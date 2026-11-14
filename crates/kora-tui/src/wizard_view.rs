@@ -45,6 +45,8 @@ pub struct View {
     pub next_label: String,
     /// Show the "Test login" button (database admin screens).
     pub has_test: bool,
+    /// Review only: label of the `[ Restart with permission ]` button when something needs administrator rights.
+    pub elevate_label: Option<String>,
 }
 
 fn opt(a: &str, b: &str) -> (String, String) {
@@ -65,9 +67,44 @@ pub fn view(w: &Wizard) -> View {
         help: String::new(),
         next_label: "Next".into(),
         has_test: false,
+        elevate_label: None,
     };
     let l = |s: &str| s.to_string();
     match w.screen {
+        Screen::Permission if w.windows => {
+            v.title = l("Kora needs to run as administrator");
+            v.lines = vec![
+                l("To set up your server Kora needs your permission to:"),
+                l("  - install the database server (a Windows service)"),
+                l("  - run your server in the background"),
+                l("  - open the firewall ports"),
+                l("Windows will ask you to approve this once."),
+            ];
+            v.lines.extend(w.elev_note.clone());
+            v.options = vec![
+                opt("[ Restart as administrator ]  (Enter)", "Opens Kora again in a new window. Windows asks you to approve it once."),
+                opt("[ Quit ]", "Leave without changing anything. Kora can't set up a server without this permission."),
+            ];
+            v.next_label = l("OK");
+            v.help = l("Kora installs a Windows service and firewall rules, which Windows only allows when Kora runs as administrator. Nothing has been changed yet.");
+        }
+        Screen::Permission => {
+            v.title = l("Permission needed");
+            v.lines = vec![
+                l("To set up your server Kora needs your permission to:"),
+                l("  - install the database server (a system service)"),
+                l("  - run your server in the background"),
+                l("  - open the firewall ports"),
+                l("Your computer will ask for your sudo password once."),
+            ];
+            v.lines.extend(w.elev_note.clone());
+            v.options = vec![
+                opt("[ Continue (your computer will ask permission) ]  (Enter)", "Restarts Kora with sudo, then you answer the questions."),
+                opt("[ Not now - limited setup ]", "Kora skips the database install, the background service and the firewall. You can use a database you already have."),
+            ];
+            v.next_label = l("OK");
+            v.help = l("Choose 'Not now' to install only the server files. You can run Kora again later with sudo to add the rest. Nothing has been changed yet.");
+        }
         Screen::Welcome => {
             v.title = l("Welcome to Kora");
             v.lines = vec![l("This will set up your own game server, step by step. It takes a few minutes and you can go back at any time.")];
@@ -88,7 +125,7 @@ pub fn view(w: &Wizard) -> View {
                 if w.admin {
                     l("Running as Administrator. Windows may ask you to confirm a few times (a \"User Account Control\" prompt): choose Yes.")
                 } else {
-                    l("Kora is not running as Administrator. It can install the server files, but it will skip the database service, the Windows service (start with Windows) and the firewall rules. To include them, close this window, right-click Windows Terminal > Run as administrator, and start kora again.")
+                    l("Kora is not running as Administrator, so it will skip the database service, the Windows service (start with Windows) and the firewall rules. To include them, start Kora again with Run as administrator.")
                 },
                 l("Git and the GitHub CLI are installed with winget (Windows' app installer) if they are missing, with a confirmation prompt for each."),
                 l("Windows Security may scan the downloads for a minute. If a file goes missing, check Windows Security > Protection history."),
@@ -175,6 +212,9 @@ pub fn view(w: &Wizard) -> View {
         Screen::Database => {
             v.title = l("Database");
             v.lines = vec![l("Kora keeps player data in a database (MariaDB or MySQL). It will create its own private database and user, so your other data is untouched.")];
+            if w.limited {
+                v.lines.push(l("Limited setup: without permission Kora can't install a database server, so use one you already have on this computer, or skip this and connect one later. Choosing 'Set it up for me' needs permission and will ask you to restart."));
+            }
             v.options = vec![
                 opt("Set it up for me (recommended)", "Use the one on this computer, or install one if there isn't one."),
                 opt("Use the one I already have", "Needs a database already running on this computer."),
@@ -307,6 +347,18 @@ pub fn view(w: &Wizard) -> View {
                 String::new(),
                 "This will change your computer as follows:".into(),
             ];
+            let reasons = w.review_reasons();
+            if !reasons.is_empty() {
+                let mut top = vec![l("Kora needs your permission to:")];
+                top.extend(reasons.iter().map(|r| format!("  - {r}")));
+                top.push(l("Press R (or click Restart with permission). Kora reopens and you answer the questions again. Or go Back and change those answers."));
+                top.extend(w.elev_note.clone());
+                top.push(String::new());
+                v.lines.splice(0..0, top);
+                v.elevate_label = Some(l("[ Restart with permission ]"));
+            } else if w.limited {
+                v.lines.insert(0, l("Limited setup: no database server, background service or firewall rules will be added. You can run Kora again later with sudo to add them."));
+            }
             if w.redeemed.is_some() {
                 v.lines.insert(0, "Loaded from your setup code on the website: type, name, features, server software, ports and public name.".into());
             }
@@ -358,6 +410,8 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 pub struct Layout {
+    /// `[ Restart with permission ]` on Review (`Rect::default()` when absent).
+    pub elevate: Rect,
     pub header: Rect,
     pub body: Rect,
     pub message: Rect,
@@ -389,6 +443,10 @@ pub fn layout(area: Rect, v: &View) -> Layout {
     let back = btn(footer.x, 10);
     let help = btn(footer.x + 11, 10);
     let test = if v.has_test { btn(footer.x + 22, 14) } else { Rect::default() };
+    let elevate = match &v.elevate_label {
+        Some(t) => btn(footer.x + 11 + 11, t.chars().count() as u16 + 2),
+        None => Rect::default(),
+    };
     let nw = (v.next_label.len() as u16 + 6).max(10);
     let next = btn(footer.right().saturating_sub(nw), nw);
 
@@ -438,7 +496,7 @@ pub fn layout(area: Rect, v: &View) -> Layout {
         }
         y = y.saturating_add(3 + extra);
     }
-    Layout { header, body, message, back, help, test, next, text, options, inputs, notes, actions, paste, clear }
+    Layout { elevate, header, body, message, back, help, test, next, text, options, inputs, notes, actions, paste, clear }
 }
 
 fn button(f: &mut Frame, r: Rect, label: &str, style: Style) {
@@ -544,6 +602,7 @@ pub fn render(f: &mut Frame, w: &Wizard) {
         } else {
             "Enter = next   Esc = back   F1 / ? = help"
         };
+        let hint = if v.elevate_label.is_some() { "R = restart with permission   Esc = back   F1 / ? = help" } else { hint };
         let (msg, st) = match (&w.error, &w.status) {
             (Some(e), _) => (e.clone(), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
             (None, Some(s)) => (s.clone(), Style::default().fg(Color::Green)),
@@ -555,6 +614,9 @@ pub fn render(f: &mut Frame, w: &Wizard) {
     button(f, l.back, "Back", dim);
     button(f, l.help, "Help", dim);
     button(f, l.test, "Test login", dim);
+    if let Some(t) = &v.elevate_label {
+        button(f, l.elevate, t, Style::default().fg(Color::Black).bg(Color::Yellow));
+    }
     button(f, l.next, &v.next_label, Style::default().fg(Color::Black).bg(BRAND));
 
     if w.help_open {

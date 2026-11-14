@@ -36,6 +36,8 @@ pub enum Action {
     OpenFolder,
     CopyPath,
     CopyDetails,
+    /// Failure caused by missing administrator rights: restart with permission.
+    Restart,
 }
 
 impl Action {
@@ -45,6 +47,7 @@ impl Action {
             Action::OpenFolder => "[ Open folder ]",
             Action::CopyPath => "[ Copy path ]",
             Action::CopyDetails => "[ Copy details ]",
+            Action::Restart => "[ Restart as administrator ]",
         }
     }
 }
@@ -53,6 +56,9 @@ impl Action {
 pub struct Services<'a> {
     pub clipboard: &'a mut dyn Clipboard,
     pub opener: &'a mut dyn Opener,
+    pub elevator: &'a mut crate::elev::Elevator,
+    /// Arguments the restart repeats.
+    pub args: &'a [std::ffi::OsString],
 }
 
 /// Extra next steps for common Windows failures (plain words).
@@ -62,10 +68,16 @@ pub fn windows_hints(message: &str) -> Vec<String> {
     if ["access is denied", "access denied", "permission denied", "os error 5", "being used by another process", "os error 32"].iter().any(|k| m.contains(k)) {
         v.push("Windows refused to change a file. An antivirus or another program may be using it: close other programs that use the folder, wait a minute and run kora install again. If it keeps happening, check Windows Security > Protection history.".to_string());
     }
-    if m.contains("administrator") || m.contains("elevat") {
-        v.push("Right-click Windows Terminal, choose Run as administrator, and run kora install again.".to_string());
+    if is_admin_error(message) {
+        v.push("If the button does not work: right-click Windows Terminal, choose Run as administrator, and run kora install again.".to_string());
     }
     v
+}
+
+/// Does the failure message say that administrator rights are missing?
+pub fn is_admin_error(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("administrator") || m.contains("elevat") || m.contains("admin rights") || m.contains("run as admin")
 }
 
 pub struct ResultScreen {
@@ -82,6 +94,10 @@ pub struct ResultScreen {
     pub hyperlinks: bool,
     /// Add Windows-specific hints (antivirus, Administrator) to the failure steps.
     pub windows: bool,
+    /// Kora can restart itself with permission (not elevated, and the platform can prompt).
+    pub can_elevate: bool,
+    /// The restart worked: the caller must exit now.
+    pub restarted: bool,
 }
 
 impl ResultScreen {
@@ -98,6 +114,8 @@ impl ResultScreen {
             status: None,
             hyperlinks: false,
             windows: cfg!(windows),
+            can_elevate: false,
+            restarted: false,
         }
     }
 
@@ -114,12 +132,23 @@ impl ResultScreen {
             status: None,
             hyperlinks: false,
             windows: cfg!(windows),
+            can_elevate: false,
+            restarted: false,
         }
     }
 
     pub fn with_windows(mut self, on: bool) -> Self {
         self.windows = on;
         self
+    }
+
+    pub fn with_elevation(mut self, on: bool) -> Self {
+        self.can_elevate = on;
+        self
+    }
+
+    fn offers_restart(&self) -> bool {
+        self.kind == Kind::Failure && self.can_elevate && is_admin_error(&self.message)
     }
 
     pub fn with_hyperlinks(mut self, on: bool) -> Self {
@@ -156,6 +185,9 @@ impl ResultScreen {
         if self.kind == Kind::Failure {
             v.push(Action::CopyDetails);
         }
+        if self.offers_restart() {
+            v.insert(0, Action::Restart);
+        }
         v
     }
 
@@ -182,6 +214,13 @@ impl ResultScreen {
                     Err(e) => (format!("{e} The path is: {p}"), false),
                 },
                 None => ("There is no path to copy.".into(), false),
+            },
+            Action::Restart => match (svc.elevator)(svc.args) {
+                Ok(()) => {
+                    self.restarted = true;
+                    ("Restarting Kora with permission...".into(), true)
+                }
+                Err(e) => (crate::elev::failure_note(&e, self.windows), false),
             },
             Action::CopyDetails => {
                 let text = self.details_text();
@@ -218,9 +257,10 @@ impl ResultScreen {
             KeyCode::Char('f' | 'F') => self.act(Action::OpenFolder, svc),
             KeyCode::Char('c' | 'C') => self.act(Action::CopyPath, svc),
             KeyCode::Char('d' | 'D') => self.act(Action::CopyDetails, svc),
+            KeyCode::Char('r' | 'R') => self.act(Action::Restart, svc),
             _ => {}
         }
-        false
+        self.restarted
     }
 
     pub fn handle_mouse(&mut self, ev: MouseEvent, area: Rect, svc: &mut Services) {
@@ -293,6 +333,9 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
             lines.push(Line::raw(""));
             lines.push(Line::styled("What to do next:", bold));
             let mut items: Vec<String> = s.next.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+            if s.offers_restart() {
+                items.insert(0, "Click Restart as administrator (or press R). Windows or your computer asks for permission once, then run kora install again - what was done so far is kept.".into());
+            }
             if s.windows {
                 items.extend(windows_hints(&s.message));
             }
@@ -394,6 +437,10 @@ mod tests {
     use crossterm::event::{KeyEventKind, KeyEventState};
     use ratatui::{backend::TestBackend, Terminal};
 
+    fn el() -> crate::elev::Elevator {
+        Box::new(|_| Err(crate::elev::ElevateError::Declined))
+    }
+
     #[derive(Default)]
     struct FakeOpener {
         opened: Vec<(PathBuf, PathBuf)>,
@@ -473,17 +520,17 @@ mod tests {
         let b = build(area, &s);
         let rect = |a: Action| b.buttons.iter().find(|(x, _)| *x == a).unwrap().1;
         let log = dir().join(".kora").join("install.log");
-        s.handle_mouse(click(rect(Action::OpenLog)), area, &mut Services { clipboard: &mut cb, opener: &mut op });
-        s.handle_mouse(click(rect(Action::OpenFolder)), area, &mut Services { clipboard: &mut cb, opener: &mut op });
-        s.handle_mouse(click(b.path.as_ref().unwrap().rect), area, &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_mouse(click(rect(Action::OpenLog)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_mouse(click(rect(Action::OpenFolder)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_mouse(click(b.path.as_ref().unwrap().rect), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         assert_eq!(op.opened, vec![(log.clone(), dir()), (dir(), dir()), (log.clone(), dir())]);
-        s.handle_mouse(click(rect(Action::CopyPath)), area, &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_mouse(click(rect(Action::CopyPath)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         assert_eq!(cb.text.as_deref(), Some(log.display().to_string().as_str()));
         assert!(text(&s, 110, 30).contains("Copied the path"));
         // a click elsewhere or a right click does nothing
         let before = op.opened.len();
-        s.handle_mouse(click(Rect::new(0, 0, 1, 1)), area, &mut Services { clipboard: &mut cb, opener: &mut op });
-        s.handle_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), ..click(rect(Action::OpenLog)) }, area, &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_mouse(click(Rect::new(0, 0, 1, 1)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), ..click(rect(Action::OpenLog)) }, area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         assert_eq!(op.opened.len(), before);
     }
 
@@ -492,13 +539,13 @@ mod tests {
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
         let mut s = screen();
         for c in ['l', 'F', 'c'] {
-            assert!(!s.handle_key(key(KeyCode::Char(c)), &mut Services { clipboard: &mut cb, opener: &mut op }));
+            assert!(!s.handle_key(key(KeyCode::Char(c)), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
         }
         assert_eq!(op.opened.len(), 2);
-        assert!(!s.handle_key(key(KeyCode::Char('x')), &mut Services { clipboard: &mut cb, opener: &mut op }), "random keys don't close it");
-        assert!(s.handle_key(key(KeyCode::Enter), &mut Services { clipboard: &mut cb, opener: &mut op }));
-        assert!(s.handle_key(key(KeyCode::Esc), &mut Services { clipboard: &mut cb, opener: &mut op }));
-        assert!(s.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), &mut Services { clipboard: &mut cb, opener: &mut op }));
+        assert!(!s.handle_key(key(KeyCode::Char('x')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }), "random keys don't close it");
+        assert!(s.handle_key(key(KeyCode::Enter), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+        assert!(s.handle_key(key(KeyCode::Esc), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+        assert!(s.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
     }
 
     #[test]
@@ -511,7 +558,7 @@ mod tests {
         std::fs::write(&log, body).unwrap();
         let mut s = ResultScreen::failure("Boom happened", "x", Some(&log));
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
-        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         let copied = cb.text.unwrap();
         assert!(copied.contains("Boom happened") && copied.contains("line 100") && copied.contains("line 61"));
         assert!(!copied.contains("line 60\n"), "only the last {DETAIL_LINES} lines");
@@ -537,12 +584,12 @@ mod tests {
         let mut cb = FakeClipboard { fail: true, ..Default::default() };
         let mut op = FakeOpener { fail: true, ..Default::default() };
         let mut s = screen();
-        s.handle_key(key(KeyCode::Char('l')), &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_key(key(KeyCode::Char('l')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         let t = text(&s, 110, 30);
         assert!(t.contains("Open this yourself") && t.contains("install.log"), "{t}");
-        s.handle_key(key(KeyCode::Char('c')), &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_key(key(KeyCode::Char('c')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         assert!(text(&s, 110, 30).contains("clipboard isn't available"));
-        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         assert!(s.status.as_ref().is_some_and(|(_, ok)| !ok));
         let _ = area;
     }
@@ -556,9 +603,9 @@ mod tests {
         assert!(!t.contains("Open log") && !t.contains("Copy details"));
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
         let mut s = s;
-        s.act(Action::OpenLog, &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.act(Action::OpenLog, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         assert!(op.opened.is_empty(), "actions that aren't offered do nothing");
-        s.handle_key(key(KeyCode::Char('f')), &mut Services { clipboard: &mut cb, opener: &mut op });
+        s.handle_key(key(KeyCode::Char('f')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
         assert_eq!(op.opened, vec![(dir(), dir())]);
     }
 
@@ -575,5 +622,64 @@ mod tests {
         assert!(t.contains(&path));
         // too narrow to keep the path on one line: no overlay, the layout is untouched
         assert!(s.hyperlink_overlay(Rect::new(0, 0, 30, 30)).is_none());
+    }
+
+    fn admin_failure() -> ResultScreen {
+        ResultScreen::failure("No MariaDB/MySQL database server was found, and setting one up needs administrator rights.", "Nothing was created.", None)
+            .with_windows(true)
+            .with_elevation(true)
+    }
+
+    #[test]
+    fn admin_failure_offers_a_restart_button_and_a_short_fallback() {
+        let t = text(&admin_failure(), 110, 30);
+        assert!(t.contains("[ Restart as administrator ]"), "{t}");
+        assert!(t.contains("1. Click Restart as administrator"), "{t}");
+        assert!(t.contains("If the button does not work"), "{t}");
+        // not offered for other errors, or when already elevated
+        assert!(!text(&screen().with_elevation(true), 110, 30).contains("Restart as administrator"));
+        assert!(!text(&admin_failure().with_elevation(false), 110, 30).contains("[ Restart as administrator ]"));
+    }
+
+    #[test]
+    fn restart_button_and_key_call_the_callback_with_the_original_args() {
+        use std::cell::RefCell;
+        use std::ffi::OsString;
+        use std::rc::Rc;
+        let seen: Rc<RefCell<Vec<Vec<OsString>>>> = Rc::default();
+        let s2 = seen.clone();
+        let mut elevator: crate::elev::Elevator = Box::new(move |a| {
+            s2.borrow_mut().push(a.to_vec());
+            Ok(())
+        });
+        let args: Vec<OsString> = vec!["install".into(), "--name".into(), "X".into()];
+        let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
+        let area = Rect::new(0, 0, 110, 30);
+        let mut s = admin_failure();
+        let r = build(area, &s).buttons.iter().find(|(a, _)| *a == Action::Restart).unwrap().1;
+        s.handle_mouse(click(r), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut elevator, args: &args });
+        assert!(s.restarted);
+        assert_eq!(seen.borrow().as_slice(), std::slice::from_ref(&args));
+        let mut s = admin_failure();
+        assert!(s.handle_key(key(KeyCode::Char('r')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut elevator, args: &args }), "closes after a restart");
+        assert_eq!(seen.borrow().len(), 2);
+    }
+
+    #[test]
+    fn declined_restart_stays_and_explains() {
+        let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
+        let mut s = admin_failure();
+        assert!(!s.handle_key(key(KeyCode::Char('r')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+        assert!(!s.restarted);
+        assert!(text(&s, 110, 34).contains("nothing was changed"));
+    }
+
+    #[test]
+    fn outcome_and_failure_wait_for_a_key() {
+        let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
+        let mut s = screen();
+        for k in [KeyCode::Char('x'), KeyCode::Down, KeyCode::Tab] {
+            assert!(!s.handle_key(key(k), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+        }
     }
 }

@@ -4,6 +4,7 @@
 //! [`progress`]) and the thin terminal runners in this file.
 
 pub mod clipboard;
+pub mod elev;
 pub mod open;
 pub mod progress;
 pub mod result;
@@ -94,7 +95,57 @@ pub fn run_install_wizard_with(
             _ => {}
         }
     }
-    Ok((w.state() == wizard::WizardState::Done).then(|| w.build_request()))
+    match w.state() {
+        wizard::WizardState::Elevated => {
+            // The elevated copy took over: leave quietly without touching the terminal further.
+            drop(term);
+            std::process::exit(0);
+        }
+        wizard::WizardState::Done => Ok(Some(w.build_request())),
+        _ => {
+            if should_pause_on_exit(cfg!(windows), console_owned()) {
+                wait_key(&mut term, &mut |f| draw_goodbye(f))?;
+            }
+            Ok(None)
+        }
+    }
+}
+
+static CONSOLE_OWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The CLI tells us when this process owns its console window (it closes when we exit), e.g. an
+/// elevated copy that Windows opened for us.
+pub fn set_console_owned(owned: bool) {
+    CONSOLE_OWNED.store(owned, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn console_owned() -> bool {
+    CONSOLE_OWNED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Pure rule: on Windows, when the console window belongs to this process, wait for a key press
+/// before exiting so the window does not vanish with the message in it.
+pub fn should_pause_on_exit(windows: bool, owns_console: bool) -> bool {
+    windows && owns_console
+}
+
+fn draw_goodbye(f: &mut ratatui::Frame) {
+    use ratatui::widgets::{Block, Borders, Paragraph};
+    f.render_widget(
+        Paragraph::new("\nNothing was changed.\n\nPress any key to close this window.")
+            .block(Block::default().borders(Borders::ALL).title(" Kora ")),
+        f.area(),
+    );
+}
+
+/// Call right before the program ends: waits for a key press when the window would vanish.
+pub fn pause_before_exit() {
+    if !should_pause_on_exit(cfg!(windows), console_owned()) {
+        return;
+    }
+    if let Ok(mut term) = Term::new() {
+        let _ = wait_key(&mut term, &mut |f| draw_goodbye(f));
+    }
 }
 
 fn wait_key(term: &mut Term, draw: &mut dyn FnMut(&mut ratatui::Frame)) -> Result<(), Box<dyn Error>> {
@@ -157,7 +208,11 @@ pub fn show_outcome(o: &InstallOutcome) -> Result<(), Box<dyn Error>> {
 
 fn run_result(screen: result::ResultScreen) -> Result<(), Box<dyn Error>> {
     use std::io::Write;
-    let mut screen = screen.with_hyperlinks(open::system_supports_hyperlinks());
+    let mut screen = screen
+        .with_hyperlinks(open::system_supports_hyperlinks())
+        .with_elevation(!elev::is_elevated() && elev::can_offer());
+    let mut elevator = elev::system_elevator();
+    let args = elev::original_args();
     let mut term = Term::new()?;
     let mut clipboard = clipboard::SystemClipboard::default();
     let mut opener = open::SystemOpener;
@@ -171,7 +226,7 @@ fn run_result(screen: result::ResultScreen) -> Result<(), Box<dyn Error>> {
             let _ = out.write_all(seq.as_bytes());
             let _ = out.flush();
         }
-        let mut svc = result::Services { clipboard: &mut clipboard, opener: &mut opener };
+        let mut svc = result::Services { clipboard: &mut clipboard, opener: &mut opener, elevator: &mut elevator, args: &args };
         match event::read()? {
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if screen.handle_key(k, &mut svc) {
@@ -180,6 +235,10 @@ fn run_result(screen: result::ResultScreen) -> Result<(), Box<dyn Error>> {
             }
             Event::Mouse(m) => screen.handle_mouse(m, area, &mut svc),
             _ => {}
+        }
+        if screen.restarted {
+            drop(term);
+            std::process::exit(0);
         }
     }
 }
@@ -231,5 +290,21 @@ mod tests {
         t.draw(draw).unwrap();
         let s = format!("{:?}", t.backend().buffer());
         assert!(s.contains("Welcome"));
+    }
+
+    #[test]
+    fn pause_only_on_windows_when_the_window_is_ours() {
+        assert!(should_pause_on_exit(true, true));
+        assert!(!should_pause_on_exit(true, false), "a console that stays open needs no pause");
+        assert!(!should_pause_on_exit(false, true));
+        assert!(!should_pause_on_exit(false, false));
+    }
+
+    #[test]
+    fn goodbye_screen_says_what_to_do() {
+        let mut t = Terminal::new(TestBackend::new(60, 10)).unwrap();
+        t.draw(draw_goodbye).unwrap();
+        let s = format!("{:?}", t.backend().buffer());
+        assert!(s.contains("Press any key"));
     }
 }

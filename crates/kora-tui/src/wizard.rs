@@ -12,10 +12,14 @@ use ratatui::layout::Rect;
 use std::path::{Path, PathBuf};
 
 use crate::clipboard::{format_setup_code, sanitize_paste, Clipboard, SystemClipboard};
+use crate::elev::{self, Elevator};
 use crate::wizard_view;
+use std::ffi::OsString;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
+    /// First screen when Kora is not running with administrator rights.
+    Permission,
     Welcome,
     Prepare,
     Mode,
@@ -46,6 +50,8 @@ pub enum WizardState {
     Running,
     Done,
     Quit,
+    /// Kora restarted itself with permission; this copy must exit.
+    Elevated,
 }
 
 /// How the wizard checks ports: a prober (the game port needs TCP and UDP free, txAdmin TCP only) and the other Kora servers in the registry (their ports stay reserved even when
@@ -121,6 +127,14 @@ pub struct Wizard {
     /// Running as Administrator (Windows) or root.
     pub admin: bool,
     pub error: Option<String>,
+    /// Show the permission screen first, and the restart button on Review.
+    elevate_offer: bool,
+    elev_args: Vec<OsString>,
+    elevator: Elevator,
+    /// The user chose the limited (no administrator) setup.
+    pub limited: bool,
+    /// Result of the last restart attempt, shown in the body.
+    pub elev_note: Option<String>,
     /// Friendly confirmation shown in the footer (e.g. "Pasted 14 characters"); never holds field content.
     pub status: Option<String>,
     clipboard: Box<dyn Clipboard>,
@@ -243,7 +257,19 @@ impl Default for Wizard {
 
 impl Wizard {
     pub fn new() -> Self {
-        Self::with_ports(PortEnv::system()).with_platform(cfg!(windows), kora_core::installer::is_admin())
+        let elevated = elev::is_elevated();
+        Self::with_ports(PortEnv::system())
+            .with_platform(cfg!(windows), elevated)
+            .with_elevation(!elevated && elev::can_offer(), elev::original_args(), elev::system_elevator())
+    }
+
+    /// Offer (or not) to restart with permission. `args` are repeated by the restart.
+    pub fn with_elevation(mut self, offer: bool, args: Vec<OsString>, elevator: Elevator) -> Self {
+        self.elevate_offer = offer;
+        self.elev_args = args;
+        self.elevator = elevator;
+        self.screen = if offer { Screen::Permission } else { Screen::Welcome };
+        self
     }
 
     /// Platform facts used for the Prepare / Review wording (tests set them explicitly).
@@ -294,6 +320,11 @@ impl Wizard {
             windows: false,
             admin: false,
             error: None,
+            elevate_offer: false,
+            elev_args: vec![],
+            elevator: elev::system_elevator(),
+            limited: false,
+            elev_note: None,
             status: None,
             clipboard: Box::new(SystemClipboard::default()),
             ports: env,
@@ -320,7 +351,11 @@ impl Wizard {
     pub fn flow(&self) -> Vec<Screen> {
         use Screen::*;
         let web = self.redeemed.is_some();
-        let mut v = vec![Welcome];
+        let mut v = vec![];
+        if self.elevate_offer {
+            v.push(Permission);
+        }
+        v.push(Welcome);
         if !self.cli_prefilled {
             v.push(SetupCode);
         }
@@ -374,7 +409,7 @@ impl Wizard {
     /// Which of the four stages (Welcome, Prepare, Choose, Review) is active.
     pub fn stage(&self) -> usize {
         match self.screen {
-            Screen::Welcome | Screen::SetupCode => 0,
+            Screen::Permission | Screen::Welcome | Screen::SetupCode => 0,
             Screen::Prepare => 1,
             Screen::Review => 3,
             _ => 2,
@@ -404,7 +439,7 @@ impl Wizard {
 
     pub fn option_count(&self) -> usize {
         match self.screen {
-            Screen::Welcome | Screen::Mode | Screen::Artifact | Screen::Resources | Screen::DbAdmin => 2,
+            Screen::Permission | Screen::Welcome | Screen::Mode | Screen::Artifact | Screen::Resources | Screen::DbAdmin => 2,
             Screen::Database => 3,
             Screen::Firewall | Screen::Service | Screen::TxAdminPublic => 2,
             _ => 0,
@@ -799,6 +834,7 @@ impl Wizard {
         match key.code {
             KeyCode::Char('?') => self.help_open = true,
             KeyCode::Char('q') => self.state = WizardState::Quit,
+            KeyCode::Char('r' | 'R') if self.screen == Screen::Review && !self.review_reasons().is_empty() => self.request_elevation(),
             KeyCode::Up | KeyCode::Left if n > 0 => self.select(self.selected.saturating_sub(1)),
             KeyCode::Down | KeyCode::Right if n > 0 => self.select(self.selected + 1),
             KeyCode::Char(c @ '1'..='9') if n > 0 => {
@@ -836,8 +872,13 @@ impl Wizard {
             self.help_open = true;
         } else if hit(l.test) {
             self.test_login();
+        } else if hit(l.elevate) {
+            self.request_elevation();
         } else if let Some(i) = l.options.iter().position(|r| hit(*r)) {
             self.select(i);
+            if self.screen == Screen::Permission {
+                self.go_next(); // the two choices are buttons
+            }
         } else if let Some(i) = l.actions.iter().position(|r| hit(*r)) {
             self.use_suggestion(Some(i));
         } else if let Some(i) = l.paste.iter().position(|r| hit(*r)) {
@@ -999,8 +1040,54 @@ impl Wizard {
         }
     }
 
+    /// Ask for permission by restarting Kora elevated. On success this copy must exit.
+    pub fn request_elevation(&mut self) {
+        self.error = None;
+        self.elev_note = None;
+        match (self.elevator)(&self.elev_args) {
+            Ok(()) => self.state = WizardState::Elevated,
+            Err(e) => self.elev_note = Some(elev::failure_note(&e, self.windows)),
+        }
+    }
+
+    /// "Not now" (Linux only): no service, no firewall, and a database the user already has (or none).
+    fn choose_limited(&mut self) {
+        self.limited = true;
+        self.elev_note = None;
+        self.service = false;
+        self.firewall = false;
+        self.txadmin_public = false;
+        if self.db == DbChoice::InstallIfMissing {
+            self.db = DbChoice::UseExisting;
+        }
+    }
+
+    /// Things the current answers need administrator rights for, when Kora is not elevated.
+    pub fn review_reasons(&self) -> Vec<String> {
+        if !self.elevate_offer {
+            return vec![];
+        }
+        elev::admin_reasons(&self.build_request())
+    }
+
     /// Validate the current screen and advance. Sets `error` and stays on failure.
     pub fn go_next(&mut self) {
+        if self.screen == Screen::Permission {
+            if self.selected == 0 {
+                self.request_elevation();
+                return;
+            }
+            if self.windows {
+                // Windows has no limited setup: the only other choice is to quit.
+                self.state = WizardState::Quit;
+                return;
+            }
+            self.choose_limited();
+        }
+        if self.screen == Screen::Review && !self.review_reasons().is_empty() {
+            self.error = Some("Kora needs your permission first: press R (or click Restart with permission), or go back and change those answers.".into());
+            return;
+        }
         if self.screen == Screen::SetupCode && self.redeemed.is_none() && !self.setup_code.trim().is_empty() {
             // The first Enter exchanges the code; the next one continues.
             self.try_redeem();
@@ -1094,7 +1181,7 @@ impl Wizard {
             },
         ];
         if self.windows && !self.admin {
-            v.push("You are not running as Administrator, so the database service, the Windows service and the firewall rules will be skipped (close this window and run Windows Terminal as administrator to include them)".into());
+            v.push("Kora is not running as Administrator, so it will not install a database server, add the Windows service or open firewall ports (start Kora with Run as administrator to include them)".into());
         }
         match self.db {
             DbChoice::InstallIfMissing if self.windows => v.push(
@@ -2101,5 +2188,189 @@ mod tests {
         assert!(!c.contains("not running as Administrator"));
         let c = wiz().system_changes().join("\n");
         assert!(c.contains("Install Git if it is missing") && c.contains("Allow ports 30120 and 40120"), "{c}");
+    }
+
+    // ---- permission step ----
+
+    use crate::elev::ElevateError;
+    use crossterm::event::MouseEvent;
+
+    type Calls = Rc<RefCell<Vec<Vec<OsString>>>>;
+
+    /// A wizard that offers elevation; the fake elevator records its arguments and answers `answer`.
+    fn ewiz(windows: bool, answer: Result<(), ElevateError>) -> (Wizard, Calls) {
+        let calls: Calls = Rc::default();
+        let c2 = calls.clone();
+        let w = wiz().with_platform(windows, false).with_elevation(
+            true,
+            vec!["install".into(), "--name".into(), "X".into()],
+            Box::new(move |a| {
+                c2.borrow_mut().push(a.to_vec());
+                answer.clone()
+            }),
+        );
+        (w, calls)
+    }
+
+    fn rendered(w: &Wizard) -> String {
+        render_text(w)
+    }
+
+    fn area() -> Rect {
+        Rect::new(0, 0, 110, 40)
+    }
+
+    fn click_at(r: Rect) -> MouseEvent {
+        MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: r.x + 1, row: r.y, modifiers: KeyModifiers::NONE }
+    }
+
+    #[test]
+    fn permission_screen_is_first_only_when_not_elevated() {
+        let (w, _) = ewiz(false, Ok(()));
+        assert_eq!(w.screen, Screen::Permission);
+        assert_eq!(w.flow()[..3], [Screen::Permission, Screen::Welcome, Screen::SetupCode]);
+        let t = rendered(&w);
+        for want in ["To set up your server Kora needs your permission to:", "install the database server", "run your server in the background", "open the firewall ports", "sudo password", "[ Continue", "[ Not now - limited setup ]"] {
+            assert!(t.contains(want), "missing {want:?}\n{t}");
+        }
+        // elevated (or no way to prompt): no panel at all
+        let w = wiz().with_platform(false, true).with_elevation(false, vec![], crate::elev::system_elevator());
+        assert_eq!(w.screen, Screen::Welcome);
+        assert!(!w.flow().contains(&Screen::Permission));
+        assert!(!rendered(&w).contains("needs your permission"));
+        assert!(!wiz().flow().contains(&Screen::Permission), "default test wizard has no offer");
+    }
+
+    #[test]
+    fn continue_calls_the_callback_with_the_original_args_and_exits() {
+        let (mut w, calls) = ewiz(false, Ok(()));
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(calls.borrow().as_slice(), &[vec![OsString::from("install"), "--name".into(), "X".into()]]);
+        assert_eq!(w.state(), WizardState::Elevated);
+        assert_eq!(w.screen, Screen::Permission);
+    }
+
+    #[test]
+    fn declined_keeps_the_screen_and_says_nothing_changed() {
+        let (mut w, calls) = ewiz(false, Err(ElevateError::Declined));
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!((w.state(), w.screen), (WizardState::Running, Screen::Permission));
+        assert!(rendered(&w).contains("No problem - nothing was changed. You can try again, or choose the limited setup."));
+        w.handle_key(key(KeyCode::Enter)); // try again
+        assert_eq!(calls.borrow().len(), 2);
+    }
+
+    #[test]
+    fn failures_show_the_reason_and_how_to_do_it_by_hand() {
+        let (mut w, _) = ewiz(false, Err(ElevateError::Failed("sudo exploded".into())));
+        w.handle_key(key(KeyCode::Enter));
+        let t = rendered(&w);
+        assert!(t.contains("sudo exploded") && t.contains("sudo kora install"), "{t}");
+        let (mut w, _) = ewiz(true, Err(ElevateError::Unsupported));
+        w.handle_key(key(KeyCode::Enter));
+        let t = rendered(&w);
+        assert!(t.contains("Right-click") && t.contains("Run as administrator"), "{t}");
+    }
+
+    #[test]
+    fn limited_setup_uses_the_no_admin_defaults_and_review_says_what_is_skipped() {
+        let (mut w, calls) = ewiz(false, Ok(()));
+        w.handle_key(key(KeyCode::Down));
+        w.handle_key(key(KeyCode::Enter));
+        assert!(calls.borrow().is_empty());
+        assert_eq!(w.screen, Screen::Welcome);
+        let r = w.build_request();
+        assert!(!r.service && !r.firewall);
+        assert_eq!(r.db, DbChoice::UseExisting);
+        assert!(w.review_reasons().is_empty(), "limited defaults need no permission");
+        w.screen = Screen::Database;
+        assert!(rendered(&w).contains("Limited setup"), "database screen explains");
+        w.screen = Screen::Review;
+        let t = rendered(&w);
+        assert!(t.contains("no database server, background service or firewall rules"), "{t}");
+        assert!(!t.contains("Restart with permission"));
+    }
+
+    #[test]
+    fn windows_has_no_limited_option_and_quit_leaves() {
+        let (w, _) = ewiz(true, Ok(()));
+        let t = rendered(&w);
+        assert!(t.contains("Kora needs to run as administrator") && t.contains("[ Restart as administrator ]") && t.contains("[ Quit ]"), "{t}");
+        assert!(t.contains("Windows will ask you to approve this once."));
+        assert!(!t.contains("limited") && !t.contains("Not now"), "{t}");
+        let (mut w, calls) = ewiz(true, Ok(()));
+        w.handle_key(key(KeyCode::Down));
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.state(), WizardState::Quit);
+        assert!(calls.borrow().is_empty());
+        assert!(!w.limited);
+    }
+
+    #[test]
+    fn review_blocks_with_a_restart_button_when_the_answers_need_admin() {
+        let (mut w, calls) = ewiz(false, Err(ElevateError::Declined));
+        w.handle_key(key(KeyCode::Down));
+        w.handle_key(key(KeyCode::Enter)); // limited
+        w.db = DbChoice::InstallIfMissing; // user later ticks "install the database"
+        w.screen = Screen::Review;
+        let t = rendered(&w);
+        assert!(t.contains("Kora needs your permission to:") && t.contains("install the database server") && t.contains("[ Restart with permission ]"), "{t}");
+        w.handle_key(key(KeyCode::Enter)); // Install is blocked
+        assert_eq!((w.state(), w.screen), (WizardState::Running, Screen::Review));
+        assert!(w.error.as_deref().unwrap().contains("permission"));
+        // R and a click both restart
+        w.handle_key(key(KeyCode::Char('r')));
+        assert_eq!(calls.borrow().len(), 1);
+        let l = wizard_view::layout(area(), &w.view());
+        assert!(l.elevate.width > 0);
+        w.handle_mouse(click_at(l.elevate), area());
+        assert_eq!(calls.borrow().len(), 2);
+        // OK once the user stops asking for it
+        let (mut w, _) = ewiz(false, Ok(()));
+        w.screen = Screen::Review;
+        w.service = false;
+        w.firewall = false;
+        w.db = DbChoice::Skip;
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.state(), WizardState::Done);
+    }
+
+    #[test]
+    fn review_has_no_restart_when_elevated() {
+        let mut w = wiz().with_platform(false, true);
+        w.screen = Screen::Review;
+        assert!(w.review_reasons().is_empty());
+        assert!(!rendered(&w).contains("Restart with permission"));
+        w.handle_key(key(KeyCode::Char('r')));
+        assert_eq!(w.state(), WizardState::Running);
+    }
+
+    #[test]
+    fn permission_buttons_are_clickable() {
+        let (mut w, calls) = ewiz(false, Err(ElevateError::Declined));
+        let l = wizard_view::layout(area(), &w.view());
+        assert_eq!(l.options.len(), 2);
+        w.handle_mouse(click_at(l.options[0]), area());
+        assert_eq!(calls.borrow().len(), 1);
+        assert_eq!(w.screen, Screen::Permission);
+        let l = wizard_view::layout(area(), &w.view()); // the message pushed the buttons down
+        w.handle_mouse(click_at(l.options[1]), area());
+        assert_eq!(w.screen, Screen::Welcome);
+        assert!(w.limited);
+        let (mut w, _) = ewiz(true, Ok(()));
+        let l = wizard_view::layout(area(), &w.view());
+        w.handle_mouse(click_at(l.options[1]), area()); // [ Quit ]
+        assert_eq!(w.state(), WizardState::Quit);
+    }
+
+    #[test]
+    fn help_mentions_the_permission() {
+        let (w, _) = ewiz(true, Ok(()));
+        assert!(w.view().help.contains("administrator"));
+        let (w, _) = ewiz(false, Ok(()));
+        assert!(w.view().help.contains("limited") || w.view().help.contains("Not now"));
+        let mut w = wiz();
+        w.screen = Screen::Review;
+        let _ = w.view().help; // still renders
     }
 }
