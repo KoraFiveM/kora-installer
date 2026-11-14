@@ -22,6 +22,21 @@ pub fn kora_home() -> PathBuf {
     PathBuf::from(home).join(".kora")
 }
 
+/// Same folder? Windows paths ignore case, accept `/` for `\\` and a trailing separator
+/// (`C:\\Kora\\Srv` = `c:/kora/srv/`); elsewhere paths are compared exactly.
+pub fn same_path(a: &Path, b: &Path) -> bool {
+    if !cfg!(windows) {
+        return a == b;
+    }
+    same_path_windows(&a.to_string_lossy(), &b.to_string_lossy())
+}
+
+/// The Windows rule of [`same_path`] on plain strings (testable on every OS).
+pub fn same_path_windows(a: &str, b: &str) -> bool {
+    let norm = |s: &str| s.replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    norm(a) == norm(b)
+}
+
 pub fn registry_path() -> PathBuf {
     kora_home().join("servers.json")
 }
@@ -115,7 +130,7 @@ impl Registry {
             .iter()
             .find(|s| s.name == name_or_dir)
             .or_else(|| self.servers.iter().find(|s| super::slug(&s.name) == name_or_dir))
-            .or_else(|| self.servers.iter().find(|s| s.dir == Path::new(name_or_dir)))
+            .or_else(|| self.servers.iter().find(|s| same_path(&s.dir, Path::new(name_or_dir))))
     }
 }
 
@@ -201,5 +216,13 @@ mod tests {
         r2.save_or_clean_to(&p).unwrap();
         assert!(!p.exists() && !p.parent().unwrap().exists());
         r2.save_or_clean_to(&p).unwrap(); // already gone: fine
+    }
+
+    #[test]
+    fn windows_paths_compare_without_case_slashes_or_trailing_separator() {
+        assert!(same_path_windows("C:\\Kora\\Srv", "c:/kora/srv/"));
+        assert!(same_path_windows("C:\\Kora\\Srv\\", "C:\\KORA\\SRV"));
+        assert!(!same_path_windows("C:\\Kora\\Srv", "C:\\Kora\\Srv2"));
+        assert!(!same_path_windows("C:\\Kora", "D:\\Kora"));
     }
 }

@@ -87,7 +87,7 @@ pub fn run(
     let names: Vec<(String, std::path::PathBuf)> = reg
         .servers
         .iter()
-        .filter(|s| opts.only.as_deref().is_none_or(|o| s.name == o || slug(&s.name) == o || s.dir == Path::new(o)))
+        .filter(|s| opts.only.as_deref().is_none_or(|o| s.name == o || slug(&s.name) == o || super::registry::same_path(&s.dir, Path::new(o))))
         .map(|s| (s.name.clone(), s.dir.clone()))
         .collect();
     if names.is_empty() {

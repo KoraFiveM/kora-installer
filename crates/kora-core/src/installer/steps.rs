@@ -107,6 +107,12 @@ fn db_client() -> String {
     "mysql".into()
 }
 
+/// winget exits non-zero for "already installed" (0x8A150061) and "no newer version" (0x8A15010D):
+/// for our purpose (the tool is there) both are success.
+pub(crate) fn winget_code_is_fine(code: i32) -> bool {
+    matches!(code as u32, 0 | 0x8A15_0061 | 0x8A15_010D)
+}
+
 fn winget_available() -> bool {
     std::process::Command::new("winget").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
 }
@@ -501,7 +507,7 @@ impl InstallStep {
                 ctx.emit(self.id, StepStatus::Running, s.description.clone(), 0.1);
                 let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
                 let o = git::CommandRunner::run(&r, &s.program, &args, None).map_err(|e| InstallError(format!("{}: {e}", s.description)))?;
-                if !o.ok() {
+                if !(o.ok() || (s.program == "winget" && winget_code_is_fine(o.code))) {
                     return err(format!("{} failed: {}", s.description, o.stderr.trim()));
                 }
             }
@@ -1225,5 +1231,14 @@ mod db_admin_tests {
         let back: DbAdmin = serde_json::from_str(&json).unwrap();
         assert_eq!(back.password, None);
         assert_eq!((back.user.as_str(), back.port), ("dba", 33061));
+    }
+
+    #[test]
+    fn winget_already_installed_codes_count_as_success() {
+        assert!(winget_code_is_fine(0));
+        assert!(winget_code_is_fine(0x8A15_0061_u32 as i32), "already installed");
+        assert!(winget_code_is_fine(0x8A15_010D_u32 as i32), "no applicable upgrade");
+        assert!(!winget_code_is_fine(1));
+        assert!(!winget_code_is_fine(0x8A15_0003_u32 as i32));
     }
 }

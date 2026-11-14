@@ -62,11 +62,11 @@ impl Target {
 
 /// Does another registered server (not in `excluding`) still run the kora copy at `path`?
 pub fn binary_used_elsewhere(reg: &Registry, path: &str, excluding: &[&Path]) -> bool {
-    reg.servers.iter().filter(|s| !excluding.iter().any(|d| *d == s.dir)).any(|s| {
+    reg.servers.iter().filter(|s| !excluding.iter().any(|d| super::registry::same_path(d, &s.dir))).any(|s| {
         std::fs::read(super::meta_dir(&s.dir).join("created.json"))
             .ok()
             .and_then(|b| serde_json::from_slice::<Created>(&b).ok())
-            .is_some_and(|c| c.binary.as_deref() == Some(path))
+            .is_some_and(|c| c.binary.as_deref().is_some_and(|b| b == path || (cfg!(windows) && super::registry::same_path_windows(b, path))))
     })
 }
 

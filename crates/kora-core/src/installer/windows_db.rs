@@ -101,7 +101,7 @@ pub fn saved_record() -> Option<Record> {
 /// `my.ini` text: Kora's server only listens on this machine.
 pub fn config_text(datadir: &Path, port: u16) -> String {
     let fwd = |p: &Path| p.to_string_lossy().replace('\\', "/");
-    format!("[mysqld]\ndatadir={}\nport={port}\nbind-address=127.0.0.1\nskip-name-resolve\n", fwd(datadir))
+    format!("[mysqld]\ndatadir=\"{}\"\nport={port}\nbind-address=127.0.0.1\nskip-name-resolve\n", fwd(datadir))
 }
 
 /// Insert/replace the Kora lines in an existing `my.ini` produced by `mariadb-install-db.exe`.
@@ -136,6 +136,18 @@ pub fn harden_ini(existing: &str, port: u16) -> String {
     let mut s = out.join("\r\n");
     s.push_str("\r\n");
     s
+}
+
+/// Appended to errors where a virus scanner is the likely culprit (it holds or quarantines new .exe files).
+pub const AV_HINT: &str = "Windows Security (or another antivirus) may have blocked or quarantined a file: open Windows Security > Virus & threat protection > Protection history, allow it, and run the install again.";
+
+/// `my.ini` is read as ANSI by some MariaDB builds, so a folder with non-ASCII letters is refused up front.
+pub fn check_ascii_path(p: &Path) -> Result<()> {
+    if p.to_string_lossy().is_ascii() {
+        Ok(())
+    } else {
+        err(format!("{} contains characters outside plain English letters, which MariaDB's configuration file cannot hold reliably. Set the KORA_MARIADB_HOME environment variable to a folder such as C:\\ProgramData\\Kora\\mariadb and run again.", p.display()))
+    }
 }
 
 /// A free TCP port on loopback, starting at 3306.
@@ -238,7 +250,7 @@ pub fn wait_for_login(admin: &AdminConn, timeout: Duration) -> Result<()> {
         }
         std::thread::sleep(Duration::from_secs(2));
     }
-    err(format!("the MariaDB service did not accept logins within {} seconds ({last})", timeout.as_secs()))
+    err(format!("the MariaDB service did not accept logins within {} seconds ({last}). {AV_HINT}", timeout.as_secs()))
 }
 
 fn service_exists(name: &str) -> bool {
@@ -257,6 +269,7 @@ pub fn list_service_names() -> Vec<String> {
 /// `say` receives plain-language progress lines.
 pub fn install(http: &dyn ArtifactSource, say: &mut dyn FnMut(&str)) -> Result<Record> {
     let base = base_dir().ok_or_else(|| InstallError("cannot find %ProgramData% for the MariaDB folder".into()))?;
+    check_ascii_path(&base)?;
     let root = base.join(MARIADB_VERSION);
     let port = pick_port();
     let plan = db::plan_install_windows(MARIADB_VERSION, &root, port, &list_service_names()).map_err(|e| InstallError(e.to_string()))?;
@@ -284,14 +297,14 @@ pub fn install(http: &dyn ArtifactSource, say: &mut dyn FnMut(&str)) -> Result<R
                 db::verify_sha256(file, &text, name).map_err(|e| InstallError(format!("MariaDB download rejected: {e}. Nothing was installed.")))?;
             }
             StepAction::ExtractZip { archive, dest } => {
-                extract_zip_stripped(archive, dest)?;
+                extract_zip_stripped(archive, dest).map_err(|e| InstallError(format!("{e}. {AV_HINT}")))?;
                 let _ = std::fs::remove_file(archive);
                 if !dest.join("bin").join("mariadb-install-db.exe").is_file() {
-                    return err("the MariaDB zip does not contain bin\\mariadb-install-db.exe");
+                    return err(format!("the MariaDB zip does not contain bin\\mariadb-install-db.exe. {AV_HINT}"));
                 }
             }
             StepAction::Run(spec) if spec.program.ends_with("mariadb-install-db.exe") => {
-                run_checked(spec, "creating the MariaDB data folder and service")?;
+                run_checked(spec, "creating the MariaDB data folder and service").map_err(|e| InstallError(format!("{e}. {AV_HINT}")))?;
                 let _ = std::fs::remove_file(root.join("mariadb.sha256sums.txt"));
                 // Loopback only, whatever install-db wrote.
                 let ini = [datadir.join("my.ini"), root.join("database-config.ini")].into_iter().find(|p| p.is_file());
@@ -395,7 +408,7 @@ mod tests {
     #[test]
     fn ini_is_loopback_only_and_idempotent() {
         let t = config_text(Path::new("C:\\ProgramData\\Kora\\data"), 3307);
-        assert!(t.contains("bind-address=127.0.0.1") && t.contains("port=3307") && t.contains("datadir=C:/ProgramData/Kora/data"));
+        assert!(t.contains("bind-address=127.0.0.1") && t.contains("port=3307") && t.contains("datadir=\"C:/ProgramData/Kora/data\""));
         let existing = "[mysqld]\r\ndatadir=C:/x\r\nport=3307\r\nbind-address=0.0.0.0\r\n[client]\r\nport=3307\r\n";
         let h = harden_ini(existing, 3307);
         assert_eq!(h.matches("bind-address").count(), 1);
@@ -460,6 +473,13 @@ mod tests {
         assert_eq!(c.client, "C:\\m\\mariadb.exe");
         assert!(c.password.is_some());
         assert!(load_record(dir.path()).is_none());
+    }
+
+    #[test]
+    fn non_ascii_mariadb_folders_are_refused_and_ascii_ones_pass() {
+        assert!(check_ascii_path(Path::new("C:\\ProgramData\\Kora\\mariadb")).is_ok());
+        let e = check_ascii_path(Path::new("C:\\Users\\Zo\u{eb} M\u{fc}ller\\mariadb")).unwrap_err().to_string();
+        assert!(e.contains("KORA_MARIADB_HOME"), "{e}");
     }
 
     #[test]
