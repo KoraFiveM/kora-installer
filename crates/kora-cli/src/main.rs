@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use kora_core::firewall::ports::{self, PortProber, SystemProber};
 use kora_core::firewall::{check_port, PortStatus};
 use kora_core::site::{self, Redeemed};
 use kora_core::installer::{
@@ -92,6 +93,9 @@ struct InstallArgs {
     /// Show the full plan and change nothing.
     #[arg(long)]
     dry_run: bool,
+    /// If a port is in use, silently use the next free one and say what changed.
+    #[arg(long)]
+    auto_ports: bool,
     /// Filled from a setup code (not a flag).
     #[arg(skip)]
     hostname: Option<String>,
@@ -123,6 +127,7 @@ impl InstallArgs {
             || self.db_admin_host.is_some()
             || self.db_admin_port.is_some()
             || self.dry_run
+            || self.auto_ports
             || self.yes
     }
 
@@ -337,6 +342,42 @@ impl ProgressSink for ChannelSink {
     }
 }
 
+/// A finished server (resume/reinstall of the same folder) keeps its ports.
+fn already_installed(req: &InstallRequest) -> bool {
+    req.dir.join("kora-server.json").is_file()
+}
+
+/// Check the requested ports against this machine (and the other Kora servers on it). With
+/// `auto`, move taken ports to the next free ones and return what changed; without, a taken port
+/// is an error naming the port, the next free port and how to apply it.
+fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber) -> Result<Vec<String>, String> {
+    let avoid = ports::registered_ports_except(&req.name, Some(&req.dir));
+    let (game, tx) = (req.ports.game, req.ports.txadmin);
+    let report = ports::check_ports(game, tx, &avoid, prober);
+    if report.all_free() {
+        return Ok(vec![]);
+    }
+    if auto {
+        let Some((g, t)) = ports::effective_ports(game, tx, &avoid, prober) else {
+            return Err("no free port was found near the requested ones: choose other ports with --game-port and --txadmin-port".into());
+        };
+        let mut changes = Vec::new();
+        for (old, new) in [(game, g), (tx, t)] {
+            if old != new {
+                changes.push(format!("Port {old} is in use, using {new}"));
+            }
+        }
+        req.ports.game = g;
+        req.ports.txadmin = t;
+        return Ok(changes);
+    }
+    let mut text = ports::conflict_messages(game, tx, &report, &avoid).join(" ");
+    if let Some((g, t)) = ports::effective_ports(game, tx, &avoid, prober) {
+        text.push_str(&format!(" Run the command again with --game-port {g} --txadmin-port {t}, or add --auto-ports to let Kora pick free ports."));
+    }
+    Err(text)
+}
+
 /// Dry-run header: the effective choices (website code + flags merged). Never includes secrets.
 fn request_summary(req: &InstallRequest) -> String {
     use kora_core::installer::{Mode, ResourceSelection};
@@ -493,6 +534,7 @@ fn install(args: InstallArgs) -> i32 {
         let catalog = args.catalog.or_else(|| std::env::var("KORA_CATALOG").ok().filter(|c| !c.is_empty()));
         return interactive_flow(catalog, redeemed);
     }
+    let args_auto_ports = args.auto_ports;
     let req = match args.into_request() {
         Ok(r) => r,
         Err(e) => {
@@ -500,6 +542,19 @@ fn install(args: InstallArgs) -> i32 {
             return 2;
         }
     };
+    let mut req = req;
+    let auto = args_auto_ports;
+    if !already_installed(&req) {
+        match settle_ports(&mut req, auto, &SystemProber) {
+            Ok(changes) => changes.iter().for_each(|c| println!("{c}")),
+            // A dry run still shows the plan: the plan notes flag the conflict.
+            Err(_) if req.dry_run => {}
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        }
+    }
     let dry = req.dry_run;
     if dry {
         print!("{}", request_summary(&req));
@@ -775,5 +830,56 @@ mod tests {
             assert!(text.contains(want), "missing {want}: {text}");
         }
         assert!(!text.contains("cfxk_secret"));
+    }
+
+    struct Busy(Vec<u16>);
+    impl PortProber for Busy {
+        fn tcp_free(&self, p: u16) -> bool {
+            !self.0.contains(&p)
+        }
+        fn udp_free(&self, _: u16) -> bool {
+            true
+        }
+    }
+
+    fn req_with_ports(game: u16, tx: u16) -> InstallRequest {
+        let mut a = InstallArgs { game_port: Some(game), txadmin_port: Some(tx), dir: Some("/nonexistent/kora-ports-test".into()), ..Default::default() };
+        a.name = Some("kora-ports-test".into());
+        a.into_request().unwrap()
+    }
+
+    #[test]
+    fn busy_port_fails_with_a_message_naming_port_and_next_free() {
+        let mut r = req_with_ports(30120, 40120);
+        let e = settle_ports(&mut r, false, &Busy(vec![30120])).unwrap_err();
+        assert!(e.contains("Port 30120 (game)") && e.contains("next free port is 30121") && e.contains("--game-port 30121 --txadmin-port 40120") && e.contains("--auto-ports"), "{e}");
+        assert_eq!(r.ports.game, 30120, "nothing changed without --auto-ports");
+        assert!(settle_ports(&mut r, false, &Busy(vec![])).unwrap().is_empty());
+    }
+
+    #[test]
+    fn auto_ports_picks_next_free_and_says_so() {
+        let mut r = req_with_ports(30120, 40120);
+        let changes = settle_ports(&mut r, true, &Busy(vec![30120, 30121, 40120])).unwrap();
+        assert_eq!(changes, vec!["Port 30120 is in use, using 30122", "Port 40120 is in use, using 40121"]);
+        assert_eq!((r.ports.game, r.ports.txadmin), (30122, 40121));
+        let mut r = req_with_ports(65535, 40120);
+        assert!(settle_ports(&mut r, true, &Busy(vec![65535])).is_err(), "exhausted");
+    }
+
+    #[test]
+    fn ports_from_a_setup_code_are_rechecked_locally() {
+        let mut a = InstallArgs { auto_ports: true, dir: Some("/nonexistent/kora-ports-test".into()), ..Default::default() };
+        a.apply_redeemed(&redeemed());
+        let mut r = a.into_request().unwrap();
+        let changes = settle_ports(&mut r, true, &Busy(vec![31120])).unwrap();
+        assert_eq!(changes, vec!["Port 31120 is in use, using 31121"]);
+    }
+
+    #[test]
+    fn dry_run_shows_the_effective_ports() {
+        let mut r = req_with_ports(30120, 40120);
+        settle_ports(&mut r, true, &Busy(vec![30120])).unwrap();
+        assert!(request_summary(&r).contains("game 30121, txAdmin 40120"));
     }
 }

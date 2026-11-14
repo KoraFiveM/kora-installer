@@ -439,6 +439,13 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
         return err("a Cfx.re license key is required (get one at https://portal.cfx.re/servers/registration-keys)");
     }
     preflight(req, hooks, admin)?;
+    // Re-check right before starting: a port can be taken since the questions were answered.
+    if !req.dir.join("kora-server.json").is_file() {
+        let c = crate::firewall::ports::install_conflicts(&req.name, &req.dir, req.ports.game, req.ports.txadmin, &crate::firewall::ports::SystemProber);
+        if !c.is_empty() {
+            return err(c.join(" "));
+        }
+    }
     let (tx, rx) = mpsc::channel();
     let ctx = new_ctx(req, hooks, admin, tx, false, false);
     // `ctx` (which owns the sender) moves into the worker so the channel closes when it ends.
@@ -542,6 +549,11 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
     match preflight(req, hooks, admin) {
         Ok(()) => notes.push("Free disk space and service-account access look fine.".into()),
         Err(e) => notes.push(format!("WARNING, a real install would stop here: {e}")),
+    }
+    if !req.dir.join("kora-server.json").is_file() {
+        for c in crate::firewall::ports::install_conflicts(&req.name, &req.dir, req.ports.game, req.ports.txadmin, &crate::firewall::ports::SystemProber) {
+            notes.push(format!("WARNING, a real install would stop here: {c}"));
+        }
     }
     let mut base = 0u32;
     for p in &plan {

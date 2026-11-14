@@ -527,7 +527,8 @@ impl InstallStep {
         let preq = PortRequest { server: slug(&ctx.req.name), game_port: ctx.req.ports.game, txadmin_port: ctx.req.ports.txadmin, expose_txadmin: ctx.req.txadmin_public };
         let already_installed = ctx.req.dir.join("kora-server.json").is_file();
         if !already_installed {
-            let conflicts = firewall::port_conflicts(&preq).map_err(|e| InstallError(e.to_string()))?;
+            preq.validate().map_err(|e| InstallError(e.to_string()))?;
+            let conflicts = firewall::ports::install_conflicts(&ctx.req.name, &ctx.req.dir, preq.game_port, preq.txadmin_port, &firewall::ports::SystemProber);
             if !conflicts.is_empty() {
                 return err(conflicts.join(" "));
             }

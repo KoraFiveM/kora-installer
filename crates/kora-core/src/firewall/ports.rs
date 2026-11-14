@@ -175,6 +175,20 @@ pub fn conflict_messages(game: u16, txadmin: u16, report: &PortReport, avoid: &[
     v
 }
 
+
+/// Everything wrong with the ports of an install (other Kora servers of this computer count as
+/// taken), as plain sentences naming the port, who uses it and the next free port. Empty = fine.
+pub fn install_conflicts(name: &str, dir: &Path, game: u16, txadmin: u16, prober: &dyn PortProber) -> Vec<String> {
+    let avoid = registered_ports_except(name, Some(dir));
+    let report = check_ports(game, txadmin, &avoid, prober);
+    conflict_messages(game, txadmin, &report, &avoid)
+}
+
+/// Ports to use for an install and what changed: `(game, txadmin; `None` = no free port.
+pub fn install_effective(name: &str, dir: &Path, game: u16, txadmin: u16, prober: &dyn PortProber) -> Option<(u16, u16)> {
+    effective_ports(game, txadmin, &registered_ports_except(name, Some(dir)), prober)
+}
+
 /// Name of the program using `port` (best effort; `None` when unknown or the lookup fails).
 pub fn describe_port_user(port: u16) -> Option<String> {
     if cfg!(windows) {
