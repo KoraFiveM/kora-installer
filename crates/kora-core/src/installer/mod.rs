@@ -464,11 +464,10 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     let build = sf.as_ref().map(|s| s.artifact_build);
     let mut notes = notes;
     notes.push(format!(
-        "The server is installed but not started. {} txAdmin runs on port {} and starts the game server by itself (an admin account is already set up). FXServer is in {}/artifacts/{}/.",
+        "The server is installed but not started. {} txAdmin runs on port {} and starts the game server by itself (an admin account is already set up). FXServer is in {}.",
         if req.service { format!("Start it with `kora start {}`.", req.name) } else { format!("Start it with `kora service-host {}`.", req.name) },
         req.ports.txadmin,
-        req.dir.display(),
-        build.map(|b| b.to_string()).unwrap_or_else(|| "<build>".into())
+        fxserver_dir_text(&req.dir, build)
     ));
     Ok(InstallOutcome {
         dir: req.dir.clone(),
@@ -476,6 +475,12 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
         txadmin_url: format!("http://localhost:{}", req.ports.txadmin),
         notes,
     })
+}
+
+/// `<dir>/artifacts/<build>/` written with the platform's own separators (no `C:\\x/artifacts` mix on Windows).
+pub(crate) fn fxserver_dir_text(dir: &Path, build: Option<u32>) -> String {
+    let b = build.map(|b| b.to_string()).unwrap_or_else(|| "<build>".into());
+    dir.join("artifacts").join(b).display().to_string()
 }
 
 /// Everything that can be checked before anything is created: free disk space (server folder,
@@ -880,5 +885,14 @@ mod tests {
         assert!(!t.path().join("srv").exists(), "nothing created before validation");
         r.ports.txadmin = r.ports.game;
         assert!(run_with(&r, &mut Collect(vec![]), &Hooks::default()).is_err());
+    }
+
+    #[test]
+    fn fxserver_note_uses_one_kind_of_separator() {
+        let d = Path::new("srv").join("main");
+        let t = fxserver_dir_text(&d, Some(38621));
+        assert_eq!(t, Path::new("srv").join("main").join("artifacts").join("38621").display().to_string());
+        assert!(!(t.contains('/') && t.contains('\\')), "mixed separators: {t}");
+        assert!(fxserver_dir_text(&d, None).ends_with("<build>"));
     }
 }

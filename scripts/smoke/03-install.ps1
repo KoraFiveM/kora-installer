@@ -10,10 +10,11 @@ Show 'kora install (production, no service)' $r
 Assert-That ($r.Code -eq 0) 'kora install exits 0'
 Assert-That ($r.Output -notmatch [regex]::Escape($fakeKey)) 'the license key is never printed'
 
-foreach ($lib in 'kora_lib', 'kora_sql', 'kora_core', 'kora_theme') {
-    Assert-That (Test-Path "$srv\resources\[pre]\$lib") "resource $lib cloned under resources\[pre]"
+foreach ($lib in 'kora_lib', 'kora_sql', 'kora_core') {
+    Assert-That (Test-Path -LiteralPath "$srv\resources\[pre]\$lib") "resource $lib cloned under resources\[pre]"
 }
-Assert-That (Test-Path "$srv\resources\[cfx-default]") 'the cfx-default dependency is present'
+Assert-That (Test-Path -LiteralPath "$srv\resources\[standalone]\kora_theme") 'the kora_theme dependency (pulled in by kora_lib) is present'
+Assert-That (Test-Path -LiteralPath "$srv\resources\[cfx-default]") 'the cfx-default dependency is present'
 $fx = Get-ChildItem "$srv\artifacts" -Recurse -Filter FXServer.exe | Select-Object -First 1
 Assert-That ($null -ne $fx) 'the Windows FXServer.exe artifact was extracted'
 foreach ($f in 'server.cfg', 'permissions.cfg', 'secrets.cfg', 'kora-server.json', '.kora\created.json', 'txData\default') {
