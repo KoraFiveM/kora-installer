@@ -18,3 +18,4 @@ pub mod txadmin;
 pub mod update;
 pub mod installer;
 pub mod launch;
+pub mod notify;
