@@ -21,3 +21,24 @@ jobs:
       - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: install.sh (shellcheck + tests against a local fake release)
+        if: runner.os == 'Linux'
+        run: |
+          shellcheck -s sh scripts/install.sh
+          shellcheck -s bash scripts/test-install.sh
+          bash scripts/test-install.sh
+      - name: install.ps1 (syntax check + PSScriptAnalyzer when available)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
+            # Write-Host is deliberate in an installer that talks to a person.
+            $found = Invoke-ScriptAnalyzer -Path scripts/install.ps1 -ExcludeRule PSAvoidUsingWriteHost
+            $found | Format-Table -AutoSize | Out-String | Write-Host
+            if ($found | Where-Object Severity -eq 'Error') { exit 1 }
+          } else {
+            Write-Host 'PSScriptAnalyzer is not installed on this runner: syntax check only.'
+          }

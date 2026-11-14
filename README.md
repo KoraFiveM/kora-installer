@@ -18,6 +18,20 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
+## Get the program
+
+Linux: `curl -fsSL <release-base>/install.sh | sh` downloads the latest release, checks its SHA-256 and installs it to
+`/usr/local/bin` (root) or `~/.local/bin`. Windows: `irm <release-base>/install.ps1 | iex` installs to
+`%LOCALAPPDATA%\Kora\bin` and adds it to your user PATH (no administrator rights). Both refuse non-HTTPS download
+addresses (except localhost), never replace a file that is not a kora program, and keep the previous version as `kora.previous`.
+`KORA_RELEASE_BASE` changes where they download from.
+
+## Removing things
+
+`kora delete <server>` removes one server (and the service account Kora created for it). `kora uninstall` asks, item by
+item, before removing the system changes Kora made (services, update timers, firewall rules, service accounts, the
+server list entry); server folders and databases are kept unless you say otherwise. `kora uninstall --dry-run` shows the plan.
+
 ## Code signing policy
 
 Free code signing provided by SignPath.io, certificate by SignPath Foundation (pending; see [CODE_SIGNING.md](CODE_SIGNING.md)).
