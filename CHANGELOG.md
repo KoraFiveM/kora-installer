@@ -1,0 +1,47 @@
+# Changelog
+
+All notable changes to Kora Installer. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+versions follow [SemVer](https://semver.org/).
+
+## [0.2.0] - unreleased
+
+First broadly usable build. Tested on Linux; the Windows build is CI-tested and real Windows runs
+have started, so expect rough edges there. See `RELEASE_NOTES.md` for known gaps.
+
+### Added
+- Setup code: redeem a code from the website in the wizard's Welcome stage or with `kora install --code`.
+- `kora uninstall` with per-item prompts, `--dry-run` and `--yes`; the safe defaults keep your folders and databases.
+- Dedicated service account for the server service, plus a root-owned copy of `kora` for services.
+- Free-space preflight before installing.
+- Catalog `dependsOn`: selecting a resource also selects its dependencies (for example kora-lib -> kora-theme).
+- `kora install --dry-run` prints the effective choices (name, mode, resources, ports, artifact) before the plan.
+- Port handling: conflict check in prepare, re-check before install, "next free port" suggestions,
+  `kora install --auto-ports`, live port status in the wizard.
+- Wizard: clipboard Paste/Clear buttons and bracketed paste; clickable log and folder actions on the failure and outcome screens.
+- Install scripts `install.sh` (Linux) and `install.ps1` (Windows): HTTPS-only, SHA-256 verified, never overwrite an
+  unknown file; `KORA_VERSION` / `-Version` to pick a release. Shipped as release assets.
+- Windows: MariaDB installed end to end (download, verify, initialise, service, admin file) with uninstall;
+  restricted ACL on `secrets.cfg`; elevation check.
+- Windows smoke-test workflow (install script, production install, dev dry-run, service and firewall steps).
+- Release tooling: rehearsable release workflow (asset, version and checksum checks), `scripts/bump-version.sh`.
+- Apache-2.0 license and a code signing policy (`CODE_SIGNING.md`).
+
+### Changed
+- Install scripts find the newest published release including pre-releases (`/releases` list) instead of
+  GitHub's `releases/latest`, which 404s while only pre-releases exist.
+- Windows service host talks to the Service Control Manager.
+- Windows auto-update task passes the server folder; git `safe.directory` is set.
+- Service account home directory is `/nonexistent`; clearer free-space message.
+- The FXServer folder is shown with the platform's path separators.
+
+### Fixed
+- Windows: `sc start` no longer fails with error 1053.
+- Windows: renames are retried after extract/clone/copy (antivirus holds new files); git long paths enabled.
+- Windows: firewall detection on non-English systems; git/gh found right after winget installs them; PATH refreshed after winget; port-reserved hint.
+- Windows: services can read the secrets file.
+- Paste in port fields keeps digits before the length cap is applied.
+- `install.ps1`: no empty catch block (PSScriptAnalyzer).
+
+## [0.1.0]
+
+Initial pre-release.
