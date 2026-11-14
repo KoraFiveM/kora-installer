@@ -346,7 +346,7 @@ fn clone_one(ctx: &Ctx, it: &CloneItem) -> Result<()> {
         let _ = std::fs::remove_dir_all(&partial);
         return err(e.to_string());
     }
-    io(std::fs::rename(&partial, &it.dest), "cannot move the clone into place")
+    io(crate::fsutil::rename_retrying(&partial, &it.dest), "cannot move the clone into place")
 }
 
 fn artifact_store(ctx: &Ctx) -> ArtifactStore {

@@ -127,7 +127,7 @@ impl CommandRunner for SystemRunner {
         }
         #[cfg(not(unix))]
         let _ = mode;
-        std::fs::rename(&tmp, d)
+        crate::fsutil::rename_retrying(&tmp, d)
     }
 
     fn remove_empty_dir(&self, path: &str) -> io::Result<()> {

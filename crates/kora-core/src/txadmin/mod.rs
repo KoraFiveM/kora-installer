@@ -346,7 +346,7 @@ pub fn write_file(path: &Path, contents: &str, secret: bool) -> Result<()> {
     f.write_all(contents.as_bytes())?;
     f.sync_all()?;
     drop(f);
-    fs::rename(&tmp, path)?;
+    crate::fsutil::rename_retrying(&tmp, path)?;
     Ok(())
 }
 

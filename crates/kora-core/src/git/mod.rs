@@ -58,6 +58,9 @@ impl CommandRunner for SystemRunner {
         }
         // Never block on interactive prompts from git.
         c.env("GIT_TERMINAL_PROMPT", "0");
+        for (k, v) in windows_git_env(cfg!(windows), std::env::var("GIT_CONFIG_COUNT").ok().as_deref()) {
+            c.env(k, v);
+        }
         let o = c.output()?;
         Ok(Output {
             code: o.status.code().unwrap_or(-1),
@@ -68,6 +71,16 @@ impl CommandRunner for SystemRunner {
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
     }
+}
+
+/// Windows: allow paths over 260 characters (node_modules inside resources routinely exceed it, and
+/// Git for Windows refuses them by default). Passed as environment config so no user config is
+/// touched; skipped when the user already uses `GIT_CONFIG_COUNT` themselves.
+pub fn windows_git_env(windows: bool, existing_count: Option<&str>) -> Vec<(&'static str, String)> {
+    if !windows || existing_count.is_some() {
+        return vec![];
+    }
+    vec![("GIT_CONFIG_COUNT", "1".into()), ("GIT_CONFIG_KEY_0", "core.longpaths".into()), ("GIT_CONFIG_VALUE_0", "true".into())]
 }
 
 fn run(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output> {
@@ -1075,6 +1088,13 @@ mod tests {
         clone_from_fork(&f, "me/res", "kora/res", Path::new("/d"), Some("dev")).unwrap();
         assert_eq!(f.count("git remote add upstream https://github.com/kora/res.git"), 1);
         assert_eq!(f.count("git checkout dev"), 1);
+    }
+
+    #[test]
+    fn long_paths_are_enabled_for_git_on_windows_only() {
+        assert!(windows_git_env(false, None).is_empty());
+        assert!(windows_git_env(true, Some("2")).is_empty());
+        assert!(windows_git_env(true, None).contains(&("GIT_CONFIG_VALUE_0", "true".to_string())));
     }
 
     #[test]

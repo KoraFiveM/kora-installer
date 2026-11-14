@@ -66,7 +66,7 @@ impl ArtifactStore {
         if target.exists() {
             fs::remove_dir_all(&target)?;
         }
-        fs::rename(&staging, &target)?;
+        crate::fsutil::rename_retrying(&staging, &target)?;
         let new = StoreState { current: Some(build), previous: st.current };
         self.save(&new)?;
         if let Some(old) = st.previous {
