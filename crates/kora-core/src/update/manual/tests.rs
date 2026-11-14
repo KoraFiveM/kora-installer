@@ -129,9 +129,7 @@ fn preview_compares_without_changing_anything() {
     assert_eq!(chat.from, before[0]);
     assert_eq!(chat.to, head(&env.up(0)));
     assert!(p.resources[2].needs_restart, "kora-core needs a restart");
-    for i in 0..3 {
-        assert_eq!(head(&env.path(i)), before[i]);
-    }
+    assert_eq!((0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(), before[..3]);
     assert!(render_preview(&p).contains("needs a server restart"));
     assert!(snapshots(&env.sf).is_empty());
 }
@@ -188,9 +186,7 @@ fn dirty_and_diverged_are_skipped_never_merged() {
     let (r, _) = run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 7);
     assert_eq!(r.skipped.len(), 2);
     assert_eq!(exit_code(&r), 3);
-    for i in 0..2 {
-        assert_eq!(head(&env.path(i)), old[i]);
-    }
+    assert_eq!((0..2).map(|i| head(&env.path(i))).collect::<Vec<_>>(), old[..2]);
     assert_eq!(std::fs::read_to_string(env.path(1).join("a")).unwrap(), "my edit");
 }
 
@@ -203,9 +199,7 @@ fn health_failure_rolls_back_to_the_snapshot() {
     assert_eq!(r.rolled_back.len(), 3);
     assert!(r.updated.is_empty());
     assert_eq!(exit_code(&r), 1);
-    for i in 0..3 {
-        assert_eq!(head(&env.path(i)), old[i], "previous commit restored");
-    }
+    assert_eq!((0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(), old[..3]);
     assert_eq!(*h.recovers.borrow(), 1);
     assert!(ev.iter().any(|e| matches!(e, UpdateEvent::Health(m) if m.contains("snapshot"))));
 }
@@ -219,9 +213,7 @@ fn manual_rollback_from_a_saved_snapshot() {
     run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 21);
     assert_eq!(snapshots(&env.sf).len(), 1, "second run had nothing to update, so no snapshot");
     rollback_with(&env.sf, "20", &GitCli::default()).unwrap();
-    for i in 0..3 {
-        assert_eq!(head(&env.path(i)), old[i]);
-    }
+    assert_eq!((0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(), old[..3]);
     assert!(rollback_with(&env.sf, "99", &GitCli::default()).is_err());
     assert!(rollback_with(&env.sf, "../x", &GitCli::default()).is_err());
 }
