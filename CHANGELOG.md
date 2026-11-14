@@ -39,6 +39,7 @@ have started, so expect rough edges there. See `RELEASE_NOTES.md` for known gaps
 - Windows: renames are retried after extract/clone/copy (antivirus holds new files); git long paths enabled.
 - Windows: firewall detection on non-English systems; git/gh found right after winget installs them; PATH refreshed after winget; port-reserved hint.
 - Windows: services can read the secrets file.
+- Windows: winget "already installed" exit codes count as success; case-insensitive folder comparisons; MariaDB config quoting, ASCII-only folder, antivirus hints; home folder taken from USERPROFILE first; clearer Prepare/Review/failure wording.
 - Paste in port fields keeps digits before the length cap is applied.
 - `install.ps1`: no empty catch block (PSScriptAnalyzer).
 
