@@ -817,7 +817,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Update { auto, .. }) => K::Update { auto: *auto },
         Some(Command::Status) => K::Status,
         Some(Command::Delete { .. }) => K::Delete,
-        Some(Command::ServiceHost { .. }) => K::Other,
+        Some(Command::ServiceHost { .. } | Command::Github { .. }) => K::Other,
         Some(Command::Start { .. }) => K::Start,
         Some(Command::Stop { .. }) => K::Stop,
         Some(Command::Restart { .. }) => K::Restart,
