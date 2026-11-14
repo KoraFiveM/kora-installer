@@ -6,7 +6,67 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      verify:
+      publish:
+        description: "Create the (draft) GitHub release. Only works when run on a v* tag. Leave false to rehearse the build and checks."
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bin: kora
+            name: kora-linux-x86_64
+          - os: windows-latest
+            bin: kora.exe
+            name: kora-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p kora-cli
+      - name: Binary reports the Cargo version
+        shell: bash
+        run: |
+          ver="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="kora-cli"))')"
+          got="$("target/release/${{ matrix.bin }}" --version | tr -d '\r')"
+          echo "cargo=$ver binary='$got'"
+          [ "$got" = "kora $ver" ]
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$ver" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo version $ver (run scripts/bump-version.sh)"; exit 1
+          fi
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir dist
+          cp "target/release/${{ matrix.bin }}" "dist/${{ matrix.name }}"
+          (cd dist && sha256sum "${{ matrix.name }}" > "${{ matrix.name }}.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+
+  # TODO(SignPath): enable after the first public release and SignPath Foundation approval.
+  # sign-windows:
+  #   needs: build
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/upload-artifact@v4   # TODO: SignPath requires the unsigned artifact uploaded in this workflow run
+  #     - uses: signpath/github-action-submit-signing-request@v1
+  #       with:
+  #         # TODO: values below are placeholders issued by SignPath on approval; no secrets invented.
+  #         organization-id: "TODO"
+  #         project-slug: "TODO"
+  #         signing-policy-slug: "TODO"   # release signing requires manual approval
+  #         github-artifact-id: "TODO"
+  #         # TODO: api-token comes from a GitHub secret created by the owner after approval.
+  #         wait-for-completion: true
+  #         output-artifact-directory: signed
+
+  verify:
     needs: build
     runs-on: ubuntu-latest
     steps:
