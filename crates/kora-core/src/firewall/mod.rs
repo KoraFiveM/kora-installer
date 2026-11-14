@@ -3,6 +3,8 @@
 //! (see [`crate::service::Plan`]) and are only applied with consent.
 
 use crate::service::{CommandRunner, Plan, Platform, ServiceError, ServiceResult, SystemStep};
+pub mod ports;
+
 use std::net::{TcpListener, UdpSocket};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
