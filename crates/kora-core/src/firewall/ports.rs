@@ -53,20 +53,30 @@ impl PortProber for SystemProber {
         if port < MIN_PORT || windows_excluded(port) {
             return false;
         }
-        if TcpListener::bind(("0.0.0.0", port)).is_err() {
-            return false;
+        // Windows lets a wildcard bind succeed while another program holds only the loopback address
+        // (an existing MariaDB does exactly that), so the loopback addresses are probed too.
+        for host in ["0.0.0.0", "127.0.0.1"] {
+            if TcpListener::bind((host, port)).is_err() {
+                return false;
+            }
         }
-        !matches!(TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)), Err(e) if v6_blocked(&e))
+        [Ipv6Addr::UNSPECIFIED, Ipv6Addr::LOCALHOST]
+            .iter()
+            .all(|a| !matches!(TcpListener::bind((*a, port)), Err(e) if v6_blocked(&e)))
     }
 
     fn udp_free(&self, port: u16) -> bool {
         if port < MIN_PORT {
             return false;
         }
-        if UdpSocket::bind(("0.0.0.0", port)).is_err() {
-            return false;
+        for host in ["0.0.0.0", "127.0.0.1"] {
+            if UdpSocket::bind((host, port)).is_err() {
+                return false;
+            }
         }
-        !matches!(UdpSocket::bind((Ipv6Addr::UNSPECIFIED, port)), Err(e) if v6_blocked(&e))
+        [Ipv6Addr::UNSPECIFIED, Ipv6Addr::LOCALHOST]
+            .iter()
+            .all(|a| !matches!(UdpSocket::bind((*a, port)), Err(e) if v6_blocked(&e)))
     }
 }
 
@@ -237,6 +247,15 @@ pub fn parse_tasklist(out: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_loopback_only_listener_makes_the_port_not_free() {
+        // Windows allows a wildcard bind next to a loopback-only listener; an existing MariaDB looks like this.
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        assert!(!SystemProber.tcp_free(port), "port {port} is held on 127.0.0.1");
+        drop(held);
+    }
+
     use super::*;
     use crate::installer::{registry::PortsRecord, Mode};
     use std::collections::HashSet;
