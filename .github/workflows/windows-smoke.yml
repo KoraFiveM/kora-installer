@@ -1,0 +1,41 @@
+# Real Windows runtime checks on an ephemeral admin VM (windows-latest). Kept apart from ci.yml
+# so the main CI stays fast. Uses a fake Cfx key only; no secrets.
+name: Windows smoke
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: "1. Build kora.exe, --version, no-TTY install error"
+        run: |
+          cargo build --release --locked -p kora-cli
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+          ./scripts/smoke/01-build.ps1
+      - name: "2a. PSScriptAnalyzer on install.ps1 (all rules except Write-Host)"
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $f = Invoke-ScriptAnalyzer -Path scripts/install.ps1 -ExcludeRule PSAvoidUsingWriteHost
+          $f | Format-Table -AutoSize | Out-String | Write-Host
+          if ($f) { throw "PSScriptAnalyzer: $(@($f).Count) finding(s)" }
+      - name: "2b. install.ps1 against a local fake release"
+        run: ./scripts/smoke/02-install-ps1.ps1
+      - name: "3. Production install (tiny catalog, no service)"
+        run: ./scripts/smoke/03-install.ps1
+      - name: "6. Dev mode dry run"
+        run: ./scripts/smoke/06-dev-dry-run.ps1
+      - name: Collect logs
+        if: always()
+        run: |
+          foreach ($p in 'C:\kora-smoke\srv\.kora', "$env:LOCALAPPDATA\Kora") { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File | Select-Object -First 40 FullName } }

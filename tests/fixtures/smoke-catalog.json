@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 2,
+  "resources": [
+    {
+      "id": "kora-lib",
+      "title": "Kora Lib",
+      "repository": "https://github.com/KoraFiveM/kora_lib.git",
+      "path": "[pre]/kora_lib",
+      "group": "pre",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 2,
+      "latest": "0.2.1",
+      "dependsOn": [
+        "kora-theme"
+      ],
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "6e5dd02ce6dab6cf7380336d7e6a91b1ed2fd126"
+        }
+      ],
+      "description": "Shared utility library for Kora resources."
+    },
+    {
+      "id": "kora-core",
+      "title": "Kora Core",
+      "repository": "https://github.com/KoraFiveM/kora_core.git",
+      "path": "[pre]/kora_core",
+      "group": "pre",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 4,
+      "latest": "0.2.1",
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "0089df7fe7609223c795829fe0e658271a6988f9"
+        }
+      ],
+      "description": "Core framework for Kora resources and player services."
+    },
+    {
+      "id": "kora-sql",
+      "title": "Kora Sql",
+      "repository": "https://github.com/KoraFiveM/kora_sql.git",
+      "path": "[pre]/kora_sql",
+      "group": "pre",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 3,
+      "latest": "0.2.1",
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "0ab7487c5e76fb25b494f3d26250872e30e6e76f"
+        }
+      ],
+      "description": "Database access for Kora resources."
+    },
+    {
+      "id": "kora-theme",
+      "title": "Kora Theme",
+      "repository": "https://github.com/KoraFiveM/kora_theme.git",
+      "path": "[standalone]/kora_theme",
+      "group": "standalone",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 5,
+      "latest": "0.2.1",
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "db3616615a3cb5261fd4ee101a4db85542bbbd7e"
+        }
+      ],
+      "description": "Shared design system for browser interfaces."
+    },
+    {
+      "id": "cfx-default",
+      "title": "Cfx Default",
+      "repository": "https://github.com/KoraFiveM/-cfx-default-.git",
+      "path": "[cfx-default]",
+      "group": "cfx-default",
+      "kind": "dependency",
+      "branch": "dev",
+      "order": 1,
+      "latest": null,
+      "versions": [],
+      "description": "Dependency installed at resources/[cfx-default]."
+    }
+  ]
+}
