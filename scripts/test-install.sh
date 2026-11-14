@@ -116,5 +116,51 @@ else
   printf 'skip - default-folder test (running as root or /usr/local/bin is writable)\n'
 fi
 
+# 10. default lookup: newest published release (pre-releases included), explicit KORA_VERSION
+mkdir -p "$WORK/api/repos/KoraFiveM/kora-installer" "$WORK/api/KoraFiveM/kora-installer/releases/download/v0.2.0-rc1"
+cp "$WORK/rel/"kora-linux-x86_64* "$WORK/api/KoraFiveM/kora-installer/releases/download/v0.2.0-rc1/"
+cat > "$WORK/api/repos/KoraFiveM/kora-installer/releases" <<'JSON'
+[
+  {
+    "id": 3,
+    "tag_name": "v0.3.0",
+    "draft": true,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "x",
+        "uploader": { "tag_name": "nested", "draft": false }
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "tag_name": "v0.2.0-rc1",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "id": 1,
+    "tag_name": "v0.1.0",
+    "draft": false,
+    "prerelease": false
+  }
+]
+JSON
+# the fake API serves the list for the path with a query string too (python ignores the query)
+(cd "$WORK/api" && exec python3 -m http.server "$((PORT + 2))" --bind 127.0.0.1 >/dev/null 2>&1) &
+API_PID=$!
+sleep 0.5
+D="$WORK/t10/bin"
+check "default lookup installs the newest non-draft pre-release" run KORA_API_BASE="http://127.0.0.1:$((PORT + 2))" KORA_DOWNLOAD_BASE="http://127.0.0.1:$((PORT + 2))" KORA_INSTALL_DIR="$D"
+check "  ... from v0.2.0-rc1 (draft v0.3.0 skipped)" out_has "releases/download/v0.2.0-rc1"
+D="$WORK/t10b/bin"
+check "KORA_VERSION without v is accepted" run KORA_VERSION=0.2.0-rc1 KORA_DOWNLOAD_BASE="http://127.0.0.1:$((PORT + 2))" KORA_INSTALL_DIR="$D"
+check "  ... uses that tag" out_has "releases/download/v0.2.0-rc1"
+check "bad KORA_VERSION refused" run_fail KORA_VERSION='v1/../x' KORA_INSTALL_DIR="$WORK/t10c"
+check "insecure KORA_API_BASE refused" run_fail KORA_API_BASE="http://evil.example" KORA_INSTALL_DIR="$WORK/t10d"
+check "insecure KORA_DOWNLOAD_BASE refused" run_fail KORA_DOWNLOAD_BASE="http://evil.example" KORA_INSTALL_DIR="$WORK/t10d"
+kill "$API_PID" 2>/dev/null
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all install.sh tests passed"; else echo "$fails install.sh test(s) FAILED"; exit 1; fi

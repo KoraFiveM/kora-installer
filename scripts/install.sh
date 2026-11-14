@@ -6,6 +6,7 @@
 #   curl -fsSL <release-base>/install.sh | sh
 #
 # Settings (environment variables, all optional):
+#   KORA_VERSION       release to install, e.g. v0.2.0. Default: the newest published release (pre-releases included).
 #   KORA_RELEASE_BASE  where the release files live. Must be https:// (http:// only for localhost).
 #   KORA_INSTALL_DIR   target folder. Default: /usr/local/bin as root, else ~/.local/bin.
 #   KORA_FORCE=1       replace an existing file at the target even if it is not a kora program.
@@ -21,15 +22,20 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'kora install: %s\n' "$*" >&2; exit 1; }
 
 # --- the download address must be safe ---------------------------------------------------
-case "$BASE" in
-  https://*) ;;
-  *)
-    # Plain http only for the machine itself: exactly localhost or 127.0.0.1, optional numeric port, then a path.
-    if ! printf '%s\n' "$BASE" | grep -Eq '^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$)'; then
-      die "refusing to download from '$BASE': the release address must start with https:// (plain http:// is only allowed for localhost)."
-    fi
-    ;;
-esac
+check_url() {
+  case "$1" in
+    https://*) ;;
+    *)
+      # Plain http only for the machine itself: exactly localhost or 127.0.0.1, optional numeric port, then a path.
+      if ! printf '%s\n' "$1" | grep -Eq '^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$)'; then
+        die "refusing to download from '$1': the release address must start with https:// (plain http:// is only allowed for localhost)."
+      fi
+      ;;
+  esac
+}
+check_url "$BASE"
+API_BASE="${KORA_API_BASE:-https://api.github.com}"; check_url "$API_BASE"
+DL_BASE="${KORA_DOWNLOAD_BASE:-https://github.com}"; check_url "$DL_BASE"
 
 # --- platform ------------------------------------------------------------------------------
 [ "$(uname -s)" = "Linux" ] || die "this script is for Linux. On Windows use install.ps1."
@@ -54,21 +60,26 @@ else
   die "needs sha256sum (or shasum) to verify the download."
 fi
 
-# GitHub's "latest" never points at a pre-release, so while only pre-releases exist use the newest one.
+# GitHub's "latest" never points at a pre-release, so by default ask for the newest published release
+# (pre-releases included) from /releases?per_page=10; KORA_VERSION=vX.Y.Z picks one explicitly.
+# If the lookup fails we fall back to "latest". Skipped entirely when KORA_RELEASE_BASE is set.
 if [ -z "${KORA_RELEASE_BASE:-}" ]; then
-  PROBE="$(mktemp)"
-  if ! fetch "$BASE/$ASSET.sha256" "$PROBE" 2>/dev/null; then
+  TAG=""
+  if [ -n "${KORA_VERSION:-}" ]; then
+    TAG="$KORA_VERSION"
+    case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
+    case "$TAG" in *[!A-Za-z0-9._-]*) die "KORA_VERSION '$KORA_VERSION' is not a valid release name." ;; esac
+  else
     LIST="$(mktemp)"
-    if fetch "https://api.github.com/repos/$REPO/releases?per_page=1" "$LIST" 2>/dev/null; then
-      TAG="$(grep -m1 '"tag_name"' "$LIST" | sed 's/.*"tag_name"[^"]*"\([^"]*\)".*/\1/')"
-      case "$TAG" in
-        "" | *[!A-Za-z0-9._-]*) ;;
-        *) BASE="https://github.com/$REPO/releases/download/$TAG" ;;
-      esac
+    if fetch "$API_BASE/repos/$REPO/releases?per_page=10" "$LIST" 2>/dev/null; then
+      # First entry that is not a draft (the public API never lists drafts; the check is belt and braces).
+      TAG="$(awk '/^    "tag_name"/ { t=$0; sub(/.*"tag_name"[^"]*"/, "", t); sub(/".*/, "", t) }
+                  /^    "draft": *false/ { if (t != "") { print t; exit } }' "$LIST")"
+      case "$TAG" in *[!A-Za-z0-9._-]*) TAG="" ;; esac
     fi
     rm -f "$LIST"
   fi
-  rm -f "$PROBE"
+  [ -n "$TAG" ] && BASE="$DL_BASE/$REPO/releases/download/$TAG"
 fi
 
 # --- where to install ----------------------------------------------------------------------

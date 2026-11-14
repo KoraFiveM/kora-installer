@@ -4,57 +4,11 @@ name: Release
 on:
   push:
     tags: ["v*"]
-permissions:
-  contents: read
-jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            bin: kora
-            name: kora-linux-x86_64
-          - os: windows-latest
-            bin: kora.exe
-            name: kora-windows-x86_64.exe
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release --locked -p kora-cli
-      - name: Stage artifact
-        shell: bash
-        run: |
-          mkdir dist
-          cp "target/release/${{ matrix.bin }}" "dist/${{ matrix.name }}"
-          (cd dist && sha256sum "${{ matrix.name }}" > "${{ matrix.name }}.sha256")
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: dist/*
-
-  # TODO(SignPath): enable after the first public release and SignPath Foundation approval.
-  # sign-windows:
-  #   needs: build
-  #   runs-on: windows-latest
-  #   steps:
-  #     - uses: actions/upload-artifact@v4   # TODO: SignPath requires the unsigned artifact uploaded in this workflow run
-  #     - uses: signpath/github-action-submit-signing-request@v1
-  #       with:
-  #         # TODO: values below are placeholders issued by SignPath on approval; no secrets invented.
-  #         organization-id: "TODO"
-  #         project-slug: "TODO"
-  #         signing-policy-slug: "TODO"   # release signing requires manual approval
-  #         github-artifact-id: "TODO"
-  #         # TODO: api-token comes from a GitHub secret created by the owner after approval.
-  #         wait-for-completion: true
-  #         output-artifact-directory: signed
-
-  publish:
+  workflow_dispatch:
+    inputs:
+      verify:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4   # for the install scripts
       - uses: actions/download-artifact@v4
@@ -63,7 +17,43 @@ jobs:
           merge-multiple: true
       - name: Add the install scripts as release assets
         run: cp scripts/install.sh scripts/install.ps1 dist/
+      - name: Every expected asset exists and checksums verify
+        working-directory: dist
+        run: |
+          ls -l
+          for f in kora-linux-x86_64 kora-linux-x86_64.sha256 kora-windows-x86_64.exe kora-windows-x86_64.exe.sha256 install.sh install.ps1; do
+            [ -s "$f" ] || { echo "MISSING or empty: $f"; exit 1; }
+          done
+          sha256sum -c kora-linux-x86_64.sha256
+          sha256sum -c kora-windows-x86_64.exe.sha256
+      - name: Linux binary runs and reports the Cargo version
+        run: |
+          chmod +x dist/kora-linux-x86_64
+          ver="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="kora-cli"))')"
+          [ "$(dist/kora-linux-x86_64 --version)" = "kora $ver" ]
+      - name: install.sh passes its tests
+        run: sh -n scripts/install.sh && bash scripts/test-install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/*
+
+  publish:
+    needs: verify
+    # Rehearsals (publish=false, or not on a tag) stop after verify.
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4   # for RELEASE_NOTES.md
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           draft: true   # TODO: maintainer reviews/approves before publishing
+          body_path: ${{ hashFiles('RELEASE_NOTES.md') != '' && 'RELEASE_NOTES.md' || '' }}
+          generate_release_notes: ${{ hashFiles('RELEASE_NOTES.md') == '' }}

@@ -3,13 +3,14 @@
   Installs the Kora program for the current user (no administrator rights needed).
 
 .DESCRIPTION
-  Downloads kora.exe from the latest release, checks its SHA-256, copies it to
+  Downloads kora.exe from the newest published release, checks its SHA-256, copies it to
   %LOCALAPPDATA%\Kora\bin and adds that folder to your user PATH. An existing kora.exe is only
   replaced when it really is an earlier kora (the old one is kept as kora.exe.previous).
 
   Settings (parameters or environment variables, all optional):
     -Base / KORA_RELEASE_BASE   Where the release files live. https:// only (http:// for localhost).
     -InstallDir / KORA_INSTALL_DIR   Target folder. Default: %LOCALAPPDATA%\Kora\bin
+    -Version / KORA_VERSION     Release to install, e.g. v0.2.0. Default: newest published release (pre-releases included).
     -Force                      Replace an existing kora.exe even if it is not a kora program.
 
 .EXAMPLE
@@ -19,6 +20,7 @@
 param(
     [string]$Base = $(if ($env:KORA_RELEASE_BASE) { $env:KORA_RELEASE_BASE } else { 'https://github.com/KoraFiveM/kora-installer/releases/latest/download' }),
     [string]$InstallDir = $(if ($env:KORA_INSTALL_DIR) { $env:KORA_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Kora\bin' }),
+    [string]$Version = $env:KORA_VERSION,
     [switch]$Force
 )
 
@@ -44,15 +46,23 @@ if ($env:PROCESSOR_ARCHITECTURE -notin @('AMD64', 'ARM64')) {
 
 $asset = 'kora-windows-x86_64.exe'
 
-# GitHub's "latest" never points at a pre-release, so while only pre-releases exist use the newest one.
+# GitHub's "latest" never points at a pre-release, so by default ask for the newest published release
+# (pre-releases included) from /releases?per_page=10; -Version / KORA_VERSION picks one explicitly.
+# If the lookup fails we fall back to "latest". Skipped entirely when a base address is given.
 if (-not $env:KORA_RELEASE_BASE -and -not $PSBoundParameters.ContainsKey('Base')) {
-    try { Invoke-WebRequest -UseBasicParsing -Uri "$Base/$asset.sha256" | Out-Null }
-    catch {
+    $tag = $null
+    if ($Version) {
+        $tag = if ($Version.StartsWith('v')) { $Version } else { "v$Version" }
+        if ($tag -notmatch '^[A-Za-z0-9._-]+$') { Exit-Install "'$Version' is not a valid release name." }
+    }
+    else {
         try {
-            $rel = @(Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/KoraFiveM/kora-installer/releases?per_page=1')[0]
-            if ($rel.tag_name -match '^[A-Za-z0-9._-]+$') { $Base = "https://github.com/KoraFiveM/kora-installer/releases/download/$($rel.tag_name)" }
+            $list = @(Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/KoraFiveM/kora-installer/releases?per_page=10')
+            $rel = $list | Where-Object { -not $_.draft } | Select-Object -First 1
+            if ($rel -and $rel.tag_name -match '^[A-Za-z0-9._-]+$') { $tag = $rel.tag_name }
         } catch { Write-Verbose "could not look up the newest release: $($_.Exception.Message)" }
     }
+    if ($tag) { $Base = "https://github.com/KoraFiveM/kora-installer/releases/download/$tag" }
 }
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kora-install-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
