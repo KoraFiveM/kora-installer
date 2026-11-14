@@ -1157,8 +1157,45 @@ mod tests {
         KeyEvent { code: c, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
     }
 
+    use std::cell::RefCell;
+    use std::collections::HashSet;
+    use std::rc::Rc;
+
+    /// Fake prober whose taken ports can change while a wizard is running.
+    #[derive(Clone, Default)]
+    struct Fake {
+        tcp: Rc<RefCell<HashSet<u16>>>,
+        udp: Rc<RefCell<HashSet<u16>>>,
+    }
+
+    impl Fake {
+        fn take(&self, ports: &[u16]) {
+            self.tcp.borrow_mut().extend(ports.iter().copied());
+        }
+        fn take_udp(&self, ports: &[u16]) {
+            self.udp.borrow_mut().extend(ports.iter().copied());
+        }
+        fn release(&self, port: u16) {
+            self.tcp.borrow_mut().remove(&port);
+            self.udp.borrow_mut().remove(&port);
+        }
+    }
+
+    impl PortProber for Fake {
+        fn tcp_free(&self, p: u16) -> bool {
+            !self.tcp.borrow().contains(&p)
+        }
+        fn udp_free(&self, p: u16) -> bool {
+            !self.udp.borrow().contains(&p)
+        }
+    }
+
+    fn pwiz(f: &Fake) -> Wizard {
+        Wizard::with_ports(PortEnv { prober: Box::new(f.clone()), servers: vec![] })
+    }
+
     fn wiz() -> Wizard {
-        Wizard::with_port_check(|_, _| vec![])
+        pwiz(&Fake::default())
     }
 
     fn type_str(w: &mut Wizard, s: &str) {
@@ -1256,11 +1293,13 @@ mod tests {
         assert!(validate_ports("a", "30120", "30120").is_err());
         assert!(validate_ports("a", "70000", "40120").is_err());
 
-        let mut w = Wizard::with_port_check(|g, _| vec![format!("Port {g} (game) is already used")]);
+        let f = Fake::default();
+        f.take(&[30120]);
+        let mut w = pwiz(&f);
         w.screen = Screen::Ports;
         w.go_next();
         assert_eq!(w.screen, Screen::Ports);
-        assert!(w.error.as_ref().unwrap().contains("already used"));
+        assert!(w.error.as_ref().unwrap().contains("already in use"));
     }
 
     #[test]
@@ -1352,7 +1391,7 @@ mod tests {
     }
 
     fn dbw() -> Wizard {
-        let mut w = Wizard::with_hooks(|_, _| vec![], ok_tester);
+        let mut w = Wizard::with_hooks(PortEnv { prober: Box::new(Fake::default()), servers: vec![] }, ok_tester);
         w.db = DbChoice::UseExisting;
         w.screen = Screen::Database;
         w
@@ -1765,5 +1804,223 @@ mod tests {
         w.screen = Screen::License;
         let h = w.view().help;
         assert!(h.contains("Shift+Insert") && h.contains("Ctrl+U"));
+    }
+
+    // ---- port checks ----
+
+    use kora_core::installer::registry::PortsRecord;
+
+    fn at_ports(f: &Fake) -> Wizard {
+        let mut w = pwiz(f);
+        w.screen = Screen::Folder;
+        w.go_next();
+        assert_eq!(w.screen, Screen::Ports);
+        w
+    }
+
+    fn walk_to(w: &mut Wizard, target: Screen) {
+        let mut guard = 0;
+        while w.screen != target && guard < 40 {
+            w.go_next();
+            assert!(w.error.is_none(), "{:?}: {:?}", w.screen, w.error);
+            guard += 1;
+        }
+        assert_eq!(w.screen, target);
+    }
+
+    #[test]
+    fn free_ports_show_a_plain_ok_line() {
+        let w = at_ports(&Fake::default());
+        assert_eq!(w.ports_status[0].as_ref().unwrap().text, "30120 is free");
+        assert_eq!(w.ports_status[1].as_ref().unwrap().text, "40120 is free");
+        let t = render_text(&w);
+        assert!(t.contains("30120 is free") && !t.contains("[ Use"), "{t}");
+        assert!(w.ports_note.is_none());
+    }
+
+    #[test]
+    fn taken_default_port_is_prefilled_with_the_next_free_one() {
+        let f = Fake::default();
+        f.take(&[30120, 30121]);
+        let w = at_ports(&f);
+        assert_eq!((w.game_port.as_str(), w.tx_port.as_str()), ("30122", "40120"));
+        assert!(w.ports_note.as_ref().unwrap().contains("30120") && w.ports_note.as_ref().unwrap().contains("30122"));
+        assert!(render_text(&w).contains("30122 is free"));
+        // UDP-only conflicts matter for the game port; txAdmin only needs TCP
+        let f = Fake::default();
+        f.take_udp(&[30120, 40120]);
+        let w = at_ports(&f);
+        assert_eq!((w.game_port.as_str(), w.tx_port.as_str()), ("30121", "40120"));
+        // later ports are never reused: the two never collide
+        let f = Fake::default();
+        f.take(&[40120]);
+        let w = at_ports(&f);
+        assert_eq!(w.tx_port, "40121");
+    }
+
+    #[test]
+    fn typed_taken_port_blocks_next_until_the_suggestion_is_used_by_click() {
+        let f = Fake::default();
+        let mut w = at_ports(&f);
+        f.take(&[30125]);
+        w.game_port.clear();
+        type_str(&mut w, "30125");
+        let line = w.ports_status[0].clone().unwrap();
+        assert!(!line.ok && line.suggestion == Some(30126));
+        assert_eq!(line.text, "30125 is already in use - 30126 is free");
+        let t = render_text(&w);
+        assert!(t.contains("30125 is already in use - 30126 is free") && t.contains("[ Use 30126 ]"), "{t}");
+        w.go_next();
+        assert_eq!(w.screen, Screen::Ports, "blocked while taken");
+        assert!(w.error.as_ref().unwrap().contains("already in use"));
+        let area = Rect::new(0, 0, 110, 40);
+        let l = wizard_view::layout(area, &w.view());
+        assert!(l.actions[0].width > 0 && l.actions[1].width == 0, "only the taken port has a button");
+        w.handle_mouse(left_click(l.actions[0]), area);
+        assert_eq!(w.game_port, "30126");
+        assert_eq!(w.status.as_deref(), Some("Using port 30126"));
+        assert!(w.error.is_none() && w.ports_status[0].as_ref().unwrap().ok);
+        w.go_next();
+        assert_eq!(w.screen, Screen::Artifact);
+    }
+
+    #[test]
+    fn keys_use_the_suggestion_and_port_boxes_take_digits_only() {
+        let f = Fake::default();
+        let mut w = at_ports(&f);
+        f.take(&[40120]);
+        w.focus = 1;
+        w.tx_port.clear();
+        type_str(&mut w, "40120");
+        w.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(w.tx_port, "40120", "letters are not typed into a port box");
+        w.handle_key(key(KeyCode::Char('u')));
+        assert_eq!(w.tx_port, "40121");
+        w.focus = 0;
+        f.take(&[30120]);
+        w.game_port.clear();
+        type_str(&mut w, "30120");
+        w.handle_key(key(KeyCode::F(3)));
+        assert_eq!(w.game_port, "30121");
+        w.game_port.clear();
+        w.handle_paste("  4x0 1y22\n");
+        assert_eq!(w.game_port, "40122", "paste keeps digits only");
+    }
+
+    #[test]
+    fn ports_of_other_kora_servers_count_as_taken_even_when_stopped() {
+        use kora_core::installer::Mode as M;
+        let other = ServerEntry { name: "Alpha RP".into(), dir: "/srv/alpha".into(), mode: M::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 };
+        let mut w = Wizard::with_ports(PortEnv { prober: Box::new(Fake::default()), servers: vec![other] });
+        w.screen = Screen::Folder;
+        w.go_next();
+        assert_eq!((w.game_port.as_str(), w.tx_port.as_str()), ("30121", "40121"), "defaults moved off the other server's ports");
+        w.game_port.clear();
+        type_str(&mut w, "30120");
+        let t = render_text(&w);
+        assert!(t.contains("30120 is used by your other server 'Alpha RP' - 30121 is free"), "{t}");
+        w.go_next();
+        assert_eq!(w.screen, Screen::Ports);
+        // re-installing the same server (same name) is not blocked by its own entry
+        w.name = "alpha rp".into();
+        w.refresh_ports();
+        assert!(w.ports_status[0].as_ref().unwrap().ok);
+    }
+
+    #[test]
+    fn website_ports_are_rechecked_and_the_screen_is_shown_when_taken() {
+        // free: the Ports screen stays skipped
+        let f = Fake::default();
+        let mut w = pwiz(&f).with_redeemer(Box::new(|_| Ok(sample_redeemed())));
+        w.screen = Screen::SetupCode;
+        w.handle_paste("KORA-7F3K-92QX");
+        w.go_next();
+        assert!(!w.flow().contains(&Screen::Ports));
+        // taken here: shown, with the plain explanation and the suggestion, nothing silently changed
+        let f = Fake::default();
+        f.take(&[31120]);
+        let mut w = pwiz(&f).with_redeemer(Box::new(|_| Ok(sample_redeemed())));
+        w.screen = Screen::SetupCode;
+        w.handle_paste("KORA-7F3K-92QX");
+        w.go_next();
+        assert!(w.flow().contains(&Screen::Ports));
+        assert!(w.flow().iter().position(|s| *s == Screen::Folder) < w.flow().iter().position(|s| *s == Screen::Ports));
+        walk_to(&mut w, Screen::Folder);
+        w.go_next();
+        assert_eq!(w.screen, Screen::Ports);
+        assert_eq!(w.game_port, "31120", "the website's choice is kept until the user accepts a change");
+        let t = render_text(&w);
+        assert!(t.contains("The website chose port 31120 but it is already used on this computer"), "{t}");
+        assert!(t.contains("31120 is already in use - 31121 is free") && t.contains("[ Use 31121 ]"), "{t}");
+        w.go_next();
+        assert_eq!(w.screen, Screen::Ports, "blocked");
+        w.handle_key(key(KeyCode::Char('u')));
+        assert_eq!(w.game_port, "31121");
+        w.go_next();
+        assert_eq!(w.screen, Screen::Database);
+        // once shown, the screen stays in the flow so going back never lands somewhere odd
+        assert!(w.flow().contains(&Screen::Ports));
+        // the CLI-prefilled path is checked too
+        let f = Fake::default();
+        f.take(&[41120]);
+        let mut w = pwiz(&f);
+        w.apply_redeemed(sample_redeemed(), true);
+        assert!(w.flow().contains(&Screen::Ports));
+        assert!(w.ports_note.as_ref().unwrap().contains("41120"));
+    }
+
+    #[test]
+    fn ports_are_rechecked_on_the_way_into_review_and_when_installing() {
+        let f = Fake::default();
+        let mut w = pwiz(&f);
+        walk_to(&mut w, Screen::License);
+        f.take(&[30120]); // someone grabs the port after it was chosen
+        w.go_next();
+        assert_eq!(w.screen, Screen::Ports, "sent back instead of reaching Review");
+        assert!(w.error.as_ref().unwrap().contains("taken in the meantime"));
+        assert_eq!(w.game_port, "30121", "untouched defaults get the free port pre-filled");
+        w.go_next();
+        assert_eq!(w.screen, Screen::Review, "straight back to Review after fixing it");
+        assert!(w.error.is_none());
+        // and once more when Install is confirmed
+        f.take(&[30121]);
+        w.go_next();
+        assert_eq!(w.state(), WizardState::Running);
+        assert_eq!(w.screen, Screen::Ports);
+        assert!(w.error.as_ref().unwrap().contains("taken in the meantime"));
+        assert_eq!(w.game_port, "30122");
+        f.release(30121);
+        w.go_next(); // the pre-filled port is free -> back to Review
+        assert_eq!(w.screen, Screen::Review);
+        w.go_next();
+        assert_eq!(w.state(), WizardState::Done);
+        assert_eq!(w.build_request().ports.game, 30122);
+    }
+
+    #[test]
+    fn help_and_hint_mention_the_port_keys() {
+        let w = at_ports(&Fake::default());
+        let h = w.view().help;
+        assert!(h.contains("press U or F3") && h.contains("next free"), "{h}");
+        assert!(h.contains("Ctrl+V"));
+    }
+
+    #[test]
+    fn port_screen_renders_at_small_sizes_with_buttons() {
+        let f = Fake::default();
+        let mut w = at_ports(&f);
+        f.take(&[30120, 40120]);
+        w.game_port = "30120".into();
+        w.tx_port = "40120".into();
+        w.refresh_ports();
+        for (c, r) in [(110u16, 40u16), (80, 24), (45, 14), (12, 4)] {
+            let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(c, r)).unwrap();
+            t.draw(|f| wizard_view::render(f, &w)).unwrap();
+        }
+        let area = Rect::new(0, 0, 80, 24);
+        let l = wizard_view::layout(area, &w.view());
+        assert!(l.actions[0].width > 0 && l.actions[1].width > 0 && !l.actions[0].intersects(l.actions[1]));
+        w.handle_mouse(left_click(l.actions[1]), area);
+        assert_eq!(w.tx_port, "40121");
     }
 }
