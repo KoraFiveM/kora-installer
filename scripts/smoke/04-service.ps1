@@ -14,6 +14,7 @@ function Wait-SvcState([string]$Want, [int]$Seconds = 60) {
 }
 function Show-ServerLogs {
     Write-Host '--- FXServer / txAdmin logs (tails) ---'
+    if (Test-Path "$srv\.kora\service-host.log") { Write-Host '== service-host.log'; Get-Content "$srv\.kora\service-host.log" -Tail 60 }
     foreach ($p in "$srv\txData\default\logs", "$srv\txData\logs", "$srv\logs") {
         if (Test-Path $p) { Get-ChildItem $p -Recurse -File | Sort-Object LastWriteTime | Select-Object -Last 4 | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 40 } }
     }

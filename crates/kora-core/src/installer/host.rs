@@ -144,6 +144,20 @@ mod scm {
 
     define_windows_service!(ffi_service_main, service_main);
 
+    /// `<server folder>/.kora/service-host.log`: FXServer's output and the reason it ended (a service has no console).
+    fn open_service_log(target: &str) -> Option<std::fs::File> {
+        let dir = resolve_dir(target).ok()?;
+        std::fs::create_dir_all(dir.join(".kora")).ok()?;
+        std::fs::OpenOptions::new().create(true).append(true).open(dir.join(".kora").join("service-host.log")).ok()
+    }
+
+    fn log_line(log: &Option<std::fs::File>, line: &str) {
+        use std::io::Write;
+        if let Some(mut f) = log.as_ref() {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
     fn service_main(_args: Vec<OsString>) {
         let code = match run() {
             Ok(c) => c,
@@ -192,12 +206,21 @@ mod scm {
             });
         };
         report(ServiceState::StartPending, ServiceControlAccept::empty(), Duration::from_secs(15), 0, 1);
+        let log = open_service_log(&target);
+        log_line(&log, &format!("kora service-host: starting FXServer for {target}"));
+        let started = std::time::Instant::now();
         let mut child = match build_command(&target).map_err(|e| e.to_string()).and_then(|mut c| {
             c.stdin(std::process::Stdio::null());
+            if let Some(f) = &log {
+                if let (Ok(o), Ok(e)) = (f.try_clone(), f.try_clone()) {
+                    c.stdout(std::process::Stdio::from(o)).stderr(std::process::Stdio::from(e));
+                }
+            }
             c.spawn().map_err(|e| format!("could not start FXServer: {e}"))
         }) {
             Ok(c) => c,
             Err(e) => {
+                log_line(&log, &format!("kora service-host: {e}"));
                 report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, 1, 0);
                 return Err(e);
             }
@@ -215,6 +238,7 @@ mod scm {
             }
         };
         let exit = windows_service_exit(code, stop);
+        log_line(&log, &format!("kora service-host: FXServer ended after {}s (exit code {code:?}, stop requested: {stop}); reporting {exit}", started.elapsed().as_secs()));
         report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, exit, 0);
         Ok(exit)
     }
