@@ -51,7 +51,7 @@ if (-not $env:KORA_RELEASE_BASE -and -not $PSBoundParameters.ContainsKey('Base')
         try {
             $rel = @(Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/KoraFiveM/kora-installer/releases?per_page=1')[0]
             if ($rel.tag_name -match '^[A-Za-z0-9._-]+$') { $Base = "https://github.com/KoraFiveM/kora-installer/releases/download/$($rel.tag_name)" }
-        } catch { }
+        } catch { Write-Verbose "could not look up the newest release: $($_.Exception.Message)" }
     }
 }
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kora-install-" + [Guid]::NewGuid().ToString('N'))
