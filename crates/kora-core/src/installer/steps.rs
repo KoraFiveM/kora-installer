@@ -225,25 +225,25 @@ fn forks_path(ctx: &Ctx) -> PathBuf {
     ctx.meta_dir().join("forks.json")
 }
 
-fn gh_login(r: &dyn git::CommandRunner) -> Result<String> {
-    let o = r.run("gh", &["api", "user", "--jq", ".login"], None).map_err(|e| InstallError(format!("could not run gh: {e}")))?;
-    if !o.ok() {
-        return err("could not read your GitHub login from `gh`; run `gh auth login` first");
-    }
-    Ok(o.stdout.trim().to_string())
-}
-
 fn fork_owner(ctx: &Ctx, r: &dyn git::CommandRunner) -> Result<(String, bool)> {
-    let login = gh_login(r)?;
+    use git::owners::{check_org, gh_auth, GhAuth};
+    let login = match gh_auth(r) {
+        GhAuth::LoggedIn { login } => login,
+        GhAuth::Missing => return err("the GitHub CLI (gh) is not installed"),
+        GhAuth::LoggedOut => return err("you are not logged in to GitHub: run `gh auth login` first"),
+    };
     match ctx.req.github_owner.as_deref() {
         None => Ok((login, false)),
         Some(o) if o.eq_ignore_ascii_case(&login) => Ok((login, false)),
         Some(o) => {
-            let exists = git::org_exists(r, o).map_err(|e| InstallError(e.to_string()))?;
-            if exists {
-                Ok((o.to_string(), true))
+            let org = check_org(r, o);
+            if org.can_fork {
+                Ok((org.login, true))
             } else {
-                err(format!("GitHub organisation '{o}' was not found (or you are not a member). Create it first, or omit --github-owner to fork into {login}."))
+                err(format!(
+                    "You cannot fork into '{o}': {}. Choose another owner (`kora github owners` lists them) or omit --github-owner to fork into {login}.",
+                    org.reason.as_deref().unwrap_or("not allowed")
+                ))
             }
         }
     }

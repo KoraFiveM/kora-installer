@@ -4,6 +4,8 @@
 //! talks to the real GitHub. Bootstrap installation is only *planned* ([`plan_bootstrap`]); the
 //! caller decides when (and with which privileges) to run the described steps.
 
+pub mod owners;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -661,7 +663,7 @@ pub fn run_forks(
                 attempt += 1;
                 continue;
             }
-            break Err(o.stderr.trim().to_string());
+            break Err(owners::friendly_fork_error(&o.stderr, &state.target_owner));
         };
         state.pending.remove(0);
         match result {

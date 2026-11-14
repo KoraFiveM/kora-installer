@@ -79,7 +79,7 @@ struct InstallArgs {
     /// Open the game port in the OS firewall (needs admin).
     #[arg(long)]
     firewall: bool,
-    /// Dev mode: GitHub user or organisation to fork into.
+    /// Dev mode: GitHub user or organisation to fork into (`list` shows the choices).
     #[arg(long)]
     github_owner: Option<String>,
     /// Catalog file or URL (default: the public catalog with an embedded fallback). Env: KORA_CATALOG.
@@ -260,6 +260,11 @@ enum Command {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+    /// GitHub helpers for development mode.
+    Github {
+        #[command(subcommand)]
+        cmd: GithubCmd,
+    },
     /// Run a server's FXServer (used by the Windows service and supervisors).
     ServiceHost {
         /// Registry name, or the server folder (absolute path).
@@ -298,6 +303,35 @@ enum Command {
         #[arg(long)]
         delete_databases: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum GithubCmd {
+    /// List the GitHub accounts and organisations your forks can go into.
+    Owners,
+}
+
+/// Print the fork targets (`kora github owners`, `--github-owner list`).
+fn github_owners() -> i32 {
+    use kora_core::git::{owners, SystemRunner};
+    match owners::list_owners(&SystemRunner) {
+        Ok(o) => {
+            print!("{}", owners::format_owner_list(&o));
+            0
+        }
+        Err(e) => {
+            eprintln!("error: could not read your GitHub accounts ({e}). Is `gh` installed and logged in? Run `gh auth login`.");
+            1
+        }
+    }
+}
+
+/// Check `--github-owner` against the real list; with no value, only the personal account is
+/// chosen automatically, and only when it is the sole usable option.
+fn resolve_github_owner(requested: Option<&str>) -> Result<String, String> {
+    use kora_core::git::{owners, SystemRunner};
+    let all = owners::list_owners(&SystemRunner).map_err(|e| format!("could not read your GitHub accounts ({e}). Is `gh` installed and logged in? Run `gh auth login`."))?;
+    owners::choose_owner(&all, requested).map(|o| o.login)
 }
 
 /// Plain printing sink.
@@ -509,6 +543,9 @@ fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>) -> i32 {
 
 fn install(args: InstallArgs) -> i32 {
     let mut args = args;
+    if args.github_owner.as_deref().is_some_and(|o| o.eq_ignore_ascii_case("list")) {
+        return github_owners();
+    }
     let mut redeemed: Option<Redeemed> = None;
     if let Some(code) = args.code.take() {
         match redeem_code(&code) {
@@ -528,7 +565,7 @@ fn install(args: InstallArgs) -> i32 {
         if args.headless_ready(dev) {
             headless = true;
         } else if headless && dev && args.github_owner.is_none() {
-            eprintln!("error: your setup code is for a development server: pass --github-owner <your GitHub user or organisation> (the website does not decide where to fork).");
+            eprintln!("error: your setup code is for a development server: pass --github-owner <your GitHub user or organisation> (`kora github owners` lists them; the website does not decide where to fork).");
             return 2;
         }
         args.apply_redeemed(r);
@@ -545,6 +582,16 @@ fn install(args: InstallArgs) -> i32 {
         return interactive_flow(catalog, redeemed);
     }
     let args_auto_ports = args.auto_ports;
+    let dev_mode = matches!(args.mode, Some(ModeArg::Dev)) || redeemed.as_ref().is_some_and(|r| r.mode == Mode::Development);
+    if dev_mode && !args.dry_run {
+        match resolve_github_owner(args.github_owner.as_deref()) {
+            Ok(l) => args.github_owner = Some(l),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 2;
+            }
+        }
+    }
     let req = match args.into_request() {
         Ok(r) => r,
         Err(e) => {
@@ -858,6 +905,7 @@ fn main() {
         Some(Command::Manager) => not_implemented("manager"),
         Some(Command::Update { auto, server }) => update(auto, &server),
         Some(Command::Status) => status(),
+        Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {
             Ok(c) => c,
