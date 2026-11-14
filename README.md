@@ -36,6 +36,16 @@ server list entry); server folders and databases are kept unless you say otherwi
 
 Free code signing provided by SignPath.io, certificate by SignPath Foundation (pending; see [CODE_SIGNING.md](CODE_SIGNING.md)).
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+Windows binaries are signed only when they are built from this repository by the public GitHub Actions workflow, and only after a maintainer manually approves each release. Until the SignPath Foundation application is approved, releases are **unsigned** and Windows SmartScreen may warn; verify downloads with the published `.sha256` files. See [CODE_SIGNING.md](CODE_SIGNING.md) for the full policy.
+
+- **Committers and reviewers:** the Kora maintainers ([KoraFiveM members](https://github.com/orgs/KoraFiveM/people))
+- **Approvers:** the Kora maintainers (every signing request is approved by hand)
+- **Privacy policy:** this program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. When you use a website setup code, the installer contacts koraframe.work to redeem it; see <https://koraframe.work/privacy>.
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
