@@ -70,6 +70,7 @@ jobs:
           cargo test --locked -p kora-core real_windows_scheduled_task -- --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'scheduled task test failed' }
       - name: "7. Install --start: the installer starts FXServer, txAdmin answers, it outlives the installer, kora stop/start/delete"
+        timeout-minutes: 12
         run: ./scripts/smoke/07-start.ps1
       - name: Collect logs
         if: always()

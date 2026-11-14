@@ -356,6 +356,54 @@ impl Default for SystemEnv {
     }
 }
 
+/// Windows: CreateProcess hands the child every *inheritable* handle of ours, including the pipe a
+/// caller (PowerShell, a script, the elevated relaunch) gave us as stdout. A long-lived server that
+/// inherited it would keep that pipe open and the caller would wait for its end of output forever.
+/// So while we spawn it our own standard handles are made non-inheritable (the child's redirected
+/// log handles are duplicated explicitly by the standard library and are not affected).
+#[cfg(windows)]
+mod winh {
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+    extern "system" {
+        fn GetStdHandle(n: u32) -> Handle;
+        fn GetHandleInformation(h: Handle, flags: *mut u32) -> i32;
+        fn SetHandleInformation(h: Handle, mask: u32, flags: u32) -> i32;
+    }
+
+    pub struct NoInherit(Vec<Handle>);
+
+    impl NoInherit {
+        pub fn std_handles() -> Self {
+            let mut changed = vec![];
+            // STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+            for n in [-10i32 as u32, -11i32 as u32, -12i32 as u32] {
+                // SAFETY: plain Win32 calls on our own standard handles; failures are ignored.
+                unsafe {
+                    let h = GetStdHandle(n);
+                    let mut flags = 0u32;
+                    if !h.is_null() && h as isize != -1 && GetHandleInformation(h, &mut flags) != 0 && flags & HANDLE_FLAG_INHERIT != 0 && SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0) != 0 {
+                        changed.push(h);
+                    }
+                }
+            }
+            NoInherit(changed)
+        }
+    }
+
+    impl Drop for NoInherit {
+        fn drop(&mut self) {
+            for &h in &self.0 {
+                // SAFETY: restores the flag we cleared on a handle that is still ours.
+                unsafe {
+                    SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+                }
+            }
+        }
+    }
+}
+
 mod sys {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
@@ -483,6 +531,8 @@ impl LaunchEnv for SystemEnv {
                 });
             }
         }
+        #[cfg(windows)]
+        let _no_inherit = winh::NoInherit::std_handles();
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
