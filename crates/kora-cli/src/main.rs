@@ -321,6 +321,27 @@ impl ProgressSink for ChannelSink {
     }
 }
 
+/// Dry-run header: the effective choices (website code + flags merged). Never includes secrets.
+fn request_summary(req: &InstallRequest) -> String {
+    use kora_core::installer::{Mode, ResourceSelection};
+    let resources = match &req.resources {
+        ResourceSelection::All => "all".to_string(),
+        ResourceSelection::Only(v) => format!("{} chosen ({})", v.len(), v.join(", ")),
+    };
+    format!(
+        "Your choices:\n  name:      {}\n  mode:      {}\n  resources: {}\n  ports:     game {}, txAdmin {}\n  artifact:  {}\n  game build: {}\n  hostname:  {}\n  cfx owner: {}\n",
+        req.name,
+        if req.mode == Mode::Production { "production" } else { "development" },
+        resources,
+        req.ports.game,
+        req.ports.txadmin,
+        req.artifact_url.as_deref().unwrap_or("recommended"),
+        req.game_build.map_or("default".to_string(), |b| b.to_string()),
+        if req.hostname.is_empty() { "(none)" } else { &req.hostname },
+        req.cfx_identifier.as_deref().unwrap_or("(none)"),
+    )
+}
+
 fn print_outcome(out: &installer::InstallOutcome, dry: bool) {
     println!();
     println!("{}", if dry { "Plan (nothing was changed):" } else { "Install finished." });
@@ -464,6 +485,9 @@ fn install(args: InstallArgs) -> i32 {
         }
     };
     let dry = req.dry_run;
+    if dry {
+        print!("{}", request_summary(&req));
+    }
     let mut sink = Printer { last: None };
     match installer::run(&req, &mut sink) {
         Ok(out) => {
@@ -653,5 +677,16 @@ mod tests {
         assert!(!InstallArgs { license_key: None, ..base() }.headless_ready(false));
         assert!(!InstallArgs { dir: None, ..base() }.headless_ready(false));
         assert!(InstallArgs { db: None, db_admin_user: Some("root".into()), ..base() }.headless_ready(false));
+    }
+
+    #[test]
+    fn dry_run_summary_shows_choices_but_no_secrets() {
+        let mut a = InstallArgs { license_key: Some("cfxk_secret".into()), ..Default::default() };
+        a.apply_redeemed(&redeemed());
+        let text = request_summary(&a.into_request().unwrap());
+        for want in ["Alpha One", "development", "2 chosen (a, b)", "game 31120, txAdmin 41120", "https://runtime.fivem.net/x", "3258", "fivem:1"] {
+            assert!(text.contains(want), "missing {want}: {text}");
+        }
+        assert!(!text.contains("cfxk_secret"));
     }
 }
