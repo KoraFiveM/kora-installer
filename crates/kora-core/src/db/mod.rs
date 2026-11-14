@@ -591,6 +591,8 @@ pub fn verify_sha256(file: &Path, sums_text: &str, name: &str) -> DbResult<()> {
             let mut it = l.split_whitespace();
             let h = it.next()?;
             let n = it.next()?.trim_start_matches('*');
+            // archive.mariadb.org lists entries as `<hash>  ./<name>`.
+            let n = n.trim_start_matches("./");
             (n == name).then(|| h.to_lowercase())
         })
         .next()
@@ -1084,6 +1086,9 @@ mod tests {
         assert!(verify_sha256(&f, good, "a.zip").is_ok());
         assert!(verify_sha256(&f, &good.replace("ba78", "0000"), "a.zip").is_err());
         assert!(verify_sha256(&f, good, "b.zip").is_err());
+        // archive.mariadb.org writes `./name` entries.
+        let dotted = good.replace("  a.zip", "  ./a.zip");
+        assert!(verify_sha256(&f, &dotted, "a.zip").is_ok());
     }
 
     #[cfg(unix)]
