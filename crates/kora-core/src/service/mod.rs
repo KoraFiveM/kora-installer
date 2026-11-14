@@ -12,8 +12,9 @@ pub mod binary;
 mod schedule;
 
 pub use schedule::{
-    scheduler_install_plan, scheduler_uninstall_plan, systemd_timer_unit, systemd_update_unit,
-    Schedule, TimeOfDay, Weekday,
+    describe, describe_for, get, get_with, schedule_install_plan, installing_user, managed_for, parse_task_xml, parse_time, parse_timer, remove, save_schedule,
+    scheduler_install_plan, scheduler_install_plan_as, scheduler_uninstall_plan, set, set_args, systemd_timer_unit, systemd_update_unit,
+    systemd_update_unit_as, task_xml, Preset, RunAs, Schedule, ScheduleConfig, ServerRecord, TimeOfDay, Weekday, RUN_AS_HELP,
 };
 
 use std::io;
@@ -25,6 +26,8 @@ pub enum ServiceError {
     Invalid(String),
     #[error("command `{command}` failed ({detail})")]
     Command { command: String, detail: String },
+    #[error("{0}")]
+    Other(String),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
 }

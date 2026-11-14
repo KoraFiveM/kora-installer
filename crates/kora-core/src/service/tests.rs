@@ -174,27 +174,155 @@ fn windows_update_task_uses_the_folder_because_system_has_no_registry() {
     let mut s = server();
     s.dir = "C:\\Users\\Zoë Müller\\kora\\main\\".into();
     s.kora_exe = "C:\\Program Files\\Kora\\bin\\0.1.0-abc\\kora.exe".into();
-    let p = scheduler_install_plan(&s, &Schedule::default(), Platform::Windows).unwrap();
-    let Action::Run { args, .. } = &p.steps[0].action else { panic!() };
-    assert_eq!(args[4], "\"C:\\Program Files\\Kora\\bin\\0.1.0-abc\\kora.exe\" update --auto \"C:\\Users\\Zoë Müller\\kora\\main\"");
+    let x = task_xml(&s, &Schedule::default(), RunAs::System, "").unwrap();
+    assert!(x.contains("<Command>C:\\Program Files\\Kora\\bin\\0.1.0-abc\\kora.exe</Command>"), "{x}");
+    assert!(x.contains("<Arguments>update --auto &quot;C:\\Users\\Zoë Müller\\kora\\main&quot;</Arguments>"), "{x}");
 }
 
 #[test]
-fn schtasks_args() {
-    let p = scheduler_install_plan(&server(), &Schedule::default(), Platform::Windows).unwrap();
-    let Action::Run { program, args } = &p.steps[0].action else { panic!() };
+fn schtasks_plan_for_system_and_installing_user() {
+    let sys = scheduler_install_plan(&server(), &Schedule::default(), Platform::Windows).unwrap();
+    assert_eq!(sys.steps.len(), 3);
+    let Action::WriteFile { path, contents, .. } = &sys.steps[0].action else { panic!() };
+    assert_eq!(path, "/srv/kora/main/.kora/update-task.xml");
+    assert!(contents.contains("<UserId>S-1-5-18</UserId>") && !contents.contains("InteractiveToken"));
+    assert!(contents.contains("<StartWhenAvailable>true</StartWhenAvailable>"));
+    assert!(contents.contains("<StartBoundary>2024-01-01T04:00:00</StartBoundary>") && contents.contains("<DaysInterval>1</DaysInterval>"));
+    let Action::Run { program, args } = &sys.steps[1].action else { panic!() };
     assert_eq!(program, "schtasks.exe");
-    let expect: Vec<String> = [
-        "/Create", "/TN", "Kora\\Update main", "/TR", "\"/usr/local/bin/kora\" update --auto \"/srv/kora/main\"",
-        "/SC", "DAILY", "/ST", "04:00", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-    assert_eq!(args, &expect);
-    let w = scheduler_install_plan(&server(), &Schedule::Custom(vec![Weekday::Mon, Weekday::Fri], TimeOfDay::new(23, 15).unwrap()), Platform::Windows).unwrap();
-    let line = w.steps[0].command_line().unwrap();
-    assert!(line.contains("/SC WEEKLY /D MON,FRI /ST 23:15"));
+    assert_eq!(args, &["/Create", "/TN", "Kora\\Update main", "/XML", "/srv/kora/main/.kora/update-task.xml", "/F"].map(String::from));
+    assert!(matches!(sys.steps[2].action, Action::RemoveFile { .. }));
+
+    let cfg = ScheduleConfig { preset: Preset::Weekly, time: "23:15".into(), weekday: Some(4), run_as: RunAs::InstallingUser, enabled: true };
+    let p = schedule_install_plan(&server(), &cfg, "PC-ÖZ\\Zoë O'Neil & Co", Platform::Windows).unwrap();
+    let Action::WriteFile { contents, .. } = &p.steps[0].action else { panic!() };
+    assert!(contents.contains("<UserId>PC-ÖZ\\Zoë O&apos;Neil &amp; Co</UserId><LogonType>InteractiveToken</LogonType>"), "{contents}");
+    assert!(contents.contains("<DaysOfWeek><Friday /></DaysOfWeek>") && contents.contains("T23:15:00"));
+    assert!(!contents.contains("<Password>"), "no password is ever stored");
+    assert!(p.descriptions()[1].contains("as PC-ÖZ"));
+}
+
+#[test]
+fn systemd_units_for_installing_user_and_system() {
+    let mut s = server();
+    s.dir = "/srv/kora/my server é".into();
+    let u = systemd_update_unit_as(&s, RunAs::InstallingUser, "zoë").unwrap();
+    assert!(u.contains("Environment=KORA_UPDATE_AS=zoë\n") && u.contains("update --auto \"/srv/kora/my server é\""), "{u}");
+    assert!(!systemd_update_unit_as(&s, RunAs::System, "").unwrap().contains("KORA_UPDATE_AS"));
+    assert!(systemd_update_unit_as(&s, RunAs::InstallingUser, "bad user").is_err());
+    assert!(systemd_update_unit_as(&s, RunAs::InstallingUser, "").is_err());
+    let t = systemd_timer_unit(&s, &Schedule::default()).unwrap();
+    assert!(t.contains("RandomizedDelaySec=600") && t.contains("Persistent=true"));
+}
+
+#[test]
+fn config_validation_table() {
+    let c = |preset, time: &str, weekday| ScheduleConfig { preset, time: time.into(), weekday, run_as: RunAs::InstallingUser, enabled: true };
+    let ok = [(Preset::Daily, "04:00", None), (Preset::Daily, "00:00", None), (Preset::Daily, "23:59", Some(3)), (Preset::Weekly, "04:00", Some(0)), (Preset::Weekly, "12:30", Some(6)), (Preset::Custom, "05:05", Some(2)), (Preset::Custom, "05:05", None)];
+    for (p, t, d) in ok {
+        assert!(c(p, t, d).validate().is_ok(), "{p:?} {t} {d:?}");
+    }
+    let bad = [
+        (Preset::Daily, "24:00", None),
+        (Preset::Daily, "4:00", None),
+        (Preset::Daily, "04:60", None),
+        (Preset::Daily, "04:00:00", None),
+        (Preset::Daily, "0400", None),
+        (Preset::Daily, "ab:cd", None),
+        (Preset::Daily, "", None),
+        (Preset::Daily, "04-00", None),
+        (Preset::Daily, "+4:00", None),
+        (Preset::Weekly, "04:00", None),
+        (Preset::Weekly, "04:00", Some(7)),
+        (Preset::Custom, "04:00", Some(9)),
+    ];
+    for (p, t, d) in bad {
+        assert!(c(p, t, d).validate().is_err(), "{p:?} {t} {d:?} must be rejected");
+    }
+}
+
+#[test]
+fn describe_is_plain_language() {
+    let mut c = ScheduleConfig::default_for_install();
+    assert_eq!(describe_for(&c, "jamie"), "Every day at 04:00, as you (jamie)");
+    c.run_as = RunAs::System;
+    assert_eq!(describe_for(&c, "jamie"), "Every day at 04:00, as the system account");
+    c = ScheduleConfig { preset: Preset::Weekly, time: "03:30".into(), weekday: Some(6), run_as: RunAs::InstallingUser, enabled: true };
+    assert_eq!(describe_for(&c, "zoë"), "Every Sunday at 03:30, as you (zoë)");
+    c.enabled = false;
+    assert!(describe_for(&c, "x").starts_with("Off"));
+}
+
+#[test]
+fn an_older_system_schedule_reads_back_as_system() {
+    // Linux: the unit files the previous Kora wrote.
+    let s = server();
+    let old_timer = systemd_timer_unit(&s, &Schedule::Weekly(Weekday::Sun, TimeOfDay::new(3, 30).unwrap())).unwrap();
+    let old_service = systemd_update_unit(&s).unwrap();
+    let c = parse_timer(&old_timer, &old_service).unwrap();
+    assert_eq!((c.preset, c.time.as_str(), c.weekday, c.run_as), (Preset::Weekly, "03:30", Some(6), RunAs::System));
+    let new_service = systemd_update_unit_as(&s, RunAs::InstallingUser, "jamie").unwrap();
+    assert_eq!(parse_timer(&systemd_timer_unit(&s, &Schedule::default()).unwrap(), &new_service).unwrap().run_as, RunAs::InstallingUser);
+    assert_eq!(parse_timer(&systemd_timer_unit(&s, &Schedule::default()).unwrap(), &new_service).unwrap().preset, Preset::Daily);
+
+    // through get_with, no schedule.json present
+    let r = FakeRunner::default();
+    r.respond("cat /etc/systemd/system/kora-update-main.timer", 0, &old_timer);
+    r.respond("cat /etc/systemd/system/kora-update-main.service", 0, &old_service);
+    let dir = std::env::temp_dir().join("kora-sched-test-none");
+    assert_eq!(get_with(&s, &dir, &r, Platform::Linux).unwrap().run_as, RunAs::System);
+    // nothing there: no schedule
+    assert!(get_with(&s, &dir, &FakeRunner::default(), Platform::Linux).is_none());
+
+    // Windows: what `schtasks /Query /XML` printed for a task made with /RU SYSTEM
+    let xml = "<Task><Triggers><CalendarTrigger><StartBoundary>2024-05-01T04:00:00</StartBoundary><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers><Principals><Principal id=\"Author\"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals></Task>";
+    let c = parse_task_xml(xml).unwrap();
+    assert_eq!((c.preset, c.time.as_str(), c.run_as), (Preset::Daily, "04:00", RunAs::System));
+    // and our own XML round-trips
+    let ours = task_xml(&s, &Schedule::Weekly(Weekday::Wed, TimeOfDay::new(1, 5).unwrap()), RunAs::InstallingUser, "PC\\jamie").unwrap();
+    let c = parse_task_xml(&ours).unwrap();
+    assert_eq!((c.preset, c.time.as_str(), c.weekday, c.run_as), (Preset::Weekly, "01:05", Some(2), RunAs::InstallingUser));
+}
+
+#[test]
+fn stored_config_is_the_source_of_truth_and_a_missing_job_reads_as_off() {
+    let dir = std::env::temp_dir().join(format!("kora-sched-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cfg = ScheduleConfig { preset: Preset::Daily, time: "02:15".into(), weekday: None, run_as: RunAs::System, enabled: true };
+    save_schedule(&dir, &cfg, "jamie").unwrap();
+    let s = server();
+    // OS job missing -> reported disabled, config kept
+    let c = get_with(&s, &dir, &FakeRunner::default(), Platform::Linux).unwrap();
+    assert!(!c.enabled && c.time == "02:15");
+    // OS job present -> enabled as stored
+    let r = FakeRunner::default();
+    r.respond("cat /etc/systemd/system/kora-update-main.timer", 0, &systemd_timer_unit(&s, &Schedule::default()).unwrap());
+    assert_eq!(get_with(&s, &dir, &r, Platform::Linux).unwrap(), cfg);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn set_args_rebuild_the_cli_call_for_elevation() {
+    let rec = ServerRecord { name: "main".into(), dir: "/srv/kora/main".into(), mode: crate::installer::Mode::Development, ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 };
+    let w = ScheduleConfig { preset: Preset::Weekly, time: "03:30".into(), weekday: Some(6), run_as: RunAs::System, enabled: true };
+    assert_eq!(set_args(&rec, &w), ["schedule", "set", "/srv/kora/main", "--weekly", "Sun", "03:30", "--as-system"].map(String::from));
+    assert_eq!(set_args(&rec, &ScheduleConfig::default_for_install()), ["schedule", "set", "/srv/kora/main", "--daily", "04:00", "--as-user"].map(String::from));
+}
+
+#[test]
+fn removal_touches_only_kora_named_jobs() {
+    let mut s = server();
+    s.name = "my-srv".into();
+    for p in [Platform::Linux, Platform::Windows] {
+        for step in scheduler_uninstall_plan(&s, p).unwrap().steps {
+            match &step.action {
+                Action::RemoveFile { path } => assert!(path.starts_with("/etc/systemd/system/kora-update-my-srv."), "{path}"),
+                Action::Run { program, args } if program == "schtasks.exe" => assert_eq!(args, &["/Delete", "/TN", "Kora\\Update my-srv", "/F"].map(String::from)),
+                Action::Run { args, .. } => assert!(args.iter().all(|a| a == "daemon-reload" || a == "disable" || a == "--now" || a == "kora-update-my-srv.timer")),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
 }
 
 #[test]
@@ -342,11 +470,17 @@ fn real_windows_scheduled_task_is_created_and_removed() {
     s.kora_exe = "C:\\Windows\\System32\\cmd.exe".into();
     let rn = SystemRunner;
     let query = || rn.run("schtasks.exe", &["/Query".into(), "/TN".into(), "Kora\\Update smoketask".into(), "/XML".into()]).unwrap();
-    apply_plan(&scheduler_install_plan(&s, &Schedule::default(), Platform::Windows).unwrap(), &rn).unwrap();
-    let q = query();
-    assert!(q.success(), "task not found after creating it: {q:?}");
-    assert!(q.stdout.contains("update --auto") && q.stdout.contains("C:\\kora-smoke\\task"), "task command line: {}", q.stdout);
-    assert!(q.stdout.contains("04:00:00"), "daily 04:00 trigger: {}", q.stdout);
-    apply_plan(&scheduler_uninstall_plan(&s, Platform::Windows).unwrap(), &rn).unwrap();
-    assert!(!query().success(), "task is still there after removing it");
+    for run_as in [RunAs::InstallingUser, RunAs::System] {
+        let cfg = ScheduleConfig { preset: Preset::Daily, time: "04:00".into(), weekday: None, run_as, enabled: true };
+        let user = installing_user();
+        apply_plan(&schedule_install_plan(&s, &cfg, &user, Platform::Windows).unwrap(), &rn).unwrap();
+        let q = query();
+        assert!(q.success(), "task not found after creating it ({run_as:?}): {q:?}");
+        assert!(q.stdout.contains("update --auto") && q.stdout.contains("C:\\kora-smoke\\task"), "task command line: {}", q.stdout);
+        assert!(q.stdout.contains("04:00:00") && q.stdout.contains("StartWhenAvailable"), "daily 04:00 trigger: {}", q.stdout);
+        let back = get_with(&s, std::path::Path::new("C:\\kora-smoke\\none"), &rn, Platform::Windows).expect("task read back");
+        assert_eq!((back.run_as, back.time.as_str()), (run_as, "04:00"), "{}", q.stdout);
+        apply_plan(&scheduler_uninstall_plan(&s, Platform::Windows).unwrap(), &rn).unwrap();
+        assert!(!query().success(), "task is still there after removing it ({run_as:?})");
+    }
 }

@@ -140,6 +140,19 @@ fn foreign_owner(_: &Path) -> Option<String> {
     None
 }
 
+/// The home folder to give git when the folder owner is the person the schedule runs "as" (the
+/// installing user, `KORA_UPDATE_AS` in the update unit): their `gh` / git credentials live there,
+/// so private forks can be fetched. Any other owner (e.g. the service account) gets the server folder.
+fn credentials_home(owner: &str) -> Option<PathBuf> {
+    if std::env::var("KORA_UPDATE_AS").ok().as_deref() != Some(owner) {
+        return None;
+    }
+    let o = std::process::Command::new("getent").args(["passwd", owner]).output().ok()?;
+    let line = String::from_utf8_lossy(&o.stdout).into_owned();
+    let home = line.trim().split(':').nth(5)?;
+    (o.status.success() && !home.is_empty()).then(|| PathBuf::from(home))
+}
+
 /// Number of players online from the server's own `/players.json` (None when unreachable).
 pub fn online_players(port: u16) -> Option<u32> {
     use std::io::{Read, Write};
@@ -277,7 +290,7 @@ pub(crate) fn service_health(name: &str, dir: &Path, sf: &ServerFile) -> Service
 /// Run `f` with the git adapter appropriate for who owns `dir` (service account / SYSTEM / plain).
 pub(crate) fn with_git<T>(dir: &Path, f: impl FnOnce(&dyn GitOps) -> T) -> T {
     match foreign_owner(dir) {
-        Some(user) => f(&GitCli(AsUser { user, home: dir.to_path_buf() })),
+        Some(user) => f(&GitCli(AsUser { home: credentials_home(&user).unwrap_or_else(|| dir.to_path_buf()), user })),
         None if cfg!(windows) => f(&GitCli(SafeDirectory(SystemRunner))),
         None => f(&GitCli::default()),
     }
