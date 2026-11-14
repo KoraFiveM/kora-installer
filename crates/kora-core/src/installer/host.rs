@@ -8,8 +8,11 @@
 //! `code=dumped`, which neither `SuccessExitStatus=` nor `LimitCORE=0` can turn into success), we
 //! exit 0 so `systemctl stop` leaves the unit `inactive`. Any crash that was not requested keeps its
 //! failure code (128+signal) so `Restart=on-failure` still works.
-//! Windows: runs FXServer as a child and waits. TODO: report to the Service Control Manager
-//! (needs the `windows-service` crate) so `sc stop` can forward a graceful stop; untested here.
+//! Windows: when started by the Service Control Manager (SCM) it registers with it, reports
+//! START_PENDING/RUNNING/STOP_PENDING/STOPPED, and on `sc stop`/shutdown ends FXServer and reports a
+//! clean stop (a plain console program would be killed by the SCM after 30 s with error 1053). Started
+//! from a terminal (error 1063 from the dispatcher) it just runs FXServer in the foreground.
+//! FXServer is ended with TerminateProcess: a service has no console to send Ctrl+C to.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -67,6 +70,7 @@ pub fn exit_code_for(code: Option<i32>, signal: Option<i32>, stop_requested: boo
 
 /// Run the server; returns the exit code.
 pub fn service_host(name_or_dir: &str) -> Result<i32> {
+    #[cfg_attr(windows, allow(unused_mut))]
     let mut cmd = build_command(name_or_dir)?;
     #[cfg(unix)]
     {
@@ -98,10 +102,121 @@ pub fn service_host(name_or_dir: &str) -> Result<i32> {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        drop(cmd);
+        scm::run_as_service_or_console(name_or_dir)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let status = cmd.status().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
         Ok(status.code().unwrap_or(1))
+    }
+}
+
+/// Exit code the Windows service reports. A stop that Windows asked for is always clean (0);
+/// otherwise FXServer's own code, with 1 for "no code" so the restart-on-failure rule still applies.
+pub fn windows_service_exit(code: Option<i32>, stop_requested: bool) -> u32 {
+    if stop_requested {
+        0
+    } else {
+        code.map_or(1, |c| c as u32)
+    }
+}
+
+#[cfg(windows)]
+mod scm {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{mpsc, OnceLock};
+    use std::time::Duration;
+    use windows_service::service::{ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType};
+    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+    use windows_service::{define_windows_service, service_dispatcher};
+
+    /// The name is ignored for an own-process service.
+    const NAME: &str = "kora";
+    /// ERROR_FAILED_SERVICE_CONTROLLER_CONNECT: not started by the SCM.
+    const NOT_A_SERVICE: i32 = 1063;
+    static TARGET: OnceLock<String> = OnceLock::new();
+    static EXIT: AtomicU32 = AtomicU32::new(1);
+
+    define_windows_service!(ffi_service_main, service_main);
+
+    fn service_main(_args: Vec<OsString>) {
+        let code = match run() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("kora service-host: {e}");
+                1
+            }
+        };
+        EXIT.store(code, Ordering::SeqCst);
+    }
+
+    pub fn run_as_service_or_console(target: &str) -> Result<i32> {
+        let _ = TARGET.set(target.to_string());
+        match service_dispatcher::start(NAME, ffi_service_main) {
+            Ok(()) => Ok(EXIT.load(Ordering::SeqCst) as i32),
+            Err(windows_service::Error::Winapi(e)) if e.raw_os_error() == Some(NOT_A_SERVICE) => {
+                let mut cmd = build_command(target)?;
+                let st = cmd.status().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
+                Ok(st.code().unwrap_or(1))
+            }
+            Err(e) => Err(InstallError(format!("cannot talk to the Windows service manager: {e}"))),
+        }
+    }
+
+    fn run() -> std::result::Result<u32, String> {
+        let target = TARGET.get().cloned().unwrap_or_default();
+        let (tx, rx) = mpsc::channel::<()>();
+        let handler = move |ev: ServiceControl| match ev {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                let _ = tx.send(());
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        };
+        let h = service_control_handler::register(NAME, handler).map_err(|e| e.to_string())?;
+        let report = |state: ServiceState, accept: ServiceControlAccept, wait: Duration, code: u32, checkpoint: u32| {
+            let _ = h.set_service_status(ServiceStatus {
+                service_type: ServiceType::OWN_PROCESS,
+                current_state: state,
+                controls_accepted: accept,
+                exit_code: ServiceExitCode::Win32(code),
+                checkpoint,
+                wait_hint: wait,
+                process_id: None,
+            });
+        };
+        report(ServiceState::StartPending, ServiceControlAccept::empty(), Duration::from_secs(15), 0, 1);
+        let mut child = match build_command(&target).map_err(|e| e.to_string()).and_then(|mut c| {
+            c.stdin(std::process::Stdio::null());
+            c.spawn().map_err(|e| format!("could not start FXServer: {e}"))
+        }) {
+            Ok(c) => c,
+            Err(e) => {
+                report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, 1, 0);
+                return Err(e);
+            }
+        };
+        report(ServiceState::Running, ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN, Duration::ZERO, 0, 0);
+        let (code, stop) = loop {
+            if let Ok(Some(st)) = child.try_wait() {
+                break (st.code(), false);
+            }
+            if rx.recv_timeout(Duration::from_millis(500)).is_ok() {
+                report(ServiceState::StopPending, ServiceControlAccept::empty(), Duration::from_secs(30), 0, 1);
+                let _ = child.kill();
+                let st = child.wait().ok();
+                break (st.and_then(|s| s.code()), true);
+            }
+        };
+        let exit = windows_service_exit(code, stop);
+        report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, exit, 0);
+        Ok(exit)
     }
 }
 
@@ -157,7 +272,15 @@ pub fn service_control(name: &str, action: crate::service::ControlAction) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::exit_code_for;
+    use super::{exit_code_for, windows_service_exit};
+
+    #[test]
+    fn windows_service_reports_a_requested_stop_as_clean_and_a_crash_as_failure() {
+        assert_eq!(windows_service_exit(Some(1), true), 0, "TerminateProcess code is not a failure after sc stop");
+        assert_eq!(windows_service_exit(None, true), 0);
+        assert_eq!(windows_service_exit(Some(0xC0000005u32 as i32), false), 0xC0000005, "an access violation keeps its code so the restart rule runs");
+        assert_eq!(windows_service_exit(None, false), 1);
+    }
 
     #[test]
     fn stop_with_segv_is_clean_but_crash_is_not() {
