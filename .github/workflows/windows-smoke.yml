@@ -7,8 +7,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Three independent jobs run in parallel on separate Windows VMs, so a failure in one step no longer hides the
+# result of the others (a failed step used to skip everything after it).
 jobs:
-  smoke:
+  basics:
+    name: "basics: --version, install.ps1, dev dry run"
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
@@ -18,11 +21,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: "1. Build kora.exe, --version, no-TTY install error"
+        with:
+          shared-key: smoke
+      - name: "Build kora.exe"
         run: |
           cargo build --release --locked -p kora-cli
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
-          ./scripts/smoke/01-build.ps1
+      - name: "1. --version and no-TTY install error"
+        run: ./scripts/smoke/01-build.ps1
       - name: "2a. PSScriptAnalyzer on install.ps1 (all rules except Write-Host)"
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
@@ -31,14 +37,58 @@ jobs:
           if ($f) { throw "PSScriptAnalyzer: $(@($f).Count) finding(s)" }
       - name: "2b. install.ps1 against a local fake release"
         run: ./scripts/smoke/02-install-ps1.ps1
+      - name: "6. Dev mode dry run"
+        run: ./scripts/smoke/06-dev-dry-run.ps1
+      - name: Collect logs
+        if: always()
+        run: |
+          foreach ($p in 'C:\kora-smoke\srv\.kora', "$env:LOCALAPPDATA\Kora") { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File | Select-Object -First 40 FullName } }
+
+  install-service:
+    name: "install + service + firewall + uninstall"
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: smoke
+      - name: "Build kora.exe"
+        run: |
+          cargo build --release --locked -p kora-cli
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
       - name: "3. Production install (tiny catalog, no service)"
         run: ./scripts/smoke/03-install.ps1
       - name: "4. Service + firewall: start/stop/restart, txAdmin answers, uninstall removes everything"
         run: ./scripts/smoke/04-service.ps1
+      - name: Collect logs
+        if: always()
+        run: |
+          foreach ($p in 'C:\kora-smoke\srv\.kora', "$env:LOCALAPPDATA\Kora") { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File | Select-Object -First 40 FullName } }
+
+  mariadb:
+    name: "MariaDB: existing server, then Kora's own (--db install)"
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: smoke
+      - name: "Build kora.exe"
+        run: |
+          cargo build --release --locked -p kora-cli
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
       - name: "5. MariaDB: existing MySQL server, then Kora's own MariaDB (--db install) and cleanup"
         run: ./scripts/smoke/05-mariadb.ps1
-      - name: "6. Dev mode dry run"
-        run: ./scripts/smoke/06-dev-dry-run.ps1
       - name: Collect logs
         if: always()
         run: |
