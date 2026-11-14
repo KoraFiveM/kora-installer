@@ -103,6 +103,9 @@ pub struct InstallRequest {
     /// Start the server when the install is done (final `launch` step) and wait until it answers.
     #[serde(default)]
     pub start: bool,
+    /// Also install the Kora app (command / Start Menu shortcut) so the user can reopen the manager later. `None` = no.
+    #[serde(default)]
+    pub app: Option<crate::app_install::AppChoice>,
 }
 
 impl std::fmt::Debug for InstallRequest {

@@ -1297,6 +1297,7 @@ impl Wizard {
             dry_run: false,
             db_admin: self.db_admin(),
             start: true,
+            app: Some(kora_core::app_install::AppChoice::default()),
         }
     }
 

@@ -299,6 +299,7 @@ mod tests {
             dry_run: false,
             db_admin: None,
             start: false,
+            app: None,
         }
     }
 

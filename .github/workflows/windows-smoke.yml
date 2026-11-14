@@ -4,6 +4,7 @@ name: Windows smoke
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
@@ -103,3 +104,23 @@ jobs:
         if: always()
         run: |
           foreach ($p in 'C:\kora-smoke\srv\.kora', "$env:LOCALAPPDATA\Kora") { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File | Select-Object -First 40 FullName } }
+
+  app:
+    name: "app: Program Files copy, PATH, shortcuts, Apps & features, uninstall"
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: smoke
+      - name: "Build kora.exe"
+        run: |
+          cargo build --release --locked -p kora-cli
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+      - name: "9. The Kora app: install, status, shortcuts (Run as administrator), PATH, Apps & features, uninstall"
+        run: ./scripts/smoke/09-app.ps1
