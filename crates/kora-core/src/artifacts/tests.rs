@@ -152,6 +152,7 @@ fn store_with(build: u32, dir: &std::path::Path, store: &ArtifactStore, tag: &st
 }
 
 #[test]
+#[cfg(unix)] // Linux archives contain symlinks, which Windows cannot extract (by design)
 fn extract_swap_rollback() {
     let d = tempfile::tempdir().unwrap();
     let store = ArtifactStore::new(d.path().join("artifacts"));
@@ -242,6 +243,7 @@ fn tar_with_link(link: &str, target: &str) -> Vec<u8> {
 }
 
 #[test]
+#[cfg(unix)]
 fn absolute_links_only_allowed_inside_alpine_rootfs() {
     let d = tempfile::tempdir().unwrap();
     // The real FXServer archive has `alpine/bin/ls -> /bin/busybox` (resolved by proot).
