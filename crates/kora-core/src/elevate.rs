@@ -725,7 +725,7 @@ mod tests {
             assert!(is_elevated(), "the runner is expected to be elevated");
         }
         let script = powershell_script("C:\\Program Files\\O'Neil\\kora.exe", &["install".into(), "--name".into(), "A & \"B\" 日本".into(), "--dir".into(), "C:\\x y\\".into()]);
-        let check = format!("$null = [System.Management.Automation.Language.Parser]::ParseInput({}, [ref]$null, [ref]$errs); if ($errs.Count -gt 0) {{ $errs | ForEach-Object {{ [Console]::Error.WriteLine($_.Message) }}; exit 1 }}", powershell_literal(&script));
+        let check = format!("$tokens = $null; $errs = $null; $null = [System.Management.Automation.Language.Parser]::ParseInput({}, [ref]$tokens, [ref]$errs); if ($errs.Count -gt 0) {{ $errs | ForEach-Object {{ [Console]::Error.WriteLine($_.Message) }}; exit 1 }}", powershell_literal(&script));
         let out = std::process::Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &check]).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }

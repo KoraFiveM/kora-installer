@@ -474,6 +474,8 @@ fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>) -> i32 {
     let mut req = match interactive_install(prefill) {
         Ok(Some(r)) => r,
         Ok(None) => {
+            // The wizard's goodbye screen already waited for a key: don't ask twice.
+            ALREADY_PAUSED.store(true, std::sync::atomic::Ordering::Relaxed);
             println!("Cancelled. Nothing was changed.");
             return 0;
         }
@@ -870,9 +872,12 @@ fn relaunch_args(cmd: &Option<Command>, original: Vec<std::ffi::OsString>) -> Ve
 }
 
 /// Window kept open (Windows) so an elevated or double-clicked console never flashes and vanishes.
+static ALREADY_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn finish(code: i32) -> ! {
     let (si, so) = (std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
-    if elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
+    if !ALREADY_PAUSED.load(std::sync::atomic::Ordering::Relaxed)
+        && elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
         println!("\nPress Enter to close this window.");
         let mut line = String::new();
         let _ = std::io::stdin().read_line(&mut line);
