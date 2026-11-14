@@ -41,7 +41,7 @@ pub fn create_plan(name: &str) -> ServiceResult<Plan> {
     Ok(Plan::new(vec![SystemStep::run(
         format!("Create the unprivileged system account '{name}' (no home folder, cannot log in) that the server runs as"),
         "useradd",
-        &["--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", name],
+        &["--system", "--user-group", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", name],
     )]))
 }
 
@@ -83,7 +83,7 @@ mod tests {
         let p = create_plan("kora-main").unwrap();
         assert_eq!(p.steps.len(), 1);
         let line = p.steps[0].command_line().unwrap();
-        assert_eq!(line, "useradd --system --user-group --no-create-home --shell /usr/sbin/nologin kora-main");
+        assert_eq!(line, "useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin kora-main");
         assert!(p.needs_admin());
         assert_eq!(delete_plan("kora-main").unwrap().steps[0].command_line().unwrap(), "userdel kora-main");
     }

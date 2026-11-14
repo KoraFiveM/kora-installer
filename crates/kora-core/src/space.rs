@@ -167,7 +167,7 @@ pub fn check(disk: &dyn DiskInfo, needs: &[Need]) -> Result<(), String> {
             }
         };
         if free < total {
-            let parts: Vec<String> = group.iter().map(|n| format!("{} {}", human(n.bytes), n.what)).collect();
+            let parts: Vec<String> = group.iter().map(|n| format!("{} for {}", human(n.bytes), n.what)).collect();
             problems.push(format!(
                 "Not enough free disk space on the disk holding {}: Kora needs about {} ({}) but only {} is free.",
                 first.path.display(),
@@ -223,7 +223,7 @@ mod tests {
         let e = check(&small, &needs).unwrap_err();
         assert!(e.contains("Not enough free disk space"), "{e}");
         assert!(e.contains("/srv/kora/a") && e.contains("4.3 GiB") && e.contains("--dir"), "{e}");
-        assert!(e.contains("1.0 GiB the FXServer build") && e.contains("54 resources"), "{e}");
+        assert!(e.contains("1.0 GiB for the FXServer build") && e.contains("54 resources"), "{e}");
         assert!(e.contains("Nothing was changed") && e.contains("KORA_SKIP_SPACE_CHECK=1"));
     }
 
