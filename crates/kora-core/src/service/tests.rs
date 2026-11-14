@@ -138,8 +138,9 @@ fn start_stop_restart_commands() {
     m.restart(&server()).unwrap();
     assert_eq!(r.calls(), vec!["systemctl start kora-main", "systemctl stop kora-main", "systemctl restart kora-main"]);
     let r = FakeRunner::default();
+    r.respond("sc.exe query", 0, "STATE : 1  STOPPED");
     ServiceManager::new(Platform::Windows, &r).restart(&server()).unwrap();
-    assert_eq!(r.calls(), vec!["sc.exe stop kora-main", "sc.exe start kora-main"]);
+    assert_eq!(r.calls(), vec!["sc.exe stop kora-main", "sc.exe query kora-main", "sc.exe start kora-main"]);
 }
 
 #[test]
@@ -274,4 +275,52 @@ fn windows_service_account_can_read_the_secrets_it_needs_despite_removed_inherit
     assert_eq!(*l, "icacls.exe C:\\Kora\\main\\txData\\admins.json /grant NT SERVICE\\kora-main:(M)");
     // a server without a database has no database.json: that grant must not abort the install
     assert!(p.steps.iter().filter(|st| st.command_line().is_some_and(|l| l.contains("database.json") || l.contains("secrets.cfg") || l.contains("admins.json"))).all(|st| st.ignore_failure));
+}
+
+/// Answers `sc query` with a scripted sequence of states; records every call.
+struct Sequence {
+    states: std::cell::RefCell<Vec<&'static str>>,
+    log: std::cell::RefCell<Vec<String>>,
+}
+
+impl CommandRunner for Sequence {
+    fn run(&self, program: &str, args: &[String]) -> std::io::Result<CommandOutput> {
+        self.log.borrow_mut().push(format!("{program} {}", args.join(" ")));
+        let out = if args.first().map(String::as_str) == Some("query") {
+            let mut s = self.states.borrow_mut();
+            let st = if s.len() > 1 { s.remove(0) } else { s[0] };
+            format!("SERVICE_NAME: kora-main\n        STATE              : 3  {st}\n")
+        } else {
+            String::new()
+        };
+        Ok(CommandOutput { code: 0, stdout: out, stderr: String::new() })
+    }
+    fn write_file(&self, _: &str, _: &str, _: Option<u32>) -> std::io::Result<()> { Ok(()) }
+    fn remove_file(&self, _: &str) -> std::io::Result<()> { Ok(()) }
+    fn copy_file(&self, _: &str, _: &str, _: Option<u32>) -> std::io::Result<()> { Ok(()) }
+    fn remove_empty_dir(&self, _: &str) -> std::io::Result<()> { Ok(()) }
+}
+
+#[test]
+fn windows_restart_waits_for_stopped_before_starting_again() {
+    let r = Sequence { states: std::cell::RefCell::new(vec!["STOP_PENDING", "STOP_PENDING", "STOPPED"]), log: Default::default() };
+    ServiceManager::new(Platform::Windows, &r).restart(&server()).unwrap();
+    let log = r.log.borrow();
+    let start = log.iter().position(|l| l.starts_with("sc.exe start")).expect("start was called");
+    let queries_before = log[..start].iter().filter(|l| l.contains("query")).count();
+    assert!(log[0].starts_with("sc.exe stop"));
+    assert_eq!(queries_before, 3, "polled until STOPPED (STOP_PENDING is not stopped): {log:?}");
+}
+
+#[test]
+fn windows_stop_returns_only_when_stopped_and_gives_up_with_a_clear_error() {
+    let r = Sequence { states: std::cell::RefCell::new(vec!["STOP_PENDING", "STOPPED"]), log: Default::default() };
+    ServiceManager::new(Platform::Windows, &r).stop(&server()).unwrap();
+    let stuck = Sequence { states: std::cell::RefCell::new(vec!["STOP_PENDING"]), log: Default::default() };
+    let e = ServiceManager::new(Platform::Windows, &stuck).wait_until_stopped(&server(), std::time::Duration::from_millis(5), std::time::Duration::from_millis(1)).unwrap_err().to_string();
+    assert!(e.contains("did not stop"), "{e}");
+    // Linux stops synchronously: no polling
+    let l = Sequence { states: std::cell::RefCell::new(vec!["x"]), log: Default::default() };
+    ServiceManager::new(Platform::Linux, &l).wait_until_stopped(&server(), std::time::Duration::ZERO, std::time::Duration::ZERO).unwrap();
+    assert!(l.log.borrow().is_empty());
 }

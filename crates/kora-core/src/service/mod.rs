@@ -606,10 +606,40 @@ impl<'a> ServiceManager<'a> {
         self.control(server, ControlAction::Start)
     }
     pub fn stop(&self, server: &ManagedServer) -> ServiceResult<()> {
-        self.control(server, ControlAction::Stop)
+        self.control(server, ControlAction::Stop)?;
+        // `sc stop` returns while the service is still STOP_PENDING; callers expect "stopped" when this returns.
+        self.wait_until_stopped(server, std::time::Duration::from_secs(90), std::time::Duration::from_millis(500))
     }
     pub fn restart(&self, server: &ManagedServer) -> ServiceResult<()> {
+        if self.platform == Platform::Windows {
+            // `sc start` fails with 1056 ("already running") while the old instance is still stopping.
+            let _ = self.control(server, ControlAction::Stop);
+            self.wait_until_stopped(server, std::time::Duration::from_secs(90), std::time::Duration::from_millis(500))?;
+            return self.control(server, ControlAction::Start);
+        }
         self.control(server, ControlAction::Restart)
+    }
+
+    /// Windows: wait until `sc query` says STOPPED (not STOP_PENDING) or the service is gone.
+    /// Other platforms stop synchronously, so this returns at once.
+    pub fn wait_until_stopped(&self, server: &ManagedServer, timeout: std::time::Duration, poll: std::time::Duration) -> ServiceResult<()> {
+        if self.platform != Platform::Windows {
+            return Ok(());
+        }
+        server.validate()?;
+        let svc = server.service_name();
+        let start = std::time::Instant::now();
+        loop {
+            let o = self.runner.run("sc.exe", &["query".into(), svc.clone()]).map_err(|e| ServiceError::Command { command: "sc.exe query".into(), detail: e.to_string() })?;
+            let text = o.stdout.to_uppercase();
+            if o.code == 1060 || text.contains("1060") || text.contains("STOPPED") {
+                return Ok(());
+            }
+            if start.elapsed() >= timeout {
+                return Err(ServiceError::Command { command: format!("sc.exe query {svc}"), detail: format!("the service did not stop within {} seconds", timeout.as_secs()) });
+            }
+            std::thread::sleep(poll);
+        }
     }
 
     pub fn status(&self, server: &ManagedServer) -> ServiceResult<ServiceState> {
