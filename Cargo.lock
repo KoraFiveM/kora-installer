@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "kora-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "kora-core",
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "kora-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bcrypt",
  "getrandom 0.4.3",
@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "kora-tui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arboard",
  "crossterm",
