@@ -65,6 +65,10 @@ jobs:
         run: ./scripts/smoke/03-install.ps1
       - name: "4. Service + firewall: start/stop/restart, txAdmin answers, uninstall removes everything"
         run: ./scripts/smoke/04-service.ps1
+      - name: "4b. Auto-update scheduled task (real schtasks create, query, delete)"
+        run: |
+          cargo test --locked -p kora-core real_windows_scheduled_task -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'scheduled task test failed' }
       - name: Collect logs
         if: always()
         run: |

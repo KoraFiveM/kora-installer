@@ -324,3 +324,24 @@ fn windows_stop_returns_only_when_stopped_and_gives_up_with_a_clear_error() {
     ServiceManager::new(Platform::Linux, &l).wait_until_stopped(&server(), std::time::Duration::ZERO, std::time::Duration::ZERO).unwrap();
     assert!(l.log.borrow().is_empty());
 }
+
+/// Runs the real `schtasks` (needs administrator rights and changes the machine), so it is ignored by
+/// default; the windows-smoke workflow runs it on an ephemeral Windows VM with `-- --ignored`.
+#[cfg(windows)]
+#[test]
+#[ignore = "changes the real machine: run by the windows-smoke workflow"]
+fn real_windows_scheduled_task_is_created_and_removed() {
+    let mut s = server();
+    s.name = "smoketask".into();
+    s.dir = "C:\\kora-smoke\\task".into();
+    s.kora_exe = "C:\\Windows\\System32\\cmd.exe".into();
+    let rn = SystemRunner;
+    let query = || rn.run("schtasks.exe", &["/Query".into(), "/TN".into(), "Kora\\Update smoketask".into(), "/XML".into()]).unwrap();
+    apply_plan(&scheduler_install_plan(&s, &Schedule::default(), Platform::Windows).unwrap(), &rn).unwrap();
+    let q = query();
+    assert!(q.success(), "task not found after creating it: {q:?}");
+    assert!(q.stdout.contains("update --auto") && q.stdout.contains("C:\\kora-smoke\\task"), "task command line: {}", q.stdout);
+    assert!(q.stdout.contains("04:00:00"), "daily 04:00 trigger: {}", q.stdout);
+    apply_plan(&scheduler_uninstall_plan(&s, Platform::Windows).unwrap(), &rn).unwrap();
+    assert!(!query().success(), "task is still there after removing it");
+}
