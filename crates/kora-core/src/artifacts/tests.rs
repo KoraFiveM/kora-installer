@@ -145,6 +145,7 @@ fn tar_xz(entries: &[(&str, &[u8])], raw_name: Option<&str>) -> Vec<u8> {
     e.finish().unwrap()
 }
 
+#[cfg(unix)]
 fn store_with(build: u32, dir: &std::path::Path, store: &ArtifactStore, tag: &str) {
     let a = dir.join(format!("a{build}.tar.xz"));
     std::fs::write(&a, tar_xz(&[("run.sh", tag.as_bytes()), ("alpine/x", b"x")], None)).unwrap();
@@ -225,6 +226,7 @@ fn zip_extract_and_traversal() {
     assert!(extract_archive(&a, &o, Platform::Windows, ExtractLimits::default()).is_err());
 }
 
+#[cfg(unix)]
 fn tar_with_link(link: &str, target: &str) -> Vec<u8> {
     let mut tb = tar::Builder::new(Vec::new());
     let mut h = tar::Header::new_gnu();
