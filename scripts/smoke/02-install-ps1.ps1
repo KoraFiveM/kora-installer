@@ -36,7 +36,7 @@ try {
     Assert-That ($inst -eq $sha) 'installed exe has the published sha256'
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     Assert-That (($userPath -split ';') -contains $default) 'the install dir is on the USER path'
-    Assert-That ((($userPath -split ';') | Where-Object { $_ -eq $default }).Count -eq 1) 'and exactly once'
+    Assert-That (@(($userPath -split ";") | Where-Object { $_ -eq $default }).Count -eq 1) 'and exactly once'
     $v = Invoke-Native "$default\kora.exe" @('--version')
     Assert-That ($v.Code -eq 0) 'the installed kora.exe runs'
 
@@ -45,7 +45,7 @@ try {
     Write-Host $out
     Assert-That ($LASTEXITCODE -eq 0 -and $out -match 'already up to date') 'second run reports up to date'
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    Assert-That ((($userPath -split ';') | Where-Object { $_ -eq $default }).Count -eq 1) 'PATH entry is not duplicated by a second run'
+    Assert-That (@(($userPath -split ";") | Where-Object { $_ -eq $default }).Count -eq 1) 'PATH entry is not duplicated by a second run'
 
     # Checksum mismatch refuses and installs nothing.
     $badDir = Join-Path $root 'bad-target'
