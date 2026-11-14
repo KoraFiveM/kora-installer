@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use kora_core::elevate;
 use kora_core::firewall::ports::{self, PortProber, SystemProber};
-use kora_core::firewall::{check_port, PortStatus};
+use kora_core::launch;
 use kora_core::site::{self, Redeemed};
 use kora_core::installer::{
     self, gitops, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection,
@@ -94,6 +94,12 @@ struct InstallArgs {
     /// Database server port for the admin login (default 3306).
     #[arg(long)]
     db_admin_port: Option<u16>,
+    /// Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default).
+    #[arg(long)]
+    start: bool,
+    /// Do not start the server after installing (start it later with `kora start <name>`).
+    #[arg(long, conflicts_with = "start")]
+    no_start: bool,
     /// Show the full plan and change nothing.
     #[arg(long)]
     dry_run: bool,
@@ -131,6 +137,8 @@ impl InstallArgs {
             || self.db_admin_host.is_some()
             || self.db_admin_port.is_some()
             || self.dry_run
+            || self.start
+            || self.no_start
             || self.auto_ports
             || self.yes
     }
@@ -219,6 +227,8 @@ impl InstallArgs {
             catalog,
             dry_run: self.dry_run,
             db_admin,
+            // Headless installs start nothing unless asked (CI and scripts keep their behaviour).
+            start: self.start && !self.no_start,
         })
     }
 }
@@ -449,6 +459,19 @@ fn print_outcome(out: &installer::InstallOutcome, dry: bool) {
     println!("  folder:  {}", out.dir.display());
     println!("  connect: {}", out.connect);
     println!("  txAdmin: {}", out.txadmin_url);
+    if out.start_attempted {
+        if out.running {
+            println!("  server:  RUNNING - txAdmin is up on {}{}", out.txadmin_url, if out.game_listening { ", the game port is listening" } else { " (the game port is not listening yet)" });
+        } else if let Some(p) = &out.launch_problem {
+            println!("  server:  NOT RUNNING - {p}");
+            for l in &out.log_tail {
+                println!("    | {l}");
+            }
+        }
+    }
+    if let (Some(u), Some(f)) = (&out.admin_user, &out.admin_password_file) {
+        println!("  txAdmin login: user '{u}', password in {}", f.display());
+    }
     for n in &out.notes {
         println!("  note: {n}");
     }
@@ -646,33 +669,56 @@ fn status() -> i32 {
         println!("No Kora servers registered ({}). Install one with `kora install`.", registry::registry_path().display());
         return 0;
     }
-    println!("{:<20} {:<5} {:<7} {:<7} {:<9} folder", "NAME", "MODE", "GAME", "TXADMIN", "STATE");
+    println!("{:<20} {:<5} {:<7} {:<7} {:<9} {:<26} folder", "NAME", "MODE", "GAME", "TXADMIN", "STATE", "PORTS");
     for s in &reg.servers {
-        let svc = host::service_state(&s.name).ok();
+        let spec = launch::Spec { name: s.name.clone(), dir: s.dir.clone(), game_port: s.ports.game, txadmin_port: s.ports.txadmin };
+        let st = launch::status_of(&launch::SystemEnv::default(), &spec);
         let state = if !s.dir.is_dir() {
             "missing"
-        } else if svc == Some(kora_core::service::ServiceState::Running) {
-            "running"
-        } else if svc == Some(kora_core::service::ServiceState::Stopped) {
-            "stopped"
-        } else if matches!(check_port(s.ports.game, false), PortStatus::InUse { .. }) {
+        } else if st.running {
             "running"
         } else {
             "stopped"
         };
+        let ports = format!("game {}, txAdmin {}", if st.game_listening { "listening" } else { "closed" }, if st.txadmin_up { "up" } else { "down" });
         let mode = if s.mode == Mode::Production { "prod" } else { "dev" };
-        println!("{:<20} {:<5} {:<7} {:<7} {:<9} {}", s.name, mode, s.ports.game, s.ports.txadmin, state, s.dir.display());
+        println!("{:<20} {:<5} {:<7} {:<7} {:<9} {:<26} {}", s.name, mode, s.ports.game, s.ports.txadmin, state, ports, s.dir.display());
     }
     0
 }
 
 fn control(server: &str, action: kora_core::service::ControlAction) -> i32 {
-    use kora_core::service::ControlAction as A;
+    use kora_core::service::{ControlAction as A, ServiceState};
     let (verb, past) = match action {
         A::Start => ("start", "Started"),
         A::Stop => ("stop", "Stopped"),
         A::Restart => ("restart", "Restarted"),
     };
+    let has_service = !matches!(host::service_state(server), Ok(ServiceState::NotInstalled) | Err(_));
+    // Without a background service Kora runs FXServer itself (detached, pid in .kora/server.pid).
+    if !has_service {
+        if matches!(action, A::Stop | A::Restart) {
+            match launch::stop_named_detached(server) {
+                Ok(true) => println!("Stopped '{server}'."),
+                Ok(false) if action == A::Stop => {
+                    println!("'{server}' was not running (nothing started by Kora).");
+                    return 0;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("error: could not {verb} '{server}': {e}");
+                    return 1;
+                }
+            }
+            if action == A::Stop {
+                return 0;
+            }
+        }
+        return start_and_report(server, past);
+    }
+    if action == A::Start {
+        return start_and_report(server, past);
+    }
     match host::service_control(server, action) {
         Ok(()) => {
             println!("{past} '{server}'.");
@@ -680,6 +726,35 @@ fn control(server: &str, action: kora_core::service::ControlAction) -> i32 {
         }
         Err(e) => {
             eprintln!("error: could not {verb} '{server}': {e}");
+            1
+        }
+    }
+}
+
+/// Start (service or detached), show progress lines and the result.
+fn start_and_report(server: &str, past: &str) -> i32 {
+    let mut last = String::new();
+    let mut progress = |m: &str, _f: f32| {
+        if m != last {
+            println!("{m}");
+            last = m.to_string();
+        }
+    };
+    match launch::start_named(server, &mut progress) {
+        Ok(r) => {
+            if r.running() {
+                println!("{} '{server}': txAdmin is up{}.", if r.method == launch::Method::AlreadyRunning { "Already running" } else { past }, if r.game_listening { ", the game port is listening" } else { ", the game port is not listening yet" });
+                0
+            } else {
+                eprintln!("error: '{server}' did not start properly: {}", r.message);
+                for l in &r.log_tail {
+                    eprintln!("  | {l}");
+                }
+                1
+            }
+        }
+        Err(e) => {
+            eprintln!("error: could not start '{server}': {e}");
             1
         }
     }
@@ -1050,5 +1125,22 @@ mod tests {
         let mut r = req_with_ports(30120, 40120);
         settle_ports(&mut r, true, &Busy(vec![30120])).unwrap();
         assert!(request_summary(&r).contains("game 30121, txAdmin 40120"));
+    }
+
+    #[test]
+    fn headless_start_is_off_unless_asked() {
+        let mk = |a: &[&str]| {
+            let mut v = vec!["kora", "install", "-y"];
+            v.extend_from_slice(a);
+            Cli::try_parse_from(v)
+        };
+        let req = |a: &[&str]| match mk(a).unwrap().command {
+            Some(Command::Install(i)) => i.into_request().unwrap().start,
+            _ => unreachable!(),
+        };
+        assert!(!req(&[]), "existing smoke/CI behaviour is unchanged");
+        assert!(req(&["--start"]));
+        assert!(!req(&["--no-start"]));
+        assert!(mk(&["--start", "--no-start"]).is_err());
     }
 }

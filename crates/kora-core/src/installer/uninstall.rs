@@ -298,6 +298,7 @@ mod tests {
             catalog: None,
             dry_run: false,
             db_admin: None,
+            start: false,
         }
     }
 

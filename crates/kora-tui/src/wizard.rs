@@ -1296,6 +1296,7 @@ impl Wizard {
             catalog: None,
             dry_run: false,
             db_admin: self.db_admin(),
+            start: true,
         }
     }
 

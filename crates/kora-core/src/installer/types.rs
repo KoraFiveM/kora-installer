@@ -100,6 +100,9 @@ pub struct InstallRequest {
     /// Optional database admin login (preferred over the `KORA_DB_*` environment variables).
     #[serde(default)]
     pub db_admin: Option<DbAdmin>,
+    /// Start the server when the install is done (final `launch` step) and wait until it answers.
+    #[serde(default)]
+    pub start: bool,
 }
 
 impl std::fmt::Debug for InstallRequest {
@@ -144,10 +147,33 @@ pub trait ProgressSink: Send {
 }
 
 /// Result summary shown on the Launch screen.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallOutcome {
     pub dir: PathBuf,
     pub connect: String,
     pub txadmin_url: String,
     pub notes: Vec<String>,
+    /// Registered server name (for Start / Stop).
+    #[serde(default)]
+    pub name: String,
+    /// The `launch` step ran (the request asked for a start).
+    #[serde(default)]
+    pub start_attempted: bool,
+    /// Started and answering (txAdmin up, no problem).
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub game_listening: bool,
+    /// Plain-language reason it is not running (rejected licence, crash, port clash, timeout...).
+    #[serde(default)]
+    pub launch_problem: Option<String>,
+    /// Last log lines for a failed start.
+    #[serde(default)]
+    pub log_tail: Vec<String>,
+    /// Generated local txAdmin admin (no Cfx identity was linked).
+    #[serde(default)]
+    pub admin_user: Option<String>,
+    /// File holding that admin's password; the password itself is never put in the outcome or logs.
+    #[serde(default)]
+    pub admin_password_file: Option<PathBuf>,
 }

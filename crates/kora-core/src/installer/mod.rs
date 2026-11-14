@@ -251,6 +251,9 @@ pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
         v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true });
     }
     v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false });
+    if req.start {
+        v.push(PlannedStep { id: "launch", title: "Start your server", weight: 4, needs_admin: false });
+    }
     v
 }
 
@@ -294,6 +297,7 @@ pub(crate) struct Shared {
     pub notes: Vec<String>,
     pub artifact_build: Option<u32>,
     pub db_name: Option<String>,
+    pub launch: Option<crate::launch::Report>,
 }
 
 pub(crate) struct Ctx {
@@ -451,7 +455,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     let (tx, rx) = mpsc::channel();
     let ctx = new_ctx(req, hooks, admin, tx, false, false);
     // `ctx` (which owns the sender) moves into the worker so the channel closes when it ends.
-    let handle = std::thread::spawn(move || -> Result<Vec<String>> {
+    let handle = std::thread::spawn(move || -> Result<(Vec<String>, Option<crate::launch::Report>)> {
         let mut list: Vec<Box<dyn Step>> = steps::build(&ctx);
         let state_path = ctx.meta_dir().join("plan-state.json");
         // The state dir must exist before the first persist; remember if the folder is ours.
@@ -467,27 +471,40 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
                 ctx.emit(p.id, StepStatus::Skipped, "Already done", 1.0);
             }
         }
-        let notes = std::mem::take(&mut ctx.shared.lock().unwrap().notes);
-        Ok(notes)
+        let mut sh = ctx.shared.lock().unwrap();
+        Ok((std::mem::take(&mut sh.notes), sh.launch.take()))
     });
     for ev in rx {
         sink.event(ev);
     }
-    let notes = handle.join().map_err(|_| InstallError("installer worker panicked".into()))??;
+    let (notes, launch) = handle.join().map_err(|_| InstallError("installer worker panicked".into()))??;
     let sf = ServerFile::load(&req.dir).ok();
     let build = sf.as_ref().map(|s| s.artifact_build);
     let mut notes = notes;
-    notes.push(format!(
-        "The server is installed but not started. {} txAdmin runs on port {} and starts the game server by itself (an admin account is already set up). FXServer is in {}.",
-        if req.service { format!("Start it with `kora start {}`.", req.name) } else { format!("Start it with `kora service-host {}`.", req.name) },
-        req.ports.txadmin,
-        fxserver_dir_text(&req.dir, build)
-    ));
+    if !req.start {
+        notes.push(format!(
+            "The server is installed but not started. Start it with `kora start {}`. txAdmin runs on port {} and starts the game server by itself (an admin account is already set up). FXServer is in {}.",
+            req.name,
+            req.ports.txadmin,
+            fxserver_dir_text(&req.dir, build)
+        ));
+    }
+    let pw_file = req.dir.join("secrets").join("txadmin-admin.txt");
+    // The file only exists when no Cfx identity was linked (a generated local admin).
+    let local_admin = pw_file.is_file();
     Ok(InstallOutcome {
         dir: req.dir.clone(),
-        connect: format!("localhost:{}", req.ports.game),
+        connect: crate::launch::connect_address(req.ports.game),
         txadmin_url: format!("http://localhost:{}", req.ports.txadmin),
         notes,
+        name: req.name.clone(),
+        start_attempted: launch.is_some(),
+        running: launch.as_ref().is_some_and(|l| l.running()),
+        game_listening: launch.as_ref().is_some_and(|l| l.game_listening),
+        launch_problem: launch.as_ref().and_then(|l| l.problem.map(|_| l.message.clone())),
+        log_tail: launch.as_ref().map(|l| l.log_tail.clone()).unwrap_or_default(),
+        admin_user: local_admin.then(|| crate::txadmin::LOCAL_ADMIN_USER.to_string()),
+        admin_password_file: local_admin.then_some(pw_file),
     })
 }
 
@@ -584,6 +601,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
             "system.firewall" => format!("Open {}/tcp+udp (admin needed)", req.ports.game),
             "system.service" => "Create + enable the background service (admin needed)".into(),
             "finalize" => format!("Write kora-server.json and register in {}", registry::registry_path().display()),
+            "launch" => format!("Start FXServer and wait until txAdmin answers on port {}", req.ports.txadmin),
             _ => String::new(),
         };
         let marker = if p.needs_admin { " [needs admin]" } else { "" };
@@ -606,6 +624,8 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
         connect: format!("localhost:{}", req.ports.game),
         txadmin_url: format!("http://localhost:{}", req.ports.txadmin),
         notes,
+        name: req.name.clone(),
+        ..Default::default()
     })
 }
 
@@ -630,6 +650,11 @@ pub fn rollback_with(dir: &Path, opts: &RollbackOptions, sink: &mut dyn Progress
     let mut req: InstallRequest = serde_json::from_slice(&bytes).map_err(|e| InstallError(format!("corrupt install record: {e}")))?;
     req.dir = dir.to_path_buf();
     let admin = hooks.assume_admin.unwrap_or_else(is_admin);
+    // A server Kora started in the background must not keep running (or hold files open) while it is deleted.
+    let spec = crate::launch::Spec { name: req.name.clone(), dir: dir.to_path_buf(), game_port: req.ports.game, txadmin_port: req.ports.txadmin };
+    if crate::launch::stop_detached(&crate::launch::SystemEnv::default(), &spec) {
+        sink.event(ProgressEvent { step: "launch".into(), title: "Stop the running server".into(), status: StepStatus::Done, detail: "Stopped the background server".into(), percent: 0 });
+    }
     let (tx, rx) = mpsc::channel();
     let ctx = new_ctx(&req, hooks, admin, tx, opts.keep_db, opts.keep_files);
     let handle = std::thread::spawn(move || -> Result<Vec<String>> {
@@ -669,6 +694,7 @@ mod tests {
             catalog: None,
             dry_run: true,
             db_admin: None,
+            start: false,
         }
     }
 

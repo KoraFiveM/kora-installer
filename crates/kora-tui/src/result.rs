@@ -38,6 +38,11 @@ pub enum Action {
     CopyDetails,
     /// Failure caused by missing administrator rights: restart with permission.
     Restart,
+    OpenTxAdmin,
+    CopyConnect,
+    CopyPassword,
+    StartServer,
+    StopServer,
 }
 
 impl Action {
@@ -48,12 +53,72 @@ impl Action {
             Action::CopyPath => "[ Copy path ]",
             Action::CopyDetails => "[ Copy details ]",
             Action::Restart => "[ Restart as administrator ]",
+            Action::OpenTxAdmin => "[ Open txAdmin ]",
+            Action::CopyConnect => "[ Copy connect address ]",
+            Action::CopyPassword => "[ Copy password ]",
+            Action::StartServer => "[ Start server ]",
+            Action::StopServer => "[ Stop server ]",
         }
     }
 }
 
+/// Messages from a background start.
+#[derive(Debug, Clone)]
+pub enum ServerMsg {
+    Progress(String),
+    Finished(kora_core::launch::Report),
+    Failed(String),
+}
+
+/// Starting and stopping the server from the final screen (fake-able in tests).
+pub trait ServerCtl {
+    /// Begin starting in the background; progress comes through `poll`.
+    fn start(&mut self, name: &str);
+    fn poll(&mut self) -> Vec<ServerMsg>;
+    /// Stop it (blocks briefly).
+    fn stop(&mut self, name: &str) -> Result<(), String>;
+}
+
+/// Used where no server can be controlled (failure screens, tests).
+pub struct NoServer;
+
+impl ServerCtl for NoServer {
+    fn start(&mut self, _: &str) {}
+    fn poll(&mut self) -> Vec<ServerMsg> {
+        vec![]
+    }
+    fn stop(&mut self, _: &str) -> Result<(), String> {
+        Err("There is no server to stop.".into())
+    }
+}
+
+/// What the final screen knows about the server.
+#[derive(Debug, Clone, Default)]
+pub struct ServerView {
+    pub name: String,
+    pub attempted: bool,
+    pub running: bool,
+    pub stopped: bool,
+    pub game_listening: bool,
+    pub problem: Option<String>,
+    pub log_tail: Vec<String>,
+    pub admin_user: Option<String>,
+    pub admin_password_file: Option<PathBuf>,
+    /// Shown on this screen only (button + text); never logged.
+    pub admin_password: Option<String>,
+    /// A start is in progress: the latest status line.
+    pub busy: Option<String>,
+}
+
+/// The password line of `secrets/txadmin-admin.txt`.
+pub fn read_admin_password(file: &Path) -> Option<String> {
+    let t = std::fs::read_to_string(file).ok()?;
+    t.lines().find_map(|l| l.strip_prefix("Password:")).map(|p| p.trim().to_string()).filter(|p| !p.is_empty())
+}
+
 /// What the actions need from the outside world.
 pub struct Services<'a> {
+    pub server: &'a mut dyn ServerCtl,
     pub clipboard: &'a mut dyn Clipboard,
     pub opener: &'a mut dyn Opener,
     pub elevator: &'a mut crate::elev::Elevator,
@@ -98,6 +163,7 @@ pub struct ResultScreen {
     pub can_elevate: bool,
     /// The restart worked: the caller must exit now.
     pub restarted: bool,
+    pub srv: ServerView,
 }
 
 impl ResultScreen {
@@ -116,10 +182,24 @@ impl ResultScreen {
             windows: cfg!(windows),
             can_elevate: false,
             restarted: false,
+            srv: ServerView::default(),
         }
     }
 
     pub fn outcome(o: &InstallOutcome) -> Self {
+        let srv = ServerView {
+            name: o.name.clone(),
+            attempted: o.start_attempted,
+            running: o.running,
+            stopped: false,
+            game_listening: o.game_listening,
+            problem: o.launch_problem.clone(),
+            log_tail: o.log_tail.clone(),
+            admin_user: o.admin_user.clone(),
+            admin_password_file: o.admin_password_file.clone(),
+            admin_password: o.admin_password_file.as_deref().and_then(read_admin_password),
+            busy: None,
+        };
         Self {
             kind: Kind::Outcome,
             message: String::new(),
@@ -134,6 +214,7 @@ impl ResultScreen {
             windows: cfg!(windows),
             can_elevate: false,
             restarted: false,
+            srv,
         }
     }
 
@@ -173,6 +254,18 @@ impl ResultScreen {
 
     fn actions(&self) -> Vec<Action> {
         let mut v = vec![];
+        if self.kind == Kind::Outcome {
+            let r = &self.srv;
+            let idle = r.busy.is_none();
+            if r.running && idle {
+                v.extend([Action::OpenTxAdmin, Action::CopyConnect]);
+            } else if idle && !r.name.is_empty() {
+                v.push(Action::StartServer);
+            }
+            if r.admin_password.is_some() {
+                v.push(Action::CopyPassword);
+            }
+        }
         if self.kind == Kind::Failure && self.log.is_some() {
             v.push(Action::OpenLog);
         }
@@ -182,6 +275,9 @@ impl ResultScreen {
         if self.shown_path().is_some() {
             v.push(Action::CopyPath);
         }
+        if self.kind == Kind::Outcome && self.srv.running && self.srv.busy.is_none() {
+            v.push(Action::StopServer);
+        }
         if self.kind == Kind::Failure {
             v.push(Action::CopyDetails);
         }
@@ -189,6 +285,36 @@ impl ResultScreen {
             v.insert(0, Action::Restart);
         }
         v
+    }
+
+    /// Apply messages from a background start; call regularly while `is_busy`.
+    pub fn tick(&mut self, svc: &mut Services) {
+        for m in svc.server.poll() {
+            match m {
+                ServerMsg::Progress(t) => self.srv.busy = Some(t),
+                ServerMsg::Finished(r) => {
+                    self.srv.busy = None;
+                    self.srv.attempted = true;
+                    self.srv.stopped = false;
+                    self.srv.running = r.running();
+                    self.srv.game_listening = r.game_listening;
+                    self.srv.problem = r.problem.map(|_| r.message.clone());
+                    self.srv.log_tail = r.log_tail.clone();
+                    self.status = Some(if r.running() { ("Your server is running.".into(), true) } else { (r.message.clone(), false) });
+                }
+                ServerMsg::Failed(e) => {
+                    self.srv.busy = None;
+                    self.srv.attempted = true;
+                    self.srv.running = false;
+                    self.srv.problem = Some(e.clone());
+                    self.status = Some((e, false));
+                }
+            }
+        }
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.srv.busy.is_some()
     }
 
     /// Run an action. Never panics; problems become a plain message on screen.
@@ -214,6 +340,37 @@ impl ResultScreen {
                     Err(e) => (format!("{e} The path is: {p}"), false),
                 },
                 None => ("There is no path to copy.".into(), false),
+            },
+            Action::OpenTxAdmin => match svc.opener.open_url(&self.txadmin_url) {
+                Ok(()) => (format!("Opening {}...", self.txadmin_url), true),
+                Err(e) => (e, false),
+            },
+            Action::CopyConnect => match svc.clipboard.set_text(&self.connect) {
+                Ok(()) => (format!("Copied {}. Paste it into FiveM (F8, then connect <address>).", self.connect), true),
+                Err(e) => (format!("{e} The address is: {}", self.connect), false),
+            },
+            Action::CopyPassword => match self.srv.admin_password.clone() {
+                Some(p) => match svc.clipboard.set_text(&p) {
+                    Ok(()) => ("Copied the txAdmin password. Change it after your first login.".into(), true),
+                    Err(e) => (e, false),
+                },
+                None => ("There is no generated password (a Cfx.re account is linked).".into(), false),
+            },
+            Action::StartServer => {
+                self.srv.busy = Some("Starting txAdmin...".into());
+                self.srv.problem = None;
+                self.status = None;
+                svc.server.start(&self.srv.name.clone());
+                return;
+            }
+            Action::StopServer => match svc.server.stop(&self.srv.name.clone()) {
+                Ok(()) => {
+                    self.srv.running = false;
+                    self.srv.stopped = true;
+                    self.srv.problem = None;
+                    ("Stopped the server.".into(), true)
+                }
+                Err(e) => (e, false),
             },
             Action::Restart => match (svc.elevator)(svc.args) {
                 Ok(()) => {
@@ -258,6 +415,10 @@ impl ResultScreen {
             KeyCode::Char('c' | 'C') => self.act(Action::CopyPath, svc),
             KeyCode::Char('d' | 'D') => self.act(Action::CopyDetails, svc),
             KeyCode::Char('r' | 'R') => self.act(Action::Restart, svc),
+            KeyCode::Char('o' | 'O') => self.act(Action::OpenTxAdmin, svc),
+            KeyCode::Char('a' | 'A') => self.act(Action::CopyConnect, svc),
+            KeyCode::Char('p' | 'P') => self.act(Action::CopyPassword, svc),
+            KeyCode::Char('s' | 'S') => self.act(if self.srv.running { Action::StopServer } else { Action::StartServer }, svc),
             _ => {}
         }
         self.restarted
@@ -351,10 +512,45 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
             }
         }
         Kind::Outcome => {
-            lines.push(Line::styled("Your server is ready!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
+            let r = &s.srv;
+            let (head, colour) = if let Some(_b) = &r.busy {
+                ("Starting your server...", Color::Yellow)
+            } else if r.running {
+                ("Your server is running", Color::Green)
+            } else if r.stopped {
+                ("Your server is stopped", Color::Yellow)
+            } else if r.attempted {
+                ("Your server did not start", Color::Red)
+            } else if r.name.is_empty() {
+                ("Your server is ready!", Color::Green)
+            } else {
+                ("Your server is installed but not started", Color::Yellow)
+            };
+            lines.push(Line::styled(head, Style::default().fg(colour).add_modifier(Modifier::BOLD)));
             lines.push(Line::raw(""));
+            if let Some(b) = &r.busy {
+                lines.extend(wrap(b, w).into_iter().map(Line::from));
+                lines.push(Line::raw(""));
+            }
+            if let (Some(p), false) = (&r.problem, r.running) {
+                lines.extend(wrap(p, w).into_iter().map(|l| Line::styled(l, Style::default().fg(Color::Red))));
+                for l in &r.log_tail {
+                    lines.extend(wrap(l, w.saturating_sub(2)).into_iter().take(2).map(|t| Line::styled(format!("| {t}"), dim)));
+                }
+                lines.push(Line::raw(""));
+            }
+            if r.running {
+                lines.push(Line::raw(format!("Game server:       {}", if r.game_listening { "listening" } else { "not listening yet (txAdmin is still starting it)" })));
+            }
             lines.push(Line::raw(format!("Players connect:   {}", s.connect)));
             lines.push(Line::raw(format!("Control panel:     {}", s.txadmin_url)));
+            if let Some(u) = &r.admin_user {
+                match (&r.admin_password, &r.admin_password_file) {
+                    (Some(p), _) => lines.push(Line::raw(format!("txAdmin login:     {u} / {p}"))),
+                    (None, Some(f)) => lines.push(Line::raw(format!("txAdmin login:     {u} (password in {})", f.display()))),
+                    _ => lines.push(Line::raw(format!("txAdmin login:     {u}"))),
+                }
+            }
             lines.push(Line::raw(""));
             for n in &s.notes {
                 for (i, l) in wrap(n, w.saturating_sub(2)).into_iter().enumerate() {
@@ -405,7 +601,7 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
         None => lines.push(Line::raw("")),
     }
     lines.push(Line::styled(
-        if s.kind == Kind::Failure { "Press Enter to exit." } else { "Press Enter to finish." },
+        if s.kind == Kind::Failure { "Press Enter to exit." } else if s.srv.running { "Press Enter to finish (the server keeps running)." } else { "Press Enter to finish." },
         dim,
     ));
     Built { lines, path, buttons }
@@ -416,7 +612,7 @@ pub fn render_result(f: &mut Frame, s: &ResultScreen) {
     let b = build(area, s);
     let (colour, title) = match s.kind {
         Kind::Failure => (Color::Red, " Kora - something went wrong "),
-        Kind::Outcome => (BRAND, " Kora - all done "),
+        Kind::Outcome => (BRAND, if s.srv.running { " Kora - your server is running " } else { " Kora - all done " }),
     };
     f.render_widget(
         Paragraph::new(b.lines.clone()).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(colour)).title(title)),
@@ -444,10 +640,15 @@ mod tests {
     #[derive(Default)]
     struct FakeOpener {
         opened: Vec<(PathBuf, PathBuf)>,
+        urls: Vec<String>,
         fail: bool,
     }
 
     impl Opener for FakeOpener {
+        fn open_url(&mut self, url: &str) -> Result<(), String> {
+            self.urls.push(url.to_string());
+            Ok(())
+        }
         fn open(&mut self, t: &Path, r: &Path) -> Result<(), String> {
             if self.fail {
                 return Err(format!("Couldn't open it automatically. Open this yourself: {}", t.display()));
@@ -520,17 +721,17 @@ mod tests {
         let b = build(area, &s);
         let rect = |a: Action| b.buttons.iter().find(|(x, _)| *x == a).unwrap().1;
         let log = dir().join(".kora").join("install.log");
-        s.handle_mouse(click(rect(Action::OpenLog)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
-        s.handle_mouse(click(rect(Action::OpenFolder)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
-        s.handle_mouse(click(b.path.as_ref().unwrap().rect), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_mouse(click(rect(Action::OpenLog)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
+        s.handle_mouse(click(rect(Action::OpenFolder)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
+        s.handle_mouse(click(b.path.as_ref().unwrap().rect), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         assert_eq!(op.opened, vec![(log.clone(), dir()), (dir(), dir()), (log.clone(), dir())]);
-        s.handle_mouse(click(rect(Action::CopyPath)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_mouse(click(rect(Action::CopyPath)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         assert_eq!(cb.text.as_deref(), Some(log.display().to_string().as_str()));
         assert!(text(&s, 110, 30).contains("Copied the path"));
         // a click elsewhere or a right click does nothing
         let before = op.opened.len();
-        s.handle_mouse(click(Rect::new(0, 0, 1, 1)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
-        s.handle_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), ..click(rect(Action::OpenLog)) }, area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_mouse(click(Rect::new(0, 0, 1, 1)), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
+        s.handle_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), ..click(rect(Action::OpenLog)) }, area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         assert_eq!(op.opened.len(), before);
     }
 
@@ -539,13 +740,13 @@ mod tests {
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
         let mut s = screen();
         for c in ['l', 'F', 'c'] {
-            assert!(!s.handle_key(key(KeyCode::Char(c)), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+            assert!(!s.handle_key(key(KeyCode::Char(c)), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer }));
         }
         assert_eq!(op.opened.len(), 2);
-        assert!(!s.handle_key(key(KeyCode::Char('x')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }), "random keys don't close it");
-        assert!(s.handle_key(key(KeyCode::Enter), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
-        assert!(s.handle_key(key(KeyCode::Esc), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
-        assert!(s.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+        assert!(!s.handle_key(key(KeyCode::Char('x')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer }), "random keys don't close it");
+        assert!(s.handle_key(key(KeyCode::Enter), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer }));
+        assert!(s.handle_key(key(KeyCode::Esc), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer }));
+        assert!(s.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer }));
     }
 
     #[test]
@@ -558,7 +759,7 @@ mod tests {
         std::fs::write(&log, body).unwrap();
         let mut s = ResultScreen::failure("Boom happened", "x", Some(&log));
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
-        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         let copied = cb.text.unwrap();
         assert!(copied.contains("Boom happened") && copied.contains("line 100") && copied.contains("line 61"));
         assert!(!copied.contains("line 60\n"), "only the last {DETAIL_LINES} lines");
@@ -584,28 +785,28 @@ mod tests {
         let mut cb = FakeClipboard { fail: true, ..Default::default() };
         let mut op = FakeOpener { fail: true, ..Default::default() };
         let mut s = screen();
-        s.handle_key(key(KeyCode::Char('l')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_key(key(KeyCode::Char('l')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         let t = text(&s, 110, 30);
         assert!(t.contains("Open this yourself") && t.contains("install.log"), "{t}");
-        s.handle_key(key(KeyCode::Char('c')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_key(key(KeyCode::Char('c')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         assert!(text(&s, 110, 30).contains("clipboard isn't available"));
-        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_key(key(KeyCode::Char('d')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         assert!(s.status.as_ref().is_some_and(|(_, ok)| !ok));
         let _ = area;
     }
 
     #[test]
     fn outcome_has_folder_buttons_only() {
-        let o = InstallOutcome { dir: dir(), connect: "localhost:30120".into(), txadmin_url: "http://localhost:40120".into(), notes: vec!["Forward port 30120.".into()] };
+        let o = InstallOutcome { dir: dir(), connect: "localhost:30120".into(), txadmin_url: "http://localhost:40120".into(), notes: vec!["Forward port 30120.".into()], ..Default::default() };
         let s = ResultScreen::outcome(&o);
         let t = text(&s, 100, 24);
         assert!(t.contains("ready") && t.contains("[ Open folder ]") && t.contains("[ Copy path ]"));
         assert!(!t.contains("Open log") && !t.contains("Copy details"));
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
         let mut s = s;
-        s.act(Action::OpenLog, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.act(Action::OpenLog, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         assert!(op.opened.is_empty(), "actions that aren't offered do nothing");
-        s.handle_key(key(KeyCode::Char('f')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] });
+        s.handle_key(key(KeyCode::Char('f')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer });
         assert_eq!(op.opened, vec![(dir(), dir())]);
     }
 
@@ -657,11 +858,11 @@ mod tests {
         let area = Rect::new(0, 0, 110, 30);
         let mut s = admin_failure();
         let r = build(area, &s).buttons.iter().find(|(a, _)| *a == Action::Restart).unwrap().1;
-        s.handle_mouse(click(r), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut elevator, args: &args });
+        s.handle_mouse(click(r), area, &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut elevator, args: &args, server: &mut NoServer });
         assert!(s.restarted);
         assert_eq!(seen.borrow().as_slice(), std::slice::from_ref(&args));
         let mut s = admin_failure();
-        assert!(s.handle_key(key(KeyCode::Char('r')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut elevator, args: &args }), "closes after a restart");
+        assert!(s.handle_key(key(KeyCode::Char('r')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut elevator, args: &args, server: &mut NoServer }), "closes after a restart");
         assert_eq!(seen.borrow().len(), 2);
     }
 
@@ -669,7 +870,7 @@ mod tests {
     fn declined_restart_stays_and_explains() {
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
         let mut s = admin_failure();
-        assert!(!s.handle_key(key(KeyCode::Char('r')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+        assert!(!s.handle_key(key(KeyCode::Char('r')), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer }));
         assert!(!s.restarted);
         assert!(text(&s, 110, 34).contains("nothing was changed"));
     }
@@ -679,7 +880,143 @@ mod tests {
         let (mut cb, mut op) = (FakeClipboard::default(), FakeOpener::default());
         let mut s = screen();
         for k in [KeyCode::Char('x'), KeyCode::Down, KeyCode::Tab] {
-            assert!(!s.handle_key(key(k), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[] }));
+            assert!(!s.handle_key(key(k), &mut Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut NoServer }));
         }
+    }
+
+    // ---- the "server is running" outcome -------------------------------------------------------
+
+    #[derive(Default)]
+    struct FakeServer {
+        started: Vec<String>,
+        stopped: Vec<String>,
+        queue: Vec<ServerMsg>,
+    }
+
+    impl ServerCtl for FakeServer {
+        fn start(&mut self, name: &str) {
+            self.started.push(name.into());
+        }
+        fn poll(&mut self) -> Vec<ServerMsg> {
+            std::mem::take(&mut self.queue)
+        }
+        fn stop(&mut self, name: &str) -> Result<(), String> {
+            self.stopped.push(name.into());
+            Ok(())
+        }
+    }
+
+    fn outcome(running: bool, attempted: bool, problem: Option<&str>) -> InstallOutcome {
+        InstallOutcome {
+            dir: dir(),
+            connect: "192.168.1.20:30120".into(),
+            txadmin_url: "http://localhost:40120".into(),
+            notes: vec![],
+            name: "alpha".into(),
+            start_attempted: attempted,
+            running,
+            game_listening: running,
+            launch_problem: problem.map(String::from),
+            log_tail: if problem.is_some() { vec!["Could not authenticate server license key".into()] } else { vec![] },
+            ..Default::default()
+        }
+    }
+
+    fn report(running: bool) -> kora_core::launch::Report {
+        use kora_core::launch::{Method, Problem, Report};
+        Report {
+            method: Method::Detached,
+            pid: Some(1),
+            txadmin_up: true,
+            game_listening: running,
+            problem: (!running).then_some(Problem::LicenceRejected),
+            message: if running { "Your server is running.".into() } else { kora_core::launch::LICENCE_MESSAGE.into() },
+            log_tail: vec![],
+        }
+    }
+
+    #[test]
+    fn running_outcome_says_so_and_offers_the_server_buttons() {
+        let pw = tempfile::tempdir().unwrap();
+        let f = pw.path().join("txadmin-admin.txt");
+        std::fs::write(&f, "txAdmin master account\nUsername: kora-admin\nPassword: s3cretPW\n").unwrap();
+        let mut o = outcome(true, true, None);
+        o.admin_user = Some("kora-admin".into());
+        o.admin_password_file = Some(f);
+        let mut s = ResultScreen::outcome(&o);
+        let t = text(&s, 110, 30);
+        for want in ["Your server is running", "[ Open txAdmin ]", "[ Copy connect address ]", "[ Open folder ]", "[ Stop server ]", "[ Copy password ]", "192.168.1.20:30120", "kora-admin / s3cretPW", "listening"] {
+            assert!(t.contains(want), "missing {want:?} in\n{t}");
+        }
+        assert!(!t.contains("[ Start server ]"));
+        let (mut cb, mut op, mut sv) = (FakeClipboard::default(), FakeOpener::default(), FakeServer::default());
+        let mut svc = Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut sv };
+        s.handle_key(key(KeyCode::Char('o')), &mut svc);
+        s.handle_key(key(KeyCode::Char('p')), &mut svc);
+        assert_eq!(svc.clipboard.get_text().unwrap(), "s3cretPW");
+        s.handle_key(key(KeyCode::Char('a')), &mut svc);
+        assert_eq!(svc.clipboard.get_text().unwrap(), "192.168.1.20:30120");
+        s.handle_key(key(KeyCode::Char('s')), &mut svc);
+        assert_eq!(op.urls, ["http://localhost:40120"]);
+        assert_eq!(sv.stopped, ["alpha"]);
+        let t = text(&s, 110, 30);
+        assert!(t.contains("Your server is stopped") && t.contains("[ Start server ]") && !t.contains("[ Stop server ]"), "{t}");
+    }
+
+    #[test]
+    fn a_failed_start_shows_the_reason_and_a_start_button_and_retry_works() {
+        let o = outcome(false, true, Some("Your licence key was rejected. Check it at portal.cfx.re, then run kora start"));
+        let mut s = ResultScreen::outcome(&o);
+        let t = text(&s, 110, 30);
+        for want in ["Your server did not start", "Your licence key was rejected", "Could not authenticate", "[ Start server ]", "[ Open folder ]"] {
+            assert!(t.contains(want), "missing {want:?} in\n{t}");
+        }
+        assert!(!t.contains("[ Open txAdmin ]") && !t.contains("Stop server"));
+        let (mut cb, mut op, mut sv) = (FakeClipboard::default(), FakeOpener::default(), FakeServer::default());
+        let mut svc = Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut sv };
+        s.handle_key(key(KeyCode::Char('s')), &mut svc);
+        assert!(s.is_busy());
+        assert!(text(&s, 110, 30).contains("Starting your server..."));
+        assert!(!text(&s, 110, 30).contains("[ Start server ]"), "no double start while busy");
+        svc.server.start("never");
+        sv.queue = vec![ServerMsg::Progress("Waiting for the game server...".into())];
+        let mut svc = Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut sv };
+        s.tick(&mut svc);
+        assert!(text(&s, 110, 30).contains("Waiting for the game server..."));
+        sv.queue = vec![ServerMsg::Finished(report(true))];
+        let mut svc = Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut sv };
+        s.tick(&mut svc);
+        assert!(!s.is_busy());
+        let t = text(&s, 110, 30);
+        assert!(t.contains("Your server is running") && t.contains("[ Stop server ]"), "{t}");
+        assert_eq!(sv.started[0], "alpha");
+    }
+
+    #[test]
+    fn not_started_says_exactly_that() {
+        let s = ResultScreen::outcome(&outcome(false, false, None));
+        let t = text(&s, 110, 30);
+        assert!(t.contains("installed but not started") && t.contains("[ Start server ]") && !t.contains("did not start"), "{t}");
+        // old callers (no server name) keep the plain screen
+        let plain = ResultScreen::outcome(&InstallOutcome { dir: dir(), ..Default::default() });
+        assert!(!text(&plain, 110, 30).contains("Start server"));
+    }
+
+    #[test]
+    fn a_failed_background_start_is_shown_plainly() {
+        let mut s = ResultScreen::outcome(&outcome(false, false, None));
+        let (mut cb, mut op, mut sv) = (FakeClipboard::default(), FakeOpener::default(), FakeServer::default());
+        sv.queue = vec![ServerMsg::Failed("Could not start the server: FXServer.exe is missing".into())];
+        let mut svc = Services { clipboard: &mut cb, opener: &mut op, elevator: &mut el(), args: &[], server: &mut sv };
+        s.tick(&mut svc);
+        let t = text(&s, 110, 30);
+        assert!(t.contains("did not start") && t.contains("FXServer.exe is missing"), "{t}");
+    }
+
+    #[test]
+    fn the_password_is_never_in_the_outcome_data() {
+        let o = outcome(true, true, None);
+        let json = serde_json::to_string(&o).unwrap();
+        assert!(!json.to_lowercase().contains("password\":\"") && !format!("{o:?}").contains("s3cret"));
     }
 }

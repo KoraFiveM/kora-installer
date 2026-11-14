@@ -23,7 +23,7 @@ use crate::artifacts::{ArtifactStore, Platform};
 use crate::txadmin;
 
 /// Resolve a registry name or an explicit server folder (containing `kora-server.json`) to a folder.
-fn resolve_dir(name_or_dir: &str) -> Result<PathBuf> {
+pub(crate) fn resolve_dir(name_or_dir: &str) -> Result<PathBuf> {
     let p = Path::new(name_or_dir);
     if p.is_absolute() && p.join("kora-server.json").is_file() {
         return Ok(p.to_path_buf());

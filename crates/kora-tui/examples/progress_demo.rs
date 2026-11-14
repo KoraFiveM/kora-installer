@@ -24,5 +24,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         connect: "connect localhost:30120".into(),
         txadmin_url: "http://localhost:40120".into(),
         notes: vec!["This was a demo; nothing was installed.".into()],
+        ..Default::default()
     })
 }

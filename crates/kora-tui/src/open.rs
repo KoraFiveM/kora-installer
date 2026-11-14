@@ -62,14 +62,53 @@ pub fn open_command(os: OsKind, target: &Path, root: &Path) -> Result<OpenComman
     Ok(OpenCommand { program: program.into(), args })
 }
 
+/// Command that opens a local `http://localhost:<port>/` or `http://127.0.0.1:<port>/` URL in the default browser.
+pub fn open_url_command(os: OsKind, url: &str) -> Result<OpenCommand, String> {
+    let ok_host = ["http://localhost:", "http://127.0.0.1:", "http://localhost/", "http://127.0.0.1/"].iter().any(|p| url.starts_with(p));
+    if !ok_host || url.chars().any(|c| c.is_control() || c.is_whitespace() || c == '"' || c == '&' || c == '^' || c == '|' || c == '<' || c == '>') {
+        return Err(format!("Only the local txAdmin address can be opened: {url}"));
+    }
+    let program = match os {
+        OsKind::Windows => "explorer.exe",
+        OsKind::Mac => "open",
+        OsKind::Other => "xdg-open",
+    };
+    Ok(OpenCommand { program: program.into(), args: vec![OsString::from(url)] })
+}
+
 /// What the screens use to open things (fake-able in tests).
 pub trait Opener {
     fn open(&mut self, target: &Path, root: &Path) -> Result<(), String>;
+    /// Open a (local) web address in the default browser.
+    fn open_url(&mut self, url: &str) -> Result<(), String> {
+        Err(format!("Open this in your browser: {url}"))
+    }
 }
 
 pub struct SystemOpener;
 
+fn spawn_quiet(cmd: &OpenCommand) -> bool {
+    match std::process::Command::new(&cmd.program).args(&cmd.args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
+        Ok(mut c) => {
+            std::thread::spawn(move || {
+                let _ = c.wait();
+            });
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 impl Opener for SystemOpener {
+    fn open_url(&mut self, url: &str) -> Result<(), String> {
+        let cmd = open_url_command(OsKind::current(), url)?;
+        if spawn_quiet(&cmd) {
+            Ok(())
+        } else {
+            Err(format!("Couldn't open the browser automatically. Open this yourself: {url}"))
+        }
+    }
+
     fn open(&mut self, target: &Path, root: &Path) -> Result<(), String> {
         let cmd = open_command(OsKind::current(), target, root)?;
         let child = std::process::Command::new(&cmd.program)
@@ -156,6 +195,16 @@ mod tests {
 
     fn root() -> PathBuf {
         if cfg!(windows) { PathBuf::from("C:\\Kora\\my server & co") } else { PathBuf::from("/srv/kora/my server & co") }
+    }
+
+    #[test]
+    fn only_local_txadmin_urls_are_opened() {
+        let c = open_url_command(OsKind::Other, "http://localhost:40120").unwrap();
+        assert_eq!((c.program.as_str(), c.args), ("xdg-open", vec![OsString::from("http://localhost:40120")]));
+        assert_eq!(open_url_command(OsKind::Windows, "http://127.0.0.1:41120/").unwrap().program, "explorer.exe");
+        for bad in ["https://evil.example/", "http://localhost.evil.example/", "http://localhost:1/ & calc", "file:///etc/passwd", "http://localhost:1/\n"] {
+            assert!(open_url_command(OsKind::Other, bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

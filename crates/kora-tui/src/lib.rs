@@ -220,7 +220,12 @@ fn run_result(screen: result::ResultScreen) -> Result<(), Box<dyn Error>> {
     let mut term = Term::new()?;
     let mut clipboard = clipboard::SystemClipboard::default();
     let mut opener = open::SystemOpener;
+    let mut server = SystemServer::default();
     loop {
+        {
+            let mut svc = result::Services { clipboard: &mut clipboard, opener: &mut opener, elevator: &mut elevator, args: &args, server: &mut server };
+            screen.tick(&mut svc);
+        }
         term.t.draw(|f| result::render_result(f, &screen))?;
         let s = term.t.size()?;
         let area = Rect::new(0, 0, s.width, s.height);
@@ -230,7 +235,11 @@ fn run_result(screen: result::ResultScreen) -> Result<(), Box<dyn Error>> {
             let _ = out.write_all(seq.as_bytes());
             let _ = out.flush();
         }
-        let mut svc = result::Services { clipboard: &mut clipboard, opener: &mut opener, elevator: &mut elevator, args: &args };
+        let mut svc = result::Services { clipboard: &mut clipboard, opener: &mut opener, elevator: &mut elevator, args: &args, server: &mut server };
+        // While a start is running, wake up often to show its progress.
+        if screen.is_busy() && !event::poll(std::time::Duration::from_millis(250))? {
+            continue;
+        }
         match event::read()? {
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if screen.handle_key(k, &mut svc) {
@@ -248,6 +257,7 @@ fn run_result(screen: result::ResultScreen) -> Result<(), Box<dyn Error>> {
 }
 
 use std::io;
+use std::sync::mpsc;
 
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
@@ -311,5 +321,49 @@ mod tests {
         t.draw(draw_goodbye).unwrap();
         let s = format!("{:?}", t.backend().buffer());
         assert!(s.contains("Press any key"));
+    }
+}
+
+/// Starts/stops the real server for the final screen: a start runs on its own thread and reports
+/// progress through a channel; a stop goes to the OS service or to the detached process.
+#[derive(Default)]
+struct SystemServer {
+    rx: Option<mpsc::Receiver<result::ServerMsg>>,
+}
+
+impl result::ServerCtl for SystemServer {
+    fn start(&mut self, name: &str) {
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+        let name = name.to_string();
+        std::thread::spawn(move || {
+            let p = tx.clone();
+            let mut progress = move |m: &str, _f: f32| {
+                let _ = p.send(result::ServerMsg::Progress(m.to_string()));
+            };
+            let msg = match kora_core::launch::start_named(&name, &mut progress) {
+                Ok(r) => result::ServerMsg::Finished(r),
+                Err(e) => result::ServerMsg::Failed(format!("Could not start the server: {e}")),
+            };
+            let _ = tx.send(msg);
+        });
+    }
+
+    fn poll(&mut self) -> Vec<result::ServerMsg> {
+        let Some(rx) = &self.rx else { return vec![] };
+        let v: Vec<_> = rx.try_iter().collect();
+        if v.iter().any(|m| !matches!(m, result::ServerMsg::Progress(_))) {
+            self.rx = None;
+        }
+        v
+    }
+
+    fn stop(&mut self, name: &str) -> Result<(), String> {
+        use kora_core::installer::host;
+        use kora_core::service::{ControlAction, ServiceState};
+        match host::service_state(name) {
+            Ok(ServiceState::NotInstalled) | Err(_) => kora_core::launch::stop_named_detached(name).map(|_| ()),
+            Ok(_) => host::service_control(name, ControlAction::Stop).map_err(|e| format!("Could not stop the service: {e}")),
+        }
     }
 }

@@ -477,6 +477,7 @@ impl InstallStep {
             "system.service" => self.service(),
             "system.schedule" => self.schedule(),
             "finalize" => self.finalize(),
+            "launch" => self.launch(),
             other => err(format!("unknown step {other}")),
         }
     }
@@ -869,9 +870,9 @@ impl InstallStep {
                 io(std::fs::create_dir_all(&sdir), "cannot create the secrets folder")?;
                 let f = sdir.join("txadmin-admin.txt");
                 txadmin::write_file(&f, &txadmin::local_admin_note(username, password, req.ports.txadmin), true).map_err(|e| InstallError(e.to_string()))?;
+                // The password itself is never put in a note or log: it is in the file, and the final screen shows it.
                 ctx.note(format!(
-                    "txAdmin login (no Cfx.re account was linked): user '{username}', password '{}'. Saved in {}. Change it after the first login.",
-                    password.expose(),
+                    "txAdmin login (no Cfx.re account was linked): user '{username}', password in {}. Change it after the first login.",
                     f.display()
                 ));
             }
@@ -1018,6 +1019,21 @@ impl InstallStep {
         ctx.update_created(|c| c.update_timer = true)?;
         service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         Ok(format!("Auto-update scheduled {}", sched.describe()))
+    }
+
+    /// Last step: start the server and wait until txAdmin answers. A server that does not come up is
+    /// reported (detail + outcome), never an error: the install itself succeeded and must not roll back.
+    fn launch(&self) -> Result<String> {
+        let ctx = &*self.ctx;
+        let spec = crate::launch::Spec { name: ctx.req.name.clone(), dir: ctx.req.dir.clone(), game_port: ctx.req.ports.game, txadmin_port: ctx.req.ports.txadmin };
+        let report = crate::launch::start(&crate::launch::SystemEnv::default(), &spec, &mut |m, f| ctx.emit("launch", StepStatus::Running, m, f));
+        let detail = match report.problem {
+            None if report.game_listening => "Your server is running (txAdmin is up and the game port is listening)".to_string(),
+            None => "txAdmin is up; the game port is not listening yet".to_string(),
+            Some(_) => format!("Not running: {}", report.message),
+        };
+        ctx.shared.lock().unwrap().launch = Some(report);
+        Ok(detail)
     }
 
     fn finalize(&self) -> Result<String> {
@@ -1189,6 +1205,11 @@ impl InstallStep {
                     let _ = std::fs::remove_file(registry::server_file_path(&ctx.req.dir));
                 }
                 Ok("Removed from the server registry".into())
+            }
+            "launch" => {
+                let spec = crate::launch::Spec { name: ctx.req.name.clone(), dir: ctx.req.dir.clone(), game_port: ctx.req.ports.game, txadmin_port: ctx.req.ports.txadmin };
+                let stopped = crate::launch::stop_detached(&crate::launch::SystemEnv::default(), &spec);
+                Ok(if stopped { "Stopped the server".into() } else { "Nothing was running".into() })
             }
             _ => Ok("Nothing to undo".into()),
         }
