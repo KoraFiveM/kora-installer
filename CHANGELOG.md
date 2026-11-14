@@ -3,7 +3,7 @@
 All notable changes to Kora Installer. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-11-14
 
 First broadly usable build. Tested on Linux; the Windows build is CI-tested and real Windows runs
 have started, so expect rough edges there. See `RELEASE_NOTES.md` for known gaps.
@@ -35,6 +35,8 @@ have started, so expect rough edges there. See `RELEASE_NOTES.md` for known gaps
 - The FXServer folder is shown with the platform's path separators.
 
 ### Fixed
+- Port check: a port held only on the loopback address (for example by an existing MariaDB) is now seen as in use on Windows.
+- Windows: MariaDB install failed with "no checksum listed" (archive.mariadb.org prefixes names with `./`) and with a FATAL from `mariadb-install-db` (a `--config` file that did not exist).
 - Windows: `sc start` no longer fails with error 1053.
 - Windows: renames are retried after extract/clone/copy (antivirus holds new files); git long paths enabled.
 - Windows: firewall detection on non-English systems; git/gh found right after winget installs them; PATH refreshed after winget; port-reserved hint.
