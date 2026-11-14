@@ -265,8 +265,24 @@ enum Command {
         /// Registry name.
         server: String,
     },
-    /// Remove Kora system changes (service, timers, firewall rules, registry entry).
-    Uninstall,
+    /// Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry).
+    /// Asks before each item; server folders and databases are kept unless you say otherwise.
+    Uninstall {
+        /// Only this server (registry name or folder); default: every registered server.
+        server: Option<String>,
+        /// Show everything that would be removed and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Do not ask: remove the system changes, keep server folders and databases.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Also delete the server folders (only what Kora created in them).
+        #[arg(long)]
+        delete_files: bool,
+        /// Also drop the databases and database users Kora created.
+        #[arg(long)]
+        delete_databases: bool,
+    },
 }
 
 /// Plain printing sink.
@@ -607,6 +623,65 @@ fn delete(server: &str, keep_files: bool, keep_db: bool, yes: bool) -> i32 {
     }
 }
 
+/// Asks on the terminal; an empty answer takes the default.
+struct Terminal;
+
+impl installer::uninstall::Asker for Terminal {
+    fn ask(&mut self, question: &str, default_yes: bool) -> bool {
+        use std::io::Write;
+        print!("{question} {} ", if default_yes { "[Y/n]" } else { "[y/N]" });
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).is_err() {
+            return false;
+        }
+        match line.trim().to_ascii_lowercase().as_str() {
+            "" => default_yes,
+            "y" | "yes" => true,
+            _ => false,
+        }
+    }
+}
+
+fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: bool, delete_databases: bool) -> i32 {
+    use installer::uninstall as un;
+    if !yes && !dry_run && !std::io::stdin().is_terminal() {
+        eprintln!("error: `kora uninstall` asks before each removal and needs a terminal. Use --dry-run to preview, or --yes to remove the system changes without questions (folders and databases are kept).");
+        return 2;
+    }
+    let mut reg = match registry::Registry::load() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: cannot read the server registry: {e}");
+            return 1;
+        }
+    };
+    let admin = installer::is_admin();
+    if !admin && !dry_run {
+        eprintln!("note: not running as administrator/root: removing services, firewall rules and accounts will be refused. Re-run with sudo / as Administrator.");
+    }
+    let runner = kora_core::service::SystemRunner;
+    let env = un::Env { platform: kora_core::service::Platform::current(), runner: &runner, admin };
+    let opts = un::Options { dry_run, only: server, delete_files, delete_databases };
+    let mut say = |s: &str| println!("{s}");
+    let mut delete = |dir: &std::path::Path, o: &RollbackOptions| installer::rollback(dir, o, &mut Printer { last: None });
+    let mut save = |r: &registry::Registry| r.save_or_clean_to(&registry::registry_path());
+    let summary = if yes {
+        un::run(&mut reg, &opts, &env, &mut un::Defaults, &mut say, &mut delete, &mut save)
+    } else {
+        un::run(&mut reg, &opts, &env, &mut Terminal, &mut say, &mut delete, &mut save)
+    };
+    if dry_run {
+        println!("\nDry run: nothing was changed.");
+        return 0;
+    }
+    println!("\nRemoved: {}. Kept: {}. Failed: {}.", summary.removed.len(), summary.kept.len(), summary.failed.len());
+    for f in &summary.failed {
+        eprintln!("  failed: {f}");
+    }
+    i32::from(!summary.ok())
+}
+
 fn main() {
     let cli = Cli::parse();
     let code = match cli.command {
@@ -626,7 +701,7 @@ fn main() {
         Some(Command::Start { server }) => control(&server, kora_core::service::ControlAction::Start),
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
-        Some(Command::Uninstall) => not_implemented("uninstall"),
+        Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
     };
     std::process::exit(code);
 }

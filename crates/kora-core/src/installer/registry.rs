@@ -80,6 +80,23 @@ impl Registry {
         self.save_to(&registry_path())
     }
 
+    /// Like [`save_to`](Self::save_to), but when no server is left the (empty) registry file is
+    /// deleted, and its folder too if that leaves it empty.
+    pub fn save_or_clean_to(&self, path: &Path) -> std::io::Result<()> {
+        if !self.servers.is_empty() {
+            return self.save_to(path);
+        }
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        }
+        if let Some(d) = path.parent() {
+            let _ = fs::remove_dir(d); // only succeeds when empty
+        }
+        Ok(())
+    }
+
     /// Insert or replace by name.
     pub fn upsert(&mut self, e: ServerEntry) {
         self.servers.retain(|s| s.name != e.name);
@@ -180,5 +197,9 @@ mod tests {
         assert!(r2.find("/x").is_some());
         let mut r2 = r2;
         assert!(r2.remove("a") && !r2.remove("a"));
+        // an emptied registry disappears (with its folder, when nothing else is in it)
+        r2.save_or_clean_to(&p).unwrap();
+        assert!(!p.exists() && !p.parent().unwrap().exists());
+        r2.save_or_clean_to(&p).unwrap(); // already gone: fine
     }
 }

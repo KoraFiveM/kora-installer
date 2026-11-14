@@ -19,6 +19,7 @@ pub mod registry;
 mod steps;
 pub mod system;
 pub mod types;
+pub mod uninstall;
 
 pub use types::*;
 
@@ -361,6 +362,26 @@ impl Ctx {
 
 pub(crate) fn meta_dir(dir: &Path) -> PathBuf {
     dir.join(".kora")
+}
+
+/// A server's record of what Kora created (`None` when the folder has no readable record).
+pub fn load_created_from(dir: &Path) -> Option<Created> {
+    std::fs::read(meta_dir(dir).join("created.json")).ok().and_then(|b| serde_json::from_slice(&b).ok())
+}
+
+/// The install request saved in a server folder (no secrets), with `dir` corrected to where it is now.
+pub fn load_request_from(dir: &Path) -> Option<InstallRequest> {
+    let mut r: InstallRequest = serde_json::from_slice(&std::fs::read(meta_dir(dir).join("request.json")).ok()?).ok()?;
+    r.dir = dir.to_path_buf();
+    Some(r)
+}
+
+pub(crate) fn save_created_to(dir: &Path, c: &Created) -> Result<()> {
+    let p = meta_dir(dir).join("created.json");
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(c).map_err(|e| InstallError(e.to_string()))?)
+        .and_then(|_| std::fs::rename(&tmp, &p))
+        .map_err(|e| InstallError(format!("cannot write install state: {e}")))
 }
 
 fn new_ctx(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<ProgressEvent>, keep_db: bool, keep_files: bool) -> Arc<Ctx> {
