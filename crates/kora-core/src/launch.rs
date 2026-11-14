@@ -131,9 +131,30 @@ pub fn port_clash(log: &str) -> bool {
     ["address already in use", "eaddrinuse", "only one usage of each socket address", "failed to bind", "could not bind"].iter().any(|k| l.contains(k))
 }
 
+/// Remove terminal colour codes (`ESC [ ... letter`) from a log line.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\u{1b}' {
+            if it.peek() == Some(&'[') {
+                it.next();
+                for d in it.by_ref() {
+                    if d.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn last_lines(text: &str, n: usize) -> Vec<String> {
-    let v: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
-    v[v.len().saturating_sub(n)..].iter().map(|s| s.to_string()).collect()
+    let v: Vec<String> = text.lines().map(|l| strip_ansi(l).trim_end().to_string()).filter(|l| !l.trim().is_empty()).collect();
+    v[v.len().saturating_sub(n)..].to_vec()
 }
 
 /// Is a server of this folder alive (pid file, then service)? Cleans up a stale pid file.

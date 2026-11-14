@@ -648,10 +648,18 @@ impl<'a> ServiceManager<'a> {
         let io = |e: io::Error| ServiceError::Command { command: "status".into(), detail: e.to_string() };
         Ok(match self.platform {
             Platform::Linux => {
-                let o = self.runner.run("systemctl", &["is-active".into(), svc]).map_err(io)?;
+                let o = self.runner.run("systemctl", &["is-active".into(), svc.clone()]).map_err(io)?;
                 match o.stdout.trim() {
                     "active" | "activating" => ServiceState::Running,
-                    "inactive" | "failed" | "deactivating" => ServiceState::Stopped,
+                    // `is-active` also says "inactive" for a unit that does not exist: ask for its load state.
+                    "inactive" | "failed" | "deactivating" => {
+                        let ls = self.runner.run("systemctl", &["show".into(), "-p".into(), "LoadState".into(), "--value".into(), svc]).map_err(io)?;
+                        if ls.stdout.trim() == "not-found" {
+                            ServiceState::NotInstalled
+                        } else {
+                            ServiceState::Stopped
+                        }
+                    }
                     "" | "unknown" => ServiceState::NotInstalled,
                     other => ServiceState::Other(other.to_string()),
                 }

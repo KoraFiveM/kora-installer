@@ -69,10 +69,13 @@ jobs:
         run: |
           cargo test --locked -p kora-core real_windows_scheduled_task -- --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'scheduled task test failed' }
+      - name: "7. Install --start: the installer starts FXServer, txAdmin answers, it outlives the installer, kora stop/start/delete"
+        run: ./scripts/smoke/07-start.ps1
       - name: Collect logs
         if: always()
         run: |
-          foreach ($p in 'C:\kora-smoke\srv\.kora', "$env:LOCALAPPDATA\Kora") { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File | Select-Object -First 40 FullName } }
+          foreach ($p in 'C:\kora-smoke\srv\.kora', 'C:\kora-smoke\srv-start\.kora', "$env:LOCALAPPDATA\Kora") { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File | Select-Object -First 40 FullName } }
+          if (Test-Path 'C:\kora-smoke\srv-start\.kora\server.log') { Get-Content 'C:\kora-smoke\srv-start\.kora\server.log' -Tail 60 }
 
   mariadb:
     name: "MariaDB: existing server, then Kora's own (--db install)"

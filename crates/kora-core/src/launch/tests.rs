@@ -330,6 +330,7 @@ fn log_line_matchers() {
     assert!(port_clash("bind: Address already in use"));
     assert!(!port_clash("all fine"));
     assert_eq!(last_lines("a\n\nb\nc\n", 2), ["b", "c"]);
+    assert_eq!(last_lines("\x1b[38;5;66m[ svadhesive] \x1b[0m\x1b[0mAuthenticating\n", 5), ["[ svadhesive] Authenticating"]);
 }
 
 #[test]

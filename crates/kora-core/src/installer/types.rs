@@ -162,6 +162,9 @@ pub struct InstallOutcome {
     /// Started and answering (txAdmin up, no problem).
     #[serde(default)]
     pub running: bool,
+    /// txAdmin answered on its port (true even when the game server was refused, e.g. a bad licence).
+    #[serde(default)]
+    pub txadmin_up: bool,
     #[serde(default)]
     pub game_listening: bool,
     /// Plain-language reason it is not running (rejected licence, crash, port clash, timeout...).

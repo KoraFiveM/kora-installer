@@ -121,6 +121,11 @@ fn status_linux_and_windows() {
     let r = FakeRunner::default();
     r.respond("is-active", 3, "inactive\n");
     assert_eq!(ServiceManager::new(Platform::Linux, &r).status(&server()).unwrap(), ServiceState::Stopped);
+    // `systemctl is-active` says "inactive" for a unit that does not exist at all: that is "not installed".
+    let r = FakeRunner::default();
+    r.respond("is-active", 3, "inactive\n");
+    r.respond("LoadState", 0, "not-found\n");
+    assert_eq!(ServiceManager::new(Platform::Linux, &r).status(&server()).unwrap(), ServiceState::NotInstalled);
     let r = FakeRunner::default();
     r.respond("sc.exe query", 0, "STATE : 4  RUNNING");
     assert!(ServiceManager::new(Platform::Windows, &r).is_running(&server()).unwrap());

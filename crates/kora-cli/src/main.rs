@@ -464,6 +464,9 @@ fn print_outcome(out: &installer::InstallOutcome, dry: bool) {
             println!("  server:  RUNNING - txAdmin is up on {}{}", out.txadmin_url, if out.game_listening { ", the game port is listening" } else { " (the game port is not listening yet)" });
         } else if let Some(p) = &out.launch_problem {
             println!("  server:  NOT RUNNING - {p}");
+            if out.txadmin_up {
+                println!("  txAdmin is up on {} (the game server itself did not start)", out.txadmin_url);
+            }
             for l in &out.log_tail {
                 println!("    | {l}");
             }

@@ -500,6 +500,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
         name: req.name.clone(),
         start_attempted: launch.is_some(),
         running: launch.as_ref().is_some_and(|l| l.running()),
+        txadmin_up: launch.as_ref().is_some_and(|l| l.txadmin_up),
         game_listening: launch.as_ref().is_some_and(|l| l.game_listening),
         launch_problem: launch.as_ref().and_then(|l| l.problem.map(|_| l.message.clone())),
         log_tail: launch.as_ref().map(|l| l.log_tail.clone()).unwrap_or_default(),
