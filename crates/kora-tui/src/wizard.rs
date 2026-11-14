@@ -135,6 +135,7 @@ pub struct Wizard {
     pub limited: bool,
     /// Result of the last restart attempt, shown in the body.
     pub elev_note: Option<String>,
+    reasons_cache: std::cell::RefCell<Option<Vec<String>>>,
     /// Friendly confirmation shown in the footer (e.g. "Pasted 14 characters"); never holds field content.
     pub status: Option<String>,
     clipboard: Box<dyn Clipboard>,
@@ -325,6 +326,7 @@ impl Wizard {
             elevator: elev::system_elevator(),
             limited: false,
             elev_note: None,
+            reasons_cache: Default::default(),
             status: None,
             clipboard: Box::new(SystemClipboard::default()),
             ports: env,
@@ -469,6 +471,7 @@ impl Wizard {
 
     /// Sync `selected` from stored answers when entering a screen.
     fn load_selection(&mut self) {
+        self.reasons_cache.take();
         self.focus = 0;
         if self.screen == Screen::Ports {
             self.prefill_free_ports();
@@ -1067,7 +1070,8 @@ impl Wizard {
         if !self.elevate_offer {
             return vec![];
         }
-        elev::admin_reasons(&self.build_request())
+        // Looking for a database server takes a moment: do it once per visit to the screen.
+        self.reasons_cache.borrow_mut().get_or_insert_with(|| elev::admin_reasons(&self.build_request())).clone()
     }
 
     /// Validate the current screen and advance. Sets `error` and stays on failure.
@@ -2311,10 +2315,11 @@ mod tests {
         let (mut w, calls) = ewiz(false, Err(ElevateError::Declined));
         w.handle_key(key(KeyCode::Down));
         w.handle_key(key(KeyCode::Enter)); // limited
-        w.db = DbChoice::InstallIfMissing; // user later ticks "install the database"
+        w.db = DbChoice::Skip;
+        w.service = true; // user later ticks "start automatically"
         w.screen = Screen::Review;
         let t = rendered(&w);
-        assert!(t.contains("Kora needs your permission to:") && t.contains("install the database server") && t.contains("[ Restart with permission ]"), "{t}");
+        assert!(t.contains("Kora needs your permission to:") && t.contains("register the server as a") && t.contains("[ Restart with permission ]"), "{t}");
         w.handle_key(key(KeyCode::Enter)); // Install is blocked
         assert_eq!((w.state(), w.screen), (WizardState::Running, Screen::Review));
         assert!(w.error.as_deref().unwrap().contains("permission"));

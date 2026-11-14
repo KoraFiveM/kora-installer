@@ -103,7 +103,7 @@ pub fn run_install_wizard_with(
         }
         wizard::WizardState::Done => Ok(Some(w.build_request())),
         _ => {
-            if should_pause_on_exit(cfg!(windows), console_owned()) {
+            if pause_now() {
                 wait_key(&mut term, &mut |f| draw_goodbye(f))?;
             }
             Ok(None)
@@ -111,22 +111,21 @@ pub fn run_install_wizard_with(
     }
 }
 
-static CONSOLE_OWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// The CLI tells us when this process owns its console window (it closes when we exit), e.g. an
-/// elevated copy that Windows opened for us.
-pub fn set_console_owned(owned: bool) {
-    CONSOLE_OWNED.store(owned, std::sync::atomic::Ordering::Relaxed);
+/// Pure rule: on Windows, when the console window is ours (or our elevated copy's), wait for a
+/// key press before exiting so the window does not vanish with the message in it.
+pub fn should_pause_on_exit(windows: bool, owns_console: bool, relaunched: bool, stdin_tty: bool, stdout_tty: bool) -> bool {
+    kora_core::elevate::should_pause(windows, owns_console, relaunched, stdin_tty, stdout_tty)
 }
 
-fn console_owned() -> bool {
-    CONSOLE_OWNED.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-/// Pure rule: on Windows, when the console window belongs to this process, wait for a key press
-/// before exiting so the window does not vanish with the message in it.
-pub fn should_pause_on_exit(windows: bool, owns_console: bool) -> bool {
-    windows && owns_console
+fn pause_now() -> bool {
+    use std::io::IsTerminal;
+    should_pause_on_exit(
+        cfg!(windows),
+        kora_core::elevate::owns_console(),
+        kora_core::elevate::was_relaunched(),
+        io::stdin().is_terminal(),
+        io::stdout().is_terminal(),
+    )
 }
 
 fn draw_goodbye(f: &mut ratatui::Frame) {
@@ -140,7 +139,7 @@ fn draw_goodbye(f: &mut ratatui::Frame) {
 
 /// Call right before the program ends: waits for a key press when the window would vanish.
 pub fn pause_before_exit() {
-    if !should_pause_on_exit(cfg!(windows), console_owned()) {
+    if !pause_now() {
         return;
     }
     if let Ok(mut term) = Term::new() {
@@ -294,10 +293,11 @@ mod tests {
 
     #[test]
     fn pause_only_on_windows_when_the_window_is_ours() {
-        assert!(should_pause_on_exit(true, true));
-        assert!(!should_pause_on_exit(true, false), "a console that stays open needs no pause");
-        assert!(!should_pause_on_exit(false, true));
-        assert!(!should_pause_on_exit(false, false));
+        assert!(should_pause_on_exit(true, true, false, true, true));
+        assert!(should_pause_on_exit(true, false, true, true, true), "our elevated copy");
+        assert!(!should_pause_on_exit(true, false, false, true, true), "a console that stays open needs no pause");
+        assert!(!should_pause_on_exit(false, true, true, true, true));
+        assert!(!should_pause_on_exit(true, true, true, false, true), "piped input: never wait");
     }
 
     #[test]
