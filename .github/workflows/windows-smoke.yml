@@ -35,6 +35,8 @@ jobs:
         run: ./scripts/smoke/03-install.ps1
       - name: "4. Service + firewall: start/stop/restart, txAdmin answers, uninstall removes everything"
         run: ./scripts/smoke/04-service.ps1
+      - name: "5. MariaDB: existing MySQL server, then Kora's own MariaDB (--db install) and cleanup"
+        run: ./scripts/smoke/05-mariadb.ps1
       - name: "6. Dev mode dry run"
         run: ./scripts/smoke/06-dev-dry-run.ps1
       - name: Collect logs

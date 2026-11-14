@@ -98,12 +98,11 @@ impl Hooks {
 /// Are we running with administrator / root rights?
 pub fn is_admin() -> bool {
     if cfg!(windows) {
-        std::process::Command::new("net")
-            .arg("session")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
+        // `net session` needs the Server service (often disabled); the token's integrity level does not.
+        std::process::Command::new("whoami")
+            .arg("/groups")
+            .output()
+            .map(|o| groups_show_elevated(&String::from_utf8_lossy(&o.stdout)))
             .unwrap_or(false)
     } else {
         std::process::Command::new("id")
@@ -112,6 +111,11 @@ pub fn is_admin() -> bool {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
             .unwrap_or(false)
     }
+}
+
+/// `whoami /groups` lists `S-1-16-12288` (High mandatory level) only for an elevated token.
+pub fn groups_show_elevated(whoami_groups: &str) -> bool {
+    whoami_groups.contains("S-1-16-12288") || whoami_groups.contains("S-1-16-16384")
 }
 
 /// Lowercase slug usable for service names, firewall rule names and file names.
@@ -895,5 +899,14 @@ mod tests {
         assert_eq!(t, Path::new("srv").join("main").join("artifacts").join("38621").display().to_string());
         assert!(!(t.contains('/') && t.contains('\\')), "mixed separators: {t}");
         assert!(fxserver_dir_text(&d, None).ends_with("<build>"));
+    }
+
+    #[test]
+    fn elevation_is_read_from_the_high_integrity_group() {
+        let elevated = "Mandatory Label\\High Mandatory Level   Label   S-1-16-12288   Mandatory group";
+        let normal = "Mandatory Label\\Medium Mandatory Level   Label   S-1-16-8192   Mandatory group\nBUILTIN\\Administrators  Alias  S-1-5-32-544  Group used for deny only";
+        assert!(groups_show_elevated(elevated));
+        assert!(!groups_show_elevated(normal), "a non-elevated administrator is not elevated");
+        assert!(!groups_show_elevated(""));
     }
 }

@@ -201,3 +201,22 @@ fn cfg_comments_have_no_semicolon() {
         }
     }
 }
+
+#[test]
+fn secret_acl_drops_inheritance_and_names_only_the_owner_admins_and_system() {
+    let a = secret_acl_args(Path::new("C:\\kora\\secrets.cfg"), "PC\\alice");
+    assert_eq!(a[0], "C:\\kora\\secrets.cfg");
+    assert_eq!(a[1], "/inheritance:r");
+    assert!(a.contains(&"PC\\alice:(F)".to_string()));
+    assert!(a.contains(&"*S-1-5-18:(F)".to_string()) && a.contains(&"*S-1-5-32-544:(F)".to_string()));
+    assert!(!a.iter().any(|x| x.contains("Users") || x.contains("Everyone") || x.contains("S-1-1-0") || x.contains("S-1-5-32-545")));
+}
+
+#[cfg(unix)]
+#[test]
+fn secret_files_stay_0600_on_unix() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    write_file(&d.path().join("secrets.cfg"), "x", true).unwrap();
+    assert_eq!(std::fs::metadata(d.path().join("secrets.cfg")).unwrap().permissions().mode() & 0o777, 0o600);
+}

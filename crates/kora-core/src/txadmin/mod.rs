@@ -318,8 +318,8 @@ pub fn txadmin_env(data_dir: &Path, txadmin_port: u16) -> Vec<(String, String)> 
     ]
 }
 
-/// Write `contents` atomically (temp + rename); `secret` files are created 0600 on unix.
-/// On Windows the ACL restriction is applied by the (separate) secrets layer.
+/// Write `contents` atomically (temp + rename); `secret` files are created 0600 on unix and, on
+/// Windows, get their inherited permissions removed (only this user, Administrators and SYSTEM).
 pub fn write_file(path: &Path, contents: &str, secret: bool) -> Result<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p)?;
@@ -334,14 +334,56 @@ pub fn write_file(path: &Path, contents: &str, secret: bool) -> Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(if secret { 0o600 } else { 0o644 });
     }
-    #[cfg(not(unix))]
-    let _ = secret;
     let mut f = o.open(&tmp)?;
+    // Windows: lock the (still empty) file down before the secret is written into it.
+    if secret && cfg!(windows) {
+        if let Err(e) = restrict_secret_file(&tmp) {
+            drop(f);
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+    }
     f.write_all(contents.as_bytes())?;
     f.sync_all()?;
     drop(f);
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// `icacls` arguments that leave `path` to `user`, Administrators and SYSTEM (well-known SIDs, so any
+/// Windows language works) and drop the permissions inherited from the folder (which include `Users`).
+pub fn secret_acl_args(path: &Path, user: &str) -> Vec<String> {
+    vec![
+        path.to_string_lossy().into_owned(),
+        "/inheritance:r".into(),
+        "/grant:r".into(),
+        format!("{user}:(F)"),
+        "*S-1-5-18:(F)".into(),
+        "*S-1-5-32-544:(F)".into(),
+    ]
+}
+
+/// The signed-in account as `DOMAIN\name` (what icacls accepts).
+fn current_account() -> Option<String> {
+    let name = std::env::var("USERNAME").ok().filter(|n| !n.is_empty())?;
+    let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || " ._-$".contains(c));
+    if !ok(&name) {
+        return None;
+    }
+    match std::env::var("USERDOMAIN").ok().filter(|d| ok(d)) {
+        Some(d) => Some(format!("{d}\\{name}")),
+        None => Some(name),
+    }
+}
+
+fn restrict_secret_file(path: &Path) -> Result<()> {
+    let user = current_account().ok_or_else(|| TxError::Invalid { field: "account", reason: "cannot tell which Windows account is running (USERNAME)".into() })?;
+    let out = std::process::Command::new("icacls").args(secret_acl_args(path, &user)).output()?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(TxError::Invalid { field: "permissions", reason: format!("could not restrict permissions on {}: {}", path.display(), String::from_utf8_lossy(&out.stdout).trim()) })
+    }
 }
 
 /// Write `server.cfg`, `permissions.cfg` and `secrets.cfg` into the FXServer data dir.

@@ -208,6 +208,60 @@ pub fn run(
     sum
 }
 
+/// Machine-wide: the MariaDB Kora installed itself (Windows). Offered only when the operator asked
+/// for databases to go (`--delete-databases`) and no remaining registered server still keeps a
+/// database in it. `remove` does the real work (service + folder); `record` is Kora's own record.
+#[allow(clippy::too_many_arguments)]
+pub fn mariadb_cleanup(
+    reg: &Registry,
+    opts: &Options,
+    admin: bool,
+    record: Option<(super::windows_db::Record, std::path::PathBuf)>,
+    ask: &mut dyn Asker,
+    say: &mut dyn FnMut(&str),
+    remove: &mut dyn FnMut(&super::windows_db::Record, &Path) -> super::Result<()>,
+    sum: &mut Summary,
+) {
+    let Some((rec, base)) = record else { return };
+    let title = format!("the MariaDB server Kora installed (service {}, {})", rec.service, rec.root.display());
+    if !opts.delete_databases || opts.only.is_some() {
+        if !opts.dry_run {
+            say(&format!("\nKept {title}: add --delete-databases (without naming one server) to remove it."));
+        }
+        sum.kept.push("MariaDB: kept".into());
+        return;
+    }
+    let still_used: Vec<&str> = reg.servers.iter().filter(|s| s.dir.join(".kora").join("db-provision.json").is_file()).map(|s| s.name.as_str()).collect();
+    if !still_used.is_empty() {
+        say(&format!("\nKept {title}: still used by {}.", still_used.join(", ")));
+        sum.kept.push("MariaDB: kept (still in use)".into());
+        return;
+    }
+    if opts.dry_run {
+        say(&format!("\nWould remove {title}: stop and delete the Windows service and delete its folder, including every database in it."));
+        return;
+    }
+    say("");
+    if !ask.ask(&format!("Remove {title}, including every database in it?"), true) {
+        sum.kept.push("MariaDB: kept".into());
+        return;
+    }
+    if !admin {
+        sum.failed.push("MariaDB: needs administrator rights (re-run as Administrator)".into());
+        return;
+    }
+    match remove(&rec, &base) {
+        Ok(()) => {
+            sum.removed.push(format!("MariaDB service {} and its folder", rec.service));
+            say("  done: removed the MariaDB server Kora installed");
+        }
+        Err(e) => {
+            sum.failed.push(format!("MariaDB: {e}"));
+            say(&format!("  FAILED: {e}"));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::registry::{PortsRecord, ServerEntry};
@@ -438,5 +492,48 @@ mod tests {
         assert!(!r.calls().iter().any(|c| c.contains("kora-a")));
         let (s, rig) = go(&mut reg, &Options { only: Some("zzz".into()), ..Default::default() }, true, &r, &mut Defaults, &mut del);
         assert!(s == Summary::default() && rig.out[0].contains("No registered Kora server matches"));
+    }
+
+    fn rec() -> super::super::windows_db::Record {
+        super::super::windows_db::Record { service: "KoraMariaDB_ab12".into(), version: "11.4.14".into(), port: 3307, root: PathBuf::from("C:\\PD\\Kora\\mariadb\\11.4.14"), client: PathBuf::from("c.exe") }
+    }
+
+    #[test]
+    fn mariadb_goes_only_with_delete_databases_for_everything_and_when_unused() {
+        let t = tempfile::tempdir().unwrap();
+        let base = t.path().to_path_buf();
+        let reg = Registry::default();
+        let removed = std::cell::RefCell::new(Vec::new());
+        let run = |opts: Options, admin: bool, ans: bool| {
+            let mut sum = Summary::default();
+            let mut said = Vec::new();
+            mariadb_cleanup(&reg, &opts, admin, Some((rec(), base.clone())), &mut Script(vec![("Remove the MariaDB", ans)], vec![]), &mut |s| said.push(s.to_string()), &mut |r, _| { removed.borrow_mut().push(r.service.clone()); Ok(()) }, &mut sum);
+            sum
+        };
+        let s = run(Options::default(), true, true);
+        assert!(s.removed.is_empty() && s.kept.len() == 1, "kept without --delete-databases");
+        let s = run(Options { delete_databases: true, only: Some("x".into()), ..Options::default() }, true, true);
+        assert!(s.removed.is_empty(), "never when one server was named");
+        let s = run(Options { delete_databases: true, dry_run: true, ..Options::default() }, true, true);
+        assert!(s.removed.is_empty() && s.failed.is_empty());
+        let s = run(Options { delete_databases: true, ..Options::default() }, true, false);
+        assert!(s.removed.is_empty(), "declined");
+        let s = run(Options { delete_databases: true, ..Options::default() }, false, true);
+        assert_eq!(s.failed.len(), 1, "needs admin");
+        assert!(removed.borrow().is_empty());
+        let s = run(Options { delete_databases: true, ..Options::default() }, true, true);
+        assert_eq!(s.removed.len(), 1);
+        assert_eq!(*removed.borrow(), vec!["KoraMariaDB_ab12".to_string()]);
+    }
+
+    #[test]
+    fn mariadb_is_kept_while_a_server_still_has_a_database_in_it() {
+        let t = tempfile::tempdir().unwrap();
+        let e = server(t.path(), "alpha", &created("kora-alpha", "/b"));
+        std::fs::write(e.dir.join(".kora/db-provision.json"), b"{}").unwrap();
+        let reg = Registry { servers: vec![e] };
+        let mut sum = Summary::default();
+        mariadb_cleanup(&reg, &Options { delete_databases: true, ..Options::default() }, true, Some((rec(), t.path().to_path_buf())), &mut Defaults, &mut |_| {}, &mut |_, _| panic!("must not remove"), &mut sum);
+        assert!(sum.removed.is_empty() && sum.kept.iter().any(|k| k.contains("in use")));
     }
 }

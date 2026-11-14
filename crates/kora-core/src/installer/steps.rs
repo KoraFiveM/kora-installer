@@ -107,6 +107,38 @@ fn db_client() -> String {
     "mysql".into()
 }
 
+fn winget_available() -> bool {
+    std::process::Command::new("winget").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// PATH as Windows would build it for a new process: machine entries, then the user's, then ours.
+pub(crate) fn merged_windows_path(machine: &str, user: &str, current: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    machine
+        .split(';')
+        .chain(user.split(';'))
+        .chain(current.split(';'))
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && seen.insert(p.to_ascii_lowercase()))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// Re-read the machine and user PATH from the registry into this process (after winget installs git).
+fn refresh_windows_path() {
+    let get = |scope: &str| {
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &format!("[Environment]::GetEnvironmentVariable('Path','{scope}')")])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    };
+    let merged = merged_windows_path(&get("Machine"), &get("User"), &std::env::var("PATH").unwrap_or_default());
+    if !merged.is_empty() {
+        std::env::set_var("PATH", merged);
+    }
+}
+
 /// Where the MariaDB / MySQL installers put their command line client (Windows).
 fn windows_client_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
@@ -478,6 +510,13 @@ impl InstallStep {
         let mut tools = git::detect(&r);
         if tools.git.is_none() || (dev && tools.gh.is_none()) {
             let plan = git::plan_bootstrap(git::Os::current(), &tools).map_err(|e| InstallError(e.to_string()))?;
+            if cfg!(windows) && !plan.is_empty() && !winget_available() {
+                return err(format!(
+                    "git{} is missing and winget (Windows Package Manager) is not available to install it. Install it yourself: Git for Windows from https://git-scm.com/download/win{} and run the install again.",
+                    if dev { " / the GitHub CLI" } else { "" },
+                    if dev { ", GitHub CLI from https://cli.github.com" } else { "" }
+                ));
+            }
             if !ctx.admin {
                 let what: Vec<String> = plan.iter().map(|s| format!("- {}", s.description)).collect();
                 return err(format!(
@@ -494,9 +533,13 @@ impl InstallStep {
                     return err(format!("{} failed: {}", s.description, o.stderr.trim()));
                 }
             }
+            if cfg!(windows) {
+                // winget changes the machine PATH, which this running program never sees: re-read it.
+                refresh_windows_path();
+            }
             tools = git::detect(&r);
             if tools.git.is_none() {
-                return err("git is still missing after installation");
+                return err("git was installed but this program cannot find it yet. Close this window, open a new one and run the install again.");
             }
         }
         if dev {
@@ -1213,5 +1256,11 @@ mod db_admin_tests {
         let back: DbAdmin = serde_json::from_str(&json).unwrap();
         assert_eq!(back.password, None);
         assert_eq!((back.user.as_str(), back.port), ("dba", 33061));
+    }
+
+    #[test]
+    fn refreshed_windows_path_keeps_order_and_drops_duplicates() {
+        let m = merged_windows_path("C:\\Windows;C:\\Program Files\\Git\\cmd", "C:\\Users\\a\\bin;c:\\windows", "C:\\Tools;C:\\Program Files\\Git\\cmd;");
+        assert_eq!(m, "C:\\Windows;C:\\Program Files\\Git\\cmd;C:\\Users\\a\\bin;C:\\Tools");
     }
 }

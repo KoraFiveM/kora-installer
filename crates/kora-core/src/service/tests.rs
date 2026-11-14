@@ -259,3 +259,17 @@ fn system_runner_copies_atomically_with_mode_and_only_removes_empty_dirs() {
     assert!(!dst.parent().unwrap().exists());
     rn.remove_empty_dir(dst.parent().unwrap().to_str().unwrap()).unwrap(); // already gone: fine
 }
+
+#[test]
+fn windows_service_account_can_read_the_secrets_it_needs_despite_removed_inheritance() {
+    let mut s = server();
+    s.dir = "C:\\Kora\\main\\".into();
+    let p = install_plan(&s, Platform::Windows).unwrap();
+    let lines: Vec<_> = p.steps.iter().filter_map(|s| s.command_line()).collect();
+    for f in ["secrets.cfg", "database.json"] {
+        let l = lines.iter().find(|l| l.contains(f)).unwrap_or_else(|| panic!("no grant for {f}: {lines:?}"));
+        assert_eq!(*l, format!("icacls.exe C:\\Kora\\main\\{f} /grant NT SERVICE\\kora-main:(R)"));
+    }
+    // a server without a database has no database.json: that grant must not abort the install
+    assert!(p.steps.iter().filter(|st| st.command_line().is_some_and(|l| l.contains("database.json") || l.contains("secrets.cfg"))).all(|st| st.ignore_failure));
+}

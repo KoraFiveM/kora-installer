@@ -671,6 +671,18 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
     } else {
         un::run(&mut reg, &opts, &env, &mut Terminal, &mut say, &mut delete, &mut save)
     };
+    let mut summary = summary;
+    {
+        let base = installer::windows_db::base_dir();
+        let record = base.as_ref().and_then(|b| installer::windows_db::load_record(b).map(|r| (r, b.clone())));
+        let mut say = |s: &str| println!("{s}");
+        let mut remove = |r: &installer::windows_db::Record, b: &std::path::Path| installer::windows_db::remove(r, b, &mut |m| println!("  {m}"));
+        if yes {
+            un::mariadb_cleanup(&reg, &opts, admin, record, &mut un::Defaults, &mut say, &mut remove, &mut summary);
+        } else {
+            un::mariadb_cleanup(&reg, &opts, admin, record, &mut Terminal, &mut say, &mut remove, &mut summary);
+        }
+    }
     if dry_run {
         println!("\nDry run: nothing was changed.");
         return 0;

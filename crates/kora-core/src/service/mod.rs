@@ -484,6 +484,20 @@ pub fn install_plan(server: &ManagedServer, platform: Platform) -> ServiceResult
                     "icacls.exe",
                     vec![server.dir.clone(), "/grant".into(), format!("{}:(OI)(CI)M", virtual_account(&svc))],
                 ),
+                // secrets.cfg / database.json have no inherited permissions (so `Users` cannot read them):
+                // the service account needs its own explicit read right or FXServer cannot read its license key.
+                SystemStep::run_owned(
+                    "Let the service account read the server's secrets file (and only read it)",
+                    "icacls.exe",
+                    vec![format!("{}\\secrets.cfg", server.dir.trim_end_matches(['\\', '/'])), "/grant".into(), format!("{}:(R)", virtual_account(&svc))],
+                )
+                .tolerant(),
+                SystemStep::run_owned(
+                    "Let the service account read the database login file (and only read it)",
+                    "icacls.exe",
+                    vec![format!("{}\\database.json", server.dir.trim_end_matches(['\\', '/'])), "/grant".into(), format!("{}:(R)", virtual_account(&svc))],
+                )
+                .tolerant(),
                 SystemStep::run_owned(
                     "Treat a non-zero exit as a crash so the restart rule applies",
                     "sc.exe",
