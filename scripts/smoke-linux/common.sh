@@ -11,9 +11,16 @@ export KORA_CATALOG="$REPO_ROOT/tests/fixtures/smoke-catalog.json"
 FAKE_KEY='cfxk_FAKEFAKEFAKEFAKEFAKE_smoke'
 GAME_PORT=31120
 TX_PORT=41120
-# Set KORA_SUDO=1 to run kora as root (service jobs); -E keeps KORA_HOME and friends.
-SUDO=""
-[ "${KORA_SUDO:-}" = "1" ] && SUDO="sudo -E"
+# Set KORA_SUDO=1 to run kora as root (service jobs). The environment is passed explicitly with `env`
+# because sudo-rs (Ubuntu 26.04) ignores -E.
+run_kora() {
+  if [ "${KORA_SUDO:-}" = "1" ]; then
+    sudo env "KORA_HOME=$KORA_HOME" "KORA_CATALOG=$KORA_CATALOG" "CFX_LICENSE_KEY=${CFX_LICENSE_KEY:-}" \
+      ${KORA_TEST_FAIL_HEALTH:+"KORA_TEST_FAIL_HEALTH=$KORA_TEST_FAIL_HEALTH"} "$KORA_BIN" "$@"
+  else
+    "$KORA_BIN" "$@"
+  fi
+}
 
 PASS=0
 step() { printf '\n=== %s ===\n' "$*"; }
@@ -43,7 +50,7 @@ as_root() { sudo "$@"; }
 # stdin is /dev/null and stdout is captured, so kora sees no terminal.
 kora() {
   set +e
-  OUT="$($SUDO "$KORA_BIN" "$@" </dev/null 2>&1)"
+  OUT="$(run_kora "$@" </dev/null 2>&1)"
   CODE=$?
   set -e
   printf -- '--- kora %s (exit %s) ---\n%s\n' "$*" "$CODE" "$OUT"
