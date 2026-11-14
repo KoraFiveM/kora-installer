@@ -21,6 +21,7 @@ pub mod system;
 pub mod types;
 pub mod uninstall;
 pub mod windows_db;
+pub mod windows_tools;
 
 pub use types::*;
 

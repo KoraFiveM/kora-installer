@@ -488,14 +488,37 @@ impl InstallStep {
         let mut tools = git::detect(&r);
         if tools.git.is_none() || (dev && tools.gh.is_none()) {
             let plan = git::plan_bootstrap(git::Os::current(), &tools).map_err(|e| InstallError(e.to_string()))?;
-            if cfg!(windows) && !plan.is_empty() && !winget_available() {
+            let no_winget = cfg!(windows) && !plan.is_empty() && !winget_available();
+            if no_winget && !ctx.admin {
                 return err(format!(
-                    "git{} is missing and winget (Windows Package Manager) is not available to install it. Install it yourself: Git for Windows from https://git-scm.com/download/win{} and run the install again.",
+                    "git{} is missing and this Windows has no winget (Windows Package Manager). Kora can download the official installer{} itself, but that needs administrator rights: right-click Windows Terminal > 'Run as administrator' and run Kora again. Or install {} yourself ({}) and run Kora again.",
                     if dev { " / the GitHub CLI" } else { "" },
-                    if dev { ", GitHub CLI from https://cli.github.com" } else { "" }
+                    if dev { "s" } else { "" },
+                    if dev { "them" } else { "it" },
+                    if dev { "https://git-scm.com/download/win, https://cli.github.com" } else { "https://git-scm.com/download/win" }
                 ));
             }
-            if !ctx.admin {
+            if no_winget {
+                // No winget: the vendors' own installers, downloaded over HTTPS and run only if their SHA-256 matches.
+                let tmp = std::env::temp_dir().join(format!("kora-tools-{}", std::process::id()));
+                let mut say = |m: &str| ctx.emit(self.id, StepStatus::Running, m.to_string(), 0.1);
+                let mut wanted = Vec::new();
+                if tools.git.is_none() {
+                    wanted.push(windows_tools::Tool::Git);
+                }
+                if dev && tools.gh.is_none() {
+                    wanted.push(windows_tools::Tool::Gh);
+                }
+                for t in wanted {
+                    windows_tools::install(t, &ctx.hooks.http, &tmp, &mut say).map_err(|e| InstallError(format!("{e}. You can also install {} yourself from {} and run Kora again.", t.label(), t.manual_url())))?;
+                }
+                let _ = std::fs::remove_dir_all(&tmp);
+                tools = git::detect(&r);
+                if tools.git.is_none() {
+                    return err("git was installed but this program cannot find it yet. Close this window, open a new one and run the install again.");
+                }
+            }
+            if !no_winget && !ctx.admin {
                 let what: Vec<String> = plan.iter().map(|s| format!("- {}", s.description)).collect();
                 return err(format!(
                     "git{} is missing. Installing it needs administrator rights; re-run as root/Administrator, or install it yourself:\n{}",
@@ -503,7 +526,7 @@ impl InstallStep {
                     what.join("\n")
                 ));
             }
-            for s in &plan {
+            for s in plan.iter().filter(|_| !no_winget) {
                 ctx.emit(self.id, StepStatus::Running, s.description.clone(), 0.1);
                 let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
                 let o = git::CommandRunner::run(&r, &s.program, &args, None).map_err(|e| InstallError(format!("{}: {e}", s.description)))?;
