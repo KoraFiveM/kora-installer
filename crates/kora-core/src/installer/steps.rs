@@ -111,34 +111,6 @@ fn winget_available() -> bool {
     std::process::Command::new("winget").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
 }
 
-/// PATH as Windows would build it for a new process: machine entries, then the user's, then ours.
-pub(crate) fn merged_windows_path(machine: &str, user: &str, current: &str) -> String {
-    let mut seen = std::collections::HashSet::new();
-    machine
-        .split(';')
-        .chain(user.split(';'))
-        .chain(current.split(';'))
-        .map(str::trim)
-        .filter(|p| !p.is_empty() && seen.insert(p.to_ascii_lowercase()))
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
-/// Re-read the machine and user PATH from the registry into this process (after winget installs git).
-fn refresh_windows_path() {
-    let get = |scope: &str| {
-        std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &format!("[Environment]::GetEnvironmentVariable('Path','{scope}')")])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default()
-    };
-    let merged = merged_windows_path(&get("Machine"), &get("User"), &std::env::var("PATH").unwrap_or_default());
-    if !merged.is_empty() {
-        std::env::set_var("PATH", merged);
-    }
-}
-
 /// Where the MariaDB / MySQL installers put their command line client (Windows).
 fn windows_client_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
@@ -532,10 +504,6 @@ impl InstallStep {
                 if !o.ok() {
                     return err(format!("{} failed: {}", s.description, o.stderr.trim()));
                 }
-            }
-            if cfg!(windows) {
-                // winget changes the machine PATH, which this running program never sees: re-read it.
-                refresh_windows_path();
             }
             tools = git::detect(&r);
             if tools.git.is_none() {
@@ -1256,11 +1224,5 @@ mod db_admin_tests {
         let back: DbAdmin = serde_json::from_str(&json).unwrap();
         assert_eq!(back.password, None);
         assert_eq!((back.user.as_str(), back.port), ("dba", 33061));
-    }
-
-    #[test]
-    fn refreshed_windows_path_keeps_order_and_drops_duplicates() {
-        let m = merged_windows_path("C:\\Windows;C:\\Program Files\\Git\\cmd", "C:\\Users\\a\\bin;c:\\windows", "C:\\Tools;C:\\Program Files\\Git\\cmd;");
-        assert_eq!(m, "C:\\Windows;C:\\Program Files\\Git\\cmd;C:\\Users\\a\\bin;C:\\Tools");
     }
 }
