@@ -39,6 +39,8 @@ pub enum Screen {
     // Advanced only
     Hostname,
     GithubOwner,
+    /// Development mode: sign in to GitHub and choose the owner of the forks.
+    GithubAccount,
     GameBuild,
     TxAdminPublic,
     SetupCode,
@@ -87,7 +89,7 @@ pub type Redeemer = Box<dyn FnMut(&str) -> Result<Redeemed, String>>;
 
 pub struct Wizard {
     pub screen: Screen,
-    state: WizardState,
+    pub(crate) state: WizardState,
     pub advanced: bool,
     pub mode: Mode,
     pub name: String,
@@ -108,6 +110,7 @@ pub struct Wizard {
     pub hostname: String,
     host_touched: bool,
     pub github_owner: String,
+    pub(crate) gh: Option<crate::github_screens::GithubFlow>,
     pub game_build: String,
     /// Setup code typed on the Welcome stage.
     pub setup_code: String,
@@ -309,6 +312,7 @@ impl Wizard {
             service: true,
             license: String::new(),
             github_owner: String::new(),
+            gh: None,
             game_build: String::new(),
             setup_code: String::new(),
             redeemed: None,
@@ -390,7 +394,9 @@ impl Wizard {
         if self.advanced && !web {
             v.push(Hostname);
         }
-        if (self.advanced || web) && self.mode == kora_core::installer::Mode::Development {
+        if self.mode == kora_core::installer::Mode::Development && self.gh.is_some() {
+            v.push(GithubAccount);
+        } else if (self.advanced || web) && self.mode == kora_core::installer::Mode::Development {
             v.push(GithubOwner);
         }
         if self.advanced {
@@ -472,6 +478,9 @@ impl Wizard {
     /// Sync `selected` from stored answers when entering a screen.
     fn load_selection(&mut self) {
         self.reasons_cache.take();
+        if self.screen == Screen::GithubAccount {
+            self.gh_enter();
+        }
         self.focus = 0;
         if self.screen == Screen::Ports {
             self.prefill_free_ports();
@@ -517,6 +526,7 @@ impl Wizard {
             Screen::Firewall => self.firewall = i == 0,
             Screen::Service => self.service = i == 0,
             Screen::TxAdminPublic => self.txadmin_public = i == 0,
+            Screen::GithubAccount => self.gh_apply(),
             _ => {}
         }
     }
@@ -709,6 +719,10 @@ impl Wizard {
     /// Insert pasted text into the focused box: cleaned, length-capped, and confirmed in the
     /// footer by count only (the text itself is never shown or logged).
     pub fn handle_paste(&mut self, text: &str) {
+        if self.gh_on_screen() && !self.help_open {
+            self.gh_paste(text);
+            return;
+        }
         if self.help_open || !self.is_text_screen() {
             return;
         }
@@ -791,6 +805,10 @@ impl Wizard {
         }
         if key.code == KeyCode::F(1) {
             self.help_open = true;
+            return;
+        }
+        if self.gh_on_screen() {
+            self.gh_key(key);
             return;
         }
         if self.on_db_admin_screen()
@@ -877,6 +895,8 @@ impl Wizard {
             self.test_login();
         } else if hit(l.elevate) {
             self.request_elevation();
+        } else if self.gh_on_screen() {
+            self.gh_click(ev, crate::github_screens::region(&l));
         } else if let Some(i) = l.options.iter().position(|r| hit(*r)) {
             self.select(i);
             if self.screen == Screen::Permission {
@@ -1032,6 +1052,9 @@ impl Wizard {
 
     pub fn go_back(&mut self) {
         self.error = None;
+        if let (Screen::GithubAccount, Some(g)) = (self.screen, self.gh.as_mut()) {
+            g.leave();
+        }
         self.jump_review = false;
         let flow = self.flow();
         let idx = flow.iter().position(|s| *s == self.screen).unwrap_or(0);
@@ -1160,6 +1183,7 @@ impl Wizard {
                 }
             }
             Screen::DbAdminLogin => self.validate_db_admin(),
+            Screen::GithubAccount => self.gh_validate(),
             Screen::License => validate_license(&self.license),
             Screen::GameBuild => {
                 let g = self.game_build.trim();
@@ -1226,7 +1250,10 @@ impl Wizard {
             v.push("Start the server automatically when this computer starts (needs administrator rights)".into());
         }
         if self.mode == kora_core::installer::Mode::Development {
-            v.push("Copy (fork) Kora's resources to your GitHub account so you can change them".into());
+            v.push(match self.github_owner.trim() {
+                "" => "Copy (fork) Kora's resources to your GitHub account so you can change them".to_string(),
+                o => format!("Copy (fork) Kora's resources to the GitHub account \"{o}\" so you can change them"),
+            });
         }
         if !self.license.trim().is_empty() {
             v.push("Save your license key inside the server's private settings file (it never leaves this computer)".into());

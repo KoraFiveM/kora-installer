@@ -291,6 +291,14 @@ pub fn view(w: &Wizard) -> View {
             v.lines = vec![l("Your GitHub user or organisation where Kora's files will be copied. Leave empty to be asked later.")];
             v.inputs = vec![inp("GitHub name", &w.github_owner, "", true)];
         }
+        Screen::GithubAccount if w.gh.is_some() => {
+            if let Some(g) = &w.gh {
+                v.title = g.title().to_string();
+                v.lines = g.lines();
+                v.help = g.help();
+            }
+        }
+        Screen::GithubAccount => {}
         Screen::GameBuild => {
             v.title = l("Game build (optional)");
             v.lines = vec![l("Newer game versions are called builds. Leave empty to use the default.")];
@@ -619,6 +627,9 @@ pub fn render(f: &mut Frame, w: &Wizard) {
     }
     button(f, l.next, &v.next_label, Style::default().fg(Color::Black).bg(BRAND));
 
+    if let (Screen::GithubAccount, Some(g)) = (w.screen, &w.gh) {
+        crate::github_screens::render(f, g, crate::github_screens::region(&l));
+    }
     if w.help_open {
         let hw = area.width.saturating_sub(8).clamp(1, 70);
         let lines = wrap(&v.help, hw.saturating_sub(2) as usize);

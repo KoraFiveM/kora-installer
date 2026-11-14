@@ -5,6 +5,8 @@
 
 pub mod clipboard;
 pub mod elev;
+pub mod github_model;
+pub mod github_screens;
 pub mod open;
 pub mod progress;
 pub mod result;
@@ -85,6 +87,10 @@ pub fn run_install_wizard_with(
     }
     while w.state() == wizard::WizardState::Running {
         term.t.draw(|f| wizard_view::render(f, &w))?;
+        if w.wants_tick() && !event::poll(Duration::from_millis(100))? {
+            w.tick();
+            continue;
+        }
         match event::read()? {
             Event::Key(k) if k.kind != KeyEventKind::Release => w.handle_key(k),
             Event::Mouse(m) => {
