@@ -142,9 +142,9 @@ pub fn detect(platform: Platform, runner: &dyn CommandRunner) -> Option<Firewall
                 None
             }
         }
-        Platform::Windows => ok("netsh", &["advfirewall", "show", "allprofiles", "state"])
-            .filter(|o| o.stdout.to_uppercase().contains("ON"))
-            .map(|_| FirewallKind::WindowsFirewall),
+        // If netsh works at all, add the rules: they are harmless while the firewall is off, and
+        // matching the word "ON" in the output missed every non-English Windows ("EIN", "ACTIVADO"...).
+        Platform::Windows => ok("netsh", &["advfirewall", "show", "allprofiles", "state"]).map(|_| FirewallKind::WindowsFirewall),
     }
 }
 
@@ -166,15 +166,23 @@ pub fn check_port(port: u16, check_udp: bool) -> PortStatus {
     }
 }
 
+fn port_in_use_text(port: u16, label: &str, windows: bool) -> String {
+    let mut m = format!("Port {port} ({label}) is already used by another program. Pick a different {label} port.");
+    if windows {
+        m.push_str(" (Windows can also reserve a port for Hyper-V or WSL; if nothing else is using it, run `netsh interface ipv4 show excludedportrange protocol=tcp` to see the reserved ranges.)");
+    }
+    m
+}
+
 /// Conflict messages (plain language) for a request; empty if all is free.
 pub fn port_conflicts(req: &PortRequest) -> ServiceResult<Vec<String>> {
     req.validate()?;
     let mut out = Vec::new();
     if let PortStatus::InUse { .. } = check_port(req.game_port, true) {
-        out.push(format!("Port {} (game) is already used by another program. Pick a different game port.", req.game_port));
+        out.push(port_in_use_text(req.game_port, "game", cfg!(windows)));
     }
     if let PortStatus::InUse { .. } = check_port(req.txadmin_port, false) {
-        out.push(format!("Port {} (txAdmin) is already used by another program. Pick a different txAdmin port.", req.txadmin_port));
+        out.push(port_in_use_text(req.txadmin_port, "txAdmin", cfg!(windows)));
     }
     Ok(out)
 }
@@ -299,6 +307,18 @@ mod tests {
         let r = FakeRunner::default();
         r.respond("netsh", 0, "Domain Profile Settings:\nState ON\n");
         assert_eq!(detect(Platform::Windows, &r), Some(FirewallKind::WindowsFirewall));
+        let r = FakeRunner::default();
+        r.respond("netsh", 0, "Domänenprofil-Einstellungen:\nStatus EIN\n");
+        assert_eq!(detect(Platform::Windows, &r), Some(FirewallKind::WindowsFirewall), "localized Windows");
+        let r = FakeRunner::default();
+        r.respond("netsh", 1, "");
+        assert_eq!(detect(Platform::Windows, &r), None);
+    }
+
+    #[test]
+    fn windows_port_hint_mentions_reserved_ranges() {
+        assert!(port_in_use_text(30120, "game", true).contains("Hyper-V"));
+        assert!(!port_in_use_text(30120, "game", false).contains("Hyper-V"));
     }
 
     #[test]

@@ -174,7 +174,56 @@ pub fn parse_version(out: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Where winget puts Git for Windows and the GitHub CLI. A program installed a moment ago is not on
+/// the PATH of the running process (Windows only updates the PATH of programs started afterwards).
+pub fn windows_tool_dirs(env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Some(p) = env(var) {
+            v.push(PathBuf::from(&p).join("Git").join("cmd"));
+            v.push(PathBuf::from(&p).join("GitHub CLI"));
+        }
+    }
+    if let Some(l) = env("LOCALAPPDATA") {
+        v.push(PathBuf::from(&l).join("Programs").join("Git").join("cmd"));
+        v.push(PathBuf::from(&l).join("Programs").join("GitHub CLI"));
+    }
+    v
+}
+
+/// `current` PATH with the existing `extra` folders appended (compared without regard to case);
+/// `None` when nothing has to change.
+pub fn path_with(current: &str, extra: &[PathBuf], exists: &dyn Fn(&Path) -> bool, sep: char) -> Option<String> {
+    let have: Vec<String> = current.split(sep).map(|e| e.trim_end_matches(['\\', '/']).to_lowercase()).collect();
+    let mut out = current.to_string();
+    let mut changed = false;
+    for d in extra {
+        let key = d.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
+        if exists(d) && !have.contains(&key) && !out.split(sep).any(|e| e.trim_end_matches(['\\', '/']).to_lowercase() == key) {
+            if !out.is_empty() && !out.ends_with(sep) {
+                out.push(sep);
+            }
+            out.push_str(&d.to_string_lossy());
+            changed = true;
+        }
+    }
+    changed.then_some(out)
+}
+
+/// Make a just-installed git/gh findable in this process (Windows only; no-op elsewhere).
+pub fn refresh_windows_path() {
+    if !cfg!(windows) {
+        return;
+    }
+    let dirs = windows_tool_dirs(&|k| std::env::var(k).ok());
+    let cur = std::env::var("PATH").unwrap_or_default();
+    if let Some(n) = path_with(&cur, &dirs, &|p| p.is_dir(), ';') {
+        std::env::set_var("PATH", n);
+    }
+}
+
 pub fn detect(r: &dyn CommandRunner) -> Tools {
+    refresh_windows_path();
     Tools { git: detect_tool(r, "git"), gh: detect_tool(r, "gh") }
 }
 
@@ -1026,6 +1075,24 @@ mod tests {
         clone_from_fork(&f, "me/res", "kora/res", Path::new("/d"), Some("dev")).unwrap();
         assert_eq!(f.count("git remote add upstream https://github.com/kora/res.git"), 1);
         assert_eq!(f.count("git checkout dev"), 1);
+    }
+
+    #[test]
+    fn windows_tool_folders_are_appended_once_and_case_insensitively() {
+        let env = |k: &str| match k {
+            "ProgramFiles" => Some("C:\\Program Files".to_string()),
+            "LOCALAPPDATA" => Some("C:\\Users\\Zoë Müller\\AppData\\Local".to_string()),
+            _ => None,
+        };
+        let dirs = windows_tool_dirs(&env);
+        assert!(dirs.contains(&PathBuf::from("C:\\Program Files").join("Git").join("cmd")));
+        let all = |_: &Path| true;
+        let already = format!("C:\\Windows;{}\\", dirs[0].to_string_lossy().to_uppercase());
+        let n = path_with(&already, &dirs, &all, ';').unwrap();
+        assert_eq!(n.to_lowercase().matches(&dirs[0].to_string_lossy().to_lowercase()).count(), 1, "already present (other case): {n}");
+        assert!(n.contains("GitHub CLI") && n.contains("Zoë Müller"));
+        assert_eq!(path_with(&n, &dirs, &all, ';'), None, "second pass changes nothing");
+        assert_eq!(path_with("C:\\Windows", &dirs, &|_: &Path| false, ';'), None, "missing folders are not added");
     }
 
     #[test]
