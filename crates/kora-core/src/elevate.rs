@@ -716,4 +716,17 @@ mod tests {
         assert!(!m.contains("right-click"));
         assert!(m.contains("--no-elevate") && m.contains("--db skip") && m.contains("11.4"));
     }
+
+    /// GitHub's Windows runners are already elevated (so the UAC path itself cannot run there).
+    #[cfg(windows)]
+    #[test]
+    fn ci_runner_is_elevated_and_the_powershell_script_parses() {
+        if std::env::var_os("GITHUB_ACTIONS").is_some() {
+            assert!(is_elevated(), "the runner is expected to be elevated");
+        }
+        let script = powershell_script("C:\\Program Files\\O'Neil\\kora.exe", &["install".into(), "--name".into(), "A & \"B\" 日本".into(), "--dir".into(), "C:\\x y\\".into()]);
+        let check = format!("$null = [System.Management.Automation.Language.Parser]::ParseInput({}, [ref]$null, [ref]$errs); if ($errs.Count -gt 0) {{ $errs | ForEach-Object {{ [Console]::Error.WriteLine($_.Message) }}; exit 1 }}", powershell_literal(&script));
+        let out = std::process::Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &check]).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
 }

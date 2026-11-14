@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use kora_core::elevate;
 use kora_core::firewall::ports::{self, PortProber, SystemProber};
 use kora_core::firewall::{check_port, PortStatus};
 use kora_core::site::{self, Redeemed};
@@ -18,6 +19,9 @@ use kora_core::installer::{
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+    /// Do not ask Windows/sudo for administrator permission (for developers and CI).
+    #[arg(long, global = true)]
+    no_elevate: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -33,7 +37,7 @@ enum DbArg {
     Skip,
 }
 
-#[derive(Args, Default)]
+#[derive(Args, Default, Clone)]
 struct InstallArgs {
     /// Single-use setup code from the website (e.g. KORA-7F3K-92QX).
     #[arg(long)]
@@ -755,8 +759,99 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
     i32::from(!summary.ok())
 }
 
+fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
+    use elevate::CmdKind as K;
+    match cmd {
+        None => K::Wizard,
+        Some(Command::Install(a)) => K::Install { dry_run: a.dry_run },
+        Some(Command::Manager) => K::Manager,
+        Some(Command::Update { auto, .. }) => K::Update { auto: *auto },
+        Some(Command::Status) => K::Status,
+        Some(Command::Delete { .. }) => K::Delete,
+        Some(Command::ServiceHost { .. }) => K::Other,
+        Some(Command::Start { .. }) => K::Start,
+        Some(Command::Stop { .. }) => K::Stop,
+        Some(Command::Restart { .. }) => K::Restart,
+        Some(Command::Uninstall { dry_run, .. }) => K::Uninstall { dry_run: *dry_run },
+    }
+}
+
+/// Linux/macOS: why this command needs root (empty = it does not). The wizard decides for itself later.
+fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
+    use kora_core::service::ServiceState;
+    let one = |s: &str| vec![s.to_string()];
+    match cmd {
+        Some(Command::Install(a)) => {
+            let headless = a.any_given() || (a.code.is_some() && a.headless_ready(false));
+            if !headless {
+                return vec![];
+            }
+            a.as_ref().clone().into_request().map(|r| elevate::admin_reasons(&r)).unwrap_or_default()
+        }
+        Some(Command::Start { server } | Command::Stop { server } | Command::Restart { server }) => {
+            match host::service_state(server) {
+                Ok(ServiceState::NotInstalled) | Err(_) => vec![],
+                Ok(_) => one("control the server's background service"),
+            }
+        }
+        Some(Command::Delete { server, .. }) => {
+            let reg = registry::Registry::load().unwrap_or_default();
+            let dir = reg.find(server).map(|e| e.dir.clone()).unwrap_or_else(|| PathBuf::from(server));
+            match installer::load_created_from(&dir) {
+                Some(c) if c.service_unit.is_some() || c.firewall || c.update_timer => one("remove the server's background service and firewall rules"),
+                _ => vec![],
+            }
+        }
+        Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
+        _ => vec![],
+    }
+}
+
+/// The arguments for the elevated copy: the original ones, plus the folder when it was only implied
+/// (a different account's home folder would otherwise change where the server goes).
+fn relaunch_args(cmd: &Option<Command>, original: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    let mut args = original;
+    if let Some(Command::Install(a)) = cmd {
+        if a.dir.is_none() && a.code.is_none() {
+            if let Ok(req) = a.as_ref().clone().into_request() {
+                args.push("--dir".into());
+                args.push(req.dir.into_os_string());
+            }
+        }
+    }
+    args
+}
+
+/// Window kept open (Windows) so an elevated or double-clicked console never flashes and vanishes.
+fn finish(code: i32) -> ! {
+    let (si, so) = (std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
+    if elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
+        println!("\nPress Enter to close this window.");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+    }
+    std::process::exit(code);
+}
+
+/// Ask for administrator permission before anything else happens (see `kora_core::elevate`).
+fn elevate_if_needed(cli: &Cli) {
+    let kind = command_kind(&cli.command);
+    let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if !tty || cli.no_elevate || !(cfg!(windows) && kind.privileged() || cfg!(not(windows))) || elevate::is_elevated() {
+        return;
+    }
+    let reasons = if cfg!(windows) { vec![] } else { admin_reasons_for_command(&cli.command) };
+    let env = elevate::Env { windows: cfg!(windows), elevated: false, tty, no_elevate: false };
+    let need = elevate::decide(&env, kind, &reasons);
+    let args = relaunch_args(&cli.command, std::env::args_os().skip(1).collect());
+    if let elevate::Elevation::Exit(code) = elevate::ensure_elevated(&need, &args, &elevate::SystemElevator, &mut |m| println!("{m}")) {
+        finish(code);
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
+    elevate_if_needed(&cli);
     let code = match cli.command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
@@ -776,7 +871,7 @@ fn main() {
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
     };
-    std::process::exit(code);
+    finish(code);
 }
 
 #[cfg(test)]
