@@ -164,12 +164,22 @@ fn systemd_scheduler_units() {
 }
 
 #[test]
+fn windows_update_task_uses_the_folder_because_system_has_no_registry() {
+    let mut s = server();
+    s.dir = "C:\\Users\\Zoë Müller\\kora\\main\\".into();
+    s.kora_exe = "C:\\Program Files\\Kora\\bin\\0.1.0-abc\\kora.exe".into();
+    let p = scheduler_install_plan(&s, &Schedule::default(), Platform::Windows).unwrap();
+    let Action::Run { args, .. } = &p.steps[0].action else { panic!() };
+    assert_eq!(args[4], "\"C:\\Program Files\\Kora\\bin\\0.1.0-abc\\kora.exe\" update --auto \"C:\\Users\\Zoë Müller\\kora\\main\"");
+}
+
+#[test]
 fn schtasks_args() {
     let p = scheduler_install_plan(&server(), &Schedule::default(), Platform::Windows).unwrap();
     let Action::Run { program, args } = &p.steps[0].action else { panic!() };
     assert_eq!(program, "schtasks.exe");
     let expect: Vec<String> = [
-        "/Create", "/TN", "Kora\\Update main", "/TR", "\"/usr/local/bin/kora\" update --auto main",
+        "/Create", "/TN", "Kora\\Update main", "/TR", "\"/usr/local/bin/kora\" update --auto \"/srv/kora/main\"",
         "/SC", "DAILY", "/ST", "04:00", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F",
     ]
     .iter()

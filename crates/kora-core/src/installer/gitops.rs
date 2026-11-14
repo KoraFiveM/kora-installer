@@ -90,6 +90,24 @@ impl CommandRunner for AsUser {
     }
 }
 
+/// Adds `-c safe.directory=*` to every `git` call. The Windows scheduled task runs as SYSTEM in a
+/// folder owned by the person who installed, which git otherwise refuses ("dubious ownership").
+pub struct SafeDirectory<R: CommandRunner>(pub R);
+
+impl<R: CommandRunner> CommandRunner for SafeDirectory<R> {
+    fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<git::Output> {
+        if program == "git" {
+            let mut a: Vec<&str> = vec!["-c", "safe.directory=*"];
+            a.extend_from_slice(args);
+            return self.0.run(program, &a, cwd);
+        }
+        self.0.run(program, args, cwd)
+    }
+    fn sleep(&self, d: Duration) {
+        self.0.sleep(d)
+    }
+}
+
 /// Name of the owner of `dir` when it is not the current user (Unix only; needs root to switch).
 #[cfg(unix)]
 fn foreign_owner(dir: &Path) -> Option<String> {
@@ -156,7 +174,15 @@ impl ServiceHealth {
         matches!(firewall::check_port(self.game_port, false), firewall::PortStatus::InUse { .. })
     }
     fn has_service(&self) -> bool {
-        Path::new(&self.managed.unit_path()).exists() || cfg!(windows)
+        if cfg!(windows) {
+            return self.has_service_via(&service::SystemRunner, service::Platform::Windows);
+        }
+        Path::new(&self.managed.unit_path()).exists()
+    }
+    /// Windows: ask the service manager. A server started by hand (no `--service`) has none, and
+    /// "restart failed" for it would wrongly roll every update back.
+    fn has_service_via(&self, rn: &dyn service::CommandRunner, platform: service::Platform) -> bool {
+        !matches!(ServiceManager::new(platform, rn).status(&self.managed), Ok(service::ServiceState::NotInstalled))
     }
     fn restart(&self) -> std::result::Result<(), String> {
         let rn = service::SystemRunner;
@@ -218,6 +244,7 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
     let players = if health.running() { online_players(sf.ports.game) } else { Some(0) };
     let res = match foreign_owner(&dir) {
         Some(user) => update_server(&name, &dir, &sf, &GitCli(AsUser { user, home: dir.clone() }), &FaultInjecting(&health), players),
+        None if cfg!(windows) => update_server(&name, &dir, &sf, &GitCli(SafeDirectory(SystemRunner)), &FaultInjecting(&health), players),
         None => update_server(&name, &dir, &sf, &GitCli::default(), &FaultInjecting(&health), players),
     };
     let line = match &res {
@@ -278,6 +305,44 @@ mod tests {
     fn sh(dir: &Path, args: &[&str]) {
         let o = Command::new("git").args(args).current_dir(dir).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap();
         assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
+    #[test]
+    fn a_hand_started_windows_server_has_no_service_so_no_restart_is_attempted() {
+        use crate::service::testing::FakeRunner;
+        let managed = ManagedServer {
+            name: "main".into(),
+            dir: "C:\\kora\\main".into(),
+            start_command: vec!["unused".into()],
+            user: "kora".into(),
+            env_file: None,
+            kora_exe: "kora".into(),
+            windows_run_as: None,
+        };
+        let h = ServiceHealth { managed, game_port: 30120, wait: Duration::from_secs(1) };
+        let r = FakeRunner::default();
+        r.respond("sc.exe query", 1060, "[SC] EnumQueryServicesStatus:OpenService FAILED 1060");
+        assert!(!h.has_service_via(&r, service::Platform::Windows));
+        let r = FakeRunner::default();
+        r.respond("sc.exe query", 0, "STATE              : 4  RUNNING");
+        assert!(h.has_service_via(&r, service::Platform::Windows));
+    }
+
+    #[test]
+    fn safe_directory_flag_is_added_to_git_only() {
+        use std::cell::RefCell;
+        struct Rec(RefCell<Vec<String>>);
+        impl CommandRunner for Rec {
+            fn run(&self, p: &str, a: &[&str], _: Option<&Path>) -> std::io::Result<git::Output> {
+                self.0.borrow_mut().push(format!("{p} {}", a.join(" ")));
+                Ok(git::Output { code: 0, stdout: String::new(), stderr: String::new() })
+            }
+            fn sleep(&self, _: Duration) {}
+        }
+        let r = SafeDirectory(Rec(RefCell::new(vec![])));
+        r.run("git", &["status"], None).unwrap();
+        r.run("gh", &["auth", "status"], None).unwrap();
+        assert_eq!(*r.0 .0.borrow(), vec!["git -c safe.directory=* status", "gh auth status"]);
     }
 
     #[test]

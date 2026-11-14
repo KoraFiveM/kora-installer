@@ -223,7 +223,9 @@ pub fn scheduler_install_plan(s: &ManagedServer, schedule: &Schedule, platform: 
             ])
         }
         Platform::Windows => {
-            let tr = format!("\"{}\" update --auto {}", s.kora_exe, s.name);
+            // The absolute folder, not the name: the task runs as SYSTEM, whose %LOCALAPPDATA% has no
+            // server registry, so a name would never be found.
+            let tr = format!("\"{}\" update --auto \"{}\"", s.kora_exe, s.dir.trim_end_matches(['\\', '/']));
             let mut args = vec!["/Create".into(), "/TN".into(), task_name(s), "/TR".into(), tr];
             args.extend(schedule.schtasks_trigger());
             args.extend(["/RU".into(), s.windows_run_as.clone().unwrap_or_else(|| "SYSTEM".into()), "/RL".into(), "HIGHEST".into(), "/F".into()]);
