@@ -35,6 +35,7 @@ use crate::steps::{rollback_plan, run_plan, Step, StepError};
 
 pub use http::HttpClient;
 pub use steps::check_db_admin;
+pub(crate) use steps::db_override;
 pub use registry::{Registry, ServerEntry, ServerFile};
 
 /// Installer error: plain-language message, safe to show (never contains secrets).

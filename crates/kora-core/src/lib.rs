@@ -6,6 +6,7 @@
 pub mod artifacts;
 pub mod catalog;
 pub mod db;
+pub mod elevate;
 pub mod firewall;
 pub mod fsutil;
 pub mod git;

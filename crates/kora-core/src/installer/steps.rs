@@ -175,7 +175,7 @@ fn admin_conn_for(db_admin: Option<&DbAdmin>) -> AdminConn {
 
 /// True when the admin login was chosen explicitly (request or environment), so the local
 /// server detection (which only knows the default install) is skipped.
-fn db_override(req: &InstallRequest) -> bool {
+pub(crate) fn db_override(req: &InstallRequest) -> bool {
     req.db_admin.is_some() || std::env::var("KORA_DB_ADMIN_PASSWORD").map(|s| !s.is_empty()).unwrap_or(false)
 }
 
@@ -608,10 +608,9 @@ impl InstallStep {
         let ctx = &*self.ctx;
         if db::Os::current() == db::Os::Windows {
             if !ctx.admin {
-                return err(format!(
-                    "No MariaDB/MySQL database server was found, and setting one up needs administrator rights (it creates a Windows service). Close this window, right-click kora.exe (or Windows Terminal) and choose 'Run as administrator', then run the install again. Kora will download the official MariaDB {} from archive.mariadb.org, verify its checksum and put it in {}. Or install MariaDB yourself and use --db existing, or --db skip.",
+                return err(crate::elevate::not_elevated_db_message(
                     windows_db::MARIADB_VERSION,
-                    windows_db::base_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "%ProgramData%\\Kora\\mariadb".into())
+                    &windows_db::base_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "%ProgramData%\\Kora\\mariadb".into()),
                 ));
             }
             let mut say = |m: &str| ctx.emit(self.id, StepStatus::Running, m.to_string(), 0.5);
