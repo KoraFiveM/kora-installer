@@ -10,3 +10,5 @@ Assert-That ($r.Output -match 'needs an interactive terminal') 'the error explai
 
 $r = Invoke-Native $kora @('status'); Show 'kora status (empty)' $r
 Assert-That ($r.Code -eq 0) 'kora status works with no servers registered'
+
+exit 0

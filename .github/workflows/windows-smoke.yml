@@ -33,6 +33,8 @@ jobs:
         run: ./scripts/smoke/02-install-ps1.ps1
       - name: "3. Production install (tiny catalog, no service)"
         run: ./scripts/smoke/03-install.ps1
+      - name: "4. Service + firewall: start/stop/restart, txAdmin answers, uninstall removes everything"
+        run: ./scripts/smoke/04-service.ps1
       - name: "6. Dev mode dry run"
         run: ./scripts/smoke/06-dev-dry-run.ps1
       - name: Collect logs

@@ -8,3 +8,5 @@ Assert-That ($r.Output -match 'mode:\s+development') 'plan says development mode
 Assert-That ($r.Output -match 'build\.forks') 'plan includes the fork step'
 Assert-That ($r.Output -match 'build\.resources') 'plan includes the clone step'
 Assert-That (-not (Test-Path 'C:\kora-smoke\dev')) 'dry run created nothing'
+
+exit 0

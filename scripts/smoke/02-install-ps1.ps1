@@ -76,3 +76,5 @@ finally {
     $p1, $p2 | ForEach-Object { if ($_ -and -not $_.HasExited) { Stop-Process -Id $_.Id -Force } }
     Remove-Item Env:KORA_RELEASE_BASE, Env:KORA_INSTALL_DIR -ErrorAction SilentlyContinue
 }
+
+exit 0

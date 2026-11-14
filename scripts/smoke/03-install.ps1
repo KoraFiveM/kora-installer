@@ -47,3 +47,5 @@ Assert-That ($st.Code -eq 0 -and $st.Output -match 'smoke\s+prod\s+31120\s+41120
 $r = Invoke-Native $kora @('install', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '-y')
 Show 'kora install (resume)' $r
 Assert-That ($r.Code -eq 0) 'running the same install again succeeds'
+
+exit 0

@@ -90,3 +90,5 @@ Assert-That (-not $reg -or $reg -notmatch '"smoke"') 'the registry entry is gone
 Assert-That (-not (Test-Path "$env:ProgramFiles\Kora\bin\*\kora.exe")) 'the Program Files kora copy is gone'
 $t = (& schtasks.exe /Query /FO LIST 2>&1 | Out-String)
 Assert-That ($t -notmatch 'Kora.*smoke') 'no Kora scheduled task is left'
+
+exit 0
