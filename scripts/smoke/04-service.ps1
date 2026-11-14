@@ -69,10 +69,17 @@ Assert-That ($fx.Count -ge 1) 'an FXServer.exe process is running'
 $st = Invoke-Native $kora @('status'); Show 'kora status' $st
 Assert-That ($st.Output -match 'smoke\s+prod\s+31120\s+41120\s+running') 'kora status shows running'
 
+Start-Sleep -Seconds 15
+Assert-That ((Get-SvcState) -eq 'RUNNING') 'the service is STILL running 15 s after start (FXServer did not die and get restarted by the SCM)'
 $r = Invoke-Native $kora @('restart', 'smoke'); Show 'kora restart smoke' $r
 Assert-That ($r.Code -eq 0) 'kora restart exits 0'
 Assert-That ((Wait-SvcState 'RUNNING' 60) -eq 'RUNNING') 'RUNNING again after restart'
 
+# Plain Windows tools too (what an admin would type): sc stop -> STOPPED, sc start -> RUNNING.
+& sc.exe stop $svc | Out-Host
+Assert-That ((Wait-SvcState 'STOPPED' 60) -eq 'STOPPED') 'sc stop (not via kora) reaches STOPPED, so the SCM stop control is handled'
+& sc.exe start $svc | Out-Host
+Assert-That ((Wait-SvcState 'RUNNING' 60) -eq 'RUNNING') 'sc start (not via kora) reaches RUNNING'
 $r = Invoke-Native $kora @('stop', 'smoke'); Show 'kora stop smoke' $r
 Assert-That ($r.Code -eq 0) 'kora stop exits 0'
 Assert-That ((Wait-SvcState 'STOPPED' 60) -eq 'STOPPED') 'sc query: STOPPED after kora stop'
