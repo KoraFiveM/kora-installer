@@ -116,6 +116,10 @@ pub struct Wizard {
     /// Focused input for text screens.
     pub focus: usize,
     pub help_open: bool,
+    /// Platform wording: Windows gets UAC / SmartScreen / winget / firewall hints.
+    pub windows: bool,
+    /// Running as Administrator (Windows) or root.
+    pub admin: bool,
     pub error: Option<String>,
     /// Friendly confirmation shown in the footer (e.g. "Pasted 14 characters"); never holds field content.
     pub status: Option<String>,
@@ -239,7 +243,14 @@ impl Default for Wizard {
 
 impl Wizard {
     pub fn new() -> Self {
-        Self::with_ports(PortEnv::system())
+        Self::with_ports(PortEnv::system()).with_platform(cfg!(windows), kora_core::installer::is_admin())
+    }
+
+    /// Platform facts used for the Prepare / Review wording (tests set them explicitly).
+    pub fn with_platform(mut self, windows: bool, admin: bool) -> Self {
+        self.windows = windows;
+        self.admin = admin;
+        self
     }
 
     pub fn with_ports(env: PortEnv) -> Self {
@@ -280,6 +291,8 @@ impl Wizard {
             selected: 0,
             focus: 0,
             help_open: false,
+            windows: false,
+            admin: false,
             error: None,
             status: None,
             clipboard: Box::new(SystemClipboard::default()),
@@ -1074,9 +1087,19 @@ impl Wizard {
         let mut v = vec![
             format!("Create the folder {} and put your server there", self.dir.trim()),
             "Download the FiveM server software and Kora's resources (needs internet)".to_string(),
-            "Install Git if it is missing".to_string(),
+            if self.windows {
+                "Install Git (and, for a development server, the GitHub CLI) with winget if missing. Windows will ask you to confirm each one".to_string()
+            } else {
+                "Install Git if it is missing".to_string()
+            },
         ];
+        if self.windows && !self.admin {
+            v.push("You are not running as Administrator, so the database service, the Windows service and the firewall rules will be skipped (close this window and run Windows Terminal as administrator to include them)".into());
+        }
         match self.db {
+            DbChoice::InstallIfMissing if self.windows => v.push(
+                "Download MariaDB (about 100 MB) from archive.mariadb.org, check its checksum and run it as a Windows service that only listens on this computer (if you don't have one), then create a new database and user just for this server".into(),
+            ),
             DbChoice::InstallIfMissing => v.push(
                 "Install the MariaDB database if you don't have one (needs administrator rights), then create a new database and user just for this server".into(),
             ),
@@ -1091,14 +1114,24 @@ impl Wizard {
                 Some(a) => format!("Log in to the database at {}:{} as '{}' once, only to create the new database and user (existing data is never touched; the password is not saved)", a.host, a.port, a.user),
             });
         }
-        if self.firewall {
+        if self.firewall && self.windows {
+            v.push(format!(
+                "Windows Firewall: allow inbound TCP and UDP {}. If Windows asks about FXServer later, choose Allow",
+                self.game_port.trim()
+            ));
+        } else if self.firewall {
             v.push(format!(
                 "Allow ports {} and {} through the firewall (needs administrator rights)",
                 self.game_port.trim(),
                 self.tx_port.trim()
             ));
         }
-        if self.service {
+        if self.service && self.windows {
+            v.push(format!(
+                "Windows service \"kora-{}\": starts with Windows and restarts after a crash. It runs under its own limited account that can only change the server folder",
+                slug(&self.name)
+            ));
+        } else if self.service {
             v.push("Start the server automatically when this computer starts (needs administrator rights)".into());
         }
         if self.mode == kora_core::installer::Mode::Development {
@@ -2027,5 +2060,46 @@ mod tests {
         assert!(l.actions[0].width > 0 && l.actions[1].width > 0 && !l.actions[0].intersects(l.actions[1]));
         w.handle_mouse(left_click(l.actions[1]), area);
         assert_eq!(w.tx_port, "40121");
+    }
+
+    // ---- Windows wording ----
+
+    #[test]
+    fn windows_prepare_screen_explains_admin_uac_antivirus_disk_and_ports() {
+        let mut w = wiz().with_platform(true, false);
+        w.screen = Screen::Prepare;
+        let t = render_text(&w);
+        for want in [
+            "Before we start (Windows)", "not running as Administrator", "Run as administrator", "winget", "Protection history", "10 GB", "30120",
+            "Windows protected your PC",
+        ] {
+            assert!(t.contains(want), "missing {want:?}\n{t}");
+        }
+        let mut w = wiz().with_platform(true, true);
+        w.screen = Screen::Prepare;
+        let t = render_text(&w);
+        assert!(t.contains("Running as Administrator") && t.contains("User Account Control") && !t.contains("not running as Administrator"), "{t}");
+        // Linux wording is unchanged
+        let mut w = wiz();
+        w.screen = Screen::Prepare;
+        let t = render_text(&w);
+        assert!(t.contains("Before we start") && !t.contains("(Windows)") && t.contains("sudo password"), "{t}");
+    }
+
+    #[test]
+    fn windows_review_lines_are_specific() {
+        let mut w = wiz().with_platform(true, false);
+        w.screen = Screen::Review;
+        let c = w.system_changes().join("\n");
+        for want in [
+            "Windows Firewall: allow inbound TCP and UDP 30120", "choose Allow", "Windows service \"kora-my-kora-server\"", "limited account",
+            "winget", "archive.mariadb.org", "not running as Administrator",
+        ] {
+            assert!(c.contains(want), "missing {want:?}\n{c}");
+        }
+        let c = wiz().with_platform(true, true).system_changes().join("\n");
+        assert!(!c.contains("not running as Administrator"));
+        let c = wiz().system_changes().join("\n");
+        assert!(c.contains("Install Git if it is missing") && c.contains("Allow ports 30120 and 40120"), "{c}");
     }
 }

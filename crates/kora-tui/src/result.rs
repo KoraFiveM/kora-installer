@@ -55,6 +55,19 @@ pub struct Services<'a> {
     pub opener: &'a mut dyn Opener,
 }
 
+/// Extra next steps for common Windows failures (plain words).
+pub fn windows_hints(message: &str) -> Vec<String> {
+    let m = message.to_ascii_lowercase();
+    let mut v = vec![];
+    if ["access is denied", "access denied", "permission denied", "os error 5", "being used by another process", "os error 32"].iter().any(|k| m.contains(k)) {
+        v.push("Windows refused to change a file. An antivirus or another program may be using it: close other programs that use the folder, wait a minute and run kora install again. If it keeps happening, check Windows Security > Protection history.".to_string());
+    }
+    if m.contains("administrator") || m.contains("elevat") {
+        v.push("Right-click Windows Terminal, choose Run as administrator, and run kora install again.".to_string());
+    }
+    v
+}
+
 pub struct ResultScreen {
     pub kind: Kind,
     pub message: String,
@@ -67,6 +80,8 @@ pub struct ResultScreen {
     pub txadmin_url: String,
     pub status: Option<(String, bool)>,
     pub hyperlinks: bool,
+    /// Add Windows-specific hints (antivirus, Administrator) to the failure steps.
+    pub windows: bool,
 }
 
 impl ResultScreen {
@@ -82,6 +97,7 @@ impl ResultScreen {
             txadmin_url: String::new(),
             status: None,
             hyperlinks: false,
+            windows: cfg!(windows),
         }
     }
 
@@ -97,7 +113,13 @@ impl ResultScreen {
             txadmin_url: o.txadmin_url.clone(),
             status: None,
             hyperlinks: false,
+            windows: cfg!(windows),
         }
+    }
+
+    pub fn with_windows(mut self, on: bool) -> Self {
+        self.windows = on;
+        self
     }
 
     pub fn with_hyperlinks(mut self, on: bool) -> Self {
@@ -271,6 +293,9 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
             lines.push(Line::raw(""));
             lines.push(Line::styled("What to do next:", bold));
             let mut items: Vec<String> = s.next.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+            if s.windows {
+                items.extend(windows_hints(&s.message));
+            }
             if s.log.is_some() {
                 items.push("Need help? Press D (or click Copy details) and paste the text into your message to support.".into());
             }
@@ -426,6 +451,18 @@ mod tests {
         for (w, h) in [(80, 24), (40, 12), (8, 3)] {
             text(&screen(), w, h); // never panics on small windows
         }
+    }
+
+    #[test]
+    fn windows_failures_get_plain_extra_steps() {
+        let log = dir().join(".kora").join("install.log");
+        let s = ResultScreen::failure("cannot rename C:\\x: Access is denied. (os error 5)", "To try again: run kora install again.", Some(&log)).with_windows(true);
+        let t = text(&s, 120, 34);
+        assert!(t.contains("antivirus") && t.contains("Protection"), "{t}");
+        let s = ResultScreen::failure("this needs Administrator rights", "x", None).with_windows(true);
+        assert!(text(&s, 120, 34).contains("Run as administrator"));
+        let s = ResultScreen::failure("Access is denied", "x", None).with_windows(false);
+        assert!(!text(&s, 120, 34).contains("antivirus"), "Linux never sees Windows hints");
     }
 
     #[test]

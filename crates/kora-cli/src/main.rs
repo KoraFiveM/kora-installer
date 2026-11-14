@@ -181,8 +181,7 @@ impl InstallArgs {
         let dir = match self.dir {
             Some(d) => d,
             None => {
-                let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
-                home.join("kora").join(installer::slug(&name))
+                home_dir(cfg!(windows), &|k| std::env::var_os(k)).join("kora").join(installer::slug(&name))
             }
         };
         let resources = match self.resources.as_deref().map(str::trim) {
@@ -218,6 +217,13 @@ impl InstallArgs {
             db_admin,
         })
     }
+}
+
+/// The user's home folder: USERPROFILE first on Windows (HOME may point elsewhere under Git Bash),
+/// HOME first elsewhere.
+fn home_dir(windows: bool, get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    let order = if windows { ["USERPROFILE", "HOME"] } else { ["HOME", "USERPROFILE"] };
+    order.iter().find_map(|k| get(k).filter(|v| !v.is_empty())).map(PathBuf::from).unwrap_or_default()
 }
 
 #[derive(Subcommand)]
@@ -792,6 +798,21 @@ mod tests {
             cfx_username: Some("Sticky".into()),
             github_login: Some("octo".into()),
         }
+    }
+
+    #[test]
+    fn home_dir_prefers_the_platform_variable() {
+        let env = |k: &str| match k {
+            "HOME" => Some("/c/Users/Git Bash Home".into()),
+            "USERPROFILE" => Some("C:\\Users\\Real".into()),
+            _ => None,
+        };
+        assert_eq!(home_dir(true, &env), PathBuf::from("C:\\Users\\Real"));
+        assert_eq!(home_dir(false, &env), PathBuf::from("/c/Users/Git Bash Home"));
+        let only_home = |k: &str| (k == "HOME").then(|| "/home/me".into());
+        assert_eq!(home_dir(true, &only_home), PathBuf::from("/home/me"), "falls back");
+        let empty = |k: &str| (k == "USERPROFILE").then(|| "".into());
+        assert_eq!(home_dir(true, &empty), PathBuf::new());
     }
 
     #[test]

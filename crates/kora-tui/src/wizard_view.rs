@@ -81,6 +81,22 @@ pub fn view(w: &Wizard) -> View {
             ];
             v.help = l("Pick 'Take me through it' if you are unsure. You can change every answer later by going back.");
         }
+        Screen::Prepare if w.windows => {
+            v.title = l("Before we start (Windows)");
+            v.lines = vec![
+                l("Kora will download the game server and Kora's files, create your server folder and set up a database. Nothing is changed until you confirm on the last screen."),
+                if w.admin {
+                    l("Running as Administrator. Windows may ask you to confirm a few times (a \"User Account Control\" prompt): choose Yes.")
+                } else {
+                    l("Kora is not running as Administrator. It can install the server files, but it will skip the database service, the Windows service (start with Windows) and the firewall rules. To include them, close this window, right-click Windows Terminal > Run as administrator, and start kora again.")
+                },
+                l("Git and the GitHub CLI are installed with winget (Windows' app installer) if they are missing, with a confirmation prompt for each."),
+                l("Windows Security may scan the downloads for a minute. If a file goes missing, check Windows Security > Protection history."),
+                l("Needs about 10 GB free on the server's drive and about 1 GB on C:. Ports 30120 and 40120 must be free; Kora checks and suggests free ones."),
+                l("If Windows says \"Windows protected your PC\", choose More info > Run anyway (kora.exe is not code-signed yet)."),
+            ];
+            v.help = l("Kora never sends your license key anywhere except into your own server's private settings.");
+        }
         Screen::Prepare => {
             v.title = l("Before we start");
             v.lines = vec![
