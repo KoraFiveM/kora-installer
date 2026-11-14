@@ -64,7 +64,7 @@ if ! wait_for "txAdmin" 180 txadmin_up; then sudo journalctl -u $SVC --no-pager 
 assert "txAdmin answers on 127.0.0.1:$TX_PORT" txadmin_up
 # The fake key is rejected by FXServer once txAdmin has started it: expected, and proves FXServer really ran.
 jr() { sudo journalctl -u $SVC --no-pager 2>/dev/null; }
-logfound() { { jr; sudo cat "$D"/txData/*/logs/* 2>/dev/null; sudo cat "$D"/.kora/service-host.log 2>/dev/null; } | grep -qiE 'license key|sv_licenseKey|licen[sc]e'; }
+logfound() { local t; t="$({ jr; sudo cat "$D"/txData/*/logs/* 2>/dev/null; } 2>/dev/null)"; grep -qiE 'Could not authenticate server license key' <<<"$t"; }
 wait_for "licence rejection logged" 120 logfound || { jr | tail -n 80; fail "no 'licence key rejected' line in the logs"; }
 assert "log shows FXServer rejected the fake licence key (expected)" logfound
 assert "an FXServer process of the service user runs" pgrep -u $ACCOUNT -f 'FXServer|run.sh'
