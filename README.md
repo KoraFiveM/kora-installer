@@ -38,4 +38,4 @@ Free code signing provided by SignPath.io, certificate by SignPath Foundation (p
 
 ## License
 
-TODO: owner must choose an OSI-approved license. See [LICENSE](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE).

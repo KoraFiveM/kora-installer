@@ -1,7 +1,7 @@
-# Code signing policy (DRAFT)
+# Code signing policy
 
-> Draft for the SignPath Foundation application. Apply only after the first public
-> (unsigned) release. Fill every TODO before applying.
+> Signing is pending: the SignPath Foundation application is made after the first public
+> (unsigned) release. Releases are unsigned until it is approved.
 
 Free code signing provided by SignPath.io, certificate by SignPath Foundation
 
@@ -11,9 +11,9 @@ All members must use multi-factor authentication on GitHub and SignPath.
 
 | Role | Responsibility | Members |
 |---|---|---|
-| Authors | Write code that is built and signed | TODO: GitHub handles |
-| Reviewers | Review changes before merge | TODO: GitHub handles |
-| Approvers | Manually approve every release signing request | TODO: GitHub handles |
+| Authors | Write code that is built and signed | The Kora maintainers ([KoraFiveM](https://github.com/orgs/KoraFiveM/people)) |
+| Reviewers | Review changes before merge | The Kora maintainers ([KoraFiveM](https://github.com/orgs/KoraFiveM/people)) |
+| Approvers | Manually approve every release signing request | The Kora maintainers ([KoraFiveM](https://github.com/orgs/KoraFiveM/people)) |
 
 ## Scope
 
@@ -23,7 +23,7 @@ All members must use multi-factor authentication on GitHub and SignPath.
 
 ## Privacy policy
 
-TODO: link to the privacy policy (koraframe.work). Usage statistics and error reports are
+Privacy policy: <https://koraframe.work/privacy>. Usage statistics and error reports are
 opt-in, described in the policy, shown during install, and can be disabled at any time.
 
 ## Build and metadata

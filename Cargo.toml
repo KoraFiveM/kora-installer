@@ -6,7 +6,7 @@ members = ["crates/kora-core", "crates/kora-cli", "crates/kora-tui"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
-# TODO: owner must choose an OSI-approved license (see LICENSE), then set `license` here.
+license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
