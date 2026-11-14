@@ -115,33 +115,38 @@ pub fn resource_name(r: &Resource) -> &str {
     r.path.rsplit('/').next().unwrap_or(&r.path)
 }
 
-fn norm_id(s: &str) -> String {
-    s.trim().to_ascii_lowercase().replace('_', "-")
-}
+use catalog::normalize_id as norm_id;
 
 /// Resolve the user's selection against the catalog, in install order. Never returns internal ones.
+/// Whatever a selected resource `dependsOn` (transitively) is added automatically.
 pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection) -> Result<Vec<&'a Resource>> {
     let ordered = cat.install_order();
-    match sel {
-        ResourceSelection::All => {
-            Ok(ordered.into_iter().filter(|r| matches!(r.kind, Kind::Kora | Kind::Dependency)).collect())
-        }
+    let seeds: Vec<String> = match sel {
+        ResourceSelection::All => ordered.iter().filter(|r| matches!(r.kind, Kind::Kora | Kind::Dependency)).map(|r| r.id.clone()).collect(),
         ResourceSelection::Only(ids) => {
-            let wanted: HashSet<String> = ids.iter().map(|i| norm_id(i)).collect();
-            for w in &wanted {
-                match cat.resources.iter().find(|r| norm_id(&r.id) == *w) {
+            for w in ids.iter().map(|i| norm_id(i)) {
+                match cat.find_normalized(&w) {
                     None => return err(format!("unknown resource '{w}' (not in the catalog)")),
                     Some(r) if r.is_internal() => return err(format!("resource '{w}' is not available for public installs")),
                     Some(_) => {}
                 }
             }
-            Ok(ordered
-                .into_iter()
-                .filter(|r| !r.is_internal())
-                .filter(|r| r.kind == Kind::Dependency || r.group == catalog::Group::Pre || wanted.contains(&norm_id(&r.id)))
-                .collect())
+            // Dependencies + core (pre group) are always part of a custom selection.
+            ids.iter()
+                .cloned()
+                .chain(ordered.iter().filter(|r| !r.is_internal() && (r.kind == Kind::Dependency || r.group == catalog::Group::Pre)).map(|r| r.id.clone()))
+                .collect()
+        }
+    };
+    let wanted = cat.with_dependencies(seeds);
+    for w in &wanted {
+        match cat.find_normalized(w) {
+            None => return err(format!("a selected resource needs '{w}', which is not in the catalog")),
+            Some(r) if r.is_internal() => return err(format!("a selected resource needs '{w}', which is not available for public installs")),
+            Some(_) => {}
         }
     }
+    Ok(ordered.into_iter().filter(|r| wanted.contains(&norm_id(&r.id))).collect())
 }
 
 /// Load the catalog per the request: explicit path/URL (must be valid), else default URL with
@@ -604,6 +609,68 @@ mod tests {
         // install order is respected
         let orders: Vec<u32> = all.iter().filter_map(|r| r.order).collect();
         assert!(orders.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    fn tiny_catalog(extra: &str) -> Catalog {
+        let sha = "a".repeat(40);
+        let rel = format!(r#""latest":"1.0.0","versions":[{{"version":"1.0.0","tag":"v1.0.0","commit":"{sha}"}}]"#);
+        let json = format!(
+            r#"{{"schemaVersion":2,"resources":[
+              {{"id":"kora-lib","repository":"https://github.com/o/lib.git","path":"[pre]/lib","group":"pre","kind":"kora","branch":"dev","order":1,{rel},"dependsOn":["kora_theme"]}},
+              {{"id":"kora-theme","repository":"https://github.com/o/theme.git","path":"[standalone]/theme","group":"standalone","kind":"optional","branch":"dev","order":2,{rel},"dependsOn":["kora-icons"]}},
+              {{"id":"kora-icons","repository":"https://github.com/o/icons.git","path":"[standalone]/icons","group":"standalone","kind":"optional","branch":"dev","order":3,{rel}}},
+              {{"id":"kora-chat","repository":"https://github.com/o/chat.git","path":"[kora]/chat","group":"kora","kind":"optional","branch":"dev","order":4,{rel}}}
+              {extra}]}}"#
+        );
+        Catalog::parse_validated(&json).unwrap()
+    }
+
+    #[test]
+    fn dependencies_are_added_automatically_and_transitively() {
+        let cat = tiny_catalog("");
+        let ids = |s: &ResourceSelection| select_resources(&cat, s).unwrap().iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+        // core (pre) is always there; its dependsOn chain (theme -> icons) comes with it; kora-chat does not.
+        assert_eq!(ids(&ResourceSelection::Only(vec![])), ["kora-lib", "kora-theme", "kora-icons"]);
+        // choosing a dependency's dependent pulls it in, in install order, underscores accepted
+        assert_eq!(ids(&ResourceSelection::Only(vec!["kora_chat".into()])), ["kora-lib", "kora-theme", "kora-icons", "kora-chat"]);
+        assert_eq!(ids(&ResourceSelection::All).len(), 3, "All = kora|dependency kinds only; optional ones are not offered");
+    }
+
+    #[test]
+    fn all_selection_includes_optional_dependencies_of_selected_resources() {
+        let cat = tiny_catalog(
+            r#",{"id":"kora-x","repository":"https://github.com/o/x.git","path":"[kora]/x","group":"kora","kind":"kora","branch":"dev","order":5,"latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"dependsOn":["kora-chat"]}"#,
+        );
+        let ids: Vec<String> = select_resources(&cat, &ResourceSelection::All).unwrap().iter().map(|r| r.id.clone()).collect();
+        assert!(ids.contains(&"kora-chat".to_string()), "optional chat is needed by kora-x: {ids:?}");
+    }
+
+    #[test]
+    fn bad_dependencies_are_rejected_by_validation() {
+        let mut cat = tiny_catalog("");
+        cat.resources[3].depends_on = vec!["nope".into()];
+        cat.resources[0].depends_on = vec!["kora-lib".into()];
+        let catalog::CatalogError::Invalid(e) = cat.validate().unwrap_err() else { panic!() };
+        assert!(e.iter().any(|m| m.contains("'nope' is not in the catalog")), "{e:?}");
+        assert!(e.iter().any(|m| m.contains("depends on itself")), "{e:?}");
+        // cycles are tolerated by selection
+        let mut cat = tiny_catalog("");
+        cat.resources[2].depends_on = vec!["kora-lib".into()];
+        assert_eq!(select_resources(&cat, &ResourceSelection::Only(vec![])).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn embedded_catalog_pulls_theme_in_with_lib_and_old_catalogs_still_parse() {
+        let cat = Catalog::embedded().unwrap();
+        assert!(cat.find("kora-theme").is_some());
+        assert_eq!(cat.find("kora-lib").unwrap().depends_on, ["kora-theme"]);
+        let only = select_resources(&cat, &ResourceSelection::Only(vec!["kora_chat".into()])).unwrap();
+        assert!(only.iter().any(|r| r.id == "kora-theme"), "kora-lib is always installed, so is its dependency");
+        let mut v: serde_json::Value = serde_json::from_str(catalog::EMBEDDED_SNAPSHOT).unwrap();
+        for r in v["resources"].as_array_mut().unwrap() {
+            r.as_object_mut().unwrap().remove("dependsOn");
+        }
+        assert!(Catalog::parse_validated(&v.to_string()).is_ok(), "dependsOn is optional");
     }
 
     #[test]

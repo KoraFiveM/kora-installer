@@ -69,6 +69,10 @@ pub struct Resource {
     pub latest: Option<String>,
     #[serde(default)]
     pub versions: Vec<Release>,
+    /// Ids of resources this one needs at runtime (e.g. `kora-lib` needs `kora-theme`). Selection
+    /// always includes them (transitively). `-` and `_` are interchangeable, like everywhere else.
+    #[serde(default, rename = "dependsOn", skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,6 +121,11 @@ impl Resource {
     pub fn is_internal(&self) -> bool {
         self.kind == Kind::Internal
     }
+}
+
+/// Canonical form used to compare resource ids.
+pub fn normalize_id(s: &str) -> String {
+    s.trim().to_ascii_lowercase().replace('_', "-")
 }
 
 fn is_sha(s: &str) -> bool {
@@ -199,12 +208,44 @@ impl Catalog {
             if matches!(r.kind, Kind::Kora | Kind::Optional) && r.versions.is_empty() {
                 errs.push(format!("{}: kora/optional resource needs a release", r.id));
             }
+            for d in &r.depends_on {
+                match self.find_normalized(d) {
+                    None => errs.push(format!("{}: dependsOn '{d}' is not in the catalog", r.id)),
+                    Some(t) if t.id == r.id => errs.push(format!("{}: depends on itself", r.id)),
+                    Some(t) if t.is_internal() && !r.is_internal() => {
+                        errs.push(format!("{}: public resource depends on internal '{}'", r.id, t.id))
+                    }
+                    Some(_) => {}
+                }
+            }
         }
         if errs.is_empty() { Ok(()) } else { Err(CatalogError::Invalid(errs)) }
     }
 
     pub fn find(&self, id: &str) -> Option<&Resource> {
         self.resources.iter().find(|r| r.id == id)
+    }
+
+    /// Find by id where `-` and `_` and letter case do not matter (`kora_theme` == `kora-theme`).
+    pub fn find_normalized(&self, id: &str) -> Option<&Resource> {
+        let n = normalize_id(id);
+        self.resources.iter().find(|r| normalize_id(&r.id) == n)
+    }
+
+    /// `seeds` plus everything they depend on, transitively (normalised ids). Unknown ids and
+    /// cycles are tolerated here (validation reports the former); the result never repeats.
+    pub fn with_dependencies(&self, seeds: impl IntoIterator<Item = String>) -> HashSet<String> {
+        let mut out: HashSet<String> = HashSet::new();
+        let mut queue: Vec<String> = seeds.into_iter().map(|s| normalize_id(&s)).collect();
+        while let Some(id) = queue.pop() {
+            if !out.insert(id.clone()) {
+                continue;
+            }
+            if let Some(r) = self.find_normalized(&id) {
+                queue.extend(r.depends_on.iter().map(|d| normalize_id(d)));
+            }
+        }
+        out
     }
 
     pub fn by_kind(&self, kind: Kind) -> Vec<&Resource> {
