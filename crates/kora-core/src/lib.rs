@@ -9,6 +9,7 @@ pub mod db;
 pub mod firewall;
 pub mod git;
 pub mod service;
+pub mod site;
 pub mod steps;
 pub mod txadmin;
 pub mod update;

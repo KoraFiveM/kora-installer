@@ -6,6 +6,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use kora_core::firewall::{self, PortRequest};
 use kora_core::installer::{DbAdmin, DbChoice, InstallRequest, Mode, Ports, ResourceSelection};
+use kora_core::site::Redeemed;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
 
@@ -61,6 +62,10 @@ fn real_port_check(game: u16, tx: u16) -> Vec<String> {
 /// Real database login check (fake-able in tests). `None` = automatic (environment / root socket).
 pub type DbTester = fn(Option<&DbAdmin>) -> Result<(), String>;
 
+/// Setup-code redeemer (injected: the CLI talks to the website, tests use a fake). The error text
+/// is shown to the user as is.
+pub type Redeemer = Box<dyn FnMut(&str) -> Result<Redeemed, String>>;
+
 pub struct Wizard {
     pub screen: Screen,
     state: WizardState,
@@ -85,8 +90,14 @@ pub struct Wizard {
     host_touched: bool,
     pub github_owner: String,
     pub game_build: String,
-    /// TODO: the website setup-code API does not exist yet; the code is only stored here.
+    /// Setup code typed on the Welcome stage.
     pub setup_code: String,
+    /// Answers loaded from a setup code (website). Their screens are skipped but shown on Review.
+    pub redeemed: Option<Redeemed>,
+    /// The code was already redeemed by the CLI, so the code screen is not offered.
+    cli_prefilled: bool,
+    cfx_identifier: Option<String>,
+    redeemer: Option<Redeemer>,
     /// Selected row for choice screens.
     pub selected: usize,
     /// Focused input for text screens.
@@ -237,6 +248,10 @@ impl Wizard {
             github_owner: String::new(),
             game_build: String::new(),
             setup_code: String::new(),
+            redeemed: None,
+            cli_prefilled: false,
+            cfx_identifier: None,
+            redeemer: None,
             selected: 0,
             focus: 0,
             help_open: false,
@@ -259,13 +274,25 @@ impl Wizard {
     /// Screens in the current order (depends on earlier answers).
     pub fn flow(&self) -> Vec<Screen> {
         use Screen::*;
-        let mut v = vec![Welcome, Prepare, Mode, Name, Folder, Ports, Artifact];
-        if self.artifact_custom {
-            v.push(ArtifactUrl);
+        let web = self.redeemed.is_some();
+        let mut v = vec![Welcome];
+        if !self.cli_prefilled {
+            v.push(SetupCode);
         }
-        v.push(Resources);
-        if !self.resources_all {
-            v.push(ResourceList);
+        v.push(Prepare);
+        if !web {
+            v.extend([Mode, Name]);
+        }
+        v.push(Folder);
+        if !web {
+            v.extend([Ports, Artifact]);
+            if self.artifact_custom {
+                v.push(ArtifactUrl);
+            }
+            v.push(Resources);
+            if !self.resources_all {
+                v.push(ResourceList);
+            }
         }
         v.push(Database);
         if self.db != DbChoice::Skip {
@@ -275,12 +302,17 @@ impl Wizard {
             }
         }
         v.extend([Firewall, Service, License]);
-        if self.advanced {
+        if self.advanced && !web {
             v.push(Hostname);
-            if self.mode == kora_core::installer::Mode::Development {
-                v.push(GithubOwner);
+        }
+        if (self.advanced || web) && self.mode == kora_core::installer::Mode::Development {
+            v.push(GithubOwner);
+        }
+        if self.advanced {
+            if !web {
+                v.push(GameBuild);
             }
-            v.extend([GameBuild, TxAdminPublic, SetupCode]);
+            v.push(TxAdminPublic);
         }
         v.push(Review);
         v
@@ -294,7 +326,7 @@ impl Wizard {
     /// Which of the four stages (Welcome, Prepare, Choose, Review) is active.
     pub fn stage(&self) -> usize {
         match self.screen {
-            Screen::Welcome => 0,
+            Screen::Welcome | Screen::SetupCode => 0,
             Screen::Prepare => 1,
             Screen::Review => 3,
             _ => 2,
@@ -316,8 +348,8 @@ impl Wizard {
             | Screen::License
             | Screen::Hostname
             | Screen::GithubOwner
-            | Screen::GameBuild
-            | Screen::SetupCode => 1,
+            | Screen::GameBuild => 1,
+            Screen::SetupCode => usize::from(self.redeemed.is_none()),
             _ => 0,
         }
     }
@@ -478,6 +510,70 @@ impl Wizard {
         }
     }
 
+    /// Install the function that exchanges a setup code for the website's choices.
+    pub fn with_redeemer(mut self, r: Redeemer) -> Self {
+        self.redeemer = Some(r);
+        self
+    }
+
+    /// Load the website's choices (used after a successful redeem, or by the CLI when it already
+    /// redeemed `--code`, in which case the code screen is not offered).
+    pub fn apply_redeemed(&mut self, r: Redeemed, from_cli: bool) {
+        self.mode = r.mode;
+        self.name = r.name.clone();
+        if !self.dir_touched {
+            self.dir = default_dir(&self.name);
+        }
+        self.hostname = r.hostname.clone().unwrap_or_else(|| r.name.clone());
+        self.host_touched = true;
+        self.game_port = r.ports.game.to_string();
+        self.tx_port = r.ports.txadmin.to_string();
+        self.artifact_custom = r.artifact_url.is_some();
+        self.artifact_url = r.artifact_url.clone().unwrap_or_default();
+        match &r.resources {
+            ResourceSelection::All => self.resources_all = true,
+            ResourceSelection::Only(ids) => {
+                self.resources_all = false;
+                self.resource_ids = ids.join(", ");
+            }
+        }
+        self.game_build = r.game_build.map(|g| g.to_string()).unwrap_or_default();
+        self.cfx_identifier = r.cfx_identifier.clone();
+        if self.github_owner.trim().is_empty() {
+            // Only a suggestion: the GitHub screen is still shown in development mode.
+            self.github_owner = r.github_login.clone().unwrap_or_default();
+        }
+        self.cli_prefilled = from_cli;
+        self.redeemed = Some(r);
+        self.error = None;
+    }
+
+    /// Welcome text after a code was loaded.
+    pub fn welcome_note(&self) -> Option<String> {
+        self.redeemed.as_ref().map(|r| r.welcome())
+    }
+
+    fn try_redeem(&mut self) {
+        let code = match kora_core::site::normalize_code(&self.setup_code) {
+            Ok(c) => c,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
+        let Some(redeemer) = self.redeemer.as_mut() else {
+            self.error = Some("Setup codes can't be used here. Leave the box empty to continue.".into());
+            return;
+        };
+        match redeemer(&code) {
+            Ok(r) => {
+                self.setup_code = code;
+                self.apply_redeemed(r, false);
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
     pub fn handle_paste(&mut self, text: &str) {
         if self.help_open || !self.is_text_screen() {
             return;
@@ -598,6 +694,11 @@ impl Wizard {
 
     /// Validate the current screen and advance. Sets `error` and stays on failure.
     pub fn go_next(&mut self) {
+        if self.screen == Screen::SetupCode && self.redeemed.is_none() && !self.setup_code.trim().is_empty() {
+            // The first Enter exchanges the code; the next one continues.
+            self.try_redeem();
+            return;
+        }
         if let Err(e) = self.validate_current() {
             self.error = Some(e);
             return;
@@ -654,14 +755,6 @@ impl Wizard {
                     Ok(())
                 } else {
                     Err("The game build must be a number (or leave it empty).".into())
-                }
-            }
-            Screen::SetupCode => {
-                let c = self.setup_code.trim();
-                if c.is_empty() || c.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-                    Ok(())
-                } else {
-                    Err("Setup codes look like KORA-7F3K-92QX.".into())
                 }
             }
             _ => Ok(()),
@@ -722,7 +815,7 @@ impl Wizard {
             name,
             dir: PathBuf::from(self.dir.trim()),
             license_key: non_empty(&self.license),
-            cfx_identifier: None,
+            cfx_identifier: self.cfx_identifier.clone(),
             ports: Ports {
                 game: self.game_port.trim().parse().unwrap_or(30120),
                 txadmin: self.tx_port.trim().parse().unwrap_or(40120),
@@ -776,11 +869,14 @@ mod tests {
         let mut w = wiz();
         assert_eq!(w.screen, Screen::Welcome);
         w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::SetupCode);
+        w.handle_key(key(KeyCode::Enter)); // empty code = skip
         assert_eq!(w.screen, Screen::Prepare);
         w.handle_key(key(KeyCode::Enter));
         assert_eq!(w.screen, Screen::Mode);
         w.handle_key(key(KeyCode::Esc));
         assert_eq!(w.screen, Screen::Prepare);
+        w.handle_key(key(KeyCode::Esc));
         w.handle_key(key(KeyCode::Esc));
         w.handle_key(key(KeyCode::Esc));
         assert_eq!(w.state(), WizardState::Quit);
@@ -789,8 +885,8 @@ mod tests {
     #[test]
     fn full_happy_path_builds_request() {
         let mut w = wiz();
-        for _ in 0..3 {
-            w.handle_key(key(KeyCode::Enter)); // welcome, prepare, mode(prod)
+        for _ in 0..4 {
+            w.handle_key(key(KeyCode::Enter)); // welcome, setup code (empty), prepare, mode(prod)
         }
         assert_eq!(w.screen, Screen::Name);
         for _ in 0..w.name.len() {
@@ -819,6 +915,7 @@ mod tests {
         w.handle_key(key(KeyCode::Down)); // advanced
         assert!(w.advanced);
         assert!(w.flow().contains(&Screen::SetupCode));
+        w.handle_key(key(KeyCode::Enter));
         w.handle_key(key(KeyCode::Enter));
         w.handle_key(key(KeyCode::Enter));
         w.handle_key(key(KeyCode::Char('2'))); // development
@@ -894,7 +991,7 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         };
         w.handle_mouse(click(l.next), area);
-        assert_eq!(w.screen, Screen::Prepare);
+        assert_eq!(w.screen, Screen::SetupCode);
         let l = wizard_view::layout(area, &w.view());
         w.handle_mouse(click(l.back), area);
         assert_eq!(w.screen, Screen::Welcome);
@@ -1055,5 +1152,141 @@ mod tests {
         assert!(changes.iter().any(|c| c.contains("MariaDB")));
         w.firewall = false;
         assert!(!w.system_changes().iter().any(|c| c.contains("firewall")));
+    }
+
+    fn sample_redeemed() -> Redeemed {
+        use kora_core::site::ArtifactChoice;
+        Redeemed {
+            mode: Mode::Development,
+            name: "Alpha One".into(),
+            resources: ResourceSelection::Only(vec!["kora_banking".into(), "kora_jobs".into()]),
+            artifact: ArtifactChoice::Build(38621),
+            artifact_url: Some("https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/38621-5412ed0c3a7e0b5b2b1e8d6d1d3c4a5b6c7d8e9f/fx.tar.xz".into()),
+            game_build: Some(3258),
+            ports: Ports { game: 31120, txadmin: 41120 },
+            hostname: Some("Alpha RP".into()),
+            cfx_identifier: Some("fivem:123456".into()),
+            cfx_username: Some("Sticky".into()),
+            github_login: Some("octo-cat".into()),
+        }
+    }
+
+    fn code_wiz() -> Wizard {
+        wiz().with_redeemer(Box::new(|c| match c {
+            "KORA-7F3K-92QX" => Ok(sample_redeemed()),
+            _ => Err("That setup code is not valid: it may have expired.".to_string()),
+        }))
+    }
+
+    fn render_text(w: &Wizard) -> String {
+        let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(110, 40)).unwrap();
+        t.draw(|f| wizard_view::render(f, w)).unwrap();
+        let b = t.backend().buffer().clone();
+        (0..b.area.height).map(|y| (0..b.area.width).map(|x| b[(x, y)].symbol().to_string()).collect::<String>()).collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn code_success_prefills_and_skips_screens() {
+        let mut w = code_wiz();
+        w.handle_key(key(KeyCode::Enter)); // -> setup code
+        assert_eq!(w.screen, Screen::SetupCode);
+        w.handle_paste("kora-7f3k-92qx");
+        assert!(render_text(&w).contains("Setup code"));
+        w.handle_key(key(KeyCode::Enter)); // redeem
+        assert_eq!(w.screen, Screen::SetupCode, "stays to show the greeting");
+        assert!(w.error.is_none());
+        let text = render_text(&w);
+        assert!(text.contains("Welcome, Sticky! Your choices from the website were loaded."), "{text}");
+        let flow = w.flow();
+        for gone in [Screen::Mode, Screen::Name, Screen::Ports, Screen::Artifact, Screen::Resources, Screen::ResourceList, Screen::Hostname, Screen::GameBuild] {
+            assert!(!flow.contains(&gone), "{gone:?}");
+        }
+        for kept in [Screen::Folder, Screen::Database, Screen::License, Screen::GithubOwner, Screen::Review] {
+            assert!(flow.contains(&kept), "{kept:?}");
+        }
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::Prepare);
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::Folder);
+        assert!(w.dir.ends_with("alpha-one"));
+        // GitHub owner is suggested but still asked.
+        let mut guard = 0;
+        while w.screen != Screen::GithubOwner && guard < 20 {
+            w.handle_key(key(KeyCode::Enter));
+            guard += 1;
+        }
+        assert_eq!(w.screen, Screen::GithubOwner);
+        assert_eq!(w.github_owner, "octo-cat");
+        while w.state() == WizardState::Running && guard < 40 {
+            w.handle_key(key(KeyCode::Enter));
+            guard += 1;
+        }
+        assert_eq!(w.state(), WizardState::Done);
+        let r = w.build_request();
+        assert_eq!(r.mode, Mode::Development);
+        assert_eq!((r.name.as_str(), r.hostname.as_str()), ("Alpha One", "Alpha RP"));
+        assert_eq!((r.ports.game, r.ports.txadmin), (31120, 41120));
+        assert_eq!(r.resources, ResourceSelection::Only(vec!["kora_banking".into(), "kora_jobs".into()]));
+        assert!(r.artifact_url.unwrap().contains("38621-"));
+        assert_eq!(r.game_build, Some(3258));
+        assert_eq!(r.cfx_identifier.as_deref(), Some("fivem:123456"));
+        assert_eq!(r.github_owner.as_deref(), Some("octo-cat"));
+        assert!(r.license_key.is_none() && r.db_admin.is_none(), "secrets are never prefilled");
+    }
+
+    #[test]
+    fn skipped_screens_are_shown_on_review() {
+        let mut w = code_wiz();
+        w.screen = Screen::SetupCode;
+        w.handle_paste("KORA-7F3K-92QX");
+        w.go_next();
+        w.screen = Screen::Review;
+        let text = render_text(&w);
+        assert!(text.contains("Loaded from your setup code"), "{text}");
+        assert!(text.contains("Alpha One") && text.contains("Development") && text.contains("31120") && text.contains("kora_banking"), "{text}");
+        assert!(text.contains("Game build: 3258"));
+    }
+
+    #[test]
+    fn code_failure_shows_friendly_error_and_keeps_wizard_intact() {
+        let mut w = code_wiz();
+        w.screen = Screen::SetupCode;
+        w.handle_paste("KORA-AAAA-BBBB");
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::SetupCode);
+        assert!(w.error.as_ref().unwrap().contains("expired"));
+        assert!(w.redeemed.is_none() && w.flow().contains(&Screen::Mode));
+        assert!(render_text(&w).contains("expired"));
+        // a malformed code is rejected before the redeemer is called
+        w.setup_code.clear();
+        w.handle_paste("nope");
+        w.handle_key(key(KeyCode::Enter));
+        assert!(w.error.as_ref().unwrap().contains("KORA-7F3K-92QX"));
+        // clearing the box lets the user continue without a code
+        for _ in 0..4 {
+            w.handle_key(key(KeyCode::Backspace));
+        }
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::Prepare);
+    }
+
+    #[test]
+    fn no_redeemer_gives_friendly_message() {
+        let mut w = wiz();
+        w.screen = Screen::SetupCode;
+        w.handle_paste("KORA-7F3K-92QX");
+        w.go_next();
+        assert!(w.error.as_ref().unwrap().contains("Leave the box empty"));
+    }
+
+    #[test]
+    fn cli_prefill_skips_code_screen() {
+        let mut w = wiz();
+        w.apply_redeemed(sample_redeemed(), true);
+        assert!(!w.flow().contains(&Screen::SetupCode));
+        assert!(render_text(&w).contains("Welcome, Sticky!"));
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::Prepare);
+        assert!(!format!("{w:?}").contains("octo"), "{w:?}");
     }
 }

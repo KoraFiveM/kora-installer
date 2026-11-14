@@ -57,13 +57,14 @@ pub fn view(w: &Wizard) -> View {
     match w.screen {
         Screen::Welcome => {
             v.title = l("Welcome to Kora");
-            v.lines = vec![
-                l("This will set up your own game server, step by step. It takes a few minutes and you can go back at any time."),
-                l("How would you like to continue?"),
-            ];
+            v.lines = vec![l("This will set up your own game server, step by step. It takes a few minutes and you can go back at any time.")];
+            if let Some(n) = w.welcome_note() {
+                v.lines.push(n);
+            }
+            v.lines.push(l("How would you like to continue?"));
             v.options = vec![
                 opt("Take me through it (recommended)", "A few simple questions with sensible answers already filled in."),
-                opt("Advanced", "Also ask about extra options such as the server's public name, game build and setup code."),
+                opt("Advanced", "Also ask about extra options such as the server's public name, game build and the txAdmin panel."),
             ];
             v.help = l("Pick 'Take me through it' if you are unsure. You can change every answer later by going back.");
         }
@@ -221,9 +222,23 @@ pub fn view(w: &Wizard) -> View {
         }
         Screen::SetupCode => {
             v.title = l("Setup code (optional)");
-            // TODO: wire to the website setup-code API once it exists; for now it is only stored.
-            v.lines = vec![l("If you prepared your install on the Kora website you got a code like KORA-7F3K-92QX. Enter it here, or leave empty. (Not active yet: it is just remembered for now.)")];
-            v.inputs = vec![inp("Setup code", &w.setup_code, "KORA-XXXX-XXXX", true)];
+            match w.welcome_note() {
+                Some(n) => {
+                    v.lines = vec![
+                        n,
+                        l("Questions the website already answered are skipped; you will see all of them again on the last screen before anything is changed."),
+                        l("Your license key and database login are never sent by the website, so you will still be asked for those."),
+                    ];
+                }
+                None => {
+                    v.lines = vec![
+                        l("If you prepared your install on the Kora website you got a code like KORA-7F3K-92QX. Paste it here and press Enter to load your choices, or leave the box empty and press Next to answer everything here."),
+                        l("A code works once and lasts 30 minutes."),
+                    ];
+                    v.inputs = vec![inp("Setup code", &w.setup_code, "KORA-XXXX-XXXX", true)];
+                }
+            }
+            v.help = l("Create a code on the Kora website (Installer page) after linking Discord, GitHub and your Cfx.re account. If it does not work you can simply continue without it.");
         }
         Screen::Review => {
             v.title = l("Ready to install");
@@ -244,12 +259,21 @@ pub fn view(w: &Wizard) -> View {
                 format!("Folder: {}", w.dir.trim()),
                 format!("Ports: game {}, control panel {}   Database: {db}{admin}", w.game_port.trim(), w.tx_port.trim()),
                 format!(
+                    "Features: {}   Server software: {}{}",
+                    if w.resources_all { "everything".to_string() } else { w.resource_ids.trim().to_string() },
+                    if w.artifact_custom { "chosen build" } else { "recommended" },
+                    if w.game_build.trim().is_empty() { String::new() } else { format!("   Game build: {}", w.game_build.trim()) },
+                ),
+                format!(
                     "License key: {}",
                     if w.license.trim().is_empty() { "not set (add later)" } else { "provided (hidden)" }
                 ),
                 String::new(),
                 "This will change your computer as follows:".into(),
             ];
+            if w.redeemed.is_some() {
+                v.lines.insert(0, "Loaded from your setup code on the website: type, name, features, server software, ports and public name.".into());
+            }
             v.lines.extend(w.system_changes().into_iter().map(|c| format!("  - {c}")));
             v.lines.push(String::new());
             v.lines.push("Choose Install to begin, or Back to change something.".into());

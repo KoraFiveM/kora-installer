@@ -31,7 +31,7 @@ pub enum ResourceSelection {
     Only(Vec<String>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ports {
     pub game: u16,
     pub txadmin: u16,
