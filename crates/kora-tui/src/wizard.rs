@@ -664,7 +664,13 @@ impl Wizard {
         }
         let screen = self.screen;
         let max = self.field_max();
+        let digits: String;
         let mut raw = text.trim();
+        if screen == Screen::Ports {
+            // Keep digits first, so the length cap counts only what is kept.
+            digits = raw.chars().filter(char::is_ascii_digit).collect();
+            raw = &digits;
+        }
         if screen == Screen::Folder {
             // "Copy as path" in Windows Explorer wraps the path in quotes.
             raw = raw.trim_matches('"');
