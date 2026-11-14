@@ -1135,8 +1135,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Update(a)) => K::Update { auto: a.auto },
         Some(Command::Status) => K::Status,
         Some(Command::Delete { .. }) => K::Delete,
-=======
->>>>>>> 13702a3 (notify: Discord webhook for update reports (validation, mock-tested send, 429 retry, redaction, 0600 file) + kora webhook CLI)
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. }) => K::Other,
         Some(Command::Start { .. }) => K::Start,
         Some(Command::Stop { .. }) => K::Stop,
         Some(Command::Restart { .. }) => K::Restart,
