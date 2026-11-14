@@ -240,20 +240,57 @@ fn home_dir(windows: bool, get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> 
     order.iter().find_map(|k| get(k).filter(|v| !v.is_empty())).map(PathBuf::from).unwrap_or_default()
 }
 
+/// What to do when an update needs a restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum RestartArg {
+    /// Apply the files, restart nothing.
+    None,
+    /// Ensure the updated resources live, no full restart.
+    Ensure,
+    /// Restart the whole server.
+    Full,
+    /// Restart only when nobody is playing (default).
+    WhenQuiet,
+}
+
+#[derive(Args, Debug, Default)]
+struct UpdateArgs {
+    /// Run unattended (fast-forward clean forks only).
+    #[arg(long, conflicts_with_all = ["resource", "all", "preview", "yes", "restart", "rollback", "list_snapshots"])]
+    auto: bool,
+    /// Server name or id.
+    server: String,
+    /// Update only this resource (repeatable).
+    #[arg(long = "resource", value_name = "ID", conflicts_with = "all")]
+    resource: Vec<String>,
+    /// Update every resource.
+    #[arg(long)]
+    all: bool,
+    /// Show what would change, then stop.
+    #[arg(long, conflicts_with_all = ["rollback", "list_snapshots"])]
+    preview: bool,
+    /// Do not ask for confirmation.
+    #[arg(long, short = 'y')]
+    yes: bool,
+    /// What to do about restarts.
+    #[arg(long, value_enum)]
+    restart: Option<RestartArg>,
+    /// Put everything back the way a snapshot saved it.
+    #[arg(long, value_name = "SNAPSHOT", conflicts_with_all = ["resource", "all", "list_snapshots"])]
+    rollback: Option<String>,
+    /// List saved snapshots.
+    #[arg(long, conflicts_with_all = ["resource", "all"])]
+    list_snapshots: bool,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Install a new Kora server (interactive TUI, or headless with options).
     Install(Box<InstallArgs>),
     /// Open the multi-server manager.
     Manager,
-    /// Update a server (used by schedulers).
-    Update {
-        /// Run unattended (fast-forward clean forks only).
-        #[arg(long)]
-        auto: bool,
-        /// Server name or id.
-        server: String,
-    },
+    /// Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers).
+    Update(UpdateArgs),
     /// Show registered servers.
     Status,
     /// Delete a server: removes what the installer created (files, database + user, registry entry).
@@ -763,20 +800,122 @@ fn start_and_report(server: &str, past: &str) -> i32 {
     }
 }
 
-fn update(auto: bool, server: &str) -> i32 {
-    if !auto {
-        eprintln!("note: interactive updates arrive with the manager; running the safe fast-forward-only update.");
+fn update(a: UpdateArgs) -> i32 {
+    use kora_core::update::manual as m;
+    if a.auto {
+        match gitops::auto_update(&a.server) {
+            Ok(report) => {
+                println!("{}", report.summary());
+                return i32::from(report.has_problems());
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        }
     }
-    match gitops::auto_update(server) {
+    let server = match m::load_server(&a.server) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    if a.list_snapshots {
+        let list = m::snapshots(&server);
+        if list.is_empty() {
+            println!("No snapshots yet. One is saved before every update.");
+        }
+        for s in list {
+            println!("{}  (unix {})  {}", s.id, s.created_unix, s.resources.join(", "));
+        }
+        return 0;
+    }
+    if let Some(id) = &a.rollback {
+        if !a.yes && !confirm(&format!("Put '{}' back the way snapshot {id} saved it?", server.name)) {
+            println!("Nothing changed.");
+            return 0;
+        }
+        return match m::rollback(&server, id) {
+            Ok(()) => {
+                println!("Rolled back to snapshot {id}.");
+                0
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                1
+            }
+        };
+    }
+    let scope = if a.all || (a.resource.is_empty() && a.preview) {
+        m::Scope::All
+    } else if a.resource.is_empty() {
+        eprintln!("error: say what to update: --resource <id> (repeatable) or --all. Add --preview to only look.");
+        return 1;
+    } else {
+        m::Scope::Resources(a.resource.clone())
+    };
+    let pre = match m::preview(&server, scope.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    print!("{}", m::render_preview(&pre));
+    if a.preview {
+        return 0;
+    }
+    if !pre.resources.iter().any(|c| c.status == m::ChangeStatus::Clean) {
+        return if pre.resources.iter().any(|c| matches!(c.status, m::ChangeStatus::Dirty | m::ChangeStatus::Diverged)) { 3 } else { 0 };
+    }
+    if !a.yes {
+        if !std::io::stdin().is_terminal() {
+            eprintln!("error: not asking for confirmation here; add --yes to go ahead.");
+            return 1;
+        }
+        if !confirm("Apply these updates? A snapshot is saved first.") {
+            println!("Nothing changed.");
+            return 0;
+        }
+    }
+    let restart = match a.restart.unwrap_or(RestartArg::WhenQuiet) {
+        RestartArg::None => m::RestartPolicy::None,
+        RestartArg::Ensure => m::RestartPolicy::Ensure,
+        RestartArg::Full => m::RestartPolicy::FullRestart,
+        RestartArg::WhenQuiet => m::RestartPolicy::WhenQuiet,
+    };
+    let mut snapshot = None;
+    let res = m::apply(&server, scope, m::ApplyOpts { restart, skip: Vec::new() }, &mut |e| match e {
+        m::UpdateEvent::Snapshot(id) => {
+            println!("Saved snapshot {id}.");
+            snapshot = Some(id);
+        }
+        m::UpdateEvent::Resource { id, state } if state == "updating" => println!("Updating {id}..."),
+        m::UpdateEvent::Health(h) => println!("{h}."),
+        _ => {}
+    });
+    match res {
         Ok(report) => {
-            println!("{}", report.summary());
-            i32::from(report.has_problems())
+            print!("{}", m::render_report(&report));
+            if let Some(id) = snapshot {
+                println!("To undo: kora update {} --rollback {id}", a.server);
+            }
+            m::exit_code(&report)
         }
         Err(e) => {
             eprintln!("error: {e}");
             1
         }
     }
+}
+
+fn confirm(question: &str) -> bool {
+    use std::io::Write;
+    print!("{question} [y/N] ");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line).is_ok() && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn delete(server: &str, keep_files: bool, keep_db: bool, yes: bool) -> i32 {
@@ -892,7 +1031,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         None => K::Wizard,
         Some(Command::Install(a)) => K::Install { dry_run: a.dry_run },
         Some(Command::Manager) => K::Manager,
-        Some(Command::Update { auto, .. }) => K::Update { auto: *auto },
+        Some(Command::Update(a)) => K::Update { auto: a.auto },
         Some(Command::Status) => K::Status,
         Some(Command::Delete { .. }) => K::Delete,
         Some(Command::ServiceHost { .. } | Command::Github { .. }) => K::Other,
@@ -986,7 +1125,7 @@ fn main() {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
         Some(Command::Manager) => not_implemented("manager"),
-        Some(Command::Update { auto, server }) => update(auto, &server),
+        Some(Command::Update(a)) => update(a),
         Some(Command::Status) => status(),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
@@ -1023,6 +1162,40 @@ mod tests {
             cfx_identifier: Some("fivem:1".into()),
             cfx_username: Some("Sticky".into()),
             github_login: Some("octo".into()),
+        }
+    }
+
+    fn parse_update(args: &[&str]) -> Result<UpdateArgs, clap::Error> {
+        let mut v = vec!["kora", "update"];
+        v.extend_from_slice(args);
+        match Cli::try_parse_from(v)?.command {
+            Some(Command::Update(a)) => Ok(a),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn update_flags_parse() {
+        let a = parse_update(&["main", "--resource", "kora-chat", "--resource", "kora-hud", "--yes", "--restart", "when-quiet"]).unwrap();
+        assert_eq!((a.server.as_str(), a.resource.len(), a.yes, a.restart), ("main", 2, true, Some(RestartArg::WhenQuiet)));
+        assert_eq!(parse_update(&["main", "--all", "--preview"]).map(|a| (a.all, a.preview)).unwrap(), (true, true));
+        assert_eq!(parse_update(&["main", "--all", "--restart", "full"]).unwrap().restart, Some(RestartArg::Full));
+        assert_eq!(parse_update(&["main", "--rollback", "123"]).unwrap().rollback.as_deref(), Some("123"));
+        assert!(parse_update(&["main", "--list-snapshots"]).unwrap().list_snapshots);
+        assert!(parse_update(&["--auto", "/srv/main"]).unwrap().auto);
+    }
+
+    #[test]
+    fn update_flag_conflicts_are_rejected() {
+        for bad in [
+            &["main", "--all", "--resource", "x"][..],
+            &["main", "--auto", "--all"],
+            &["main", "--rollback", "1", "--all"],
+            &["main", "--preview", "--rollback", "1"],
+            &["main", "--restart", "sometimes"],
+            &["--all"],
+        ] {
+            assert!(parse_update(bad).is_err(), "{bad:?}");
         }
     }
 

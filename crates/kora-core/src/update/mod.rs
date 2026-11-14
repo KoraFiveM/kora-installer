@@ -5,6 +5,8 @@
 //! Git and the server health check are behind traits so everything is testable offline.
 //! SQL migrations are flagged and never rolled back automatically.
 
+pub mod manual;
+
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -35,6 +37,18 @@ pub trait GitOps {
     fn is_diverged(&self, repo: &Path, upstream: &str) -> GitResult<bool>;
     /// Commits in `upstream` that are not in HEAD.
     fn behind_count(&self, repo: &Path, upstream: &str) -> GitResult<u32>;
+    /// Production: fetch `origin` (where pinned release commits live).
+    fn fetch_origin(&self, _repo: &Path) -> GitResult<()> {
+        Ok(())
+    }
+    /// Production: move the checkout to a pinned release commit (detached).
+    fn move_pinned(&self, _repo: &Path, _commit: &str) -> GitResult<()> {
+        Err(UpdateError::Git("pinned moves are not supported here".into()))
+    }
+    /// Commit subjects in `from..to`, newest first, at most `max` (best effort; empty when unknown).
+    fn log_subjects(&self, _repo: &Path, _from: &str, _to: &str, _max: usize) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Does the update `from..to` contain SQL migrations?
