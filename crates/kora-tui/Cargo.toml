@@ -11,3 +11,7 @@ ratatui.workspace = true
 crossterm.workspace = true
 kora-core.workspace = true
 serde_json.workspace = true
+arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
+
+[dev-dependencies]
+tempfile.workspace = true

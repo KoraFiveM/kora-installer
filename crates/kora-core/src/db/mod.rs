@@ -652,6 +652,8 @@ impl AdminConn {
                 args.extend(["--protocol=tcp".into(), "-h".into(), self.host.clone(), "-P".into(), self.port.to_string()]);
                 env.push(("MYSQL_PWD".to_string(), p.expose().to_string()));
             }
+            // Windows has no unix socket: a login without password (e.g. the stock MySQL `root`) goes over TCP.
+            None if cfg!(windows) => args.extend(["--protocol=tcp".into(), "-h".into(), self.host.clone(), "-P".into(), self.port.to_string()]),
             None => args.push("--protocol=socket".into()),
         }
         // SQL goes via stdin so it never appears in process listings.

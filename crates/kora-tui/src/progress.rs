@@ -1,15 +1,15 @@
 //! Progress + outcome screens. State and rendering are pure; `run_*` wrap the terminal.
 
-use kora_core::installer::{InstallOutcome, ProgressEvent, StepStatus};
+use kora_core::installer::{ProgressEvent, StepStatus};
 use ratatui::{
-    layout::{Alignment, Constraint, Layout},
+    layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph},
     Frame,
 };
 
-use crate::wizard_view::{wrap, BRAND};
+use crate::wizard_view::BRAND;
 
 const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
@@ -94,62 +94,6 @@ pub fn render_progress(f: &mut Frame, st: &ProgressState, finished: bool) {
     );
 }
 
-pub fn render_outcome(f: &mut Frame, o: &InstallOutcome) {
-    let area = f.area();
-    let mut lines = vec![
-        Line::styled("Your server is ready!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        Line::raw(""),
-        Line::raw(format!("Folder:            {}", o.dir.display())),
-        Line::raw(format!("Players connect:   {}", o.connect)),
-        Line::raw(format!("Control panel:     {}", o.txadmin_url)),
-        Line::raw(""),
-    ];
-    let w = area.width.saturating_sub(4) as usize;
-    for n in &o.notes {
-        for (i, l) in wrap(n, w.saturating_sub(2)).into_iter().enumerate() {
-            lines.push(Line::raw(format!("{}{l}", if i == 0 { "• " } else { "  " })));
-        }
-    }
-    lines.push(Line::raw(""));
-    lines.push(Line::styled("Press any key to finish.", Style::default().fg(Color::DarkGray)));
-    f.render_widget(
-        Paragraph::new(lines).alignment(Alignment::Left).block(
-            Block::default().borders(Borders::ALL).border_style(Style::default().fg(BRAND)).title(" Kora - all done "),
-        ),
-        area,
-    );
-}
-
-/// Plain-language error screen shown after a failed install.
-pub fn render_failure(f: &mut Frame, message: &str, next: &str, log: Option<&std::path::Path>) {
-    let area = f.area();
-    let w = area.width.saturating_sub(4) as usize;
-    let mut lines = vec![
-        Line::styled("The install could not finish", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-        Line::raw(""),
-    ];
-    for l in wrap(message, w) {
-        lines.push(Line::raw(l));
-    }
-    lines.push(Line::raw(""));
-    for l in wrap(next, w) {
-        lines.push(Line::raw(l));
-    }
-    if let Some(p) = log {
-        lines.push(Line::raw(""));
-        for l in wrap(&format!("Details were saved in: {}", p.display()), w) {
-            lines.push(Line::raw(l));
-        }
-    }
-    lines.push(Line::raw(""));
-    lines.push(Line::styled("Press any key to exit.", Style::default().fg(Color::DarkGray)));
-    f.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Red)).title(" Kora - something went wrong ")),
-        area,
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,31 +135,5 @@ mod tests {
         t.draw(|f| render_progress(f, &s, false)).unwrap();
         let out = text(&t);
         assert!(out.contains("Title s2") && out.contains("40%"));
-    }
-
-    #[test]
-    fn failure_renders_message_and_log() {
-        let mut t = Terminal::new(TestBackend::new(80, 20)).unwrap();
-        let log = std::path::PathBuf::from("/srv/kora/.kora/install.log");
-        t.draw(|f| render_failure(f, "Port 30120 is already in use.", "Fix it and run again.", Some(&log))).unwrap();
-        let out = text(&t);
-        assert!(out.contains("could not finish") && out.contains("Port 30120") && out.contains("install.log"));
-        let mut t = Terminal::new(TestBackend::new(8, 3)).unwrap();
-        t.draw(|f| render_failure(f, "x", "y", None)).unwrap();
-    }
-
-    #[test]
-    fn outcome_renders() {
-        let o = InstallOutcome {
-            dir: "/srv/kora".into(),
-            connect: "connect 1.2.3.4:30120".into(),
-            txadmin_url: "http://localhost:40120".into(),
-            notes: vec!["Forward port 30120 on your router.".into()],
-        };
-        let mut t = Terminal::new(TestBackend::new(80, 20)).unwrap();
-        t.draw(|f| render_outcome(f, &o)).unwrap();
-        assert!(text(&t).contains("ready"));
-        let mut t = Terminal::new(TestBackend::new(8, 3)).unwrap();
-        t.draw(|f| render_outcome(f, &o)).unwrap();
     }
 }

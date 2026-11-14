@@ -20,6 +20,7 @@ mod steps;
 pub mod system;
 pub mod types;
 pub mod uninstall;
+pub mod windows_db;
 
 pub use types::*;
 

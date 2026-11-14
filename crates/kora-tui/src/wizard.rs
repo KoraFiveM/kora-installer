@@ -10,6 +10,7 @@ use kora_core::site::Redeemed;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
 
+use crate::clipboard::{format_setup_code, sanitize_paste, Clipboard, SystemClipboard};
 use crate::wizard_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +105,9 @@ pub struct Wizard {
     pub focus: usize,
     pub help_open: bool,
     pub error: Option<String>,
+    /// Friendly confirmation shown in the footer (e.g. "Pasted 14 characters"); never holds field content.
+    pub status: Option<String>,
+    clipboard: Box<dyn Clipboard>,
     port_check: PortCheck,
     db_tester: DbTester,
     /// false = automatic (root socket / no password), true = enter an admin login.
@@ -256,6 +260,8 @@ impl Wizard {
             focus: 0,
             help_open: false,
             error: None,
+            status: None,
+            clipboard: Box::new(SystemClipboard::default()),
             port_check,
             db_tester,
             dba_custom: false,
@@ -574,12 +580,94 @@ impl Wizard {
         }
     }
 
+    /// Use another clipboard (tests inject a fake one).
+    pub fn with_clipboard(mut self, c: Box<dyn Clipboard>) -> Self {
+        self.clipboard = c;
+        self
+    }
+
+    /// Longest text the focused box accepts.
+    fn field_max(&self) -> usize {
+        match (self.screen, self.focus) {
+            (Screen::Ports, _) | (Screen::DbAdminLogin, 3) => 5,
+            (Screen::GameBuild, _) => 8,
+            (Screen::SetupCode, _) => 32,
+            (Screen::Name, _) | (Screen::Hostname, _) => 64,
+            (Screen::GithubOwner, _) | (Screen::DbAdminLogin, 0) => 64,
+            (Screen::License, _) => 128,
+            (Screen::DbAdminLogin, 1) => 256,
+            (Screen::DbAdminLogin, 2) => 255,
+            (Screen::Folder, _) => 260,
+            (Screen::ResourceList, _) => 1024,
+            (Screen::ArtifactUrl, _) => 2048,
+            _ => 256,
+        }
+    }
+
+    /// Is the focused box a hidden one (license key, database password)?
+    pub fn focused_is_masked(&self) -> bool {
+        matches!((self.screen, self.focus), (Screen::License, _) | (Screen::DbAdminLogin, 1))
+    }
+
+    /// Insert pasted text into the focused box: cleaned, length-capped, and confirmed in the
+    /// footer by count only (the text itself is never shown or logged).
     pub fn handle_paste(&mut self, text: &str) {
         if self.help_open || !self.is_text_screen() {
             return;
         }
-        for c in text.chars().filter(|c| !c.is_control()) {
-            self.type_char(c);
+        let screen = self.screen;
+        let max = self.field_max();
+        let mut raw = text.trim();
+        if screen == Screen::Folder {
+            // "Copy as path" in Windows Explorer wraps the path in quotes.
+            raw = raw.trim_matches('"');
+        }
+        let (clean, cut) = if screen == Screen::SetupCode {
+            let c = format_setup_code(raw);
+            let cut = c.chars().count() > max;
+            (c.chars().take(max).collect::<String>(), cut)
+        } else {
+            let used = self.field_mut().map_or(0, |f| f.chars().count());
+            sanitize_paste(raw, max.saturating_sub(used))
+        };
+        let n = clean.chars().count();
+        if n == 0 {
+            self.status = Some("Nothing to paste: the clipboard had no text for this box.".into());
+            return;
+        }
+        if let Some(f) = self.field_mut() {
+            if screen == Screen::SetupCode {
+                *f = clean;
+            } else {
+                f.push_str(&clean);
+            }
+        }
+        self.after_edit(screen);
+        self.status = Some(if cut {
+            format!("Pasted {n} characters (shortened to fit)")
+        } else {
+            format!("Pasted {n} character{}", if n == 1 { "" } else { "s" })
+        });
+    }
+
+    /// Paste from the system clipboard into the focused box (button, Ctrl+V, Shift+Insert).
+    pub fn paste_clipboard(&mut self) {
+        if self.help_open || !self.is_text_screen() {
+            return;
+        }
+        match self.clipboard.get_text() {
+            Ok(t) => self.handle_paste(&t),
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    /// Empty the focused box.
+    pub fn clear_field(&mut self) {
+        let screen = self.screen;
+        if let Some(f) = self.field_mut() {
+            f.clear();
+            self.after_edit(screen);
+            self.status = Some("Cleared".into());
         }
     }
 
@@ -588,6 +676,7 @@ impl Wizard {
             return;
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        self.status = None;
         if ctrl && key.code == KeyCode::Char('c') {
             self.state = WizardState::Quit;
             return;
@@ -609,7 +698,11 @@ impl Wizard {
             return;
         }
         if self.is_text_screen() {
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
             match key.code {
+                KeyCode::Char('v' | 'V') if ctrl => self.paste_clipboard(),
+                KeyCode::Insert if shift => self.paste_clipboard(),
+                KeyCode::Char('u') if ctrl => self.clear_field(),
                 KeyCode::Char(c) if !ctrl => self.type_char(c),
                 KeyCode::Backspace => {
                     let screen = self.screen;
@@ -658,6 +751,7 @@ impl Wizard {
         if self.state != WizardState::Running || ev.kind != MouseEventKind::Down(MouseButton::Left) {
             return;
         }
+        self.status = None;
         let pos = (ev.column, ev.row);
         let hit = |r: Rect| r.contains(ratatui::layout::Position::new(pos.0, pos.1));
         if self.help_open {
@@ -675,6 +769,12 @@ impl Wizard {
             self.test_login();
         } else if let Some(i) = l.options.iter().position(|r| hit(*r)) {
             self.select(i);
+        } else if let Some(i) = l.paste.iter().position(|r| hit(*r)) {
+            self.focus = i;
+            self.paste_clipboard();
+        } else if let Some(i) = l.clear.iter().position(|r| hit(*r)) {
+            self.focus = i;
+            self.clear_field();
         } else if let Some(i) = l.inputs.iter().position(|r| hit(*r)) {
             self.focus = i;
         }
@@ -1288,5 +1388,179 @@ mod tests {
         w.handle_key(key(KeyCode::Enter));
         assert_eq!(w.screen, Screen::Prepare);
         assert!(!format!("{w:?}").contains("octo"), "{w:?}");
+    }
+
+    // ---- paste / clear / clipboard ----
+
+    use crate::clipboard::FakeClipboard;
+    use crossterm::event::MouseButton as Mb;
+
+    fn cwiz(text: Option<&str>) -> Wizard {
+        wiz().with_clipboard(Box::new(FakeClipboard { text: text.map(String::from), fail: false }))
+    }
+
+    fn left_click(r: Rect) -> MouseEvent {
+        MouseEvent { kind: MouseEventKind::Down(Mb::Left), column: r.x + 1, row: r.y, modifiers: KeyModifiers::NONE }
+    }
+
+    #[test]
+    fn paste_is_sanitised_and_confirmed_by_count() {
+        let mut w = cwiz(None);
+        w.screen = Screen::Name;
+        w.name.clear();
+        w.handle_paste("  Alpha\r\nOne\t\x1b[0m  ");
+        assert_eq!(w.name, "AlphaOne[0m");
+        assert_eq!(w.status.as_deref(), Some("Pasted 11 characters"));
+        // capped per field, and says so
+        w.screen = Screen::Ports;
+        w.focus = 0;
+        w.game_port.clear();
+        w.handle_paste("1234567890");
+        assert_eq!(w.game_port, "12345");
+        assert!(w.status.as_ref().unwrap().contains("shortened"));
+        // empty paste is explained
+        w.handle_paste("\n\n");
+        assert!(w.status.as_ref().unwrap().contains("Nothing to paste"));
+        // not a text screen: ignored
+        w.screen = Screen::Mode;
+        w.status = None;
+        w.handle_paste("x");
+        assert!(w.status.is_none());
+    }
+
+    #[test]
+    fn folder_paste_strips_quotes_from_copy_as_path() {
+        let mut w = cwiz(None);
+        w.screen = Screen::Folder;
+        w.dir.clear();
+        w.handle_paste("\"C:\\Games\\my server\"\r\n");
+        assert_eq!(w.dir, "C:\\Games\\my server");
+    }
+
+    #[test]
+    fn masked_fields_stay_masked_and_are_never_echoed() {
+        let secret = "cfxk_ABCDEFGHIJKLMNOPQRST_1234";
+        let mut w = cwiz(Some(secret));
+        w.screen = Screen::License;
+        w.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+        assert_eq!(w.license, secret);
+        assert!(w.focused_is_masked());
+        assert_eq!(w.status.as_deref(), Some("Pasted 30 characters"));
+        assert!(!render_text(&w).contains("ABCDEFGH"));
+        assert!(!format!("{w:?}").contains("ABCDEFGH"));
+        // database password too
+        w.screen = Screen::DbAdminLogin;
+        w.focus = 1;
+        w.clipboard.set_text("hunter2-secret").unwrap();
+        w.handle_key(KeyEvent::new(KeyCode::Insert, KeyModifiers::SHIFT));
+        assert_eq!(w.dba_pass, "hunter2-secret");
+        let t = render_text(&w);
+        assert!(!t.contains("hunter2") && t.contains("**************"));
+        assert!(!w.status.clone().unwrap().contains("hunter2"));
+        assert!(!format!("{w:?}").contains("hunter2"));
+        // Clear empties it
+        w.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert!(w.dba_pass.is_empty());
+    }
+
+    #[test]
+    fn setup_code_is_autoformatted_from_any_paste() {
+        for pasted in ["kora-7f3k-92qx", "KORA7F3K92QX", "7f3k92qx", "  kora 7f3k 92qx\n"] {
+            let mut w = code_wiz();
+            w.screen = Screen::SetupCode;
+            w.handle_paste(pasted);
+            assert_eq!(w.setup_code, "KORA-7F3K-92QX", "{pasted:?}");
+            w.go_next();
+            assert!(w.redeemed.is_some(), "{pasted:?}");
+        }
+        // pasting twice replaces rather than appends
+        let mut w = code_wiz();
+        w.screen = Screen::SetupCode;
+        w.handle_paste("KORA-AAAA-BBBB");
+        w.handle_paste("kora-7f3k-92qx");
+        assert_eq!(w.setup_code, "KORA-7F3K-92QX");
+    }
+
+    #[test]
+    fn keyboard_paste_variants_and_failure_message() {
+        let mut w = cwiz(Some("Beta"));
+        w.screen = Screen::Name;
+        w.name.clear();
+        w.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+        w.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::CONTROL | KeyModifiers::SHIFT));
+        w.handle_key(KeyEvent::new(KeyCode::Insert, KeyModifiers::SHIFT));
+        assert_eq!(w.name, "BetaBetaBeta");
+        assert_eq!(w.dir, default_dir("BetaBetaBeta"), "folder follows the name like typing does");
+        // no clipboard text / no clipboard at all -> plain message, nothing typed
+        let mut w = wiz().with_clipboard(Box::new(FakeClipboard { text: None, fail: true }));
+        w.screen = Screen::Name;
+        w.name.clear();
+        w.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+        assert!(w.name.is_empty());
+        assert!(w.error.as_ref().unwrap().contains("clipboard isn't available"));
+        assert!(render_text(&w).contains("clipboard isn't available"));
+        // Ctrl+V on a choice screen does nothing and doesn't panic
+        w.screen = Screen::Mode;
+        w.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn paste_and_clear_buttons_are_clickable_for_every_text_field() {
+        let area = Rect::new(0, 0, 110, 40);
+        let mut w = cwiz(Some("12"));
+        w.advanced = true;
+        w.mode = Mode::Development;
+        w.artifact_custom = true;
+        w.resources_all = false;
+        w.dba_custom = true;
+        for s in w.flow() {
+            w.screen = s;
+            w.load_selection();
+            for i in 0..w.input_count() {
+                let l = wizard_view::layout(area, &w.view());
+                assert_eq!(l.paste.len(), w.input_count());
+                assert!(l.paste[i].width > 0 && l.clear[i].width > 0, "{s:?}/{i} has buttons");
+                assert!(!l.paste[i].intersects(l.clear[i]) && !l.paste[i].intersects(l.inputs[i]));
+                let text = render_text(&w);
+                assert!(text.contains("[ Paste ]") && text.contains("[ Clear ]"), "{s:?}");
+                if s == Screen::SetupCode {
+                    continue; // code screens are covered by their own test
+                }
+                w.handle_mouse(left_click(l.clear[i]), area);
+                assert_eq!(w.focus, i);
+                assert_eq!(w.status.as_deref(), Some("Cleared"), "{s:?}/{i}");
+                w.handle_mouse(left_click(l.paste[i]), area);
+                assert_eq!(w.status.as_deref(), Some("Pasted 2 characters"), "{s:?}/{i}");
+            }
+        }
+        // a narrow window drops the buttons but keeps the field usable
+        let narrow = Rect::new(0, 0, 40, 24);
+        w.screen = Screen::Name;
+        assert!(wizard_view::layout(narrow, &w.view()).paste[0].width == 0);
+    }
+
+    #[test]
+    fn paste_event_goes_to_the_focused_field_and_help_blocks_it() {
+        let mut w = cwiz(None);
+        w.screen = Screen::DbAdminLogin;
+        w.dba_custom = true;
+        w.focus = 2;
+        w.dba_host.clear();
+        w.handle_paste("db.example.com\n");
+        assert_eq!(w.dba_host, "db.example.com");
+        assert!(w.db_test.is_none());
+        w.help_open = true;
+        w.handle_paste("zzz");
+        assert_eq!(w.dba_host, "db.example.com");
+    }
+
+    #[test]
+    fn help_mentions_new_keys() {
+        let w = cwiz(None);
+        assert!(w.view().help.contains("Ctrl+V"));
+        let mut w = w;
+        w.screen = Screen::License;
+        let h = w.view().help;
+        assert!(h.contains("Shift+Insert") && h.contains("Ctrl+U"));
     }
 }

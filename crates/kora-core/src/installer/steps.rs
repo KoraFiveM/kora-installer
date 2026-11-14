@@ -93,7 +93,41 @@ fn db_state_path(ctx: &Ctx) -> PathBuf {
 
 fn db_client() -> String {
     let ok = |c: &str| std::process::Command::new(c).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
-    if ok("mariadb") { "mariadb".into() } else { "mysql".into() }
+    if ok("mariadb") {
+        return "mariadb".into();
+    }
+    if ok("mysql") {
+        return "mysql".into();
+    }
+    if cfg!(windows) {
+        if let Some(c) = windows_db::saved_record().map(|r| r.client).filter(|c| c.is_file()).or_else(|| windows_client_candidates().into_iter().find(|c| c.is_file())) {
+            return c.to_string_lossy().into_owned();
+        }
+    }
+    "mysql".into()
+}
+
+/// Where the MariaDB / MySQL installers put their command line client (Windows).
+fn windows_client_candidates() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        let Some(pf) = std::env::var_os(var).map(PathBuf::from) else { continue };
+        for vendor in ["MariaDB", "MySQL"] {
+            let Ok(rd) = std::fs::read_dir(&pf) else { continue };
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                if n.starts_with(vendor) {
+                    let nested = std::fs::read_dir(e.path()).into_iter().flatten().flatten().map(|d| d.path());
+                    for dir in std::iter::once(e.path()).chain(nested) {
+                        for exe in ["mariadb.exe", "mysql.exe"] {
+                            v.push(dir.join("bin").join(exe));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    v
 }
 
 /// Admin connection for provisioning. Preference: `req.db_admin`, then the environment
@@ -110,6 +144,12 @@ fn admin_conn_for(db_admin: Option<&DbAdmin>) -> AdminConn {
     if let Some(a) = db_admin {
         let pw = a.password.clone().filter(|s| !s.is_empty()).or(env_pw);
         return AdminConn { host: a.host.clone(), port: a.port, user: a.user.clone(), password: pw.map(db::Secret::new), client };
+    }
+    // The login of the MariaDB Kora installed itself (Windows), unless the operator chose another.
+    if env_pw.is_none() {
+        if let Some(saved) = windows_db::saved_admin() {
+            return saved.to_conn();
+        }
     }
     match env_pw {
         Some(p) => AdminConn {
@@ -493,7 +533,12 @@ impl InstallStep {
                         _ => return err("No MariaDB/MySQL server was found. Re-run with --db install (needs admin) or --db skip."),
                     }
                 } else if !found.iter().any(|s| s.running) {
-                    return err(format!("{} is installed but not running. Start it (systemctl start {}) and try again.", found[0].name, found[0].name));
+                    self.start_stopped_db(&found[0].name)?;
+                } else if cfg!(windows) && windows_db::saved_admin().is_none() {
+                    ctx.note(format!(
+                        "Using the database server '{}' that is already on this computer. Kora needs its administrator login to create a NEW database and user: pass --db-admin-user (and KORA_DB_ADMIN_PASSWORD), or use --db install to let Kora set up its own private MariaDB.",
+                        found[0].name
+                    ));
                 }
                 check_admin_login(&admin_conn(&ctx.req))?;
             }
@@ -501,11 +546,47 @@ impl InstallStep {
         Ok("git, database and ports are ready".into())
     }
 
+    /// A detected database service that is not running: start it when Kora owns it (Windows), else say how.
+    fn start_stopped_db(&self, name: &str) -> Result<()> {
+        let ctx = &*self.ctx;
+        if cfg!(windows) {
+            if let Some(rec) = windows_db::saved_record().filter(|r| r.service == name) {
+                ctx.emit(self.id, StepStatus::Running, format!("Starting Kora's MariaDB service {name}"), 0.5);
+                windows_db::ensure_running(&rec)?;
+                if let Some(a) = windows_db::saved_admin() {
+                    windows_db::wait_for_login(&a.to_conn(), std::time::Duration::from_secs(90))?;
+                }
+                return Ok(());
+            }
+            return err(format!("{name} is installed but not running. Start it (as administrator: `net start {name}`) and try again."));
+        }
+        err(format!("{name} is installed but not running. Start it (systemctl start {name}) and try again."))
+    }
+
     fn install_db_server(&self) -> Result<()> {
         let ctx = &*self.ctx;
+        if db::Os::current() == db::Os::Windows {
+            if !ctx.admin {
+                return err(format!(
+                    "No MariaDB/MySQL database server was found, and setting one up needs administrator rights (it creates a Windows service). Close this window, right-click kora.exe (or Windows Terminal) and choose 'Run as administrator', then run the install again. Kora will download the official MariaDB {} from archive.mariadb.org, verify its checksum and put it in {}. Or install MariaDB yourself and use --db existing, or --db skip.",
+                    windows_db::MARIADB_VERSION,
+                    windows_db::base_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "%ProgramData%\\Kora\\mariadb".into())
+                ));
+            }
+            let mut say = |m: &str| ctx.emit(self.id, StepStatus::Running, m.to_string(), 0.5);
+            let rec = windows_db::install(&ctx.hooks.http, &mut say)?;
+            ctx.note(format!(
+                "Kora installed its own MariaDB {} as the Windows service '{}' (127.0.0.1:{}, in {}). `kora uninstall --delete-databases` removes it again.",
+                rec.version,
+                rec.service,
+                rec.port,
+                rec.root.display()
+            ));
+            return Ok(());
+        }
         let plan = match db::plan_install(db::Os::current(), &ctx.req.dir, "", 3306, &[]) {
             Ok(p) if db::Os::current() == db::Os::Linux => p,
-            _ => return err("Automatic MariaDB installation is only wired up for Debian/Ubuntu so far. Install MariaDB yourself, then use --db existing."),
+            _ => return err("Automatic MariaDB installation is not available on this system. Install MariaDB yourself, then use --db existing."),
         };
         if !ctx.admin {
             let what: Vec<String> = plan.steps.iter().map(|s| format!("- {}", s.description)).collect();

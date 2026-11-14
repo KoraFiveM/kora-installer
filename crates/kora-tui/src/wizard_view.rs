@@ -13,6 +13,10 @@ use crate::wizard::{Screen, Wizard};
 
 pub const BRAND: Color = Color::Cyan;
 
+/// Width of the `[ Paste ]` / `[ Clear ]` buttons and the narrowest body that shows them.
+const BUTTON_W: u16 = 9;
+const BUTTONS_MIN_WIDTH: u16 = 46;
+
 pub struct InputView {
     pub label: String,
     pub value: String,
@@ -281,9 +285,9 @@ pub fn view(w: &Wizard) -> View {
         }
     }
     if v.help.is_empty() {
-        v.help = l("Use Up/Down (or 1-9) to choose, Enter for Next, Esc for Back. Type to fill in boxes. Press F1 or ? for this help. Ctrl+C quits.");
+        v.help = l("Use Up/Down (or 1-9) to choose, Enter for Next, Esc for Back. Type to fill in boxes; Ctrl+V or Shift+Insert (or the Paste button) pastes, Ctrl+U (or Clear) empties a box. Press F1 or ? for this help. Ctrl+C quits.");
     } else {
-        v.help.push_str("\n\nKeys: Up/Down choose, Enter next, Esc back, F1 or ? help, Ctrl+C quit.");
+        v.help.push_str("\n\nKeys: Up/Down choose, Enter next, Esc back, F1 or ? help, Ctrl+V / Shift+Insert paste, Ctrl+U clear, Ctrl+C quit.");
     }
     v
 }
@@ -332,6 +336,9 @@ pub struct Layout {
     pub text: Rect,
     pub options: Vec<Rect>,
     pub inputs: Vec<Rect>,
+    /// `[ Paste ]` / `[ Clear ]` buttons, one per input (empty rect when the window is too narrow).
+    pub paste: Vec<Rect>,
+    pub clear: Vec<Rect>,
 }
 
 fn clamp(r: Rect, area: Rect) -> Rect {
@@ -366,11 +373,21 @@ pub fn layout(area: Rect, v: &View) -> Layout {
         y = y.saturating_add(h + 1);
     }
     let mut inputs = Vec::new();
+    let (mut paste, mut clear) = (Vec::new(), Vec::new());
+    let buttons = inner.width >= BUTTONS_MIN_WIDTH;
+    let bw = if buttons { inner.width - 2 * BUTTON_W - 2 } else { inner.width };
     for _ in &v.inputs {
-        inputs.push(clamp(Rect::new(inner.x, y, inner.width, 3), inner));
+        inputs.push(clamp(Rect::new(inner.x, y, bw, 3), inner));
+        if buttons {
+            paste.push(clamp(Rect::new(inner.x + bw + 1, y + 1, BUTTON_W, 1), inner));
+            clear.push(clamp(Rect::new(inner.x + bw + 2 + BUTTON_W, y + 1, BUTTON_W, 1), inner));
+        } else {
+            paste.push(Rect::default());
+            clear.push(Rect::default());
+        }
         y = y.saturating_add(3);
     }
-    Layout { header, body, message, back, help, test, next, text, options, inputs }
+    Layout { header, body, message, back, help, test, next, text, options, inputs, paste, clear }
 }
 
 fn button(f: &mut Frame, r: Rect, label: &str, style: Style) {
@@ -433,6 +450,13 @@ pub fn render(f: &mut Frame, w: &Wizard) {
         lines.extend(wrap(desc, (r.width as usize).saturating_sub(4)).into_iter().map(|d| Line::styled(format!("    {d}"), Style::default().fg(Color::Gray))));
         f.render_widget(Paragraph::new(lines), *r);
     }
+    let link = Style::default().fg(Color::Black).bg(Color::Gray);
+    for (i, p) in l.paste.iter().enumerate() {
+        if p.width > 0 {
+            f.render_widget(Paragraph::new("[ Paste ]").style(link), *p);
+            f.render_widget(Paragraph::new("[ Clear ]").style(link), l.clear[i]);
+        }
+    }
     for (iv, r) in v.inputs.iter().zip(&l.inputs) {
         if r.height == 0 {
             continue;
@@ -452,9 +476,15 @@ pub fn render(f: &mut Frame, w: &Wizard) {
 
     // Footer.
     if l.message.height > 0 {
-        let (msg, st) = match &w.error {
-            Some(e) => (e.clone(), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            None => ("Enter = next   Esc = back   F1 / ? = help".to_string(), Style::default().fg(Color::DarkGray)),
+        let hint = if w.is_text_screen() {
+            "Enter = next   Esc = back   Ctrl+V = paste   F1 = help"
+        } else {
+            "Enter = next   Esc = back   F1 / ? = help"
+        };
+        let (msg, st) = match (&w.error, &w.status) {
+            (Some(e), _) => (e.clone(), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            (None, Some(s)) => (s.clone(), Style::default().fg(Color::Green)),
+            (None, None) => (hint.to_string(), Style::default().fg(Color::DarkGray)),
         };
         f.render_widget(Paragraph::new(msg).style(st), l.message);
     }

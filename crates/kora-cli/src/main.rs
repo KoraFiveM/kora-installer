@@ -436,7 +436,7 @@ fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>) -> i32 {
             let path = write_install_log(&req, &log, Some(&msg));
             let next = if req.dir.join(".kora").is_dir() {
                 format!(
-                    "What was done so far is kept. Run `kora install` again to continue where it stopped, or `kora delete {}` to remove what was created.",
+                    "What was done so far is kept.\nTo try again: run `kora install` again; it continues where it stopped.\nTo start over: run `kora delete {}` to remove what was created.",
                     req.dir.display()
                 )
             } else {

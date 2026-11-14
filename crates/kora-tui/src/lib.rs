@@ -3,7 +3,10 @@
 //! Logic is split into pure state machines/renderers ([`wizard`], [`wizard_view`],
 //! [`progress`]) and the thin terminal runners in this file.
 
+pub mod clipboard;
+pub mod open;
 pub mod progress;
+pub mod result;
 pub mod wizard;
 pub mod wizard_view;
 
@@ -29,25 +32,33 @@ fn install_panic_hook() {
     ONCE.call_once(|| {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            let _ = crossterm::execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+            restore_modes();
             ratatui::restore();
             prev(info);
         }));
     });
 }
 
+fn restore_modes() {
+    let _ = crossterm::execute!(io::stdout(), DisableBracketedPaste);
+    let _ = crossterm::execute!(io::stdout(), DisableMouseCapture);
+}
+
 impl Term {
     fn new() -> io::Result<Self> {
         install_panic_hook();
         let t = ratatui::try_init()?;
-        let _ = crossterm::execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste);
+        // Separate calls: bracketed paste isn't supported by the old Windows console and must not
+        // stop the mouse from being enabled (or the reverse).
+        let _ = crossterm::execute!(io::stdout(), EnableMouseCapture);
+        let _ = crossterm::execute!(io::stdout(), EnableBracketedPaste);
         Ok(Self { t })
     }
 }
 
 impl Drop for Term {
     fn drop(&mut self) {
-        let _ = crossterm::execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+        restore_modes();
         ratatui::restore();
     }
 }
@@ -133,16 +144,44 @@ pub fn run_install_progress(rx: Receiver<ProgressEvent>) -> Result<(), Box<dyn E
     Ok(())
 }
 
-/// Error screen (plain-language message, what to do next, log location); waits for a key.
+/// Error screen: what went wrong, what to do next (numbered), and clickable [ Open log ],
+/// [ Open folder ], [ Copy path ] and [ Copy details ] actions (keys L, F, C, D).
 pub fn show_failure(message: &str, next: &str, log: Option<&Path>) -> Result<(), Box<dyn Error>> {
-    let mut term = Term::new()?;
-    wait_key(&mut term, &mut |f| progress::render_failure(f, message, next, log))
+    run_result(result::ResultScreen::failure(message, next, log))
 }
 
-/// Final screen with connect info; waits for a key.
+/// Final screen with connect info and [ Open folder ] / [ Copy path ].
 pub fn show_outcome(o: &InstallOutcome) -> Result<(), Box<dyn Error>> {
+    run_result(result::ResultScreen::outcome(o))
+}
+
+fn run_result(screen: result::ResultScreen) -> Result<(), Box<dyn Error>> {
+    use std::io::Write;
+    let mut screen = screen.with_hyperlinks(open::system_supports_hyperlinks());
     let mut term = Term::new()?;
-    wait_key(&mut term, &mut |f| progress::render_outcome(f, o))
+    let mut clipboard = clipboard::SystemClipboard::default();
+    let mut opener = open::SystemOpener;
+    loop {
+        term.t.draw(|f| result::render_result(f, &screen))?;
+        let s = term.t.size()?;
+        let area = Rect::new(0, 0, s.width, s.height);
+        if let Some(seq) = screen.hyperlink_overlay(area) {
+            // Re-draws only the path text as an OSC 8 link; terminals without support never get this.
+            let mut out = io::stdout();
+            let _ = out.write_all(seq.as_bytes());
+            let _ = out.flush();
+        }
+        let mut svc = result::Services { clipboard: &mut clipboard, opener: &mut opener };
+        match event::read()? {
+            Event::Key(k) if k.kind != KeyEventKind::Release => {
+                if screen.handle_key(k, &mut svc) {
+                    return Ok(());
+                }
+            }
+            Event::Mouse(m) => screen.handle_mouse(m, area, &mut svc),
+            _ => {}
+        }
+    }
 }
 
 use std::io;
