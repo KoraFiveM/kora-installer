@@ -60,7 +60,7 @@ try {
     foreach ($b in 'http://example.com/releases', 'http://127.0.0.1.evil.example/x', 'http://localhost.evil.example/x', 'ftp://example.com/x') {
         $env:KORA_RELEASE_BASE = $b
         $out = & pwsh -NoProfile -File "$PWD/scripts/install.ps1" 2>&1 | Out-String
-        Assert-That ($LASTEXITCODE -ne 0 -and $out -match 'must start with https') "refuses base $b"
+        Assert-That ($LASTEXITCODE -ne 0 -and $out -match 'refusing to download') "refuses base $b"
         Assert-That (-not (Test-Path "$badDir\kora.exe")) "nothing installed for $b"
     }
 
