@@ -1,0 +1,128 @@
+# Real Linux end-to-end checks on ephemeral ubuntu runners: the counterpart of windows-smoke.yml. Kept apart from
+# ci.yml so the main CI stays fast. Fake Cfx key only; no secrets. Uses only ports 31120 (game) / 41120 (txAdmin).
+name: Linux smoke
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: linux-smoke-${{ github.ref }}
+  cancel-in-progress: true
+# Independent jobs on separate VMs: a failure in one never hides the result of the others.
+jobs:
+  basics:
+    name: "basics: --version, no-TTY error, dry run, ports, github owners"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-smoke
+      - name: Build kora (release)
+        run: cargo build --release --locked -p kora-cli
+      - name: "basics: --version, no-TTY error, dry run, ports, github owners"
+        run: scripts/smoke-linux/01-basics.sh
+      - name: Collect logs
+        if: always()
+        run: |
+          for p in /opt/kora-smoke "$HOME/kora-smoke"; do
+            [ -d "$p" ] && { echo "== $p"; sudo find "$p" -maxdepth 4 \( -name '*.log' -o -name 'servers.json' -o -name 'created.json' \) -print -exec sudo tail -n 40 {} \; ; }
+          done
+          true
+
+  install-prod:
+    name: "install-prod: real install + MariaDB (--db existing) + delete"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-smoke
+      - name: Build kora (release)
+        run: cargo build --release --locked -p kora-cli
+      - name: Start MariaDB (docker, root password set)
+        run: scripts/smoke-linux/mariadb-up.sh
+      - name: "install-prod: real install + MariaDB (--db existing) + delete"
+        run: scripts/smoke-linux/02-install-prod.sh
+      - name: Collect logs
+        if: always()
+        run: |
+          for p in /opt/kora-smoke "$HOME/kora-smoke"; do
+            [ -d "$p" ] && { echo "== $p"; sudo find "$p" -maxdepth 4 \( -name '*.log' -o -name 'servers.json' -o -name 'created.json' \) -print -exec sudo tail -n 40 {} \; ; }
+          done
+          true
+
+  install-service:
+    name: "install-service: systemd service, start/stop/restart, txAdmin, uninstall/delete"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-smoke
+      - name: Build kora (release)
+        run: cargo build --release --locked -p kora-cli
+      - name: "install-service: systemd service, start/stop/restart, txAdmin, uninstall/delete"
+        run: scripts/smoke-linux/03-install-service.sh
+      - name: Collect logs
+        if: always()
+        run: |
+          for p in /opt/kora-smoke "$HOME/kora-smoke"; do
+            [ -d "$p" ] && { echo "== $p"; sudo find "$p" -maxdepth 4 \( -name '*.log' -o -name 'servers.json' -o -name 'created.json' \) -print -exec sudo tail -n 40 {} \; ; }
+          done
+          true
+
+  update-auto:
+    name: "update-auto: dev-mode kora update --auto against local git repos"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-smoke
+      - name: Build kora (release)
+        run: cargo build --release --locked -p kora-cli
+      - name: "update-auto: dev-mode kora update --auto against local git repos"
+        run: scripts/smoke-linux/04-update-auto.sh
+      - name: Collect logs
+        if: always()
+        run: |
+          for p in /opt/kora-smoke "$HOME/kora-smoke"; do
+            [ -d "$p" ] && { echo "== $p"; sudo find "$p" -maxdepth 4 \( -name '*.log' -o -name 'servers.json' -o -name 'created.json' \) -print -exec sudo tail -n 40 {} \; ; }
+          done
+          true
+
+  uninstall:
+    name: "uninstall: dry run and real run keep folders and databases"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-smoke
+      - name: Build kora (release)
+        run: cargo build --release --locked -p kora-cli
+      - name: Start MariaDB (docker, root password set)
+        run: scripts/smoke-linux/mariadb-up.sh
+      - name: "uninstall: dry run and real run keep folders and databases"
+        run: scripts/smoke-linux/05-uninstall.sh
+      - name: Collect logs
+        if: always()
+        run: |
+          for p in /opt/kora-smoke "$HOME/kora-smoke"; do
+            [ -d "$p" ] && { echo "== $p"; sudo find "$p" -maxdepth 4 \( -name '*.log' -o -name 'servers.json' -o -name 'created.json' \) -print -exec sudo tail -n 40 {} \; ; }
+          done
+          true
