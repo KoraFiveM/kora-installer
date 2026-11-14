@@ -5,7 +5,6 @@
 
 pub mod clipboard;
 pub mod elev;
-pub mod github_model;
 pub mod github_screens;
 pub mod open;
 pub mod progress;
@@ -78,7 +77,7 @@ pub fn run_install_wizard_with(
     prefill: Option<kora_core::site::Redeemed>,
 ) -> Result<Option<InstallRequest>, Box<dyn Error>> {
     let mut term = Term::new()?;
-    let mut w = wizard::Wizard::new();
+    let mut w = wizard::Wizard::new().with_github(github_screens::GithubFlow::new(std::sync::Arc::new(github_screens::SystemGithub)));
     if let Some(r) = redeemer {
         w = w.with_redeemer(r);
     }

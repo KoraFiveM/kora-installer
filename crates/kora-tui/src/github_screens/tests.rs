@@ -743,3 +743,14 @@ fn without_a_github_api_the_old_text_screen_is_used() {
     w.advanced = true;
     assert!(w.flow().contains(&Screen::GithubOwner) && !w.flow().contains(&Screen::GithubAccount));
 }
+
+#[test]
+fn github_errors_are_put_in_plain_words() {
+    use kora_core::git::GitError;
+    let cmd = |stderr: &str| GitError::Command { cmd: "gh api user".into(), code: 1, stderr: stderr.into() };
+    assert!(plain_error(&cmd("HTTP 429: secondary rate limit")).contains("limiting requests"));
+    assert!(plain_error(&cmd("dial tcp: lookup api.github.com: no such host")).contains("internet connection"));
+    assert!(plain_error(&cmd("HTTP 401: Bad credentials")).contains("not signed in"));
+    assert_eq!(plain_error(&cmd("\nHTTP 500: oops\n")), "GitHub said: HTTP 500: oops");
+    assert!(plain_error(&GitError::Spawn("gh".into(), "not found".into())).contains("couldn't run"));
+}

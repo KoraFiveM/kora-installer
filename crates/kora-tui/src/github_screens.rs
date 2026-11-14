@@ -25,7 +25,7 @@ use crate::open::{OpenCommand, OsKind};
 use crate::wizard::{Screen, Wizard};
 use crate::wizard_view::{wrap, BRAND};
 
-pub use crate::github_model::{GhAuth, Owner, OwnerKind};
+pub use kora_core::git::owners::{GhAuth, Owner, OwnerKind};
 
 const SPINNER: [&str; 4] = ["|", "/", "-", "\\"];
 const LINK: Style = Style::new().fg(Color::Black).bg(Color::Gray);
@@ -99,6 +99,95 @@ impl UrlOpener for SystemUrlOpener {
             }
             Err(_) => Err(format!("Couldn't open the browser. Open this yourself: {url}")),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The real GitHub (through `gh`)
+// ---------------------------------------------------------------------------------------------
+
+/// Plain-language text for a failed GitHub call.
+pub fn plain_error(e: &kora_core::git::GitError) -> String {
+    use kora_core::git::GitError;
+    match e {
+        GitError::Spawn(..) => "Kora couldn't run GitHub's command line tool (gh).".into(),
+        GitError::Command { stderr, .. } => {
+            let low = stderr.to_ascii_lowercase();
+            if kora_core::git::is_rate_limited(stderr) {
+                "GitHub is limiting requests right now. Wait a minute and try again.".into()
+            } else if ["could not resolve", "dial tcp", "connection", "timed out", "network", "offline"].iter().any(|k| low.contains(k)) {
+                "Kora couldn't reach GitHub. Check your internet connection.".into()
+            } else if low.contains("401") || low.contains("bad credentials") || low.contains("auth login") {
+                "GitHub says you are not signed in any more. Press Try again to sign in.".into()
+            } else {
+                let first = stderr.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("something went wrong");
+                format!("GitHub said: {first}")
+            }
+        }
+        other => format!("Something went wrong: {other}"),
+    }
+}
+
+/// A runner that stops answering once `stop` is set (ends the organisation watch quickly).
+struct StoppableRunner(Arc<AtomicBool>);
+
+impl kora_core::git::CommandRunner for StoppableRunner {
+    fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<kora_core::git::Output> {
+        if self.0.load(Ordering::SeqCst) {
+            return Err(std::io::Error::other("stopped"));
+        }
+        kora_core::git::SystemRunner.run(program, args, cwd)
+    }
+    fn sleep(&self, d: std::time::Duration) {
+        kora_core::git::SystemRunner.sleep(d);
+    }
+}
+
+/// The real thing: `gh` on this computer.
+#[derive(Default)]
+pub struct SystemGithub;
+
+impl GithubApi for SystemGithub {
+    fn auth(&self) -> GhAuth {
+        kora_core::git::owners::gh_auth(&kora_core::git::SystemRunner)
+    }
+
+    fn list_owners(&self) -> Result<Vec<Owner>, String> {
+        kora_core::git::owners::list_owners(&kora_core::git::SystemRunner).map_err(|e| plain_error(&e))
+    }
+
+    fn begin_login(&self) -> Result<LoginHandle, String> {
+        let session = kora_core::git::owners::begin_login(&kora_core::git::owners::SystemLogin, false).map_err(|e| plain_error(&e))?;
+        let (code, url) = (session.code.clone(), session.url.clone());
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(session.wait().map_err(|e| plain_error(&e)));
+        });
+        // `gh` can only be waited for (not stopped) from here: a cancelled sign-in just stops being
+        // listened to, and the one-time code expires on its own.
+        Ok(LoginHandle { code, url, done: rx, cancel: Box::new(|| {}) })
+    }
+
+    fn org_creation_url(&self) -> String {
+        kora_core::git::owners::org_creation_url().to_string()
+    }
+
+    fn watch_new_org(&self, before: Vec<String>) -> OrgWatch {
+        let (tx, rx) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        std::thread::spawn(move || {
+            let runner = StoppableRunner(flag.clone());
+            let nap = |d: std::time::Duration| {
+                let end = std::time::Instant::now() + d;
+                while std::time::Instant::now() < end && !flag.load(Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            };
+            let found = kora_core::git::owners::wait_for_new_org(&before, std::time::Duration::from_secs(600), &runner, &nap);
+            let _ = tx.send(found);
+        });
+        OrgWatch { found: rx, stop }
     }
 }
 
@@ -340,7 +429,7 @@ impl GithubFlow {
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     self.job = None;
-                    self.to_manual("Something went wrong while talking to GitHub.");
+                    self.show_manual("Something went wrong while talking to GitHub.");
                     changed = true;
                 }
             }
@@ -357,15 +446,15 @@ impl GithubFlow {
                             self.status = Some(format!("Signed in as {}", self.signed_in.clone().unwrap_or_default()));
                             self.start_owners();
                         }
-                        Ok(_) => self.to_manual("GitHub did not finish the sign-in. Try again, or type the name below."),
-                        Err(e) => self.to_manual(&format!("Sign-in did not work: {e}")),
+                        Ok(_) => self.show_manual("GitHub did not finish the sign-in. Try again, or type the name below."),
+                        Err(e) => self.show_manual(&format!("Sign-in did not work: {e}")),
                     }
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     self.login_done = None;
                     self.login_cancel = None;
-                    self.to_manual("Sign-in stopped unexpectedly. Try again, or type the name below.");
+                    self.show_manual("Sign-in stopped unexpectedly. Try again, or type the name below.");
                     changed = true;
                 }
             }
@@ -398,7 +487,7 @@ impl GithubFlow {
     fn on_job(&mut self, j: Job) {
         match j {
             Job::Auth(GhAuth::Missing) => {
-                self.to_manual(
+                self.show_manual(
                     "GitHub's command line tool (gh) is not installed yet. Kora installs it during setup; you can then sign in the next time you run Kora. For now, type the name of the GitHub user or organisation that should hold your copies.",
                 );
             }
@@ -412,15 +501,15 @@ impl GithubFlow {
                 self.login_done = Some(h.done);
                 self.login_cancel = Some(h.cancel);
             }
-            Job::Login(Err(e)) => self.to_manual(&format!("Couldn't start the GitHub sign-in: {e}")),
+            Job::Login(Err(e)) => self.show_manual(&format!("Couldn't start the GitHub sign-in: {e}")),
             Job::Owners(Ok(list)) => self.set_owners(list),
             Job::Owners(Err(e)) => {
-                self.to_manual(&format!("Couldn't load your GitHub accounts: {e} Press Try again, or type the name below."));
+                self.show_manual(&format!("Couldn't load your GitHub accounts: {e} Press Try again, or type the name below."));
             }
         }
     }
 
-    fn to_manual(&mut self, note: &str) {
+    fn show_manual(&mut self, note: &str) {
         self.phase = Phase::Manual;
         self.note = Some(note.to_string());
         if self.manual.is_empty() {
@@ -442,7 +531,7 @@ impl GithubFlow {
         self.note = None;
         self.cursor = pick.unwrap_or(0);
         if self.owners.is_empty() {
-            self.to_manual("GitHub didn't list any account for you. Type the name of the user or organisation below.");
+            self.show_manual("GitHub didn't list any account for you. Type the name of the user or organisation below.");
         } else {
             self.phase = Phase::Picker;
         }
@@ -574,7 +663,7 @@ impl GithubFlow {
             Btn::Cancel => match self.phase {
                 Phase::SignIn { .. } => {
                     self.stop_all();
-                    self.to_manual("Sign-in cancelled. Press Try again to sign in, or type the name of the GitHub user or organisation below.");
+                    self.show_manual("Sign-in cancelled. Press Try again to sign in, or type the name of the GitHub user or organisation below.");
                 }
                 _ => {
                     self.stop_all();
