@@ -68,6 +68,20 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     fn behind_count(&self, repo: &Path, upstream: &str) -> GitResult<u32> {
         self.count(repo, &format!("HEAD..{upstream}"))
     }
+    fn fetch_origin(&self, repo: &Path) -> GitResult<()> {
+        self.git(repo, &["fetch", "origin"]).map(|_| ())
+    }
+    fn move_pinned(&self, repo: &Path, commit: &str) -> GitResult<()> {
+        git::move_pinned(&self.0, repo, commit).map(|_| ()).map_err(gerr)
+    }
+    fn log_subjects(&self, repo: &Path, from: &str, to: &str, max: usize) -> Vec<String> {
+        let range = format!("{from}..{to}");
+        let n = format!("-{max}");
+        match self.git(repo, &["log", "--format=%s", &n, &range]) {
+            Ok(o) => o.stdout.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect(),
+            Err(_) => Vec::new(),
+        }
+    }
 }
 
 /// Runs every command as `user` (via `runuser`) with `HOME` set to a folder that user owns.
@@ -170,7 +184,7 @@ pub struct ServiceHealth {
 }
 
 impl ServiceHealth {
-    fn running(&self) -> bool {
+    pub(crate) fn running(&self) -> bool {
         matches!(firewall::check_port(self.game_port, false), firewall::PortStatus::InUse { .. })
     }
     fn has_service(&self) -> bool {
@@ -229,8 +243,23 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         (entry.name.clone(), entry.dir.clone())
     };
     let sf = ServerFile::load(&dir).map_err(|e| InstallError(format!("cannot read {}: {e}", dir.join("kora-server.json").display())))?;
+    let health = service_health(&name, &dir, &sf);
+    // Running server: ask it for its player count (restart-needing updates wait for 0 players);
+    // a server that is not running has none.
+    let players = if health.running() { online_players(sf.ports.game) } else { Some(0) };
+    let res = with_git(&dir, |git| update_server(&name, &dir, &sf, git, &FaultInjecting(&health), players));
+    let line = match &res {
+        Ok(r) => r.summary(),
+        Err(e) => format!("update failed: {e}"),
+    };
+    append_log(&dir, &line);
+    res
+}
+
+/// Service-backed health check for a registered server.
+pub(crate) fn service_health(name: &str, dir: &Path, sf: &ServerFile) -> ServiceHealth {
     let managed = ManagedServer {
-        name: slug(&name),
+        name: slug(name),
         dir: dir.to_string_lossy().into_owned(),
         start_command: vec!["unused".into()],
         user: "kora".into(),
@@ -238,21 +267,16 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         kora_exe: "kora".into(),
         windows_run_as: None,
     };
-    let health = ServiceHealth { managed, game_port: sf.ports.game, wait: Duration::from_secs(90) };
-    // Running server: ask it for its player count (restart-needing updates wait for 0 players);
-    // a server that is not running has none.
-    let players = if health.running() { online_players(sf.ports.game) } else { Some(0) };
-    let res = match foreign_owner(&dir) {
-        Some(user) => update_server(&name, &dir, &sf, &GitCli(AsUser { user, home: dir.clone() }), &FaultInjecting(&health), players),
-        None if cfg!(windows) => update_server(&name, &dir, &sf, &GitCli(SafeDirectory(SystemRunner)), &FaultInjecting(&health), players),
-        None => update_server(&name, &dir, &sf, &GitCli::default(), &FaultInjecting(&health), players),
-    };
-    let line = match &res {
-        Ok(r) => r.summary(),
-        Err(e) => format!("update failed: {e}"),
-    };
-    append_log(&dir, &line);
-    res
+    ServiceHealth { managed, game_port: sf.ports.game, wait: Duration::from_secs(90) }
+}
+
+/// Run `f` with the git adapter appropriate for who owns `dir` (service account / SYSTEM / plain).
+pub(crate) fn with_git<T>(dir: &Path, f: impl FnOnce(&dyn GitOps) -> T) -> T {
+    match foreign_owner(dir) {
+        Some(user) => f(&GitCli(AsUser { user, home: dir.to_path_buf() })),
+        None if cfg!(windows) => f(&GitCli(SafeDirectory(SystemRunner))),
+        None => f(&GitCli::default()),
+    }
 }
 
 fn append_log(dir: &Path, text: &str) {
