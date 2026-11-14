@@ -543,7 +543,6 @@ pub fn plan_install_windows(
     let sums = root.join("mariadb.sha256sums.txt");
     let dest = root.join("database");
     let data = root.join("database-data");
-    let config = root.join("database-config.ini");
     let install_db = dest.join("bin").join("mariadb-install-db.exe");
     let s = |p: &Path| p.to_string_lossy().into_owned();
 
@@ -564,7 +563,6 @@ pub fn plan_install_windows(
                     format!("--service={service}"),
                     format!("--password={}", password.expose()),
                     format!("--port={port}"),
-                    format!("--config={}", s(&config)),
                 ],
                 ..CommandSpec::default()
             })),

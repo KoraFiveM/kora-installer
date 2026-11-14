@@ -307,14 +307,10 @@ pub fn install(http: &dyn ArtifactSource, say: &mut dyn FnMut(&str)) -> Result<R
                 run_checked(spec, "creating the MariaDB data folder and service").map_err(|e| InstallError(format!("{e}. {AV_HINT}")))?;
                 let _ = std::fs::remove_file(root.join("mariadb.sha256sums.txt"));
                 // Loopback only, whatever install-db wrote.
-                let ini = [datadir.join("my.ini"), root.join("database-config.ini")].into_iter().find(|p| p.is_file());
-                match ini {
-                    Some(p) => {
-                        let text = std::fs::read_to_string(&p).unwrap_or_default();
-                        std::fs::write(&p, harden_ini(&text, port)).map_err(|e| InstallError(format!("cannot write {}: {e}", p.display())))?;
-                    }
-                    None => say("note: mariadb-install-db wrote no my.ini; the server may listen on every interface"),
-                }
+                let p = datadir.join("my.ini");
+                let text = std::fs::read_to_string(&p).unwrap_or_default();
+                let new = if text.trim().is_empty() { config_text(&datadir, port) } else { harden_ini(&text, port) };
+                std::fs::write(&p, new).map_err(|e| InstallError(format!("cannot write {}: {e}", p.display())))?;
                 // Save the login right away: if a later step fails the service is still reachable.
                 let saved = SavedAdmin { host: "127.0.0.1".into(), port, user: "root".into(), password: password.clone(), client: client.clone() };
                 write_json_restricted(&admin_path(&base), &saved, true)?;
@@ -501,6 +497,11 @@ mod tests {
         assert!(p.steps.iter().all(|s| match &s.action {
             StepAction::Download { dest, .. } => dest.starts_with(&root),
             StepAction::ExtractZip { dest, .. } => dest.starts_with(&root),
+            _ => true,
+        }));
+        // `--config` must name an EXISTING file for mariadb-install-db (real run: FATAL ERROR); never pass it.
+        assert!(p.steps.iter().all(|s| match &s.action {
+            StepAction::Run(c) => !c.args.iter().any(|a| a.starts_with("--config")),
             _ => true,
         }));
     }
