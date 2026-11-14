@@ -128,17 +128,16 @@ impl Ctx<'_> {
         Ok(())
     }
     fn finish(self) -> Result<()> {
+        #[cfg(not(unix))]
+        if !self.links.is_empty() {
+            return bad("symlinks are not supported on this platform");
+        }
+        #[cfg(unix)]
         for (rel, target) in self.links {
             if let Some(p) = rel.parent() {
                 fs::create_dir_all(self.root.join(p))?;
             }
-            #[cfg(unix)]
             std::os::unix::fs::symlink(&target, self.root.join(&rel))?;
-            #[cfg(not(unix))]
-            {
-                let _ = target;
-                return bad("symlinks are not supported on this platform");
-            }
         }
         Ok(())
     }
