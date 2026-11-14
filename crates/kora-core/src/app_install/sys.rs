@@ -180,7 +180,10 @@ impl Sys for RealSys {
     }
 
     fn set_machine_path(&mut self, value: &str) -> Result<()> {
-        let script = format!("Set-ItemProperty -LiteralPath '{ENV_KEY}' -Name Path -Type ExpandString -Value $env:KORA_VALUE");
+        // Keep the registry type the machine already uses (REG_SZ or REG_EXPAND_SZ).
+        let script = format!(
+            "$k = Get-Item -LiteralPath '{ENV_KEY}'; $t = [string]$k.GetValueKind('Path'); Set-ItemProperty -LiteralPath '{ENV_KEY}' -Name Path -Type $t -Value $env:KORA_VALUE"
+        );
         powershell(&script, &[("KORA_VALUE", value.into())]).map(|_| ())
     }
 

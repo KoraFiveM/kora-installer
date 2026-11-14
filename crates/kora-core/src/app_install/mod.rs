@@ -700,7 +700,9 @@ pub fn install_app_with(sys: &mut dyn Sys, l: &Layout, run: &Running, opts: &App
     let mut plan = plan_install(sys, l, run, opts);
     let changes = if opts.dry_run { plan.actions.iter().map(Action::describe).collect() } else { run_plan(sys, l, &plan)? };
     if !opts.dry_run {
-        if let Some(dir) = l.command_dir() {
+        if l.windows {
+            // the machine PATH was handled above
+        } else if let Some(dir) = l.command_dir() {
             if let Some(h) = path_hint(&dir, &std::env::var("PATH").unwrap_or_default()) {
                 plan.notes.push(h);
             }
