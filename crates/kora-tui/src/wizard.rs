@@ -4,9 +4,8 @@
 //! Stages: Welcome -> Prepare -> Choose (one decision per screen) -> Review.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use kora_core::firewall::ports::{suggest_free_port, PortProber, SystemProber};
 use kora_core::firewall::PortRequest;
-// TODO(ports): switch to `kora_core::firewall::{...}` when the core module lands and delete ports.rs.
-use crate::ports::{suggest_free_port, PortProber, SystemProber};
 use kora_core::installer::{DbAdmin, DbChoice, InstallRequest, Mode, Ports, ResourceSelection, ServerEntry};
 use kora_core::site::Redeemed;
 use ratatui::layout::Rect;
