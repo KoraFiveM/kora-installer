@@ -4,11 +4,13 @@
 //! Stages: Welcome -> Prepare -> Choose (one decision per screen) -> Review.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use kora_core::firewall::{self, PortRequest};
-use kora_core::installer::{DbAdmin, DbChoice, InstallRequest, Mode, Ports, ResourceSelection};
+use kora_core::firewall::PortRequest;
+// TODO(ports): switch to `kora_core::firewall::{...}` when the core module lands and delete ports.rs.
+use crate::ports::{suggest_free_port, PortProber, SystemProber};
+use kora_core::installer::{DbAdmin, DbChoice, InstallRequest, Mode, Ports, ResourceSelection, ServerEntry};
 use kora_core::site::Redeemed;
 use ratatui::layout::Rect;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::clipboard::{format_setup_code, sanitize_paste, Clipboard, SystemClipboard};
 use crate::wizard_view;
@@ -47,17 +49,28 @@ pub enum WizardState {
     Quit,
 }
 
-/// Port checker: (game, txadmin) -> plain-language conflict messages.
-pub type PortCheck = fn(u16, u16) -> Vec<String>;
+/// How the wizard checks ports: a prober (the game port needs TCP and UDP free, txAdmin TCP only) and the other Kora servers in the registry (their ports stay reserved even when
+/// they are stopped). Injected so tests can use fakes.
+pub struct PortEnv {
+    pub prober: Box<dyn PortProber>,
+    pub servers: Vec<ServerEntry>,
+}
 
-fn real_port_check(game: u16, tx: u16) -> Vec<String> {
-    let req = PortRequest {
-        server: "kora".into(),
-        game_port: game,
-        txadmin_port: tx,
-        expose_txadmin: false,
-    };
-    firewall::port_conflicts(&req).unwrap_or_default()
+impl PortEnv {
+    pub fn system() -> Self {
+        Self { prober: Box::new(SystemProber), servers: kora_core::installer::Registry::load().map(|r| r.servers).unwrap_or_default() }
+    }
+}
+
+/// Live status of one port box, shown under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortLine {
+    pub port: u16,
+    pub ok: bool,
+    /// "30120 is free" / "30120 is already in use - 30121 is free".
+    pub text: String,
+    /// The next free port, offered as a `[ Use N ]` button.
+    pub suggestion: Option<u16>,
 }
 
 /// Real database login check (fake-able in tests). `None` = automatic (environment / root socket).
@@ -108,7 +121,16 @@ pub struct Wizard {
     /// Friendly confirmation shown in the footer (e.g. "Pasted 14 characters"); never holds field content.
     pub status: Option<String>,
     clipboard: Box<dyn Clipboard>,
-    port_check: PortCheck,
+    ports: PortEnv,
+    /// Live status of the game / txAdmin port boxes (refreshed whenever they change).
+    pub ports_status: [Option<PortLine>; 2],
+    ports_touched: bool,
+    /// Why the Ports screen is shown for a website-chosen port that is taken.
+    pub ports_note: Option<String>,
+    /// A website-chosen port was taken: keep the Ports screen in the flow.
+    web_ports_shown: bool,
+    /// After a re-check sent the user back to Ports, return straight to Review.
+    jump_review: bool,
     db_tester: DbTester,
     /// false = automatic (root socket / no password), true = enter an admin login.
     pub dba_custom: bool,
@@ -218,14 +240,14 @@ impl Default for Wizard {
 
 impl Wizard {
     pub fn new() -> Self {
-        Self::with_port_check(real_port_check)
+        Self::with_ports(PortEnv::system())
     }
 
-    pub fn with_port_check(port_check: PortCheck) -> Self {
-        Self::with_hooks(port_check, kora_core::installer::check_db_admin)
+    pub fn with_ports(env: PortEnv) -> Self {
+        Self::with_hooks(env, kora_core::installer::check_db_admin)
     }
 
-    pub fn with_hooks(port_check: PortCheck, db_tester: DbTester) -> Self {
+    pub fn with_hooks(env: PortEnv, db_tester: DbTester) -> Self {
         let name = "My Kora Server".to_string();
         let ports = Ports::default();
         Self {
@@ -262,7 +284,12 @@ impl Wizard {
             error: None,
             status: None,
             clipboard: Box::new(SystemClipboard::default()),
-            port_check,
+            ports: env,
+            ports_status: [None, None],
+            ports_touched: false,
+            ports_note: None,
+            web_ports_shown: false,
+            jump_review: false,
             db_tester,
             dba_custom: false,
             dba_user: "root".into(),
@@ -290,8 +317,11 @@ impl Wizard {
             v.extend([Mode, Name]);
         }
         v.push(Folder);
+        if !web || self.web_ports_shown {
+            v.push(Ports);
+        }
         if !web {
-            v.extend([Ports, Artifact]);
+            v.push(Artifact);
             if self.artifact_custom {
                 v.push(ArtifactUrl);
             }
@@ -393,6 +423,9 @@ impl Wizard {
     /// Sync `selected` from stored answers when entering a screen.
     fn load_selection(&mut self) {
         self.focus = 0;
+        if self.screen == Screen::Ports {
+            self.prefill_free_ports();
+        }
         self.selected = match self.screen {
             Screen::Welcome => usize::from(self.advanced),
             Screen::Mode => usize::from(self.mode == Mode::Development),
@@ -448,6 +481,9 @@ impl Wizard {
 
     fn type_char(&mut self, c: char) {
         let screen = self.screen;
+        if screen == Screen::Ports && !c.is_ascii_digit() {
+            return; // port boxes take digits only (letters are shortcuts there)
+        }
         if let Some(f) = self.field_mut() {
             f.push(c);
         }
@@ -464,6 +500,11 @@ impl Wizard {
                 if !self.host_touched {
                     self.hostname = self.name.clone();
                 }
+            }
+            Screen::Ports => {
+                self.ports_touched = true;
+                self.ports_note = None;
+                self.refresh_ports();
             }
             Screen::Folder => self.dir_touched = true,
             Screen::Hostname => self.host_touched = true,
@@ -552,6 +593,12 @@ impl Wizard {
         self.cli_prefilled = from_cli;
         self.redeemed = Some(r);
         self.error = None;
+        // Ports from the website are not trusted: they were free on the website's side, not here.
+        self.refresh_ports();
+        if let Some(l) = self.ports_status.iter().flatten().find(|l| !l.ok) {
+            self.ports_note = Some(format!("The website chose port {} but it is already used on this computer, so please pick another.", l.port));
+            self.web_ports_shown = true;
+        }
     }
 
     /// Welcome text after a code was loaded.
@@ -630,6 +677,7 @@ impl Wizard {
             let used = self.field_mut().map_or(0, |f| f.chars().count());
             sanitize_paste(raw, max.saturating_sub(used))
         };
+        let clean = if screen == Screen::Ports { clean.chars().filter(char::is_ascii_digit).collect() } else { clean };
         let n = clean.chars().count();
         if n == 0 {
             self.status = Some("Nothing to paste: the clipboard had no text for this box.".into());
@@ -699,10 +747,13 @@ impl Wizard {
         }
         if self.is_text_screen() {
             let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+            let screen_is_ports = self.screen == Screen::Ports && !ctrl;
             match key.code {
                 KeyCode::Char('v' | 'V') if ctrl => self.paste_clipboard(),
                 KeyCode::Insert if shift => self.paste_clipboard(),
                 KeyCode::Char('u') if ctrl => self.clear_field(),
+                KeyCode::F(3) => self.use_suggestion(None),
+                KeyCode::Char('u' | 'U') if screen_is_ports => self.use_suggestion(None),
                 KeyCode::Char(c) if !ctrl => self.type_char(c),
                 KeyCode::Backspace => {
                     let screen = self.screen;
@@ -769,6 +820,8 @@ impl Wizard {
             self.test_login();
         } else if let Some(i) = l.options.iter().position(|r| hit(*r)) {
             self.select(i);
+        } else if let Some(i) = l.actions.iter().position(|r| hit(*r)) {
+            self.use_suggestion(Some(i));
         } else if let Some(i) = l.paste.iter().position(|r| hit(*r)) {
             self.focus = i;
             self.paste_clipboard();
@@ -780,8 +833,144 @@ impl Wizard {
         }
     }
 
+    fn parse_port(s: &str) -> Option<u16> {
+        s.trim().parse::<u16>().ok().filter(|p| *p >= 1024)
+    }
+
+    /// Ports claimed by the user's other Kora servers.
+    fn reserved_ports(&self) -> Vec<u16> {
+        self.ports
+            .servers
+            .iter()
+            .filter(|s| slug(&s.name) != slug(&self.name) && s.dir != Path::new(self.dir.trim()))
+            .flat_map(|s| [s.ports.game, s.ports.txadmin])
+            .collect()
+    }
+
+    fn other_server_using(&self, port: u16) -> Option<&str> {
+        self.ports
+            .servers
+            .iter()
+            .filter(|s| slug(&s.name) != slug(&self.name) && s.dir != Path::new(self.dir.trim()))
+            .find(|s| s.ports.game == port || s.ports.txadmin == port)
+            .map(|s| s.name.as_str())
+    }
+
+    /// Status of both port boxes (`None` for a box that doesn't hold a usable number yet).
+    fn compute_ports_status(&self) -> [Option<PortLine>; 2] {
+        let reg = self.reserved_ports();
+        let (g, t) = (Self::parse_port(&self.game_port), Self::parse_port(&self.tx_port));
+        let prober = &*self.ports.prober;
+        let line = |port: Option<u16>, other: Option<u16>, udp: bool| -> Option<PortLine> {
+            let port = port?;
+            let avoid: Vec<u16> = reg.iter().copied().chain(other).collect();
+            let why = if Some(port) == other {
+                Some("is the same as the other port".to_string())
+            } else if let Some(name) = self.other_server_using(port) {
+                Some(format!("is used by your other server '{name}'"))
+            } else if !(prober.tcp_free(port) && (!udp || prober.udp_free(port))) {
+                Some("is already in use".to_string())
+            } else {
+                None
+            };
+            Some(match why {
+                None => PortLine { port, ok: true, text: format!("{port} is free"), suggestion: None },
+                Some(why) => {
+                    let suggestion = suggest_free_port(port, &avoid, udp, prober);
+                    let text = match suggestion {
+                        Some(s) => format!("{port} {why} - {s} is free"),
+                        None => format!("{port} {why} - no free port found nearby, please type another"),
+                    };
+                    PortLine { port, ok: false, text, suggestion }
+                }
+            })
+        };
+        [line(g, t, true), line(t, g, false)]
+    }
+
+    pub fn refresh_ports(&mut self) {
+        self.ports_status = self.compute_ports_status();
+    }
+
+    /// First problem with the chosen ports, in plain words (fresh check).
+    fn port_problem(&self) -> Option<String> {
+        self.compute_ports_status().into_iter().flatten().find(|l| !l.ok).map(|l| match l.suggestion {
+            Some(s) => format!("Port {}. Press U (or click the Use {s} button) to switch to {s}, or type another port.", l.text),
+            None => format!("Port {}.", l.text),
+        })
+    }
+
+    /// Keep each port when it is fine, otherwise move it to the next free one.
+    fn pick_free_ports(&self, g: u16, t: u16) -> Option<(u16, u16)> {
+        let reg = self.reserved_ports();
+        let p = &*self.ports.prober;
+        let ok = |port: u16, avoid: &[u16], udp: bool| !avoid.contains(&port) && p.tcp_free(port) && (!udp || p.udp_free(port));
+        let av_g: Vec<u16> = reg.iter().copied().chain([t]).collect();
+        let ng = if ok(g, &av_g, true) { g } else { suggest_free_port(g, &av_g, true, p)? };
+        let av_t: Vec<u16> = reg.iter().copied().chain([ng]).collect();
+        let nt = if ok(t, &av_t, false) { t } else { suggest_free_port(t, &av_t, false, p)? };
+        Some((ng, nt))
+    }
+
+    /// If the default ports (untouched, not from a website code) are taken, fill in free ones.
+    fn prefill_free_ports(&mut self) {
+        if self.ports_touched || self.redeemed.is_some() {
+            self.refresh_ports();
+            return;
+        }
+        if let (Some(g), Some(t)) = (Self::parse_port(&self.game_port), Self::parse_port(&self.tx_port)) {
+            if let Some((ng, nt)) = self.pick_free_ports(g, t) {
+                if (ng, nt) != (g, t) {
+                    self.ports_note = Some(format!(
+                        "The usual ports ({g} and {t}) are already in use on this computer, so we picked free ones for you: {ng} for players and {nt} for the control panel."
+                    ));
+                    self.game_port = ng.to_string();
+                    self.tx_port = nt.to_string();
+                }
+            }
+        }
+        self.refresh_ports();
+    }
+
+    /// Switch a port box to its suggested free port (`None` = the focused box, else the other one).
+    pub fn use_suggestion(&mut self, which: Option<usize>) {
+        if self.screen != Screen::Ports {
+            return;
+        }
+        let order: Vec<usize> = match which {
+            Some(i) => vec![i],
+            None => vec![self.focus.min(1), 1 - self.focus.min(1)],
+        };
+        for i in order {
+            if let Some(PortLine { suggestion: Some(s), .. }) = self.ports_status[i].clone() {
+                if i == 0 { self.game_port = s.to_string() } else { self.tx_port = s.to_string() }
+                self.ports_touched = true;
+                self.ports_note = None;
+                self.error = None;
+                self.refresh_ports();
+                self.status = Some(format!("Using port {s}"));
+                return;
+            }
+        }
+    }
+
+    /// On the way into Review (and when Install is confirmed): if a port got taken in the
+    /// meantime, go back to the Ports screen. Returns true when it did.
+    fn recheck_ports_or_redirect(&mut self) -> bool {
+        let Some(problem) = self.port_problem() else { return false };
+        if self.redeemed.is_some() {
+            self.web_ports_shown = true;
+        }
+        self.screen = Screen::Ports;
+        self.load_selection();
+        self.jump_review = true;
+        self.error = Some(format!("A port was taken in the meantime. {problem}"));
+        true
+    }
+
     pub fn go_back(&mut self) {
         self.error = None;
+        self.jump_review = false;
         let flow = self.flow();
         let idx = flow.iter().position(|s| *s == self.screen).unwrap_or(0);
         if idx == 0 {
@@ -801,12 +990,26 @@ impl Wizard {
         }
         if let Err(e) = self.validate_current() {
             self.error = Some(e);
+            if self.screen == Screen::Ports {
+                self.refresh_ports();
+            }
             return;
         }
         self.error = None;
         self.apply_selection();
+        if self.screen == Screen::Ports && std::mem::take(&mut self.jump_review) {
+            self.screen = Screen::Review;
+            self.load_selection();
+            return;
+        }
         let flow = self.flow();
         let idx = flow.iter().position(|s| *s == self.screen).unwrap_or(0);
+        // A port can be taken between choosing it and installing: look again on the way into
+        // Review and once more when the install is confirmed.
+        let leaving_to_review = idx + 1 >= flow.len() || flow[idx + 1] == Screen::Review;
+        if leaving_to_review && self.screen != Screen::Ports && self.recheck_ports_or_redirect() {
+            return;
+        }
         if idx + 1 >= flow.len() {
             self.state = WizardState::Done;
         } else {
@@ -826,9 +1029,9 @@ impl Wizard {
                 }
             }
             Screen::Ports => {
-                let (g, t) = validate_ports(&self.name, &self.game_port, &self.tx_port)?;
-                match (self.port_check)(g, t).into_iter().next() {
-                    Some(c) => Err(c),
+                validate_ports(&self.name, &self.game_port, &self.tx_port)?;
+                match self.port_problem() {
+                    Some(p) => Err(p),
                     None => Ok(()),
                 }
             }

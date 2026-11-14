@@ -5,6 +5,7 @@
 
 pub mod clipboard;
 pub mod open;
+pub mod ports;
 pub mod progress;
 pub mod result;
 pub mod wizard;

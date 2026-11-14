@@ -38,7 +38,7 @@ $qc = (& sc.exe qc $svc | Out-String); Write-Host $qc
 Assert-That ($qc -match 'AUTO_START') 'service start type is automatic'
 Assert-That ($qc -match 'NT SERVICE\\kora-smoke') 'service runs as the NT SERVICE virtual account'
 Assert-That ($qc -match 'service-host') 'service command line is `kora service-host`'
-$bin = ($qc -split "`n" | Where-Object { $_ -match 'BINARY_PATH_NAME' }) -replace '.*:\s*', ''
+$bin = ($qc -split "`n" | Where-Object { $_ -match 'BINARY_PATH_NAME' }) -replace '^\s*BINARY_PATH_NAME\s*:\s*', ''
 Assert-That ($bin -match [regex]::Escape($env:ProgramFiles)) 'service binary is the Program Files copy (not a user-writable path)'
 
 $fw = (& netsh advfirewall firewall show rule name=all | Out-String)

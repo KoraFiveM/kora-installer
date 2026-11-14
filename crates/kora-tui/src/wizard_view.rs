@@ -23,6 +23,15 @@ pub struct InputView {
     pub masked: bool,
     pub focused: bool,
     pub hint: String,
+    /// Status line under the box (port checks) with an optional action button.
+    pub note: Option<Note>,
+}
+
+pub struct Note {
+    pub text: String,
+    pub ok: bool,
+    /// Button label such as `[ Use 30121 ]`.
+    pub action: Option<String>,
 }
 
 pub struct View {
@@ -43,7 +52,7 @@ fn opt(a: &str, b: &str) -> (String, String) {
 }
 
 fn inp(label: &str, value: &str, hint: &str, focused: bool) -> InputView {
-    InputView { label: label.into(), value: value.into(), masked: false, focused, hint: hint.into() }
+    InputView { label: label.into(), value: value.into(), masked: false, focused, hint: hint.into(), note: None }
 }
 
 pub fn view(w: &Wizard) -> View {
@@ -110,11 +119,18 @@ pub fn view(w: &Wizard) -> View {
                 l("Ports are like numbered doors your server uses to talk to players and to its web control panel. The defaults are almost always right."),
                 l("Use Up/Down to switch between the two. We check that no other program is already using them."),
             ];
+            if let Some(n) = &w.ports_note {
+                v.lines.push(n.clone());
+            }
+            v.lines.push(l("Kora checks that nothing else on this computer uses them. If one is taken, press U (or click the Use button) to switch to the next free port."));
             v.inputs = vec![
                 inp("Game port (players connect here)", &w.game_port, "", w.focus == 0),
                 inp("Control panel port (txAdmin)", &w.tx_port, "", w.focus == 1),
             ];
-            v.help = l("Ports must be between 1024 and 65535 and different from each other. If you are behind a home router you may need to forward the game port to this computer.");
+            for (iv, st) in v.inputs.iter_mut().zip(&w.ports_status) {
+                iv.note = st.as_ref().map(|s| Note { text: s.text.clone(), ok: s.ok, action: s.suggestion.map(|p| format!("[ Use {p} ]")) });
+            }
+            v.help = l("Ports must be between 1024 and 65535 and different from each other. A port that is already used by another program (or by another of your Kora servers) can't be used: press U or F3, or click the Use button, to take the next free one. If you are behind a home router you may need to forward the game port to this computer.");
         }
         Screen::Artifact => {
             v.title = l("Server software version");
@@ -287,7 +303,7 @@ pub fn view(w: &Wizard) -> View {
     if v.help.is_empty() {
         v.help = l("Use Up/Down (or 1-9) to choose, Enter for Next, Esc for Back. Type to fill in boxes; Ctrl+V or Shift+Insert (or the Paste button) pastes, Ctrl+U (or Clear) empties a box. Press F1 or ? for this help. Ctrl+C quits.");
     } else {
-        v.help.push_str("\n\nKeys: Up/Down choose, Enter next, Esc back, F1 or ? help, Ctrl+V / Shift+Insert paste, Ctrl+U clear, Ctrl+C quit.");
+        v.help.push_str("\n\nKeys: Up/Down choose, Enter next, Esc back, F1 or ? help, Ctrl+V / Shift+Insert paste, Ctrl+U clear, U or F3 use the suggested port (Ports screen), Ctrl+C quit.");
     }
     v
 }
@@ -336,6 +352,9 @@ pub struct Layout {
     pub text: Rect,
     pub options: Vec<Rect>,
     pub inputs: Vec<Rect>,
+    /// Status line under each input that has a note, and its action button (`Rect::default()` when absent).
+    pub notes: Vec<Rect>,
+    pub actions: Vec<Rect>,
     /// `[ Paste ]` / `[ Clear ]` buttons, one per input (empty rect when the window is too narrow).
     pub paste: Vec<Rect>,
     pub clear: Vec<Rect>,
@@ -374,10 +393,26 @@ pub fn layout(area: Rect, v: &View) -> Layout {
     }
     let mut inputs = Vec::new();
     let (mut paste, mut clear) = (Vec::new(), Vec::new());
+    let (mut notes, mut actions) = (Vec::new(), Vec::new());
     let buttons = inner.width >= BUTTONS_MIN_WIDTH;
     let bw = if buttons { inner.width - 2 * BUTTON_W - 2 } else { inner.width };
-    for _ in &v.inputs {
+    for iv in &v.inputs {
         inputs.push(clamp(Rect::new(inner.x, y, bw, 3), inner));
+        let mut extra = 0u16;
+        match &iv.note {
+            Some(n) => {
+                let label_w = n.action.as_ref().map_or(0, |a| a.chars().count() as u16);
+                let ax = if buttons { inner.x + bw + 1 } else { inner.right().saturating_sub(label_w) };
+                let nw = if buttons { bw } else { inner.width.saturating_sub(label_w + 1) };
+                notes.push(clamp(Rect::new(inner.x, y + 3, nw, 1), inner));
+                actions.push(if label_w > 0 { clamp(Rect::new(ax, y + 3, label_w, 1), inner) } else { Rect::default() });
+                extra = 1;
+            }
+            None => {
+                notes.push(Rect::default());
+                actions.push(Rect::default());
+            }
+        }
         if buttons {
             paste.push(clamp(Rect::new(inner.x + bw + 1, y + 1, BUTTON_W, 1), inner));
             clear.push(clamp(Rect::new(inner.x + bw + 2 + BUTTON_W, y + 1, BUTTON_W, 1), inner));
@@ -385,9 +420,9 @@ pub fn layout(area: Rect, v: &View) -> Layout {
             paste.push(Rect::default());
             clear.push(Rect::default());
         }
-        y = y.saturating_add(3);
+        y = y.saturating_add(3 + extra);
     }
-    Layout { header, body, message, back, help, test, next, text, options, inputs, paste, clear }
+    Layout { header, body, message, back, help, test, next, text, options, inputs, notes, actions, paste, clear }
 }
 
 fn button(f: &mut Frame, r: Rect, label: &str, style: Style) {
@@ -455,6 +490,18 @@ pub fn render(f: &mut Frame, w: &Wizard) {
         if p.width > 0 {
             f.render_widget(Paragraph::new("[ Paste ]").style(link), *p);
             f.render_widget(Paragraph::new("[ Clear ]").style(link), l.clear[i]);
+        }
+    }
+    for (i, iv) in v.inputs.iter().enumerate() {
+        if let Some(n) = &iv.note {
+            let (nr, ar) = (l.notes[i], l.actions[i]);
+            if nr.width > 0 && nr.height > 0 {
+                let st = if n.ok { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Yellow) };
+                f.render_widget(Paragraph::new(n.text.clone()).style(st), nr);
+            }
+            if let (Some(a), true) = (&n.action, ar.width > 0 && ar.height > 0) {
+                f.render_widget(Paragraph::new(a.clone()).style(Style::default().fg(Color::Black).bg(Color::Yellow)), ar);
+            }
         }
     }
     for (iv, r) in v.inputs.iter().zip(&l.inputs) {
