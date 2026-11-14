@@ -152,7 +152,12 @@ pub fn check_ascii_path(p: &Path) -> Result<()> {
 
 /// A free TCP port on loopback, starting at 3306.
 pub fn pick_port() -> u16 {
-    (3306u16..3400).find(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok()).unwrap_or(3306)
+    pick_port_with(&crate::firewall::ports::SystemProber, &crate::firewall::ports::registered_ports())
+}
+
+/// 3306 when free, else the next free port (never one another Kora server is registered on).
+pub fn pick_port_with(prober: &dyn crate::firewall::ports::PortProber, avoid: &[u16]) -> u16 {
+    crate::firewall::ports::suggest_free_port(3305, avoid, false, prober).unwrap_or(3306)
 }
 
 /// Unpack a MariaDB zip into `dest`, dropping the single top-level folder (`mariadb-x.y.z-winx64/`).
@@ -476,6 +481,23 @@ mod tests {
         assert!(check_ascii_path(Path::new("C:\\ProgramData\\Kora\\mariadb")).is_ok());
         let e = check_ascii_path(Path::new("C:\\Users\\Zo\u{eb} M\u{fc}ller\\mariadb")).unwrap_err().to_string();
         assert!(e.contains("KORA_MARIADB_HOME"), "{e}");
+    }
+
+    struct Busy(Vec<u16>);
+    impl crate::firewall::ports::PortProber for Busy {
+        fn tcp_free(&self, p: u16) -> bool {
+            !self.0.contains(&p)
+        }
+        fn udp_free(&self, _: u16) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn busy_3306_moves_kora_mariadb_to_the_next_free_port() {
+        assert_eq!(pick_port_with(&Busy(vec![]), &[]), 3306);
+        assert_eq!(pick_port_with(&Busy(vec![3306]), &[]), 3307);
+        assert_eq!(pick_port_with(&Busy(vec![3306, 3307]), &[3308]), 3309);
     }
 
     #[test]
