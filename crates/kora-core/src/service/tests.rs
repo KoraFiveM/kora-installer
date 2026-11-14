@@ -156,7 +156,7 @@ fn systemd_scheduler_units() {
     assert!(t.contains("Persistent=true"));
     assert!(t.contains("Unit=kora-update-main.service"));
     let s = systemd_update_unit(&server()).unwrap();
-    assert!(s.contains("ExecStart=/usr/local/bin/kora update --auto main"));
+    assert!(s.contains("ExecStart=/usr/local/bin/kora update --auto /srv/kora/main"));
     assert!(s.contains("Type=oneshot"));
     let c = Schedule::Custom(vec![Weekday::Mon, Weekday::Thu], TimeOfDay::new(5, 5).unwrap());
     assert_eq!(c.on_calendar(), "Mon,Thu *-*-* 05:05:00");

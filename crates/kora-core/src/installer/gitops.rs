@@ -1,7 +1,7 @@
 //! Glue for `kora update --auto`: a [`GitOps`] adapter over the git module, a service-based
 //! health check, and [`auto_update`] which wires the update engine to a registered server.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::registry::{now_unix, Registry, ServerFile};
@@ -70,6 +70,78 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     }
 }
 
+/// Runs every command as `user` (via `runuser`) with `HOME` set to a folder that user owns.
+/// Used when the update runs as root (systemd timer) so git never creates root-owned files in
+/// a server folder owned by the service account, and never trips git's "dubious ownership" check.
+pub struct AsUser {
+    pub user: String,
+    pub home: PathBuf,
+}
+
+impl CommandRunner for AsUser {
+    fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<git::Output> {
+        let home = format!("HOME={}", self.home.display());
+        let mut a: Vec<&str> = vec!["-u", &self.user, "--", "env", &home, program];
+        a.extend_from_slice(args);
+        SystemRunner.run("runuser", &a, cwd)
+    }
+    fn sleep(&self, d: Duration) {
+        std::thread::sleep(d);
+    }
+}
+
+/// Name of the owner of `dir` when it is not the current user (Unix only; needs root to switch).
+#[cfg(unix)]
+fn foreign_owner(dir: &Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let uid = std::fs::metadata(dir).ok()?.uid();
+    let me = String::from_utf8_lossy(&std::process::Command::new("id").arg("-u").output().ok()?.stdout).trim().parse::<u32>().ok()?;
+    if me != 0 || uid == 0 {
+        return None;
+    }
+    let o = std::process::Command::new("id").args(["-nu", &uid.to_string()]).output().ok()?;
+    let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (o.status.success() && !name.is_empty()).then_some(name)
+}
+#[cfg(not(unix))]
+fn foreign_owner(_: &Path) -> Option<String> {
+    None
+}
+
+/// Number of players online from the server's own `/players.json` (None when unreachable).
+pub fn online_players(port: u16) -> Option<u32> {
+    use std::io::{Read, Write};
+    let mut c = std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_secs(3)).ok()?;
+    c.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    c.write_all(format!("GET /players.json HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes()).ok()?;
+    let mut buf = String::new();
+    c.read_to_string(&mut buf).ok()?;
+    let body = buf.split_once("\r\n\r\n")?.1;
+    serde_json::from_str::<Vec<serde_json::Value>>(body).ok().map(|v| v.len() as u32)
+}
+
+/// Test seam (documented): when `KORA_TEST_FAIL_HEALTH` is set, the health check after an update
+/// reports the update as unhealthy (after a real restart), so the automatic rollback to the
+/// recorded commits can be exercised end to end. Never set in production.
+pub const FAIL_HEALTH_ENV: &str = "KORA_TEST_FAIL_HEALTH";
+
+struct FaultInjecting<'a>(&'a dyn HealthCheck);
+
+impl HealthCheck for FaultInjecting<'_> {
+    fn check(&self, req: &HealthRequest) -> HealthOutcome {
+        let real = self.0.check(req);
+        match real {
+            HealthOutcome::Healthy if std::env::var_os(FAIL_HEALTH_ENV).is_some_and(|v| !v.is_empty()) => {
+                HealthOutcome::Unhealthy { reason: format!("injected failure ({FAIL_HEALTH_ENV})"), failed: req.updated.clone() }
+            }
+            other => other,
+        }
+    }
+    fn recover(&self, req: &HealthRequest) {
+        self.0.recover(req)
+    }
+}
+
 /// Health check backed by the OS service: restarts it and waits for the game port to come up.
 /// A server that is not running needs no restart. A running server that Kora does not manage as
 /// a service cannot be restarted by Kora: it is left alone and reported healthy.
@@ -117,14 +189,23 @@ impl HealthCheck for ServiceHealth {
     }
 }
 
-/// Run `kora update --auto <server>`. Development servers only.
+/// Run `kora update --auto <server>`. Development servers only. `server` is a registered name
+/// or the absolute server folder (what the systemd timer passes). The report is appended to
+/// `<dir>/update.log`.
 pub fn auto_update(server: &str) -> Result<UpdateReport> {
-    let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
-    let entry = reg.find(server).ok_or_else(|| InstallError(format!("no registered server named '{server}' (see `kora status`)")))?.clone();
-    let sf = ServerFile::load(&entry.dir).map_err(|e| InstallError(format!("cannot read {}: {e}", entry.dir.join("kora-server.json").display())))?;
+    let as_dir = Path::new(server);
+    let (name, dir) = if as_dir.is_absolute() && as_dir.join("kora-server.json").is_file() {
+        let sf = ServerFile::load(as_dir).map_err(|e| InstallError(format!("cannot read {}: {e}", as_dir.join("kora-server.json").display())))?;
+        (sf.name, as_dir.to_path_buf())
+    } else {
+        let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
+        let entry = reg.find(server).ok_or_else(|| InstallError(format!("no registered server named '{server}' (see `kora status`)")))?;
+        (entry.name.clone(), entry.dir.clone())
+    };
+    let sf = ServerFile::load(&dir).map_err(|e| InstallError(format!("cannot read {}: {e}", dir.join("kora-server.json").display())))?;
     let managed = ManagedServer {
-        name: slug(&entry.name),
-        dir: entry.dir.to_string_lossy().into_owned(),
+        name: slug(&name),
+        dir: dir.to_string_lossy().into_owned(),
         start_command: vec!["unused".into()],
         user: "kora".into(),
         env_file: None,
@@ -132,9 +213,26 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         windows_run_as: None,
     };
     let health = ServiceHealth { managed, game_port: sf.ports.game, wait: Duration::from_secs(90) };
-    // No player-count hook yet: a stopped server has no players, a running one is unknown (defer).
-    let players = if health.running() { None } else { Some(0) };
-    update_server(&entry.name, &entry.dir, &sf, &GitCli::default(), &health, players)
+    // Running server: ask it for its player count (restart-needing updates wait for 0 players);
+    // a server that is not running has none.
+    let players = if health.running() { online_players(sf.ports.game) } else { Some(0) };
+    let res = match foreign_owner(&dir) {
+        Some(user) => update_server(&name, &dir, &sf, &GitCli(AsUser { user, home: dir.clone() }), &FaultInjecting(&health), players),
+        None => update_server(&name, &dir, &sf, &GitCli::default(), &FaultInjecting(&health), players),
+    };
+    let line = match &res {
+        Ok(r) => r.summary(),
+        Err(e) => format!("update failed: {e}"),
+    };
+    append_log(&dir, &line);
+    res
+}
+
+fn append_log(dir: &Path, text: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("update.log")) {
+        let _ = writeln!(f, "=== unix {} ===\n{}", now_unix(), text.trim_end());
+    }
 }
 
 /// The engine wiring, with injectable git and health (used by tests).

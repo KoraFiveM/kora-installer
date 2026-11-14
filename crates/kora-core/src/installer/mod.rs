@@ -213,6 +213,9 @@ pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
     if req.service {
         v.push(PlannedStep { id: "system.service", title: "Register the background service", weight: 2, needs_admin: true });
     }
+    if req.service && req.mode == Mode::Development {
+        v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true });
+    }
     v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false });
     v
 }
@@ -231,6 +234,9 @@ pub(crate) struct Created {
     /// Relative to `<dir>`.
     pub files: Vec<String>,
     pub service_unit: Option<String>,
+    /// Dev mode: the auto-update timer was registered.
+    #[serde(default)]
+    pub update_timer: bool,
     pub firewall: bool,
     pub registered: bool,
 }
@@ -629,6 +635,18 @@ mod tests {
         r.firewall = false;
         let ids: Vec<&str> = plan_steps(&r, true).iter().map(|p| p.id).collect();
         assert!(ids.contains(&"build.forks") && !ids.contains(&"build.db") && !ids.contains(&"system.service"));
+    }
+
+    #[test]
+    fn dev_service_plan_schedules_updates_prod_does_not() {
+        let mut r = req(Path::new("/x"));
+        r.service = true;
+        r.mode = Mode::Development;
+        let ids: Vec<&str> = plan_steps(&r, true).iter().map(|p| p.id).collect();
+        let (svc, sch) = (ids.iter().position(|i| *i == "system.service"), ids.iter().position(|i| *i == "system.schedule"));
+        assert!(svc.is_some() && sch > svc);
+        r.mode = Mode::Production;
+        assert!(!plan_steps(&r, true).iter().any(|p| p.id == "system.schedule"));
     }
 
     #[test]

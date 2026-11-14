@@ -336,12 +336,18 @@ pub fn parse_scopes(text: &str) -> Vec<String> {
     Vec::new()
 }
 
+/// GitHub scope hierarchy: `admin:org` > `write:org` > `read:org` (a parent grants its children).
+fn scope_satisfies(have: &str, need: &str) -> bool {
+    have == need
+        || matches!((have, need), ("admin:org", "read:org" | "write:org") | ("write:org", "read:org"))
+}
+
 impl AuthStatus {
     /// Required scopes that the current token lacks.
     pub fn missing_scopes(&self, admin_org: bool) -> Vec<String> {
         required_scopes(admin_org)
             .into_iter()
-            .filter(|s| !self.scopes.iter().any(|h| h == s))
+            .filter(|s| !self.scopes.iter().any(|h| scope_satisfies(h, s)))
             .map(str::to_string)
             .collect()
     }
@@ -448,6 +454,10 @@ pub struct ForkConfig {
     pub max_backoff: Duration,
     /// Rate-limit retries for one repo before the run pauses (state stays resumable).
     pub max_retries: u32,
+    /// GitHub creates forks asynchronously: how long to wait for a new fork to have its commits
+    /// (0 = do not wait, used by tests).
+    pub ready_timeout: Duration,
+    pub ready_poll: Duration,
 }
 
 impl Default for ForkConfig {
@@ -458,6 +468,8 @@ impl Default for ForkConfig {
             base_backoff: Duration::from_secs(60),
             max_backoff: Duration::from_secs(900),
             max_retries: 5,
+            ready_timeout: Duration::from_secs(300),
+            ready_poll: Duration::from_secs(3),
         }
     }
 }
@@ -481,17 +493,59 @@ fn repo_name(repo: &str) -> &str {
     repo.rsplit('/').next().unwrap_or(repo)
 }
 
-/// Does `<target>/<name>` already exist? (prevents duplicate forks after a crash/resume.)
-fn fork_exists(r: &dyn CommandRunner, target: &str, name: &str) -> Result<bool> {
+/// What is at `<target>/<name>` before we fork.
+enum ForkProbe {
+    Missing,
+    /// A fork of the expected upstream (or an answer we cannot inspect).
+    Present,
+    /// A repository with that name exists but is not a fork of the upstream: never reuse it.
+    Foreign(String),
+}
+
+/// Does `<target>/<name>` already exist, and is it really a fork of `upstream`? (prevents
+/// duplicate forks after a crash/resume and refuses to adopt an unrelated repository.)
+fn probe_fork(r: &dyn CommandRunner, target: &str, name: &str, upstream: &str) -> Result<ForkProbe> {
     let path = format!("repos/{target}/{name}");
     let o = run(r, "gh", &["api", &path], None)?;
     if o.ok() {
-        return Ok(true);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&o.stdout) {
+            if let Some(is_fork) = v.get("fork").and_then(|f| f.as_bool()) {
+                let parent = v.pointer("/parent/full_name").and_then(|p| p.as_str()).unwrap_or("");
+                if !is_fork {
+                    return Ok(ForkProbe::Foreign(format!("{target}/{name} exists but is not a fork of {upstream}")));
+                }
+                if !parent.is_empty() && !parent.eq_ignore_ascii_case(upstream) {
+                    return Ok(ForkProbe::Foreign(format!("{target}/{name} is a fork of {parent}, not {upstream}")));
+                }
+            }
+        }
+        return Ok(ForkProbe::Present);
     }
     if is_rate_limited(&o.stderr) {
         return Err(GitError::Command { cmd: format!("gh api {path}"), code: o.code, stderr: o.stderr });
     }
-    Ok(false)
+    Ok(ForkProbe::Missing)
+}
+
+/// Wait until the (asynchronously created) fork has its commits, so a clone right after succeeds.
+fn wait_fork_ready(r: &dyn CommandRunner, target: &str, name: &str, cfg: &ForkConfig) -> std::result::Result<(), String> {
+    if cfg.ready_timeout.is_zero() {
+        return Ok(());
+    }
+    let path = format!("repos/{target}/{name}/commits?per_page=1");
+    let mut waited = Duration::ZERO;
+    loop {
+        if let Ok(o) = r.run("gh", &["api", &path, "--jq", "length"], None) {
+            if o.ok() && o.stdout.trim() == "1" {
+                return Ok(());
+            }
+        }
+        if waited >= cfg.ready_timeout {
+            return Err(format!("fork {target}/{name} was created but is still not ready after {}s", cfg.ready_timeout.as_secs()));
+        }
+        r.sleep(cfg.ready_poll);
+        waited += cfg.ready_poll.max(Duration::from_millis(1));
+    }
 }
 
 /// Run (or resume) forking. `on_progress` is called after every state change so the caller can
@@ -518,9 +572,11 @@ pub fn run_forks(
         }
         let mut attempt = 0u32;
         let result: std::result::Result<(), String> = loop {
-            let o = match fork_exists(r, &state.target_owner, repo_name(&repo)) {
-                Ok(true) => break Ok(()), // already there: count as done, no new fork
-                Ok(false) => {
+            let o = match probe_fork(r, &state.target_owner, repo_name(&repo), &repo) {
+                // already there: no new fork, but it may still be filling up after a crash
+                Ok(ForkProbe::Present) => break wait_fork_ready(r, &state.target_owner, repo_name(&repo), cfg),
+                Ok(ForkProbe::Foreign(why)) => break Err(why),
+                Ok(ForkProbe::Missing) => {
                     let mut args = vec!["repo", "fork", repo.as_str(), "--clone=false"];
                     if state.target_is_org {
                         args.push("--org");
@@ -531,8 +587,8 @@ pub fn run_forks(
                 Err(GitError::Command { code, stderr, .. }) => Output { code, stdout: String::new(), stderr },
                 Err(e) => return Err(e),
             };
-            if o.ok() {
-                break Ok(());
+            if o.ok() || o.stderr.contains("already exists") {
+                break wait_fork_ready(r, &state.target_owner, repo_name(&repo), cfg);
             }
             if is_rate_limited(&o.stderr) {
                 if attempt >= cfg.max_retries {
@@ -747,10 +803,53 @@ mod tests {
             base_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(8),
             max_retries: 4,
+            ready_timeout: Duration::ZERO,
+            ready_poll: Duration::from_secs(1),
         }
     }
     fn repos(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn admin_org_scope_satisfies_read_org() {
+        let st = AuthStatus { logged_in: true, scopes: vec!["repo".into(), "admin:org".into()] };
+        assert!(st.missing_scopes(true).is_empty());
+        let st = AuthStatus { logged_in: true, scopes: vec!["repo".into(), "read:org".into()] };
+        assert_eq!(st.missing_scopes(true), vec!["admin:org".to_string()]);
+    }
+
+    #[test]
+    fn foreign_repo_with_same_name_is_not_adopted_and_fork_waits_until_ready() {
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api repos/me/mine") {
+                ok(r#"{"fork":false}"#)
+            } else if c.starts_with("gh api repos/me/other") {
+                ok(r#"{"fork":true,"parent":{"full_name":"zzz/other"}}"#)
+            } else {
+                ok("")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["a/mine", "a/other"]));
+        run_forks(&f, &mut st, &cfg(), &mut |_| {}).unwrap();
+        assert_eq!(st.failed.len(), 2, "{:?}", st.failed);
+        assert_eq!(f.count("gh repo fork"), 0);
+
+        // async fork: commits endpoint is empty twice, then ready.
+        let n = std::cell::Cell::new(0);
+        let f = Fake::new(move |c| {
+            if c.contains("/commits") {
+                n.set(n.get() + 1);
+                return if n.get() < 3 { fail("HTTP 409: Git Repository is empty") } else { ok("1\n") };
+            }
+            if c.starts_with("gh api repos/me/") { fail("HTTP 404") } else { ok("") }
+        });
+        let mut c = cfg();
+        c.ready_timeout = Duration::from_secs(30);
+        let mut st = ForkState::new("me", false, &repos(&["a/new"]));
+        run_forks(&f, &mut st, &c, &mut |_| {}).unwrap();
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(f.sleeps.borrow().len(), 2);
     }
 
     #[test]

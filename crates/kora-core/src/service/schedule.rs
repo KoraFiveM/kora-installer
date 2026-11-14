@@ -142,10 +142,16 @@ fn task_name(s: &ManagedServer) -> String {
 }
 
 fn exec_line(s: &ManagedServer) -> String {
-    format!("{} update --auto {}", super::systemd_quote(&s.kora_exe), s.name)
+    // The absolute server folder (not the name): root has no registry entry guarantee here.
+    format!("{} update --auto {}", super::systemd_quote(&s.kora_exe), super::systemd_quote(&s.dir))
 }
 
-/// systemd oneshot service that runs `kora update --auto <server>`.
+/// systemd oneshot service that runs `kora update --auto <server folder>`.
+///
+/// It runs as root on purpose: restarting the game service (and rolling back) needs systemctl.
+/// `kora update` itself runs every git command as the owner of the server folder (`runuser`),
+/// so no root-owned files appear in the server. No `PrivateTmp`: found in the dev e2e run that
+/// it hides a kora binary or server folder under `/tmp` from the job (status 203/EXEC).
 pub fn systemd_update_unit(s: &ManagedServer) -> ServiceResult<String> {
     s.validate()?;
     Ok(format!(
@@ -156,13 +162,10 @@ pub fn systemd_update_unit(s: &ManagedServer) -> ServiceResult<String> {
          \n\
          [Service]\n\
          Type=oneshot\n\
-         User={user}\n\
          WorkingDirectory={dir}\n\
          ExecStart={exec}\n\
-         NoNewPrivileges=true\n\
-         PrivateTmp=true\n",
+         NoNewPrivileges=true\n",
         name = s.name,
-        user = s.user,
         dir = s.dir,
         exec = exec_line(s),
     ))

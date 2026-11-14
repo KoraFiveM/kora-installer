@@ -373,6 +373,7 @@ impl InstallStep {
                 .all(|f| ctx.req.dir.join(f).is_file()),
             "system.firewall" => ctx.admin && ctx.load_created().firewall,
             "system.service" => ctx.load_created().service_unit.is_some(),
+            "system.schedule" => ctx.load_created().update_timer,
             _ => false,
         }
     }
@@ -407,6 +408,7 @@ impl InstallStep {
             "build.config" => self.config(),
             "system.firewall" => self.firewall(),
             "system.service" => self.service(),
+            "system.schedule" => self.schedule(),
             "finalize" => self.finalize(),
             other => err(format!("unknown step {other}")),
         }
@@ -805,6 +807,22 @@ impl InstallStep {
         Ok(format!("Service {} registered (not started)", server.service_name()))
     }
 
+    /// Dev mode: daily 04:00 `kora update --auto <dir>` timer (systemd) / scheduled task (Windows).
+    fn schedule(&self) -> Result<String> {
+        let ctx = &*self.ctx;
+        let user = service_user().unwrap_or_else(|| "SYSTEM".into());
+        let server = managed_server(ctx, &user)?;
+        let sched = service::Schedule::default();
+        let plan = service::scheduler_install_plan(&server, &sched, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
+        if !ctx.admin {
+            ctx.note(format!("Auto-update schedule NOT created (needs administrator rights). Re-run as root/Administrator to: {}", plan.descriptions().join("; ")));
+            return Ok("Skipped (needs admin); see notes".into());
+        }
+        ctx.update_created(|c| c.update_timer = true)?;
+        service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+        Ok(format!("Auto-update scheduled {}", sched.describe()))
+    }
+
     fn finalize(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let req = &ctx.req;
@@ -941,6 +959,17 @@ impl InstallStep {
                     Ok("Service removed".into())
                 } else {
                     ctx.note(format!("Service NOT removed (needs admin): {}", plan.descriptions().join("; ")));
+                    Ok("Skipped (needs admin)".into())
+                }
+            }
+            "system.schedule" if created.update_timer => {
+                let server = managed_server(ctx, &service_user().unwrap_or_else(|| "kora".into()))?;
+                let plan = service::scheduler_uninstall_plan(&server, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
+                if ctx.admin {
+                    service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+                    Ok("Update schedule removed".into())
+                } else {
+                    ctx.note(format!("Update schedule NOT removed (needs admin): {}", plan.descriptions().join("; ")));
                     Ok("Skipped (needs admin)".into())
                 }
             }
