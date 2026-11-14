@@ -198,3 +198,54 @@ fn private_tmp_only_outside_tmp() {
     s.dir = "/tmpfoo/srv".into();
     assert!(systemd_unit(&s).unwrap().contains("PrivateTmp=true"));
 }
+
+#[test]
+fn windows_service_runs_as_its_virtual_account_with_access_to_its_folder_only() {
+    let mut s = server();
+    s.dir = "C:\\Kora\\main".into();
+    s.kora_exe = "C:\\Program Files\\Kora\\bin\\0.1.0-abc\\kora.exe".into();
+    let p = install_plan(&s, Platform::Windows).unwrap();
+    let lines: Vec<_> = p.steps.iter().filter_map(|s| s.command_line()).collect();
+    // the virtual account is set at creation, and the service gets the folder (not the registry name: it cannot read the installer's per-user registry)
+    assert!(lines[0].contains("obj= NT SERVICE\\kora-main"), "{}", lines[0]);
+    assert!(lines[0].contains("service-host \"C:\\Kora\\main\""), "{}", lines[0]);
+    let acl = lines.iter().find(|l| l.starts_with("icacls.exe")).unwrap();
+    assert_eq!(acl, "icacls.exe C:\\Kora\\main /grant NT SERVICE\\kora-main:(OI)(CI)M");
+    // and the grant is taken away again before the service goes
+    let u = uninstall_plan(&s, Platform::Windows).unwrap();
+    assert_eq!(u.steps[0].command_line().unwrap(), "icacls.exe C:\\Kora\\main /remove NT SERVICE\\kora-main");
+    assert!(u.steps[0].ignore_failure);
+}
+
+#[test]
+fn copy_and_rmdir_actions_go_through_the_runner() {
+    let r = FakeRunner::default();
+    let p = Plan::new(vec![
+        SystemStep::copy("copy", "/home/me/kora", "/opt/kora/v/kora", 0o755),
+        SystemStep::remove_dir_if_empty("rmdir", "/opt/kora/v"),
+    ]);
+    apply_plan(&p, &r).unwrap();
+    assert_eq!(r.calls(), ["copy /home/me/kora /opt/kora/v/kora", "rmdir /opt/kora/v"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn system_runner_copies_atomically_with_mode_and_only_removes_empty_dirs() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tempfile::tempdir().unwrap();
+    let src = t.path().join("src");
+    std::fs::write(&src, b"program").unwrap();
+    let dst = t.path().join("opt/kora/v1/kora");
+    let rn = SystemRunner;
+    rn.copy_file(src.to_str().unwrap(), dst.to_str().unwrap(), Some(0o755)).unwrap();
+    assert_eq!(std::fs::read(&dst).unwrap(), b"program");
+    assert_eq!(std::fs::metadata(&dst).unwrap().permissions().mode() & 0o777, 0o755);
+    assert!(!dst.with_extension("kora-new").exists(), "no temp file left");
+    // not empty: left alone, no error
+    rn.remove_empty_dir(dst.parent().unwrap().to_str().unwrap()).unwrap();
+    assert!(dst.exists());
+    rn.remove_file(dst.to_str().unwrap()).unwrap();
+    rn.remove_empty_dir(dst.parent().unwrap().to_str().unwrap()).unwrap();
+    assert!(!dst.parent().unwrap().exists());
+    rn.remove_empty_dir(dst.parent().unwrap().to_str().unwrap()).unwrap(); // already gone: fine
+}

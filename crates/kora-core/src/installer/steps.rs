@@ -314,26 +314,43 @@ fn parse_cfx(id: &str) -> Option<CfxIdentity> {
     Some(CfxIdentity { fivem_id: n, username: format!("cfx-{n}") })
 }
 
-fn service_user() -> Option<String> {
-    std::env::var("KORA_SERVICE_USER")
-        .ok()
-        .or_else(|| std::env::var("SUDO_USER").ok())
-        .filter(|u| !u.is_empty() && u != "root")
+/// Explicit service account chosen by the operator (`KORA_SERVICE_USER`). It must already exist and
+/// is never created or removed by Kora. Without it Kora creates a dedicated `kora-<name>` account.
+fn service_user_override() -> Option<String> {
+    std::env::var("KORA_SERVICE_USER").ok().filter(|u| !u.is_empty() && u != "root")
 }
 
-fn managed_server(ctx: &Ctx, user: &str) -> Result<ManagedServer> {
-    let build = artifact_store(ctx).state().ok().and_then(|s| s.current).unwrap_or(0);
-    let _ = build;
-    let kora_exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "kora".into());
+/// The kora program a service runs: the root-owned copy when one was made, else this program.
+fn kora_exe_for(created: &Created) -> String {
+    created
+        .binary
+        .clone()
+        .or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "kora".into())
+}
+
+fn managed_server(ctx: &Ctx, user: &str, kora_exe: &str) -> Result<ManagedServer> {
     Ok(ManagedServer {
         name: slug(&ctx.req.name),
         dir: ctx.req.dir.to_string_lossy().into_owned(),
-        start_command: vec![kora_exe.clone(), "service-host".into(), ctx.req.dir.to_string_lossy().into_owned()],
+        start_command: vec![kora_exe.to_string(), "service-host".into(), ctx.req.dir.to_string_lossy().into_owned()],
         user: user.to_string(),
         env_file: None,
-        kora_exe,
+        kora_exe: kora_exe.to_string(),
         windows_run_as: None,
     })
+}
+
+/// `uid:gid` of a folder (Unix); used to hand ownership back later.
+#[cfg(unix)]
+fn owner_of(p: &Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(p).ok().map(|m| format!("{}:{}", m.uid(), m.gid()))
+}
+
+#[cfg(not(unix))]
+fn owner_of(_p: &Path) -> Option<String> {
+    None
 }
 
 fn txadmin_env_text(ctx: &Ctx) -> String {
@@ -783,35 +800,94 @@ impl InstallStep {
 
     fn service(&self) -> Result<String> {
         let ctx = &*self.ctx;
-        let Some(user) = service_user().or_else(|| (svc_platform() == SvcPlatform::Windows).then(|| "SYSTEM".to_string())) else {
-            ctx.note("Service NOT created: the server must run as a normal (non-root) account. Set KORA_SERVICE_USER=<account> (or run via sudo from that account) and re-run.");
-            return Ok("Skipped (no non-root service account); see notes".into());
+        let platform = svc_platform();
+        let rn = service::SystemRunner;
+        let svc_name = format!("kora-{}", slug(&ctx.req.name));
+        let created = ctx.load_created();
+
+        // Which account runs the service?
+        let (account, create_account) = match (service_user_override(), platform) {
+            (Some(u), _) => (u, false),
+            (None, SvcPlatform::Windows) => (svc_name.clone(), false), // NT SERVICE\<service>, made with the service
+            (None, SvcPlatform::Linux) => {
+                let name = created.service_account.clone().unwrap_or_else(|| service::account::account_name(&slug(&ctx.req.name)));
+                match service::account::user_status(&rn, &name).map_err(|e| InstallError(e.to_string()))? {
+                    service::account::UserStatus::Exists(0) => return err(format!("'{name}' is the root account: refusing to run a server as it. Remove it or choose another server name.")),
+                    // An account Kora made in an earlier attempt of this same install is still ours.
+                    service::account::UserStatus::Exists(_) => (name.clone(), false),
+                    service::account::UserStatus::Missing => (name, true),
+                }
+            }
         };
-        let server = managed_server(ctx, &user)?;
-        let mut plan = service::install_plan(&server, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
-        if svc_platform() == SvcPlatform::Linux {
-            let mut steps = vec![
-                service::SystemStep::write("Save the server's non-secret environment (txAdmin data folder and port)", &server.env_file_path(), txadmin_env_text(ctx), 0o600),
-                service::SystemStep::run(format!("Give '{user}' ownership of the server folder"), "chown", &["-R", &format!("{user}:{user}"), &server.dir]),
-            ];
-            steps.extend(plan.steps);
-            plan = service::Plan::new(steps);
+
+        // Which program does the service run? Not one in a folder ordinary users can write to.
+        let exe = std::env::current_exe().map_err(|e| InstallError(format!("cannot find the kora program: {e}")))?;
+        let own_copy = match (created.binary.clone(), service::binary::exe_is_service_safe(&exe)) {
+            (Some(b), _) => Some(PathBuf::from(b)),
+            (None, true) => None,
+            (None, false) => {
+                let root = service::binary::default_root(platform).ok_or_else(|| InstallError("cannot find a program folder for the service copy of kora (ProgramFiles is not set)".into()))?;
+                let sha = service::binary::file_sha256(&exe).map_err(|e| InstallError(format!("cannot read the kora program: {e}")))?;
+                Some(service::binary::versioned_path(&root, env!("CARGO_PKG_VERSION"), &sha, platform))
+            }
+        };
+        let kora_exe = own_copy.as_ref().map_or_else(|| exe.to_string_lossy().into_owned(), |p| p.to_string_lossy().into_owned());
+
+        let server = managed_server(ctx, &account, &kora_exe)?;
+        let mut head = Vec::new(); // account + program copy
+        if create_account {
+            head.extend(service::account::create_plan(&account).map_err(|e| InstallError(e.to_string()))?.steps);
         }
+        if let Some(dest) = &own_copy {
+            if !dest.is_file() {
+                head.extend(service::binary::install_plan(&exe.to_string_lossy(), dest).steps);
+            }
+        }
+        let mut tail = Vec::new();
+        if platform == SvcPlatform::Linux {
+            tail.push(service::SystemStep::write("Save the server's non-secret environment (txAdmin data folder and port)", &server.env_file_path(), txadmin_env_text(ctx), 0o600));
+            tail.push(service::SystemStep::run(format!("Give '{account}' ownership of the server folder (and only that folder)"), "chown", &["-R", &format!("{account}:{account}"), &server.dir]));
+        }
+        tail.extend(service::install_plan(&server, platform).map_err(|e| InstallError(e.to_string()))?.steps);
+
         if !ctx.admin {
-            ctx.note(format!("Service NOT created (needs administrator rights). Re-run as root/Administrator to: {}", plan.descriptions().join("; ")));
+            let all: Vec<String> = head.iter().chain(tail.iter()).map(|s| s.description.clone()).collect();
+            ctx.note(format!("Service NOT created (needs administrator rights). Re-run as root/Administrator to: {}", all.join("; ")));
             return Ok("Skipped (needs admin); see notes".into());
         }
+
+        // Stage 1: account and program copy. Recorded as soon as they exist, so delete can remove exactly these.
+        service::apply_plan(&service::Plan::new(head), &rn).map_err(|e| InstallError(e.to_string()))?;
+        let dir_owner = owner_of(&ctx.req.dir);
+        ctx.update_created(|c| {
+            c.service_account = Some(account.clone());
+            c.service_account_created |= create_account;
+            if c.dir_owner.is_none() {
+                c.dir_owner = dir_owner;
+            }
+            if own_copy.is_some() {
+                c.binary = own_copy.as_ref().map(|p| p.to_string_lossy().into_owned());
+            }
+        })?;
+        // Stage 2: ownership + unit.
         let unit = server.unit_path();
         ctx.update_created(|c| c.service_unit = Some(unit))?;
-        service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
-        Ok(format!("Service {} registered (not started)", server.service_name()))
+        service::apply_plan(&service::Plan::new(tail), &rn).map_err(|e| InstallError(e.to_string()))?;
+        if create_account {
+            ctx.note(format!("Created the system account '{account}' (no login, no home folder) for the server; `kora delete` removes it again."));
+        }
+        if let Some(p) = &own_copy {
+            ctx.note(format!("The service runs the root-owned copy of kora at {}.", p.display()));
+        }
+        Ok(format!("Service {} registered (not started), running as '{account}'", server.service_name()))
     }
 
     /// Dev mode: daily 04:00 `kora update --auto <dir>` timer (systemd) / scheduled task (Windows).
     fn schedule(&self) -> Result<String> {
         let ctx = &*self.ctx;
-        let user = service_user().unwrap_or_else(|| "SYSTEM".into());
-        let server = managed_server(ctx, &user)?;
+        let created = ctx.load_created();
+        let user = created.service_account.clone().unwrap_or_else(|| format!("kora-{}", slug(&ctx.req.name)));
+        let server = managed_server(ctx, &user, &kora_exe_for(&created))?;
         let sched = service::Schedule::default();
         let plan = service::scheduler_install_plan(&server, &sched, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
         if !ctx.admin {
@@ -951,27 +1027,36 @@ impl InstallStep {
                 }
                 Ok("Firewall rules removed".into())
             }
-            "system.service" if created.service_unit.is_some() => {
-                let server = managed_server(ctx, &service_user().unwrap_or_else(|| "kora".into()))?;
-                let plan = service::uninstall_plan(&server, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
-                if ctx.admin {
-                    service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
-                    Ok("Service removed".into())
-                } else {
-                    ctx.note(format!("Service NOT removed (needs admin): {}", plan.descriptions().join("; ")));
-                    Ok("Skipped (needs admin)".into())
+            "system.service" | "system.schedule" => {
+                let is_service = self.id == "system.service";
+                let wanted: &[system::Kind] = if is_service { &[system::Kind::Service, system::Kind::ServiceAccount, system::Kind::Binary] } else { &[system::Kind::UpdateTimer] };
+                let rn = service::SystemRunner;
+                let reg = Registry::load().unwrap_or_default();
+                let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&reg, b, &[ctx.req.dir.as_path()]));
+                let target = system::Target::from_request(&ctx.req);
+                let items: Vec<system::Item> = system::items_for(&target, &created, svc_platform(), &rn, ctx.keep_files, used)?
+                    .into_iter()
+                    .filter(|i| wanted.contains(&i.kind))
+                    .collect();
+                if items.is_empty() {
+                    return Ok("Nothing to undo".into());
                 }
-            }
-            "system.schedule" if created.update_timer => {
-                let server = managed_server(ctx, &service_user().unwrap_or_else(|| "kora".into()))?;
-                let plan = service::scheduler_uninstall_plan(&server, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
-                if ctx.admin {
-                    service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
-                    Ok("Update schedule removed".into())
-                } else {
-                    ctx.note(format!("Update schedule NOT removed (needs admin): {}", plan.descriptions().join("; ")));
-                    Ok("Skipped (needs admin)".into())
+                let mut done = Vec::new();
+                for item in items {
+                    if let Some(n) = &item.note {
+                        ctx.note(n.clone());
+                    }
+                    if !ctx.admin {
+                        ctx.note(format!("NOT removed (needs administrator rights): {}", item.plan.descriptions().join("; ")));
+                        continue;
+                    }
+                    service::apply_plan(&item.plan, &rn).map_err(|e| InstallError(format!("{}: {e}", item.title)))?;
+                    if system::clears_record(&item) {
+                        ctx.update_created(|c| system::clear_record(c, item.kind))?;
+                    }
+                    done.push(item.title.clone());
                 }
+                Ok(if done.is_empty() { "Skipped (needs admin)".into() } else { done.join("; ") })
             }
             "finalize" => {
                 if let Ok(mut reg) = Registry::load() {

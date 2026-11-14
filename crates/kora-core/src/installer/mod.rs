@@ -17,6 +17,7 @@ pub mod host;
 pub mod http;
 pub mod registry;
 mod steps;
+pub mod system;
 pub mod types;
 
 pub use types::*;
@@ -59,6 +60,18 @@ pub struct Hooks {
     pub http: HttpClient,
     /// Force the "running as administrator" answer (tests).
     pub assume_admin: Option<bool>,
+    /// Free-space provider (tests); `None` = the real disk.
+    pub disk: Option<SharedDisk>,
+}
+
+/// A shareable [`crate::space::DiskInfo`] (printable so `Hooks` stays `Debug`).
+#[derive(Clone)]
+pub struct SharedDisk(pub Arc<dyn crate::space::DiskInfo + Send + Sync>);
+
+impl std::fmt::Debug for SharedDisk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SharedDisk")
+    }
 }
 
 impl Hooks {
@@ -68,6 +81,14 @@ impl Hooks {
         Hooks {
             http: HttpClient { allow_http_localhost: mirror.is_some(), artifact_mirror: mirror },
             assume_admin: None,
+            disk: None,
+        }
+    }
+
+    fn disk(&self) -> &dyn crate::space::DiskInfo {
+        match &self.disk {
+            Some(d) => d.0.as_ref(),
+            None => &crate::space::SystemDisk,
         }
     }
 }
@@ -231,7 +252,7 @@ pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
 
 /// What this run created. Persisted at `<dir>/.kora/created.json`; rollback removes only this.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct Created {
+pub struct Created {
     pub created_dir: bool,
     /// Relative to `<dir>/resources/`.
     pub resources: Vec<String>,
@@ -244,6 +265,18 @@ pub(crate) struct Created {
     pub update_timer: bool,
     pub firewall: bool,
     pub registered: bool,
+    /// The account the service runs as (an existing one or the one Kora created).
+    #[serde(default)]
+    pub service_account: Option<String>,
+    /// Kora created `service_account` (so delete/uninstall may remove it). Never true for an account that already existed.
+    #[serde(default)]
+    pub service_account_created: bool,
+    /// Owner of the server folder before it was handed to the service account (`uid:gid`, Unix).
+    #[serde(default)]
+    pub dir_owner: Option<String>,
+    /// The root-owned copy of the kora program the service runs (shared between servers).
+    #[serde(default)]
+    pub binary: Option<String>,
 }
 
 #[derive(Default)]
@@ -379,6 +412,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     if req.license_key.as_deref().map(str::trim).unwrap_or("").is_empty() {
         return err("a Cfx.re license key is required (get one at https://portal.cfx.re/servers/registration-keys)");
     }
+    preflight(req, hooks, admin)?;
     let (tx, rx) = mpsc::channel();
     let ctx = new_ctx(req, hooks, admin, tx, false, false);
     // `ctx` (which owns the sender) moves into the worker so the channel closes when it ends.
@@ -423,6 +457,31 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     })
 }
 
+/// Everything that can be checked before anything is created: free disk space (server folder,
+/// artifact folder, the shared program copy a service needs) and whether the service account will
+/// be able to reach the server folder. Plain-language errors; nothing has been changed yet.
+pub fn preflight(req: &InstallRequest, hooks: &Hooks, admin: bool) -> Result<()> {
+    let resuming = meta_dir(&req.dir).is_dir();
+    let selected = match &req.resources {
+        ResourceSelection::All => None,
+        ResourceSelection::Only(v) => Some(v.len()),
+    };
+    let mut needs = crate::space::install_needs(&req.dir, crate::space::resource_estimate(selected), resuming);
+    if req.service && !resuming {
+        if let (Some(root), Ok(exe)) = (crate::service::binary::default_root(crate::service::Platform::current()), std::env::current_exe()) {
+            let size = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
+            needs.push(crate::space::Need::new("the kora program the background service runs", root, size + 64 * crate::space::MIB));
+        }
+    }
+    crate::space::check(hooks.disk(), &needs).map_err(InstallError)?;
+    if req.service && admin {
+        if let Some(why) = crate::service::binary::unreachable_reason(&req.dir) {
+            return err(format!("Cannot set up the background service: {why} Nothing was changed."));
+        }
+    }
+    Ok(())
+}
+
 fn save_request(ctx: &Ctx) -> Result<()> {
     // Never persist the license key.
     let mut r = ctx.req.clone();
@@ -449,6 +508,10 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
     };
     notes.extend(cnote);
     let selected = select_resources(&cat, &req.resources).unwrap_or_default();
+    match preflight(req, hooks, admin) {
+        Ok(()) => notes.push("Free disk space and service-account access look fine.".into()),
+        Err(e) => notes.push(format!("WARNING, a real install would stop here: {e}")),
+    }
     let mut base = 0u32;
     for p in &plan {
         let detail = match p.id {
@@ -714,6 +777,76 @@ mod tests {
         assert!(svc.is_some() && sch > svc);
         r.mode = Mode::Production;
         assert!(!plan_steps(&r, true).iter().any(|p| p.id == "system.schedule"));
+    }
+
+    struct TinyDisk(u64);
+    impl crate::space::DiskInfo for TinyDisk {
+        fn free_bytes(&self, _: &Path) -> std::io::Result<u64> {
+            Ok(self.0)
+        }
+        fn volume_key(&self, _: &Path) -> String {
+            "one".into()
+        }
+    }
+
+    fn hooks_with_disk(free: u64) -> Hooks {
+        Hooks { assume_admin: Some(false), disk: Some(SharedDisk(Arc::new(TinyDisk(free)))), ..Hooks::default() }
+    }
+
+    #[test]
+    fn a_too_small_disk_stops_the_install_before_anything_is_created() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("srv");
+        let mut r = req(&dir);
+        r.dry_run = false;
+        r.license_key = Some("cfxk_x".into());
+        r.resources = ResourceSelection::Only(vec!["kora_chat".into()]);
+        let e = run_with(&r, &mut Collect(vec![]), &hooks_with_disk(crate::space::GIB)).unwrap_err().to_string();
+        assert!(e.contains("Not enough free disk space") && e.contains("only 1.0 GiB is free"), "{e}");
+        assert!(e.contains(&*dir.to_string_lossy()) && e.contains("--dir"), "{e}");
+        assert!(!dir.exists(), "nothing may be created");
+        // The estimate follows the selection: 1 chosen + 10 = 11 resources.
+        assert!(e.contains("11 resources"), "{e}");
+    }
+
+    #[test]
+    fn enough_disk_passes_the_preflight_and_a_resumed_install_needs_only_working_room() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("srv");
+        let mut r = req(&dir);
+        r.service = false;
+        assert!(preflight(&r, &hooks_with_disk(100 * crate::space::GIB), false).is_ok());
+        assert!(preflight(&r, &hooks_with_disk(3 * crate::space::GIB), false).is_err());
+        std::fs::create_dir_all(dir.join(".kora")).unwrap();
+        assert!(preflight(&r, &hooks_with_disk(3 * crate::space::GIB), false).is_ok(), "resume: 2 GiB working room only");
+        assert!(preflight(&r, &hooks_with_disk(crate::space::GIB), false).is_err());
+    }
+
+    #[test]
+    fn dry_run_reports_a_disk_problem_as_a_warning_instead_of_failing() {
+        let t = tempfile::tempdir().unwrap();
+        let mut r = req(&t.path().join("srv"));
+        r.catalog = Some("/nonexistent".into());
+        let out = run_with(&r, &mut Collect(vec![]), &hooks_with_disk(1)).unwrap();
+        assert!(out.notes.iter().any(|n| n.contains("a real install would stop here") && n.contains("Not enough free disk space")), "{:?}", out.notes);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_parent_folder_is_refused_for_service_installs_before_anything_is_created() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let private = t.path().join("home-me");
+        std::fs::create_dir(&private).unwrap();
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let dir = private.join("kora/srv");
+        let mut r = req(&dir);
+        r.dry_run = false;
+        r.license_key = Some("cfxk_x".into());
+        let hooks = Hooks { assume_admin: Some(true), disk: Some(SharedDisk(Arc::new(TinyDisk(u64::MAX)))), ..Hooks::default() };
+        let e = run_with(&r, &mut Collect(vec![]), &hooks).unwrap_err().to_string();
+        assert!(e.contains("cannot enter") && e.contains("Nothing was changed"), "{e}");
+        assert!(!dir.exists());
     }
 
     #[test]

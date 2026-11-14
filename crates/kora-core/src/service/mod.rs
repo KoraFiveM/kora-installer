@@ -7,6 +7,8 @@
 //! Windows plans are plain command data (`sc.exe`, `schtasks`) and are
 //! generated on any OS.
 
+pub mod account;
+pub mod binary;
 mod schedule;
 
 pub use schedule::{
@@ -67,6 +69,10 @@ pub trait CommandRunner {
     /// Write `contents` to `path` (creating parent dirs); `mode` is a Unix mode if set.
     fn write_file(&self, path: &str, contents: &str, mode: Option<u32>) -> io::Result<()>;
     fn remove_file(&self, path: &str) -> io::Result<()>;
+    /// Copy `src` to `dst` (creating parent dirs, replacing atomically); `mode` is a Unix mode if set.
+    fn copy_file(&self, src: &str, dst: &str, mode: Option<u32>) -> io::Result<()>;
+    /// Remove `path` only if it is an empty directory (missing / not empty is fine).
+    fn remove_empty_dir(&self, path: &str) -> io::Result<()>;
 }
 
 /// Real runner using `std::process` and `std::fs`.
@@ -105,6 +111,34 @@ impl CommandRunner for SystemRunner {
             other => other,
         }
     }
+
+    fn copy_file(&self, src: &str, dst: &str, mode: Option<u32>) -> io::Result<()> {
+        let d = std::path::Path::new(dst);
+        if let Some(parent) = d.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Copy next to the target and rename: a running copy of the old file is never half-written.
+        let tmp = d.with_extension("kora-new");
+        std::fs::copy(src, &tmp)?;
+        #[cfg(unix)]
+        if let Some(m) = mode {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(m))?;
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+        std::fs::rename(&tmp, d)
+    }
+
+    fn remove_empty_dir(&self, path: &str) -> io::Result<()> {
+        match std::fs::remove_dir(path) {
+            Ok(()) => Ok(()),
+            // missing, or something else lives there: leave it alone
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(_) if std::fs::read_dir(path).map(|mut d| d.next().is_some()).unwrap_or(false) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// What a step does when applied.
@@ -113,6 +147,8 @@ pub enum Action {
     Run { program: String, args: Vec<String> },
     WriteFile { path: String, contents: String, mode: Option<u32> },
     RemoveFile { path: String },
+    CopyFile { src: String, dst: String, mode: Option<u32> },
+    RemoveEmptyDir { path: String },
 }
 
 /// One system change: plain-language description plus what it needs.
@@ -162,6 +198,24 @@ impl SystemStep {
             description: description.into(),
             needs_admin: true,
             action: Action::RemoveFile { path: path.to_string() },
+            ignore_failure: true,
+        }
+    }
+
+    pub fn copy(description: impl Into<String>, src: &str, dst: &str, mode: u32) -> Self {
+        SystemStep {
+            description: description.into(),
+            needs_admin: true,
+            action: Action::CopyFile { src: src.to_string(), dst: dst.to_string(), mode: Some(mode) },
+            ignore_failure: false,
+        }
+    }
+
+    pub fn remove_dir_if_empty(description: impl Into<String>, path: &str) -> Self {
+        SystemStep {
+            description: description.into(),
+            needs_admin: true,
+            action: Action::RemoveEmptyDir { path: path.to_string() },
             ignore_failure: true,
         }
     }
@@ -225,6 +279,8 @@ pub fn apply_plan(plan: &Plan, runner: &dyn CommandRunner) -> ServiceResult<()> 
                 runner.write_file(path, contents, *mode).map_err(Into::into)
             }
             Action::RemoveFile { path } => runner.remove_file(path).map_err(Into::into),
+            Action::CopyFile { src, dst, mode } => runner.copy_file(src, dst, *mode).map_err(Into::into),
+            Action::RemoveEmptyDir { path } => runner.remove_empty_dir(path).map_err(Into::into),
         };
         if let Err(e) = res {
             if !step.ignore_failure {
@@ -316,6 +372,11 @@ impl ManagedServer {
     }
 }
 
+/// The Windows virtual service account of `svc` (`NT SERVICE\\kora-main`): exists exactly as long as the service.
+pub fn virtual_account(svc: &str) -> String {
+    format!("NT SERVICE\\{svc}")
+}
+
 /// Quote one argument for a systemd `ExecStart=` line.
 fn systemd_quote(arg: &str) -> String {
     let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%").replace('$', "$$");
@@ -396,12 +457,17 @@ pub fn install_plan(server: &ManagedServer, platform: Platform) -> ServiceResult
             SystemStep::run(format!("Start '{}' automatically at boot and restart it if it crashes", server.name), "systemctl", &["enable", &svc]),
         ]),
         Platform::Windows => {
-            let bin = format!("\"{}\" service-host {}", server.kora_exe, server.name);
+            let bin = format!("\"{}\" service-host \"{}\"", server.kora_exe, server.dir);
             Plan::new(vec![
                 SystemStep::run_owned(
                     format!("Register the Windows service '{svc}' so '{}' starts automatically when Windows boots", server.name),
                     "sc.exe",
-                    vec!["create".into(), svc.clone(), "binPath=".into(), bin, "start=".into(), "auto".into(), "DisplayName=".into(), format!("Kora server {}", server.name)],
+                    vec![
+                        "create".into(), svc.clone(), "binPath=".into(), bin, "start=".into(), "auto".into(),
+                        "DisplayName=".into(), format!("Kora server {}", server.name),
+                        // The per-service virtual account needs no password and has no rights beyond what is granted to it.
+                        "obj=".into(), virtual_account(&svc),
+                    ],
                 ),
                 SystemStep::run_owned(
                     "Add a description to the service",
@@ -412,6 +478,11 @@ pub fn install_plan(server: &ManagedServer, platform: Platform) -> ServiceResult
                     "Make the service restart itself if it crashes (after 60 seconds, up to three times, counter reset daily)",
                     "sc.exe",
                     vec!["failure".into(), svc.clone(), "reset=".into(), "86400".into(), "actions=".into(), "restart/60000/restart/60000/restart/60000".into()],
+                ),
+                SystemStep::run_owned(
+                    format!("Let the service account '{}' change files in the server folder only", virtual_account(&svc)),
+                    "icacls.exe",
+                    vec![server.dir.clone(), "/grant".into(), format!("{}:(OI)(CI)M", virtual_account(&svc))],
                 ),
                 SystemStep::run_owned(
                     "Treat a non-zero exit as a crash so the restart rule applies",
@@ -436,6 +507,12 @@ pub fn uninstall_plan(server: &ManagedServer, platform: Platform) -> ServiceResu
             SystemStep::run(format!("Clear any leftover 'failed' mark for '{}'", server.name), "systemctl", &["reset-failed", &svc]).tolerant(),
         ]),
         Platform::Windows => Plan::new(vec![
+            SystemStep::run_owned(
+                format!("Take the service account's access to {} away again", server.dir),
+                "icacls.exe",
+                vec![server.dir.clone(), "/remove".into(), virtual_account(&svc)],
+            )
+            .tolerant(),
             SystemStep::run(format!("Stop '{}' if it is running", server.name), "sc.exe", &["stop", &svc]).tolerant(),
             SystemStep::run(format!("Remove the Windows service '{svc}' that Kora created"), "sc.exe", &["delete", &svc]),
         ]),
@@ -593,6 +670,14 @@ pub(crate) mod testing {
         }
         fn remove_file(&self, path: &str) -> io::Result<()> {
             self.log.borrow_mut().push(format!("remove {path}"));
+            Ok(())
+        }
+        fn copy_file(&self, src: &str, dst: &str, _mode: Option<u32>) -> io::Result<()> {
+            self.log.borrow_mut().push(format!("copy {src} {dst}"));
+            Ok(())
+        }
+        fn remove_empty_dir(&self, path: &str) -> io::Result<()> {
+            self.log.borrow_mut().push(format!("rmdir {path}"));
             Ok(())
         }
     }
