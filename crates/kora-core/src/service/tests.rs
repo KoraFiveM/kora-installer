@@ -270,6 +270,8 @@ fn windows_service_account_can_read_the_secrets_it_needs_despite_removed_inherit
         let l = lines.iter().find(|l| l.contains(f)).unwrap_or_else(|| panic!("no grant for {f}: {lines:?}"));
         assert_eq!(*l, format!("icacls.exe C:\\Kora\\main\\{f} /grant NT SERVICE\\kora-main:(R)"));
     }
+    let l = lines.iter().find(|l| l.contains("admins.json")).expect("txAdmin must be able to read its admin list");
+    assert_eq!(*l, "icacls.exe C:\\Kora\\main\\txData\\admins.json /grant NT SERVICE\\kora-main:(M)");
     // a server without a database has no database.json: that grant must not abort the install
-    assert!(p.steps.iter().filter(|st| st.command_line().is_some_and(|l| l.contains("database.json") || l.contains("secrets.cfg"))).all(|st| st.ignore_failure));
+    assert!(p.steps.iter().filter(|st| st.command_line().is_some_and(|l| l.contains("database.json") || l.contains("secrets.cfg") || l.contains("admins.json"))).all(|st| st.ignore_failure));
 }

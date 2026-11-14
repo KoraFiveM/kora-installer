@@ -498,6 +498,13 @@ pub fn install_plan(server: &ManagedServer, platform: Platform) -> ServiceResult
                     vec![format!("{}\\database.json", server.dir.trim_end_matches(['\\', '/'])), "/grant".into(), format!("{}:(R)", virtual_account(&svc))],
                 )
                 .tolerant(),
+                // txAdmin reads (and changes) its admin list: it has no inherited permissions either.
+                SystemStep::run_owned(
+                    "Let the service account read and change txAdmin's admin list",
+                    "icacls.exe",
+                    vec![format!("{}\\txData\\admins.json", server.dir.trim_end_matches(['\\', '/'])), "/grant".into(), format!("{}:(M)", virtual_account(&svc))],
+                )
+                .tolerant(),
                 SystemStep::run_owned(
                     "Treat a non-zero exit as a crash so the restart rule applies",
                     "sc.exe",
