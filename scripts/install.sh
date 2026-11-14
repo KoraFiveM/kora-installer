@@ -12,8 +12,8 @@
 
 set -eu
 
-# TODO(release owner): point this at the public releases page once the repository is public.
-DEFAULT_BASE="https://github.com/Jamie9192/kora_test/releases/latest/download"
+REPO="KoraFiveM/kora-installer"
+DEFAULT_BASE="https://github.com/$REPO/releases/latest/download"
 BASE="${KORA_RELEASE_BASE:-$DEFAULT_BASE}"
 BASE="${BASE%/}"
 
@@ -52,6 +52,23 @@ elif command -v shasum >/dev/null 2>&1; then
   hash_of() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
 else
   die "needs sha256sum (or shasum) to verify the download."
+fi
+
+# GitHub's "latest" never points at a pre-release, so while only pre-releases exist use the newest one.
+if [ -z "${KORA_RELEASE_BASE:-}" ]; then
+  PROBE="$(mktemp)"
+  if ! fetch "$BASE/$ASSET.sha256" "$PROBE" 2>/dev/null; then
+    LIST="$(mktemp)"
+    if fetch "https://api.github.com/repos/$REPO/releases?per_page=1" "$LIST" 2>/dev/null; then
+      TAG="$(grep -m1 '"tag_name"' "$LIST" | sed 's/.*"tag_name"[^"]*"\([^"]*\)".*/\1/')"
+      case "$TAG" in
+        "" | *[!A-Za-z0-9._-]*) ;;
+        *) BASE="https://github.com/$REPO/releases/download/$TAG" ;;
+      esac
+    fi
+    rm -f "$LIST"
+  fi
+  rm -f "$PROBE"
 fi
 
 # --- where to install ----------------------------------------------------------------------

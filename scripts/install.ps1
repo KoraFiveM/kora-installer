@@ -17,8 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    # TODO(release owner): point this at the public releases page once the repository is public.
-    [string]$Base = $(if ($env:KORA_RELEASE_BASE) { $env:KORA_RELEASE_BASE } else { 'https://github.com/Jamie9192/kora_test/releases/latest/download' }),
+    [string]$Base = $(if ($env:KORA_RELEASE_BASE) { $env:KORA_RELEASE_BASE } else { 'https://github.com/KoraFiveM/kora-installer/releases/latest/download' }),
     [string]$InstallDir = $(if ($env:KORA_INSTALL_DIR) { $env:KORA_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Kora\bin' }),
     [switch]$Force
 )
@@ -44,6 +43,17 @@ if ($env:PROCESSOR_ARCHITECTURE -notin @('AMD64', 'ARM64')) {
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $asset = 'kora-windows-x86_64.exe'
+
+# GitHub's "latest" never points at a pre-release, so while only pre-releases exist use the newest one.
+if (-not $env:KORA_RELEASE_BASE -and -not $PSBoundParameters.ContainsKey('Base')) {
+    try { Invoke-WebRequest -UseBasicParsing -Uri "$Base/$asset.sha256" | Out-Null }
+    catch {
+        try {
+            $rel = @(Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/KoraFiveM/kora-installer/releases?per_page=1')[0]
+            if ($rel.tag_name -match '^[A-Za-z0-9._-]+$') { $Base = "https://github.com/KoraFiveM/kora-installer/releases/download/$($rel.tag_name)" }
+        } catch { }
+    }
+}
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kora-install-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
