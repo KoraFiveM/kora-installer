@@ -9,7 +9,7 @@ function Invoke-Sql([string]$Client, [int]$Port, [string]$User, [string]$Passwor
     try {
         $a = @('--batch', '--skip-column-names', '--protocol=tcp', '-h', '127.0.0.1', '-P', "$Port", '-u', $User)
         if ($Database) { $a += $Database }
-        $o = $Sql | & $Client @a 2>&1 | Out-String
+        $o = $Sql | & $Client @a 2>$null | Out-String
         [pscustomobject]@{ Code = $LASTEXITCODE; Output = $o.Trim() }
     } finally { Remove-Item Env:MYSQL_PWD -ErrorAction SilentlyContinue }
 }
