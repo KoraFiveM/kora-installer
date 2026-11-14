@@ -1,0 +1,12 @@
+[package]
+name = "kora-tui"
+description = "Kora ratatui front end"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true
+kora-core.workspace = true
+serde_json.workspace = true

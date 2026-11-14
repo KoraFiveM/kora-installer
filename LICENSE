@@ -1,0 +1,4 @@
+TODO: The project owner must choose an OSI-approved license (no commercial
+dual-licensing, no proprietary components; required for SignPath Foundation).
+No license has been selected. Replace this file with the full license text,
+then set `license` in Cargo.toml.

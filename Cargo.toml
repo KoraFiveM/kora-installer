@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/kora-core", "crates/kora-cli", "crates/kora-tui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+# TODO: owner must choose an OSI-approved license (see LICENSE), then set `license` here.
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+crossterm = "0.28"
+kora-core = { path = "crates/kora-core" }
+kora-tui = { path = "crates/kora-tui" }
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = false   # keep symbols simple; never use UPX/packers (AV false positives, see plan section 9)

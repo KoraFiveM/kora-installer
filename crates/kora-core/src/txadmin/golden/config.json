@@ -1,0 +1,9 @@
+{
+  "server": {
+    "autoStart": true,
+    "cfgPath": "server.cfg",
+    "dataPath": "/srv/server-data",
+    "onesync": "on"
+  },
+  "version": 2
+}

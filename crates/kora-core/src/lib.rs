@@ -1,0 +1,15 @@
+//! Kora core library.
+//!
+//! Implemented in M0: [`steps`] (step engine trait + persisted state).
+//! Everything else is a documented stub filled in during M2.
+
+pub mod artifacts;
+pub mod catalog;
+pub mod db;
+pub mod firewall;
+pub mod git;
+pub mod service;
+pub mod steps;
+pub mod txadmin;
+pub mod update;
+pub mod installer;

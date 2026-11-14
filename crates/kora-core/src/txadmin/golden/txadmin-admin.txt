@@ -1,0 +1,6 @@
+txAdmin master account created by the Kora installer
+URL:      http://127.0.0.1:40120/ (use an SSH tunnel for remote access)
+Username: kora-admin
+Password: pw-for-golden
+
+Change the password after the first login (txAdmin > Admin Manager). Keep this file private.

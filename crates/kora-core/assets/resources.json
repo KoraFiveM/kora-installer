@@ -1,0 +1,1791 @@
+{
+  "schemaVersion": 2,
+  "resources": [
+    {
+      "id": "kora-lib",
+      "title": "Kora Lib",
+      "repository": "https://github.com/KoraFiveM/kora_lib.git",
+      "path": "[pre]/kora_lib",
+      "group": "pre",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 4,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "6e5dd02ce6dab6cf7380336d7e6a91b1ed2fd126",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "66ef017668adef3f55448d33cfc371df67ef9830",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "66cc457a220a4b593ab4ac8ae2d17ed8ce9c6882"
+        }
+      ],
+      "description": "Shared utility library for Kora resources."
+    },
+    {
+      "id": "kora-admin",
+      "title": "Kora Admin",
+      "repository": "https://github.com/KoraFiveM/kora_admin.git",
+      "path": "[kora]/kora_admin",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 12,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "d8d174e0979fdb5317e6d9c2947cff676d181777",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "df205b4333abb505c48f5e7fbde0c9ccabb3c3b9",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "682708f56923eba692eb29327e9a641fcd65243a"
+        }
+      ],
+      "description": "Administration tools for Kora servers."
+    },
+    {
+      "id": "kora-ambulance",
+      "title": "Kora Ambulance",
+      "repository": "https://github.com/KoraFiveM/kora_ambulance.git",
+      "path": "[kora]/kora_ambulance",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 32,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "2572bf66607e052f68be8e2efff931e5d103d3d3",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "c444d5df324cc7c32c598d8a25d6f98172aea616",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "1654edf612df786d21ceb9ea546dcf86a4f13df0"
+        }
+      ],
+      "description": "Ambulance and medical gameplay."
+    },
+    {
+      "id": "kora-banking",
+      "title": "Kora Banking",
+      "repository": "https://github.com/KoraFiveM/kora_banking.git",
+      "path": "[kora]/kora_banking",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 19,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "c8e38d7284ea35ff7d2395b9cf26b87aabf94085",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "4491145dc734fe7b0424561ab1150e5337393061",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "cb2d2868c89b66b98328572f652f405d2cb3438c"
+        }
+      ],
+      "description": "Personal, shared, society, gang and ATM banking for qbcore"
+    },
+    {
+      "id": "kora-bossmenu",
+      "title": "Kora Bossmenu",
+      "repository": "https://github.com/KoraFiveM/kora_bossmenu.git",
+      "path": "[kora]/kora_bossmenu",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 14,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "c074286404f2fafec7676a7b9447cb771ab0c234",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "da2c2efcb45bd867af0ab5f20f2111e0c9a4888f",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "25a3b88220955e8273ea51d99cd31a168319f570"
+        }
+      ],
+      "description": "Management menu for job and business leaders."
+    },
+    {
+      "id": "kora-businesses",
+      "title": "Kora Businesses",
+      "repository": "https://github.com/KoraFiveM/kora_businesses.git",
+      "path": "[kora]/kora_businesses",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 11,
+      "docsPath": "docs",
+      "entryPage": "CCTV",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "f843d48fc5bdcfdaaefed3a95ed7b33a9afc7bfe",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "aef8213a074ddf53779fc91534c30f857da1db3a",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "2005d15143d4f7ef40dc677911f001de8d1e7e90"
+        }
+      ],
+      "description": "Database-backed modular businesses for qblib: built in-game, live on every client, no restart"
+    },
+    {
+      "id": "kora-chat",
+      "title": "Kora Chat",
+      "repository": "https://github.com/KoraFiveM/kora_chat.git",
+      "path": "[standalone]/kora_chat",
+      "group": "standalone",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 47,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "0e568be534ddb73d1b4b17bbdc5ef8899898e80f",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "dd4f9825668827294c2531d5c88a378ec66ac398"
+        }
+      ],
+      "description": "Event-driven chat replacement providing the legacy chat identity, built on qblib"
+    },
+    {
+      "id": "kora-cityhall",
+      "title": "Kora Cityhall",
+      "repository": "https://github.com/KoraFiveM/kora_cityhall.git",
+      "path": "[kora]/kora_cityhall",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 35,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "3074dfe27c3545d92d95f1e0b5ece048df036fe9",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "abde59762431805661cd327df5c4d4a8bfcaecaa",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "382c1c60a264916840863477562db58ad7a444be"
+        }
+      ],
+      "description": "City services and civic interactions."
+    },
+    {
+      "id": "kora-clothing",
+      "title": "Kora Clothing",
+      "repository": "https://github.com/KoraFiveM/kora_clothing.git",
+      "path": "[kora]/kora_clothing",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 18,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "a4b450f31faf8e8316c92cd07a05dc10bb1fb652",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "a875836dbca52e7c37582853342523630c0e2acb",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "dd756e60647c4ca10b62d33603caa3f4883a1532"
+        }
+      ],
+      "description": "Clothing and character appearance."
+    },
+    {
+      "id": "kora-consumables",
+      "title": "Kora Consumables",
+      "repository": "https://github.com/KoraFiveM/kora_consumables.git",
+      "path": "[kora]/kora_consumables",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 37,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "eb61f6a60a558a2336f505d484d8d0092069933a",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "5b53b8148175bf190b436f592b8b669ca84806bf",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "d3c5018d8d12392d39e8b699201535bf023b5981"
+        }
+      ],
+      "description": "Food, drinks, and other usable consumables."
+    },
+    {
+      "id": "kora-core",
+      "title": "Kora Core",
+      "repository": "https://github.com/KoraFiveM/kora_core.git",
+      "path": "[pre]/kora_core",
+      "group": "pre",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 7,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "0089df7fe7609223c795829fe0e658271a6988f9",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "6d79ebed6cd06083a7d84313086fa95800783ebb",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.1",
+          "tag": "v0.1.1",
+          "commit": "a4016183ac0993e051abc2bdfcea6c8477990182"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "596337f88425c0cf6ce56fa5316b2bbbafd937e7"
+        }
+      ],
+      "description": "Core framework for Kora resources and player services."
+    },
+    {
+      "id": "kora-crafting",
+      "title": "Kora Crafting",
+      "repository": "https://github.com/KoraFiveM/kora_crafting.git",
+      "path": "[kora]/kora_crafting",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 31,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "d1d6b135c1a3b7a9a997bdbb4b33ff1eb89bdf53",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "14302cd5843d75e7d35ce0effb6cc5761d2b60b2",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "5d0ce7cb3abd6ff138668a76c044f61cb8c65c30"
+        }
+      ],
+      "description": "Server-authoritative, export-driven crafting for qbcore2"
+    },
+    {
+      "id": "kora-customs",
+      "title": "Kora Customs",
+      "repository": "https://github.com/KoraFiveM/kora_customs.git",
+      "path": "[kora]/kora_customs",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 36,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "a9c61f7a1978d936bd5d0205629bbd2d3ccff124",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "a11e22afd9996375362fa0767fbd2c59c4604322"
+        }
+      ],
+      "description": "Self-service cosmetic vehicle customisation for the qbcore2 stack"
+    },
+    {
+      "id": "kora-dealership",
+      "title": "Kora Dealership",
+      "repository": "https://github.com/KoraFiveM/kora_dealership.git",
+      "path": "[kora]/kora_dealership",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 29,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "0e471169a67c236a490340779dc544ec9f3a808a",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "4634e2dc898a33adc14987a7891b69dcb342b335"
+        }
+      ],
+      "description": "Server-authoritative vehicle dealership for qbcore2"
+    },
+    {
+      "id": "kora-dispatch",
+      "title": "Kora Dispatch",
+      "repository": "https://github.com/KoraFiveM/kora_dispatch.git",
+      "path": "[kora]/kora_dispatch",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 20,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "e1c8fb0fbc93b3db0da66ee1eb6e2c2930df875b",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "e1039e7be067348a9add4b6909a4a2b78c2cf2a9"
+        }
+      ],
+      "description": "Job-agnostic dispatch: call lifecycle, keyboard-driven alert feed, and a tablet with a rendered map"
+    },
+    {
+      "id": "kora-doorlock",
+      "title": "Kora Doorlock",
+      "repository": "https://github.com/KoraFiveM/kora_doorlock.git",
+      "path": "[kora]/kora_doorlock",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 10,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "dbbb0faf336cc88be3307141236d7d8d3944dd34",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "5c60ce2cb480883acd94c431d06c08fd07405174"
+        }
+      ],
+      "description": "Server-authoritative qblib-native door locking for FiveM"
+    },
+    {
+      "id": "kora-drugs",
+      "title": "Kora Drugs",
+      "repository": "https://github.com/KoraFiveM/kora_drugs.git",
+      "path": "[kora]/kora_drugs",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 8,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "34c638e7d33187409deac105e409e4718379081a",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "1d7f69b9cc271f06bd45f270aef6b4ab9aee6214"
+        }
+      ],
+      "description": "Drug-related activities and gameplay."
+    },
+    {
+      "id": "kora-emotemenu",
+      "title": "Kora Emotemenu",
+      "repository": "https://github.com/KoraFiveM/kora_emotemenu.git",
+      "path": "[standalone]/kora_emotemenu",
+      "group": "standalone",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 51,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "15da53d1db6df27d54797310a42d5f5d638e73ee",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "dc1387a4ad08d139dcce39428e575f6fdcade101",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "0584ea06166091847656232208b78de300b98d80"
+        }
+      ],
+      "description": "In-game emote selection and playback."
+    },
+    {
+      "id": "kora-fishing",
+      "title": "Kora Fishing",
+      "repository": "https://github.com/KoraFiveM/kora_fishing.git",
+      "path": "[kora]/kora_fishing",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 40,
+      "docsPath": "readme.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "e5f0f41ea42aff4119fced955af73f4b7acbb504",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "99a12a06b0c8b3746acfbc8e2744f91df2348887"
+        }
+      ],
+      "description": "Fishing activities and related items."
+    },
+    {
+      "id": "kora-fuel",
+      "title": "Kora Fuel",
+      "repository": "https://github.com/KoraFiveM/kora_fuel.git",
+      "path": "[kora]/kora_fuel",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 21,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "3e5213dce07baaff39629d2abbc2411df0ca0ded",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "ede70a9a57ba24b23747288dab7531fee9bfb39d",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "7df990967dc193ad1a8fb285ccaaf8ac766475e3"
+        }
+      ],
+      "description": "Vehicle fuel and EV charging for qblib"
+    },
+    {
+      "id": "kora-garages",
+      "title": "Kora Garages",
+      "repository": "https://github.com/KoraFiveM/kora_garages.git",
+      "path": "[kora]/kora_garages",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 27,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "dd20a197f9acdbe88ba52c3e9aa33a1f2e62da62",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "77fe8547796986721e69e88d4c529a39e057e259"
+        }
+      ],
+      "description": "Player-owned vehicle garages for the qbcore2 framework stack"
+    },
+    {
+      "id": "kora-hud",
+      "title": "Kora Hud",
+      "repository": "https://github.com/KoraFiveM/kora_hud.git",
+      "path": "[kora]/kora_hud",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 17,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "2b03de8d1302475c640283e1e1ac30184c880a8f",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "6b3311cb0c68c0533359f202e6e687eb10ccd0b2"
+        }
+      ],
+      "description": "Heads-up display and interface settings."
+    },
+    {
+      "id": "kora-interior",
+      "title": "Kora Interior",
+      "repository": "https://github.com/KoraFiveM/kora_interior.git",
+      "path": "[kora]/kora_interior",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 23,
+      "docsPath": "docs",
+      "entryPage": "SHELL_GEOMETRY",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "791cb6b82b1e6f91471ecb1a42a7cdcc5623a1c4",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "51d0b4039d87f86ec9787a9f0fad10c011888cc2"
+        }
+      ],
+      "description": "Interior shells and related utilities."
+    },
+    {
+      "id": "kora-inventory",
+      "title": "Kora Inventory",
+      "repository": "https://github.com/KoraFiveM/kora_inventory.git",
+      "path": "[pre]/kora_inventory",
+      "group": "pre",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 6,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "65788defbde80b3cfae48c6ed60c5189c3196050",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "a599003d5b51ed75c38eacdc8e09407e01624b4b",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "b849467c0120e3c476223ee4154ac23852ca899c"
+        }
+      ],
+      "description": "Player inventory, items, storage, and shops."
+    },
+    {
+      "id": "kora-jobcreator",
+      "title": "Kora Jobcreator",
+      "repository": "https://github.com/KoraFiveM/kora_jobcreator.git",
+      "path": "[kora]/kora_jobcreator",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 30,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "83ff745ad296360262d8273d327c1a70dc802ccc",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "0bf4d0dfbedc6bd4a64748192d5e60bf26a5abe6"
+        }
+      ],
+      "description": "qblib-native in-game job and business creator"
+    },
+    {
+      "id": "kora-loading",
+      "title": "Kora Loading",
+      "repository": "https://github.com/KoraFiveM/kora_loading.git",
+      "path": "[kora]/kora_loading",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 16,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "5e7511f3c6b34d632ecaefd788b6a0867aa041b9",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "5cfe06e9f8c25e97e83b3db0a197f44733ab83e7"
+        }
+      ],
+      "description": "Server loading screen."
+    },
+    {
+      "id": "kora-mdt",
+      "title": "Kora Mdt",
+      "repository": "https://github.com/KoraFiveM/kora_mdt.git",
+      "path": "[kora]/kora_mdt",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 43,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "2fba74c317502234f6343bf62904e9c1f94f4a8f",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "ec54cac0f9e2cbebf8741f12c3f888e5195e089e"
+        }
+      ],
+      "description": "Records and operations terminal for jobs."
+    },
+    {
+      "id": "kora-metaldetecting",
+      "title": "Kora Metaldetecting",
+      "repository": "https://github.com/KoraFiveM/kora_metaldetecting.git",
+      "path": "[kora]/kora_metaldetecting",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 42,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "34deee3c69bcd7e628b991223cec0c4985533b8c",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "af8fe30c62118ac7be85503822ed5276cd2d0c9d"
+        }
+      ],
+      "description": "FiveM metal detecting resource for QBCore"
+    },
+    {
+      "id": "kora-mining",
+      "title": "Kora Mining",
+      "repository": "https://github.com/KoraFiveM/kora_mining.git",
+      "path": "[kora]/kora_mining",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 44,
+      "docsPath": "MINING_ITEMS.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "388750017296c009fc3a426bf381262794947eee",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "60048dc34960751fc9dca874d5c70d381c6f9dda"
+        }
+      ],
+      "description": "Mining activities, tools, and items."
+    },
+    {
+      "id": "kora-multichar",
+      "title": "Kora Multichar",
+      "repository": "https://github.com/KoraFiveM/kora_multichar.git",
+      "path": "[kora]/kora_multichar",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 15,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "0b30144610dc261dc4586613872014c8e2cf5ef8",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "c0e89b3205f26cdb517a7f75e52744a7227d584a"
+        }
+      ],
+      "description": "Character selection and management."
+    },
+    {
+      "id": "kora-multijob",
+      "title": "Kora Multijob",
+      "repository": "https://github.com/KoraFiveM/kora_multijob.git",
+      "path": "[kora]/kora_multijob",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 13,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "44d48f61c06cc4554ae84fcffed9b75270721153",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "6781ba08a98d82080df05df6eb2394e116b27f22"
+        }
+      ],
+      "description": "Management of players’ multiple jobs."
+    },
+    {
+      "id": "kora-newsjob",
+      "title": "Kora Newsjob",
+      "repository": "https://github.com/KoraFiveM/kora_newsjob.git",
+      "path": "[kora]/kora_newsjob",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 34,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "004958a58ccb2e55a4de141ec7b61a957535db42",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "2a92a88b6a2bc3cb4460fdff59da7c6a3e66cd6b"
+        }
+      ],
+      "description": "News job and related activities."
+    },
+    {
+      "id": "kora-pawnshop",
+      "title": "Kora Pawnshop",
+      "repository": "https://github.com/KoraFiveM/kora_pawnshop.git",
+      "path": "[kora]/kora_pawnshop",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 39,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "07eda932f961c49d0a37d1aa56166d68cf703b0b",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "419585fc17decbb26e309c0909f3ed0e1bea19e3",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "0e3f2b8e6103d293ea523ad2051a84667ac267f4"
+        }
+      ],
+      "description": "Pawn shop transactions and gameplay."
+    },
+    {
+      "id": "kora-police",
+      "title": "Kora Police",
+      "repository": "https://github.com/KoraFiveM/kora_police.git",
+      "path": "[kora]/kora_police",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 26,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "78fc211e316e7739d8a3a3544abb8bf9955bf649",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "6001e32a46f56853452d55bbc42ccc4e0baf6e9d"
+        }
+      ],
+      "description": "Police job and related gameplay."
+    },
+    {
+      "id": "kora-queue",
+      "title": "Kora Queue",
+      "repository": "https://github.com/KoraFiveM/kora_queue.git",
+      "path": "[standalone]/kora_queue",
+      "group": "standalone",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 46,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "6d7c6be4d4a4481142bb2a667f0dd53d56ea9182",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "32b65a4daf4a4cbc36b170851468e08b3f9a3e8e",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "7e00782bde5c9ce100b18d995f8549f32ffb3fd0"
+        }
+      ],
+      "description": "Player connection queue."
+    },
+    {
+      "id": "kora-robberies",
+      "title": "Kora Robberies",
+      "repository": "https://github.com/KoraFiveM/kora_robberies.git",
+      "path": "[kora]/kora_robberies",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 45,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "bd75ee224c860bac13622ec3ae5dd719f7c86e18",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "79d40b189aa3a5522b7f47eb291f0845eb18a820"
+        }
+      ],
+      "description": "In-game robbery creator for qblib-based FiveM servers"
+    },
+    {
+      "id": "kora-scoreboard",
+      "title": "Kora Scoreboard",
+      "repository": "https://github.com/KoraFiveM/kora_scoreboard.git",
+      "path": "[kora]/kora_scoreboard",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 38,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "77aa9f4e73e721105ec232acd16f9adb930a7dd2",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "9fa1267fd6127554f42ebc606553c2f65c4ff5f9"
+        }
+      ],
+      "description": "Player scoreboard."
+    },
+    {
+      "id": "kora-skills",
+      "title": "Kora Skills",
+      "repository": "https://github.com/KoraFiveM/kora_skills.git",
+      "path": "[kora]/kora_skills",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 28,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "ab2d8c84b7cce9dda0a21163f9f7d6ce5d205698",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "acb5102300e94806a3a933ac5b2d18710b7fd48e"
+        }
+      ],
+      "description": "Config-driven XP skills for QB-Core"
+    },
+    {
+      "id": "kora-sound",
+      "title": "Kora Sound",
+      "repository": "https://github.com/KoraFiveM/kora_sound.git",
+      "path": "[standalone]/kora_sound",
+      "group": "standalone",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 53,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "bb59059e3f0cd9a323e2dbce8c1230872d4a8194",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "b5f98299a7226a9165fdbbcee64f696f0d12459c"
+        }
+      ],
+      "description": "Sound playback and synchronisation."
+    },
+    {
+      "id": "kora-sql",
+      "title": "Kora Sql",
+      "repository": "https://github.com/KoraFiveM/kora_sql.git",
+      "path": "[pre]/kora_sql",
+      "group": "pre",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 5,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "0ab7487c5e76fb25b494f3d26250872e30e6e76f",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "c2a75efe5ccea9e305d5a91e97bf058211bab23c",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "919482b1489788fa188ce2388083de2305cb1f9a"
+        }
+      ],
+      "description": "Database access for Kora resources."
+    },
+    {
+      "id": "kora-target",
+      "title": "Kora Target",
+      "repository": "https://github.com/KoraFiveM/kora_target.git",
+      "path": "[kora]/kora_target",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 22,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "84eedcd0c5a5f9b7ba5a9f7c98f4a86b39c47aa8",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "881749f4872072a23e49a53986c9306812067102",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.1",
+          "tag": "v0.1.1",
+          "commit": "46b2c04450a2320cd2f7b2b59d455641774deacd"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "29c9290c77eb8022f788b7eae7a4f61422f68198"
+        }
+      ],
+      "description": "Interaction targeting for entities and locations."
+    },
+    {
+      "id": "kora-theme",
+      "title": "Kora Theme",
+      "repository": "https://github.com/KoraFiveM/kora_theme.git",
+      "path": "[standalone]/kora_theme",
+      "group": "standalone",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 50,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "db3616615a3cb5261fd4ee101a4db85542bbbd7e",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "4461f33139889e54f3970476dac401edcb6dc5cc",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "313e04b95676f66486c5e20700cf9c8f75bfadd4"
+        }
+      ],
+      "description": "Shared design system for browser interfaces."
+    },
+    {
+      "id": "kora-truckerjob",
+      "title": "Kora Truckerjob",
+      "repository": "https://github.com/KoraFiveM/kora_truckerjob.git",
+      "path": "[kora]/kora_truckerjob",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 33,
+      "docsPath": "README.MD",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "acfc49aa97967ca5f20c177ce387020e29f214a0",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "28b2df67836f8b7f1c82e69bb697569f52e754e6"
+        }
+      ],
+      "description": "Freight jobs and delivery contracts."
+    },
+    {
+      "id": "kora-utils",
+      "title": "Kora Utils",
+      "repository": "https://github.com/KoraFiveM/kora_utils.git",
+      "path": "[kora]/kora_utils",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 9,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "3cef820b5f7bee32a3400a9ca2073efb43b5f4df",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "9e678b374491b079c0cca95db1e0e15afb5c52d5"
+        }
+      ],
+      "description": "Shared Kora utilities."
+    },
+    {
+      "id": "kora-vehiclekeys",
+      "title": "Kora Vehiclekeys",
+      "repository": "https://github.com/KoraFiveM/kora_vehiclekeys.git",
+      "path": "[kora]/kora_vehiclekeys",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 41,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "dd1a65c69bf20933bb948534e3b742faffb3c15d",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "f95ca5185616ae32e2470beda57ba74dadbbdb9b"
+        }
+      ],
+      "description": "Server-authoritative vehicle keys, locks, ignition, and hotwiring for qblib/qbcore"
+    },
+    {
+      "id": "kora-voice",
+      "title": "Kora Voice",
+      "repository": "https://github.com/KoraFiveM/kora_voice.git",
+      "path": "[standalone]/kora_voice",
+      "group": "standalone",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 49,
+      "docsPath": "docs",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "b59c9e841e46d05ed4f8808b7691a869c3d3a849",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "commit": "f699d3ffae9f5562a59eabd0a41f12b29311cd00",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "9216d90ca981e490c4c610de7ac4319f405d3107"
+        }
+      ],
+      "description": "First-party voice resource (pma-voice parity) for the qbcore2 framework stack"
+    },
+    {
+      "id": "kora-weathersync",
+      "title": "Kora Weathersync",
+      "repository": "https://github.com/KoraFiveM/kora_weathersync.git",
+      "path": "[kora]/kora_weathersync",
+      "group": "kora",
+      "kind": "kora",
+      "branch": "dev",
+      "order": 24,
+      "docsPath": "README.md",
+      "entryPage": "index",
+      "latest": "0.2.1",
+      "docsAvailable": true,
+      "versions": [
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "commit": "4fdaa5fa0ba59e46897edab7c9ee59cf220a9ea6",
+          "docsPath": "docs",
+          "entryPage": "index"
+        },
+        {
+          "version": "0.1.0",
+          "tag": "v0.1.0",
+          "commit": "ccf4e0c62a55748851bb85cf4aeb3bcb5beff1bc"
+        }
+      ],
+      "description": "Synchronised weather and time."
+    },
+    {
+      "id": "bob74-ipl",
+      "title": "Bob74 Ipl",
+      "repository": "https://github.com/Bob74/bob74_ipl.git",
+      "path": "[standalone]/bob74_ipl",
+      "group": "standalone",
+      "kind": "dependency",
+      "branch": "master",
+      "order": 54,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Dependency installed at resources/[standalone]/bob74_ipl."
+    },
+    {
+      "id": "cfx-default",
+      "title": "Cfx Default",
+      "repository": "https://github.com/KoraFiveM/-cfx-default-.git",
+      "path": "[cfx-default]",
+      "group": "cfx-default",
+      "kind": "dependency",
+      "branch": "dev",
+      "order": 1,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Dependency installed at resources/[cfx-default]."
+    },
+    {
+      "id": "compat",
+      "title": "Compat",
+      "repository": "https://github.com/KoraFiveM/compat.git",
+      "path": "[compat]",
+      "group": "compat",
+      "kind": "dependency",
+      "branch": "main",
+      "order": 48,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Dependency installed at resources/[compat]."
+    },
+    {
+      "id": "default-maps",
+      "title": "Default Maps",
+      "repository": "https://github.com/KoraFiveM/-default-maps-.git",
+      "path": "[default-maps]",
+      "group": "default-maps",
+      "kind": "dependency",
+      "branch": "dev",
+      "order": 2,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Dependency installed at resources/[default-maps]."
+    },
+    {
+      "id": "kora-phone",
+      "title": "Kora Phone",
+      "repository": "https://github.com/KoraFiveM/kora_phone.git",
+      "path": "[kora]/kora_phone",
+      "group": "kora",
+      "kind": "dependency",
+      "branch": "dev",
+      "order": 25,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Dependency installed at resources/[kora]/kora_phone."
+    },
+    {
+      "id": "kora-phoneshop",
+      "title": "Kora Phoneshop",
+      "repository": "https://github.com/KoraFiveM/kora_phoneshop.git",
+      "path": "[default-maps]/kora_phoneshop",
+      "group": "default-maps",
+      "kind": "dependency",
+      "branch": "main",
+      "order": 3,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Dependency installed at resources/[default-maps]/kora_phoneshop."
+    },
+    {
+      "id": "props",
+      "title": "Props",
+      "repository": "https://github.com/KoraFiveM/props.git",
+      "path": "[standalone]/props",
+      "group": "props",
+      "kind": "dependency",
+      "branch": "main",
+      "order": 52,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Dependency installed at resources/[standalone]/props."
+    },
+    {
+      "id": "fft",
+      "title": "Fft",
+      "repository": "https://github.com/KoraFiveM/fft.git",
+      "path": "[standalone]/fft",
+      "group": "standalone",
+      "kind": "internal",
+      "branch": "main",
+      "order": 55,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[standalone]/fft."
+    },
+    {
+      "id": "kora-cards",
+      "title": "Kora Cards",
+      "repository": "https://github.com/KoraFiveM/kora_cards.git",
+      "path": "[kora]/kora_cards",
+      "group": "kora",
+      "kind": "internal",
+      "branch": "main",
+      "order": 56,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[kora]/kora_cards."
+    },
+    {
+      "id": "kora-crypto",
+      "title": "Kora Crypto",
+      "repository": "https://github.com/KoraFiveM/kora_crypto.git",
+      "path": "[kora]/kora_crypto",
+      "group": "kora",
+      "kind": "internal",
+      "branch": "main",
+      "order": 57,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[kora]/kora_crypto."
+    },
+    {
+      "id": "kora-diving",
+      "title": "Kora Diving",
+      "repository": "https://github.com/KoraFiveM/kora_diving.git",
+      "path": "[kora]/kora_diving",
+      "group": "kora",
+      "kind": "internal",
+      "branch": "main",
+      "order": 58,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[kora]/kora_diving."
+    },
+    {
+      "id": "kora-image-maker",
+      "title": "Kora Image Maker",
+      "repository": "https://github.com/KoraFiveM/kora_image_maker.git",
+      "path": "[kora]/kora_image_maker",
+      "group": "kora",
+      "kind": "internal",
+      "branch": "main",
+      "order": 59,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[kora]/kora_image_maker."
+    },
+    {
+      "id": "kora-jewellery",
+      "title": "Kora Jewellery",
+      "repository": "https://github.com/KoraFiveM/kora_jewellery.git",
+      "path": "[kora]/kora_jewellery",
+      "group": "kora",
+      "kind": "internal",
+      "branch": "main",
+      "order": 60,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[kora]/kora_jewellery."
+    },
+    {
+      "id": "kora-lib-playground",
+      "title": "Kora Lib Playground",
+      "repository": "https://github.com/KoraFiveM/kora_lib-playground.git",
+      "path": "[standalone]/kora_lib-playground",
+      "group": "standalone",
+      "kind": "internal",
+      "branch": "main",
+      "order": 61,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[standalone]/kora_lib-playground."
+    },
+    {
+      "id": "kora-phoneshop-demo",
+      "title": "Kora Phoneshop Demo",
+      "repository": "https://github.com/KoraFiveM/kora_phoneshop_demo.git",
+      "path": "[standalone]/kora_phoneshop_demo",
+      "group": "standalone",
+      "kind": "internal",
+      "branch": "main",
+      "order": 62,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[standalone]/kora_phoneshop_demo."
+    },
+    {
+      "id": "kora-scrapyard",
+      "title": "Kora Scrapyard",
+      "repository": "https://github.com/KoraFiveM/kora_scrapyard.git",
+      "path": "[kora]/kora_scrapyard",
+      "group": "kora",
+      "kind": "internal",
+      "branch": "main",
+      "order": 63,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[kora]/kora_scrapyard."
+    },
+    {
+      "id": "kora-truckrobbery",
+      "title": "Kora Truckrobbery",
+      "repository": "https://github.com/KoraFiveM/kora_truckrobbery.git",
+      "path": "[kora]/kora_truckrobbery",
+      "group": "kora",
+      "kind": "internal",
+      "branch": "main",
+      "order": 64,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[kora]/kora_truckrobbery."
+    },
+    {
+      "id": "polyzone",
+      "title": "Polyzone",
+      "repository": "https://github.com/KoraFiveM/PolyZone.git",
+      "path": "[standalone]/PolyZone",
+      "group": "standalone",
+      "kind": "internal",
+      "branch": "main",
+      "order": 65,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[standalone]/PolyZone."
+    },
+    {
+      "id": "server-cfg-test",
+      "title": "Server Cfg Test",
+      "repository": "https://github.com/KoraFiveM/server_cfg_test.git",
+      "path": "[config]/server_cfg_test",
+      "group": "other",
+      "kind": "internal",
+      "branch": "main",
+      "order": 66,
+      "docsPath": null,
+      "entryPage": "index",
+      "latest": null,
+      "docsAvailable": false,
+      "versions": [],
+      "description": "Internal development-only repository installed at resources/[config]/server_cfg_test."
+    }
+  ]
+}

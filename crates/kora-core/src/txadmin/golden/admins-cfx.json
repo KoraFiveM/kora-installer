@@ -1,0 +1,17 @@
+[
+  {
+    "$schema": 1,
+    "master": true,
+    "name": "stick_alex",
+    "password_hash": "$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+    "password_temporary": true,
+    "permissions": [],
+    "providers": {
+      "citizenfx": {
+        "data": {},
+        "id": "stick_alex",
+        "identifier": "fivem:1234567"
+      }
+    }
+  }
+]

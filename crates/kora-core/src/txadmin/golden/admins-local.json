@@ -1,0 +1,10 @@
+[
+  {
+    "$schema": 1,
+    "master": true,
+    "name": "kora-admin",
+    "password_hash": "$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+    "permissions": [],
+    "providers": {}
+  }
+]

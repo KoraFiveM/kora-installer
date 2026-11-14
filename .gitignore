@@ -1,0 +1,9 @@
+/target
+Cargo.lock.bak
+*.pdb
+.env
+*.pem
+*.pfx
+*.key
+secrets.cfg
+database.json
