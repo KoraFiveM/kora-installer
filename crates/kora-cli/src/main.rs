@@ -678,9 +678,38 @@ impl ProgressSink for Printer {
     }
 }
 
-fn not_implemented(what: &str) -> i32 {
-    eprintln!("kora {what}: not implemented yet");
-    2
+/// What a bare `kora` does in a terminal: manage the servers you have, or set up the first one.
+fn default_command(registered: usize) -> Command {
+    if registered > 0 {
+        Command::Manager
+    } else {
+        Command::Install(Box::default())
+    }
+}
+
+fn registered_servers() -> usize {
+    registry::Registry::load().map(|r| r.servers.len()).unwrap_or(0)
+}
+
+/// `kora manager`: the server list. "Install a new server" runs the install wizard, then comes back.
+fn manager() -> i32 {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        eprintln!("error: `kora manager` needs an interactive terminal. `kora status` lists your servers without one.");
+        return 2;
+    }
+    loop {
+        match kora_tui::manager::run_manager() {
+            Ok(kora_tui::manager::Exit::Quit) => return 0,
+            // The wizard reports its own errors and cancellation; either way the manager comes back.
+            Ok(kora_tui::manager::Exit::InstallNew) => {
+                install(InstallArgs::default());
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        }
+    }
 }
 
 /// Exchange a setup code for the website's choices (and verify the artifact build).
@@ -1539,7 +1568,7 @@ fn main() {
     let code = match command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
-        Some(Command::Manager) => not_implemented("manager"),
+        Some(Command::Manager) => manager(),
         Some(Command::Update(a)) => update(a),
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
@@ -1598,6 +1627,17 @@ mod tests {
         match Cli::try_parse_from(v)?.command {
             Some(Command::Update(a)) => Ok(a),
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn bare_kora_opens_the_manager_with_servers_and_the_wizard_without() {
+        for (registered, manager) in [(0, false), (1, true), (2, true), (50, true)] {
+            match default_command(registered) {
+                Command::Manager => assert!(manager, "{registered} servers"),
+                Command::Install(a) => assert!(!manager && !a.any_given(), "{registered} servers: the plain wizard"),
+                _ => panic!("unexpected default command"),
+            }
         }
     }
 
