@@ -9,9 +9,10 @@ use kora_core::service::ControlAction;
 use ratatui::layout::{Position, Rect};
 
 use super::adopt::{self, Candidate};
-use super::api::manual::{ApplyOpts, ChangeStatus, ResourceChange, Scope, UpdateReport};
-use super::api::notify::NotifyConfig;
-use super::api::schedule::{Preset, RunAs, ScheduleConfig};
+use kora_core::notify::{self, NotifyConfig};
+use kora_core::service::{self as schedule, Preset, RunAs, ScheduleConfig};
+use kora_core::update::manual::{ApplyOpts, ChangeStatus, ResourceChange, RestartPolicy, Scope, SnapshotInfo, UpdateEvent};
+use kora_core::update::UpdateReport;
 use super::backend::{Backend, Status, UpdateBadge};
 use super::input::TextInput;
 use super::logs::LogView;
@@ -28,12 +29,60 @@ pub struct Services {
     pub backend: Box<dyn Backend>,
     pub launcher: Box<dyn Launcher>,
     pub clipboard: Box<dyn Clipboard>,
+    /// Called with the running update's progress each time an event arrives (draws it live).
+    pub live: Box<dyn FnMut(&Live)>,
+}
+
+/// Progress of an update that is running right now: one line per resource, newest state wins.
+/// Handles both the coarse events (a resource is "updated") and the fine ones ("updating" first).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Live {
+    pub server: String,
+    pub rows: Vec<(String, String)>,
+    pub snapshot: Option<String>,
+    pub health: Option<String>,
+    pub done: bool,
+}
+
+impl Live {
+    pub fn on_event(&mut self, ev: &UpdateEvent) {
+        match ev {
+            UpdateEvent::Resource { id, state } => match self.rows.iter_mut().find(|(r, _)| r == id) {
+                Some(row) => row.1 = state.clone(),
+                None => self.rows.push((id.clone(), state.clone())),
+            },
+            UpdateEvent::Snapshot(id) => self.snapshot = Some(id.clone()),
+            UpdateEvent::Health(h) => self.health = Some(h.clone()),
+            UpdateEvent::Done => self.done = true,
+        }
+    }
+}
+
+/// What to call a restart policy on screen.
+pub fn restart_text(r: RestartPolicy) -> &'static str {
+    match r {
+        RestartPolicy::None => "Don't restart anything",
+        RestartPolicy::Ensure => "Ensure updated resources (no full restart)",
+        RestartPolicy::FullRestart => "Restart the whole server",
+        RestartPolicy::WhenQuiet => "Restart only when nobody is playing",
+    }
+}
+
+pub fn next_restart(r: RestartPolicy) -> RestartPolicy {
+    match r {
+        RestartPolicy::WhenQuiet => RestartPolicy::Ensure,
+        RestartPolicy::Ensure => RestartPolicy::FullRestart,
+        RestartPolicy::FullRestart => RestartPolicy::None,
+        RestartPolicy::None => RestartPolicy::WhenQuiet,
+    }
 }
 
 /// Why the manager stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Exit {
     Quit,
+    /// Changing the schedule needs administrator rights: run `kora <args>` elevated, then come back.
+    Elevate(Vec<String>),
     /// The user asked to install a new server: run the install wizard, then come back.
     InstallNew,
 }
@@ -96,6 +145,10 @@ pub enum Action {
     ToggleAll,
     ApplySelected,
     Rollback,
+    CheckUpdates,
+    Snapshots,
+    CycleRestart,
+    Paste,
     Save,
     SendTest,
     Remove,
@@ -171,6 +224,7 @@ impl UpItem {
 pub enum UpStage {
     Preview,
     Report,
+    Snapshots,
 }
 
 #[derive(Debug, Clone)]
@@ -179,20 +233,52 @@ pub struct UpdateState {
     pub stage: UpStage,
     pub items: Vec<UpItem>,
     pub sel: usize,
-    pub restart: bool,
-    pub events: Vec<String>,
+    pub restart: RestartPolicy,
+    pub new_release: Option<String>,
+    /// Per-resource outcome of the last run (id, state), in the order the engine reported them.
+    pub progress: Vec<(String, String)>,
+    pub snapshot: Option<String>,
+    pub health: Option<String>,
     pub report: Option<UpdateReport>,
     pub error: Option<String>,
-    pub rollback: Option<TextInput>,
+    pub snapshots: Vec<SnapshotInfo>,
+    pub snap_sel: usize,
+    /// Waiting for "roll back to this snapshot? y/n".
+    pub confirm_rollback: Option<String>,
 }
 
 impl UpdateState {
     fn new(entry: ServerEntry) -> Self {
-        Self { entry, stage: UpStage::Preview, items: vec![], sel: 0, restart: true, events: vec![], report: None, error: None, rollback: None }
+        Self {
+            entry,
+            stage: UpStage::Preview,
+            items: vec![],
+            sel: 0,
+            restart: RestartPolicy::WhenQuiet,
+            new_release: None,
+            progress: vec![],
+            snapshot: None,
+            health: None,
+            report: None,
+            error: None,
+            snapshots: vec![],
+            snap_sel: 0,
+            confirm_rollback: None,
+        }
     }
 
     pub fn checked_ids(&self) -> Vec<String> {
         self.items.iter().filter(|i| i.checked && i.selectable()).map(|i| i.change.id.clone()).collect()
+    }
+
+    /// Did the last run go wrong (rolled back, needs attention, or the run itself failed)?
+    pub fn failed(&self) -> bool {
+        self.error.is_some() || self.report.as_ref().is_some_and(|r| r.has_problems())
+    }
+
+    /// The snapshot a rollback from the report screen would use.
+    pub fn report_snapshot(&self) -> Option<String> {
+        self.snapshot.clone()
     }
 }
 
@@ -211,7 +297,7 @@ pub struct ScheduleState {
     pub existing: Option<ScheduleConfig>,
     pub preset: Preset,
     pub time: TextInput,
-    /// 0 = Monday .. 6 = Sunday.
+    /// 0 = Monday .. 6 = Sunday; 7 = every day (Custom only).
     pub weekday: u8,
     pub run_as: RunAs,
     /// 0 preset, 1 time, 2 weekday, 3 run as.
@@ -221,7 +307,7 @@ pub struct ScheduleState {
 impl ScheduleState {
     fn new(entry: ServerEntry, existing: Option<ScheduleConfig>) -> Self {
         let (preset, time, weekday, run_as) = match &existing {
-            Some(c) => (c.preset, c.time.clone(), c.weekday.unwrap_or(0).min(6), c.run_as),
+            Some(c) => (c.preset, c.time.clone(), c.weekday.map_or(if c.preset == Preset::Custom { 7 } else { 0 }, |d| d.min(6)), c.run_as),
             None => (Preset::Daily, "04:00".to_string(), 0, RunAs::InstallingUser),
         };
         Self { entry, existing, preset, time: TextInput::with_text(40, &time), weekday, run_as, focus: 0 }
@@ -229,7 +315,7 @@ impl ScheduleState {
 
     /// The fields that matter for the chosen preset (weekday only when weekly).
     pub fn fields(&self) -> Vec<usize> {
-        if self.preset == Preset::Weekly {
+        if self.preset != Preset::Daily {
             vec![0, 1, 2, 3]
         } else {
             vec![0, 1, 3]
@@ -239,21 +325,31 @@ impl ScheduleState {
     /// Validated config, or what is wrong with it.
     pub fn build(&self) -> Result<ScheduleConfig, String> {
         let time = self.time.text().trim().to_string();
-        if self.preset == Preset::Custom {
-            if time.is_empty() {
-                return Err("Type when to run.".into());
-            }
-        } else if !valid_time(&time) {
-            return Err("Time must look like 04:30 (24-hour, HH:MM).".into());
-        }
-        Ok(ScheduleConfig { preset: self.preset, time, weekday: (self.preset == Preset::Weekly).then_some(self.weekday), run_as: self.run_as })
+        let weekday = match self.preset {
+            Preset::Daily => None,
+            Preset::Weekly => Some(self.weekday.min(6)),
+            Preset::Custom => (self.weekday < 7).then_some(self.weekday),
+        };
+        let cfg = ScheduleConfig { preset: self.preset, time, weekday, run_as: self.run_as, enabled: true };
+        cfg.validate().map_err(|e| e.to_string())?;
+        Ok(cfg)
+    }
+
+    /// The plain-language tradeoff of the chosen "run as" (from `kora_core`'s own help text).
+    pub fn run_as_help(&self) -> String {
+        let mut lines = schedule::RUN_AS_HELP.split('\n');
+        let you = lines.next().unwrap_or_default();
+        let sys = lines.next().unwrap_or_default();
+        if self.run_as == RunAs::System { sys } else { you }.to_string()
     }
 }
 
-pub fn valid_time(t: &str) -> bool {
-    let Some((h, m)) = t.split_once(':') else { return false };
-    let ok = |s: &str, max: u32| (1..=2).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<u32>().is_ok_and(|v| v <= max);
-    ok(h, 23) && m.len() == 2 && ok(m, 59)
+pub fn weekday_name(i: u8) -> &'static str {
+    if i > 6 {
+        "Every day"
+    } else {
+        WEEKDAYS[i as usize]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,6 +392,8 @@ pub enum Job {
     Adopt(usize),
     AdoptPath,
     NotifyTest,
+    CheckUpdates,
+    Snapshots,
 }
 
 /// `ControlAction` without needing `Eq` on it.
@@ -335,6 +433,8 @@ impl Job {
             Job::Scan => "Looking for server folders...".into(),
             Job::Adopt(_) | Job::AdoptPath => "Adding the server...".into(),
             Job::NotifyTest => "Sending a test message...".into(),
+            Job::CheckUpdates => "Checking for updates...".into(),
+            Job::Snapshots => "Reading the saved snapshots...".into(),
         }
     }
 }
@@ -447,7 +547,6 @@ impl App {
             Screen::Notify(s) => Some(s.input.paste(text)),
             Screen::Schedule(s) if s.focus == 1 => Some(s.time.paste(text)),
             Screen::Add(s) if s.stage == AddStage::Path => Some(s.input.paste(text)),
-            Screen::Update(s) => s.rollback.as_mut().map(|i| i.paste(text)),
             _ => None,
         };
         if cut == Some(true) {
@@ -485,6 +584,7 @@ impl App {
                     l.scroll_down(3)
                 }
             }
+            Screen::Update(s) if s.stage == UpStage::Snapshots => s.snap_sel = (s.snap_sel as isize + dir).clamp(0, s.snapshots.len().saturating_sub(1) as isize) as usize,
             Screen::Update(s) => s.sel = (s.sel as isize + dir).clamp(0, s.items.len().saturating_sub(1) as isize) as usize,
             Screen::Add(s) if s.stage == AddStage::Found => s.sel = (s.sel as isize + dir).clamp(0, s.found.len().saturating_sub(1) as isize) as usize,
             _ => {}
@@ -494,6 +594,7 @@ impl App {
     fn click_row(&mut self, i: usize) {
         match &mut self.screen {
             Screen::Main => self.sel = i.min(self.rows.len().saturating_sub(1)),
+            Screen::Update(s) if s.stage == UpStage::Snapshots => s.snap_sel = i.min(s.snapshots.len().saturating_sub(1)),
             Screen::Update(s) => {
                 s.sel = i;
                 if let Some(it) = s.items.get_mut(i) {
@@ -598,6 +699,12 @@ impl App {
                     self.busy = Some(Job::UpdatePreview);
                 }
             }
+            Action::CheckUpdates => {
+                if self.current().is_some_and(|r| r.status != Status::Missing) {
+                    self.notice = None;
+                    self.busy = Some(Job::CheckUpdates);
+                }
+            }
             Action::Notify => {
                 if let Some(e) = self.entry() {
                     let current = self.svc.backend.notify_load(&e);
@@ -623,8 +730,12 @@ impl App {
                 s.stage = AddStage::Menu;
                 return;
             }
-            Screen::Update(s) if s.rollback.is_some() => {
-                s.rollback = None;
+            Screen::Update(s) if s.confirm_rollback.is_some() => {
+                s.confirm_rollback = None;
+                return;
+            }
+            Screen::Update(s) if s.stage == UpStage::Snapshots => {
+                s.stage = UpStage::Preview;
                 return;
             }
             _ => {}
@@ -701,6 +812,15 @@ impl App {
             },
             Screen::Update(s) => self.update_action(s, a),
             Screen::Notify(s) => match a {
+                Action::Paste => match self.svc.clipboard.get_text() {
+                    Ok(t) if !t.trim().is_empty() => {
+                        s.input.set("");
+                        s.input.paste(t.trim());
+                        self.say(Level::Info, "Pasted. Press Enter to save it.");
+                    }
+                    Ok(_) => self.say(Level::Info, "The clipboard is empty. Copy the webhook address in Discord first."),
+                    Err(e) => self.say(Level::Bad, format!("Couldn't read the clipboard ({e}). Paste with your terminal's paste shortcut instead.")),
+                },
                 Action::Save => {
                     let url = s.input.text().trim().to_string();
                     if url.is_empty() {
@@ -737,21 +857,28 @@ impl App {
             },
             Screen::Schedule(s) => match a {
                 Action::Save => match s.build() {
-                    Ok(cfg) => match self.svc.backend.schedule_set(&s.entry, &cfg) {
-                        Ok(()) => {
-                            s.existing = Some(cfg);
-                            self.say(Level::Good, "Schedule saved.");
-                        }
-                        Err(e) => self.say(Level::Bad, format!("Couldn't save the schedule: {e}")),
+                    Ok(cfg) => match self.svc.backend.schedule_elevation(&s.entry, Some(&cfg)) {
+                        Some(args) => self.exit = Some(Exit::Elevate(args)),
+                        None => match self.svc.backend.schedule_set(&s.entry, &cfg) {
+                            Ok(()) => {
+                                s.existing = Some(cfg);
+                                self.say(Level::Good, "Schedule saved.");
+                            }
+                            Err(e) => self.say(Level::Bad, format!("Couldn't save the schedule: {e}")),
+                        },
                     },
                     Err(e) => self.say(Level::Bad, e),
                 },
-                Action::Remove => match self.svc.backend.schedule_remove(&s.entry) {
-                    Ok(()) => {
-                        s.existing = None;
-                        self.say(Level::Good, "Automatic updates are off.");
-                    }
-                    Err(e) => self.say(Level::Bad, format!("Couldn't remove the schedule: {e}")),
+                Action::Remove if s.existing.is_none() => self.say(Level::Info, "Automatic updates are already off."),
+                Action::Remove => match self.svc.backend.schedule_elevation(&s.entry, None) {
+                    Some(args) => self.exit = Some(Exit::Elevate(args)),
+                    None => match self.svc.backend.schedule_remove(&s.entry) {
+                        Ok(()) => {
+                            s.existing = None;
+                            self.say(Level::Good, "Automatic updates are off.");
+                        }
+                        Err(e) => self.say(Level::Bad, format!("Couldn't remove the schedule: {e}")),
+                    },
                 },
                 _ => {}
             },
@@ -786,7 +913,7 @@ impl App {
 
     fn update_action(&mut self, s: &mut UpdateState, a: Action) {
         match a {
-            Action::ToggleRestart => s.restart = !s.restart,
+            Action::CycleRestart => s.restart = next_restart(s.restart),
             Action::ToggleAll => {
                 let all = s.items.iter().filter(|i| i.selectable()).all(|i| i.checked);
                 for i in s.items.iter_mut().filter(|i| i.selectable()) {
@@ -801,34 +928,29 @@ impl App {
                 self.busy = Some(Job::UpdatePreview);
             }
             Action::ApplySelected | Action::Confirm if s.stage == UpStage::Preview => {
-                if s.rollback.is_some() {
-                    return;
-                }
                 if s.checked_ids().is_empty() {
                     self.say(Level::Info, "Tick at least one resource first (Space).");
                 } else {
                     self.busy = Some(Job::UpdateApply);
                 }
             }
-            Action::Rollback => match &s.rollback {
-                None => {
-                    let snap = s.report.as_ref().and_then(|r| r.snapshot.clone()).unwrap_or_default();
-                    s.rollback = Some(TextInput::with_text(100, &snap));
+            Action::Snapshots => self.busy = Some(Job::Snapshots),
+            Action::Rollback => {
+                let id = if s.stage == UpStage::Snapshots { s.snapshots.get(s.snap_sel).map(|x| x.id.clone()) } else { s.report_snapshot() };
+                match id {
+                    Some(id) => s.confirm_rollback = Some(id),
+                    None => self.say(Level::Info, "There is no snapshot to roll back to."),
                 }
-                Some(i) => {
-                    let id = i.text().trim().to_string();
-                    if id.is_empty() {
-                        self.say(Level::Bad, "Type the snapshot id to roll back to.");
-                    } else {
-                        self.busy = Some(Job::Rollback(id));
-                    }
+            }
+            Action::Yes => {
+                if let Some(id) = s.confirm_rollback.take() {
+                    self.busy = Some(Job::Rollback(id));
                 }
-            },
+            }
+            Action::No => s.confirm_rollback = None,
             _ => {}
         }
     }
-
-    // ------------------------------------------------------------ jobs
 
     /// Run the pending job (after the screen has shown its "working" text). True if one ran.
     pub fn run_pending(&mut self) -> bool {
@@ -894,6 +1016,7 @@ impl App {
                 let Screen::Update(s) = &mut self.screen else { return };
                 match self.svc.backend.preview(&s.entry, Scope::All) {
                     Ok(p) => {
+                        s.new_release = p.new_release.clone();
                         s.items = p.resources.into_iter().map(|c| UpItem { checked: c.status == ChangeStatus::Clean, change: c }).collect();
                         s.sel = 0;
                         s.error = None;
@@ -904,34 +1027,59 @@ impl App {
             Job::UpdateApply => {
                 let Screen::Update(s) = &mut self.screen else { return };
                 let ids = s.checked_ids();
-                let mut events = vec![];
-                let res = self.svc.backend.apply(&s.entry, Scope::Resources(ids), ApplyOpts { restart_if_needed: s.restart }, &mut |ev| {
-                    events.push(format!("{}: {}", ev.resource, ev.message))
+                let mut live = Live { server: s.entry.name.clone(), ..Live::default() };
+                // Every selected resource is on screen as "waiting" until the engine says more.
+                live.rows = ids.iter().map(|i| (i.clone(), "waiting".to_string())).collect();
+                let hook = &mut self.svc.live;
+                hook(&live);
+                let res = self.svc.backend.apply(&s.entry, Scope::Resources(ids), ApplyOpts { restart: s.restart, skip: vec![] }, &mut |ev| {
+                    live.on_event(&ev);
+                    hook(&live);
                 });
-                s.events = events;
+                s.progress = live.rows;
+                s.snapshot = live.snapshot;
+                s.health = live.health;
                 match res {
                     Ok(r) => {
                         s.report = Some(r);
                         s.error = None;
-                        s.stage = UpStage::Report;
                     }
                     Err(e) => {
+                        s.report = None;
                         s.error = Some(e);
-                        s.stage = UpStage::Report;
                     }
                 }
+                s.stage = UpStage::Report;
                 self.refresh_status();
+            }
+            Job::Snapshots => {
+                let Screen::Update(s) = &mut self.screen else { return };
+                s.snapshots = self.svc.backend.snapshots(&s.entry);
+                s.snap_sel = 0;
+                s.stage = UpStage::Snapshots;
             }
             Job::Rollback(id) => {
                 let Screen::Update(s) = &mut self.screen else { return };
                 match self.svc.backend.rollback(&s.entry, &id) {
                     Ok(()) => {
-                        s.rollback = None;
-                        s.events.push(format!("Rolled back to {id}."));
+                        s.progress.push(("rollback".into(), format!("put back to snapshot {id}")));
                         s.error = None;
-                        self.say(Level::Good, format!("Rolled back to {id}."));
+                        self.say(Level::Good, format!("Rolled back to snapshot {id}. Restart the server if it is running."));
                     }
                     Err(e) => self.say(Level::Bad, format!("Rollback failed: {e}")),
+                }
+            }
+            Job::CheckUpdates => {
+                let Some(e) = self.entry() else { return };
+                match self.svc.backend.check_updates(&e) {
+                    Ok(b) => {
+                        self.refresh_status();
+                        if let Some(r) = self.rows.iter_mut().find(|r| r.entry.name == e.name) {
+                            r.badge = Some(b);
+                        }
+                        self.say(Level::Good, format!("'{}': {}.", e.name, b.text()));
+                    }
+                    Err(err) => self.say(Level::Bad, format!("Couldn't check '{}': {err}", e.name)),
                 }
             }
             Job::Scan => {
@@ -967,7 +1115,7 @@ impl App {
             }
             Job::NotifyTest => {
                 let Screen::Notify(s) = &self.screen else { return };
-                match self.svc.backend.notify_test(&s.current) {
+                match self.svc.backend.notify_test(&s.entry, &s.current) {
                     Ok(()) => self.say(Level::Good, "Test message sent. Check your Discord channel."),
                     Err(e) => self.say(Level::Bad, format!("The test message failed: {e}")),
                 }
@@ -996,22 +1144,12 @@ impl App {
 
 /// Discord webhook addresses only.
 pub fn check_webhook(url: &str) -> Result<(), String> {
-    let ok = ["https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/", "https://canary.discord.com/api/webhooks/", "https://ptb.discord.com/api/webhooks/"]
-        .iter()
-        .any(|p| url.starts_with(p) && url.len() > p.len());
-    if ok {
-        Ok(())
-    } else {
-        Err("That doesn't look like a Discord webhook (https://discord.com/api/webhooks/...).".into())
-    }
+    notify::validate_webhook(url).map_err(|e| format!("{e}. A Discord webhook looks like https://discord.com/api/webhooks/<id>/<token>."))
 }
 
-/// Show a webhook without its secret token.
+/// A webhook without its secret token (the only form that is ever shown).
 pub fn mask_webhook(url: &str) -> String {
-    match url.rfind('/') {
-        Some(i) if i + 1 < url.len() => format!("{}/{}", &url[..i], "*".repeat(8)),
-        _ => "*".repeat(8),
-    }
+    notify::redact(url)
 }
 
 // ---------------------------------------------------------------- key maps
@@ -1027,6 +1165,7 @@ fn main_key(k: KeyEvent) -> Option<Action> {
         KeyCode::Char('e') => Action::Ensure,
         KeyCode::Char('d') => Action::Delete,
         KeyCode::Char('u') => Action::Update,
+        KeyCode::Char('v') => Action::CheckUpdates,
         KeyCode::Char('n') => Action::Notify,
         KeyCode::Char('c') => Action::Schedule,
         KeyCode::Char('a') => Action::Add,
@@ -1103,14 +1242,11 @@ fn delete_key(s: &mut DeleteState, k: KeyEvent) -> Option<Action> {
 }
 
 fn update_key(s: &mut UpdateState, k: KeyEvent) -> Option<Action> {
-    if let Some(i) = s.rollback.as_mut() {
+    if s.confirm_rollback.is_some() {
         return match k.code {
-            KeyCode::Esc => Some(Action::Back),
-            KeyCode::Enter => Some(Action::Rollback),
-            _ => {
-                i.key(k);
-                None
-            }
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => Some(Action::Yes),
+            KeyCode::Esc | KeyCode::Char('n' | 'N') => Some(Action::No),
+            _ => None,
         };
     }
     match (s.stage, k.code) {
@@ -1123,6 +1259,15 @@ fn update_key(s: &mut UpdateState, k: KeyEvent) -> Option<Action> {
             s.sel = (s.sel + 1).min(s.items.len().saturating_sub(1));
             None
         }
+        (UpStage::Snapshots, KeyCode::Up | KeyCode::Char('k')) => {
+            s.snap_sel = s.snap_sel.saturating_sub(1);
+            None
+        }
+        (UpStage::Snapshots, KeyCode::Down | KeyCode::Char('j')) => {
+            s.snap_sel = (s.snap_sel + 1).min(s.snapshots.len().saturating_sub(1));
+            None
+        }
+        (UpStage::Snapshots, KeyCode::Enter) => Some(Action::Rollback),
         (UpStage::Preview, KeyCode::PageUp) => Some(Action::PageUp),
         (UpStage::Preview, KeyCode::PageDown) => Some(Action::PageDown),
         (UpStage::Preview, KeyCode::Char(' ')) => {
@@ -1135,8 +1280,9 @@ fn update_key(s: &mut UpdateState, k: KeyEvent) -> Option<Action> {
         }
         (UpStage::Preview, KeyCode::Char('a')) => Some(Action::ToggleAll),
         (UpStage::Preview, KeyCode::Enter | KeyCode::Char('u')) => Some(Action::ApplySelected),
-        (UpStage::Preview, KeyCode::Char('r')) => Some(if s.error.is_some() { Action::Retry } else { Action::ToggleRestart }),
-        (_, KeyCode::Char('b')) => Some(Action::Rollback),
+        (UpStage::Preview, KeyCode::Char('r')) => Some(if s.error.is_some() { Action::Retry } else { Action::CycleRestart }),
+        (UpStage::Preview | UpStage::Report, KeyCode::Char('s')) => Some(Action::Snapshots),
+        (UpStage::Report | UpStage::Snapshots, KeyCode::Char('b')) => Some(Action::Rollback),
         _ => None,
     }
 }
@@ -1146,6 +1292,7 @@ fn notify_key(s: &mut NotifyState, k: KeyEvent) -> Option<Action> {
         KeyCode::Esc => Some(Action::Back),
         KeyCode::Enter => Some(Action::Save),
         KeyCode::F(2) => Some(Action::SendTest),
+        KeyCode::F(4) => Some(Action::Paste),
         KeyCode::F(3) => Some(Action::Remove),
         _ => {
             s.input.key(k);
@@ -1173,8 +1320,14 @@ fn schedule_key(s: &mut ScheduleState, k: KeyEvent) -> Option<Action> {
                     let all = [Preset::Daily, Preset::Weekly, Preset::Custom];
                     let i = all.iter().position(|p| *p == s.preset).unwrap_or(0) as i32;
                     s.preset = all[(i + d).rem_euclid(3) as usize];
+                    if s.preset != Preset::Custom {
+                        s.weekday = s.weekday.min(6);
+                    }
                 }
-                2 => s.weekday = (s.weekday as i32 + d).rem_euclid(7) as u8,
+                2 => {
+                    let n = if s.preset == Preset::Custom { 8 } else { 7 };
+                    s.weekday = (s.weekday as i32 + d).rem_euclid(n) as u8;
+                }
                 _ => {
                     s.run_as = if s.run_as == RunAs::System { RunAs::InstallingUser } else { RunAs::System };
                 }

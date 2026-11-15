@@ -6,9 +6,10 @@ use std::path::PathBuf;
 use kora_core::installer::registry::ServerEntry;
 use kora_core::service::ControlAction;
 
-use super::api::manual::{ApplyOpts, Scope, UpdateEvent, UpdatePreview, UpdateReport};
-use super::api::notify::NotifyConfig;
-use super::api::schedule::ScheduleConfig;
+use kora_core::notify::NotifyConfig;
+use kora_core::service::ScheduleConfig;
+use kora_core::update::manual::{ApplyOpts, ChangeStatus, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
+use kora_core::update::UpdateReport;
 
 pub type Res<T> = Result<T, String>;
 
@@ -42,6 +43,28 @@ impl UpdateBadge {
     }
 }
 
+/// The badge for a fresh preview (what `[ Check for updates ]` shows).
+pub fn badge_of(p: &UpdatePreview) -> UpdateBadge {
+    let n = p.resources.iter().filter(|r| r.status == ChangeStatus::Clean).count() as u32;
+    let attention = p.resources.iter().any(|r| matches!(r.status, ChangeStatus::Dirty | ChangeStatus::Diverged));
+    if attention {
+        UpdateBadge::NeedsAttention
+    } else if n > 0 {
+        UpdateBadge::Updates(n)
+    } else if p.new_release.is_some() {
+        UpdateBadge::NewRelease
+    } else {
+        UpdateBadge::UpToDate
+    }
+}
+
+/// `<server>/.kora/update-status.json` for a preview: the same shape the updater writes.
+pub fn status_json(p: &UpdatePreview, now_unix: u64) -> String {
+    let updates = p.resources.iter().filter(|r| r.status == ChangeStatus::Clean).count();
+    let attention = p.resources.iter().any(|r| matches!(r.status, ChangeStatus::Dirty | ChangeStatus::Diverged));
+    serde_json::json!({ "checked_at": now_unix, "updates": updates, "attention": attention, "new_release": p.new_release.is_some() }).to_string()
+}
+
 pub trait Backend {
     /// The registered servers.
     fn list(&mut self) -> Res<Vec<ServerEntry>>;
@@ -64,12 +87,21 @@ pub trait Backend {
     fn preview(&mut self, e: &ServerEntry, scope: Scope) -> Res<UpdatePreview>;
     fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport>;
     fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()>;
+    /// Saved snapshots, newest first.
+    fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo>;
+    /// `[ Check for updates ]`: preview, remember the result for the list badge, return the badge.
+    fn check_updates(&mut self, e: &ServerEntry) -> Res<UpdateBadge> {
+        self.preview(e, Scope::All).map(|p| badge_of(&p))
+    }
 
     fn notify_load(&mut self, e: &ServerEntry) -> NotifyConfig;
     fn notify_save(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()>;
-    fn notify_test(&mut self, c: &NotifyConfig) -> Res<()>;
+    fn notify_test(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()>;
 
     fn schedule_get(&mut self, e: &ServerEntry) -> Option<ScheduleConfig>;
     fn schedule_set(&mut self, e: &ServerEntry, c: &ScheduleConfig) -> Res<()>;
     fn schedule_remove(&mut self, e: &ServerEntry) -> Res<()>;
+    /// When changing the schedule needs administrator rights this process does not have: the
+    /// `kora` arguments that do it elevated (the manager closes, runs them, and comes back).
+    fn schedule_elevation(&mut self, e: &ServerEntry, set: Option<&ScheduleConfig>) -> Option<Vec<String>>;
 }

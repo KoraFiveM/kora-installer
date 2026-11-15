@@ -704,6 +704,17 @@ fn manager() -> i32 {
             Ok(kora_tui::manager::Exit::InstallNew) => {
                 install(InstallArgs::default());
             }
+            // Changing the schedule needs administrator rights: the terminal is back to normal here,
+            // so the permission prompt (sudo / UAC) can be answered, then the manager comes back.
+            Ok(kora_tui::manager::Exit::Elevate(args)) => {
+                println!("Changing the update schedule needs administrator permission. Approve the prompt to continue.");
+                let os: Vec<std::ffi::OsString> = args.iter().map(Into::into).collect();
+                match elevate::relaunch_elevated(&os) {
+                    Ok(()) => println!("Done. Opening the manager again..."),
+                    Err(elevate::ElevateError::Declined) => println!("{}", elevate::declined_message()),
+                    Err(e) => eprintln!("error: {e}. Run this yourself: sudo kora {}", args.join(" ")),
+                }
+            }
             Err(e) => {
                 eprintln!("error: {e}");
                 return 1;

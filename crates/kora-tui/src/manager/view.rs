@@ -11,8 +11,8 @@ use ratatui::{
 
 use kora_core::installer::Mode;
 
-use super::api::manual::ChangeStatus;
-use super::api::schedule::{Preset, RunAs};
+use kora_core::service::{self as schedule, Preset, RunAs};
+use kora_core::update::manual::ChangeStatus;
 use super::app::*;
 use super::backend::Status;
 use super::input::TextInput;
@@ -158,13 +158,16 @@ pub fn hits(app: &App, area: Rect) -> Vec<(Hit, Rect)> {
 
 fn help_for(app: &App) -> &'static str {
     match &app.screen {
-        Screen::Main => "↑↓ select  s start  x stop  r restart  t txAdmin  o folder  l logs  e ensure  u update  n notify  c schedule  d delete  a add  q quit",
+        Screen::Main => "↑↓ select  s start  x stop  r restart  t txAdmin  o folder  l logs  e ensure  u update  v check  n notify  c schedule  d delete  a add  q quit",
         Screen::Logs(_) => "↑↓ PgUp PgDn scroll  Tab next file  c copy  r reload  Esc back",
         Screen::Ensure(_) => "type a name or ↑↓ pick  Enter ensure  Tab restart on/off  Esc back",
         Screen::Delete(s) if s.stage == DelStage::Name => "type the name, Enter confirms  Esc cancels",
         Screen::Delete(_) => "y yes  n no  Esc cancel",
-        Screen::Update(_) => "↑↓ move  Space tick  a all  Enter update  r restart on/off  b rollback  Esc back",
-        Screen::Notify(_) => "paste the webhook  Enter save  F2 send test  F3 remove  Esc back",
+        Screen::Update(s) if s.confirm_rollback.is_some() => "y roll back  n / Esc cancel",
+        Screen::Update(s) if s.stage == UpStage::Snapshots => "↑↓ pick  Enter / b roll back  Esc back",
+        Screen::Update(s) if s.stage == UpStage::Report => "b roll back  s snapshots  Esc back",
+        Screen::Update(_) => "↑↓ move  Space tick  a all  Enter update  r restart policy  s snapshots  Esc back",
+        Screen::Notify(_) => "paste the webhook  Enter save  F4 paste from clipboard  F2 send test  F3 remove  Esc back",
         Screen::Schedule(_) => "↑↓ field  ←→ change  Enter save  F3 remove  Esc back",
         Screen::Add(_) => "↑↓ pick  Enter add  p type a folder  Esc back",
     }
@@ -287,6 +290,7 @@ fn main(app: &App, body: Rect, b: &mut Built) {
             btn(Action::Logs, "View logs (l)", there),
             btn(Action::Ensure, "Ensure a resource (e)", there),
             btn(Action::Update, "Update (u)", there),
+            btn(Action::CheckUpdates, "Check for updates (v)", there),
             btn(Action::Notify, "Notifications (n)", true),
             btn(Action::Schedule, "Schedule (c)", true),
             btn(Action::Delete, if r.managed { "Delete (d)" } else { "Remove from list (d)" }, true),
@@ -441,39 +445,81 @@ fn delete(p: &mut Page, s: &DeleteState) {
     }
 }
 
+fn state_colour(state: &str) -> Color {
+    if state.starts_with("updated") {
+        Color::Green
+    } else if state.starts_with("rolled back") || state.starts_with("skipped") {
+        Color::Red
+    } else if state.starts_with("waiting") {
+        Color::Yellow
+    } else {
+        Color::Gray
+    }
+}
+
+fn progress_lines(p: &mut Page, rows: &[(String, String)], snapshot: &Option<String>, health: &Option<String>, room: usize) {
+    let w = p.w();
+    if let Some(id) = snapshot {
+        p.text(&format!("Snapshot: {id} (a way back if something goes wrong)"), DIM);
+    }
+    let skip = rows.len().saturating_sub(room);
+    for (id, st) in rows.iter().skip(skip) {
+        p.line(Line::from(vec![Span::styled(format!("  {:<24}", trunc(id, 24)), BOLD), Span::styled(trunc(st, w.saturating_sub(28)), Style::default().fg(state_colour(st)))]));
+    }
+    if let Some(h) = health {
+        p.text(h, DIM);
+    }
+}
+
 fn update(p: &mut Page, s: &UpdateState) {
-    if let Some(i) = &s.rollback {
-        p.text("Roll back: put the resources back to how they were before an update.", DIM);
+    if let Some(id) = &s.confirm_rollback {
+        p.text(&format!("Roll back to snapshot {id}?"), BOLD);
+        p.text("Resources go back to how they were before that update. The server is not restarted for you.", DIM);
         p.blank();
-        let w = p.w();
-        p.line(field("Snapshot id:", i, w, true));
+        p.buttons(&[btn(Action::Yes, "Yes, roll back (y)", true), btn(Action::No, "No (n)", true)]);
+        return;
+    }
+    if s.stage == UpStage::Snapshots {
+        if s.snapshots.is_empty() {
+            p.text("No snapshots yet. One is saved automatically before every update.", DIM);
+        } else {
+            p.text("Saved snapshots (newest first). Pick one to put resources back to how they were.", DIM);
+            let room = p.room().saturating_sub(5).max(1);
+            let start = s.snap_sel.saturating_sub(room - 1).min(s.snapshots.len().saturating_sub(room));
+            for (i, sn) in s.snapshots.iter().enumerate().skip(start).take(room) {
+                let names = if sn.resources.len() > 3 { format!("{} and {} more", sn.resources[..3].join(", "), sn.resources.len() - 3) } else { sn.resources.join(", ") };
+                let line = format!("{} {}  ({} resource(s): {})", if i == s.snap_sel { "▶" } else { " " }, sn.id, sn.resources.len(), names);
+                let w = p.w();
+                p.row(Hit::Row(i), Line::styled(trunc(&line, w), if i == s.snap_sel { BOLD } else { Style::default() }));
+            }
+        }
         p.blank();
-        p.buttons(&[btn(Action::Rollback, "Roll back (Enter)", true), back()]);
+        p.buttons(&[btn(Action::Rollback, "Roll back (Enter)", !s.snapshots.is_empty()), back()]);
         return;
     }
     if s.stage == UpStage::Report {
         match (&s.report, &s.error) {
             (_, Some(e)) => p.text(&format!("The update did not finish: {e}"), Style::default().fg(Color::Red)),
             (Some(r), None) => {
-                p.text(&format!("Updated {} resource(s){}.", r.updated.len(), if r.restarted { "; server restarted" } else { "" }), Style::default().fg(Color::Green));
-                for (id, why) in &r.failed {
-                    p.text(&format!("Failed: {id}: {why}"), Style::default().fg(Color::Red));
+                let colour = if r.has_problems() { Color::Red } else { Color::Green };
+                p.text(&format!("{} updated, {} skipped, {} waiting, {} rolled back, {} need you.", r.updated.len(), r.skipped.len(), r.deferred.len(), r.rolled_back.len(), r.needs_attention.len()), Style::default().fg(colour));
+                for (id, why) in &r.rolled_back {
+                    p.text(&format!("Rolled back: {id}: {why}"), Style::default().fg(Color::Red));
                 }
-                if let Some(sn) = &r.snapshot {
-                    p.text(&format!("Rollback id: {sn}"), DIM);
+                for (id, why) in &r.needs_attention {
+                    p.text(&format!("Needs you: {id}: {why}"), Style::default().fg(Color::Red));
+                }
+                if !r.sql_flagged.is_empty() {
+                    p.text(&format!("Has SQL changes to run yourself: {}", r.sql_flagged.join(", ")), Style::default().fg(Color::Yellow));
                 }
             }
             _ => {}
         }
         p.blank();
-        let room = p.room().saturating_sub(3);
-        let skip = s.events.len().saturating_sub(room);
-        let w = p.w();
-        for e in s.events.iter().skip(skip) {
-            p.line(Line::raw(trunc(e, w)));
-        }
+        let room = p.room().saturating_sub(4);
+        progress_lines(p, &s.progress, &s.snapshot, &s.health, room);
         p.blank();
-        p.buttons(&[btn(Action::Rollback, "Roll back (b)", true), back()]);
+        p.buttons(&[btn(Action::Rollback, "Roll back (b)", s.snapshot.is_some()), btn(Action::Snapshots, "Snapshots (s)", true), back()]);
         return;
     }
     if let Some(e) = &s.error {
@@ -482,96 +528,139 @@ fn update(p: &mut Page, s: &UpdateState) {
         p.buttons(&[btn(Action::Retry, "Try again (r)", true), back()]);
         return;
     }
+    if let Some(v) = &s.new_release {
+        p.text(&format!("A new Kora release is available: {v}"), Style::default().fg(Color::Yellow));
+    }
     if s.items.is_empty() {
         p.text("Everything is up to date.", Style::default().fg(Color::Green));
         p.blank();
-        p.buttons(&[back()]);
+        p.buttons(&[btn(Action::Snapshots, "Snapshots (s)", true), back()]);
         return;
     }
     let n = s.checked_ids().len();
-    p.text(&format!("{n} of {} resource(s) ticked. Resources with local changes are not updated here.", s.items.len()), DIM);
-    let room = p.room().saturating_sub(8).max(1);
+    let total = s.items.iter().filter(|i| i.selectable()).count();
+    p.text(&format!("{n} of {total} updatable resource(s) ticked. Resources with local changes are never touched here."), DIM);
+    let w = p.w();
+    p.line(Line::styled(format!("  {:<3} {:<22} {:<23} {:<14} {}", "", "Resource", "From → to", "Status", "Restart"), DIM));
+    let room = p.room().saturating_sub(10).max(1);
     let start = s.sel.saturating_sub(room - 1).min(s.items.len().saturating_sub(room));
     for (i, it) in s.items.iter().enumerate().skip(start).take(room) {
         let c = &it.change;
         let mark = if !it.selectable() { "[-]" } else if it.checked { "[x]" } else { "[ ]" };
         let (tag, col) = match c.status {
             ChangeStatus::Clean => (format!("{} behind", c.behind), Color::Yellow),
-            ChangeStatus::Dirty => ("local changes".to_string(), Color::Red),
-            ChangeStatus::Diverged => ("diverged".to_string(), Color::Red),
-            ChangeStatus::UpToDate => ("up to date".to_string(), Color::Green),
+            ChangeStatus::Dirty => ("Dirty".to_string(), Color::Red),
+            ChangeStatus::Diverged => ("Diverged".to_string(), Color::Red),
+            ChangeStatus::UpToDate => ("Up to date".to_string(), Color::Green),
         };
-        let mut spans = vec![
+        let spans = vec![
             Span::raw(format!("{} {mark} ", if i == s.sel { "▶" } else { " " })),
-            Span::styled(format!("{:<22}", trunc(&c.id, 22)), BOLD),
-            Span::raw(format!("{} → {}  ", trunc(&c.from, 10), trunc(&c.to, 10))),
-            Span::styled(tag, Style::default().fg(col)),
+            Span::styled(format!("{:<22} ", trunc(&c.id, 22)), BOLD),
+            Span::raw(format!("{:<23}", format!("{} → {}", trunc(&c.from, 10), trunc(&c.to, 10)))),
+            Span::styled(format!("{tag:<14}"), Style::default().fg(col)),
+            Span::styled(if c.needs_restart { "needs restart" } else { "" }, DIM),
         ];
-        if c.needs_restart {
-            spans.push(Span::styled("  needs restart", DIM));
-        }
         p.row(Hit::Row(i), Line::from(spans));
     }
     if let Some(it) = s.items.get(s.sel) {
-        if !it.change.changelog.is_empty() {
-            p.blank();
-            let w = p.w();
-            for l in it.change.changelog.iter().take(4) {
-                p.line(Line::styled(format!("  {}", trunc(l, w.saturating_sub(2))), DIM));
-            }
+        p.blank();
+        p.text(&format!("Changes in {} (newest first):", it.change.id), BOLD);
+        if it.change.changelog.is_empty() {
+            p.text("  (no changes listed)", DIM);
+        }
+        for l in it.change.changelog.iter().take(4) {
+            p.line(Line::styled(format!("  {}", trunc(l, w.saturating_sub(2))), DIM));
         }
     }
     p.blank();
     p.buttons(&[
         btn(Action::ApplySelected, "Update ticked (Enter)", n > 0),
-        btn(Action::ToggleAll, "Tick all / none (a)", true),
-        btn(Action::ToggleRestart, &format!("[{}] Restart if needed (r)", if s.restart { "x" } else { " " }), true),
+        btn(Action::ToggleAll, if n == total { "Untick all (a)" } else { "Update all: tick all (a)" }, true),
+        btn(Action::CycleRestart, &format!("Restart: {} (r)", restart_text(s.restart)), true),
+        btn(Action::Snapshots, "Snapshots (s)", true),
         back(),
     ]);
+}
+
+/// Standalone page drawn while an update runs: no `App` can exist then (the backend is busy).
+pub fn render_live(f: &mut Frame, l: &Live) {
+    let area = f.area();
+    f.render_widget(Clear, area);
+    f.render_widget(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BRAND)).title(" Kora manager "), area);
+    let body = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
+    let mut p = Page::new(body);
+    p.text("Updating... please wait; do not close this window.", Style::default().fg(Color::Yellow));
+    p.blank();
+    let room = p.room().saturating_sub(2);
+    progress_lines(&mut p, &l.rows, &l.snapshot, &l.health, room);
+    f.render_widget(Paragraph::new(p.lines).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow)).title(format!(" Update - {} ", l.server))), body);
 }
 
 fn notify(p: &mut Page, s: &NotifyState) {
     p.text("Get a Discord message when an automatic update runs (updated, failed, or needs you).", DIM);
     p.blank();
     match &s.current.discord_webhook {
-        Some(u) => p.text(&format!("Current: {}", mask_webhook(u)), Style::default().fg(Color::Green)),
+        Some(u) => p.text(&format!("Current: {} (the secret part is never shown)", mask_webhook(u)), Style::default().fg(Color::Green)),
         None => p.text("Current: not set", DIM),
     }
     p.blank();
+    // The address is a secret: it is never drawn, only what it was recognised as.
+    let typed = s.input.text().trim().to_string();
     let w = p.w();
-    p.line(field("New webhook:", &s.input, w, true));
-    p.text("In Discord: channel settings, Integrations, Webhooks, Copy URL. Paste it here.", DIM);
+    if typed.is_empty() {
+        p.text("New webhook: (paste it here, or use the Paste button)", Style::default());
+    } else {
+        match check_webhook(&typed) {
+            Ok(()) => p.text(&format!("New webhook: {} - looks right, press Enter to save", mask_webhook(&typed)), Style::default().fg(Color::Green)),
+            Err(e) => {
+                p.text(&format!("New webhook: {} characters entered", typed.chars().count()), Style::default());
+                for l in wrap(&e, w) {
+                    p.line(Line::styled(l, Style::default().fg(Color::Red)));
+                }
+            }
+        }
+    }
+    p.text("In Discord: channel settings, Integrations, Webhooks, Copy URL.", DIM);
     p.blank();
-    p.buttons(&[btn(Action::Save, "Save (Enter)", true), btn(Action::SendTest, "Send test (F2)", s.current.discord_webhook.is_some()), btn(Action::Remove, "Turn off (F3)", s.current.discord_webhook.is_some()), back()]);
+    let has = s.current.discord_webhook.is_some();
+    p.buttons(&[
+        btn(Action::Paste, "Paste (F4)", true),
+        btn(Action::Save, "Save (Enter)", !typed.is_empty()),
+        btn(Action::SendTest, "Send test (F2)", has),
+        btn(Action::Remove, "Remove (F3)", has),
+        back(),
+    ]);
 }
 
 fn schedule(p: &mut Page, s: &ScheduleState) {
     p.text("Run updates automatically at a set time. Only safe, clean updates are applied; anything else is left for you.", DIM);
     p.blank();
+    match &s.existing {
+        Some(c) => p.text(&format!("Now: {}", schedule::describe(c)), Style::default().fg(Color::Green)),
+        None => p.text("Now: off. This server is not updated automatically.", DIM),
+    }
+    p.blank();
     let mark = |f: usize| if s.focus == f { "▶ " } else { "  " };
     let preset = match s.preset {
-        Preset::Daily => "Daily",
-        Preset::Weekly => "Weekly",
-        Preset::Custom => "Custom",
+        Preset::Daily => "Every day",
+        Preset::Weekly => "Every week",
+        Preset::Custom => "Custom day",
     };
     p.row(Hit::Row(0), Line::raw(format!("{}Repeat:   ◀ {preset} ▶", mark(0))));
     let w = p.w();
-    let label = if s.preset == Preset::Custom { "When:" } else { "Time (24h):" };
-    let mut v = vec![Span::raw(mark(1)), Span::styled(format!("{label} "), BOLD)];
-    v.extend(s.time.spans(w.saturating_sub(18), s.focus == 1));
+    let mut v = vec![Span::raw(mark(1)), Span::styled("Time (24h HH:MM): ", BOLD)];
+    v.extend(s.time.spans(w.saturating_sub(24), s.focus == 1));
     p.row(Hit::Row(1), Line::from(v));
-    if s.preset == Preset::Weekly {
-        p.row(Hit::Row(2), Line::raw(format!("{}Day:      ◀ {} ▶", mark(2), WEEKDAYS[s.weekday as usize % 7])));
+    if s.preset != Preset::Daily {
+        p.row(Hit::Row(2), Line::raw(format!("{}Day:      ◀ {} ▶", mark(2), weekday_name(s.weekday))));
     }
-    let who = if s.run_as == RunAs::System { "System (runs even when nobody is logged in)" } else { "The user who installed Kora" };
+    let who = if s.run_as == RunAs::System { "System (the machine account)" } else { "As you (recommended)" };
     p.row(Hit::Row(3), Line::raw(format!("{}Run as:   ◀ {who} ▶", mark(3))));
-    p.blank();
-    match &s.existing {
-        Some(c) => p.text(&format!("Currently on: {}{} at {}", match c.preset { Preset::Daily => "daily", Preset::Weekly => "weekly", Preset::Custom => "custom" }, c.weekday.map(|d| format!(" ({})", WEEKDAYS[d as usize % 7])).unwrap_or_default(), c.time), Style::default().fg(Color::Green)),
-        None => p.text("Currently off.", DIM),
+    for l in wrap(&s.run_as_help(), w.saturating_sub(2)) {
+        p.line(Line::styled(format!("  {l}"), DIM));
     }
     p.blank();
-    p.buttons(&[btn(Action::Save, "Save (Enter)", true), btn(Action::Remove, "Turn off (F3)", s.existing.is_some()), back()]);
+    p.buttons(&[btn(Action::Save, "Save (Enter)", true), btn(Action::Remove, "Remove schedule (F3)", s.existing.is_some()), back()]);
 }
 
 fn add(p: &mut Page, s: &AddState) {

@@ -16,9 +16,10 @@ use kora_core::installer::registry::{self, Registry, ServerEntry, ServerFile};
 use kora_core::installer::{self, host, RollbackOptions};
 use kora_core::service::{ControlAction, ServiceState};
 
-use super::api::manual::{self, ApplyOpts, Scope, UpdateEvent, UpdatePreview, UpdateReport};
-use super::api::notify::{self, NotifyConfig};
-use super::api::schedule::{self, ScheduleConfig};
+use kora_core::notify::{self, NotifyConfig};
+use kora_core::service::{self as schedule, ScheduleConfig};
+use kora_core::update::manual::{self, ApplyOpts, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
+use kora_core::update::UpdateReport;
 use super::backend::{Backend, Res, Status, UpdateBadge};
 
 #[derive(Default)]
@@ -47,21 +48,45 @@ pub fn with_ensure(cfg: &str, name: &str) -> Option<String> {
     Some(out)
 }
 
-/// Optional `<dir>/.kora/update-status.json`, written by the updater/notifier when it knows:
-/// `{"behind": 3, "needs_attention": false, "new_release": false}`.
+/// `<dir>/.kora/update-status.json`, written by the updater and by `[ Check for updates ]`:
+/// `{"checked_at": 1700000000, "updates": 3, "attention": false, "new_release": false}`.
+/// A missing, unreadable or older-shaped file means "not known" (`None`) or whatever fields it has.
 pub fn read_badge(dir: &Path) -> Option<UpdateBadge> {
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join(".kora").join("update-status.json")).ok()?).ok()?;
-    if v.get("needs_attention").and_then(|x| x.as_bool()) == Some(true) {
+    let flag = |k: &str| match v.get(k) {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => !s.is_empty(),
+        _ => false,
+    };
+    if flag("attention") || flag("needs_attention") {
         return Some(UpdateBadge::NeedsAttention);
     }
-    let behind = v.get("behind").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
-    if behind > 0 {
-        return Some(UpdateBadge::Updates(behind));
+    let n = v.get("updates").or_else(|| v.get("behind")).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+    if n > 0 {
+        return Some(UpdateBadge::Updates(n));
     }
-    if v.get("new_release").and_then(|x| x.as_bool()) == Some(true) {
+    if flag("new_release") {
         return Some(UpdateBadge::NewRelease);
     }
     Some(UpdateBadge::UpToDate)
+}
+
+/// Write the status file the list badge reads (atomically; a failure only costs the badge).
+fn write_status(dir: &Path, p: &UpdatePreview) {
+    let meta = dir.join(".kora");
+    if std::fs::create_dir_all(&meta).is_err() {
+        return;
+    }
+    let tmp = meta.join("update-status.json.tmp");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    if std::fs::write(&tmp, super::backend::status_json(p, now)).is_ok() && std::fs::rename(&tmp, meta.join("update-status.json")).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// The record the manual update engine wants (it reads `kora-server.json`).
+fn record(e: &ServerEntry) -> Res<manual::ServerRecord> {
+    manual::load_server(&e.dir.to_string_lossy()).map_err(err)
 }
 
 fn err<E: std::fmt::Display>(e: E) -> String {
@@ -162,15 +187,28 @@ impl Backend for SystemBackend {
     }
 
     fn preview(&mut self, e: &ServerEntry, scope: Scope) -> Res<UpdatePreview> {
-        manual::preview(e, scope)
+        manual::preview(&record(e)?, scope).map_err(err)
     }
 
     fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
-        manual::apply(e, scope, o, on)
+        let rec = record(e)?;
+        let report = manual::apply(&rec, scope, o, on).map_err(err)?;
+        notify::after_update(e, &report);
+        Ok(report)
     }
 
     fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()> {
-        manual::rollback(e, snapshot)
+        manual::rollback(&record(e)?, snapshot).map_err(err)
+    }
+
+    fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo> {
+        record(e).map(|r| manual::snapshots(&r)).unwrap_or_default()
+    }
+
+    fn check_updates(&mut self, e: &ServerEntry) -> Res<UpdateBadge> {
+        let p = self.preview(e, Scope::All)?;
+        write_status(&e.dir, &p);
+        Ok(super::backend::badge_of(&p))
     }
 
     fn notify_load(&mut self, e: &ServerEntry) -> NotifyConfig {
@@ -178,11 +216,11 @@ impl Backend for SystemBackend {
     }
 
     fn notify_save(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()> {
-        notify::save(e, c)
+        notify::save(e, c).map_err(err)
     }
 
-    fn notify_test(&mut self, c: &NotifyConfig) -> Res<()> {
-        notify::send_test(c)
+    fn notify_test(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()> {
+        notify::send_test(c, &e.name).map_err(err)
     }
 
     fn schedule_get(&mut self, e: &ServerEntry) -> Option<ScheduleConfig> {
@@ -190,11 +228,21 @@ impl Backend for SystemBackend {
     }
 
     fn schedule_set(&mut self, e: &ServerEntry, c: &ScheduleConfig) -> Res<()> {
-        schedule::set(e, c)
+        schedule::set(e, c).map_err(err)
     }
 
     fn schedule_remove(&mut self, e: &ServerEntry) -> Res<()> {
-        schedule::remove(e)
+        schedule::remove(e).map_err(err)
+    }
+
+    fn schedule_elevation(&mut self, e: &ServerEntry, set: Option<&ScheduleConfig>) -> Option<Vec<String>> {
+        if kora_core::elevate::is_elevated() {
+            return None;
+        }
+        Some(match set {
+            Some(c) => schedule::set_args(e, c),
+            None => vec!["schedule".into(), "off".into(), e.dir.to_string_lossy().into_owned()],
+        })
     }
 }
 
@@ -262,10 +310,14 @@ mod tests {
         assert_eq!(read_badge(d.path()), None);
         std::fs::create_dir(d.path().join(".kora")).unwrap();
         let w = |s: &str| std::fs::write(d.path().join(".kora/update-status.json"), s).unwrap();
-        w(r#"{"behind":3}"#);
+        w(r#"{"checked_at":5,"updates":3,"attention":false,"new_release":false}"#);
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::Updates(3)));
-        w(r#"{"behind":0,"needs_attention":true}"#);
+        w(r#"{"updates":0,"attention":true}"#);
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::NeedsAttention));
+        w(r#"{"behind":2}"#);
+        assert_eq!(read_badge(d.path()), Some(UpdateBadge::Updates(2)), "the old shape still reads");
+        w("not json");
+        assert_eq!(read_badge(d.path()), None);
         w(r#"{"new_release":true}"#);
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::NewRelease));
         w(r#"{}"#);

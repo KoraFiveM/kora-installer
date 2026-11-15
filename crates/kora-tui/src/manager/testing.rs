@@ -11,9 +11,10 @@ use kora_core::installer::Mode;
 use kora_core::service::ControlAction;
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
 
-use super::api::manual::{ApplyOpts, Scope, UpdateEvent, UpdatePreview, UpdateReport};
-use super::api::notify::NotifyConfig;
-use super::api::schedule::ScheduleConfig;
+use kora_core::notify::NotifyConfig;
+use kora_core::service::ScheduleConfig;
+use kora_core::update::manual::{ApplyOpts, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
+use kora_core::update::UpdateReport;
 use super::app::*;
 use super::backend::{Backend, Res, Status, UpdateBadge};
 use crate::clipboard::Clipboard;
@@ -35,6 +36,13 @@ pub struct Fake {
     pub apply_events: Vec<UpdateEvent>,
     pub notify: NotifyConfig,
     pub notify_test_error: Option<String>,
+    pub notify_save_error: Option<String>,
+    pub snapshots: Vec<SnapshotInfo>,
+    /// `Some(args)`: changing the schedule needs elevation and these are the arguments.
+    pub elevation: Option<Vec<String>>,
+    /// What the live-progress hook saw (a copy of the progress at each event).
+    pub frames: Vec<super::app::Live>,
+    pub checked: Option<Res<super::backend::UpdateBadge>>,
     pub schedule: Option<ScheduleConfig>,
     pub clip: Option<String>,
     pub launch_error: Option<String>,
@@ -108,30 +116,50 @@ impl Backend for FakeBackend {
     fn preview(&mut self, _e: &ServerEntry, scope: Scope) -> Res<UpdatePreview> {
         let f = self.0.borrow();
         assert_eq!(scope, Scope::All);
-        f.preview.clone().unwrap_or_else(|| Ok(UpdatePreview::default()))
+        f.preview.clone().unwrap_or_else(|| Ok(UpdatePreview { resources: vec![], new_release: None }))
     }
     fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
-        let mut f = self.0.borrow_mut();
-        f.calls.push(format!("apply {} {scope:?} restart={}", e.name, o.restart_if_needed));
-        for ev in f.apply_events.clone() {
-            on(ev);
+        let (events, result) = {
+            let mut f = self.0.borrow_mut();
+            f.calls.push(format!("apply {} {scope:?} restart={:?}", e.name, o.restart));
+            (f.apply_events.clone(), f.apply.clone().unwrap_or_else(|| Ok(UpdateReport::default())))
+        };
+        for ev in events {
+            on(ev); // the live hook borrows the fake too, so no borrow is held here
         }
-        f.apply.clone().unwrap_or_else(|| Ok(UpdateReport::default()))
+        result
     }
     fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()> {
         self.0.borrow_mut().calls.push(format!("rollback {} {snapshot}", e.name));
         Ok(())
+    }
+    fn snapshots(&mut self, _e: &ServerEntry) -> Vec<SnapshotInfo> {
+        self.0.borrow().snapshots.clone()
+    }
+    fn check_updates(&mut self, e: &ServerEntry) -> Res<UpdateBadge> {
+        let mut f = self.0.borrow_mut();
+        f.calls.push(format!("check {}", e.name));
+        match f.checked.clone() {
+            Some(r) => r,
+            None => f.preview.clone().unwrap_or_else(|| Ok(UpdatePreview { resources: vec![], new_release: None })).map(|p| super::backend::badge_of(&p)),
+        }
+    }
+    fn schedule_elevation(&mut self, _e: &ServerEntry, _set: Option<&ScheduleConfig>) -> Option<Vec<String>> {
+        self.0.borrow().elevation.clone()
     }
     fn notify_load(&mut self, _e: &ServerEntry) -> NotifyConfig {
         self.0.borrow().notify.clone()
     }
     fn notify_save(&mut self, _e: &ServerEntry, c: &NotifyConfig) -> Res<()> {
         let mut f = self.0.borrow_mut();
+        if let Some(e) = &f.notify_save_error {
+            return Err(e.clone());
+        }
         f.calls.push(format!("notify_save {:?}", c.discord_webhook));
         f.notify = c.clone();
         Ok(())
     }
-    fn notify_test(&mut self, _c: &NotifyConfig) -> Res<()> {
+    fn notify_test(&mut self, _e: &ServerEntry, _c: &NotifyConfig) -> Res<()> {
         let mut f = self.0.borrow_mut();
         f.calls.push("notify_test".into());
         match &f.notify_test_error {
@@ -195,7 +223,13 @@ pub fn managed_dir(root: &Path, name: &str) -> PathBuf {
 
 pub fn app_with(servers: Vec<ServerEntry>) -> (App, Shared) {
     let shared: Shared = Rc::new(RefCell::new(Fake { servers, ..Fake::default() }));
-    let app = App::new(Services { backend: Box::new(FakeBackend(shared.clone())), launcher: Box::new(FakeLauncher(shared.clone())), clipboard: Box::new(FakeClip(shared.clone())) });
+    let live_to = shared.clone();
+    let app = App::new(Services {
+        backend: Box::new(FakeBackend(shared.clone())),
+        launcher: Box::new(FakeLauncher(shared.clone())),
+        clipboard: Box::new(FakeClip(shared.clone())),
+        live: Box::new(move |l| live_to.borrow_mut().frames.push(l.clone())),
+    });
     (app, shared)
 }
 
