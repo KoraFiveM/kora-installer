@@ -5,6 +5,12 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-15
+
+### Fixed
+- The live catalog is no longer rejected because of its `bridges` / `creators` groups: Add resources showed "unknown variant `bridges`", fell back to an old bundled catalog and listed 0 compatibility resources, bridges and creators. Unknown group names are now tolerated (shown as "other"); an unknown `kind` or `type` is still refused, now naming the resource and field and asking you to update the installer.
+- The bundled offline catalog is refreshed to the current schema-v3 catalog (compatibility resources and bridges included).
+
 ## [0.3.2] - 2026-11-15
 
 ### Added

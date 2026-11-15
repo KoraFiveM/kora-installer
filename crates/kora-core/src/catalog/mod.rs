@@ -19,6 +19,8 @@ pub const EMBEDDED_SNAPSHOT: &str = include_str!("../../assets/resources.json");
 pub enum CatalogError {
     #[error("catalog parse error: {0}")]
     Parse(#[from] serde_json::Error),
+    #[error("catalog needs a newer installer: {0}")]
+    Unrecognised(String),
     #[error("catalog fetch error: {0}")]
     Fetch(String),
     #[error("catalog invalid: {}", .0.join("; "))]
@@ -35,6 +37,11 @@ pub enum Group {
     DefaultMaps,
     Compat,
     Props,
+    Bridges,
+    Creators,
+    /// Also the home of any group name this installer does not know yet, so a new catalog group
+    /// can never make the whole catalog unreadable (groups only affect display order, not installs).
+    #[serde(other)]
     Other,
 }
 
@@ -240,7 +247,33 @@ pub fn is_valid_repo_url(url: &str) -> bool {
 
 impl Catalog {
     pub fn parse(json: &str) -> Result<Catalog, CatalogError> {
-        Ok(serde_json::from_str(json)?)
+        match serde_json::from_str(json) {
+            Ok(c) => Ok(c),
+            Err(e) => Err(Self::explain_unrecognised(json).unwrap_or(CatalogError::Parse(e))),
+        }
+    }
+
+    /// `kind` and `type` decide what gets installed and where, so an unknown value is never guessed:
+    /// the catalog is rejected, naming the resource and field so it is clear the installer is too old.
+    fn explain_unrecognised(json: &str) -> Option<CatalogError> {
+        let v: serde_json::Value = serde_json::from_str(json).ok()?;
+        for r in v.get("resources")?.as_array()? {
+            let id = r.get("id").and_then(|x| x.as_str()).unwrap_or("?");
+            for (field, known) in [
+                ("kind", &["kora", "dependency", "optional", "internal"][..]),
+                ("type", &["compat", "bridge", "creator"][..]),
+            ] {
+                if let Some(val) = r.get(field).and_then(|x| x.as_str()) {
+                    if !known.contains(&val) {
+                        return Some(CatalogError::Unrecognised(format!(
+                            "resource '{id}' has an unrecognised {field} '{val}' (known: {}); update the Kora installer",
+                            known.join(", ")
+                        )));
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Parse and validate.
@@ -430,6 +463,34 @@ mod tests {
     }
 
     #[test]
+    fn embedded_snapshot_is_current_v3() {
+        let c = Catalog::embedded().unwrap();
+        assert_eq!(c.schema_version, 3);
+        assert!(c.resources.iter().any(|r| r.res_type == Some(ResType::Compat)));
+        assert!(c.resources.iter().any(|r| r.res_type == Some(ResType::Bridge) && r.group == Group::Bridges));
+        assert_eq!(c.section(Section::Bridges).len(), 4);
+    }
+
+    #[test]
+    fn group_is_tolerant_but_kind_and_type_are_strict() {
+        let base = |g: &str, k: &str, t: &str| {
+            format!(
+                r#"{{"schemaVersion":3,"resources":[{{"id":"x","repository":"https://github.com/o/x.git","path":"x","group":"{g}","kind":"{k}","branch":"main"{t}}}]}}"#
+            )
+        };
+        for (g, want) in [("other", Group::Other), ("brand-new-group", Group::Other), ("bridges", Group::Bridges), ("creators", Group::Creators), ("kora", Group::Kora), ("cfx-default", Group::CfxDefault)] {
+            assert_eq!(Catalog::parse(&base(g, "kora", "")).unwrap().resources[0].group, want, "{g}");
+        }
+        for (g, s) in [(Group::Bridges, "\"bridges\""), (Group::CfxDefault, "\"cfx-default\""), (Group::Other, "\"other\"")] {
+            assert_eq!(serde_json::to_string(&g).unwrap(), s);
+        }
+        let e = Catalog::parse(&base("kora", "weird", "")).unwrap_err().to_string();
+        assert!(e.contains("'x'") && e.contains("kind") && e.contains("'weird'") && e.contains("update"), "{e}");
+        let e = Catalog::parse(&base("kora", "kora", r#","type":"gizmo""#)).unwrap_err().to_string();
+        assert!(e.contains("'x'") && e.contains("type") && e.contains("'gizmo'"), "{e}");
+    }
+
+    #[test]
     fn remote_then_fallback() {
         let (c, o) = load(&Fake(Ok(EMBEDDED_SNAPSHOT.into())), CATALOG_URL).unwrap();
         assert_eq!(o, CatalogOrigin::Remote);
@@ -555,7 +616,12 @@ mod tests {
 
     #[test]
     fn v2_catalog_still_parses() {
-        let c = Catalog::embedded().unwrap();
+        // The bundled snapshot is v3 now; derive a v2 catalog from it (no types, no creators).
+        let mut v: serde_json::Value = serde_json::from_str(EMBEDDED_SNAPSHOT).unwrap();
+        v["schemaVersion"] = 2.into();
+        v.as_object_mut().unwrap().remove("creators");
+        v["resources"].as_array_mut().unwrap().retain(|r| r.get("type").is_none());
+        let c = Catalog::parse_validated(&v.to_string()).unwrap();
         assert_eq!(c.schema_version, 2);
         assert!(c.creators.is_empty());
         assert!(c.resources.iter().all(|r| r.res_type.is_none() && !r.is_third_party()));
