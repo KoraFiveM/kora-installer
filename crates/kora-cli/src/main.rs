@@ -103,6 +103,12 @@ struct InstallArgs {
     /// Show the full plan and change nothing.
     #[arg(long)]
     dry_run: bool,
+    /// Do not install the Kora app (the `kora` command and Start Menu shortcut) next to the server.
+    #[arg(long)]
+    no_app: bool,
+    /// With the Kora app: no desktop shortcut (Windows).
+    #[arg(long)]
+    no_desktop_shortcut: bool,
     /// If a port is in use, silently use the next free one and say what changed.
     #[arg(long)]
     auto_ports: bool,
@@ -229,6 +235,8 @@ impl InstallArgs {
             db_admin,
             // Headless installs start nothing unless asked (CI and scripts keep their behaviour).
             start: self.start && !self.no_start,
+            // Real installs include the app by default; a dry run lists nothing it would not change anyway.
+            app: (!self.no_app && !self.dry_run).then_some(kora_core::app_install::AppChoice { desktop_shortcut: !self.no_desktop_shortcut }),
         })
     }
 }
@@ -317,6 +325,11 @@ enum Command {
         #[command(subcommand)]
         cmd: ScheduleCmd,
     },
+    /// The Kora app: the `kora` command / Start Menu shortcut that reopens the manager.
+    App {
+        #[command(subcommand)]
+        cmd: AppCmd,
+    },
     /// GitHub helpers for development mode.
     Github {
         #[command(subcommand)]
@@ -359,6 +372,9 @@ enum Command {
         /// Also drop the databases and database users Kora created.
         #[arg(long)]
         delete_databases: bool,
+        /// Remove only the Kora app (shortcuts, PATH entry, the installed copy); servers and databases are never touched.
+        #[arg(long)]
+        app: bool,
     },
 }
 
@@ -487,6 +503,114 @@ fn webhook(cmd: WebhookCmd) -> i32 {
             },
             Err(e) => fail(e),
         },
+    }
+}
+
+#[derive(Subcommand)]
+enum AppCmd {
+    /// Install or update the Kora app (idempotent).
+    Install {
+        /// Do not ask (nothing is asked today; accepted for scripts).
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// No desktop shortcut (Windows).
+        #[arg(long)]
+        no_desktop_shortcut: bool,
+        /// Replace a newer installed copy with this program.
+        #[arg(long)]
+        force: bool,
+        /// List every change and make none.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show whether the Kora app is installed (`key: value` lines).
+    Status,
+    /// Remove the Kora app. Servers and databases are never touched.
+    Uninstall {
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// What a bare `kora` does in a terminal: manage the servers you have, or set up the first one.
+fn default_command(registered: usize) -> Command {
+    if registered > 0 {
+        Command::Manager
+    } else {
+        Command::Install(Box::default())
+    }
+}
+
+fn registered_servers() -> usize {
+    registry::Registry::load().map(|r| r.servers.len()).unwrap_or(0)
+}
+
+fn print_lines(prefix: &str, lines: &[String]) {
+    for l in lines {
+        println!("{prefix}{l}");
+    }
+}
+
+fn app_install(force: bool, no_desktop_shortcut: bool, dry_run: bool) -> i32 {
+    use kora_core::app_install as app;
+    if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
+        eprintln!("error: installing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux/macOS).");
+        return 1;
+    }
+    match app::install_app(&app::AppOptions { desktop_shortcut: !no_desktop_shortcut, force, dry_run }) {
+        Ok(out) => {
+            if dry_run {
+                println!("Dry run: nothing was changed. The Kora app install would:");
+            } else if out.changed() {
+                println!("The Kora app is installed ({}):", out.exe.display());
+            } else {
+                println!("The Kora app is already installed and up to date ({}).", out.exe.display());
+            }
+            print_lines("  - ", &out.changes);
+            print_lines("  note: ", &out.notes);
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+fn app_status() -> i32 {
+    print_lines("", &kora_core::app_install::status().lines());
+    0
+}
+
+fn app_uninstall(yes: bool, dry_run: bool) -> i32 {
+    use kora_core::app_install as app;
+    if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
+        eprintln!("error: removing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux/macOS).");
+        return 1;
+    }
+    if !yes && !dry_run {
+        if !std::io::stdin().is_terminal() {
+            eprintln!("error: pass --yes to remove the Kora app without a terminal to ask in (or --dry-run to preview).");
+            return 2;
+        }
+        if !installer::uninstall::Asker::ask(&mut Terminal, "Remove the Kora app (shortcuts, PATH entry, the installed program)? Your servers and databases are not touched.", true) {
+            println!("Cancelled. Nothing was changed.");
+            return 0;
+        }
+    }
+    match app::uninstall_app_opts(dry_run) {
+        Ok(lines) => {
+            println!("{}", if dry_run { "Dry run: nothing was changed. Removing the Kora app would:" } else { "The Kora app was removed:" });
+            print_lines("  - ", &lines);
+            println!("Your servers and databases were not touched.");
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
     }
 }
 
@@ -671,7 +795,7 @@ fn write_install_log(req: &InstallRequest, lines: &[String], error: Option<&str>
 }
 
 /// Wizard -> installer thread + progress screen -> outcome / error screen.
-fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>) -> i32 {
+fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>, no_app: bool, no_desktop_shortcut: bool) -> i32 {
     let mut req = match interactive_install(prefill) {
         Ok(Some(r)) => r,
         Ok(None) => {
@@ -687,6 +811,11 @@ fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>) -> i32 {
     };
     if catalog.is_some() {
         req.catalog = catalog;
+    }
+    if no_app {
+        req.app = None;
+    } else if no_desktop_shortcut {
+        req.app = Some(kora_core::app_install::AppChoice { desktop_shortcut: false });
     }
     let (tx, rx) = mpsc::channel();
     let worker_req = req.clone();
@@ -782,7 +911,7 @@ fn install(args: InstallArgs) -> i32 {
             return 2;
         }
         let catalog = args.catalog.or_else(|| std::env::var("KORA_CATALOG").ok().filter(|c| !c.is_empty()));
-        return interactive_flow(catalog, redeemed);
+        return interactive_flow(catalog, redeemed, args.no_app, args.no_desktop_shortcut);
     }
     let args_auto_ports = args.auto_ports;
     let dev_mode = matches!(args.mode, Some(ModeArg::Dev)) || redeemed.as_ref().is_some_and(|r| r.mode == Mode::Development);
@@ -1232,9 +1361,15 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
     }
     if dry_run {
         println!("\nDry run: nothing was changed.");
+        if kora_core::app_install::status().installed {
+            println!("The Kora app would stay installed (remove it with `kora uninstall --app`).");
+        }
         return 0;
     }
     println!("\nRemoved: {}. Kept: {}. Failed: {}.", summary.removed.len(), summary.kept.len(), summary.failed.len());
+    if kora_core::app_install::status().installed {
+        println!("The Kora app itself (the `kora` command and its shortcuts) is still installed. Remove it with `kora uninstall --app`.");
+    }
     for f in &summary.failed {
         eprintln!("  failed: {f}");
     }
@@ -1256,6 +1391,10 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Stop { .. }) => K::Stop,
         Some(Command::Restart { .. }) => K::Restart,
         Some(Command::Uninstall { dry_run, .. }) => K::Uninstall { dry_run: *dry_run },
+        Some(Command::App { cmd }) => match cmd {
+            AppCmd::Install { dry_run, .. } | AppCmd::Uninstall { dry_run, .. } => K::Uninstall { dry_run: *dry_run },
+            AppCmd::Status => K::Status,
+        },
     }
 }
 
@@ -1286,7 +1425,9 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
             }
         }
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) => one("change the automatic-update schedule"),
+        Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
+        Some(Command::App { cmd: AppCmd::Install { dry_run: false, .. } | AppCmd::Uninstall { dry_run: false, .. } }) => one("install or remove the Kora app (the command, shortcuts and the installed program)"),
         _ => vec![],
     }
 }
@@ -1321,13 +1462,15 @@ fn finish(code: i32) -> ! {
 }
 
 /// Ask for administrator permission before anything else happens (see `kora_core::elevate`).
-fn elevate_if_needed(cli: &Cli) {
-    let kind = command_kind(&cli.command);
+/// `effective` = what will run (a bare `kora` resolves to the manager or the wizard); the relaunch
+/// keeps the original arguments so the elevated copy decides the same way.
+fn elevate_if_needed(cli: &Cli, effective: &Option<Command>) {
+    let kind = command_kind(effective);
     let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     if !tty || cli.no_elevate || !(cfg!(windows) && kind.privileged() || cfg!(not(windows))) || elevate::is_elevated() {
         return;
     }
-    let reasons = if cfg!(windows) { vec![] } else { admin_reasons_for_command(&cli.command) };
+    let reasons = if cfg!(windows) { vec![] } else { admin_reasons_for_command(effective) };
     let env = elevate::Env { windows: cfg!(windows), elevated: false, tty, no_elevate: false };
     let need = elevate::decide(&env, kind, &reasons);
     let args = relaunch_args(&cli.command, std::env::args_os().skip(1).collect());
@@ -1338,8 +1481,15 @@ fn elevate_if_needed(cli: &Cli) {
 
 fn main() {
     let cli = Cli::parse();
-    elevate_if_needed(&cli);
-    let code = match cli.command {
+    // Bare `kora` in a terminal: the manager when servers exist, the install wizard otherwise.
+    let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let bare = match &cli.command {
+        None if tty => Some(default_command(registered_servers())),
+        _ => None,
+    };
+    elevate_if_needed(&cli, if bare.is_some() { &bare } else { &cli.command });
+    let command = if bare.is_some() { bare } else { cli.command };
+    let code = match command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
         Some(Command::Manager) => not_implemented("manager"),
@@ -1359,7 +1509,13 @@ fn main() {
         Some(Command::Start { server }) => control(&server, kora_core::service::ControlAction::Start),
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
-        Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
+        Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run),
+        Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
+        Some(Command::App { cmd }) => match cmd {
+            AppCmd::Install { force, no_desktop_shortcut, dry_run, .. } => app_install(force, no_desktop_shortcut, dry_run),
+            AppCmd::Status => app_status(),
+            AppCmd::Uninstall { yes, dry_run } => app_uninstall(yes, dry_run),
+        },
     };
     finish(code);
 }
@@ -1429,6 +1585,37 @@ mod tests {
         assert!(p(&["webhook", "remove", "alpha"]).is_ok());
         assert!(p(&["webhook", "set"]).is_err());
         assert!(p(&["webhook"]).is_err());
+    }
+
+    #[test]
+    fn bare_kora_opens_the_manager_with_servers_and_the_wizard_without() {
+        for (registered, manager) in [(0, false), (1, true), (2, true), (50, true)] {
+            match default_command(registered) {
+                Command::Manager => assert!(manager, "{registered} servers"),
+                Command::Install(a) => assert!(!manager && !a.any_given(), "{registered} servers: the plain wizard"),
+                _ => panic!("unexpected default command"),
+            }
+        }
+    }
+
+    #[test]
+    fn real_installs_include_the_app_unless_told_not_to_and_dry_runs_do_not() {
+        let app = |a: InstallArgs| a.into_request().unwrap().app;
+        assert_eq!(app(InstallArgs::default()), Some(kora_core::app_install::AppChoice { desktop_shortcut: true }));
+        assert_eq!(app(InstallArgs { no_desktop_shortcut: true, ..Default::default() }), Some(kora_core::app_install::AppChoice { desktop_shortcut: false }));
+        assert_eq!(app(InstallArgs { no_app: true, ..Default::default() }), None);
+        assert_eq!(app(InstallArgs { dry_run: true, ..Default::default() }), None);
+        assert!(!InstallArgs { no_app: true, ..Default::default() }.any_given(), "--no-app alone still opens the wizard");
+    }
+
+    #[test]
+    fn app_commands_are_classified_for_elevation() {
+        use elevate::CmdKind as K;
+        let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
+        assert_eq!(command_kind(&parse(&["app", "install", "--yes"])), K::Uninstall { dry_run: false });
+        assert_eq!(command_kind(&parse(&["app", "install", "--dry-run"])), K::Uninstall { dry_run: true });
+        assert_eq!(command_kind(&parse(&["app", "status"])), K::Status);
+        assert!(matches!(parse(&["uninstall", "--app", "-y"]), Some(Command::Uninstall { app: true, yes: true, .. })));
     }
 
     #[test]

@@ -260,6 +260,7 @@ fn apply_to_request_leaves_secrets_alone() {
         dry_run: false,
         db_admin: None,
         start: false,
+        app: None,
     };
     let mut r = sample(ArtifactChoice::Recommended);
     r.mode = Mode::Development;

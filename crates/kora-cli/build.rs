@@ -1,5 +1,6 @@
 // Windows file metadata (SignPath requires consistent product name/version).
 fn main() {
+    println!("cargo:rerun-if-changed=../../assets/kora.ico");
     #[cfg(windows)]
     {
         let version = std::env::var("CARGO_PKG_VERSION").unwrap();
@@ -10,7 +11,8 @@ fn main() {
         res.set("OriginalFilename", "kora.exe");
         res.set("ProductVersion", &version);
         res.set("FileVersion", &version);
-        // TODO: add an icon via res.set_icon("assets/kora.ico") once artwork exists.
+        // The Kora fox (assets/README.md): the exe, Start Menu / Desktop shortcuts and Apps & features all use it.
+        res.set_icon("../../assets/kora.ico");
         res.compile().expect("failed to compile Windows resources");
     }
 }

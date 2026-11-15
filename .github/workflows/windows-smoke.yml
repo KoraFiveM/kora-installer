@@ -4,6 +4,7 @@ name: Windows smoke
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,16 +29,20 @@ jobs:
           cargo build --release --locked -p kora-cli
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
       - name: "1. --version and no-TTY install error"
+        timeout-minutes: 10
         run: ./scripts/smoke/01-build.ps1
       - name: "2a. PSScriptAnalyzer on install.ps1 (all rules except Write-Host)"
+        timeout-minutes: 10
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
           $f = Invoke-ScriptAnalyzer -Path scripts/install.ps1 -ExcludeRule PSAvoidUsingWriteHost
           $f | Format-Table -AutoSize | Out-String | Write-Host
           if ($f) { throw "PSScriptAnalyzer: $(@($f).Count) finding(s)" }
       - name: "2b. install.ps1 against a local fake release"
+        timeout-minutes: 10
         run: ./scripts/smoke/02-install-ps1.ps1
       - name: "6. Dev mode dry run"
+        timeout-minutes: 10
         run: ./scripts/smoke/06-dev-dry-run.ps1
       - name: Collect logs
         if: always()
@@ -62,10 +67,13 @@ jobs:
           cargo build --release --locked -p kora-cli
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
       - name: "3. Production install (tiny catalog, no service)"
+        timeout-minutes: 10
         run: ./scripts/smoke/03-install.ps1
       - name: "4. Service + firewall: start/stop/restart, txAdmin answers, uninstall removes everything"
+        timeout-minutes: 10
         run: ./scripts/smoke/04-service.ps1
       - name: "4b. Auto-update scheduled task (real schtasks create, query, delete)"
+        timeout-minutes: 10
         run: |
           cargo test --locked -p kora-core real_windows_scheduled_task -- --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'scheduled task test failed' }
@@ -98,8 +106,30 @@ jobs:
           cargo build --release --locked -p kora-cli
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
       - name: "5. MariaDB: existing MySQL server, then Kora's own MariaDB (--db install) and cleanup"
+        timeout-minutes: 25
         run: ./scripts/smoke/05-mariadb.ps1
       - name: Collect logs
         if: always()
         run: |
           foreach ($p in 'C:\kora-smoke\srv\.kora', "$env:LOCALAPPDATA\Kora") { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File | Select-Object -First 40 FullName } }
+
+  app:
+    name: "app: Program Files copy, PATH, shortcuts, Apps & features, uninstall"
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: smoke
+      - name: "Build kora.exe"
+        run: |
+          cargo build --release --locked -p kora-cli
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+      - name: "9. The Kora app: install, status, shortcuts (Run as administrator), PATH, Apps & features, uninstall"
+        timeout-minutes: 10
+        run: ./scripts/smoke/09-app.ps1
