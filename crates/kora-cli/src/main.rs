@@ -301,6 +301,18 @@ enum Command {
     Update(UpdateArgs),
     /// Show registered servers.
     Status,
+    /// Update the kora program itself to the newest release (checksum-verified).
+    SelfUpdate {
+        /// Only say whether a newer version exists.
+        #[arg(long)]
+        check: bool,
+        /// Do not ask for confirmation.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Install exactly this release (also allows going back to an older one), e.g. v0.2.1.
+        #[arg(long, value_name = "vX.Y.Z")]
+        version: Option<String>,
+    },
     /// Discord notifications for update reports.
     Webhook {
         #[command(subcommand)]
@@ -1386,7 +1398,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Status | Command::Schedule { cmd: ScheduleCmd::Show { .. } }) => K::Status,
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. }) => K::Other,
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. }) => K::Other,
         Some(Command::Start { .. }) => K::Start,
         Some(Command::Stop { .. }) => K::Stop,
         Some(Command::Restart { .. }) => K::Restart,
@@ -1510,6 +1522,8 @@ fn main() {
     if std::env::args_os().any(|a| a == "--license-key" || a.to_string_lossy().starts_with("--license-key=")) {
         eprintln!("Note: a licence key on the command line is visible to other programs on this computer (process list) and stays in your shell history. Prefer the CFX_LICENSE_KEY environment variable.");
     }
+    // Before parsing: `--version`/`--help` exit inside the parser and must clean up too.
+    kora_core::self_update::startup_cleanup();
     let cli = Cli::parse();
     // Bare `kora` in a terminal: the manager when servers exist, the install wizard otherwise.
     let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -1519,12 +1533,16 @@ fn main() {
     };
     elevate_if_needed(&cli, if bare.is_some() { &bare } else { &cli.command });
     let command = if bare.is_some() { bare } else { cli.command };
+    // "New version available": background check, interactive runs only (never CI, pipes, services).
+    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Update(UpdateArgs { auto: true, .. })));
+    let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
     let code = match command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
         Some(Command::Manager) => not_implemented("manager"),
         Some(Command::Update(a)) => update(a),
         Some(Command::Status) => status(),
+        Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
@@ -1547,6 +1565,9 @@ fn main() {
             AppCmd::Uninstall { yes, dry_run } => app_uninstall(yes, dry_run),
         },
     };
+    if let Some(line) = pending.and_then(|p| p.finish(std::time::Duration::from_secs(2))) {
+        println!("\n{line}");
+    }
     finish(code);
 }
 
