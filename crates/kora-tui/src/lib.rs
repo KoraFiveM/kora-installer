@@ -84,6 +84,8 @@ pub fn run_install_wizard_with(
     }
     if let Some(p) = prefill {
         w.apply_redeemed(p, true);
+    } else if let Some(saved) = kora_core::installer::saved::load() {
+        w.restore_saved(&saved);
     }
     while w.state() == wizard::WizardState::Running {
         term.t.draw(|f| wizard_view::render(f, &w))?;

@@ -16,6 +16,7 @@ pub mod gitops;
 pub mod host;
 pub mod http;
 pub mod registry;
+pub mod saved;
 mod steps;
 pub mod system;
 pub mod types;

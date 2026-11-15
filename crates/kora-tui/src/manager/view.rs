@@ -14,6 +14,7 @@ use kora_core::installer::Mode;
 use kora_core::service::{self as schedule, Preset, RunAs};
 use kora_core::update::manual::ChangeStatus;
 use super::app::*;
+use super::console::{self, ConsoleState, Tone};
 use super::backend::Status;
 use super::input::TextInput;
 use crate::wizard_view::{wrap, BRAND};
@@ -159,6 +160,7 @@ pub fn hits(app: &App, area: Rect) -> Vec<(Hit, Rect)> {
 fn help_for(app: &App) -> &'static str {
     match &app.screen {
         Screen::Main => "↑↓ select  s start  x stop  r restart  t txAdmin  o folder  l logs  e ensure  u update  v check  n notify  c schedule  d delete  a add  q quit",
+        Screen::Console(_) => "type a command, Enter sends  ↑↓ earlier commands  PgUp PgDn scroll  F2 turn on  Esc back",
         Screen::Logs(_) => "↑↓ PgUp PgDn scroll  Tab next file  c copy  r reload  Esc back",
         Screen::Ensure(_) => "type a name or ↑↓ pick  Enter ensure  Tab restart on/off  Esc back",
         Screen::Delete(s) if s.stage == DelStage::Name => "type the name, Enter confirms  Esc cancels",
@@ -288,6 +290,7 @@ fn main(app: &App, body: Rect, b: &mut Built) {
             btn(Action::OpenTx, "Open txAdmin (t)", there),
             btn(Action::OpenFolder, "Open folder (o)", there),
             btn(Action::Logs, "View logs (l)", there),
+            btn(Action::Console, "Live console (w)", there),
             btn(Action::Ensure, "Ensure a resource (e)", there),
             btn(Action::Update, "Update (u)", there),
             btn(Action::CheckUpdates, "Check for updates (v)", there),
@@ -307,6 +310,10 @@ fn screen(app: &App, s: &Screen, body: Rect) -> (String, Page) {
     let name = app.current().map(|r| r.entry.name.clone()).unwrap_or_default();
     let title = match s {
         Screen::Main => String::new(),
+        Screen::Console(c) => {
+            console_screen(&mut p, c);
+            format!(" Live console - {name} ")
+        }
         Screen::Logs(l) => {
             logs(&mut p, l);
             format!(" Logs - {name} ")
@@ -341,6 +348,49 @@ fn screen(app: &App, s: &Screen, body: Rect) -> (String, Page) {
 
 fn back() -> (Action, String, bool) {
     btn(Action::Back, "Back (Esc)", true)
+}
+
+fn console_screen(p: &mut Page, c: &ConsoleState) {
+    let src = c.source_name();
+    p.line(Line::from(vec![
+        Span::styled("Live ", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+        Span::styled(match &src { Some(n) => format!("following {n}"), None => "no output yet: start the server".into() }, DIM),
+        Span::raw("   "),
+        if c.enabled { Span::styled("● commands on", Style::default().fg(BRAND)) } else { Span::styled("○ commands off", Style::default().fg(Color::Yellow)) },
+    ]));
+    p.buttons(&[
+        btn(Action::Send, "Send (Enter)", c.enabled && !c.input.is_empty()),
+        btn(Action::EnableConsole, "Turn on commands (F2)", !c.enabled),
+        btn(Action::PageUp, "Older", !c.lines.is_empty()),
+        btn(Action::PageDown, "Newer", c.scroll > 0),
+        btn(Action::End, "Latest", c.scroll > 0),
+        back(),
+    ]);
+    let w = p.w();
+    // Keep three rows for the separator, the note and the input box.
+    let room = p.room().saturating_sub(3);
+    for line in c.window(room) {
+        let style = match console::tone(line) {
+            Tone::Plain => Style::default(),
+            Tone::Typed => Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+            Tone::Error => Style::default().fg(Color::Red),
+            Tone::Warn => Style::default().fg(Color::Yellow),
+        };
+        p.line(Line::styled(trunc(line, w), style));
+    }
+    while p.room() > 3 {
+        p.blank();
+    }
+    let status = if c.scroll > 0 { format!("scrolled up {} lines (End shows the latest)", c.scroll) } else { "following the latest output".to_string() };
+    p.line(Line::styled(format!("{}  {}", "─".repeat(6), status), DIM));
+    match (&c.note, c.enabled) {
+        (Some(n), _) => p.line(Line::styled(trunc(n, w), Style::default().fg(BRAND))),
+        (None, false) => p.line(Line::styled(trunc("Commands need the Kora console helper in the server: press F2 once, then restart the server.", w), Style::default().fg(Color::Yellow))),
+        (None, true) => p.blank(),
+    }
+    let mut v = vec![Span::styled("> ", Style::default().fg(BRAND).add_modifier(Modifier::BOLD))];
+    v.extend(c.input.spans(w.saturating_sub(3), true));
+    p.line(Line::from(v));
 }
 
 fn logs(p: &mut Page, l: &logs::LogView) {

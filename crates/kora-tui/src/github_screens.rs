@@ -488,7 +488,7 @@ impl GithubFlow {
         match j {
             Job::Auth(GhAuth::Missing) => {
                 self.show_manual(
-                    "GitHub's command line tool (gh) is not installed yet. Kora installs it during setup; you can then sign in the next time you run Kora. For now, type the name of the GitHub user or organisation that should hold your copies.",
+                    "GitHub's command line tool (gh) is not installed yet. Kora installs it during setup and then opens your browser so you can sign in to GitHub (you only do this once). For now, type the name of the GitHub user or organisation that should hold your copies.",
                 );
             }
             Job::Auth(GhAuth::LoggedOut) => self.start_login(),

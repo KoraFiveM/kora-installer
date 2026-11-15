@@ -54,6 +54,78 @@ pub fn build_command(name_or_dir: &str) -> Result<Command> {
     Ok(c)
 }
 
+/// Copies FXServer's output to `<server>/.kora/console.log` (what the manager's Console screen shows),
+/// to `extra` (the service log on Windows) and, when `echo` is set, to our own stdout (journal / terminal).
+/// The pump threads end by themselves when FXServer closes its output.
+pub struct ConsoleTee;
+
+/// What the pump threads share: the log file, bytes written to it, its path, and the optional second copy.
+struct TeeSink {
+    file: Option<std::fs::File>,
+    written: u64,
+    path: PathBuf,
+    extra: Option<std::fs::File>,
+}
+
+impl ConsoleTee {
+    /// At most this much is kept in `console.log`; then it is moved to `console.log.old` and restarted.
+    const MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+    pub fn start(dir: &Path, child: &mut std::process::Child, echo: bool, extra: Option<std::fs::File>) -> Self {
+        let out = child.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>);
+        let err = child.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>);
+        Self::attach(dir, out, err, echo, extra)
+    }
+
+    /// Like [`start`](Self::start) for any two output streams.
+    pub fn attach(dir: &Path, out: Option<Box<dyn std::io::Read + Send>>, err: Option<Box<dyn std::io::Read + Send>>, echo: bool, extra: Option<std::fs::File>) -> Self {
+        use std::sync::{Arc, Mutex};
+        let meta = dir.join(".kora");
+        let _ = std::fs::create_dir_all(&meta);
+        let path = meta.join("console.log");
+        let _ = std::fs::rename(&path, meta.join("console.log.old"));
+        let file = std::fs::File::create(&path).ok();
+        let sink = Arc::new(Mutex::new(TeeSink { file, written: 0, path, extra }));
+        let pump = |mut r: Box<dyn std::io::Read + Send>, sink: Arc<Mutex<TeeSink>>| {
+            std::thread::spawn(move || {
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 8192];
+                loop {
+                    let n = match r.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    if echo {
+                        let mut o = std::io::stdout().lock();
+                        let _ = o.write_all(&buf[..n]);
+                        let _ = o.flush();
+                    }
+                    let mut g = sink.lock().unwrap();
+                    if g.written > Self::MAX_BYTES {
+                        let _ = std::fs::rename(&g.path, g.path.with_extension("log.old"));
+                        g.file = std::fs::File::create(&g.path).ok();
+                        g.written = 0;
+                    }
+                    if let Some(f) = g.file.as_mut() {
+                        let _ = f.write_all(&buf[..n]);
+                    }
+                    if let Some(f) = g.extra.as_mut() {
+                        let _ = f.write_all(&buf[..n]);
+                    }
+                    g.written += n as u64;
+                }
+            });
+        };
+        if let Some(o) = out {
+            pump(o, Arc::clone(&sink));
+        }
+        if let Some(e) = err {
+            pump(e, sink);
+        }
+        ConsoleTee
+    }
+}
+
 /// Exit code `service-host` reports for FXServer's wait status.
 /// `stop_requested`: we received SIGTERM/SIGINT before it ended. Pure, so it is unit-tested.
 pub fn exit_code_for(code: Option<i32>, signal: Option<i32>, stop_requested: bool) -> i32 {
@@ -70,7 +142,14 @@ pub fn exit_code_for(code: Option<i32>, signal: Option<i32>, stop_requested: boo
 
 /// Run the server; returns the exit code.
 pub fn service_host(name_or_dir: &str) -> Result<i32> {
-    #[cfg_attr(windows, allow(unused_mut))]
+    // Windows: connect to the service manager FIRST. Anything that fails before that (missing build,
+    // unreadable file) would exit without answering the manager, which reports a bare "1053" with no reason.
+    // `scm::run` builds the command itself, after reporting "starting", and writes any error to the log.
+    #[cfg(windows)]
+    {
+        scm::run_as_service_or_console(name_or_dir)
+    }
+    #[cfg(unix)]
     let mut cmd = build_command(name_or_dir)?;
     #[cfg(unix)]
     {
@@ -81,7 +160,10 @@ pub fn service_host(name_or_dir: &str) -> Result<i32> {
         for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
             signal_hook::flag::register(sig, Arc::clone(&stop)).map_err(|e| InstallError(format!("cannot install signal handlers: {e}")))?;
         }
+        let dir = resolve_dir(name_or_dir)?;
+        cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
+        let _console = ConsoleTee::start(&dir, &mut child, true, None);
         let pid = child.id() as i32;
         let mut forwarded = false;
         loop {
@@ -102,14 +184,9 @@ pub fn service_host(name_or_dir: &str) -> Result<i32> {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
-    #[cfg(windows)]
-    {
-        drop(cmd);
-        scm::run_as_service_or_console(name_or_dir)
-    }
     #[cfg(not(any(unix, windows)))]
     {
-        let status = cmd.status().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
+        let status = build_command(name_or_dir)?.status().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
         Ok(status.code().unwrap_or(1))
     }
 }
@@ -211,11 +288,7 @@ mod scm {
         let started = std::time::Instant::now();
         let mut child = match build_command(&target).map_err(|e| e.to_string()).and_then(|mut c| {
             c.stdin(std::process::Stdio::null());
-            if let Some(f) = &log {
-                if let (Ok(o), Ok(e)) = (f.try_clone(), f.try_clone()) {
-                    c.stdout(std::process::Stdio::from(o)).stderr(std::process::Stdio::from(e));
-                }
-            }
+            c.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
             c.spawn().map_err(|e| format!("could not start FXServer: {e}"))
         }) {
             Ok(c) => c,
@@ -225,6 +298,7 @@ mod scm {
                 return Err(e);
             }
         };
+        let _console = resolve_dir(&target).ok().map(|d| super::ConsoleTee::start(&d, &mut child, false, log.as_ref().and_then(|f| f.try_clone().ok())));
         report(ServiceState::Running, ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN, Duration::ZERO, 0, 0);
         let (code, stop) = loop {
             if let Ok(Some(st)) = child.try_wait() {
@@ -297,6 +371,23 @@ pub fn service_control(name: &str, action: crate::service::ControlAction) -> Res
 #[cfg(test)]
 mod tests {
     use super::{exit_code_for, windows_service_exit};
+
+    #[test]
+    fn the_console_tee_copies_server_output_to_console_log() {
+        // In-memory streams: no child process, so no SIGCHLD to interrupt other tests' socket reads.
+        let d = tempfile::tempdir().unwrap();
+        let out: Box<dyn std::io::Read + Send> = Box::new(std::io::Cursor::new(b"hello from fxserver\n".to_vec()));
+        let err: Box<dyn std::io::Read + Send> = Box::new(std::io::Cursor::new(b"oops\n".to_vec()));
+        let _t = super::ConsoleTee::attach(d.path(), Some(out), Some(err), false, None);
+        let log = d.path().join(".kora").join("console.log");
+        for _ in 0..50 {
+            if std::fs::read_to_string(&log).is_ok_and(|t| t.contains("hello") && t.contains("oops")) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("console.log: {:?}", std::fs::read_to_string(&log));
+    }
 
     #[test]
     fn windows_service_reports_a_requested_stop_as_clean_and_a_crash_as_failure() {
