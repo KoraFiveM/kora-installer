@@ -253,6 +253,10 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         Err(e) => format!("update failed: {e}"),
     };
     append_log(&dir, &line);
+    if let Ok(report) = &res {
+        let record = super::registry::ServerEntry { name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
+        crate::notify::after_update(&record, report);
+    }
     res
 }
 
