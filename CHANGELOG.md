@@ -5,6 +5,9 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `kora install ... --github-owner NAME` (the website one-liner) no longer demands that `gh` is already installed and signed in. The name is checked for a legal GitHub login straight away; if `gh` is ready the owner is verified up front as before, otherwise the install sets `gh` up, signs you in in the browser, and verifies the owner right after that, before anything is forked (an unknown owner stops the install with the list of valid owners; nothing is forked and your answers are saved).
+
 ## [0.3.1] - 2026-11-15
 
 Visual-only release: the terminal screens have a new look. Behaviour and key bindings are unchanged.

@@ -240,6 +240,19 @@ fn forks_path(ctx: &Ctx) -> PathBuf {
     ctx.meta_dir().join("forks.json")
 }
 
+/// Once `gh` is signed in: check an explicitly requested owner against the account's real list.
+/// Runs before anything is forked (an install started with `--github-owner` while `gh` was missing
+/// or signed out could not check it up front). Nothing is created on failure.
+fn verify_requested_owner(r: &dyn git::CommandRunner, requested: Option<&str>) -> Result<()> {
+    let Some(want) = requested.map(str::trim).filter(|o| !o.is_empty()) else { return Ok(()) };
+    git::owners::check_login_syntax(want).map_err(InstallError)?;
+    let all = git::owners::list_owners(r).map_err(|e| InstallError(format!("could not read your GitHub accounts ({e}). Run the installer again to retry; your answers are saved.")))?;
+    match git::owners::choose_owner(&all, Some(want)) {
+        Ok(_) => Ok(()),
+        Err(m) => err(format!("{m}\nNothing was forked. Run the installer again with a valid --github-owner (your answers are saved).")),
+    }
+}
+
 fn fork_owner(ctx: &Ctx, r: &dyn git::CommandRunner) -> Result<(String, bool)> {
     use git::owners::{check_org, gh_auth, GhAuth};
     let login = match gh_auth(r) {
@@ -607,6 +620,7 @@ impl InstallStep {
             if !missing.is_empty() {
                 return err(format!("Your GitHub sign-in lacks the scopes {}. Run `gh auth refresh -h github.com -s {}` and try again.", missing.join(", "), missing.join(",")));
             }
+            verify_requested_owner(&r, ctx.req.github_owner.as_deref())?;
         }
         // Ports.
         let preq = PortRequest { server: slug(&ctx.req.name), game_port: ctx.req.ports.game, txadmin_port: ctx.req.ports.txadmin, expose_txadmin: ctx.req.txadmin_public };
@@ -1380,6 +1394,47 @@ mod db_admin_tests {
         let back: DbAdmin = serde_json::from_str(&json).unwrap();
         assert_eq!(back.password, None);
         assert_eq!((back.user.as_str(), back.port), ("dba", 33061));
+    }
+
+    /// A fake `gh` that is signed in as `me` (member of org `Team`); records every call.
+    struct SignedInGh {
+        calls: std::sync::Mutex<Vec<String>>,
+    }
+    impl git::CommandRunner for SignedInGh {
+        fn run(&self, p: &str, a: &[&str], _: Option<&std::path::Path>) -> std::io::Result<git::Output> {
+            let line = format!("{p} {}", a.join(" "));
+            self.calls.lock().unwrap().push(line.clone());
+            let ok = |s: &str| Ok(git::Output { code: 0, stdout: s.into(), stderr: String::new() });
+            match line.as_str() {
+                "gh auth status --hostname github.com" => ok(""),
+                "gh api user" => ok(r#"{"login":"me"}"#),
+                l if l.starts_with("gh api user/orgs") => ok(r#"[{"login":"Team"}]"#),
+                l if l.starts_with("gh api user/memberships/orgs/") => ok(r#"{"state":"active","role":"member"}"#),
+                l if l.starts_with("gh api orgs/") => ok(r#"{"members_can_create_repositories":true}"#),
+                _ => Ok(git::Output { code: 1, stdout: String::new(), stderr: "unexpected".into() }),
+            }
+        }
+        fn sleep(&self, _: std::time::Duration) {}
+    }
+
+    #[test]
+    fn after_sign_in_a_valid_owner_passes_and_none_is_skipped() {
+        let g = SignedInGh { calls: Default::default() };
+        assert!(verify_requested_owner(&g, Some("team")).is_ok());
+        assert!(verify_requested_owner(&g, Some("ME")).is_ok());
+        let none = SignedInGh { calls: Default::default() };
+        assert!(verify_requested_owner(&none, None).is_ok());
+        assert!(none.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn after_sign_in_an_unknown_owner_fails_before_any_fork() {
+        let g = SignedInGh { calls: Default::default() };
+        let e = verify_requested_owner(&g, Some("nobody")).unwrap_err().to_string();
+        assert!(e.contains("'nobody' is not your GitHub account"), "{e}");
+        assert!(e.contains("Team") && e.contains("Nothing was forked") && e.contains("--github-owner"), "{e}");
+        assert!(!g.calls.lock().unwrap().iter().any(|c| c.contains("repo fork")), "no fork may be attempted");
+        assert!(verify_requested_owner(&g, Some("-bad")).is_err());
     }
 
     #[test]
