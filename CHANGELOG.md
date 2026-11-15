@@ -5,11 +5,17 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
 ### Added
 - Catalog schema v3 (v2 still works): compat, bridge and creator resources, creators, tag-less releases, `subpath` installs. Bridge and creator resources are always pinned clones, never forked, even in development mode.
 - New installs use the folders `[cfx-default]`, `[compat]`, `[kora]`, `[bridges]`, `[creators]/[<creator>]`, plus empty `[addons]` and `[streamedassets]`; `server.cfg` ensures folders, not single resources. Compat, bridge and creator resources are never installed unless chosen or needed.
 - Add resources to an installed server: `kora add-resources <server> --code CODE | --resource ID`, and `Add resources (g)` in the manager (browse compat / bridges / creators, with dependencies kept). Existing servers are not rearranged; missing `ensure` lines are appended.
-- Manager: `Report an issue (b)` for both modes and `Open pull request (p)` for development servers, through `gh`.
+- Manager: `Report an issue (b)` for both modes and `Open pull request (p)` for development servers, through `gh`. If `gh` is not signed in, Kora offers the browser sign-in first; issue and pull request text never contains paths, host names, ports, keys or passwords.
+
+### Changed
+- Catalog v3 needs this version: an older Kora does not understand it. Once the catalog moves to schema v3, v0.2.x installs stop reading it, so update with `kora self-update`.
+- Smoke tests (Linux and Windows) now expect `server.cfg` to ensure folders instead of single resources.
 
 ## [0.2.3] - 2026-11-15
 
