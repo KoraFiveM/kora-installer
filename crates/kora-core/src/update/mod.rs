@@ -50,6 +50,30 @@ pub trait GitOps {
     fn log_subjects(&self, _repo: &Path, _from: &str, _to: &str, _max: usize) -> Vec<String> {
         Vec::new()
     }
+    /// Development: bring the user's forks on GitHub up to date with upstream, fast-forward only
+    /// (never forced), when the user is signed in to gh. Returns one outcome per fork that was
+    /// looked at; empty when not possible. Default: nothing.
+    fn sync_forks(&self, _targets: &[UpdateTarget]) -> Vec<(String, crate::git::SyncOutcome)> {
+        Vec::new()
+    }
+}
+
+/// Fold fork-sync outcomes into the report: synced ones are counted, untouched ones listed with
+/// a plain explanation. Informational: never marks the update as needing attention.
+pub fn add_fork_sync(report: &mut UpdateReport, results: Vec<(String, crate::git::SyncOutcome)>) {
+    use crate::git::SyncOutcome as O;
+    for (id, o) in results {
+        match o {
+            O::Synced { .. } => report.forks_synced.push(id),
+            O::UpToDate => {}
+            O::Ahead { ahead } => report.forks_left_alone.push((id, format!("your fork has {ahead} commit(s) of its own and upstream has nothing new; left as it is"))),
+            O::Diverged { .. } => report.forks_left_alone.push((
+                id,
+                "your fork and upstream both have new commits; the fork was not touched. Fix: in the resource folder run `git fetch upstream && git merge upstream/<branch>`, then `git push`".into(),
+            )),
+            O::Unknown(why) => report.forks_left_alone.push((id, format!("could not check the fork ({why}); left untouched"))),
+        }
+    }
 }
 
 /// Does the update `from..to` contain SQL migrations?
@@ -138,7 +162,7 @@ impl SkipReason {
         match self {
             SkipReason::LocalCommits => "has local commits".into(),
             SkipReason::Dirty => "uncommitted changes".into(),
-            SkipReason::Diverged => "diverged from upstream".into(),
+            SkipReason::Diverged => "diverged from upstream (it has commits of its own and upstream has new ones); skipped, nothing was changed".into(),
             SkipReason::Error(e) => format!("error: {e}"),
         }
     }
@@ -319,6 +343,12 @@ pub struct UpdateReport {
     /// SQL-migration updates; never auto-rolled-back.
     pub sql_flagged: Vec<String>,
     pub needs_attention: Vec<(String, String)>,
+    /// Forks on GitHub fast-forwarded before updating (development).
+    #[serde(default)]
+    pub forks_synced: Vec<String>,
+    /// Forks that were not touched (own commits / diverged / unknown) with the reason.
+    #[serde(default)]
+    pub forks_left_alone: Vec<(String, String)>,
 }
 
 fn short(c: &str) -> &str {
@@ -354,6 +384,12 @@ impl UpdateReport {
         }
         for (id, m) in &self.needs_attention {
             s += &format!("  ATTENTION {id}: {m}\n");
+        }
+        if !self.forks_synced.is_empty() {
+            s += &format!("  forks brought up to date on GitHub: {}\n", self.forks_synced.join(", "));
+        }
+        for (id, m) in &self.forks_left_alone {
+            s += &format!("  fork {id}: {m}\n");
         }
         s
     }
@@ -484,6 +520,12 @@ pub fn run_update_with(
                 applied.push(n);
                 events(RunEvent::Applied(item.target.id.clone()));
             }
+            // The checkout has commits of its own (it can no longer fast-forward): that is `diverged`,
+            // not a failure. Skip this resource, change nothing in it, and carry on with the rest.
+            Err(_) if git.is_diverged(&item.target.path, &item.target.upstream_ref).unwrap_or(false) => {
+                report.skipped.push((item.target.id.clone(), SkipReason::Diverged));
+                report.needs_attention.push((item.target.id.clone(), SkipReason::Diverged.text()));
+            }
             Err(e) => {
                 let msg = format!("fast-forward failed: {e}");
                 events(RunEvent::ApplyFailed(item.target.id.clone(), msg.clone()));
@@ -569,6 +611,8 @@ mod tests {
         dirty: bool,
         ahead: bool,
         behind: u32,
+        /// Fast-forward fails (the checkout turned out to have its own commits).
+        ff_fails: bool,
     }
 
     struct FakeGit(RefCell<HashMap<PathBuf, Repo>>);
@@ -591,6 +635,10 @@ mod tests {
         fn fast_forward(&self, p: &Path, _: &str) -> GitResult<()> {
             let mut m = self.0.borrow_mut();
             let r = m.get_mut(p).unwrap();
+            if r.ff_fails {
+                r.ahead = true;
+                return Err(UpdateError::Git("fatal: Not possible to fast-forward, aborting.".into()));
+            }
             r.head = r.upstream.clone();
             r.behind = 0;
             Ok(())
@@ -636,7 +684,7 @@ mod tests {
     }
 
     fn repo(head: &str, up: &str, behind: u32) -> Repo {
-        Repo { head: head.into(), upstream: up.into(), dirty: false, ahead: false, behind }
+        Repo { head: head.into(), upstream: up.into(), dirty: false, ahead: false, behind, ff_fails: false }
     }
     fn target(id: &str, path: &str) -> UpdateTarget {
         UpdateTarget {
@@ -687,6 +735,41 @@ mod tests {
         assert_eq!(r.needs_attention.len(), 2);
         assert_eq!(git.head("/d"), "a");
         assert!(!snap.exists());
+    }
+
+    #[test]
+    fn update_continues_after_a_resource_that_cannot_fast_forward() {
+        let mut bad = repo("a", "b", 1);
+        bad.ff_fails = true;
+        let git = FakeGit::new(vec![("/bad", bad), ("/ok", repo("c", "d", 1))]);
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("s.json");
+        let p = plan(&git, &[target("kora-bad", "/bad"), target("kora-ok", "/ok")]);
+        assert_eq!(p.items[0].action, Action::FastForward);
+        let h = FakeHealth::new(HealthOutcome::Healthy);
+        let r = run_update(&git, &h, &NoMigrations, &p, &opts(tmp.path(), RestartDecision::Proceed, &snap)).unwrap();
+        assert_eq!(r.skipped, vec![("kora-bad".to_string(), SkipReason::Diverged)]);
+        assert_eq!(r.updated.len(), 1);
+        assert_eq!(r.updated[0].id, "kora-ok");
+        assert!(r.rolled_back.is_empty());
+        assert_eq!(git.head("/bad"), "a");
+        assert_eq!(git.head("/ok"), "d");
+        assert!(r.summary().contains("skipped kora-bad: diverged"), "{}", r.summary());
+    }
+
+    #[test]
+    fn fork_sync_results_are_listed_without_failing_the_update() {
+        use crate::git::SyncOutcome as O;
+        let mut r = UpdateReport::default();
+        add_fork_sync(
+            &mut r,
+            vec![("a".into(), O::Synced { commits: 2 }), ("b".into(), O::UpToDate), ("c".into(), O::Ahead { ahead: 1 }), ("d".into(), O::Diverged { ahead: 1, behind: 2 })],
+        );
+        assert_eq!(r.forks_synced, vec!["a".to_string()]);
+        assert_eq!(r.forks_left_alone.len(), 2);
+        assert!(!r.has_problems());
+        let s = r.summary();
+        assert!(s.contains("brought up to date on GitHub: a") && s.contains("fork d:") && s.contains("git merge upstream"), "{s}");
     }
 
     #[test]

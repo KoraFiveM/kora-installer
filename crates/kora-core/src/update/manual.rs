@@ -375,6 +375,8 @@ pub fn apply_with(
     let sel = select(server, &scope, &opts.skip, catalog)?;
     let pinned = PinnedGit(git);
     let g = git_view(server, git, &pinned);
+    // Development: fast-forward the user's forks on GitHub first (never forced); production has no forks.
+    let fork_sync = if server.mode == Mode::Development { g.sync_forks(&sel.targets) } else { Vec::new() };
     let the_plan = plan(g, &sel.targets);
     let restart = match opts.restart {
         RestartPolicy::WhenQuiet => decide_restart(players, 0, &QuietConfig { window: None, max_players: 0 }),
@@ -406,6 +408,7 @@ pub fn apply_with(
         run_update_with(g, &ph, &NoMigrations, &the_plan, &run, &mut on).map_err(|e| InstallError(e.to_string()))?
     };
 
+    super::add_fork_sync(&mut report, fork_sync);
     if server.mode == Mode::Production && !report.updated.is_empty() {
         let moved: Vec<(String, String)> = report.updated.iter().map(|u| (u.id.clone(), u.to.clone())).collect();
         if let Err(m) = record_commits(server, &moved) {

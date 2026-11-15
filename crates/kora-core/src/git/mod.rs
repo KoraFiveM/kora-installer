@@ -497,6 +497,102 @@ pub struct FailedFork {
     pub error: String,
 }
 
+/// How an existing fork compares with its upstream (from the GitHub compare API).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForkSync {
+    UpToDate,
+    /// Upstream has `n` commits the fork lacks and the fork has none of its own: safe to fast-forward.
+    Behind(u32),
+    /// The fork has `n` commits of its own and upstream has nothing new: leave untouched.
+    Ahead(u32),
+    /// Both sides have commits the other lacks.
+    Diverged { ahead: u32, behind: u32 },
+    /// Could not tell (reason). Never acted on.
+    Unknown(String),
+}
+
+/// `ahead` = commits only the fork has, `behind` = commits only upstream has.
+pub fn classify_counts(ahead: u32, behind: u32) -> ForkSync {
+    match (ahead, behind) {
+        (0, 0) => ForkSync::UpToDate,
+        (0, b) => ForkSync::Behind(b),
+        (a, 0) => ForkSync::Ahead(a),
+        (a, b) => ForkSync::Diverged { ahead: a, behind: b },
+    }
+}
+
+/// Classify the JSON of `compare/<upstream>:<b>...<fork>:<b>` (base = upstream, head = fork).
+pub fn classify_compare(json: &str) -> ForkSync {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return ForkSync::Unknown("unreadable answer from GitHub".into());
+    };
+    let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).and_then(|x| u32::try_from(x).ok());
+    match (n("ahead_by"), n("behind_by")) {
+        (Some(a), Some(b)) => classify_counts(a, b),
+        _ => ForkSync::Unknown("GitHub did not report ahead/behind counts".into()),
+    }
+}
+
+/// What happened to an adopted fork; persisted in the resumable state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SyncOutcome {
+    /// Fast-forwarded on GitHub by this many commits.
+    Synced { commits: u32 },
+    UpToDate,
+    Ahead { ahead: u32 },
+    /// `ahead` is 0 when GitHub refused the fast-forward without telling how many own commits exist.
+    Diverged { ahead: u32, behind: u32 },
+    Unknown(String),
+}
+
+impl SyncOutcome {
+    /// Forks that were not changed and need a person's attention or at least a mention.
+    pub fn left_alone(&self) -> bool {
+        matches!(self, SyncOutcome::Ahead { .. } | SyncOutcome::Diverged { .. } | SyncOutcome::Unknown(_))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncRecord {
+    pub repo: String,
+    pub branch: String,
+    pub outcome: SyncOutcome,
+}
+
+/// Counts and plain-language lines for the install result and log.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncSummary {
+    pub synced: usize,
+    pub up_to_date: usize,
+    pub left_alone: usize,
+    /// One line per fork that was left alone, with the safe fix.
+    pub lines: Vec<String>,
+}
+
+impl SyncSummary {
+    pub fn headline(&self) -> String {
+        format!("{} fork(s) brought up to date, {} already current, {} left alone", self.synced, self.up_to_date, self.left_alone)
+    }
+}
+
+/// Plain-language line for a fork that was not touched. `path` is the resource folder on disk.
+pub fn left_alone_line(rec: &SyncRecord, fork_owner: &str, path: &str) -> Option<String> {
+    let name = repo_name(&rec.repo);
+    let b = &rec.branch;
+    let fix = format!("Safe fix: cd {path} && git fetch upstream && git merge upstream/{b} (or git rebase upstream/{b}, which needs a force-push you decide on yourself), then git push. Nothing was changed on this fork.");
+    match &rec.outcome {
+        SyncOutcome::Ahead { ahead } => Some(format!(
+            "{fork_owner}/{name} ({b}): your fork has {ahead} commit(s) of its own and upstream has nothing new, so it was left as it is. Nothing was changed on this fork."
+        )),
+        SyncOutcome::Diverged { ahead, behind } => {
+            let own = if *ahead == 0 { "commits of its own".to_string() } else { format!("{ahead} commit(s) of its own") };
+            Some(format!("{fork_owner}/{name} ({b}): your fork has {own} and upstream has {behind} new commit(s), so GitHub cannot fast-forward it. It was not touched. {fix}"))
+        }
+        SyncOutcome::Unknown(why) => Some(format!("{fork_owner}/{name} ({b}): could not check it against upstream ({why}); left untouched.")),
+        _ => None,
+    }
+}
+
 /// Persistable fork progress. Repos are `owner/name` sources.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkState {
@@ -507,6 +603,15 @@ pub struct ForkState {
     pub pending: Vec<String>,
     pub done: Vec<String>,
     pub failed: Vec<FailedFork>,
+    /// Branch to compare/sync per repo (falls back to the fork's default branch).
+    #[serde(default)]
+    pub branches: std::collections::BTreeMap<String, String>,
+    /// Result of syncing each adopted (already existing) fork.
+    #[serde(default)]
+    pub sync: Vec<SyncRecord>,
+    /// GitHub API calls made through `gh` so far (for pacing and diagnostics).
+    #[serde(default)]
+    pub api_calls: u32,
 }
 
 impl ForkState {
@@ -517,7 +622,33 @@ impl ForkState {
             pending: repos.to_vec(),
             done: vec![],
             failed: vec![],
+            branches: Default::default(),
+            sync: vec![],
+            api_calls: 0,
         }
+    }
+
+    fn record_sync(&mut self, repo: &str, branch: &str, outcome: SyncOutcome) {
+        self.sync.retain(|s| s.repo != repo);
+        self.sync.push(SyncRecord { repo: repo.to_string(), branch: branch.to_string(), outcome });
+    }
+
+    /// Totals plus one explanatory line per fork left alone. `path_of(repo)` gives the resource folder.
+    pub fn sync_summary(&self, path_of: &dyn Fn(&str) -> String) -> SyncSummary {
+        let mut s = SyncSummary::default();
+        for rec in &self.sync {
+            match &rec.outcome {
+                SyncOutcome::Synced { .. } => s.synced += 1,
+                SyncOutcome::UpToDate => s.up_to_date += 1,
+                _ => {
+                    s.left_alone += 1;
+                    if let Some(l) = left_alone_line(rec, &self.target_owner, &path_of(&rec.repo)) {
+                        s.lines.push(l);
+                    }
+                }
+            }
+        }
+        s
     }
 
     /// Move failed repos back to pending (user chose "retry failed").
@@ -545,11 +676,18 @@ pub struct ForkConfig {
     /// (0 = do not wait, used by tests).
     pub ready_timeout: Duration,
     pub ready_poll: Duration,
+    /// Bring an adopted (already existing) fork up to date by fast-forward only.
+    pub sync_existing: bool,
+    /// With `sync_existing`, pacing counts GitHub API calls (a repo costs 1-3) instead of repos:
+    /// pause after this many calls.
+    pub batch_calls: usize,
 }
 
 impl Default for ForkConfig {
     fn default() -> Self {
         ForkConfig {
+            sync_existing: false,
+            batch_calls: 15,
             batch_size: 5,
             batch_pause: Duration::from_secs(30),
             base_backoff: Duration::from_secs(60),
@@ -583,8 +721,8 @@ fn repo_name(repo: &str) -> &str {
 /// What is at `<target>/<name>` before we fork.
 enum ForkProbe {
     Missing,
-    /// A fork of the expected upstream (or an answer we cannot inspect).
-    Present,
+    /// A fork of the expected upstream (or an answer we cannot inspect); carries its default branch.
+    Present(Option<String>),
     /// A repository with that name exists but is not a fork of the upstream: never reuse it.
     Foreign(String),
 }
@@ -595,7 +733,9 @@ fn probe_fork(r: &dyn CommandRunner, target: &str, name: &str, upstream: &str) -
     let path = format!("repos/{target}/{name}");
     let o = run(r, "gh", &["api", &path], None)?;
     if o.ok() {
+        let mut default_branch = None;
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&o.stdout) {
+            default_branch = v.get("default_branch").and_then(|b| b.as_str()).map(str::to_string);
             if let Some(is_fork) = v.get("fork").and_then(|f| f.as_bool()) {
                 let parent = v.pointer("/parent/full_name").and_then(|p| p.as_str()).unwrap_or("");
                 if !is_fork {
@@ -606,7 +746,7 @@ fn probe_fork(r: &dyn CommandRunner, target: &str, name: &str, upstream: &str) -
                 }
             }
         }
-        return Ok(ForkProbe::Present);
+        return Ok(ForkProbe::Present(default_branch));
     }
     if is_rate_limited(&o.stderr) {
         return Err(GitError::Command { cmd: format!("gh api {path}"), code: o.code, stderr: o.stderr });
@@ -635,6 +775,153 @@ fn wait_fork_ready(r: &dyn CommandRunner, target: &str, name: &str, cfg: &ForkCo
     }
 }
 
+/// Wraps a runner and counts the `gh` calls (each one is a GitHub API request), so pacing is by cost.
+pub struct CountingRunner<'a> {
+    inner: &'a dyn CommandRunner,
+    calls: std::cell::Cell<u32>,
+}
+
+impl<'a> CountingRunner<'a> {
+    pub fn new(inner: &'a dyn CommandRunner) -> Self {
+        CountingRunner { inner, calls: std::cell::Cell::new(0) }
+    }
+    pub fn calls(&self) -> u32 {
+        self.calls.get()
+    }
+}
+
+impl CommandRunner for CountingRunner<'_> {
+    fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<Output> {
+        if program == "gh" {
+            self.calls.set(self.calls.get() + 1);
+        }
+        self.inner.run(program, args, cwd)
+    }
+    fn sleep(&self, d: Duration) {
+        self.inner.sleep(d)
+    }
+}
+
+/// One attempt to compare a fork with its upstream and, only when it is purely behind, fast-forward it.
+enum SyncStep {
+    Done(SyncOutcome),
+    RateLimited,
+}
+
+fn compare_fork(r: &dyn CommandRunner, fork: &str, upstream: &str, branch: &str) -> Result<std::result::Result<ForkSync, ()>> {
+    let up_owner = upstream.split('/').next().unwrap_or("");
+    let fork_owner = fork.split('/').next().unwrap_or("");
+    let path = format!("repos/{fork}/compare/{up_owner}:{branch}...{fork_owner}:{branch}");
+    let o = run(r, "gh", &["api", &path], None)?;
+    if o.ok() {
+        return Ok(Ok(classify_compare(&o.stdout)));
+    }
+    if is_rate_limited(&o.stderr) {
+        return Ok(Err(()));
+    }
+    Ok(Ok(ForkSync::Unknown(first_line(&o.stderr, "GitHub refused the comparison"))))
+}
+
+fn first_line(s: &str, fallback: &str) -> String {
+    s.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or(fallback).chars().take(200).collect()
+}
+
+/// Fast-forward only: compare, then `gh repo sync <fork> --branch <b>` when the fork is purely
+/// behind. `--force` is never passed; a refusal because of divergence is recorded, not overridden.
+fn sync_step(r: &dyn CommandRunner, fork: &str, upstream: &str, branch: &str) -> Result<SyncStep> {
+    check("fork repo", valid_repo(fork), fork)?;
+    check("upstream repo", valid_repo(upstream), upstream)?;
+    check("branch", valid_ref(branch), branch)?;
+    let state = match compare_fork(r, fork, upstream, branch)? {
+        Ok(s) => s,
+        Err(()) => return Ok(SyncStep::RateLimited),
+    };
+    let behind = match state {
+        ForkSync::UpToDate => return Ok(SyncStep::Done(SyncOutcome::UpToDate)),
+        ForkSync::Ahead(a) => return Ok(SyncStep::Done(SyncOutcome::Ahead { ahead: a })),
+        ForkSync::Diverged { ahead, behind } => return Ok(SyncStep::Done(SyncOutcome::Diverged { ahead, behind })),
+        ForkSync::Unknown(why) => return Ok(SyncStep::Done(SyncOutcome::Unknown(why))),
+        ForkSync::Behind(n) => n,
+    };
+    let o = run(r, "gh", &["repo", "sync", fork, "--branch", branch], None)?;
+    if o.ok() {
+        return Ok(SyncStep::Done(SyncOutcome::Synced { commits: behind }));
+    }
+    if is_rate_limited(&o.stderr) {
+        return Ok(SyncStep::RateLimited);
+    }
+    let low = o.stderr.to_ascii_lowercase();
+    if low.contains("diverg") || low.contains("--force") || low.contains("conflict") || low.contains("not a fast-forward") {
+        // GitHub says the fork has history upstream lacks (e.g. it changed since we compared): look again.
+        return Ok(SyncStep::Done(match compare_fork(r, fork, upstream, branch)? {
+            Ok(ForkSync::Diverged { ahead, behind }) => SyncOutcome::Diverged { ahead, behind },
+            Ok(ForkSync::Ahead(a)) => SyncOutcome::Ahead { ahead: a },
+            _ => SyncOutcome::Diverged { ahead: 0, behind },
+        }));
+    }
+    Ok(SyncStep::Done(SyncOutcome::Unknown(first_line(&o.stderr, "gh repo sync failed"))))
+}
+
+/// [`sync_step`] with the pacing backoff on rate limits. `None` = still limited after all retries
+/// (the caller pauses and resumes later).
+pub fn sync_fork_retrying(r: &dyn CommandRunner, fork: &str, upstream: &str, branch: &str, cfg: &ForkConfig) -> Result<Option<SyncOutcome>> {
+    let mut attempt = 0u32;
+    loop {
+        match sync_step(r, fork, upstream, branch)? {
+            SyncStep::Done(o) => return Ok(Some(o)),
+            SyncStep::RateLimited => {
+                if attempt >= cfg.max_retries {
+                    return Ok(None);
+                }
+                r.sleep(cfg.backoff(attempt));
+                attempt += 1;
+            }
+        }
+    }
+}
+
+/// One fork to bring up to date outside the install flow (`kora update`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncJob {
+    pub id: String,
+    /// `owner/name` of the user's fork.
+    pub fork: String,
+    /// `owner/name` of the upstream repository.
+    pub upstream: String,
+    pub branch: String,
+}
+
+/// Paced sync of many forks (same batches and pauses as forking). Stops at a persistent rate limit:
+/// the remaining jobs are reported as `Unknown("rate limited ...")` and left untouched.
+pub fn sync_forks_paced(r: &dyn CommandRunner, jobs: &[SyncJob], cfg: &ForkConfig) -> Vec<(String, SyncOutcome)> {
+    let counter = CountingRunner::new(r);
+    let mut out = Vec::new();
+    let mut in_batch = 0usize;
+    let mut limited = false;
+    for (i, j) in jobs.iter().enumerate() {
+        if limited {
+            out.push((j.id.clone(), SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into())));
+            continue;
+        }
+        let before = counter.calls();
+        let res = match sync_fork_retrying(&counter, &j.fork, &j.upstream, &j.branch, cfg) {
+            Ok(Some(o)) => o,
+            Ok(None) => {
+                limited = true;
+                SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into())
+            }
+            Err(e) => SyncOutcome::Unknown(e.to_string()),
+        };
+        out.push((j.id.clone(), res));
+        in_batch += (counter.calls() - before).max(1) as usize;
+        if in_batch >= cfg.batch_calls && i + 1 < jobs.len() {
+            in_batch = 0;
+            r.sleep(cfg.batch_pause);
+        }
+    }
+    out
+}
+
 /// Run (or resume) forking. `on_progress` is called after every state change so the caller can
 /// persist `state`. Never forks a repo already in `done` or already present at the target.
 pub fn run_forks(
@@ -644,8 +931,13 @@ pub fn run_forks(
     on_progress: &mut dyn FnMut(&ForkState),
 ) -> Result<ForkOutcome> {
     check("target owner", valid_name(&state.target_owner), &state.target_owner)?;
+    let counter = CountingRunner::new(r);
+    let r: &dyn CommandRunner = &counter;
     let mut in_batch = 0usize;
     while let Some(repo) = state.pending.first().cloned() {
+        let calls_before = counter.calls();
+        // Some(default branch) when an already existing fork was adopted for this repo.
+        let mut adopted: Option<Option<String>> = None;
         if state.done.contains(&repo) {
             state.pending.remove(0);
             on_progress(state);
@@ -661,7 +953,10 @@ pub fn run_forks(
         let result: std::result::Result<(), String> = loop {
             let o = match probe_fork(r, &state.target_owner, repo_name(&repo), &repo) {
                 // already there: no new fork, but it may still be filling up after a crash
-                Ok(ForkProbe::Present) => break wait_fork_ready(r, &state.target_owner, repo_name(&repo), cfg),
+                Ok(ForkProbe::Present(db)) => {
+                    adopted = Some(db);
+                    break wait_fork_ready(r, &state.target_owner, repo_name(&repo), cfg);
+                }
                 Ok(ForkProbe::Foreign(why)) => break Err(why),
                 Ok(ForkProbe::Missing) => {
                     let mut args = vec!["repo", "fork", repo.as_str(), "--clone=false"];
@@ -688,14 +983,35 @@ pub fn run_forks(
             }
             break Err(owners::friendly_fork_error(&o.stderr, &state.target_owner));
         };
+        if let (true, true, Some(default_branch)) = (cfg.sync_existing, result.is_ok(), adopted) {
+            match state.branches.get(&repo).cloned().or(default_branch) {
+                Some(branch) => {
+                    let fork = format!("{}/{}", state.target_owner, repo_name(&repo));
+                    match sync_fork_retrying(r, &fork, &repo, &branch, cfg) {
+                        Ok(Some(o)) => state.record_sync(&repo, &branch, o),
+                        Ok(None) => {
+                            state.api_calls += counter.calls() - calls_before;
+                            on_progress(state);
+                            return Ok(ForkOutcome::Paused);
+                        }
+                        Err(e) => state.record_sync(&repo, &branch, SyncOutcome::Unknown(e.to_string())),
+                    }
+                }
+                None => state.record_sync(&repo, "?", SyncOutcome::Unknown("could not tell which branch to compare".into())),
+            }
+        }
+        let used = counter.calls() - calls_before;
+        state.api_calls += used;
         state.pending.remove(0);
         match result {
             Ok(()) => state.done.push(repo),
             Err(error) => state.failed.push(FailedFork { repo, error }),
         }
         on_progress(state);
-        in_batch += 1;
-        if in_batch >= cfg.batch_size && !state.pending.is_empty() {
+        // Without syncing a repo counts as 1 (as before); with it pacing counts real API calls.
+        let (weight, limit) = if cfg.sync_existing { (used.max(1) as usize, cfg.batch_calls) } else { (1, cfg.batch_size) };
+        in_batch += weight;
+        if in_batch >= limit && !state.pending.is_empty() {
             in_batch = 0;
             r.sleep(cfg.batch_pause);
         }
@@ -856,6 +1172,15 @@ pub fn owner_of_url(url: &str) -> Option<String> {
     (valid_name(owner) && !name.is_empty()).then(|| owner.to_string())
 }
 
+/// `owner/name` in a `github.com` remote URL (https or ssh form, optional `.git`).
+pub fn slug_of_url(url: &str) -> Option<String> {
+    let owner = owner_of_url(url)?;
+    let rest = url.trim().rsplit_once(&format!("{owner}/"))?.1;
+    let name = rest.trim_end_matches('/').trim_end_matches(".git");
+    let slug = format!("{owner}/{name}");
+    valid_repo(&slug).then_some(slug)
+}
+
 /// Commits on HEAD that `upstream/<base>` does not have (fetches `upstream` first).
 pub fn ahead_of_upstream(r: &dyn CommandRunner, repo: &Path, base: &str) -> Result<u32> {
     check("branch", valid_ref(base), base)?;
@@ -972,7 +1297,32 @@ mod tests {
             max_retries: 4,
             ready_timeout: Duration::ZERO,
             ready_poll: Duration::from_secs(1),
+            sync_existing: false,
+            batch_calls: 6,
         }
+    }
+    fn sync_cfg() -> ForkConfig {
+        ForkConfig { sync_existing: true, ..cfg() }
+    }
+    /// Fake GitHub: `forks` maps repo name -> (ahead, behind) of the fork vs upstream; names not in
+    /// the map do not exist. `sync_ok` false makes `gh repo sync` refuse as GitHub does when diverged.
+    fn github(forks: &'static [(&'static str, u32, u32)]) -> Fake {
+        Fake::new(move |c| {
+            if let Some(rest) = c.strip_prefix("gh api repos/me/") {
+                let name = rest.split('/').next().unwrap();
+                let Some((_, a, b)) = forks.iter().find(|(n, _, _)| *n == name) else { return fail("HTTP 404") };
+                if rest.contains("/compare/") {
+                    return ok(&format!(r#"{{"ahead_by":{a},"behind_by":{b},"status":"x"}}"#));
+                }
+                return ok(&format!(r#"{{"fork":true,"default_branch":"dev","parent":{{"full_name":"up/{name}"}}}}"#));
+            }
+            if c.starts_with("gh repo sync") {
+                let name = c.split_whitespace().nth(3).unwrap().rsplit('/').next().unwrap();
+                let (_, a, _) = forks.iter().find(|(n, _, _)| *n == name).unwrap();
+                return if *a == 0 { ok("") } else { fail("can't sync because there are diverging changes; you can use `--force` to overwrite the destination branch") };
+            }
+            ok("")
+        })
     }
     fn repos(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -1125,6 +1475,133 @@ mod tests {
         assert_eq!(*f.sleeps.borrow(), vec![Duration::from_secs(10)]);
         st.requeue_failed();
         assert_eq!(st.pending, repos(&["a/bad"]));
+    }
+
+    #[test]
+    fn classifier_table() {
+        let j = |a: i64, b: i64| format!(r#"{{"status":"x","ahead_by":{a},"behind_by":{b},"total_commits":{a}}}"#);
+        assert_eq!(classify_compare(&j(0, 0)), ForkSync::UpToDate);
+        assert_eq!(classify_compare(&j(0, 7)), ForkSync::Behind(7));
+        assert_eq!(classify_compare(&j(3, 0)), ForkSync::Ahead(3));
+        assert_eq!(classify_compare(&j(2, 5)), ForkSync::Diverged { ahead: 2, behind: 5 });
+        for bad in ["", "not json", "{}", r#"{"ahead_by":1}"#, r#"{"ahead_by":"1","behind_by":0}"#, r#"{"ahead_by":-1,"behind_by":0}"#] {
+            assert!(matches!(classify_compare(bad), ForkSync::Unknown(_)), "{bad}");
+        }
+    }
+
+    #[test]
+    fn adoption_syncs_only_pure_behind_and_never_forces() {
+        let f = github(&[("cur", 0, 0), ("behind", 0, 4), ("own", 2, 0), ("div", 3, 5)]);
+        let mut st = ForkState::new("me", false, &repos(&["up/cur", "up/behind", "up/own", "up/div"]));
+        st.branches.insert("up/cur".into(), "dev".into());
+        let out = run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap();
+        assert_eq!(out, ForkOutcome::Finished);
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(f.count("gh repo sync"), 1);
+        assert_eq!(f.count("gh repo sync me/behind --branch dev"), 1);
+        assert_eq!(f.count("--force"), 0);
+        assert_eq!(f.count("gh repo fork"), 0);
+        let get = |n: &str| st.sync.iter().find(|s| s.repo == n).unwrap().outcome.clone();
+        assert_eq!(get("up/cur"), SyncOutcome::UpToDate);
+        assert_eq!(get("up/behind"), SyncOutcome::Synced { commits: 4 });
+        assert_eq!(get("up/own"), SyncOutcome::Ahead { ahead: 2 });
+        assert_eq!(get("up/div"), SyncOutcome::Diverged { ahead: 3, behind: 5 });
+        // summary: counts and plain lines with the safe fix, only for the untouched ones
+        let s = st.sync_summary(&|r| format!("resources/{}", repo_name(r)));
+        assert_eq!((s.synced, s.up_to_date, s.left_alone), (1, 1, 2));
+        assert_eq!(s.lines.len(), 2);
+        assert!(s.lines[0].contains("2 commit(s) of its own") && s.lines[0].contains("nothing new"));
+        assert!(s.lines[1].contains("cd resources/div && git fetch upstream && git merge upstream/dev") && s.lines[1].contains("Nothing was changed"), "{}", s.lines[1]);
+        // survives a save/reload
+        let again: ForkState = serde_json::from_str(&serde_json::to_string(&st).unwrap()).unwrap();
+        assert_eq!(again.sync, st.sync);
+    }
+
+    #[test]
+    fn refused_sync_is_diverged_and_not_retried_with_force() {
+        // compare says behind-only, but gh refuses (the fork changed meanwhile)
+        let n = std::cell::Cell::new(0);
+        let f = Fake::new(move |c| {
+            if c.contains("/compare/") {
+                n.set(n.get() + 1);
+                return ok(if n.get() == 1 { r#"{"ahead_by":0,"behind_by":2}"# } else { r#"{"ahead_by":1,"behind_by":2}"# });
+            }
+            if c.starts_with("gh repo sync") {
+                return fail("can't sync because there are diverging changes; use --force");
+            }
+            ok(r#"{"fork":true,"default_branch":"dev"}"#)
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/x"]));
+        run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap();
+        assert_eq!(st.sync[0].outcome, SyncOutcome::Diverged { ahead: 1, behind: 2 });
+        assert_eq!(f.count("gh repo sync"), 1);
+        assert_eq!(f.count("--force"), 0);
+        assert!(st.is_complete());
+    }
+
+    #[test]
+    fn unknown_and_foreign_are_left_alone() {
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api repos/me/foreign") {
+                ok(r#"{"fork":true,"parent":{"full_name":"zzz/foreign"}}"#)
+            } else if c.contains("/compare/") {
+                fail("HTTP 500 boom")
+            } else {
+                ok(r#"{"fork":true,"default_branch":"dev"}"#)
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/foreign", "up/odd"]));
+        run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap();
+        assert_eq!(st.failed.len(), 1);
+        assert_eq!(st.failed[0].repo, "up/foreign");
+        assert!(matches!(&st.sync[0].outcome, SyncOutcome::Unknown(w) if w.contains("boom")));
+        assert_eq!(f.count("gh repo sync"), 0);
+    }
+
+    #[test]
+    fn pacing_counts_api_calls_and_rate_limit_pauses_resumably() {
+        // each adopted fork costs probe + compare (+ sync): batch_calls is 6
+        let f = github(&[("a", 0, 1), ("b", 0, 1), ("c", 0, 0)]);
+        let mut st = ForkState::new("me", false, &repos(&["up/a", "up/b", "up/c"]));
+        run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap();
+        // a: 3 calls, b: 3 calls -> 6 reached -> one pause before c (2 calls)
+        assert_eq!(*f.sleeps.borrow(), vec![Duration::from_secs(10)]);
+        assert_eq!(st.api_calls, 8);
+        assert_eq!(f.count("gh "), 8);
+
+        // persistent rate limit on compare pauses; state stays resumable and nothing is lost
+        let limited = std::rc::Rc::new(std::cell::Cell::new(true));
+        let l2 = limited.clone();
+        let f = Fake::new(move |c| {
+            if c.contains("/compare/") {
+                return if l2.get() { fail("HTTP 403: secondary rate limit") } else { ok(r#"{"ahead_by":0,"behind_by":0}"#) };
+            }
+            ok(r#"{"fork":true,"default_branch":"dev"}"#)
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/a"]));
+        assert_eq!(run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap(), ForkOutcome::Paused);
+        assert_eq!(st.pending, repos(&["up/a"]));
+        limited.set(false);
+        assert_eq!(run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap(), ForkOutcome::Finished);
+        assert_eq!(st.sync[0].outcome, SyncOutcome::UpToDate);
+    }
+
+    #[test]
+    fn sync_is_off_unless_asked_for() {
+        let f = github(&[("behind", 0, 4)]);
+        let mut st = ForkState::new("me", false, &repos(&["up/behind"]));
+        run_forks(&f, &mut st, &cfg(), &mut |_| {}).unwrap();
+        assert_eq!(f.count("gh repo sync") + f.count("/compare/"), 0);
+        assert!(st.sync.is_empty());
+    }
+
+    #[test]
+    fn paced_job_sync_stops_at_a_persistent_rate_limit() {
+        let f = Fake::new(|c| if c.contains("/compare/") { fail("HTTP 429") } else { ok("") });
+        let job = |i: &str| SyncJob { id: i.into(), fork: format!("me/{i}"), upstream: format!("up/{i}"), branch: "dev".into() };
+        let out = sync_forks_paced(&f, &[job("a"), job("b")], &sync_cfg());
+        assert!(out.iter().all(|(_, o)| matches!(o, SyncOutcome::Unknown(w) if w.contains("rate limit"))));
+        assert_eq!(f.count("/compare/"), 5); // 1 + 4 retries, then b is not even tried
     }
 
     fn git_fake(status: &'static str, counts: &'static str) -> Fake {

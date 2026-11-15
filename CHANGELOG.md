@@ -5,6 +5,19 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-15
+
+### Added
+- Development installs adopt forks that already exist in your account or organisation and bring them up to date with upstream: a fork that is only behind is fast-forwarded on GitHub (`gh repo sync`, never `--force`); a fork with its own commits (ahead or diverged) is not touched. The install result and `install.log` list those forks in plain language with the safe fix (`git fetch upstream && git merge upstream/<branch>`, then push) and say nothing was changed on them, plus counts of brought up to date / already current / left alone. Foreign repositories with the same name are still refused.
+- Fork syncing is paced by GitHub API calls (batches, pauses, backoff on rate limits); results are saved in the resumable fork state.
+- `kora update` (development) fast-forwards behind-only forks on GitHub first when `gh` is signed in, and lists forks it left alone.
+
+### Changed
+- `kora update`: a resource whose checkout has commits of its own and can no longer fast-forward is reported as `diverged` and skipped; the other resources are still updated (before, it aborted the run and rolled back).
+
+### Fixed
+- `kora install ... --github-owner NAME` (the website one-liner) no longer demands that `gh` is already installed and signed in. The name is checked for a legal GitHub login straight away; if `gh` is ready the owner is verified up front as before, otherwise the install sets `gh` up, signs you in in the browser, and verifies the owner right after that, before anything is forked (an unknown owner stops the install with the list of valid owners; nothing is forked and your answers are saved).
+
 ## [0.3.1] - 2026-11-15
 
 Visual-only release: the terminal screens have a new look. Behaviour and key bindings are unchanged.
