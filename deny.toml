@@ -9,14 +9,8 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-# Justified exceptions (revisit when fixed upstream):
-ignore = [
-  # sevenz-rust: path traversal is in its own `decompress_impl`. Kora does not call it: crates/kora-core/src/artifacts/extract.rs
-  # reads entries with `for_each_entries` and validates every path (`clean_name`, `claim`) before writing.
-  { id = "RUSTSEC-2026-0245", reason = "vulnerable decompress_impl is not used; kora validates entry paths itself" },
-  { id = "RUSTSEC-2026-0246", reason = "sevenz-rust unmaintained; migrate to sevenz-rust2 (tracked)" },
-  { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; build-time macro pulled in by ratatui 0.29" },
-]
+# No advisory exceptions: sevenz-rust -> sevenz-rust2 and ratatui 0.30 removed the previous ones.
+ignore = []
 
 [licenses]
 version = 2

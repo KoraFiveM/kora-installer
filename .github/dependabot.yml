@@ -2,13 +2,19 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
+    open-pull-requests-limit: 3
     schedule:
       interval: weekly
     groups:
       cargo-dependencies:
         patterns: ["*"]
+    ignore:
+      # ureq 3 is a full API rewrite of the (hash-pinned) download path; migrate deliberately, not via a bot PR.
+      - dependency-name: ureq
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
+    open-pull-requests-limit: 3
     schedule:
       interval: weekly
     groups:
