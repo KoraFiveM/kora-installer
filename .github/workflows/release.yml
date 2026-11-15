@@ -25,7 +25,7 @@ jobs:
             name: kora-windows-x86_64.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked -p kora-cli
       - name: Binary reports the Cargo version
@@ -44,7 +44,7 @@ jobs:
           mkdir dist
           cp "target/release/${{ matrix.bin }}" "dist/${{ matrix.name }}"
           (cd dist && sha256sum "${{ matrix.name }}" > "${{ matrix.name }}.sha256")
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: dist/*
@@ -54,7 +54,7 @@ jobs:
   #   needs: build
   #   runs-on: windows-latest
   #   steps:
-  #     - uses: actions/upload-artifact@v4   # TODO: SignPath requires the unsigned artifact uploaded in this workflow run
+  #     - uses: actions/upload-artifact@v7   # TODO: SignPath requires the unsigned artifact uploaded in this workflow run
   #     - uses: signpath/github-action-submit-signing-request@v1
   #       with:
   #         # TODO: values below are placeholders issued by SignPath on approval; no secrets invented.
@@ -70,8 +70,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4   # for the install scripts
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7   # for the install scripts
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -93,7 +93,7 @@ jobs:
           [ "$(dist/kora-linux-x86_64 --version)" = "kora $ver" ]
       - name: install.sh passes its tests
         run: sh -n scripts/install.sh && bash scripts/test-install.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-assets
           path: dist/*
@@ -106,12 +106,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4   # for RELEASE_NOTES.md
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7   # for RELEASE_NOTES.md
+      - uses: actions/download-artifact@v8
         with:
           name: release-assets
           path: dist
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           draft: true   # TODO: maintainer reviews/approves before publishing
