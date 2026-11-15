@@ -604,7 +604,7 @@ fn update_shows_a_new_release_and_the_restart_policies_cycle() {
     let mut seen = vec![];
     for _ in 0..5 {
         let t = screen_text(&a);
-        seen.push(["nobody is playing", "no full restart", "whole server", "Don't restart"].iter().position(|x| t.contains(x)));
+        seen.push(["nobody is playing", "no live ensure", "whole server", "Don't restart"].iter().position(|x| t.contains(x)));
         chr(&mut a, 'r');
     }
     assert_eq!(seen, [Some(0), Some(1), Some(2), Some(3), Some(0)], "when quiet -> ensure -> full -> none -> when quiet");
@@ -772,7 +772,7 @@ fn update_rows_toggle_by_click() {
     click(&mut a, AREA, Hit::Row(1));
     assert!(screen_text(&a).contains("[ ] kora_hud"));
     click(&mut a, AREA, Hit::Act(Action::CycleRestart));
-    assert!(screen_text(&a).contains("no full restart"));
+    assert!(screen_text(&a).contains("no live ensure"));
 }
 
 // ------------------------------------------------------------ update badges
@@ -797,13 +797,11 @@ fn check_for_updates_refreshes_the_badge() {
 
 #[test]
 fn badges_come_from_the_preview() {
-    use super::backend::{badge_of, status_json};
+    use super::backend::badge_of;
     assert_eq!(badge_of(&preview(vec![])), UpdateBadge::UpToDate);
     assert_eq!(badge_of(&preview(vec![change("a", ChangeStatus::Clean)])), UpdateBadge::Updates(1));
     assert_eq!(badge_of(&preview(vec![change("a", ChangeStatus::Clean), change("b", ChangeStatus::Diverged)])), UpdateBadge::NeedsAttention);
     assert_eq!(badge_of(&UpdatePreview { resources: vec![], new_release: Some("2".into()) }), UpdateBadge::NewRelease);
-    let v: serde_json::Value = serde_json::from_str(&status_json(&preview(vec![change("a", ChangeStatus::Clean)]), 77)).unwrap();
-    assert_eq!(v, serde_json::json!({"checked_at": 77, "updates": 1, "attention": false, "new_release": false}));
 }
 
 // ------------------------------------------------------------ notifications

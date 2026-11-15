@@ -678,19 +678,6 @@ impl ProgressSink for Printer {
     }
 }
 
-/// What a bare `kora` does in a terminal: manage the servers you have, or set up the first one.
-fn default_command(registered: usize) -> Command {
-    if registered > 0 {
-        Command::Manager
-    } else {
-        Command::Install(Box::default())
-    }
-}
-
-fn registered_servers() -> usize {
-    registry::Registry::load().map(|r| r.servers.len()).unwrap_or(0)
-}
-
 /// `kora manager`: the server list. "Install a new server" runs the install wizard, then comes back.
 fn manager() -> i32 {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
@@ -1687,17 +1674,6 @@ mod tests {
         assert!(p(&["webhook", "remove", "alpha"]).is_ok());
         assert!(p(&["webhook", "set"]).is_err());
         assert!(p(&["webhook"]).is_err());
-    }
-
-    #[test]
-    fn bare_kora_opens_the_manager_with_servers_and_the_wizard_without() {
-        for (registered, manager) in [(0, false), (1, true), (2, true), (50, true)] {
-            match default_command(registered) {
-                Command::Manager => assert!(manager, "{registered} servers"),
-                Command::Install(a) => assert!(!manager && !a.any_given(), "{registered} servers: the plain wizard"),
-                _ => panic!("unexpected default command"),
-            }
-        }
     }
 
     #[test]

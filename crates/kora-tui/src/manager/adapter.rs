@@ -48,7 +48,7 @@ pub fn with_ensure(cfg: &str, name: &str) -> Option<String> {
     Some(out)
 }
 
-/// `<dir>/.kora/update-status.json`, written by the updater and by `[ Check for updates ]`:
+/// `<dir>/.kora/update-status.json`, written by the core updater (auto runs, full previews, full applies):
 /// `{"checked_at": 1700000000, "updates": 3, "attention": false, "new_release": false}`.
 /// A missing, unreadable or older-shaped file means "not known" (`None`) or whatever fields it has.
 pub fn read_badge(dir: &Path) -> Option<UpdateBadge> {
@@ -69,19 +69,6 @@ pub fn read_badge(dir: &Path) -> Option<UpdateBadge> {
         return Some(UpdateBadge::NewRelease);
     }
     Some(UpdateBadge::UpToDate)
-}
-
-/// Write the status file the list badge reads (atomically; a failure only costs the badge).
-fn write_status(dir: &Path, p: &UpdatePreview) {
-    let meta = dir.join(".kora");
-    if std::fs::create_dir_all(&meta).is_err() {
-        return;
-    }
-    let tmp = meta.join("update-status.json.tmp");
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    if std::fs::write(&tmp, super::backend::status_json(p, now)).is_ok() && std::fs::rename(&tmp, meta.join("update-status.json")).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
 }
 
 /// The record the manual update engine wants (it reads `kora-server.json`).
@@ -203,12 +190,6 @@ impl Backend for SystemBackend {
 
     fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo> {
         record(e).map(|r| manual::snapshots(&r)).unwrap_or_default()
-    }
-
-    fn check_updates(&mut self, e: &ServerEntry) -> Res<UpdateBadge> {
-        let p = self.preview(e, Scope::All)?;
-        write_status(&e.dir, &p);
-        Ok(super::backend::badge_of(&p))
     }
 
     fn notify_load(&mut self, e: &ServerEntry) -> NotifyConfig {

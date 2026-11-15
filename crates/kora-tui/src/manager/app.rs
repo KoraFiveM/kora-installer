@@ -62,7 +62,7 @@ impl Live {
 pub fn restart_text(r: RestartPolicy) -> &'static str {
     match r {
         RestartPolicy::None => "Don't restart anything",
-        RestartPolicy::Ensure => "Ensure updated resources (no full restart)",
+        RestartPolicy::Ensure => "Files only: no restart, no live ensure",
         RestartPolicy::FullRestart => "Restart the whole server",
         RestartPolicy::WhenQuiet => "Restart only when nobody is playing",
     }

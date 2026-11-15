@@ -58,13 +58,6 @@ pub fn badge_of(p: &UpdatePreview) -> UpdateBadge {
     }
 }
 
-/// `<server>/.kora/update-status.json` for a preview: the same shape the updater writes.
-pub fn status_json(p: &UpdatePreview, now_unix: u64) -> String {
-    let updates = p.resources.iter().filter(|r| r.status == ChangeStatus::Clean).count();
-    let attention = p.resources.iter().any(|r| matches!(r.status, ChangeStatus::Dirty | ChangeStatus::Diverged));
-    serde_json::json!({ "checked_at": now_unix, "updates": updates, "attention": attention, "new_release": p.new_release.is_some() }).to_string()
-}
-
 pub trait Backend {
     /// The registered servers.
     fn list(&mut self) -> Res<Vec<ServerEntry>>;
@@ -89,7 +82,7 @@ pub trait Backend {
     fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()>;
     /// Saved snapshots, newest first.
     fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo>;
-    /// `[ Check for updates ]`: preview, remember the result for the list badge, return the badge.
+    /// `[ Check for updates ]`: a full preview (the core writes `update-status.json` for it), then the badge.
     fn check_updates(&mut self, e: &ServerEntry) -> Res<UpdateBadge> {
         self.preview(e, Scope::All).map(|p| badge_of(&p))
     }
