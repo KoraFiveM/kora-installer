@@ -519,7 +519,7 @@ impl InstallStep {
             }
             "prepare.catalog" => {
                 let (cat, note) = load_catalog(&ctx.req, &ctx.hooks)?;
-                let sel: Vec<Resource> = select_resources(&cat, &ctx.req.resources)?.into_iter().cloned().collect();
+                let sel: Vec<Resource> = select_resources(&cat, &ctx.req.resources, ctx.req.mode == Mode::Development)?.into_iter().cloned().collect();
                 if sel.is_empty() {
                     return err("no resources selected");
                 }

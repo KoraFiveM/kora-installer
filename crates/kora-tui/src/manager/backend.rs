@@ -7,6 +7,7 @@ use kora_core::addresources::{AddOutcome, AddPlan};
 use kora_core::catalog::Catalog;
 use kora_core::feedback::PrPlan;
 use kora_core::installer::registry::ServerEntry;
+use kora_core::installer::Ports;
 use kora_core::service::ControlAction;
 
 use kora_core::notify::NotifyConfig;
@@ -118,4 +119,7 @@ pub trait Backend {
     /// When changing the schedule needs administrator rights this process does not have: the
     /// `kora` arguments that do it elevated (the manager closes, runs them, and comes back).
     fn schedule_elevation(&mut self, e: &ServerEntry, set: Option<&ScheduleConfig>) -> Option<Vec<String>>;
+
+    /// Change the game and txAdmin ports of a stopped server. Returns notes to show (firewall, restart).
+    fn ports_set(&mut self, e: &ServerEntry, p: Ports) -> Res<Vec<String>>;
 }

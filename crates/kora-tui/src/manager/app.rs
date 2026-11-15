@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use kora_core::installer::registry::{self, ServerEntry};
-use kora_core::installer::Mode;
+use kora_core::installer::{Mode, Ports};
 use kora_core::service::ControlAction;
 use ratatui::layout::{Position, Rect};
 
@@ -132,6 +132,7 @@ pub enum Action {
     Update,
     Notify,
     Schedule,
+    Ports,
     Add,
     Refresh,
     Quit,
@@ -306,6 +307,48 @@ pub struct NotifyState {
     pub input: TextInput,
 }
 
+/// The "Ports" screen: the game and txAdmin port of a stopped server.
+#[derive(Debug, Clone)]
+pub struct PortsState {
+    pub entry: ServerEntry,
+    pub game: TextInput,
+    pub txadmin: TextInput,
+    /// 0 = game port, 1 = txAdmin port.
+    pub focus: usize,
+    /// Notes from the last save (firewall, restart).
+    pub notes: Vec<String>,
+}
+
+impl PortsState {
+    pub fn new(entry: ServerEntry) -> Self {
+        let game = TextInput::with_text(5, &entry.ports.game.to_string());
+        let txadmin = TextInput::with_text(5, &entry.ports.txadmin.to_string());
+        Self { entry, game, txadmin, focus: 0, notes: Vec::new() }
+    }
+
+    fn field(&mut self) -> &mut TextInput {
+        if self.focus == 0 {
+            &mut self.game
+        } else {
+            &mut self.txadmin
+        }
+    }
+
+    /// Only digits are kept: a port is a number.
+    pub fn paste(&mut self, text: &str) -> bool {
+        let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+        self.field().paste(&digits)
+    }
+
+    /// The ports typed, if both are valid numbers from 1024 up.
+    pub fn wanted(&self) -> Result<Ports, String> {
+        let parse = |t: &TextInput, what: &str| {
+            t.text().trim().parse::<u16>().ok().filter(|p| *p >= 1024).ok_or_else(|| format!("The {what} port must be a number from 1024 to 65535."))
+        };
+        Ok(Ports { game: parse(&self.game, "game")?, txadmin: parse(&self.txadmin, "txAdmin")? })
+    }
+}
+
 pub const WEEKDAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 #[derive(Debug, Clone)]
@@ -387,6 +430,8 @@ pub struct AddState {
 #[derive(Debug, Clone)]
 pub enum Screen {
     Main,
+    /// "Restart the server?" for the selected server. Yes restarts, No or Esc goes back.
+    ConfirmRestart,
     Logs(Box<LogView>),
     Console(Box<ConsoleState>),
     Ensure(Box<EnsureState>),
@@ -394,6 +439,7 @@ pub enum Screen {
     Update(Box<UpdateState>),
     Notify(Box<NotifyState>),
     Schedule(Box<ScheduleState>),
+    Ports(Box<PortsState>),
     Add(Box<AddState>),
     AddRes(Box<AddResState>),
     Feedback(Box<FeedbackState>),
@@ -560,6 +606,11 @@ impl App {
         }
         let a = match &mut self.screen {
             Screen::Main => main_key(k),
+            Screen::ConfirmRestart => match k.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Some(Action::Yes),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(Action::No),
+                _ => None,
+            },
             Screen::Logs(_) => logs_key(k),
             Screen::Console(s) => console_key(s, k),
             Screen::Ensure(s) => ensure_key(s, k),
@@ -567,6 +618,7 @@ impl App {
             Screen::Update(s) => update_key(s, k),
             Screen::Notify(s) => notify_key(s, k),
             Screen::Schedule(s) => schedule_key(s, k),
+            Screen::Ports(s) => ports_key(s, k),
             Screen::Add(s) => add_key(s, k),
             Screen::AddRes(s) => s.key(k),
             Screen::Feedback(s) => s.key(k),
@@ -589,6 +641,7 @@ impl App {
             Screen::Notify(s) => Some(s.input.paste(text)),
             Screen::Console(s) => Some(s.input.paste(text)),
             Screen::Schedule(s) if s.focus == 1 => Some(s.time.paste(text)),
+            Screen::Ports(s) => Some(s.paste(text)),
             Screen::Add(s) if s.stage == AddStage::Path => Some(s.input.paste(text)),
             Screen::AddRes(s) if s.stage == AddResStage::Code => Some(s.code.paste(text)),
             Screen::Feedback(s) if s.stage == FbStage::Compose => Some(if s.focus == 0 { s.title.paste(text) } else { s.body.paste(text) }),
@@ -686,6 +739,17 @@ impl App {
     // ------------------------------------------------------------ actions
 
     pub fn act(&mut self, a: Action) {
+        if matches!(self.screen, Screen::ConfirmRestart) {
+            match a {
+                Action::Yes | Action::Confirm => {
+                    self.screen = Screen::Main;
+                    self.busy = Some(Job::Control(ControlActionKey::Restart));
+                }
+                Action::No | Action::Back => self.screen = Screen::Main,
+                _ => {}
+            }
+            return;
+        }
         match a {
             Action::Quit => self.exit = Some(Exit::Quit),
             Action::InstallNew => self.exit = Some(Exit::InstallNew),
@@ -704,16 +768,20 @@ impl App {
                 Action::Top => self.sel = 0,
                 _ => self.sel = self.rows.len().saturating_sub(1),
             },
-            Action::Start | Action::Stop | Action::Restart => {
+            Action::Restart => {
                 let Some(r) = self.current() else { return };
                 if r.status == Status::Missing {
                     return self.say(Level::Bad, "That server's folder is missing.");
                 }
-                let key = match a {
-                    Action::Start => ControlActionKey::Start,
-                    Action::Stop => ControlActionKey::Stop,
-                    _ => ControlActionKey::Restart,
-                };
+                self.notice = None;
+                self.screen = Screen::ConfirmRestart;
+            }
+            Action::Start | Action::Stop => {
+                let Some(r) = self.current() else { return };
+                if r.status == Status::Missing {
+                    return self.say(Level::Bad, "That server's folder is missing.");
+                }
+                let key = if a == Action::Start { ControlActionKey::Start } else { ControlActionKey::Stop };
                 self.busy = Some(Job::Control(key));
             }
             Action::OpenTx => {
@@ -791,6 +859,15 @@ impl App {
                     let current = self.svc.backend.notify_load(&e);
                     self.notice = None;
                     self.screen = Screen::Notify(Box::new(NotifyState { entry: e, current, input: TextInput::new(300) }));
+                }
+            }
+            Action::Ports => {
+                let Some((e, status)) = self.current().map(|r| (r.entry.clone(), r.status)) else { return };
+                self.notice = None;
+                match status {
+                    Status::Stopped => self.screen = Screen::Ports(Box::new(PortsState::new(e))),
+                    Status::Running => self.say(Level::Info, "Stop the server first, then change its ports."),
+                    Status::Missing => self.say(Level::Bad, "The server's folder is missing, so its ports can't be changed."),
                 }
             }
             Action::Schedule => {
@@ -897,7 +974,7 @@ impl App {
         let was_main = matches!(self.screen, Screen::Main);
         let mut screen = std::mem::replace(&mut self.screen, Screen::Main);
         match &mut screen {
-            Screen::Main => {}
+            Screen::Main | Screen::ConfirmRestart => {}
             Screen::Logs(l) => match a {
                 Action::Up => l.scroll_up(1),
                 Action::Down => l.scroll_down(1),
@@ -1015,6 +1092,11 @@ impl App {
                 }
                 _ => {}
             },
+            Screen::Ports(s) => {
+                if a == Action::Save {
+                    self.ports_save(s);
+                }
+            }
             Screen::Schedule(s) => match a {
                 Action::Save => match s.build() {
                     Ok(cfg) => match self.svc.backend.schedule_elevation(&s.entry, Some(&cfg)) {
@@ -1365,6 +1447,26 @@ impl App {
         }
     }
 
+    /// Save the ports typed on the Ports screen. The server must be stopped (the backend checks).
+    fn ports_save(&mut self, s: &mut PortsState) {
+        let wanted = match s.wanted() {
+            Ok(p) => p,
+            Err(e) => return self.say(Level::Bad, e),
+        };
+        if wanted == (Ports { game: s.entry.ports.game, txadmin: s.entry.ports.txadmin }) {
+            return self.say(Level::Info, "Those are already the ports this server uses.");
+        }
+        match self.svc.backend.ports_set(&s.entry, wanted.clone()) {
+            Ok(notes) => {
+                s.entry.ports = registry::PortsRecord { game: wanted.game, txadmin: wanted.txadmin };
+                s.notes = notes;
+                self.say(Level::Good, format!("Saved. The server now uses game port {} and txAdmin port {}. Start it to use them.", wanted.game, wanted.txadmin));
+                self.reload();
+            }
+            Err(e) => self.say(Level::Bad, format!("Couldn't change the ports: {e}")),
+        }
+    }
+
     /// Register a found folder (registry entry only: the folder itself is not touched).
     fn adopt(&mut self, c: Candidate) {
         let taken: Vec<String> = self.rows.iter().map(|r| r.entry.name.clone()).collect();
@@ -1411,6 +1513,7 @@ fn main_key(k: KeyEvent) -> Option<Action> {
         KeyCode::Char('v') => Action::CheckUpdates,
         KeyCode::Char('n') => Action::Notify,
         KeyCode::Char('c') => Action::Schedule,
+        KeyCode::Char('m') => Action::Ports,
         KeyCode::Char('a') => Action::Add,
         KeyCode::Char('g') => Action::AddResources,
         KeyCode::Char('b') => Action::ReportIssue,
@@ -1606,6 +1709,23 @@ fn schedule_key(s: &mut ScheduleState, k: KeyEvent) -> Option<Action> {
         _ => {}
     }
     None
+}
+
+fn ports_key(s: &mut PortsState, k: KeyEvent) -> Option<Action> {
+    match k.code {
+        KeyCode::Esc => Some(Action::Back),
+        KeyCode::Enter => Some(Action::Save),
+        KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down => {
+            s.focus = 1 - s.focus;
+            None
+        }
+        // Digits only; other letters are ignored.
+        KeyCode::Char(c) if !c.is_ascii_digit() => None,
+        _ => {
+            s.field().key(k);
+            None
+        }
+    }
 }
 
 fn add_key(s: &mut AddState, k: KeyEvent) -> Option<Action> {

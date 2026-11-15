@@ -5,6 +5,11 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-15
+
+### Added
+- Change a server's game and txAdmin ports from the manager: select the server while it is stopped, press `m` (or "Change ports"), type the new ports and press Enter. Kora checks they are free and not used by another Kora server, then updates `server.cfg`, the txAdmin port in the service environment (Linux), `kora-server.json` and the server list. Firewall rules are not changed: open the new ports and close the old ones yourself.
+
 ## [0.3.3] - 2026-11-15
 
 ### Fixed

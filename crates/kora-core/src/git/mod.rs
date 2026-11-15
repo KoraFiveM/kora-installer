@@ -748,7 +748,11 @@ fn probe_fork(r: &dyn CommandRunner, target: &str, name: &str, upstream: &str) -
         }
         return Ok(ForkProbe::Present(default_branch));
     }
-    if is_rate_limited(&o.stderr) {
+    // Only a definite "not found" means the fork is missing. Anything else (rate limit, network
+    // error, expired token, server error) must NOT be read as "missing": that would send a fork
+    // request for a repo that may already exist.
+    let not_found = o.stderr.contains("HTTP 404") || o.stderr.contains("Not Found");
+    if !not_found {
         return Err(GitError::Command { cmd: format!("gh api {path}"), code: o.code, stderr: o.stderr });
     }
     Ok(ForkProbe::Missing)
@@ -1367,6 +1371,22 @@ mod tests {
         run_forks(&f, &mut st, &c, &mut |_| {}).unwrap();
         assert!(st.is_complete(), "{st:?}");
         assert_eq!(f.sleeps.borrow().len(), 2);
+    }
+
+    #[test]
+    fn failed_existence_check_never_forks() {
+        // A network/auth/server error on the lookup must not be read as "repo missing".
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api repos/me/") {
+                fail("error connecting to api.github.com")
+            } else {
+                ok("")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["a/mine"]));
+        run_forks(&f, &mut st, &cfg(), &mut |_| {}).unwrap();
+        assert_eq!(f.count("gh repo fork"), 0, "must not fork a repo whose existence is unknown");
+        assert_eq!(st.failed.len(), 1);
     }
 
     #[test]

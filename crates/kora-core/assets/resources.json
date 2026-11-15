@@ -1751,7 +1751,8 @@
       "repository": "https://github.com/KoraFiveM/fft.git",
       "path": "[standalone]/fft",
       "group": "standalone",
-      "kind": "internal",
+      "kind": "optional",
+      "devOnly": true,
       "branch": "dev",
       "order": 59,
       "docsPath": null,
@@ -1759,7 +1760,7 @@
       "latest": null,
       "docsAvailable": false,
       "versions": [],
-      "description": "Internal development-only repository installed at resources/[standalone]/fft."
+      "description": "Development-only option, installed at resources/[standalone]/fft. Offered to development servers only."
     },
     {
       "id": "kora-cards",

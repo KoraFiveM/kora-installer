@@ -77,7 +77,7 @@ pub fn load_catalog() -> Result<(Catalog, Option<String>)> {
 
 /// What to install for `ids` (plus dependencies) on `server`.
 pub fn plan(cat: &Catalog, server: &ServerFile, ids: &[String]) -> Result<AddPlan> {
-    let picker = Picker::with_ids(cat, installed_ids(server), ids)
+    let picker = Picker::with_ids(cat, installed_ids(server), server.mode == Mode::Development, ids)
         .map_err(|e| InstallError(e.to_string()))?;
     plan_from_picker(&picker, server, ids)
 }
