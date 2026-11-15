@@ -10,6 +10,11 @@ permissions:
   contents: read
 # Three independent jobs run in parallel on separate Windows VMs, so a failure in one step no longer hides the
 # result of the others (a failed step used to skip everything after it).
+concurrency:
+  # A newer push to the same branch/PR cancels the older run instead of stacking up (runners are limited).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   basics:
     name: "basics: --version, install.ps1, dev dry run"

@@ -8,6 +8,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  # A newer push to the same branch/PR cancels the older run instead of stacking up (runners are limited).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deny:
     name: cargo deny (advisories, licenses, bans, sources)
