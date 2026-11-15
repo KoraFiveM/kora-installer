@@ -35,6 +35,8 @@ pub enum Screen {
     DbAdminLogin,
     Firewall,
     Service,
+    /// Windows: put a Kora shortcut on the desktop (the Start Menu entry is always added).
+    Shortcut,
     License,
     // Advanced only
     Hostname,
@@ -106,6 +108,8 @@ pub struct Wizard {
     /// Advanced only: also open the txAdmin port in the firewall.
     pub txadmin_public: bool,
     pub service: bool,
+    /// Windows: also put a Kora shortcut on the desktop (default on).
+    pub desktop_shortcut: bool,
     pub license: String,
     pub hostname: String,
     host_touched: bool,
@@ -310,6 +314,7 @@ impl Wizard {
             firewall: true,
             txadmin_public: false,
             service: true,
+            desktop_shortcut: true,
             license: String::new(),
             github_owner: String::new(),
             gh: None,
@@ -390,7 +395,11 @@ impl Wizard {
                 v.push(DbAdminLogin);
             }
         }
-        v.extend([Firewall, Service, License]);
+        v.extend([Firewall, Service]);
+        if self.windows {
+            v.push(Shortcut);
+        }
+        v.push(License);
         if self.advanced && !web {
             v.push(Hostname);
         }
@@ -449,7 +458,7 @@ impl Wizard {
         match self.screen {
             Screen::Permission | Screen::Welcome | Screen::Mode | Screen::Artifact | Screen::Resources | Screen::DbAdmin => 2,
             Screen::Database => 3,
-            Screen::Firewall | Screen::Service | Screen::TxAdminPublic => 2,
+            Screen::Firewall | Screen::Service | Screen::Shortcut | Screen::TxAdminPublic => 2,
             _ => 0,
         }
     }
@@ -498,6 +507,7 @@ impl Wizard {
             Screen::DbAdmin => usize::from(self.dba_custom),
             Screen::Firewall => usize::from(!self.firewall),
             Screen::Service => usize::from(!self.service),
+            Screen::Shortcut => usize::from(!self.desktop_shortcut),
             Screen::TxAdminPublic => usize::from(!self.txadmin_public),
             _ => 0,
         };
@@ -525,6 +535,7 @@ impl Wizard {
             }
             Screen::Firewall => self.firewall = i == 0,
             Screen::Service => self.service = i == 0,
+            Screen::Shortcut => self.desktop_shortcut = i == 0,
             Screen::TxAdminPublic => self.txadmin_public = i == 0,
             Screen::GithubAccount => self.gh_apply(),
             _ => {}
@@ -864,8 +875,8 @@ impl Wizard {
                     self.select(i);
                 }
             }
-            KeyCode::Char('y') if matches!(self.screen, Screen::Firewall | Screen::Service | Screen::TxAdminPublic) => self.select(0),
-            KeyCode::Char('n') if matches!(self.screen, Screen::Firewall | Screen::Service | Screen::TxAdminPublic) => self.select(1),
+            KeyCode::Char('y') if matches!(self.screen, Screen::Firewall | Screen::Service | Screen::Shortcut | Screen::TxAdminPublic) => self.select(0),
+            KeyCode::Char('n') if matches!(self.screen, Screen::Firewall | Screen::Service | Screen::Shortcut | Screen::TxAdminPublic) => self.select(1),
             KeyCode::Enter | KeyCode::Tab => self.go_next(),
             KeyCode::Esc | KeyCode::Backspace | KeyCode::BackTab | KeyCode::Char('b') => self.go_back(),
             _ => {}
@@ -1297,7 +1308,7 @@ impl Wizard {
             dry_run: false,
             db_admin: self.db_admin(),
             start: true,
-            app: Some(kora_core::app_install::AppChoice::default()),
+            app: Some(kora_core::app_install::AppChoice { desktop_shortcut: self.windows && self.desktop_shortcut }),
         }
     }
 
@@ -1405,6 +1416,32 @@ mod tests {
         assert!(r.license_key.is_none());
         assert!(matches!(r.resources, ResourceSelection::All));
         assert!(r.firewall && r.service);
+    }
+
+    #[test]
+    fn desktop_shortcut_checkbox_is_windows_only_default_on_and_wired_to_the_app_option() {
+        let mut w = wiz();
+        w.windows = true;
+        let flow = w.flow();
+        let at = flow.iter().position(|s| *s == Screen::Shortcut).expect("the shortcut screen is in the Windows flow");
+        assert_eq!(flow[at - 1], Screen::Service);
+        assert_eq!(flow[at + 1], Screen::License);
+        assert!(w.desktop_shortcut, "default on");
+        assert!(w.build_request().app.unwrap().desktop_shortcut);
+        w.screen = Screen::Shortcut;
+        assert_eq!(w.option_count(), 2);
+        w.handle_key(key(KeyCode::Char('n')));
+        assert!(!w.desktop_shortcut);
+        assert!(!w.build_request().app.unwrap().desktop_shortcut);
+        w.handle_key(key(KeyCode::Char('y')));
+        assert!(w.build_request().app.unwrap().desktop_shortcut);
+        let v = crate::wizard_view::view(&w);
+        assert!(v.title.to_string().contains("Kora shortcut on my desktop"));
+
+        let mut l = wiz();
+        l.windows = false;
+        assert!(!l.flow().contains(&Screen::Shortcut), "no desktop on Linux");
+        assert!(!l.build_request().app.unwrap().desktop_shortcut);
     }
 
     #[test]

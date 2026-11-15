@@ -272,6 +272,14 @@ pub fn view(w: &Wizard) -> View {
                 opt("No, I'll start it myself", "You can add this later."),
             ];
         }
+        Screen::Shortcut => {
+            v.title = l("Put a Kora shortcut on my desktop");
+            v.lines = vec![l("Kora is also added to the Start Menu so you can open it later to manage your servers.")];
+            v.options = vec![
+                opt("Yes, put a Kora shortcut on my desktop", "Recommended."),
+                opt("No, the Start Menu is enough", "You can add it later with `kora app install`."),
+            ];
+        }
         Screen::License => {
             v.title = l("Your server license key");
             v.lines = vec![
