@@ -72,6 +72,13 @@ impl ConsoleTee {
     const MAX_BYTES: u64 = 20 * 1024 * 1024;
 
     pub fn start(dir: &Path, child: &mut std::process::Child, echo: bool, extra: Option<std::fs::File>) -> Self {
+        let out = child.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>);
+        let err = child.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>);
+        Self::attach(dir, out, err, echo, extra)
+    }
+
+    /// Like [`start`](Self::start) for any two output streams.
+    pub fn attach(dir: &Path, out: Option<Box<dyn std::io::Read + Send>>, err: Option<Box<dyn std::io::Read + Send>>, echo: bool, extra: Option<std::fs::File>) -> Self {
         use std::sync::{Arc, Mutex};
         let meta = dir.join(".kora");
         let _ = std::fs::create_dir_all(&meta);
@@ -109,11 +116,11 @@ impl ConsoleTee {
                 }
             });
         };
-        if let Some(o) = child.stdout.take() {
-            pump(Box::new(o), Arc::clone(&sink));
+        if let Some(o) = out {
+            pump(o, Arc::clone(&sink));
         }
-        if let Some(e) = child.stderr.take() {
-            pump(Box::new(e), sink);
+        if let Some(e) = err {
+            pump(e, sink);
         }
         ConsoleTee
     }
@@ -365,18 +372,13 @@ pub fn service_control(name: &str, action: crate::service::ControlAction) -> Res
 mod tests {
     use super::{exit_code_for, windows_service_exit};
 
-    #[cfg(unix)]
     #[test]
     fn the_console_tee_copies_server_output_to_console_log() {
+        // In-memory streams: no child process, so no SIGCHLD to interrupt other tests' socket reads.
         let d = tempfile::tempdir().unwrap();
-        let mut child = std::process::Command::new("sh")
-            .args(["-c", "echo hello from fxserver; echo oops 1>&2"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        let _t = super::ConsoleTee::start(d.path(), &mut child, false, None);
-        child.wait().unwrap();
+        let out: Box<dyn std::io::Read + Send> = Box::new(std::io::Cursor::new(b"hello from fxserver\n".to_vec()));
+        let err: Box<dyn std::io::Read + Send> = Box::new(std::io::Cursor::new(b"oops\n".to_vec()));
+        let _t = super::ConsoleTee::attach(d.path(), Some(out), Some(err), false, None);
         let log = d.path().join(".kora").join("console.log");
         for _ in 0..50 {
             if std::fs::read_to_string(&log).is_ok_and(|t| t.contains("hello") && t.contains("oops")) {
