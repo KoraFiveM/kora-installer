@@ -1,26 +1,31 @@
-## Kora Installer v0.3.0
+## Kora Installer v0.3.1
 
 Install and manage a Kora FiveM server from one program: `kora install` (guided wizard or flags).
 
 ### Install
 Linux:
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.3.0/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.3.1/install.sh | sh
 ```
 Windows (PowerShell):
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.3.0/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.3.1/install.ps1 | iex
 ```
 Then run `kora install`. Or download the program below and check it yourself.
 
-### New in 0.3.0
-- **You need this version for the new catalog.** The resource catalog is moving to a new format (schema v3). Kora 0.3.0 reads it; older versions do not. v0.2.x installs keep working only until the catalog moves to schema v3, so please update now: run `kora self-update`, or use the install line above.
-- **Add resources to a server you already have.** `kora add-resources <server> --code CODE` (a code from the website) or `--resource ID`. In `kora manager`, press `g` on a server to browse compatibility resources, bridges and creator resources. Anything a resource depends on is added with it.
-- **A tidier folder layout for new servers.** Folders are `[cfx-default]`, `[compat]`, `[kora]`, `[bridges]` and `[creators]/[<creator>]`, plus empty `[addons]` and `[streamedassets]` for your own things. `server.cfg` now starts whole folders instead of listing each resource. Compatibility, bridge and creator resources are only installed when you choose them or something needs them.
-- **Existing servers are not rearranged.** Your folders and `server.cfg` stay as they are. Adding resources only appends the missing `ensure` lines.
-- **Report an issue from the manager.** Press `b` on a server to send an issue to the resource's repository through the GitHub CLI. It contains only the Kora version, your system, the mode, the resource and its version. No paths, host names, ports, keys or passwords.
-- **Open a pull request from the manager** (development servers). Press `p` to push your fork's branch and open a pull request to the original repository. If the GitHub CLI is not signed in, Kora offers to sign you in first.
-- **Third-party resources are always pinned.** Bridge and creator resources are installed at an exact commit, never as a fork, even in development mode, so they cannot change under you. Releases without a tag are pinned by commit.
+### New in 0.3.1
+- **A new look for the terminal screens.** One theme with the Kora lime accent, a rounded frame, a `KORA` header, step tabs and progress gauges, status chips with symbols, and key hints in the footer. The review is a two-column summary; progress shows an icon per step and a scrollbar; "Add resources" has section tabs and shows dependencies as badges; the manager list has a header.
+- **Terminal too small?** Below 80x24 you now get a clear "Terminal too small" panel instead of a broken layout. Make the window bigger.
+- **Visual changes only.** Behaviour and key bindings are unchanged.
+- **Colour fallbacks.** 256-colour and 16-colour terminals get the closest green. Set `NO_COLOR=1` (or `TERM=dumb`) for no colour at all; state is then shown with bold, reverse and symbols.
+- **ASCII fallback.** Symbols and borders switch to plain ASCII on a non-UTF-8 locale and on the legacy Windows console. Set `KORA_ASCII=1` to force it.
+
+### Earlier: 0.3.0
+- **You need 0.3.0 or newer for the new catalog (schema v3).** v0.2.x installs keep working only until the catalog moves to schema v3: run `kora self-update`, or use the install line above.
+- **Add resources to an existing server:** `kora add-resources <server> --code CODE` or `--resource ID`, or press `g` in `kora manager`. Dependencies are added with them.
+- **Tidier folder layout for new servers** (`[cfx-default]`, `[compat]`, `[kora]`, `[bridges]`, `[creators]`, plus empty `[addons]` and `[streamedassets]`); `server.cfg` starts whole folders. Existing servers are not rearranged.
+- **Report an issue** (`b`) and **open a pull request** (`p`, development servers) from the manager, through the GitHub CLI; no paths, host names, ports, keys or passwords are sent.
+- **Third-party resources are always pinned** to an exact commit, never forked, even in development mode.
 
 ### Earlier: 0.2.3
 - **Live console** in `kora manager` (`w`), and **GitHub sign-in as part of setup** for development servers.
@@ -38,6 +43,7 @@ Then run `kora install`. Or download the program below and check it yourself.
 
 ### Known gaps
 - Real Windows runs of the new features (app install, schedule as the installing user) are covered by CI only so far.
+- The new look is lightly tested in the Windows console; colours and symbols may render differently there. If it looks wrong, set `KORA_ASCII=1` and/or `NO_COLOR=1`, and please report it.
 - The MariaDB root password is briefly visible to administrators in the process list while the database is created (a limit of the MariaDB tool).
 - The Windows `.exe` is **unsigned** (SignPath application pending), so SmartScreen will warn ("More info" -> "Run anyway").
 
