@@ -80,7 +80,32 @@ try {
     # B is not newer than... (B reports the same version as A): update offered again, never a downgrade path without --version
     $r = Invoke-Native $a @('self-update', '--check') $envs
     Assert-That ($r.Output -match 'v99\.0\.0 is available') 'the notice path still works from B'
+
+    # ---- the installed Kora app copy (Program Files) is what gets updated, not the running copy ----
+    $pfDir = Join-Path $env:ProgramFiles 'Kora'; $pf = Join-Path $pfDir 'kora.exe'
+    $r = Invoke-Native $kora @('app', 'install', '--yes') $envs; Show 'app install (copy A)' $r
+    Assert-That ($r.Code -eq 0 -and (Test-Path $pf)) 'the app copy is installed in Program Files'
+    Assert-That ((Get-FileHash -Algorithm SHA256 $pf).Hash.ToLowerInvariant() -eq $hashA) 'the app copy is build A'
+    $runBefore = (Get-FileHash -Algorithm SHA256 $a).Hash.ToLowerInvariant()
+    # checksum mismatch first: the app copy stays
+    Set-Sum ('1' * 64)
+    $r = Invoke-Native $a @('self-update', '--yes') $envs; Show 'self-update (bad checksum, app copy)' $r
+    Assert-That ($r.Code -ne 0) 'mismatch refused'
+    Assert-That ((Get-FileHash -Algorithm SHA256 $pf).Hash.ToLowerInvariant() -eq $hashA) 'the app copy is intact'
+    Set-Sum $hashB
+    $r = Invoke-Native $a @('self-update', '--yes') $envs; Show 'self-update (app copy)' $r
+    Assert-That ($r.Code -eq 0 -and $r.Output -match [regex]::Escape($pf)) 'self-update targets Program Files\Kora\kora.exe'
+    Assert-That ((Get-FileHash -Algorithm SHA256 $pf).Hash.ToLowerInvariant() -eq $hashB) 'the app copy is now build B'
+    Assert-That ((Get-FileHash -Algorithm SHA256 $a).Hash.ToLowerInvariant() -eq $runBefore) 'the running copy elsewhere was not touched'
+    Assert-That (Test-Path "$pf.old") 'the previous app exe was renamed to kora.exe.old'
+    $r = Invoke-Native $pf @('app', 'status') $envs; Show 'app status after self-update' $r
+    Assert-That ($r.Output -match 'version: 99\.0\.0') 'app status reports the new recorded version'
+    Assert-That (-not (Test-Path "$pf.old")) '.old of the app copy is deleted at the next start'
+    $r = Invoke-Native $pf @('app', 'uninstall', '--yes') $envs; Show 'app uninstall' $r
+    Assert-That (-not (Test-Path $pfDir)) 'cleanup: Program Files\Kora is gone'
 }
 finally {
+    $d = Join-Path $env:ProgramFiles 'Kora'
+    if (Test-Path $d) { & $kora app uninstall --yes 2>&1 | Out-Null }
     if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
 }

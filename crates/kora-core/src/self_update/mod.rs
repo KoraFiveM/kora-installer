@@ -12,7 +12,6 @@ pub mod replace;
 pub mod update_check;
 pub mod version;
 
-use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -116,23 +115,21 @@ pub struct Target {
     pub app_copy: bool,
 }
 
-/// The installed app copy (`%ProgramFiles%\Kora\kora.exe`, `/opt/kora/bin/kora`, with its `app.json`)
-/// when it exists, otherwise the running file.
-pub fn resolve_target(running: &Path, windows: bool, get: &dyn Fn(&str) -> Option<OsString>) -> Target {
-    let var = |k: &str| get(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let app = if windows {
-        var("ProgramFiles").map(|p| p.join("Kora")).map(|d| (d.join("kora.exe"), d.join("app.json")))
-    } else {
-        let dir = match var("KORA_APP_PREFIX") {
-            Some(p) => p.join("opt/kora/bin"),
-            None => PathBuf::from("/opt/kora/bin"),
-        };
-        Some((dir.join("kora"), dir.join("app.json")))
-    };
+/// The Kora app copy, when `kora app install` put one on this machine: `(exe, app state file)`.
+pub fn installed_app() -> Option<(PathBuf, PathBuf)> {
+    let st = crate::app_install::status();
+    if !(st.installed && st.exe_exists) {
+        return None;
+    }
+    let layout = crate::app_install::Layout::from_env(&st.exe).ok()?;
+    Some((layout.exe, layout.state))
+}
+
+/// The installed app copy when there is one (its recorded version is updated afterwards, so
+/// `kora app status` stays truthful), otherwise the running file.
+pub fn resolve_target(running: &Path, windows: bool, app: Option<(PathBuf, PathBuf)>) -> Target {
     if let Some((exe, state)) = app {
-        if exe.is_file() && state.is_file() {
-            return Target { exe, state: Some(state), app_copy: true };
-        }
+        return Target { exe, state: Some(state), app_copy: true };
     }
     let exe = if windows { running.to_path_buf() } else { std::fs::canonicalize(running).unwrap_or_else(|_| running.to_path_buf()) };
     Target { exe, state: None, app_copy: false }
@@ -248,9 +245,11 @@ pub fn startup_cleanup() {
     }
     if let Ok(me) = std::env::current_exe() {
         replace::cleanup_old(&replace::RealFs, true, &me);
-        let t = resolve_target(&me, true, &|k| std::env::var_os(k));
-        if t.exe != me {
-            replace::cleanup_old(&replace::RealFs, true, &t.exe);
+        // the app copy's leftover too (cheap: no status probe at startup)
+        if let Ok(l) = crate::app_install::Layout::from_env(&me) {
+            if l.exe != me {
+                replace::cleanup_old(&replace::RealFs, true, &l.exe);
+            }
         }
     }
 }

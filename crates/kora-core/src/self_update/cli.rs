@@ -62,7 +62,7 @@ pub fn run(o: &Options) -> i32 {
         Ok(p) => p,
         Err(e) => return fail(format!("cannot find the kora program: {e}")),
     };
-    let target = resolve_target(&running, cfg!(windows), &|k| std::env::var_os(k));
+    let target = resolve_target(&running, cfg!(windows), installed_app());
     if !o.yes {
         if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
             return fail("not a terminal: add --yes to update without asking".into());

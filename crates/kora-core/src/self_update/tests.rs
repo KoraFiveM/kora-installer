@@ -239,33 +239,35 @@ fn fetches_and_picks_from_the_releases_endpoint() {
 }
 
 #[test]
-fn target_prefers_the_installed_app_copy() {
+fn target_is_the_installed_app_copy_else_the_running_file() {
     let d = tempfile::tempdir().unwrap();
     let running = d.path().join("elsewhere").join("kora");
     std::fs::create_dir_all(running.parent().unwrap()).unwrap();
     std::fs::write(&running, b"x").unwrap();
-    let prefix = d.path().join("root");
-    let get = |k: &str| (k == "KORA_APP_PREFIX").then(|| prefix.clone().into_os_string());
-    let t = resolve_target(&running, false, &get);
-    assert!(!t.app_copy);
+    let t = resolve_target(&running, false, None);
+    assert!(!t.app_copy && t.state.is_none());
     assert_eq!(t.exe, std::fs::canonicalize(&running).unwrap());
+    let app = (d.path().join("opt/kora/bin/kora"), d.path().join("opt/kora/bin/app.json"));
+    let t = resolve_target(&running, false, Some(app.clone()));
+    assert_eq!((t.exe, t.state, t.app_copy), (app.0, Some(app.1), true));
+}
 
-    let app = prefix.join("opt/kora/bin");
-    std::fs::create_dir_all(&app).unwrap();
-    std::fs::write(app.join("kora"), b"app").unwrap();
-    assert!(!resolve_target(&running, false, &get).app_copy, "needs app.json too");
-    std::fs::write(app.join("app.json"), br#"{"version":"0.2.1","sha256":"x","installed_unix":1}"#).unwrap();
-    let t = resolve_target(&running, false, &get);
-    assert_eq!((t.exe.clone(), t.app_copy), (app.join("kora"), true));
-    assert_eq!(t.state, Some(app.join("app.json")));
-
-    // Windows layout, same rule
-    let pf = d.path().join("pf");
-    std::fs::create_dir_all(pf.join("Kora")).unwrap();
-    std::fs::write(pf.join("Kora").join("kora.exe"), b"x").unwrap();
-    std::fs::write(pf.join("Kora").join("app.json"), b"{}").unwrap();
-    let getw = |k: &str| (k == "ProgramFiles").then(|| pf.clone().into_os_string());
-    assert!(resolve_target(&running, true, &getw).app_copy);
+#[test]
+fn updating_the_app_copy_keeps_app_status_truthful() {
+    // fake app state as `kora app install` writes it (AppState) + the real file swap
+    let m = Mock::start();
+    let rel = m.publish(b"NEW", b"NEW", "kora-linux-x86_64");
+    let (d, t) = setup(b"OLD");
+    let state = d.path().join("app.json");
+    let st = crate::app_install::AppState { version: "0.2.1".into(), sha256: "oldhash".into(), installed_unix: 5 };
+    std::fs::write(&state, serde_json::to_vec_pretty(&st).unwrap()).unwrap();
+    let target = resolve_target(Path::new("/nowhere"), false, Some((t.clone(), state.clone())));
+    let a = apply(&m.src(), &rel, "kora-linux-x86_64", &target.exe, &RealFs, Flow::Unix).unwrap();
+    update_app_state(target.state.as_ref().unwrap(), &v("0.9.0"), &a.sha256).unwrap();
+    let back: crate::app_install::AppState = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+    assert_eq!((back.version.as_str(), back.sha256.as_str()), ("0.9.0", a.sha256.as_str()));
+    assert!(back.installed_unix > 5);
+    assert_eq!(std::fs::read(&t).unwrap(), b"NEW");
 }
 
 #[test]
