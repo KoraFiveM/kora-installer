@@ -312,6 +312,11 @@ enum Command {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+    /// Show or change when a development server updates itself.
+    Schedule {
+        #[command(subcommand)]
+        cmd: ScheduleCmd,
+    },
     /// GitHub helpers for development mode.
     Github {
         #[command(subcommand)]
@@ -354,6 +359,38 @@ enum Command {
         /// Also drop the databases and database users Kora created.
         #[arg(long)]
         delete_databases: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ScheduleCmd {
+    /// Show the current schedule in plain language.
+    Show {
+        /// Registry name, or the server folder.
+        server: String,
+    },
+    /// Change the schedule (needs administrator rights; Kora asks for them).
+    #[command(after_help = kora_core::service::RUN_AS_HELP)]
+    Set {
+        /// Registry name, or the server folder.
+        server: String,
+        /// Every day at HH:MM (24 hours, this computer's time). The default is 04:00.
+        #[arg(long, value_name = "HH:MM", conflicts_with = "weekly")]
+        daily: Option<String>,
+        /// Every week on DAY (mon..sun) at HH:MM.
+        #[arg(long, num_args = 2, value_names = ["DAY", "HH:MM"], conflicts_with = "daily")]
+        weekly: Option<Vec<String>>,
+        /// Run as you, the person who installed (default): your GitHub sign-in works for private forks.
+        #[arg(long, conflicts_with = "as_system")]
+        as_user: bool,
+        /// Run as the system account: works when nobody is logged in, but cannot fetch private forks.
+        #[arg(long)]
+        as_system: bool,
+    },
+    /// Turn automatic updates off.
+    Off {
+        /// Registry name, or the server folder.
+        server: String,
     },
 }
 
@@ -901,6 +938,84 @@ fn start_and_report(server: &str, past: &str) -> i32 {
     }
 }
 
+/// `kora schedule show|set|off`.
+fn schedule(cmd: ScheduleCmd) -> i32 {
+    use kora_core::service as svc;
+    let find = |server: &str| -> Option<registry::ServerEntry> {
+        let reg = registry::Registry::load().unwrap_or_default();
+        reg.find(server).cloned().or_else(|| {
+            let dir = PathBuf::from(server);
+            let sf = registry::ServerFile::load(&dir).ok()?;
+            Some(registry::ServerEntry { name: sf.name, dir, mode: sf.mode, ports: registry::PortsRecord { game: sf.ports.game, txadmin: sf.ports.txadmin }, created_unix: 0 })
+        })
+    };
+    let missing = |server: &str| {
+        eprintln!("error: '{server}' is not a registered Kora server or server folder (see `kora status`)");
+        1
+    };
+    match cmd {
+        ScheduleCmd::Show { server } => {
+            let Some(rec) = find(&server) else { return missing(&server) };
+            match svc::get(&rec) {
+                Some(cfg) => {
+                    println!("{}: {}", rec.name, svc::describe(&cfg));
+                    if cfg.run_as == svc::RunAs::System {
+                        println!("note: the system account has no GitHub sign-in, so forks of private repositories cannot be updated. Switch with: kora schedule set {} --as-user", rec.name);
+                    }
+                }
+                None => println!("{}: no automatic updates are scheduled. Turn them on with: kora schedule set {} --daily 04:00", rec.name, rec.name),
+            }
+            0
+        }
+        ScheduleCmd::Set { server, daily, weekly, as_user: _, as_system } => {
+            let Some(rec) = find(&server) else { return missing(&server) };
+            let (preset, time, weekday) = match (daily, weekly) {
+                (_, Some(w)) => {
+                    let day = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].iter().position(|d| w[0].to_lowercase().starts_with(d));
+                    let Some(day) = day.filter(|_| w[0].len() >= 3) else {
+                        eprintln!("error: '{}' is not a weekday (use mon, tue, wed, thu, fri, sat or sun)", w[0]);
+                        return 1;
+                    };
+                    (svc::Preset::Weekly, w[1].clone(), Some(day as u8))
+                }
+                (Some(t), None) => (svc::Preset::Daily, t, None),
+                (None, None) => {
+                    eprintln!("error: say when: --daily HH:MM or --weekly DAY HH:MM");
+                    return 1;
+                }
+            };
+            let cfg = svc::ScheduleConfig { preset, time, weekday, run_as: if as_system { svc::RunAs::System } else { svc::RunAs::InstallingUser }, enabled: true };
+            if let Err(e) = cfg.validate() {
+                eprintln!("error: {e}");
+                return 1;
+            }
+            match svc::set(&rec, &cfg) {
+                Ok(()) => {
+                    println!("{}: {}", rec.name, svc::describe(&cfg));
+                    0
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    1
+                }
+            }
+        }
+        ScheduleCmd::Off { server } => {
+            let Some(rec) = find(&server) else { return missing(&server) };
+            match svc::remove(&rec) {
+                Ok(()) => {
+                    println!("{}: automatic updates are off", rec.name);
+                    0
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    1
+                }
+            }
+        }
+    }
+}
+
 fn update(a: UpdateArgs) -> i32 {
     use kora_core::update::manual as m;
     if a.auto {
@@ -1133,7 +1248,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Install(a)) => K::Install { dry_run: a.dry_run },
         Some(Command::Manager) => K::Manager,
         Some(Command::Update(a)) => K::Update { auto: a.auto },
-        Some(Command::Status) => K::Status,
+        Some(Command::Status | Command::Schedule { cmd: ScheduleCmd::Show { .. } }) => K::Status,
+        Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
         Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. }) => K::Other,
         Some(Command::Start { .. }) => K::Start,
@@ -1169,6 +1285,7 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
                 _ => vec![],
             }
         }
+        Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) => one("change the automatic-update schedule"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
         _ => vec![],
     }
@@ -1229,6 +1346,7 @@ fn main() {
         Some(Command::Update(a)) => update(a),
         Some(Command::Status) => status(),
         Some(Command::Webhook { cmd }) => webhook(cmd),
+        Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {

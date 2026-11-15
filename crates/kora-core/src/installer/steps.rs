@@ -1004,21 +1004,24 @@ impl InstallStep {
         Ok(format!("Service {} registered (not started), running as '{account}'", server.service_name()))
     }
 
-    /// Dev mode: daily 04:00 `kora update --auto <dir>` timer (systemd) / scheduled task (Windows).
+    /// Dev mode: daily 04:00 `kora update --auto <dir>` as the installing user (their GitHub
+    /// sign-in works for private forks); configurable later with `kora schedule`.
     fn schedule(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let created = ctx.load_created();
         let user = created.service_account.clone().unwrap_or_else(|| format!("kora-{}", slug(&ctx.req.name)));
         let server = managed_server(ctx, &user, &kora_exe_for(&created))?;
-        let sched = service::Schedule::default();
-        let plan = service::scheduler_install_plan(&server, &sched, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
+        let cfg = service::ScheduleConfig::default_for_install();
+        let who = service::installing_user();
+        let plan = service::schedule_install_plan(&server, &cfg, &who, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
         if !ctx.admin {
             ctx.note(format!("Auto-update schedule NOT created (needs administrator rights). Re-run as root/Administrator to: {}", plan.descriptions().join("; ")));
             return Ok("Skipped (needs admin); see notes".into());
         }
         ctx.update_created(|c| c.update_timer = true)?;
         service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
-        Ok(format!("Auto-update scheduled {}", sched.describe()))
+        service::save_schedule(&ctx.req.dir, &cfg, &who).map_err(|e| InstallError(e.to_string()))?;
+        Ok(format!("Auto-update scheduled: {} (change it with `kora schedule set {}`)", service::describe_for(&cfg, &who), server.name))
     }
 
     /// Last step: start the server and wait until txAdmin answers. A server that does not come up is

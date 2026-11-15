@@ -72,6 +72,8 @@ jobs:
       - name: "7. Install --start: the installer starts FXServer, txAdmin answers, it outlives the installer, kora stop/start/delete"
         timeout-minutes: 12
         run: ./scripts/smoke/07-start.ps1
+      - name: "8. kora schedule show/set/off (installing user and SYSTEM, real Task Scheduler)"
+        run: ./scripts/smoke/08-schedule.ps1
       - name: Collect logs
         if: always()
         run: |

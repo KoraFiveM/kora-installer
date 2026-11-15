@@ -12,8 +12,9 @@ pub mod binary;
 mod schedule;
 
 pub use schedule::{
-    scheduler_install_plan, scheduler_uninstall_plan, systemd_timer_unit, systemd_update_unit,
-    Schedule, TimeOfDay, Weekday,
+    describe, describe_for, get, get_with, schedule_install_plan, installing_user, managed_for, parse_task_xml, parse_time, parse_timer, remove, save_schedule,
+    scheduler_install_plan, scheduler_install_plan_as, scheduler_uninstall_plan, set, set_args, systemd_timer_unit, systemd_update_unit,
+    systemd_update_unit_as, task_xml, Preset, RunAs, Schedule, ScheduleConfig, ServerRecord, TimeOfDay, Weekday, RUN_AS_HELP,
 };
 
 use std::io;
@@ -25,6 +26,8 @@ pub enum ServiceError {
     Invalid(String),
     #[error("command `{command}` failed ({detail})")]
     Command { command: String, detail: String },
+    #[error("{0}")]
+    Other(String),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
 }
@@ -75,6 +78,22 @@ pub trait CommandRunner {
     fn remove_empty_dir(&self, path: &str) -> io::Result<()>;
 }
 
+/// Bytes to write for `contents`. An XML document that declares `encoding="UTF-16"` (Windows Task Scheduler's
+/// `schtasks /XML` refuses UTF-8 here: "unable to switch the encoding") is written as UTF-16 LE with a byte-order mark;
+/// everything else is UTF-8 as is.
+pub(crate) fn file_bytes(contents: &str) -> Vec<u8> {
+    let first = contents.lines().next().unwrap_or("");
+    if first.starts_with("<?xml") && first.to_ascii_lowercase().contains("encoding=\"utf-16\"") {
+        let mut out = vec![0xFF, 0xFE];
+        for u in contents.replace("\r\n", "\n").replace('\n', "\r\n").encode_utf16() {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        out
+    } else {
+        contents.as_bytes().to_vec()
+    }
+}
+
 /// Real runner using `std::process` and `std::fs`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemRunner;
@@ -94,7 +113,7 @@ impl CommandRunner for SystemRunner {
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(p, contents)?;
+        std::fs::write(p, file_bytes(contents))?;
         #[cfg(unix)]
         if let Some(m) = mode {
             use std::os::unix::fs::PermissionsExt;

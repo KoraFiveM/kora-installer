@@ -10,6 +10,10 @@ versions follow [SemVer](https://semver.org/).
 ### Added
 - The installer now starts your server when it finishes (final step "Start your server"): FXServer runs in the background (or through its service), Kora waits until txAdmin answers and tells you plainly if it does not come up (rejected licence key, port clash, crash, with the last log lines). The final screen has [ Open txAdmin ], [ Copy connect address ], [ Copy password ], [ Open folder ] and [ Stop server ] (or [ Start server ] when it is not running). `kora install --start` / `--no-start` for scripts (off by default there); `kora start`/`stop` work without a service; `kora status` shows the running state and port states.
 - Development mode: the installer signs you in to GitHub (one-time code, copy and open buttons) and lets you pick where your forks go - your own account or one of your organisations (greyed out with the reason when one can't be used) - or create a new organisation. Your last choice is remembered.
+- `kora schedule show|set|off <server> [--daily HH:MM | --weekly DAY HH:MM] [--as-user|--as-system]`: change when a development server updates itself, after install. The setting is stored in `<server>/.kora/schedule.json`.
+
+### Fixed
+- The automatic update no longer runs as SYSTEM by default (SYSTEM has no GitHub sign-in, so forks of private repositories could not be fetched). It now runs as the person who installed: on Windows as a "run only when logged on" task (no password stored; a missed run happens at the next login), on Linux with the installing user's git credentials when they own the folder. SYSTEM stays available with `--as-system`. Schedules made by older versions are read back as SYSTEM. Timers now add up to 10 minutes of random delay and catch up after downtime.
 
 ### Changed
 - The generated txAdmin password is no longer printed in the install notes or log; it is in `secrets/txadmin-admin.txt` and shown on the final screen.
