@@ -101,7 +101,7 @@ fn dev_env() -> Env {
         sh(t.path(), &["clone", "-q", up.to_str().unwrap(), fork.to_str().unwrap()]);
         sh(&fork, &["remote", "add", "upstream", up.to_str().unwrap()]);
         commit(&up, "2", &format!("{id} two"));
-        recs.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None });
+        recs.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None, third_party: false });
     }
     server(Mode::Development, recs, t, dir)
 }
@@ -257,7 +257,7 @@ fn prod_env() -> (Env, [String; 3]) {
     std::fs::create_dir_all(fork.parent().unwrap()).unwrap();
     sh(t.path(), &["clone", "-q", up.to_str().unwrap(), fork.to_str().unwrap()]);
     sh(&fork, &["checkout", "-q", "--detach", &c1]);
-    let rec = ResourceRecord { id: "kora-chat".into(), path: "[kora]/kora_chat".into(), repository: "https://github.com/x/kora_chat.git".into(), branch: "main".into(), commit: Some(c1.clone()) };
+    let rec = ResourceRecord { id: "kora-chat".into(), path: "[kora]/kora_chat".into(), repository: "https://github.com/x/kora_chat.git".into(), branch: "main".into(), commit: Some(c1.clone()), third_party: false };
     let env = server(Mode::Production, vec![rec], t, dir);
     env.sf.save().unwrap();
     (env, [c1, c2, c3])

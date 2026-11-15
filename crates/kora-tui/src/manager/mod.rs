@@ -6,6 +6,7 @@
 //! * [`adopt`]: finding existing server folders; [`logs`]: log tailing; [`input`]: text field.
 
 pub mod adapter;
+pub mod addres;
 pub mod adopt;
 pub mod app;
 pub mod backend;
@@ -18,6 +19,8 @@ pub mod view;
 mod testing;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_addres;
 
 use std::cell::RefCell;
 use std::error::Error;

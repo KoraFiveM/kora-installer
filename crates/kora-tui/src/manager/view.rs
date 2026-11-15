@@ -13,6 +13,7 @@ use kora_core::installer::Mode;
 
 use kora_core::service::{self as schedule, Preset, RunAs};
 use kora_core::update::manual::ChangeStatus;
+use super::addres::{AddResStage, AddResState, FbKind, FbStage, FeedbackState, ListView};
 use super::app::*;
 use super::console::{self, ConsoleState, Tone};
 use super::backend::Status;
@@ -172,6 +173,19 @@ fn help_for(app: &App) -> &'static str {
         Screen::Notify(_) => "paste the webhook  Enter save  F4 paste from clipboard  F2 send test  F3 remove  Esc back",
         Screen::Schedule(_) => "↑↓ field  ←→ change  Enter save  F3 remove  Esc back",
         Screen::Add(_) => "↑↓ pick  Enter add  p type a folder  Esc back",
+        Screen::AddRes(s) => match s.stage {
+            AddResStage::Menu => "c website code  b browse the catalog  Esc back",
+            AddResStage::Code => "paste the code, Enter checks it  Esc back",
+            AddResStage::Sections => "↑↓ pick  Enter open  i review and install  Esc back",
+            AddResStage::Items => "↑↓ move  Space tick  a all/none  Enter open  i review and install  Esc back",
+            AddResStage::Review => "Enter / y install  n or Esc back",
+            AddResStage::Result => "Esc back",
+        },
+        Screen::Feedback(s) => match s.stage {
+            FbStage::Pick => "↑↓ pick a resource  Enter next  Esc back",
+            FbStage::Compose => "type  Tab next field  Enter send  Esc back",
+            FbStage::Done => "c copy the address  Esc back",
+        },
     }
 }
 
@@ -292,6 +306,9 @@ fn main(app: &App, body: Rect, b: &mut Built) {
             btn(Action::Logs, "View logs (l)", there),
             btn(Action::Console, "Live console (w)", there),
             btn(Action::Ensure, "Ensure a resource (e)", there),
+            btn(Action::AddResources, "Add resources (g)", there),
+            btn(Action::ReportIssue, "Report an issue (b)", there),
+            btn(Action::OpenPr, "Open pull request (p)", there && e.mode == Mode::Development),
             btn(Action::Update, "Update (u)", there),
             btn(Action::CheckUpdates, "Check for updates (v)", there),
             btn(Action::Notify, "Notifications (n)", true),
@@ -341,6 +358,14 @@ fn screen(app: &App, s: &Screen, body: Rect) -> (String, Page) {
         Screen::Add(s) => {
             add(&mut p, s);
             " Add a server ".into()
+        }
+        Screen::AddRes(s) => {
+            add_resources(&mut p, s);
+            format!(" Add resources - {name} ")
+        }
+        Screen::Feedback(s) => {
+            feedback(&mut p, s);
+            format!(" {} - {name} ", s.heading())
         }
     };
     (title, p)
@@ -430,6 +455,158 @@ fn logs(p: &mut Page, l: &logs::LogView) {
             p.blank();
         }
         p.line(Line::styled(note, DIM));
+    }
+}
+
+fn list_row(p: &mut Page, i: usize, sel: bool, check: Option<bool>, label: &str, note: &str) {
+    let w = p.w();
+    let mark = match check {
+        Some(true) => "[x] ",
+        Some(false) => "[ ] ",
+        None => "",
+    };
+    let mut spans = vec![Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(BRAND)), Span::raw(mark)];
+    spans.push(Span::styled(trunc(label, w.saturating_sub(8 + note.chars().count().min(w / 2)).max(8)), if sel { Style::default().fg(BRAND).add_modifier(Modifier::BOLD) } else { Style::default() }));
+    if !note.is_empty() {
+        spans.push(Span::styled(format!("  {note}"), DIM));
+    }
+    p.row(Hit::Row(i), Line::from(spans));
+}
+
+fn add_resources(p: &mut Page, s: &AddResState) {
+    if let Some(n) = &s.catalog_note {
+        p.text(n, DIM);
+    }
+    match s.stage {
+        AddResStage::Menu => {
+            p.text("Add more resources to this server: compatibility layers, bridges to other frameworks, and resources from creators. They are downloaded at the version the catalog pins, put in their own folders and loaded with one `ensure` line per folder. Nothing you already have is moved.", DIM);
+            p.blank();
+            p.buttons(&[btn(Action::UseCode, "I have a website code (c)", s.cat.is_some()), btn(Action::Browse, "Browse the catalog (b)", s.cat.is_some()), back()]);
+        }
+        AddResStage::Code => {
+            p.text("Make your choice on the Kora website, then paste the code it gives you. A code works once and lasts 30 minutes.", DIM);
+            p.blank();
+            let w = p.w();
+            p.line(field("Code:", &s.code, w, true));
+            p.blank();
+            p.buttons(&[btn(Action::Confirm, "Check code (Enter)", true), back()]);
+        }
+        AddResStage::Sections => {
+            p.text("Pick a section. Nothing is chosen for you; whatever a choice needs is added automatically.", DIM);
+            p.blank();
+            for (i, r) in s.section_rows().iter().enumerate() {
+                list_row(p, i, i == s.sel, None, &r.label, &r.note);
+            }
+            p.blank();
+            p.buttons(&[btn(Action::Install, "Review and install (i)", !s.picked.is_empty()), back()]);
+        }
+        AddResStage::Items => {
+            p.line(Line::styled(s.list_title(), BOLD));
+            if let Some(b) = s.creator_blurb().filter(|b| !b.is_empty()) {
+                p.text(&b, DIM);
+            }
+            let rows = s.item_rows();
+            let room = p.room().saturating_sub(3).max(1);
+            let start = s.sel.saturating_sub(room - 1);
+            if rows.is_empty() {
+                p.text("Nothing here yet.", DIM);
+            }
+            for (i, r) in rows.iter().enumerate().skip(start).take(room) {
+                list_row(p, i, i == s.sel, r.checked, &r.label, &r.note);
+            }
+            p.blank();
+            let creators = s.view == ListView::CreatorIndex;
+            p.buttons(&[
+                btn(Action::Toggle, "Tick (Space)", !creators),
+                btn(Action::ToggleAll, "All / none (a)", !creators),
+                btn(Action::Install, &format!("Review and install ({})", s.picked.len()), !s.picked.is_empty()),
+                back(),
+            ]);
+        }
+        AddResStage::Review => {
+            p.text("These will be added. Each is downloaded at its pinned version (resources of someone else are never forked), put in its folder, and the folder is added to server.cfg if needed.", DIM);
+            p.blank();
+            if let Some(plan) = &s.plan {
+                for i in &plan.items {
+                    let how = if i.third_party { "pinned" } else if i.fork { "your fork" } else if i.commit.is_some() { "pinned" } else { "latest" };
+                    let line = format!("  {}{}  ->  {}  ({how})", i.id, if i.dependency { " (needed)" } else { "" }, i.rel);
+                    p.line(Line::raw(trunc(&line, p.w())));
+                }
+                if !plan.already.is_empty() {
+                    p.text(&format!("Already installed: {}", plan.already.join(", ")), DIM);
+                }
+                p.blank();
+                p.text(&format!("server.cfg gets: {}", plan.ensure.iter().map(|f| format!("ensure {f}")).collect::<Vec<_>>().join(", ")), DIM);
+            }
+            p.blank();
+            p.buttons(&[btn(Action::Confirm, "Install (Enter)", s.plan.as_ref().is_some_and(|x| !x.is_empty())), back()]);
+        }
+        AddResStage::Result => {
+            if let Some(o) = &s.outcome {
+                for id in &o.installed {
+                    p.line(Line::styled(format!("  added  {id}"), Style::default().fg(Color::Green)));
+                }
+                for (id, e) in &o.failed {
+                    p.line(Line::styled(trunc(&format!("  failed {id}: {e}"), p.w()), Style::default().fg(Color::Red)));
+                }
+                for n in &o.notes {
+                    p.text(n, DIM);
+                }
+                if !o.ensured.is_empty() {
+                    p.text(&format!("Added to server.cfg: {}", o.ensured.iter().map(|f| format!("ensure {f}")).collect::<Vec<_>>().join(", ")), DIM);
+                }
+                if !o.installed.is_empty() {
+                    p.text("Restart the server so it loads the new resources.", Style::default().fg(Color::Yellow));
+                }
+            }
+            p.blank();
+            p.buttons(&[back()]);
+        }
+    }
+}
+
+fn feedback(p: &mut Page, s: &FeedbackState) {
+    match s.stage {
+        FbStage::Pick => {
+            p.text(
+                match s.kind {
+                    FbKind::Issue => "Which resource is the report about? It goes to that resource's GitHub page, with your Kora version and system (never passwords, keys or folders).",
+                    FbKind::Pr => "Which resource has the change you want to propose? Kora checks your fork first.",
+                },
+                DIM,
+            );
+            p.blank();
+            let room = p.room().saturating_sub(3).max(1);
+            let start = s.sel.saturating_sub(room - 1);
+            for (i, c) in s.choices.iter().enumerate().skip(start).take(room) {
+                list_row(p, i, i == s.sel, None, c, "");
+            }
+            p.blank();
+            p.buttons(&[btn(Action::Confirm, "Next (Enter)", !s.choices.is_empty()), back()]);
+        }
+        FbStage::Compose => {
+            p.line(Line::from(vec![Span::styled("Resource: ", BOLD), Span::raw(s.resource.clone())]));
+            if let Some(pl) = &s.plan {
+                p.text(
+                    &format!("Sending will push branch '{}' of your fork to GitHub and open a pull request into {} ({}), with {} new commit(s).", pl.head_branch, pl.upstream, pl.base, pl.ahead),
+                    Style::default().fg(Color::Yellow),
+                );
+            } else {
+                p.text("This is public on GitHub, under your account.", DIM);
+            }
+            p.blank();
+            let w = p.w();
+            p.line(field("Title:", &s.title, w, s.focus == 0));
+            p.line(field("Details:", &s.body, w, s.focus == 1));
+            p.blank();
+            p.buttons(&[btn(Action::Confirm, if s.kind == FbKind::Issue { "Send report (Enter)" } else { "Open pull request (Enter)" }, true), btn(Action::NextField, "Next field (Tab)", true), back()]);
+        }
+        FbStage::Done => {
+            p.text(if s.kind == FbKind::Issue { "Your report was sent:" } else { "Your pull request is open:" }, BOLD);
+            p.line(Line::styled(s.url.clone().unwrap_or_default(), Style::default().fg(BRAND)));
+            p.blank();
+            p.buttons(&[btn(Action::Copy, "Copy address (c)", true), back()]);
+        }
     }
 }
 

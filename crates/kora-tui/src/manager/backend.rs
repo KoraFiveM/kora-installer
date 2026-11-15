@@ -3,6 +3,9 @@
 
 use std::path::PathBuf;
 
+use kora_core::addresources::{AddOutcome, AddPlan};
+use kora_core::catalog::Catalog;
+use kora_core::feedback::PrPlan;
 use kora_core::installer::registry::ServerEntry;
 use kora_core::service::ControlAction;
 
@@ -86,6 +89,24 @@ pub trait Backend {
     fn check_updates(&mut self, e: &ServerEntry) -> Res<UpdateBadge> {
         self.preview(e, Scope::All).map(|p| badge_of(&p))
     }
+
+    /// The catalog to browse (remote, else the bundled one) and the ids installed on the server.
+    fn add_catalog(&mut self, e: &ServerEntry) -> Res<(Catalog, Vec<String>, Option<String>)>;
+    /// Redeem a website code made for adding resources: the chosen resource ids.
+    fn add_redeem(&mut self, code: &str) -> Res<Vec<String>>;
+    /// What adding `ids` (plus dependencies) would do.
+    fn add_plan(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddPlan>;
+    /// Install `ids` (plus dependencies) into the right folders, pinned, and add the missing `ensure` lines.
+    fn add_install(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddOutcome>;
+
+    /// Is `gh` signed in to GitHub?
+    fn github_signed_in(&mut self) -> bool;
+    /// Report an issue about a resource of the server. Returns the issue address.
+    fn report_issue(&mut self, e: &ServerEntry, resource: &str, title: &str, text: &str) -> Res<String>;
+    /// Check that a pull request can be made from the resource's fork (development servers).
+    fn pr_plan(&mut self, e: &ServerEntry, resource: &str) -> Res<PrPlan>;
+    /// Push the fork branch and open the pull request. Returns its address.
+    fn pr_open(&mut self, plan: &PrPlan, title: &str, text: &str) -> Res<String>;
 
     fn notify_load(&mut self, e: &ServerEntry) -> NotifyConfig;
     fn notify_save(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()>;

@@ -274,6 +274,8 @@ struct CloneItem {
     branch: String,
     /// Dev: `owner/name` of the user's fork.
     fork: Option<String>,
+    /// Install only this subfolder of the repository (a pinned copy, no `.git`).
+    subpath: Option<String>,
 }
 
 fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
@@ -291,15 +293,18 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
         .map(|r| {
             let repo = repo_slug(&r.repository);
             let name = repo.rsplit('/').next().unwrap_or("").to_string();
-            let commit = match (ctx.req.mode, r.resolve(catalog::Mode::Prod)) {
-                (Mode::Production, ResolvedVersion::Pinned { commit, .. }) => Some(commit),
+            // Pinned copies (bridge / creator resources, subpath installs) are never forked, in any mode.
+            let commit = match (ctx.req.mode == Mode::Production || r.is_pinned_copy(), r.resolve(catalog::Mode::Prod)) {
+                (true, ResolvedVersion::Pinned { commit, .. }) => Some(commit),
                 _ => None,
             };
+            let rel = r.install_rel();
             CloneItem {
                 id: r.id.clone(),
-                rel: r.path.clone(),
-                dest: root.join(&r.path),
-                fork: fork_owner.as_ref().map(|o| format!("{o}/{name}")),
+                dest: root.join(&rel),
+                rel,
+                fork: if r.is_pinned_copy() { None } else { fork_owner.as_ref().map(|o| format!("{o}/{name}")) },
+                subpath: r.subpath.clone(),
                 repo,
                 commit,
                 branch: r.branch.clone(),
@@ -309,6 +314,9 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
 }
 
 fn item_ok(it: &CloneItem) -> bool {
+    if it.subpath.is_some() {
+        return it.commit.as_deref().is_some_and(|c| pinned::marker_matches(&it.dest, c));
+    }
     if !it.dest.join(".git").exists() {
         return false;
     }
@@ -367,7 +375,7 @@ fn clone_one(ctx: &Ctx, it: &CloneItem) -> Result<()> {
         let _ = std::fs::remove_dir_all(&partial);
         return err(e.to_string());
     }
-    io(crate::fsutil::rename_retrying(&partial, &it.dest), "cannot move the clone into place")
+    pinned::place(&partial, &it.dest, it.subpath.as_deref(), &it.repo, it.commit.as_deref()).map_err(InstallError)
 }
 
 fn artifact_store(ctx: &Ctx) -> ArtifactStore {
@@ -695,7 +703,7 @@ impl InstallStep {
     fn forks(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let r = git::SystemRunner;
-        let repos: Vec<String> = ctx.shared.lock().unwrap().selected.iter().map(|x| repo_slug(&x.repository)).collect();
+        let repos: Vec<String> = ctx.shared.lock().unwrap().selected.iter().filter(|x| !x.is_pinned_copy()).map(|x| repo_slug(&x.repository)).collect();
         let path = forks_path(ctx);
         let mut state = match std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<git::ForkState>(&b).ok()) {
             Some(mut s) => {
@@ -736,6 +744,7 @@ impl InstallStep {
         let items = items(ctx)?;
         let total = items.len();
         io(std::fs::create_dir_all(res_dir(ctx)), "cannot create resources folder")?;
+        io(layout::create_empty_dirs(&res_dir(ctx)), "cannot create the add-on folders")?;
         // A resource whose folder lies inside another resource's clone (e.g. `[default-maps]/kora_phoneshop`
         // inside the `default-maps` repo) must wait until that parent clone has been moved into place.
         let nested = |it: &CloneItem| items.iter().any(|o| o.dest != it.dest && it.dest.starts_with(&o.dest));
@@ -851,7 +860,8 @@ impl InstallStep {
         if req.cfx_identifier.is_some() && master.is_none() {
             ctx.note("The Cfx identifier was not understood (expected fivem:<number>); no txAdmin master was configured.");
         }
-        let ensure: Vec<String> = ctx.shared.lock().unwrap().selected.iter().map(|r| resource_name(r).to_string()).collect();
+        // Folders, never single resources (see `layout`).
+        let ensure: Vec<String> = layout::ensure_for_new(ctx.shared.lock().unwrap().selected.iter().map(|r| r.install_rel()).collect::<Vec<_>>().iter().map(String::as_str));
         let creds: Option<Credentials> = if req.db == DbChoice::Skip {
             None
         } else {
@@ -1142,13 +1152,14 @@ impl InstallStep {
             .iter()
             .map(|r| ResourceRecord {
                 id: r.id.clone(),
-                path: r.path.clone(),
+                path: r.install_rel(),
                 repository: r.repository.clone(),
                 branch: r.branch.clone(),
-                commit: match (req.mode, r.resolve(catalog::Mode::Prod)) {
-                    (Mode::Production, ResolvedVersion::Pinned { commit, .. }) => Some(commit),
+                commit: match (req.mode == Mode::Production || r.is_pinned_copy(), r.resolve(catalog::Mode::Prod)) {
+                    (true, ResolvedVersion::Pinned { commit, .. }) => Some(commit),
                     _ => None,
                 },
+                third_party: r.is_pinned_copy(),
             })
             .collect();
         let database = ProvisionState::load(&db_state_path(ctx)).ok().map(|s| s.database);
@@ -1202,6 +1213,7 @@ impl InstallStep {
                         prune_empty_parents(&root, parent.to_path_buf());
                     }
                 }
+                layout::remove_empty_dirs(&root);
                 let _ = std::fs::remove_dir(&root);
                 Ok(format!("Removed {} resources", created.resources.len()))
             }

@@ -1,10 +1,13 @@
-//! Catalog client: schema v2 types, loader (remote with embedded fallback),
+//! Catalog client: schema v2/v3 types, loader (remote with embedded fallback),
 //! validation, selection helpers and version resolution.
 //!
 //! Network access is behind [`CatalogSource`] so tests stay offline.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+pub mod pick;
+pub use pick::{PickError, Picker, Section};
 
 /// Public catalog location.
 pub const CATALOG_URL: &str = "https://docs.koraframe.work/resources.json";
@@ -44,9 +47,42 @@ pub enum Kind {
     Internal,
 }
 
+/// Schema v3 resource type. Absent in the catalog = a normal (Kora / dependency) resource.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResType {
+    Compat,
+    Bridge,
+    Creator,
+}
+
+impl ResType {
+    /// Top-level folder (under `resources/`) holding resources of this type.
+    pub fn folder(self) -> &'static str {
+        match self {
+            ResType::Compat => "[compat]",
+            ResType::Bridge => "[bridges]",
+            ResType::Creator => "[creators]",
+        }
+    }
+}
+
+/// A third-party creator whose resources the catalog lists (schema v3 `creators`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Creator {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Release {
     pub version: String,
+    /// May be omitted (schema v3): such a release is pinned by commit only. Empty = no tag.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tag: String,
     pub commit: String,
 }
@@ -73,6 +109,15 @@ pub struct Resource {
     /// always includes them (transitively). `-` and `_` are interchangeable, like everywhere else.
     #[serde(default, rename = "dependsOn", skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
+    /// Schema v3: `compat` | `bridge` | `creator`; absent = default.
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub res_type: Option<ResType>,
+    /// Schema v3: creator id for `type: creator`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
+    /// Schema v3: folder inside the repository that holds the resource, when it is not the repo root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +125,9 @@ pub struct Resource {
 pub struct Catalog {
     pub schema_version: u32,
     pub resources: Vec<Resource>,
+    /// Schema v3; empty for v2 catalogs.
+    #[serde(default)]
+    pub creators: Vec<Creator>,
 }
 
 /// Prod pins releases; dev tracks the branch head.
@@ -107,7 +155,42 @@ impl Resource {
             .or_else(|| self.versions.first())
     }
 
+    /// Bridge and creator resources are other people's repositories: always a pinned clone at the
+    /// catalog release, never forked, in production and in development.
+    pub fn is_third_party(&self) -> bool {
+        matches!(self.res_type, Some(ResType::Bridge | ResType::Creator))
+    }
+
+    /// A copy that is never forked and never tracks a branch: bridge / creator resources (someone
+    /// else's repository) and anything installed from a `subpath` of a repository (a plain copy of
+    /// one subfolder, which cannot be a fork checkout). Always a clone/copy pinned to the catalog commit.
+    pub fn is_pinned_copy(&self) -> bool {
+        self.is_third_party() || self.subpath.is_some()
+    }
+
+    /// Folder of this resource relative to the server's `resources/` dir. A catalog path that
+    /// already starts with a `[folder]` is used as is, except that typed resources are forced into
+    /// their folder (`[bridges]`, `[creators]/[<creator>]`, `[compat]`).
+    pub fn install_rel(&self) -> String {
+        let Some(t) = self.res_type else { return self.path.clone() };
+        let prefix = match (t, &self.creator) {
+            // Creator folders are bracketed too, so FXServer scans inside them: `[creators]/[acme]`.
+            (ResType::Creator, Some(c)) => format!("{}/[{c}]", t.folder()),
+            _ => t.folder().to_string(),
+        };
+        if self.path == prefix || self.path.starts_with(&format!("{prefix}/")) {
+            return self.path.clone();
+        }
+        // Drop a leading `[other]/` folder so only the resource's own folder name is kept.
+        let rest = match self.path.split_once('/') {
+            Some((first, rest)) if first.starts_with('[') => rest,
+            _ => self.path.as_str(),
+        };
+        format!("{prefix}/{rest}")
+    }
+
     pub fn resolve(&self, mode: Mode) -> ResolvedVersion {
+        let mode = if self.is_pinned_copy() { Mode::Prod } else { mode };
         match (mode, self.latest_release()) {
             (Mode::Prod, Some(r)) => ResolvedVersion::Pinned {
                 version: r.version.clone(),
@@ -140,6 +223,10 @@ fn is_safe_path(p: &str) -> bool {
         && !p.split('/').any(|s| s == "..")
 }
 
+fn is_safe_segment(s: &str) -> bool {
+    !s.is_empty() && s != "." && s != ".." && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+}
+
 /// `https://github.com/<owner>/<repo>.git`
 pub fn is_valid_repo_url(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://github.com/") else { return false };
@@ -170,16 +257,42 @@ impl Catalog {
     /// Collect every problem rather than stopping at the first.
     pub fn validate(&self) -> Result<(), CatalogError> {
         let mut errs = Vec::new();
-        if self.schema_version != 2 {
+        if !matches!(self.schema_version, 2 | 3) {
             errs.push(format!("unsupported schemaVersion {}", self.schema_version));
         }
-        let (mut ids, mut paths, mut orders) = (HashSet::new(), HashSet::new(), HashSet::new());
+        let (mut ids, mut paths, mut orders) = (HashSet::new(), HashSet::<String>::new(), HashSet::new());
+        let mut creator_ids = HashSet::new();
+        for c in &self.creators {
+            if !creator_ids.insert(c.id.as_str()) {
+                errs.push(format!("duplicate creator id {}", c.id));
+            }
+            if !is_safe_segment(&c.id) || c.id.starts_with('[') {
+                errs.push(format!("unsafe creator id {}", c.id));
+            }
+        }
         for r in &self.resources {
+            match (r.res_type, &r.creator) {
+                (Some(ResType::Creator), None) => errs.push(format!("{}: type creator needs a creator id", r.id)),
+                (Some(ResType::Creator), Some(c)) if !creator_ids.contains(c.as_str()) => {
+                    errs.push(format!("{}: unknown creator '{c}'", r.id))
+                }
+                (Some(ResType::Creator), Some(_)) => {}
+                (_, Some(_)) => errs.push(format!("{}: creator is only valid with type creator", r.id)),
+                _ => {}
+            }
+            if let Some(sp) = &r.subpath {
+                if !is_safe_path(sp) {
+                    errs.push(format!("{}: unsafe subpath {sp}", r.id));
+                }
+            }
+            if r.is_pinned_copy() && r.versions.is_empty() {
+                errs.push(format!("{}: a bridge, creator or subpath resource needs a release to pin", r.id));
+            }
             if !ids.insert(r.id.as_str()) {
                 errs.push(format!("duplicate id {}", r.id));
             }
-            if !paths.insert(r.path.as_str()) {
-                errs.push(format!("duplicate path {}", r.path));
+            if !paths.insert(r.install_rel()) {
+                errs.push(format!("duplicate path {}", r.install_rel()));
             }
             if let Some(o) = r.order {
                 if o == 0 || !orders.insert(o) {
@@ -189,7 +302,7 @@ impl Catalog {
             if !is_valid_repo_url(&r.repository) {
                 errs.push(format!("{}: bad repository url {}", r.id, r.repository));
             }
-            if !is_safe_path(&r.path) {
+            if !is_safe_path(&r.install_rel()) {
                 errs.push(format!("{}: unsafe path {}", r.id, r.path));
             }
             if r.branch.is_empty() {
@@ -369,5 +482,83 @@ mod tests {
         assert_eq!(lib.resolve(Mode::Dev), ResolvedVersion::BranchHead { branch: "dev".into() });
         let dep = c.resources.iter().find(|r| r.versions.is_empty()).unwrap();
         assert!(matches!(dep.resolve(Mode::Prod), ResolvedVersion::BranchHead { .. }));
+    }
+
+    fn v3(extra_resources: &str, creators: &str) -> String {
+        let rel = r#""latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"0123456789012345678901234567890123456789"}]"#;
+        format!(
+            r#"{{"schemaVersion":3,"creators":[{creators}],"resources":[{{"id":"kora-a","repository":"https://github.com/KoraFiveM/a.git","path":"[kora]/a","group":"kora","kind":"kora","branch":"dev",{rel},"dependsOn":["bridge-b"]}}{extra_resources}]}}"#
+        )
+    }
+
+    #[test]
+    fn v3_types_creators_and_install_folders() {
+        let rel = r#""latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"0123456789012345678901234567890123456789"}]"#;
+        let extra = format!(
+            r#",{{"id":"bridge-b","repository":"https://github.com/o/b.git","path":"bridge_b","group":"other","kind":"optional","branch":"main","type":"bridge",{rel}}},
+            {{"id":"c-one","repository":"https://github.com/o/c.git","path":"[creators]/[acme]/c_one","group":"other","kind":"optional","branch":"main","type":"creator","creator":"acme","subpath":"res",{rel}}},
+            {{"id":"c-two","repository":"https://github.com/o/d.git","path":"d","group":"other","kind":"optional","branch":"main","type":"creator","creator":"acme",{rel}}},
+            {{"id":"cm","repository":"https://github.com/o/e.git","path":"[standalone]/e","group":"compat","kind":"optional","branch":"main","type":"compat",{rel}}}"#
+        );
+        let c = Catalog::parse_validated(&v3(&extra, r#"{"id":"acme","name":"Acme","url":"https://acme.example","description":"x"}"#)).unwrap();
+        assert_eq!(c.creators.len(), 1);
+        assert_eq!(c.find("bridge-b").unwrap().install_rel(), "[bridges]/bridge_b");
+        assert_eq!(c.find("c-one").unwrap().install_rel(), "[creators]/[acme]/c_one");
+        assert_eq!(c.find("c-two").unwrap().install_rel(), "[creators]/[acme]/d");
+        assert_eq!(c.find("cm").unwrap().install_rel(), "[compat]/e");
+        assert_eq!(c.find("kora-a").unwrap().install_rel(), "[kora]/a");
+        assert_eq!(c.find("c-one").unwrap().subpath.as_deref(), Some("res"));
+        // third-party is pinned even in dev mode; kora resources track the branch
+        assert!(matches!(c.find("bridge-b").unwrap().resolve(Mode::Dev), ResolvedVersion::Pinned { .. }));
+        assert!(matches!(c.find("c-one").unwrap().resolve(Mode::Dev), ResolvedVersion::Pinned { .. }));
+        assert!(matches!(c.find("cm").unwrap().resolve(Mode::Dev), ResolvedVersion::BranchHead { .. }));
+        assert!(matches!(c.find("kora-a").unwrap().resolve(Mode::Dev), ResolvedVersion::BranchHead { .. }));
+        // dependsOn works across types
+        let deps = c.with_dependencies(["kora-a".to_string()]);
+        assert!(deps.contains("bridge-b"));
+    }
+
+    #[test]
+    fn v3_validation() {
+        let rel = r#""latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"0123456789012345678901234567890123456789"}]"#;
+        let creator_res = |creator: &str| {
+            format!(
+                r#",{{"id":"bridge-b","repository":"https://github.com/o/b.git","path":"b","group":"other","kind":"optional","branch":"main","type":"creator"{creator},{rel}}}"#
+            )
+        };
+        let bad = |json: String| match Catalog::parse_validated(&json) {
+            Err(CatalogError::Invalid(e)) => e.join("; "),
+            other => panic!("expected invalid, got {other:?}"),
+        };
+        assert!(bad(v3(&creator_res(""), "")).contains("needs a creator id"));
+        assert!(bad(v3(&creator_res(r#","creator":"nobody""#), "")).contains("unknown creator"));
+        let no_release = r#",{"id":"bridge-b","repository":"https://github.com/o/b.git","path":"b","group":"other","kind":"optional","branch":"main","type":"bridge","latest":null,"versions":[]}"#;
+        assert!(bad(v3(no_release, "")).contains("needs a release"));
+    }
+
+    #[test]
+    fn versions_may_omit_the_tag_and_compat_may_use_a_subpath() {
+        let json = r#"{"schemaVersion":3,"creators":[],"resources":[
+            {"id":"ox-lib","repository":"https://github.com/KoraFiveM/compat.git","path":"[compat]/ox_lib","group":"compat","kind":"optional","branch":"main","type":"compat","subpath":"ox_lib","latest":"1.0.0","versions":[{"version":"1.0.0","commit":"0123456789012345678901234567890123456789"}]}]}"#;
+        let c = Catalog::parse_validated(json).unwrap();
+        let r = c.find("ox-lib").unwrap();
+        assert_eq!(r.latest_release().unwrap().tag, "");
+        assert!(r.is_pinned_copy() && !r.is_third_party());
+        assert!(matches!(r.resolve(Mode::Dev), ResolvedVersion::Pinned { ref commit, .. } if commit.starts_with("0123")));
+        assert_eq!(r.install_rel(), "[compat]/ox_lib");
+        // no release at all: a pinned copy cannot be installed
+        let none = json.replace(r#","latest":"1.0.0","versions":[{"version":"1.0.0","commit":"0123456789012345678901234567890123456789"}]"#, "");
+        assert!(Catalog::parse_validated(&none).is_err());
+        // and a tag-less release round-trips without inventing a tag
+        assert!(!serde_json::to_string(&c).unwrap().contains("\"tag\""));
+    }
+
+    #[test]
+    fn v2_catalog_still_parses() {
+        let c = Catalog::embedded().unwrap();
+        assert_eq!(c.schema_version, 2);
+        assert!(c.creators.is_empty());
+        assert!(c.resources.iter().all(|r| r.res_type.is_none() && !r.is_third_party()));
+        assert!(c.resources.iter().all(|r| r.install_rel() == r.path));
     }
 }

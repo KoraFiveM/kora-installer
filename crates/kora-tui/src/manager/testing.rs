@@ -11,6 +11,9 @@ use kora_core::installer::Mode;
 use kora_core::service::ControlAction;
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
 
+use kora_core::addresources::{AddOutcome, AddPlan};
+use kora_core::catalog::Catalog;
+use kora_core::feedback::PrPlan;
 use kora_core::notify::NotifyConfig;
 use kora_core::service::ScheduleConfig;
 use kora_core::update::manual::{ApplyOpts, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
@@ -46,6 +49,15 @@ pub struct Fake {
     pub schedule: Option<ScheduleConfig>,
     pub clip: Option<String>,
     pub launch_error: Option<String>,
+    /// Catalog + installed ids for the add-resources screen.
+    pub add_catalog: Option<(Catalog, Vec<String>)>,
+    pub add_catalog_error: Option<String>,
+    pub add_redeem: Option<Res<Vec<String>>>,
+    pub add_result: Option<Res<AddOutcome>>,
+    pub signed_in: bool,
+    pub issue_result: Option<Res<String>>,
+    pub pr_plan: Option<Res<PrPlan>>,
+    pub pr_result: Option<Res<String>>,
 }
 
 pub type Shared = Rc<RefCell<Fake>>;
@@ -146,6 +158,63 @@ impl Backend for FakeBackend {
     }
     fn schedule_elevation(&mut self, _e: &ServerEntry, _set: Option<&ScheduleConfig>) -> Option<Vec<String>> {
         self.0.borrow().elevation.clone()
+    }
+    fn add_catalog(&mut self, _e: &ServerEntry) -> Res<(Catalog, Vec<String>, Option<String>)> {
+        let f = self.0.borrow();
+        if let Some(e) = &f.add_catalog_error {
+            return Err(e.clone());
+        }
+        let (c, i) = f.add_catalog.clone().expect("a catalog");
+        Ok((c, i, None))
+    }
+    fn add_redeem(&mut self, code: &str) -> Res<Vec<String>> {
+        let mut f = self.0.borrow_mut();
+        f.calls.push(format!("add_redeem {code}"));
+        f.add_redeem.clone().unwrap_or_else(|| Err("no".into()))
+    }
+    fn add_plan(&mut self, _e: &ServerEntry, ids: &[String]) -> Res<AddPlan> {
+        let f = self.0.borrow();
+        let (c, inst) = f.add_catalog.clone().expect("a catalog");
+        let sf = kora_core::installer::registry::ServerFile {
+            name: "x".into(),
+            mode: Mode::Production,
+            dir: PathBuf::from("/nowhere"),
+            ports: PortsRecord { game: 1, txadmin: 2 },
+            game_build: 1,
+            artifact_build: 1,
+            database: None,
+            github_owner: None,
+            created_unix: 0,
+            kora_version: "0".into(),
+            resources: inst
+                .into_iter()
+                .map(|id| kora_core::installer::registry::ResourceRecord { id, path: "x".into(), repository: "https://github.com/o/x.git".into(), branch: "dev".into(), commit: None, third_party: false })
+                .collect(),
+        };
+        kora_core::addresources::plan(&c, &sf, ids).map_err(|e| e.to_string())
+    }
+    fn add_install(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddOutcome> {
+        let mut f = self.0.borrow_mut();
+        f.calls.push(format!("add_install {} {}", e.name, ids.join(",")));
+        f.add_result.clone().unwrap_or_else(|| Ok(AddOutcome::default()))
+    }
+    fn github_signed_in(&mut self) -> bool {
+        self.0.borrow().signed_in
+    }
+    fn report_issue(&mut self, e: &ServerEntry, resource: &str, title: &str, text: &str) -> Res<String> {
+        let mut f = self.0.borrow_mut();
+        f.calls.push(format!("issue {} {resource} [{title}] [{text}]", e.name));
+        f.issue_result.clone().unwrap_or_else(|| Ok("https://github.com/KoraFiveM/x/issues/1".into()))
+    }
+    fn pr_plan(&mut self, e: &ServerEntry, resource: &str) -> Res<PrPlan> {
+        let mut f = self.0.borrow_mut();
+        f.calls.push(format!("pr_plan {} {resource}", e.name));
+        f.pr_plan.clone().expect("a pr plan")
+    }
+    fn pr_open(&mut self, plan: &PrPlan, title: &str, text: &str) -> Res<String> {
+        let mut f = self.0.borrow_mut();
+        f.calls.push(format!("pr_open {} [{title}] [{text}]", plan.resource));
+        f.pr_result.clone().unwrap_or_else(|| Ok("https://github.com/KoraFiveM/x/pull/2".into()))
     }
     fn notify_load(&mut self, _e: &ServerEntry) -> NotifyConfig {
         self.0.borrow().notify.clone()

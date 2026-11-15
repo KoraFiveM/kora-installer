@@ -11,7 +11,12 @@
 
 use std::path::{Path, PathBuf};
 
+use kora_core::addresources::{self as add, AddOutcome, AddPlan};
+use kora_core::catalog::Catalog;
+use kora_core::feedback::{self, PrPlan};
 use kora_core::firewall::ports::{PortProber, SystemProber};
+use kora_core::git::{self, SystemRunner};
+use kora_core::site;
 use kora_core::installer::registry::{self, Registry, ServerEntry, ServerFile};
 use kora_core::installer::{self, host, RollbackOptions};
 use kora_core::service::{ControlAction, ServiceState};
@@ -190,6 +195,50 @@ impl Backend for SystemBackend {
 
     fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo> {
         record(e).map(|r| manual::snapshots(&r)).unwrap_or_default()
+    }
+
+    fn add_catalog(&mut self, e: &ServerEntry) -> Res<(Catalog, Vec<String>, Option<String>)> {
+        let sf = ServerFile::load(&e.dir).map_err(|x| format!("Can't read {}: {x}", e.dir.join("kora-server.json").display()))?;
+        let (cat, note) = add::load_catalog().map_err(err)?;
+        Ok((cat, add::installed_ids(&sf), note))
+    }
+
+    fn add_redeem(&mut self, code: &str) -> Res<Vec<String>> {
+        site::redeem_add_resources(code, &site::site_url_from_env()).map(|c| c.resources).map_err(err)
+    }
+
+    fn add_plan(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddPlan> {
+        let sf = ServerFile::load(&e.dir).map_err(err)?;
+        let (cat, _) = add::load_catalog().map_err(err)?;
+        add::plan(&cat, &sf, ids).map_err(err)
+    }
+
+    fn add_install(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddOutcome> {
+        let mut sf = ServerFile::load(&e.dir).map_err(err)?;
+        let (cat, _) = add::load_catalog().map_err(err)?;
+        let plan = add::plan(&cat, &sf, ids).map_err(err)?;
+        if plan.items.iter().any(|i| i.fork) {
+            feedback::require_sign_in(&SystemRunner).map_err(err)?;
+        }
+        add::execute(&add::GitCloner(&SystemRunner), &mut sf, &plan, &mut |_| {}).map_err(err)
+    }
+
+    fn github_signed_in(&mut self) -> bool {
+        git::is_signed_in(&SystemRunner)
+    }
+
+    fn report_issue(&mut self, e: &ServerEntry, resource: &str, title: &str, text: &str) -> Res<String> {
+        let sf = ServerFile::load(&e.dir).map_err(err)?;
+        feedback::report_issue(&SystemRunner, &sf, resource, title, text).map_err(err)
+    }
+
+    fn pr_plan(&mut self, e: &ServerEntry, resource: &str) -> Res<PrPlan> {
+        let sf = ServerFile::load(&e.dir).map_err(err)?;
+        feedback::plan_pr(&SystemRunner, &sf, resource).map_err(err)
+    }
+
+    fn pr_open(&mut self, plan: &PrPlan, title: &str, text: &str) -> Res<String> {
+        feedback::open_pr(&SystemRunner, plan, title, text).map_err(err)
     }
 
     fn notify_load(&mut self, e: &ServerEntry) -> NotifyConfig {

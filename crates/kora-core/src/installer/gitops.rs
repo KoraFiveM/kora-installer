@@ -320,6 +320,7 @@ pub fn update_server(
     let targets: Vec<UpdateTarget> = sf
         .resources
         .iter()
+        .filter(|r| !r.third_party && !super::pinned::is_subpath_copy(&dir.join("resources").join(&r.path)))
         .map(|r| UpdateTarget {
             id: r.id.clone(),
             path: dir.join("resources").join(&r.path),
@@ -444,7 +445,7 @@ mod tests {
             sh(&fork, &["remote", "add", "upstream", up.to_str().unwrap()]);
             std::fs::write(up.join("a"), "2").unwrap();
             sh(&up, &["commit", "-qam", "two"]);
-            records.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None });
+            records.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None, third_party: false });
         }
         // make the second fork dirty
         std::fs::write(t.path().join("srv/resources/[kora]/kora_hud/a"), "local edit").unwrap();
