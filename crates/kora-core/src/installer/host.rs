@@ -140,7 +140,7 @@ pub fn service_host(name_or_dir: &str) -> Result<i32> {
     // `scm::run` builds the command itself, after reporting "starting", and writes any error to the log.
     #[cfg(windows)]
     {
-        return scm::run_as_service_or_console(name_or_dir);
+        scm::run_as_service_or_console(name_or_dir)
     }
     #[cfg(unix)]
     let mut cmd = build_command(name_or_dir)?;
