@@ -1,7 +1,7 @@
 //! Windows: install a private MariaDB server for Kora, end to end.
 //!
-//! The *plan* lives in [`crate::db::plan_install_windows`] (official zip from archive.mariadb.org,
-//! SHA-256 verified against MariaDB's own list, one uniquely named service). This module runs it:
+//! The *plan* lives in [`crate::db::plan_install_windows`] (official zip via MariaDB's mirror network with archive.mariadb.org
+//! as fallback, SHA-256 verified against a hash pinned in this program, one uniquely named service). This module runs it:
 //! download, verify, unpack (without the zip's top-level folder), `mariadb-install-db.exe` (data
 //! folder + service + generated root password), loopback-only config, start, wait until it accepts
 //! logins. Everything lives in one Kora-owned folder, `%ProgramData%\Kora\mariadb\<version>\`,
@@ -20,11 +20,21 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::{err, InstallError, Result};
-use crate::artifacts::ArtifactSource;
+use crate::artifacts::ArtifactSource as _;
 use crate::db::{self, AdminConn, CommandSpec, Secret, StepAction};
 
-/// MariaDB LTS release Kora installs on Windows (listed with a `sha256sums.txt` on archive.mariadb.org).
-pub const MARIADB_VERSION: &str = "11.4.14";
+/// MariaDB LTS release Kora installs on Windows. 11.4.13 because MariaDB's download mirrors carry it (they lag the
+/// archive by a release) and mirrors are ~300x faster than archive.mariadb.org.
+pub const MARIADB_VERSION: &str = "11.4.13";
+
+/// SHA-256 of `mariadb-11.4.13-winx64.zip`: the anchor of trust. Identical in archive.mariadb.org's `sha256sums.txt`
+/// and in MariaDB's REST API listing. Whatever mirror delivers the file, it must hash to this.
+pub const MARIADB_ZIP_SHA256: &str = "d62986d433eeebfde218560b276103831604a61e929e87f1a17f5aebd80257e2";
+
+/// The pinned hash for `version`, if this build knows one.
+pub fn pinned_sha256(version: &str) -> Option<&'static str> {
+    (version == MARIADB_VERSION).then_some(MARIADB_ZIP_SHA256)
+}
 
 /// Machine-wide folder holding Kora's MariaDB (`%ProgramData%\Kora\mariadb`).
 pub fn base_dir() -> Option<PathBuf> {
@@ -276,7 +286,7 @@ pub fn list_service_names() -> Vec<String> {
 
 /// Download + verify + unpack + initialise + start. Returns the saved record. Needs administrator rights.
 /// `say` receives plain-language progress lines.
-pub fn install(http: &dyn ArtifactSource, say: &mut dyn FnMut(&str)) -> Result<Record> {
+pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Record> {
     let base = base_dir().ok_or_else(|| InstallError("cannot find %ProgramData% for the MariaDB folder".into()))?;
     check_ascii_path(&base)?;
     let root = base.join(MARIADB_VERSION);
@@ -297,13 +307,31 @@ pub fn install(http: &dyn ArtifactSource, say: &mut dyn FnMut(&str)) -> Result<R
     for s in &plan.steps {
         say(&s.description);
         match &s.action {
-            StepAction::Download { url, dest } => {
-                let mut f = std::fs::File::create(dest).map_err(|e| InstallError(format!("cannot write {}: {e}", dest.display())))?;
-                http.download(url, &mut f).map_err(|e| InstallError(format!("could not download {url}: {e}")))?;
-            }
-            StepAction::VerifySha256 { file, sums, name } => {
-                let text = std::fs::read_to_string(sums).map_err(|e| InstallError(format!("cannot read the checksum list: {e}")))?;
-                db::verify_sha256(file, &text, name).map_err(|e| InstallError(format!("MariaDB download rejected: {e}. Nothing was installed.")))?;
+            StepAction::DownloadVerified { sources, dest, name, sums_url } => {
+                // Pinned hash first; for a version without one, MariaDB's own list (never "no verification").
+                let want = match pinned_sha256(MARIADB_VERSION) {
+                    Some(h) => h.to_string(),
+                    None => {
+                        let list = http.fetch_text(sums_url).map_err(|e| InstallError(format!("cannot fetch MariaDB's checksum list: {e}")))?;
+                        db::sha256_from_sums(&list, name).map_err(|e| InstallError(format!("MariaDB download rejected: {e}. Nothing was installed.")))?
+                    }
+                };
+                let cfg = super::http::FetchConfig::default();
+                let mut last = String::new();
+                let used = {
+                    let say = std::cell::RefCell::new(&mut *say);
+                    let mut progress = |p: &super::http::FetchProgress| {
+                        let l = p.line(&format!("MariaDB {MARIADB_VERSION}"));
+                        if l != last {
+                            (say.borrow_mut())(&l);
+                            last = l;
+                        }
+                    };
+                    let mut notes = |m: &str| (say.borrow_mut())(m);
+                    http.download_verified(sources, dest, &want, &cfg, &mut progress, &mut notes)
+                }
+                .map_err(|e| InstallError(format!("MariaDB download failed: {e}")))?;
+                say(&format!("Downloaded MariaDB {MARIADB_VERSION} from {} (SHA-256 verified)", used.split_once("://").map_or(used.as_str(), |(_, r)| r).split('/').next().unwrap_or("")));
             }
             StepAction::ExtractZip { archive, dest } => {
                 extract_zip_stripped(archive, dest).map_err(|e| InstallError(format!("{e}. {AV_HINT}")))?;
@@ -314,7 +342,6 @@ pub fn install(http: &dyn ArtifactSource, say: &mut dyn FnMut(&str)) -> Result<R
             }
             StepAction::Run(spec) if spec.program.ends_with("mariadb-install-db.exe") => {
                 run_checked(spec, "creating the MariaDB data folder and service").map_err(|e| InstallError(format!("{e}. {AV_HINT}")))?;
-                let _ = std::fs::remove_file(root.join("mariadb.sha256sums.txt"));
                 // Loopback only, whatever install-db wrote.
                 let p = datadir.join("my.ini");
                 let text = std::fs::read_to_string(&p).unwrap_or_default();
@@ -521,7 +548,7 @@ mod tests {
         let svc = p.service_name.unwrap();
         assert!(svc.starts_with("KoraMariaDB_") && svc != "KoraMariaDB_aaaa");
         assert!(p.steps.iter().all(|s| match &s.action {
-            StepAction::Download { dest, .. } => dest.starts_with(&root),
+            StepAction::DownloadVerified { dest, sources, .. } => dest.starts_with(&root) && sources.iter().all(|u| u.starts_with("https://")) && sources[0].contains("downloads.mariadb.org") && sources[1].contains("archive.mariadb.org"),
             StepAction::ExtractZip { dest, .. } => dest.starts_with(&root),
             _ => true,
         }));

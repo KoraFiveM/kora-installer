@@ -396,7 +396,7 @@ pub fn declined_message() -> &'static str {
 /// was declined, is unavailable, or `--no-elevate` was given).
 pub fn not_elevated_db_message(version: &str, folder: &str) -> String {
     format!(
-        "No MariaDB/MySQL database server was found, and setting one up needs administrator permission (it creates a Windows service), which Kora did not get. Run the install again and choose Yes when Windows asks for permission (don't use --no-elevate). Kora will then download the official MariaDB {version} from archive.mariadb.org, verify its checksum and put it in {folder}. Or install MariaDB yourself and use --db existing, or use --db skip."
+        "No MariaDB/MySQL database server was found, and setting one up needs administrator permission (it creates a Windows service), which Kora did not get. Run the install again and choose Yes when Windows asks for permission (don't use --no-elevate). Kora will then download the official MariaDB {version} from MariaDB's official download mirrors, verify its checksum and put it in {folder}. Or install MariaDB yourself and use --db existing, or use --db skip."
     )
 }
 

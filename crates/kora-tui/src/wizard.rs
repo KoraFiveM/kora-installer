@@ -1213,7 +1213,7 @@ impl Wizard {
         }
         match self.db {
             DbChoice::InstallIfMissing if self.windows => v.push(
-                "Download MariaDB (about 100 MB) from archive.mariadb.org, check its checksum and run it as a Windows service that only listens on this computer (if you don't have one), then create a new database and user just for this server".into(),
+                "Download MariaDB (about 100 MB) from MariaDB's official mirrors, check its checksum and run it as a Windows service that only listens on this computer (if you don't have one), then create a new database and user just for this server".into(),
             ),
             DbChoice::InstallIfMissing => v.push(
                 "Install the MariaDB database if you don't have one (needs administrator rights), then create a new database and user just for this server".into(),
@@ -2212,7 +2212,7 @@ mod tests {
         let c = w.system_changes().join("\n");
         for want in [
             "Windows Firewall: allow inbound TCP and UDP 30120", "choose Allow", "Windows service \"kora-my-kora-server\"", "limited account",
-            "winget", "archive.mariadb.org", "not running as Administrator",
+            "winget", "official mirrors", "not running as Administrator",
         ] {
             assert!(c.contains(want), "missing {want:?}\n{c}");
         }
