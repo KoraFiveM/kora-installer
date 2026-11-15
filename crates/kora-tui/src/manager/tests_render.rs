@@ -13,6 +13,12 @@ use crate::progress::{render_progress, ProgressState};
 use crate::result::{render_result, ResultScreen};
 use crate::wizard::{Screen as WS, Wizard};
 
+/// A wizard that does not depend on who runs the tests: `Wizard::new()` offers a restart with
+/// permission to non-root users, which adds a first step ("step 2 of 16" instead of "step 1 of 15").
+fn wizard() -> Wizard {
+    Wizard::new().with_elevation(false, vec![], crate::elev::system_elevator())
+}
+
 const SHA: &str = "0123456789012345678901234567890123456789";
 
 fn catalog() -> Catalog {
@@ -50,11 +56,11 @@ fn write_dumps() {
     for (w, h) in [(80u16, 24u16), (120, 40)] {
         let mut add = |name: &str, s: String| out.push((format!("{name}-{w}x{h}"), s));
         for (name, screen) in [("wizard-welcome", WS::Welcome), ("wizard-mode", WS::Mode), ("wizard-ports", WS::Ports), ("wizard-dblogin", WS::DbAdminLogin), ("wizard-review", WS::Review)] {
-            let mut wz = Wizard::new();
+            let mut wz = wizard();
             wz.screen = screen;
             add(name, dump(w, h, |f| crate::wizard_view::render(f, &wz)));
         }
-        let mut wz = Wizard::new();
+        let mut wz = wizard();
         wz.screen = WS::Welcome;
         wz.help_open = true;
         add("wizard-help-modal", dump(w, h, |f| crate::wizard_view::render(f, &wz)));
@@ -100,7 +106,7 @@ fn write_dumps() {
         let _ = &mut a3;
     }
     let (small_w, small_h) = (60, 15);
-    let wz = Wizard::new();
+    let wz = wizard();
     out.push(("wizard-too-small-60x15".into(), dump(small_w, small_h, |f| crate::wizard_view::render(f, &wz))));
     with_theme(Theme::new(ColorLevel::None, false), || {
         for (n, s) in all_screens(80, 24) {
@@ -127,7 +133,7 @@ use crate::theme::{with_theme, ColorLevel, Theme};
 fn all_screens(w: u16, h: u16) -> Vec<(&'static str, String)> {
     let mut out = vec![];
     for (name, screen) in [("welcome", WS::Welcome), ("mode", WS::Mode), ("ports", WS::Ports), ("dblogin", WS::DbAdminLogin), ("review", WS::Review), ("license", WS::License)] {
-        let mut wz = Wizard::new();
+        let mut wz = wizard();
         wz.screen = screen;
         out.push((name, dump(w, h, |f| crate::wizard_view::render(f, &wz))));
     }
@@ -189,7 +195,7 @@ fn below_80x24_every_top_level_screen_says_the_terminal_is_too_small() {
             assert!(t.contains("Terminal too small") || w < 30 || h < 6, "{name} at {w}x{h}:\n{t}");
         }
     }
-    let t = dump(60, 15, |f| crate::wizard_view::render(f, &Wizard::new()));
+    let t = dump(60, 15, |f| crate::wizard_view::render(f, &wizard()));
     assert!(t.contains("Terminal too small") && t.contains("80x24") && t.contains("60x15"), "{t}");
 }
 
@@ -200,7 +206,7 @@ fn ascii_theme_without_colour_draws_only_ascii_and_keeps_the_words() {
         for (name, text) in all_screens(100, 30) {
             assert!(text.is_ascii(), "{name} has non-ASCII output:\n{}", text.chars().filter(|c| !c.is_ascii()).collect::<String>());
         }
-        let wz = Wizard::new();
+        let wz = wizard();
         let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
         term.draw(|f| crate::wizard_view::render(f, &wz)).unwrap();
         // NO_COLOR: no cell carries a foreground or background colour.
@@ -213,7 +219,7 @@ fn ascii_theme_without_colour_draws_only_ascii_and_keeps_the_words() {
 #[test]
 fn sixteen_colour_theme_uses_named_colours_only() {
     with_theme(Theme::new(ColorLevel::Ansi16, true), || {
-        let wz = Wizard::new();
+        let wz = wizard();
         let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
         term.draw(|f| crate::wizard_view::render(f, &wz)).unwrap();
         use ratatui::style::Color;
