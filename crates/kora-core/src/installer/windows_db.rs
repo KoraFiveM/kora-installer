@@ -180,9 +180,13 @@ pub fn extract_zip_stripped(archive: &Path, dest: &Path) -> Result<()> {
             std::fs::create_dir_all(p).map_err(io_err)?;
         }
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&out).map_err(io_err)?;
-        total += std::io::copy(&mut f, &mut file).map_err(io_err)?;
+        // Bounded while copying, so a zip bomb stops at the limit instead of filling the disk first.
+        const LIMIT: u64 = 6 << 30;
+        let left = LIMIT - total;
+        let n = std::io::copy(&mut std::io::Read::take(&mut f, left + 1), &mut file).map_err(io_err)?;
+        total += n;
         file.flush().map_err(io_err)?;
-        if total > 6 << 30 {
+        if n > left {
             return err("the MariaDB zip unpacks to an unreasonable size");
         }
     }
@@ -229,7 +233,7 @@ fn run_checked(spec: &CommandSpec, what: &str) -> Result<db::CommandOutput> {
     Ok(out)
 }
 
-fn restrict(path: &Path, is_dir: bool, what: &str) -> Result<()> {
+pub(super) fn restrict(path: &Path, is_dir: bool, what: &str) -> Result<()> {
     let spec = CommandSpec { program: "icacls".into(), args: admin_only_acl_args(path, is_dir), ..CommandSpec::default() };
     run_checked(&spec, what).map(|_| ())
 }
@@ -259,7 +263,7 @@ pub fn wait_for_login(admin: &AdminConn, timeout: Duration) -> Result<()> {
 }
 
 fn service_exists(name: &str) -> bool {
-    std::process::Command::new("sc.exe")
+    crate::sysexe::command("sc.exe")
         .args(["query", name])
         .output()
         .map(|o| o.status.success())
@@ -337,7 +341,7 @@ pub fn install(http: &dyn ArtifactSource, say: &mut dyn FnMut(&str)) -> Result<R
 
 /// Make sure Kora's MariaDB (if one was installed earlier) is running; used before provisioning.
 pub fn ensure_running(rec: &Record) -> Result<()> {
-    let q = std::process::Command::new("sc.exe").args(["query", &rec.service]).output().map_err(|e| InstallError(format!("sc.exe: {e}")))?;
+    let q = crate::sysexe::command("sc.exe").args(["query", &rec.service]).output().map_err(|e| InstallError(format!("sc.exe: {e}")))?;
     let text = String::from_utf8_lossy(&q.stdout).to_uppercase();
     if text.contains("RUNNING") {
         return Ok(());
@@ -368,7 +372,7 @@ pub fn remove(rec: &Record, base: &Path, say: &mut dyn FnMut(&str)) -> Result<()
 fn wait_service_stopped(name: &str, timeout: Duration) {
     let start = Instant::now();
     while start.elapsed() < timeout {
-        let out = std::process::Command::new("sc.exe").args(["query", name]).output();
+        let out = crate::sysexe::command("sc.exe").args(["query", name]).output();
         match out {
             Ok(o) if String::from_utf8_lossy(&o.stdout).to_uppercase().contains("STOPPED") => return,
             Ok(o) if !o.status.success() => return,

@@ -45,6 +45,24 @@ pub fn versioned_path(root: &Path, version: &str, sha256: &str, platform: Platfo
     root.join(format!("{version}-{}", &sha256[..sha256.len().min(12)])).join(name)
 }
 
+/// The 12 hex characters a [`versioned_path`] folder (`<version>-<sha12>`) promises, if `dest` is one.
+pub fn pinned_sha12(dest: &Path) -> Option<String> {
+    let folder = dest.parent()?.file_name()?.to_str()?;
+    let tail = folder.rsplit_once('-')?.1;
+    (tail.len() == 12 && tail.bytes().all(|b| b.is_ascii_hexdigit())).then(|| tail.to_ascii_lowercase())
+}
+
+/// For a pinned destination, check that `copy` really hashes to the promised prefix.
+pub fn verify_pinned_copy(dest: &Path, copy: &Path) -> std::io::Result<()> {
+    let Some(want) = pinned_sha12(dest) else { return Ok(()) };
+    let got = file_sha256(copy)?;
+    if got.starts_with(&want) {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("the copy of the kora program changed while it was being copied (expected sha256 {want}..., got {}...): nothing was installed", &got[..12])))
+    }
+}
+
 /// Copy `src` to `dest` unless it is already there.
 pub fn install_plan(src: &str, dest: &Path) -> Plan {
     let d = dest.to_string_lossy();
@@ -146,6 +164,22 @@ pub fn unreachable_reason(_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_swapped_source_is_rejected_when_the_folder_pins_a_hash() {
+        let dir = std::env::temp_dir().join(format!("kora-pin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("kora");
+        std::fs::write(&src, b"good").unwrap();
+        let sha = file_sha256(&src).unwrap();
+        let dest = versioned_path(Path::new("/opt/kora"), "0.1.0", &sha, Platform::Linux);
+        assert!(verify_pinned_copy(&dest, &src).is_ok());
+        std::fs::write(&src, b"evil").unwrap(); // swapped after hashing
+        assert!(verify_pinned_copy(&dest, &src).unwrap_err().to_string().contains("changed while"));
+        // not a pinned folder: no claim to check
+        assert!(verify_pinned_copy(Path::new("/opt/kora/kora"), &src).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn versioned_path_pins_version_and_hash() {

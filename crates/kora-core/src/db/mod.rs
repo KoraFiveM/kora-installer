@@ -106,8 +106,8 @@ pub struct SystemRunner;
 impl CommandRunner for SystemRunner {
     fn run(&self, spec: &CommandSpec) -> DbResult<CommandOutput> {
         use std::io::Write;
-        use std::process::{Command, Stdio};
-        let mut cmd = Command::new(&spec.program);
+        use std::process::Stdio;
+        let mut cmd = crate::sysexe::command(&spec.program);
         cmd.args(&spec.args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

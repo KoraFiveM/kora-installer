@@ -378,7 +378,7 @@ fn current_account() -> Option<String> {
 
 fn restrict_secret_file(path: &Path) -> Result<()> {
     let user = current_account().ok_or_else(|| TxError::Invalid { field: "account", reason: "cannot tell which Windows account is running (USERNAME)".into() })?;
-    let out = std::process::Command::new("icacls").args(secret_acl_args(path, &user)).output()?;
+    let out = crate::sysexe::command("icacls").args(secret_acl_args(path, &user)).output()?;
     if out.status.success() {
         Ok(())
     } else {

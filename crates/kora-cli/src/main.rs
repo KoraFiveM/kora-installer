@@ -1306,6 +1306,27 @@ fn relaunch_args(cmd: &Option<Command>, original: Vec<std::ffi::OsString>) -> Ve
     args
 }
 
+/// Remove `--license-key <k>` / `--license-key=<k>` from `args`, returning the key. Pure.
+fn strip_license_key_arg(args: Vec<std::ffi::OsString>) -> (Vec<std::ffi::OsString>, Option<String>) {
+    let mut out = Vec::with_capacity(args.len());
+    let mut key = None;
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        let text = a.to_string_lossy().into_owned();
+        if text == "--license-key" {
+            if let Some(v) = it.next() {
+                key = Some(v.to_string_lossy().into_owned());
+                continue;
+            }
+        } else if let Some(v) = text.strip_prefix("--license-key=") {
+            key = Some(v.to_string());
+            continue;
+        }
+        out.push(a);
+    }
+    (out, key)
+}
+
 /// Window kept open (Windows) so an elevated or double-clicked console never flashes and vanishes.
 static ALREADY_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1331,12 +1352,21 @@ fn elevate_if_needed(cli: &Cli) {
     let env = elevate::Env { windows: cfg!(windows), elevated: false, tty, no_elevate: false };
     let need = elevate::decide(&env, kind, &reasons);
     let args = relaunch_args(&cli.command, std::env::args_os().skip(1).collect());
+    // A licence key typed on the command line would be visible in the elevated copy's process listing (and in the
+    // PowerShell helper's): hand it over through the environment instead (`sudo` keeps CFX_LICENSE_KEY; so does Start-Process).
+    let (args, key) = strip_license_key_arg(args);
+    if let Some(k) = key {
+        std::env::set_var("CFX_LICENSE_KEY", k);
+    }
     if let elevate::Elevation::Exit(code) = elevate::ensure_elevated(&need, &args, &elevate::SystemElevator, &mut |m| println!("{m}")) {
         finish(code);
     }
 }
 
 fn main() {
+    if std::env::args_os().any(|a| a == "--license-key" || a.to_string_lossy().starts_with("--license-key=")) {
+        eprintln!("Note: a licence key on the command line is visible to other programs on this computer (process list) and stays in your shell history. Prefer the CFX_LICENSE_KEY environment variable.");
+    }
     let cli = Cli::parse();
     elevate_if_needed(&cli);
     let code = match cli.command {
@@ -1471,6 +1501,17 @@ mod tests {
         assert!(!InstallArgs { license_key: None, ..base() }.headless_ready(false));
         assert!(!InstallArgs { dir: None, ..base() }.headless_ready(false));
         assert!(InstallArgs { db: None, db_admin_user: Some("root".into()), ..base() }.headless_ready(false));
+    }
+
+    #[test]
+    fn the_licence_key_is_taken_off_the_relaunch_command_line() {
+        let v = |a: &[&str]| a.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+        let (rest, key) = strip_license_key_arg(v(&["install", "--license-key", "cfxk_a", "--dir", "/x"]));
+        assert_eq!((rest, key.as_deref()), (v(&["install", "--dir", "/x"]), Some("cfxk_a")));
+        let (rest, key) = strip_license_key_arg(v(&["install", "--license-key=cfxk_b", "-y"]));
+        assert_eq!((rest, key.as_deref()), (v(&["install", "-y"]), Some("cfxk_b")));
+        let (rest, key) = strip_license_key_arg(v(&["install", "--dir", "/x"]));
+        assert_eq!((rest.len(), key), (3, None));
     }
 
     #[test]

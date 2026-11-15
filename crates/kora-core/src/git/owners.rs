@@ -393,7 +393,7 @@ impl LoginSpawner for SystemLogin {
     fn spawn(&self, args: &[String]) -> std::io::Result<Box<dyn LoginChild>> {
         use std::io::Read;
         use std::process::Stdio;
-        let mut c = std::process::Command::new("gh");
+        let mut c = crate::sysexe::command("gh");
         c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         c.env("GIT_TERMINAL_PROMPT", "0").env("NO_COLOR", "1").env("GH_PROMPT_DISABLED", "1");
         let mut child = c.spawn()?;

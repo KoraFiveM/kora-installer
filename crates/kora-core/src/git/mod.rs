@@ -53,7 +53,7 @@ pub struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<Output> {
-        let mut c = std::process::Command::new(program);
+        let mut c = crate::sysexe::command(program);
         c.args(args);
         if let Some(d) = cwd {
             c.current_dir(d);
