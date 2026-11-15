@@ -2,16 +2,14 @@
 
 use kora_core::installer::{ProgressEvent, StepStatus};
 use ratatui::{
-    layout::{Constraint, Layout},
-    style::{Color, Modifier, Style},
+    layout::{Constraint, Layout, Rect},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph},
+    widgets::{Gauge, LineGauge, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 
-use crate::wizard_view::BRAND;
-
-const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+use crate::theme::{self, theme, Tone};
 
 #[derive(Debug, Default, Clone)]
 pub struct ProgressState {
@@ -43,53 +41,95 @@ impl ProgressState {
 }
 
 pub fn render_progress(f: &mut Frame, st: &ProgressState, finished: bool) {
+    if theme::guard_size(f, theme::MIN_WIDTH, theme::MIN_HEIGHT) {
+        return;
+    }
+    let t = theme();
+    let g = t.glyphs;
     let area = f.area();
     let [head, gauge, list, detail] =
-        Layout::vertical([Constraint::Length(2), Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)]).areas(area);
+        Layout::vertical([Constraint::Length(2), Constraint::Length(3), Constraint::Min(0), Constraint::Length(4)]).areas(area);
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" KORA ", Style::default().fg(Color::Black).bg(BRAND).add_modifier(Modifier::BOLD)),
-            Span::raw("  Setting up your server. This can take a few minutes; please keep this window open."),
-        ])),
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled(" KORA ", t.wordmark()),
+                Span::styled(format!("  {}  ", g.crumb), t.disabled()),
+                Span::styled("Installing", t.selected()),
+            ]),
+            Line::styled("Setting up your server. This can take a few minutes; please keep this window open.", t.hint()),
+        ]),
         head,
     );
-    f.render_widget(
-        Gauge::default()
-            .block(Block::default().borders(Borders::ALL).title(" Overall progress "))
-            .gauge_style(Style::default().fg(if st.failed() { Color::Red } else { BRAND }))
-            .percent(u16::from(st.percent))
-            .label(format!("{}%", st.percent)),
-        gauge,
-    );
+    let failed = st.failed();
+    let bar = if failed { t.danger() } else { t.brand_style() };
+    let block = t.panel_tone("Overall progress", if failed { Tone::Fail } else { Tone::Ok });
+    if g.unicode {
+        f.render_widget(
+            Gauge::default()
+                .block(block)
+                .gauge_style(bar)
+                .percent(u16::from(st.percent))
+                .label(Span::styled(format!("{}%", st.percent), Style::new().add_modifier(ratatui::style::Modifier::BOLD))),
+            gauge,
+        );
+    } else {
+        // ASCII terminals: the Gauge block characters are not safe, so draw `####----  40%`.
+        let inner = block.inner(gauge);
+        f.render_widget(block, gauge);
+        f.render_widget(
+            LineGauge::default()
+                .ratio(f64::from(st.percent) / 100.0)
+                .filled_symbol(g.gauge_full)
+                .unfilled_symbol(g.gauge_empty)
+                .filled_style(bar)
+                .unfilled_style(t.disabled())
+                .label(format!("{}%", st.percent)),
+            inner,
+        );
+    }
     let lines: Vec<Line> = st
         .steps
         .iter()
         .map(|(_, title, status, _)| {
-            let (mark, style) = match status {
-                StepStatus::Pending => ("·".to_string(), Style::default().fg(Color::DarkGray)),
-                StepStatus::Running => (SPINNER[st.tick % SPINNER.len()].to_string(), Style::default().fg(BRAND)),
-                StepStatus::Done => ("✓".to_string(), Style::default().fg(Color::Green)),
-                StepStatus::Skipped => ("-".to_string(), Style::default().fg(Color::DarkGray)),
-                StepStatus::Failed => ("✗".to_string(), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            let (mark, style, word) = match status {
+                StepStatus::Pending => (g.pending, t.disabled(), None),
+                StepStatus::Running => (g.spin(st.tick), t.brand_style(), None),
+                StepStatus::Done => (g.ok, t.success(), None),
+                StepStatus::Skipped => (g.skipped, t.disabled(), Some("skipped")),
+                StepStatus::Failed => (g.fail, t.danger(), None),
             };
-            Line::from(vec![Span::styled(format!(" {mark} "), style), Span::styled(title.clone(), style)])
+            let mut spans = vec![Span::styled(format!(" {mark} "), style), Span::styled(title.clone(), if *status == StepStatus::Running { t.selected() } else { style })];
+            match status {
+                StepStatus::Failed => {
+                    spans.push(Span::raw("  "));
+                    spans.push(t.chip(Tone::Fail, "FAIL"));
+                }
+                StepStatus::Skipped => spans.push(Span::styled(format!("  ({})", word.unwrap_or("")), t.disabled())),
+                _ => {}
+            }
+            Line::from(spans)
         })
         .collect();
     // Keep the newest steps visible when the list is taller than the area.
     let h = list.height.saturating_sub(2) as usize;
-    let skip = lines.len().saturating_sub(h);
+    let total = lines.len();
+    let skip = total.saturating_sub(h);
     f.render_widget(
-        Paragraph::new(lines.into_iter().skip(skip).collect::<Vec<_>>())
-            .block(Block::default().borders(Borders::ALL).title(" Steps ")),
+        Paragraph::new(lines.into_iter().skip(skip).collect::<Vec<_>>()).block(t.panel(format!("Steps ({}/{})", st.steps.iter().filter(|s| matches!(s.2, StepStatus::Done | StepStatus::Skipped)).count(), total), true)),
         list,
     );
-    let text = if finished && st.failed() {
-        "Something went wrong. Press any key to see what to do next.".to_string()
+    if skip > 0 {
+        let mut sb = ScrollbarState::new(total.saturating_sub(h)).position(skip);
+        let r = Rect::new(list.x, list.y + 1, list.width, list.height.saturating_sub(2));
+        f.render_stateful_widget(Scrollbar::new(ScrollbarOrientation::VerticalRight).begin_symbol(None).end_symbol(None), r, &mut sb);
+    }
+    let (text, style, tone) = if finished && failed {
+        ("Something went wrong. Press any key to see what to do next.".to_string(), t.danger(), Tone::Fail)
     } else {
-        st.detail.clone()
+        (st.detail.clone(), t.text(), Tone::Info)
     };
     f.render_widget(
-        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" What's happening now ")),
+        Paragraph::new(text).style(style).wrap(Wrap { trim: true }).block(t.panel_tone("What's happening now", tone).padding(Padding::horizontal(1))),
         detail,
     );
 }

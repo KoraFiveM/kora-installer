@@ -1,4 +1,5 @@
 use super::*;
+use ratatui::style::Color;
 use crate::wizard::{PortEnv, WizardState};
 use crossterm::event::{KeyEventKind, KeyEventState};
 use kora_core::firewall::ports::PortProber;
