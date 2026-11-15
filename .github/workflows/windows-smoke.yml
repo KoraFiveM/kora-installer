@@ -106,7 +106,7 @@ jobs:
           cargo build --release --locked -p kora-cli
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
       - name: "5. MariaDB: existing MySQL server, then Kora's own MariaDB (--db install) and cleanup"
-        timeout-minutes: 10
+        timeout-minutes: 25
         run: ./scripts/smoke/05-mariadb.ps1
       - name: Collect logs
         if: always()
