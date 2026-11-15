@@ -286,7 +286,7 @@ fn missing_cli_explains_and_falls_back_to_typing() {
     settle(&mut f);
     assert_eq!(f.phase, Phase::Manual);
     let lines = f.lines().join(" ");
-    assert!(lines.contains("installs it during setup") && lines.contains("next time"), "{lines}");
+    assert!(lines.contains("installs it during setup") && lines.contains("opens your browser"), "{lines}");
     assert_eq!(f.chosen(), None);
     typed(&mut f, "my-team");
     assert_eq!(f.chosen().as_deref(), Some("my-team"));
