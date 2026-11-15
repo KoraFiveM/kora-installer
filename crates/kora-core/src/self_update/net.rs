@@ -4,13 +4,15 @@
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
+// Shared with the installer's hardened client: bounded hops, absolute-URL-only redirect resolution.
+use crate::installer::http::{resolve_redirect, MAX_REDIRECTS};
+
 pub const ALLOWED_HOSTS: &[&str] =
     &["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
 
 /// Largest program we will download.
 pub const MAX_BINARY: u64 = 100 * 1024 * 1024;
 pub const MAX_TEXT: u64 = 2 * 1024 * 1024;
-const MAX_REDIRECTS: usize = 5;
 
 #[derive(Debug, Clone)]
 pub struct Net {
@@ -76,15 +78,7 @@ impl Net {
             };
             if (300..400).contains(&resp.status()) {
                 let loc = resp.header("location").ok_or("redirect without a location")?;
-                cur = if loc.contains("://") {
-                    loc.to_string()
-                } else if loc.starts_with('/') {
-                    let (scheme, host) = split_url(&cur).ok_or("bad URL")?;
-                    let auth = cur[scheme.len() + 3..].split(['/', '?', '#']).next().unwrap_or(host);
-                    format!("{scheme}://{auth}{loc}")
-                } else {
-                    return Err("refusing an unusual redirect".into());
-                };
+                cur = resolve_redirect(&cur, loc)?;
                 continue;
             }
             return Ok(resp);
