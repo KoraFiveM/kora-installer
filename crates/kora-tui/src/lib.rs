@@ -6,6 +6,7 @@
 pub mod clipboard;
 pub mod elev;
 pub mod github_screens;
+pub mod manager;
 pub mod open;
 pub mod progress;
 pub mod result;

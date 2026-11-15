@@ -6,6 +6,10 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `kora manager`: a full-screen manager for every registered server: start/stop/restart, open txAdmin or the folder, logs, ensure a resource, delete, add an existing server, and "Install a new server". Bare `kora` in a terminal opens it when at least one server is registered, and the install wizard otherwise.
+- Manager > Update: a preview table (resource, from -> to, commits behind, needs restart, Clean/Dirty/Diverged/Up to date) with the changelog of the highlighted resource, tick resources or tick all, a restart choice (none / ensure / full / when quiet), live per-resource progress, the snapshot id, [ Roll back ] after a failed update and a list of saved snapshots to roll back to.
+- Manager > Notifications: set, test and remove the Discord webhook; only the redacted address is ever shown. Manager > Schedule: see the schedule in plain words, change preset/time/day, choose "as you" or "System" (with the tradeoff explained), remove it; asks for administrator permission when needed.
+- Update badges in the server list (`<server>/.kora/update-status.json`) and a [ Check for updates ] action (a full preview; the core writes the file).
 - Manual update flow (`kora update <server> --preview | --resource <id> | --all | --rollback <id>`): preview what changes, a snapshot before every apply, rollback, production servers move to the catalog's pinned release commits. Discord notifications (`kora webhook set|test|show|remove`) for update reports. `kora schedule` (see 0.2.1).
 - Every `kora update --auto` run, every full manual `--preview` and every full `--all` apply writes `<server>/.kora/update-status.json` (`{"checked_at": RFC3339 UTC, "updates": n waiting, "attention": n needing a person, "new_release": string|null}`, written atomically) so the manager can show badges.
 - Applying now reports each resource as it happens (the engine streams events: snapshot saved, resource updating, updated, rolling back, checking the server) instead of only before/after.

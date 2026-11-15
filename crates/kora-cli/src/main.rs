@@ -678,9 +678,36 @@ impl ProgressSink for Printer {
     }
 }
 
-fn not_implemented(what: &str) -> i32 {
-    eprintln!("kora {what}: not implemented yet");
-    2
+/// `kora manager`: the server list. "Install a new server" runs the install wizard, then comes back.
+fn manager() -> i32 {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        eprintln!("error: `kora manager` needs an interactive terminal. `kora status` lists your servers without one.");
+        return 2;
+    }
+    loop {
+        match kora_tui::manager::run_manager() {
+            Ok(kora_tui::manager::Exit::Quit) => return 0,
+            // The wizard reports its own errors and cancellation; either way the manager comes back.
+            Ok(kora_tui::manager::Exit::InstallNew) => {
+                install(InstallArgs::default());
+            }
+            // Changing the schedule needs administrator rights: the terminal is back to normal here,
+            // so the permission prompt (sudo / UAC) can be answered, then the manager comes back.
+            Ok(kora_tui::manager::Exit::Elevate(args)) => {
+                println!("Changing the update schedule needs administrator permission. Approve the prompt to continue.");
+                let os: Vec<std::ffi::OsString> = args.iter().map(Into::into).collect();
+                match elevate::relaunch_elevated(&os) {
+                    Ok(()) => println!("Done. Opening the manager again..."),
+                    Err(elevate::ElevateError::Declined) => println!("{}", elevate::declined_message()),
+                    Err(e) => eprintln!("error: {e}. Run this yourself: sudo kora {}", args.join(" ")),
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        }
+    }
 }
 
 /// Exchange a setup code for the website's choices (and verify the artifact build).
@@ -1539,7 +1566,7 @@ fn main() {
     let code = match command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
-        Some(Command::Manager) => not_implemented("manager"),
+        Some(Command::Manager) => manager(),
         Some(Command::Update(a)) => update(a),
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
@@ -1602,6 +1629,17 @@ mod tests {
     }
 
     #[test]
+    fn bare_kora_opens_the_manager_with_servers_and_the_wizard_without() {
+        for (registered, manager) in [(0, false), (1, true), (2, true), (50, true)] {
+            match default_command(registered) {
+                Command::Manager => assert!(manager, "{registered} servers"),
+                Command::Install(a) => assert!(!manager && !a.any_given(), "{registered} servers: the plain wizard"),
+                _ => panic!("unexpected default command"),
+            }
+        }
+    }
+
+    #[test]
     fn update_flags_parse() {
         let a = parse_update(&["main", "--resource", "kora-chat", "--resource", "kora-hud", "--yes", "--restart", "when-quiet"]).unwrap();
         assert_eq!((a.server.as_str(), a.resource.len(), a.yes, a.restart), ("main", 2, true, Some(RestartArg::WhenQuiet)));
@@ -1636,17 +1674,6 @@ mod tests {
         assert!(p(&["webhook", "remove", "alpha"]).is_ok());
         assert!(p(&["webhook", "set"]).is_err());
         assert!(p(&["webhook"]).is_err());
-    }
-
-    #[test]
-    fn bare_kora_opens_the_manager_with_servers_and_the_wizard_without() {
-        for (registered, manager) in [(0, false), (1, true), (2, true), (50, true)] {
-            match default_command(registered) {
-                Command::Manager => assert!(manager, "{registered} servers"),
-                Command::Install(a) => assert!(!manager && !a.any_given(), "{registered} servers: the plain wizard"),
-                _ => panic!("unexpected default command"),
-            }
-        }
     }
 
     #[test]
