@@ -6,6 +6,7 @@
 pub mod app_install;
 pub mod artifacts;
 pub mod catalog;
+pub mod console;
 pub mod db;
 pub mod elevate;
 pub mod firewall;

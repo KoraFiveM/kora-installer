@@ -15,6 +15,7 @@ use kora_core::update::manual::{ApplyOpts, ChangeStatus, ResourceChange, Restart
 use kora_core::update::UpdateReport;
 use super::backend::{Backend, Status, UpdateBadge};
 use super::input::TextInput;
+use super::console::ConsoleState;
 use super::logs::LogView;
 use super::view;
 use crate::clipboard::Clipboard;
@@ -118,6 +119,9 @@ pub enum Action {
     OpenTx,
     OpenFolder,
     Logs,
+    Console,
+    Send,
+    EnableConsole,
     Ensure,
     Delete,
     Update,
@@ -371,6 +375,7 @@ pub struct AddState {
 pub enum Screen {
     Main,
     Logs(Box<LogView>),
+    Console(Box<ConsoleState>),
     Ensure(Box<EnsureState>),
     Delete(Box<DeleteState>),
     Update(Box<UpdateState>),
@@ -484,6 +489,13 @@ impl App {
     }
 
     /// Cheap periodic refresh of running/stopped and the update badges.
+    /// Called every loop turn: pull new console output in while the console is open.
+    pub fn tick_console(&mut self) {
+        if let Screen::Console(c) = &mut self.screen {
+            c.refresh();
+        }
+    }
+
     pub fn refresh_status(&mut self) {
         for r in &mut self.rows {
             r.status = self.svc.backend.status(&r.entry);
@@ -522,6 +534,7 @@ impl App {
         let a = match &mut self.screen {
             Screen::Main => main_key(k),
             Screen::Logs(_) => logs_key(k),
+            Screen::Console(s) => console_key(s, k),
             Screen::Ensure(s) => ensure_key(s, k),
             Screen::Delete(s) => delete_key(s, k),
             Screen::Update(s) => update_key(s, k),
@@ -545,6 +558,7 @@ impl App {
             }
             Screen::Delete(s) if s.stage == DelStage::Name => Some(s.input.paste(text)),
             Screen::Notify(s) => Some(s.input.paste(text)),
+            Screen::Console(s) => Some(s.input.paste(text)),
             Screen::Schedule(s) if s.focus == 1 => Some(s.time.paste(text)),
             Screen::Add(s) if s.stage == AddStage::Path => Some(s.input.paste(text)),
             _ => None,
@@ -577,6 +591,13 @@ impl App {
     fn scroll(&mut self, dir: isize) {
         match &mut self.screen {
             Screen::Main => self.select(dir),
+            Screen::Console(c) => {
+                if dir < 0 {
+                    c.scroll_up(3)
+                } else {
+                    c.scroll_down(3)
+                }
+            }
             Screen::Logs(l) => {
                 if dir < 0 {
                     l.scroll_up(3)
@@ -675,6 +696,13 @@ impl App {
                     self.screen = Screen::Logs(Box::new(v));
                 }
             }
+            Action::Console => {
+                if let Some(r) = self.current() {
+                    let v = ConsoleState::open(r.entry.dir.clone());
+                    self.notice = None;
+                    self.screen = Screen::Console(Box::new(v));
+                }
+            }
             Action::Ensure => {
                 if let Some(e) = self.entry() {
                     let choices = self.svc.backend.resources(&e);
@@ -766,6 +794,17 @@ impl App {
                         Err(e) => Notice { level: Level::Bad, text: e },
                     };
                     self.notice = Some(msg);
+                }
+                _ => {}
+            },
+            Screen::Console(c) => match a {
+                Action::Send => c.send(),
+                Action::EnableConsole => c.enable(),
+                Action::PageUp => c.scroll_up(10),
+                Action::PageDown => c.scroll_down(10),
+                Action::End => c.to_end(),
+                Action::Reload => {
+                    c.refresh();
                 }
                 _ => {}
             },
@@ -1162,6 +1201,7 @@ fn main_key(k: KeyEvent) -> Option<Action> {
         KeyCode::Char('t') => Action::OpenTx,
         KeyCode::Char('o') => Action::OpenFolder,
         KeyCode::Char('l') => Action::Logs,
+        KeyCode::Char('w') => Action::Console,
         KeyCode::Char('e') => Action::Ensure,
         KeyCode::Char('d') => Action::Delete,
         KeyCode::Char('u') => Action::Update,
@@ -1178,6 +1218,30 @@ fn main_key(k: KeyEvent) -> Option<Action> {
         KeyCode::End => Action::End,
         _ => return None,
     })
+}
+
+fn console_key(s: &mut ConsoleState, k: KeyEvent) -> Option<Action> {
+    match k.code {
+        KeyCode::Esc => Some(Action::Back),
+        KeyCode::Enter => Some(Action::Send),
+        KeyCode::F(2) => Some(Action::EnableConsole),
+        KeyCode::F(5) => Some(Action::Reload),
+        KeyCode::PageUp => Some(Action::PageUp),
+        KeyCode::PageDown => Some(Action::PageDown),
+        KeyCode::End if k.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::End),
+        KeyCode::Up => {
+            s.history(true);
+            None
+        }
+        KeyCode::Down => {
+            s.history(false);
+            None
+        }
+        _ => {
+            s.input.key(k);
+            None
+        }
+    }
 }
 
 fn logs_key(k: KeyEvent) -> Option<Action> {

@@ -530,7 +530,7 @@ fn every_screen_draws_on_a_tiny_terminal_without_panicking() {
     let d = tempfile::tempdir().unwrap();
     let (mut a, s) = with_logs(d.path());
     s.borrow_mut().preview = Some(Ok(UpdatePreview { resources: vec![change("r1", ChangeStatus::Clean)], new_release: None }));
-    for k in ['l', 'e', 'd', 'u', 'n', 'c', 'a'] {
+    for k in ['l', 'w', 'e', 'd', 'u', 'n', 'c', 'a'] {
         chr(&mut a, k);
         for (w, h) in [(10u16, 4u16), (30, 8), (100, 40)] {
             let _ = text(&a, w, h);
@@ -541,6 +541,38 @@ fn every_screen_draws_on_a_tiny_terminal_without_panicking() {
             key(&mut a, KeyCode::Esc);
         }
     }
+}
+
+// ------------------------------------------------------------ live console
+
+#[test]
+fn the_live_console_follows_the_output_and_sends_commands() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = managed_dir(d.path(), "alpha");
+    std::fs::write(dir.join("server.cfg"), "ensure kora_core\n").unwrap();
+    std::fs::write(dir.join(".kora/console.log"), "Started resource kora_core\nSCRIPT ERROR: boom\n").unwrap();
+    let (mut a, _s) = app_with(vec![entry("alpha", &dir, 30120)]);
+    chr(&mut a, 'w');
+    let t = screen_text(&a);
+    assert!(t.contains("Live console") && t.contains("following console.log") && t.contains("Started resource kora_core"), "{t}");
+    assert!(t.contains("commands off") && t.contains("F2"), "{t}");
+    // typing works (and 'q' / 'l' are letters here, not shortcuts)
+    for c in "list".chars() {
+        chr(&mut a, c);
+    }
+    key(&mut a, KeyCode::Enter);
+    assert!(screen_text(&a).contains("live console"), "refused until turned on");
+    key(&mut a, KeyCode::F(2));
+    assert!(screen_text(&a).contains("commands on"));
+    key(&mut a, KeyCode::Enter);
+    assert_eq!(std::fs::read_to_string(dir.join(".kora/console.in")).unwrap(), "list\n");
+    // new output appears without any key press
+    std::fs::write(dir.join(".kora/console.log"), "Started resource kora_core\nSCRIPT ERROR: boom\n> list\nthe result\n").unwrap();
+    a.tick_console();
+    let t = screen_text(&a);
+    assert!(t.contains("the result"), "{t}");
+    key(&mut a, KeyCode::Esc);
+    assert!(matches!(a.screen, Screen::Main));
 }
 
 // ------------------------------------------------------------ update

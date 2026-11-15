@@ -11,7 +11,8 @@ use ratatui::{
 
 use crate::wizard::{Screen, Wizard};
 
-pub const BRAND: Color = Color::Cyan;
+/// Kora lime (the website's `--lime`, #95ff00).
+pub const BRAND: Color = Color::Rgb(0x95, 0xff, 0x00);
 
 /// Width of the `[ Paste ]` / `[ Clear ]` buttons and the narrowest body that shows them.
 const BUTTON_W: u16 = 9;
@@ -109,8 +110,10 @@ pub fn view(w: &Wizard) -> View {
             v.title = l("Welcome to Kora");
             v.lines = vec![l("This will set up your own game server, step by step. It takes a few minutes and you can go back at any time.")];
             if let Some(n) = w.welcome_note() {
+                v.lines.push(String::new());
                 v.lines.push(n);
             }
+            v.lines.push(String::new());
             v.lines.push(l("How would you like to continue?"));
             v.options = vec![
                 opt("Take me through it (recommended)", "A few simple questions with sensible answers already filled in."),
@@ -138,12 +141,15 @@ pub fn view(w: &Wizard) -> View {
             v.title = l("Before we start");
             v.lines = vec![
                 l("To set up your server, Kora may need to:"),
+                String::new(),
                 l("  - Download the game server software and Kora's files from the internet."),
                 l("  - Create a folder for your server."),
                 l("  - Install Git (a download tool) and a database if they are missing."),
                 l("  - Create a database and user used only by this server."),
                 l("  - Allow the server through your firewall and start it automatically (you will be asked)."),
+                String::new(),
                 l("Some of these need administrator rights. Windows will show a permission prompt; on Linux you may be asked for your sudo password."),
+                String::new(),
                 l("Nothing is changed until you confirm on the last screen."),
             ];
             v.help = l("Kora never sends your license key anywhere except into your own server's private settings.");
@@ -173,6 +179,7 @@ pub fn view(w: &Wizard) -> View {
                 l("Use Up/Down to switch between the two. We check that no other program is already using them."),
             ];
             if let Some(n) = &w.ports_note {
+                v.lines.push(String::new());
                 v.lines.push(n.clone());
             }
             v.lines.push(l("Kora checks that nothing else on this computer uses them. If one is taken, press U (or click the Use button) to switch to the next free port."));
@@ -213,6 +220,7 @@ pub fn view(w: &Wizard) -> View {
             v.title = l("Database");
             v.lines = vec![l("Kora keeps player data in a database (MariaDB or MySQL). It will create its own private database and user, so your other data is untouched.")];
             if w.limited {
+                v.lines.push(String::new());
                 v.lines.push(l("Limited setup: without permission Kora can't install a database server, so use one you already have on this computer, or skip this and connect one later. Choosing 'Set it up for me' needs permission and will ask you to restart."));
             }
             v.options = vec![
@@ -240,12 +248,13 @@ pub fn view(w: &Wizard) -> View {
             v.lines = vec![
                 l("Enter the MariaDB admin account. It is used once, only to create the new database and user, and the password is never saved."),
             ];
-            v.lines.extend(test_lines(w, "Press Ctrl+T or F2 (or click Test login) to check it before you continue."));
+            v.lines.extend(test_lines(w, "Press Ctrl+T or F2 (or click Test login) to check it. Kora also tests it when you press Next, and will not continue if it fails."));
             v.inputs = vec![
                 inp("Admin user", &w.dba_user, "root", w.focus == 0),
                 InputView { masked: true, ..inp("Admin password (hidden)", &w.dba_pass, "leave empty if none", w.focus == 1) },
-                inp("Database server address", &w.dba_host, "127.0.0.1", w.focus == 2),
-                inp("Database port", &w.dba_port, "3306", w.focus == 3),
+                InputView { masked: true, ..inp("Confirm admin password (hidden)", &w.dba_pass2, "type it again", w.focus == 2) },
+                inp("Database server address", &w.dba_host, "127.0.0.1", w.focus == 3),
+                inp("Database port", &w.dba_port, "3306", w.focus == 4),
             ];
         }
         Screen::Firewall => {
@@ -284,6 +293,7 @@ pub fn view(w: &Wizard) -> View {
             v.title = l("Your server license key");
             v.lines = vec![
                 l("FiveM requires a free license key for every server. Create one at portal.cfx.re (Registration keys), then paste it below. What you type is hidden."),
+                String::new(),
                 l("Not ready? Leave it empty and add it later."),
             ];
             v.inputs = vec![InputView { masked: true, ..inp("License key", &w.license, "paste here", true) }];
@@ -318,13 +328,16 @@ pub fn view(w: &Wizard) -> View {
                 Some(n) => {
                     v.lines = vec![
                         n,
+                        String::new(),
                         l("Questions the website already answered are skipped; you will see all of them again on the last screen before anything is changed."),
+                        String::new(),
                         l("Your license key and database login are never sent by the website, so you will still be asked for those."),
                     ];
                 }
                 None => {
                     v.lines = vec![
                         l("If you prepared your install on the Kora website you got a code like KORA-7F3K-92QX. Paste it here and press Enter to load your choices, or leave the box empty and press Next to answer everything here."),
+                        String::new(),
                         l("A code works once and lasts 30 minutes."),
                     ];
                     v.inputs = vec![inp("Setup code", &w.setup_code, "KORA-XXXX-XXXX", true)];
@@ -342,27 +355,39 @@ pub fn view(w: &Wizard) -> View {
                 DbChoice::Skip => "skip",
             };
             let admin = match (w.db.clone(), w.db_admin()) {
-                (DbChoice::Skip, _) => String::new(),
-                (_, None) => "   DB admin: automatic".to_string(),
-                (_, Some(a)) => format!("   DB admin: {}@{}:{}", a.user, a.host, a.port),
+                (DbChoice::Skip, _) => "not used".to_string(),
+                (_, None) => "automatic".to_string(),
+                (_, Some(a)) => format!("{}@{}:{}", a.user, a.host, a.port),
             };
-            v.lines = vec![
-                format!("Name: {}   Type: {mode}", w.name.trim()),
+            let mut left = vec![
+                format!("Name: {}", w.name.trim()),
                 format!("Folder: {}", w.dir.trim()),
-                format!("Ports: game {}, control panel {}   Database: {db}{admin}", w.game_port.trim(), w.tx_port.trim()),
-                format!(
-                    "Features: {}   Server software: {}{}",
-                    if w.resources_all { "everything".to_string() } else { w.resource_ids.trim().to_string() },
-                    if w.artifact_custom { "chosen build" } else { "recommended" },
-                    if w.game_build.trim().is_empty() { String::new() } else { format!("   Game build: {}", w.game_build.trim()) },
-                ),
-                format!(
-                    "License key: {}",
-                    if w.license.trim().is_empty() { "not set (add later)" } else { "provided (hidden)" }
-                ),
+                format!("DB admin: {admin}"),
+                format!("License Key: {}", if w.license.trim().is_empty() { "not set (add later)" } else { "provided (hidden)" }),
+                format!("Server Software: {}", if w.artifact_custom { "chosen build" } else { "recommended" }),
+            ];
+            let mut right = vec![
+                format!("Type: {mode}"),
+                format!("Features: {}", if w.resources_all { "everything".to_string() } else { w.resource_ids.trim().to_string() }),
+                format!("Database: {db}"),
+                format!("Ports: game {}, control panel {}", w.game_port.trim(), w.tx_port.trim()),
+            ];
+            if !w.game_build.trim().is_empty() {
+                right.push(format!("Game build: {}", w.game_build.trim()));
+            }
+            let rows = left.len().max(right.len());
+            left.resize(rows, String::new());
+            right.resize(rows, String::new());
+            let lw = left.iter().map(|x| x.chars().count()).max().unwrap_or(0);
+            v.lines = left
+                .iter()
+                .zip(&right)
+                .map(|(a, b)| format!("{a:<lw$}  |   {b}").trim_end().to_string())
+                .collect();
+            v.lines.extend([
                 String::new(),
                 "This will change your computer as follows:".into(),
-            ];
+            ]);
             let reasons = w.review_reasons();
             if !reasons.is_empty() {
                 let mut top = vec![l("Kora needs your permission to:")];

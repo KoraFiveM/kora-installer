@@ -880,6 +880,7 @@ fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>, no_app: 
                 eprintln!("note: could not show the final screen: {e}");
             }
             let _ = write_install_log(&req, &log, None);
+            installer::saved::clear();
             print_outcome(&out, false);
             0
         }
@@ -890,11 +891,16 @@ fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>, no_app: 
         Err(e) => {
             let msg = e.to_string();
             let path = write_install_log(&req, &log, Some(&msg));
+            // Keep the answers (never the secrets) so the next run does not ask everything again.
+            let saved = installer::saved::save(&req).is_ok();
             let next = if req.dir.join(".kora").is_dir() {
                 format!(
-                    "What was done so far is kept.\nTo try again: run `kora install` again; it continues where it stopped.\nTo start over: run `kora delete {}` to remove what was created.",
+                    "What was done so far is kept{}.\nTo try again: run `kora install` again; it continues where it stopped.\nTo start over: run `kora delete {}` to remove what was created.",
+                    if saved { ", and so are your answers (not the license key or database password)" } else { "" },
                     req.dir.display()
                 )
+            } else if saved {
+                "Nothing was created. Your answers are saved (not the license key or database password): fix the problem above and run `kora install` again.".to_string()
             } else {
                 "Nothing was created. Fix the problem above and run `kora install` again.".to_string()
             };

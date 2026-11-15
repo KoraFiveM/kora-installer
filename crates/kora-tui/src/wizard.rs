@@ -161,8 +161,12 @@ pub struct Wizard {
     pub dba_custom: bool,
     pub dba_user: String,
     pub dba_pass: String,
+    /// Second entry of the admin password (must match).
+    pub dba_pass2: String,
     pub dba_host: String,
     pub dba_port: String,
+    /// Answers came back from an install that failed earlier (shown on Welcome).
+    pub restored: bool,
     /// Result of the last "Test login" (cleared when the login changes).
     pub db_test: Option<Result<(), String>>,
 }
@@ -348,9 +352,11 @@ impl Wizard {
             dba_custom: false,
             dba_user: "root".into(),
             dba_pass: String::new(),
+            dba_pass2: String::new(),
             dba_host: "127.0.0.1".into(),
             dba_port: "3306".into(),
             db_test: None,
+            restored: false,
         }
     }
 
@@ -440,7 +446,7 @@ impl Wizard {
     pub fn input_count(&self) -> usize {
         match self.screen {
             Screen::Ports => 2,
-            Screen::DbAdminLogin => 4,
+            Screen::DbAdminLogin => 5,
             Screen::Name
             | Screen::Folder
             | Screen::ArtifactUrl
@@ -471,7 +477,8 @@ impl Wizard {
             (Screen::Ports, _) => &mut self.tx_port,
             (Screen::DbAdminLogin, 0) => &mut self.dba_user,
             (Screen::DbAdminLogin, 1) => &mut self.dba_pass,
-            (Screen::DbAdminLogin, 2) => &mut self.dba_host,
+            (Screen::DbAdminLogin, 2) => &mut self.dba_pass2,
+            (Screen::DbAdminLogin, 3) => &mut self.dba_host,
             (Screen::DbAdminLogin, _) => &mut self.dba_port,
             (Screen::ArtifactUrl, _) => &mut self.artifact_url,
             (Screen::ResourceList, _) => &mut self.resource_ids,
@@ -612,12 +619,37 @@ impl Wizard {
         self.db_test = Some((self.db_tester)(self.db_admin().as_ref()));
     }
 
+    /// Leaving a database screen: really connect first, so a wrong login or a stopped server is found
+    /// now and not halfway through the install. A failed automatic login only blocks when the user
+    /// said to use an existing database; with "set it up for me" the server may simply not be installed yet.
+    fn check_database_before_leaving(&mut self) -> Result<(), String> {
+        let blocks = match self.screen {
+            Screen::DbAdminLogin => true,
+            Screen::DbAdmin => !self.dba_custom,
+            _ => return Ok(()),
+        };
+        if !blocks {
+            return Ok(());
+        }
+        let result = (self.db_tester)(self.db_admin().as_ref());
+        self.db_test = Some(result.clone());
+        match result {
+            Ok(()) => Ok(()),
+            // Kora installs the database itself, so there may be nothing to connect to yet.
+            Err(_) if self.screen == Screen::DbAdmin && self.db == DbChoice::InstallIfMissing => Ok(()),
+            Err(e) => Err(format!("The database login did not work, so the install cannot continue yet: {e} Fix the login, or go Back and choose a different database option.")),
+        }
+    }
+
     fn validate_db_admin(&self) -> Result<(), String> {
         if !self.dba_custom {
             return Ok(());
         }
         if self.dba_user.trim().is_empty() {
             return Err("Please enter the database admin user name (often 'root').".into());
+        }
+        if self.dba_pass != self.dba_pass2 {
+            return Err("The two passwords don't match. Type the same password in both boxes.".into());
         }
         if self.dba_host.trim().is_empty() {
             return Err("Please enter the database server address (usually 127.0.0.1).".into());
@@ -672,8 +704,49 @@ impl Wizard {
         }
     }
 
+    /// Fill the answers from an earlier install that failed (secrets are never saved, so the license
+    /// key and database password are asked for again).
+    pub fn restore_saved(&mut self, r: &InstallRequest) {
+        self.mode = r.mode;
+        self.name = r.name.clone();
+        self.dir = r.dir.to_string_lossy().into_owned();
+        self.dir_touched = true;
+        self.hostname = r.hostname.clone();
+        self.host_touched = true;
+        self.game_port = r.ports.game.to_string();
+        self.tx_port = r.ports.txadmin.to_string();
+        self.ports_touched = true;
+        self.artifact_custom = r.artifact_url.is_some();
+        self.artifact_url = r.artifact_url.clone().unwrap_or_default();
+        self.game_build = r.game_build.map(|g| g.to_string()).unwrap_or_default();
+        match &r.resources {
+            ResourceSelection::All => self.resources_all = true,
+            ResourceSelection::Only(ids) => {
+                self.resources_all = false;
+                self.resource_ids = ids.join(", ");
+            }
+        }
+        self.db = r.db.clone();
+        self.firewall = r.firewall;
+        self.service = r.service;
+        self.txadmin_public = r.txadmin_public;
+        self.github_owner = r.github_owner.clone().unwrap_or_default();
+        self.cfx_identifier = r.cfx_identifier.clone();
+        if let Some(a) = &r.db_admin {
+            self.dba_custom = true;
+            self.dba_user = a.user.clone();
+            self.dba_host = a.host.clone();
+            self.dba_port = a.port.to_string();
+        }
+        self.restored = true;
+        self.refresh_ports();
+    }
+
     /// Welcome text after a code was loaded.
     pub fn welcome_note(&self) -> Option<String> {
+        if self.restored && self.redeemed.is_none() {
+            return Some("Your answers from the last attempt are filled in, so you can go straight through. Kora continues where it stopped. For your safety the license key and database password are not saved, so you will type those again.".into());
+        }
         self.redeemed.as_ref().map(|r| r.welcome())
     }
 
@@ -707,14 +780,14 @@ impl Wizard {
     /// Longest text the focused box accepts.
     fn field_max(&self) -> usize {
         match (self.screen, self.focus) {
-            (Screen::Ports, _) | (Screen::DbAdminLogin, 3) => 5,
+            (Screen::Ports, _) | (Screen::DbAdminLogin, 4) => 5,
             (Screen::GameBuild, _) => 8,
             (Screen::SetupCode, _) => 32,
             (Screen::Name, _) | (Screen::Hostname, _) => 64,
             (Screen::GithubOwner, _) | (Screen::DbAdminLogin, 0) => 64,
             (Screen::License, _) => 128,
-            (Screen::DbAdminLogin, 1) => 256,
-            (Screen::DbAdminLogin, 2) => 255,
+            (Screen::DbAdminLogin, 1) | (Screen::DbAdminLogin, 2) => 256,
+            (Screen::DbAdminLogin, 3) => 255,
             (Screen::Folder, _) => 260,
             (Screen::ResourceList, _) => 1024,
             (Screen::ArtifactUrl, _) => 2048,
@@ -724,7 +797,7 @@ impl Wizard {
 
     /// Is the focused box a hidden one (license key, database password)?
     pub fn focused_is_masked(&self) -> bool {
-        matches!((self.screen, self.focus), (Screen::License, _) | (Screen::DbAdminLogin, 1))
+        matches!((self.screen, self.focus), (Screen::License, _) | (Screen::DbAdminLogin, 1) | (Screen::DbAdminLogin, 2))
     }
 
     /// Insert pasted text into the focused box: cleaned, length-capped, and confirmed in the
@@ -1140,6 +1213,10 @@ impl Wizard {
         }
         self.error = None;
         self.apply_selection();
+        if let Err(e) = self.check_database_before_leaving() {
+            self.error = Some(e);
+            return;
+        }
         if self.screen == Screen::Ports && std::mem::take(&mut self.jump_review) {
             self.screen = Screen::Review;
             self.load_selection();
@@ -1208,6 +1285,20 @@ impl Wizard {
         }
     }
 
+    /// Which ports will be opened in the firewall, in plain words (also says when none are).
+    pub fn firewall_line(&self) -> String {
+        let (g, t) = (self.game_port.trim(), self.tx_port.trim());
+        if !self.firewall {
+            return format!("Open no firewall ports (you chose to do it yourself). Players need port {g} (TCP and UDP) open to join");
+        }
+        let fw = if self.windows { "Windows Firewall" } else { "the firewall" };
+        if self.txadmin_public {
+            format!("Open these ports in {fw}: {g} TCP and UDP (players join here) and {t} TCP (txAdmin control panel, reachable from the network)")
+        } else {
+            format!("Open this port in {fw}: {g} TCP and UDP (players join here). The control panel port {t} stays closed, so only this computer can reach it{}", if self.windows { ". If Windows asks about FXServer later, choose Allow" } else { "" })
+        }
+    }
+
     /// Plain-language list of everything the install will change on this computer.
     pub fn system_changes(&self) -> Vec<String> {
         let mut v = vec![
@@ -1240,18 +1331,7 @@ impl Wizard {
                 Some(a) => format!("Log in to the database at {}:{} as '{}' once, only to create the new database and user (existing data is never touched; the password is not saved)", a.host, a.port, a.user),
             });
         }
-        if self.firewall && self.windows {
-            v.push(format!(
-                "Windows Firewall: allow inbound TCP and UDP {}. If Windows asks about FXServer later, choose Allow",
-                self.game_port.trim()
-            ));
-        } else if self.firewall {
-            v.push(format!(
-                "Allow ports {} and {} through the firewall (needs administrator rights)",
-                self.game_port.trim(),
-                self.tx_port.trim()
-            ));
-        }
+        v.push(self.firewall_line());
         if self.service && self.windows {
             v.push(format!(
                 "Windows service \"kora-{}\": starts with Windows and restarts after a crash. It runs under its own limited account that can only change the server folder",
@@ -1632,6 +1712,9 @@ mod tests {
         w.handle_key(key(KeyCode::Tab));
         type_str(&mut w, "bad");
         w.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert!(matches!(&w.db_test, Some(Err(e)) if e.contains("don't match")), "the confirm box must match first");
+        w.dba_pass2 = "bad".into();
+        w.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
         assert_eq!(w.db_test, Some(Err("Access denied".into())));
         assert_eq!(w.dba_pass, "bad", "Ctrl+T must not type a character");
         // fix the password: result is cleared, retest succeeds
@@ -1640,11 +1723,12 @@ mod tests {
         }
         assert!(w.db_test.is_none());
         type_str(&mut w, "pw");
+        w.dba_pass2 = "pw".into();
         w.handle_key(key(KeyCode::F(2)));
         assert_eq!(w.db_test, Some(Ok(())));
         // the view shows the result and masks the password
         let v = w.view();
-        assert!(v.inputs[1].masked && v.has_test);
+        assert!(v.inputs[1].masked && v.inputs[2].masked && v.has_test);
         assert!(v.lines.iter().any(|l| l.contains("worked")));
         let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 34)).unwrap();
         t.draw(|f| wizard_view::render(f, &w)).unwrap();
@@ -1668,6 +1752,11 @@ mod tests {
         assert!(w.error.as_ref().unwrap().contains("port"));
         w.dba_port = "33061".into();
         w.dba_pass = "pw".into();
+        w.dba_pass2 = "other".into();
+        w.go_next();
+        assert_eq!(w.screen, Screen::DbAdminLogin);
+        assert!(w.error.as_ref().unwrap().contains("don't match"));
+        w.dba_pass2 = "pw".into();
         let area = Rect::new(0, 0, 100, 34);
         let l = wizard_view::layout(area, &w.view());
         w.handle_mouse(
@@ -1688,7 +1777,46 @@ mod tests {
         assert!(changes.iter().any(|c| c.contains("firewall")));
         assert!(changes.iter().any(|c| c.contains("MariaDB")));
         w.firewall = false;
-        assert!(!w.system_changes().iter().any(|c| c.contains("firewall")));
+        let c = w.system_changes();
+        assert!(!c.iter().any(|c| c.contains("Open this port")));
+        assert!(c.iter().any(|c| c.contains("Open no firewall ports")));
+    }
+
+    #[test]
+    fn firewall_line_names_every_port_that_is_opened() {
+        let mut w = wiz();
+        let l = w.firewall_line();
+        assert!(l.contains("30120 TCP and UDP") && l.contains("40120 stays closed"), "{l}");
+        w.txadmin_public = true;
+        let l = w.firewall_line();
+        assert!(l.contains("30120 TCP and UDP") && l.contains("40120 TCP") && l.contains("control panel"), "{l}");
+    }
+
+    #[test]
+    fn a_failing_database_login_blocks_next_and_a_working_one_continues() {
+        fn bad(_: Option<&DbAdmin>) -> Result<(), String> {
+            Err("Access denied.".into())
+        }
+        let mut w = dbw();
+        w.db_tester = bad;
+        w.db = DbChoice::UseExisting;
+        w.screen = Screen::DbAdmin;
+        w.load_selection();
+        w.go_next();
+        assert_eq!(w.screen, Screen::DbAdmin, "must not continue with a broken database login");
+        assert!(w.error.as_ref().unwrap().contains("Access denied"));
+        // "set it up for me": the server may not exist yet, so a failed automatic probe does not block
+        w.db = DbChoice::InstallIfMissing;
+        w.go_next();
+        assert_ne!(w.screen, Screen::DbAdmin);
+        // a typed login always has to work
+        w.screen = Screen::DbAdminLogin;
+        w.dba_custom = true;
+        w.go_next();
+        assert_eq!(w.screen, Screen::DbAdminLogin);
+        w.db_tester = |_| Ok(());
+        w.go_next();
+        assert_eq!(w.screen, Screen::Firewall);
     }
 
     fn sample_redeemed() -> Redeemed {
@@ -1981,7 +2109,7 @@ mod tests {
         let mut w = cwiz(None);
         w.screen = Screen::DbAdminLogin;
         w.dba_custom = true;
-        w.focus = 2;
+        w.focus = 3;
         w.dba_host.clear();
         w.handle_paste("db.example.com\n");
         assert_eq!(w.dba_host, "db.example.com");
@@ -2249,7 +2377,7 @@ mod tests {
         w.screen = Screen::Review;
         let c = w.system_changes().join("\n");
         for want in [
-            "Windows Firewall: allow inbound TCP and UDP 30120", "choose Allow", "Windows service \"kora-my-kora-server\"", "limited account",
+            "Open this port in Windows Firewall: 30120 TCP and UDP", "choose Allow", "Windows service \"kora-my-kora-server\"", "limited account",
             "winget", "official mirrors", "not running as Administrator",
         ] {
             assert!(c.contains(want), "missing {want:?}\n{c}");
@@ -2257,7 +2385,7 @@ mod tests {
         let c = wiz().with_platform(true, true).system_changes().join("\n");
         assert!(!c.contains("not running as Administrator"));
         let c = wiz().system_changes().join("\n");
-        assert!(c.contains("Install Git if it is missing") && c.contains("Allow ports 30120 and 40120"), "{c}");
+        assert!(c.contains("Install Git if it is missing") && c.contains("Open this port in the firewall: 30120 TCP and UDP"), "{c}");
     }
 
     // ---- permission step ----

@@ -894,6 +894,10 @@ impl InstallStep {
             }
             io(std::fs::write(&gi, format!("{existing}{add}")), "cannot write .gitignore")?;
         }
+        // The live console's helper (a failure here must never fail the install: the console is optional).
+        if let Err(e) = crate::console::install(dir) {
+            ctx.note(format!("The live console helper could not be added ({e}); you can turn it on later in the manager."));
+        }
         Ok("server.cfg, permissions.cfg, secrets.cfg and txAdmin profile written".into())
     }
 

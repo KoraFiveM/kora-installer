@@ -9,6 +9,7 @@ pub mod adapter;
 pub mod adopt;
 pub mod app;
 pub mod backend;
+pub mod console;
 pub mod input;
 pub mod logs;
 pub mod view;
@@ -51,6 +52,7 @@ pub fn run_manager() -> Result<Exit, Box<dyn Error>> {
     let mut app = App::new(system_services_with(live));
     let mut last_refresh = Instant::now();
     loop {
+        app.tick_console();
         term.borrow_mut().t.draw(|f| view::render(f, &app))?;
         // The "working" text is on screen now; do the slow job, then draw its result.
         if app.run_pending() {
