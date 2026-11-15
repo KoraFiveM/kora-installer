@@ -5,6 +5,21 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-15
+
+### Added
+- Live console in `kora manager` (`w`): follows the server's output and sends commands through a small `kora_console` helper resource (`.kora/console.in`). New installs include it; existing servers turn it on with F2. `kora service-host` now also writes the server output to `.kora/console.log`.
+- Development installs sign in to GitHub in the browser during setup when `gh` was just installed (one-time code shown, page opened) instead of failing with "run gh auth login".
+- Answers of a failed install are saved to `<kora home>/last-install.json` (never the license key or database password) and restored on the next run.
+- Confirm-password box on the database admin login; the login is tested before the install continues.
+- The review screen is a two-column summary and states exactly which firewall ports will be opened.
+
+### Fixed
+- Windows service start failing with error 1053: `service-host` now answers the service manager first and logs any start-up failure to `.kora/service-host.log`.
+
+### Changed
+- Accent colour is Kora lime (#95ff00); intro screens have spaced paragraphs.
+
 ## [0.2.2] - 2026-11-15
 
 ### Added

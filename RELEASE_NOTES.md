@@ -1,19 +1,28 @@
-## Kora Installer v0.2.2
+## Kora Installer v0.2.3
 
 Install and manage a Kora FiveM server from one program: `kora install` (guided wizard or flags).
 
 ### Install
 Linux:
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.2.2/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.2.3/install.sh | sh
 ```
 Windows (PowerShell):
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.2.2/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.2.3/install.ps1 | iex
 ```
 Then run `kora install`. Or download the program below and check it yourself.
 
-### New in 0.2.2
+### New in 0.2.3
+- **Live console.** In `kora manager`, press `w` on a server to watch its console as it happens and type commands into it. Servers you install now get it automatically; for an existing server press F2 on that screen once and restart the server.
+- **GitHub sign-in is part of setup.** If the GitHub CLI had to be installed for a development server, Kora now opens your browser to sign in (it shows the one-time code) instead of stopping with an error.
+- **Fixes the Windows "service failed to start (1053)" dead end.** If the server could not start, the service now says why in `.kora\service-host.log` instead of failing silently.
+- **A failed install no longer makes you start over.** Your answers are saved (never the license key or database password) and filled in next time; Kora continues where it stopped.
+- **Safer database step.** The admin password is typed twice, and the login is tested before the install continues.
+- **Clearer review screen.** A tidy two-column summary, and a plain statement of exactly which firewall ports will be opened.
+- **Kora lime** colour throughout, and easier-to-read intro screens.
+
+### Earlier: 0.2.2
 - **Update your server on your terms.** `kora update <server>` shows what would change, saves a snapshot, applies the update and puts everything back automatically if it goes wrong. `kora update <server> --preview` only looks; `--rollback <snapshot>` undoes an update later; `--list-snapshots` shows what you can go back to.
 - **Discord notifications.** `kora webhook set <server>` sends the report of each automatic update to a Discord channel (`kora webhook test <server>` sends a test message).
 - **You choose when automatic updates run.** `kora schedule set <server> --daily 04:00` or `--weekly sun 04:00`. It now runs as you, not as the system account, so private GitHub forks can be updated.
