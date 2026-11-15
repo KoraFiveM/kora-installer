@@ -1,0 +1,38 @@
+name: Supply chain
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1"   # weekly: new advisories appear without any code change
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deny:
+    name: cargo deny (advisories, licenses, bans, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+          arguments: --all-features
+  pinned-actions:
+    name: third-party actions pinned by commit SHA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Report unpinned actions
+        # Only this workflow is enforced; the others are reported as warnings (they use version tags).
+        run: |
+          fail=0
+          for f in .github/workflows/*.yml; do
+            grep -nE '^\s*-?\s*uses:\s*[^./][^@ ]*@' "$f" | grep -vE '@[0-9a-f]{40}(\s|$)' | while IFS= read -r l; do
+              echo "::warning file=$f::not pinned to a commit SHA: $l"
+            done
+          done
+          if grep -nE '^\s*-?\s*uses:\s*[^./][^@ ]*@' .github/workflows/supply-chain.yml | grep -vE '@[0-9a-f]{40}(\s|$)'; then
+            echo "::error::supply-chain.yml has an action not pinned by SHA"; fail=1
+          fi
+          exit $fail
