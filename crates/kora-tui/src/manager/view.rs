@@ -777,7 +777,7 @@ fn update(p: &mut Page, s: &UpdateState) {
         let (tag, col) = match c.status {
             ChangeStatus::Clean => (format!("{} behind", c.behind), Color::Yellow),
             ChangeStatus::Dirty => ("Dirty".to_string(), Color::Red),
-            ChangeStatus::Diverged => ("Diverged".to_string(), Color::Red),
+            ChangeStatus::Diverged => ("Diverged (skipped)".to_string(), Color::Red),
             ChangeStatus::UpToDate => ("Up to date".to_string(), Color::Green),
         };
         let spans = vec![

@@ -313,6 +313,35 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
         .collect())
 }
 
+#[cfg(test)]
+mod fork_sync_tests {
+    use super::*;
+    use crate::git::{SyncOutcome as O, SyncRecord};
+
+    #[test]
+    fn summary_lists_untouched_forks_with_the_safe_fix_and_counts() {
+        let mut st = git::ForkState::new("me", false, &[]);
+        assert_eq!(fork_sync_report(&st, &|r| r.to_string()), (String::new(), vec![]));
+        let rec = |repo: &str, outcome| SyncRecord { repo: repo.into(), branch: "dev".into(), outcome };
+        st.sync = vec![rec("a/one", O::Synced { commits: 2 }), rec("a/two", O::UpToDate), rec("a/three", O::Diverged { ahead: 1, behind: 4 }), rec("a/four", O::Ahead { ahead: 2 })];
+        let (head, lines) = fork_sync_report(&st, &|r| format!("resources/{}", r.rsplit('/').next().unwrap()));
+        assert_eq!(head, "; 1 fork(s) brought up to date, 1 already current, 2 left alone");
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("me/three") && lines[0].contains("cd resources/three && git fetch upstream && git merge upstream/dev") && lines[0].contains("Nothing was changed"), "{}", lines[0]);
+        assert!(lines[1].contains("me/four") && lines[1].contains("2 commit(s) of its own") && lines[1].contains("Nothing was changed"));
+    }
+}
+
+/// Text for the end of the fork step: `"; 2 fork(s) brought up to date, ..."` (empty when no existing
+/// fork was adopted) and one line per fork that was left alone, with the safe fix.
+fn fork_sync_report(state: &git::ForkState, path_of: &dyn Fn(&str) -> String) -> (String, Vec<String>) {
+    if state.sync.is_empty() {
+        return (String::new(), vec![]);
+    }
+    let s = state.sync_summary(path_of);
+    (format!("; {}", s.headline()), s.lines)
+}
+
 fn item_ok(it: &CloneItem) -> bool {
     if it.subpath.is_some() {
         return it.commit.as_deref().is_some_and(|c| pinned::marker_matches(&it.dest, c));
@@ -715,6 +744,12 @@ impl InstallStep {
                 git::ForkState::new(&owner, is_org, &repos)
             }
         };
+        // Which branch each fork is compared/synced on, and where its resource folder is.
+        let sel: Vec<(String, String, String)> =
+            ctx.shared.lock().unwrap().selected.iter().filter(|x| !x.is_pinned_copy()).map(|x| (repo_slug(&x.repository), x.branch.clone(), x.install_rel())).collect();
+        for (repo, branch, _) in &sel {
+            state.branches.insert(repo.clone(), branch.clone());
+        }
         let total = repos.len().max(1);
         let save = |s: &git::ForkState| {
             if let Ok(b) = serde_json::to_vec_pretty(s) {
@@ -726,7 +761,8 @@ impl InstallStep {
             save(s);
             ctx.emit(self.id, StepStatus::Running, format!("Forked {}/{total} (owner {})", s.done.len(), s.target_owner), s.done.len() as f32 / total as f32);
         };
-        let out = git::run_forks(&r, &mut state, &git::ForkConfig::default(), &mut on_progress).map_err(|e| InstallError(e.to_string()))?;
+        let cfg = git::ForkConfig { sync_existing: true, ..git::ForkConfig::default() };
+        let out = git::run_forks(&r, &mut state, &cfg, &mut on_progress).map_err(|e| InstallError(e.to_string()))?;
         match out {
             git::ForkOutcome::Paused => err("GitHub rate limit reached. Progress is saved: run the installer again later to resume forking."),
             git::ForkOutcome::Finished if !state.failed.is_empty() => err(format!(
@@ -735,7 +771,15 @@ impl InstallStep {
                 state.failed[0].repo,
                 state.failed[0].error
             )),
-            git::ForkOutcome::Finished => Ok(format!("{} forks ready in {}", state.done.len(), state.target_owner)),
+            git::ForkOutcome::Finished => {
+                let rel_of = |repo: &str| sel.iter().find(|(r, _, _)| r == repo).map(|(_, _, rel)| format!("resources/{rel}")).unwrap_or_else(|| repo.to_string());
+                let (headline, lines) = fork_sync_report(&state, &rel_of);
+                for l in &lines {
+                    ctx.emit(self.id, StepStatus::Running, l.clone(), 1.0);
+                    ctx.note(l.clone());
+                }
+                Ok(format!("{} forks ready in {}{headline}", state.done.len(), state.target_owner))
+            }
         }
     }
 

@@ -74,6 +74,23 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     fn move_pinned(&self, repo: &Path, commit: &str) -> GitResult<()> {
         git::move_pinned(&self.0, repo, commit).map(|_| ()).map_err(gerr)
     }
+    fn sync_forks(&self, targets: &[UpdateTarget]) -> Vec<(String, git::SyncOutcome)> {
+        // Needs gh and a signed-in user; otherwise the forks are simply left as they are.
+        let slug = |repo: &Path, remote: &str| self.git(repo, &["remote", "get-url", remote]).ok().and_then(|o| git::slug_of_url(o.stdout.trim()));
+        let jobs: Vec<git::SyncJob> = targets
+            .iter()
+            .filter_map(|t| {
+                let branch = t.upstream_ref.strip_prefix("upstream/")?.to_string();
+                let (fork, upstream) = (slug(&t.path, "origin")?, slug(&t.path, "upstream")?);
+                // Not a fork of someone else's repository (the user works on the original): nothing to sync.
+                (!fork.eq_ignore_ascii_case(&upstream)).then(|| git::SyncJob { id: t.id.clone(), fork, upstream, branch })
+            })
+            .collect();
+        if jobs.is_empty() || !git::is_signed_in(&self.0) {
+            return Vec::new();
+        }
+        git::sync_forks_paced(&self.0, &jobs, &git::ForkConfig { sync_existing: true, ..git::ForkConfig::default() })
+    }
     fn log_subjects(&self, repo: &Path, from: &str, to: &str, max: usize) -> Vec<String> {
         let range = format!("{from}..{to}");
         let n = format!("-{max}");
@@ -328,13 +345,17 @@ pub fn update_server(
             class: ResourceClass::from_id(&r.id),
         })
         .collect();
+    // Bring the user's forks on GitHub up to date first (fast-forward only), then the local checkouts.
+    let fork_sync = git.sync_forks(&targets);
     let plan = update::plan(git, &targets);
     let snap_dir = dir.join("snapshots");
     std::fs::create_dir_all(&snap_dir).map_err(|e| InstallError(e.to_string()))?;
     let snapshot = snap_dir.join("last-update.json");
     let restart: RestartDecision = update::decide_restart(players, 0, &QuietConfig { window: None, max_players: 0 });
     let opts = RunOptions { server: name, snapshot_file: &snapshot, now_unix: now_unix(), restart };
-    update::run_update(git, health, &NoMigrations, &plan, &opts).map_err(|e| InstallError(e.to_string()))
+    let mut report = update::run_update(git, health, &NoMigrations, &plan, &opts).map_err(|e| InstallError(e.to_string()))?;
+    update::add_fork_sync(&mut report, fork_sync);
+    Ok(report)
 }
 
 fn err_msg<T>(m: &str) -> Result<T> {
@@ -370,6 +391,48 @@ mod tests {
         let r = FakeRunner::default();
         r.respond("sc.exe query", 0, "STATE              : 4  RUNNING");
         assert!(h.has_service_via(&r, service::Platform::Windows));
+    }
+
+    #[test]
+    fn update_syncs_only_behind_forks_when_signed_in_and_never_forces() {
+        use std::cell::RefCell;
+        struct Gh {
+            calls: RefCell<Vec<String>>,
+            signed_in: bool,
+        }
+        impl CommandRunner for Gh {
+            fn run(&self, p: &str, a: &[&str], _: Option<&Path>) -> std::io::Result<git::Output> {
+                let line = format!("{p} {}", a.join(" "));
+                self.calls.borrow_mut().push(line.clone());
+                let ok = |s: &str| Ok(git::Output { code: 0, stdout: s.into(), stderr: String::new() });
+                if line.starts_with("gh auth status") {
+                    return Ok(git::Output { code: if self.signed_in { 0 } else { 1 }, ..Default::default() });
+                }
+                if line.starts_with("git remote get-url origin") {
+                    return ok("https://github.com/me/res.git\n");
+                }
+                if line.starts_with("git remote get-url upstream") {
+                    return ok("https://github.com/KoraFiveM/res.git\n");
+                }
+                if line.contains("/compare/") {
+                    return ok(r#"{"ahead_by":0,"behind_by":3}"#);
+                }
+                ok("")
+            }
+            fn sleep(&self, _: Duration) {}
+        }
+        let t = |id: &str| UpdateTarget { id: id.into(), path: PathBuf::from("/x"), upstream_ref: "upstream/dev".into(), class: ResourceClass::Other };
+        let g = GitCli(Gh { calls: RefCell::new(vec![]), signed_in: true });
+        let out = g.sync_forks(&[t("res")]);
+        assert_eq!(out, vec![("res".to_string(), git::SyncOutcome::Synced { commits: 3 })]);
+        let calls = g.0.calls.borrow();
+        assert!(calls.contains(&"gh repo sync me/res --branch dev".to_string()), "{calls:?}");
+        assert!(calls.iter().all(|c| !c.contains("--force")));
+        drop(calls);
+        // signed out: no GitHub call beyond the auth check
+        let g = GitCli(Gh { calls: RefCell::new(vec![]), signed_in: false });
+        assert!(g.sync_forks(&[t("res")]).is_empty());
+        assert!(g.0.calls.borrow().iter().all(|c| !c.contains("/compare/") && !c.contains("repo sync")));
     }
 
     #[test]
