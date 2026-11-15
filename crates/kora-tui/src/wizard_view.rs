@@ -3,16 +3,14 @@
 use kora_core::installer::{DbChoice, Mode};
 use ratatui::{
     layout::{Alignment, Constraint, Layout as RLayout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, LineGauge, Paragraph, Tabs},
     Frame,
 };
 
+use crate::theme::{self, theme, Theme, Tone};
 use crate::wizard::{Screen, Wizard};
-
-/// Kora lime (the website's `--lime`, #95ff00).
-pub const BRAND: Color = Color::Rgb(0x95, 0xff, 0x00);
 
 /// Width of the `[ Paste ]` / `[ Clear ]` buttons and the narrowest body that shows them.
 const BUTTON_W: u16 = 9;
@@ -544,48 +542,126 @@ fn button(f: &mut Frame, r: Rect, label: &str, style: Style) {
     if r.width == 0 || r.height == 0 {
         return;
     }
-    let p = Paragraph::new(label.to_string())
-        .alignment(Alignment::Center)
-        .style(style)
-        .block(Block::default().borders(Borders::ALL).border_style(style));
+    let t = theme();
+    let p = Paragraph::new(label.to_string()).alignment(Alignment::Center).style(style).block(t.frame(style));
     f.render_widget(p, r);
 }
 
+/// Style one already-wrapped body line: bullets, section headings and the review columns.
+fn body_line(s: &str, t: &Theme) -> Line<'static> {
+    let trimmed = s.trim_start();
+    let indent = &s[..s.len() - trimmed.len()];
+    if !indent.is_empty() {
+        if let Some(rest) = trimmed.strip_prefix("- ") {
+            return Line::from(vec![Span::raw(indent.to_string()), Span::styled("- ", t.brand_style()), Span::raw(rest.to_string())]);
+        }
+    }
+    if s.ends_with(':') && !s.contains("  ") && s.len() < 70 {
+        return Line::styled(s.to_string(), t.label());
+    }
+    Line::raw(s.to_string())
+}
+
+fn pair(s: &str) -> Option<(&str, &str)> {
+    s.split_once("  |   ").or_else(|| s.strip_suffix("  |").map(|a| (a, "")))
+}
+
+/// All body lines: the review's `left | right` rows become two aligned columns (when they fit),
+/// everything else is word-wrapped and styled line by line.
+fn body_lines(lines: &[String], width: usize, t: &Theme) -> Vec<Line<'static>> {
+    let lw = lines.iter().filter_map(|s| pair(s)).map(|(a, _)| a.trim_end().chars().count()).max().unwrap_or(0);
+    let rw = lines.iter().filter_map(|s| pair(s)).map(|(_, b)| b.chars().count()).max().unwrap_or(0);
+    let fits = lw + 5 + rw <= width;
+    let mut out = vec![];
+    for s in lines {
+        match pair(s) {
+            Some((a, b)) if fits => {
+                let a = a.trim_end();
+                let mut spans = kv(a, t);
+                spans.push(Span::raw(" ".repeat(lw.saturating_sub(a.chars().count()))));
+                spans.push(Span::styled(format!("  {}  ", t.glyphs.vbar), t.border(false)));
+                spans.extend(kv(b, t));
+                out.push(Line::from(spans));
+            }
+            _ => out.extend(wrap(s, width).iter().map(|l| body_line(l, t))),
+        }
+    }
+    out
+}
+
+/// `Key: value` -> dim key, plain value.
+fn kv(s: &str, t: &Theme) -> Vec<Span<'static>> {
+    match s.split_once(": ") {
+        Some((k, v)) if k.len() < 24 && !k.contains(' ') || k == "DB admin" || k == "License Key" || k == "Server Software" || k == "Game build" => {
+            vec![Span::styled(format!("{k}: "), t.hint()), Span::styled(v.to_string(), t.label())]
+        }
+        _ => vec![Span::raw(s.to_string())],
+    }
+}
+
+fn header(f: &mut Frame, w: &Wizard, area: Rect, t: &Theme) {
+    let g = &t.glyphs;
+    let (pos, total) = w.position();
+    let block = Block::new()
+        .borders(Borders::BOTTOM)
+        .border_set(t.border_set())
+        .border_style(t.border(false))
+        .title_bottom(Line::styled(format!(" step {pos} of {total} "), t.hint()).right_aligned());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let [row0, row1] = RLayout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(inner);
+    let [mark, tabs] = RLayout::horizontal([Constraint::Length(8), Constraint::Min(0)]).areas(row0);
+    f.render_widget(Paragraph::new(Span::styled(" KORA ", t.wordmark())), mark);
+    let stages = ["Welcome", "Prepare", "Choose", "Review"];
+    let cur = w.stage();
+    let titles: Vec<Line> = stages
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if i < cur {
+                Line::styled(format!("{} {s}", g.ok), t.success())
+            } else if i == cur {
+                Line::styled((*s).to_string(), t.selected().add_modifier(Modifier::UNDERLINED))
+            } else {
+                Line::styled((*s).to_string(), t.disabled())
+            }
+        })
+        .collect();
+    f.render_widget(
+        Tabs::new(titles).select(cur.min(stages.len() - 1)).divider(Span::styled(format!(" {} ", g.crumb), t.disabled())).highlight_style(Style::new()).padding("", ""),
+        tabs,
+    );
+    let ratio = if total == 0 { 0.0 } else { pos as f64 / total as f64 };
+    let gw = row1.width.min(48);
+    f.render_widget(
+        LineGauge::default()
+            .ratio(ratio.clamp(0.0, 1.0))
+            .filled_symbol(g.gauge_full)
+            .unfilled_symbol(g.gauge_empty)
+            .filled_style(t.brand_style())
+            .unfilled_style(t.disabled())
+            .label(""),
+        Rect::new(row1.x, row1.y, gw, row1.height),
+    );
+}
+
 pub fn render(f: &mut Frame, w: &Wizard) {
+    if theme::guard_size(f, theme::MIN_WIDTH, theme::MIN_HEIGHT) {
+        return;
+    }
+    let t = theme();
+    let g = t.glyphs;
     let area = f.area();
     let v = w.view();
     let l = layout(area, &v);
 
-    // Header: brand + stages.
-    let stages = ["Welcome", "Prepare", "Choose", "Review"];
-    let mut spans = vec![Span::styled(" KORA ", Style::default().fg(Color::Black).bg(BRAND).add_modifier(Modifier::BOLD)), Span::raw("  ")];
-    for (i, s) in stages.iter().enumerate() {
-        let st = if i == w.stage() {
-            Style::default().fg(BRAND).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-        } else if i < w.stage() {
-            Style::default().fg(Color::Green)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        spans.push(Span::styled(format!("{}{s}", if i < w.stage() { "✓ " } else { "" }), st));
-        if i + 1 < stages.len() {
-            spans.push(Span::styled("  ›  ", Style::default().fg(Color::DarkGray)));
-        }
-    }
-    let (pos, total) = w.position();
-    f.render_widget(
-        Paragraph::new(Line::from(spans)).block(
-            Block::default().borders(Borders::BOTTOM).title_bottom(Line::from(format!(" step {pos} of {total} ")).right_aligned()),
-        ),
-        clamp(l.header, area),
-    );
+    header(f, w, clamp(l.header, area), &t);
 
     // Body.
-    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(BRAND)).title(format!(" {} ", v.title));
-    f.render_widget(block, clamp(l.body, area));
+    f.render_widget(t.panel(v.title.clone(), true), clamp(l.body, area));
     let inner = Rect::new(l.body.x + 1, l.body.y + 1, l.body.width.saturating_sub(2), l.body.height.saturating_sub(2));
     let inner = clamp(inner, area);
-    let wrapped: Vec<Line> = v.lines.iter().flat_map(|s| wrap(s, inner.width as usize)).map(Line::from).collect();
+    let wrapped = body_lines(&v.lines, inner.width as usize, &t);
     if l.text.height > 0 {
         f.render_widget(Paragraph::new(wrapped), clamp(l.text, inner));
     }
@@ -594,13 +670,13 @@ pub fn render(f: &mut Frame, w: &Wizard) {
             continue;
         }
         let sel = i == v.selected;
-        let marker = if sel { "(•)" } else { "( )" };
-        let st = if sel { Style::default().fg(BRAND).add_modifier(Modifier::BOLD) } else { Style::default() };
+        let marker = if sel { g.radio_on } else { g.radio_off };
+        let st = if sel { t.selected() } else { t.text() };
         let mut lines = vec![Line::styled(format!("{marker} {label}"), st)];
-        lines.extend(wrap(desc, (r.width as usize).saturating_sub(4)).into_iter().map(|d| Line::styled(format!("    {d}"), Style::default().fg(Color::Gray))));
+        lines.extend(wrap(desc, (r.width as usize).saturating_sub(4)).into_iter().map(|d| Line::styled(format!("    {d}"), t.hint())));
         f.render_widget(Paragraph::new(lines), *r);
     }
-    let link = Style::default().fg(Color::Black).bg(Color::Gray);
+    let link = t.button();
     for (i, p) in l.paste.iter().enumerate() {
         if p.width > 0 {
             f.render_widget(Paragraph::new("[ Paste ]").style(link), *p);
@@ -611,11 +687,11 @@ pub fn render(f: &mut Frame, w: &Wizard) {
         if let Some(n) = &iv.note {
             let (nr, ar) = (l.notes[i], l.actions[i]);
             if nr.width > 0 && nr.height > 0 {
-                let st = if n.ok { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Yellow) };
-                f.render_widget(Paragraph::new(n.text.clone()).style(st), nr);
+                let (tone, sym) = if n.ok { (Tone::Ok, g.ok) } else { (Tone::Warn, g.warn) };
+                f.render_widget(Paragraph::new(format!("{sym} {}", n.text)).style(t.tone(tone)), nr);
             }
             if let (Some(a), true) = (&n.action, ar.width > 0 && ar.height > 0) {
-                f.render_widget(Paragraph::new(a.clone()).style(Style::default().fg(Color::Black).bg(Color::Yellow)), ar);
+                f.render_widget(Paragraph::new(a.clone()).style(t.button_warn()), ar);
             }
         }
     }
@@ -625,57 +701,49 @@ pub fn render(f: &mut Frame, w: &Wizard) {
         }
         let shown = if iv.masked { "*".repeat(iv.value.chars().count()) } else { iv.value.clone() };
         let content = if shown.is_empty() {
-            Line::styled(iv.hint.clone(), Style::default().fg(Color::DarkGray))
+            let mut spans = vec![];
+            if iv.focused {
+                spans.push(Span::styled(g.cursor, t.brand_style()));
+            }
+            spans.push(Span::styled(iv.hint.clone(), t.disabled()));
+            Line::from(spans)
         } else {
-            Line::from(format!("{shown}{}", if iv.focused { "▏" } else { "" }))
+            Line::from(format!("{shown}{}", if iv.focused { g.cursor } else { "" }))
         };
-        let bs = if iv.focused { Style::default().fg(BRAND) } else { Style::default().fg(Color::DarkGray) };
-        f.render_widget(
-            Paragraph::new(content).block(Block::default().borders(Borders::ALL).border_style(bs).title(format!(" {} ", iv.label))),
-            *r,
-        );
+        let title = Line::styled(format!(" {} ", iv.label), if iv.focused { t.title() } else { t.hint() });
+        f.render_widget(Paragraph::new(content).block(t.frame(t.border(iv.focused)).title(title)), *r);
     }
 
-    // Footer.
+    // Footer: message row (error / status / key hints), then the buttons.
     if l.message.height > 0 {
-        let hint = if w.is_text_screen() {
-            "Enter = next   Esc = back   Ctrl+V = paste   F1 = help"
+        let hints: &[(&str, &str)] = if v.elevate_label.is_some() {
+            &[("R", "restart with permission"), ("Esc", "back"), ("F1", "help")]
+        } else if w.is_text_screen() {
+            &[("Enter", "next"), ("Esc", "back"), ("Ctrl+V", "paste"), ("F1", "help")]
         } else {
-            "Enter = next   Esc = back   F1 / ? = help"
+            &[("Enter", "next"), ("Esc", "back"), ("F1", "help")]
         };
-        let hint = if v.elevate_label.is_some() { "R = restart with permission   Esc = back   F1 / ? = help" } else { hint };
-        let (msg, st) = match (&w.error, &w.status) {
-            (Some(e), _) => (e.clone(), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            (None, Some(s)) => (s.clone(), Style::default().fg(Color::Green)),
-            (None, None) => (hint.to_string(), Style::default().fg(Color::DarkGray)),
+        let line = match (&w.error, &w.status) {
+            (Some(e), _) => Line::from(vec![t.chip(Tone::Fail, "FAIL"), Span::styled(format!(" {e}"), t.danger())]),
+            (None, Some(s)) => Line::from(vec![t.chip(Tone::Ok, "OK"), Span::styled(format!(" {s}"), t.success())]),
+            (None, None) => t.hints(hints, l.message.width as usize),
         };
-        f.render_widget(Paragraph::new(msg).style(st), l.message);
+        f.render_widget(Paragraph::new(line), l.message);
     }
-    let dim = Style::default().fg(Color::Gray);
-    button(f, l.back, "Back", dim);
-    button(f, l.help, "Help", dim);
-    button(f, l.test, "Test login", dim);
-    if let Some(t) = &v.elevate_label {
-        button(f, l.elevate, t, Style::default().fg(Color::Black).bg(Color::Yellow));
+    button(f, l.back, "Back", t.border(false).patch(t.hint()));
+    button(f, l.help, "Help", t.border(false).patch(t.hint()));
+    button(f, l.test, "Test login", t.border(false).patch(t.hint()));
+    if let Some(label) = &v.elevate_label {
+        button(f, l.elevate, label, t.button_warn());
     }
-    button(f, l.next, &v.next_label, Style::default().fg(Color::Black).bg(BRAND));
+    button(f, l.next, &v.next_label, t.button_primary());
 
-    if let (Screen::GithubAccount, Some(g)) = (w.screen, &w.gh) {
-        crate::github_screens::render(f, g, crate::github_screens::region(&l));
+    if let (Screen::GithubAccount, Some(gh)) = (w.screen, &w.gh) {
+        crate::github_screens::render(f, gh, crate::github_screens::region(&l));
     }
     if w.help_open {
         let hw = area.width.saturating_sub(8).clamp(1, 70);
-        let lines = wrap(&v.help, hw.saturating_sub(2) as usize);
-        let hh = (lines.len() as u16 + 2).min(area.height);
-        let r = clamp(
-            Rect::new(area.x + area.width.saturating_sub(hw) / 2, area.y + area.height.saturating_sub(hh) / 2, hw, hh),
-            area,
-        );
-        f.render_widget(Clear, r);
-        f.render_widget(
-            Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
-                .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow)).title(" Help (press any key) ")),
-            r,
-        );
+        let lines: Vec<Line<'static>> = wrap(&v.help, hw.saturating_sub(4) as usize).into_iter().map(Line::from).collect();
+        theme::modal(f, area, "Help (press any key)", lines, Tone::Warn, 70);
     }
 }

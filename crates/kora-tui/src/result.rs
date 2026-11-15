@@ -9,15 +9,16 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use kora_core::installer::InstallOutcome;
 use ratatui::{
     layout::{Position, Rect},
-    style::{Color, Modifier, Style},
-    text::Line,
-    widgets::{Block, Borders, Paragraph},
+    style::Modifier,
+    text::{Line, Span},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::clipboard::{last_lines, Clipboard};
 use crate::open::{file_url, osc8_overlay, root_for_log, Opener};
-use crate::wizard_view::{wrap, BRAND};
+use crate::theme::{self, theme, Tone};
+use crate::wizard_view::wrap;
 
 /// How many log lines "Copy details" puts on the clipboard.
 pub const DETAIL_LINES: usize = 40;
@@ -483,12 +484,13 @@ fn clip(r: Rect, area: Rect) -> Rect {
 fn build(area: Rect, s: &ResultScreen) -> Built {
     let inner = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
     let w = inner.width as usize;
-    let dim = Style::default().fg(Color::DarkGray);
-    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let t = theme();
+    let dim = t.hint();
+    let bold = t.label();
     let mut lines: Vec<Line<'static>> = vec![];
     match s.kind {
         Kind::Failure => {
-            lines.push(Line::styled("The install could not finish", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+            lines.push(Line::from(vec![t.chip(Tone::Fail, "FAIL"), Span::styled(" The install could not finish", t.danger())]));
             lines.push(Line::raw(""));
             lines.extend(wrap(&s.message, w).into_iter().map(Line::from));
             lines.push(Line::raw(""));
@@ -513,48 +515,48 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
         }
         Kind::Outcome => {
             let r = &s.srv;
-            let (head, colour) = if let Some(_b) = &r.busy {
-                ("Starting your server...", Color::Yellow)
+            let (head, tone, word) = if let Some(_b) = &r.busy {
+                ("Starting your server...", Tone::Warn, "WAIT")
             } else if r.running {
-                ("Your server is running", Color::Green)
+                ("Your server is running", Tone::Ok, "OK")
             } else if r.stopped {
-                ("Your server is stopped", Color::Yellow)
+                ("Your server is stopped", Tone::Warn, "WARN")
             } else if r.attempted {
-                ("Your server did not start", Color::Red)
+                ("Your server did not start", Tone::Fail, "FAIL")
             } else if r.name.is_empty() {
-                ("Your server is ready!", Color::Green)
+                ("Your server is ready!", Tone::Ok, "OK")
             } else {
-                ("Your server is installed but not started", Color::Yellow)
+                ("Your server is installed but not started", Tone::Warn, "WARN")
             };
-            lines.push(Line::styled(head, Style::default().fg(colour).add_modifier(Modifier::BOLD)));
+            lines.push(Line::from(vec![t.chip(tone, word), Span::styled(format!(" {head}"), t.tone(tone).add_modifier(Modifier::BOLD))]));
             lines.push(Line::raw(""));
             if let Some(b) = &r.busy {
                 lines.extend(wrap(b, w).into_iter().map(Line::from));
                 lines.push(Line::raw(""));
             }
             if let (Some(p), false) = (&r.problem, r.running) {
-                lines.extend(wrap(p, w).into_iter().map(|l| Line::styled(l, Style::default().fg(Color::Red))));
+                lines.extend(wrap(p, w).into_iter().map(|l| Line::styled(l, t.danger())));
                 for l in &r.log_tail {
                     lines.extend(wrap(l, w.saturating_sub(2)).into_iter().take(2).map(|t| Line::styled(format!("| {t}"), dim)));
                 }
                 lines.push(Line::raw(""));
             }
             if r.running {
-                lines.push(Line::raw(format!("Game server:       {}", if r.game_listening { "listening" } else { "not listening yet (txAdmin is still starting it)" })));
+                lines.push(kv("Game server:       ", if r.game_listening { "listening" } else { "not listening yet (txAdmin is still starting it)" }));
             }
-            lines.push(Line::raw(format!("Players connect:   {}", s.connect)));
-            lines.push(Line::raw(format!("Control panel:     {}", s.txadmin_url)));
+            lines.push(kv("Players connect:   ", &s.connect));
+            lines.push(kv("Control panel:     ", &s.txadmin_url));
             if let Some(u) = &r.admin_user {
                 match (&r.admin_password, &r.admin_password_file) {
-                    (Some(p), _) => lines.push(Line::raw(format!("txAdmin login:     {u} / {p}"))),
-                    (None, Some(f)) => lines.push(Line::raw(format!("txAdmin login:     {u} (password in {})", f.display()))),
-                    _ => lines.push(Line::raw(format!("txAdmin login:     {u}"))),
+                    (Some(p), _) => lines.push(kv("txAdmin login:     ", &format!("{u} / {p}"))),
+                    (None, Some(f)) => lines.push(kv("txAdmin login:     ", &format!("{u} (password in {})", f.display()))),
+                    _ => lines.push(kv("txAdmin login:     ", u)),
                 }
             }
             lines.push(Line::raw(""));
             for n in &s.notes {
                 for (i, l) in wrap(n, w.saturating_sub(2)).into_iter().enumerate() {
-                    lines.push(Line::raw(format!("{}{l}", if i == 0 { "• " } else { "  " })));
+                    lines.push(Line::raw(format!("{}{l}", if i == 0 { format!("{} ", t.glyphs.bullet) } else { "  ".to_string() })));
                 }
             }
         }
@@ -571,7 +573,7 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
         let n = shown.len().max(1) as u16;
         let link = (shown.len() == 1 && text.chars().count() + 2 <= w).then(|| (inner.x + 2, row, text.clone()));
         path = Some(PathRow { rect: clip(Rect::new(inner.x, row, inner.width, n), inner), link });
-        let link_style = Style::default().fg(BRAND).add_modifier(Modifier::UNDERLINED);
+        let link_style = t.brand_style().add_modifier(Modifier::UNDERLINED);
         for l in shown {
             lines.push(Line::styled(l, link_style));
         }
@@ -594,9 +596,9 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
     }
     lines.push(Line::raw(""));
     match &s.status {
-        Some((t, ok)) => {
-            let st = if *ok { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Yellow) };
-            lines.extend(wrap(t, w).into_iter().map(|l| Line::styled(l, st)));
+        Some((msg, ok)) => {
+            let st = if *ok { t.success() } else { t.warn() };
+            lines.extend(wrap(msg, w).into_iter().map(|l| Line::styled(l, st)));
         }
         None => lines.push(Line::raw("")),
     }
@@ -607,18 +609,25 @@ fn build(area: Rect, s: &ResultScreen) -> Built {
     Built { lines, path, buttons }
 }
 
+/// `Label:   value`: dim label, bold value (the text is unchanged).
+fn kv(label: &str, value: &str) -> Line<'static> {
+    let t = theme();
+    Line::from(vec![Span::styled(label.to_string(), t.hint()), Span::styled(value.to_string(), t.label())])
+}
+
 pub fn render_result(f: &mut Frame, s: &ResultScreen) {
+    if theme::guard_size(f, theme::MIN_WIDTH, theme::MIN_HEIGHT) {
+        return;
+    }
+    let t = theme();
     let area = f.area();
     let b = build(area, s);
-    let (colour, title) = match s.kind {
-        Kind::Failure => (Color::Red, " Kora - something went wrong "),
-        Kind::Outcome => (BRAND, if s.srv.running { " Kora - your server is running " } else { " Kora - all done " }),
+    let (tone, title) = match s.kind {
+        Kind::Failure => (Tone::Fail, "Kora - something went wrong"),
+        Kind::Outcome => (Tone::Ok, if s.srv.running { "Kora - your server is running" } else { "Kora - all done" }),
     };
-    f.render_widget(
-        Paragraph::new(b.lines.clone()).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(colour)).title(title)),
-        area,
-    );
-    let st = Style::default().fg(Color::Black).bg(Color::Gray);
+    f.render_widget(Paragraph::new(b.lines.clone()).block(t.panel_tone(title, tone)), area);
+    let st = t.button();
     for (a, r) in &b.buttons {
         if r.width == a.label().chars().count() as u16 && r.height > 0 {
             f.render_widget(Paragraph::new(a.label()).style(st), *r);

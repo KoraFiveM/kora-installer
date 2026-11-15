@@ -14,21 +14,20 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     layout::{Alignment, Position, Rect},
-    style::{Color, Modifier, Style},
+    style::Modifier,
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::clipboard::{sanitize_paste, Clipboard, SystemClipboard};
 use crate::open::{OpenCommand, OsKind};
 use crate::wizard::{Screen, Wizard};
-use crate::wizard_view::{wrap, BRAND};
+use crate::theme::theme;
+use crate::wizard_view::wrap;
 
 pub use kora_core::git::owners::{GhAuth, Owner, OwnerKind};
 
-const SPINNER: [&str; 4] = ["|", "/", "-", "\\"];
-const LINK: Style = Style::new().fg(Color::Black).bg(Color::Gray);
 
 // ---------------------------------------------------------------------------------------------
 // What the screens need from GitHub (injected)
@@ -860,7 +859,9 @@ pub fn render(f: &mut Frame, flow: &GithubFlow, region: Rect) {
         return;
     }
     let l = flow.layout(region);
-    let spin = SPINNER[flow.tick % SPINNER.len()];
+    let t = theme();
+    let g = t.glyphs;
+    let spin = g.spin(flow.tick);
     let area = l.area;
     match &flow.phase {
         Phase::Loading(msg) => {
@@ -872,16 +873,16 @@ pub fn render(f: &mut Frame, flow: &GithubFlow, region: Rect) {
             f.render_widget(
                 Paragraph::new(vec![
                     Line::from(""),
-                    Line::styled(code.clone(), Style::default().fg(BRAND).add_modifier(Modifier::BOLD | Modifier::REVERSED)),
+                    Line::styled(code.clone(), t.brand_style().add_modifier(Modifier::BOLD | Modifier::REVERSED)),
                 ])
                 .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BRAND)).title(" Your one-time code ")),
+                .block(t.panel("Your one-time code", true)),
                 r,
             );
             let rest = Rect::new(area.x, area.y + box_h, area.width, area.height.saturating_sub(box_h));
             let mut lines: Vec<Line> = wrap(&format!("Go to {url} and type the code."), rest.width as usize).into_iter().map(Line::from).collect();
             lines.push(Line::from(""));
-            lines.push(Line::styled(format!("{spin} Waiting for you to approve in the browser..."), Style::default().fg(Color::Yellow)));
+            lines.push(Line::styled(format!("{spin} Waiting for you to approve in the browser..."), t.warn()));
             f.render_widget(Paragraph::new(lines), rest);
         }
         Phase::Picker => {
@@ -890,12 +891,12 @@ pub fn render(f: &mut Frame, flow: &GithubFlow, region: Rect) {
                 let label = entry_label(o);
                 if o.can_fork {
                     let sel = *i == flow.cursor;
-                    let st = if sel { Style::default().fg(BRAND).add_modifier(Modifier::BOLD) } else { Style::default() };
-                    f.render_widget(Paragraph::new(format!("{} {label}", if sel { "(•)" } else { "( )" })).style(st), *r);
+                    let st = if sel { t.selected() } else { t.text() };
+                    f.render_widget(Paragraph::new(format!("{} {label}", if sel { g.radio_on } else { g.radio_off })).style(st), *r);
                 } else {
                     let why = o.reason.clone().unwrap_or_else(|| "Can't be used for your copies.".into());
                     let lines = vec![Line::from(format!("    {label}")), Line::from(format!("      {why}"))];
-                    f.render_widget(Paragraph::new(lines).style(Style::default().fg(Color::DarkGray)), *r);
+                    f.render_widget(Paragraph::new(lines).style(t.disabled()), *r);
                 }
             }
         }
@@ -903,7 +904,7 @@ pub fn render(f: &mut Frame, flow: &GithubFlow, region: Rect) {
             let lines = vec![
                 Line::from("GitHub is open in your browser. Create your organisation there (the free plan is fine), then come back."),
                 Line::from(""),
-                Line::styled(format!("{spin} Waiting for your new organisation..."), Style::default().fg(Color::Yellow)),
+                Line::styled(format!("{spin} Waiting for your new organisation..."), t.warn()),
                 Line::from(""),
                 Line::from("Kora picks it up by itself. If it doesn't, press I'm done."),
             ];
@@ -912,18 +913,18 @@ pub fn render(f: &mut Frame, flow: &GithubFlow, region: Rect) {
         Phase::Manual => {
             let box_r = Rect::new(area.x, area.y, area.width.min(60), 3.min(area.height));
             let content = if flow.manual.is_empty() {
-                Line::styled("e.g. my-team", Style::default().fg(Color::DarkGray))
+                Line::styled("e.g. my-team", t.disabled())
             } else {
-                Line::from(format!("{}▏", flow.manual))
+                Line::from(format!("{}{}", flow.manual, g.cursor))
             };
             f.render_widget(
-                Paragraph::new(content).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BRAND)).title(" GitHub name ")),
+                Paragraph::new(content).block(t.panel("GitHub name", true)),
                 box_r,
             );
         }
     }
     for (b, r) in &l.buttons {
-        f.render_widget(Paragraph::new(b.label()).style(LINK), *r);
+        f.render_widget(Paragraph::new(b.label()).style(t.button()), *r);
     }
 }
 

@@ -5,6 +5,23 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-15
+
+Visual-only release: the terminal screens have a new look. Behaviour and key bindings are unchanged.
+
+### Added
+- `NO_COLOR` (set and non-empty) and `TERM=dumb` turn colour off completely; state is then carried by bold, reverse and dim text and by symbols, never by colour alone.
+- ASCII fallback for all symbols and borders (non-UTF-8 locale, the legacy Windows console, or `KORA_ASCII=1`).
+
+### Changed
+- TUI redesign: one central theme with the Kora lime accent (#95ff00), with 256-colour and 16-colour fallbacks (bright green in 16 colours).
+- Rounded frame, `KORA` wordmark header, step tabs and gauges, status chips with symbols (`[ ✓ OK ]`, `[ ! WARN ]`, `[ ✗ FAIL ]`), and key-hint chips in the footer (hints that do not fit are dropped).
+- Review is a two-column summary.
+- Progress shows a per-step icon (pending, spinner, done, failed) and a scrollbar.
+- Add resources has section tabs and dependency badges (`<needs ox-lib>`).
+- Manager has a list header.
+- Screens smaller than 80x24 show a "Terminal too small" panel instead of a broken layout.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

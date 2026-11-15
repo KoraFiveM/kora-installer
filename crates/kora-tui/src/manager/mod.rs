@@ -21,6 +21,8 @@ mod testing;
 mod tests;
 #[cfg(test)]
 mod tests_addres;
+#[cfg(test)]
+mod tests_render;
 
 use std::cell::RefCell;
 use std::error::Error;

@@ -11,6 +11,7 @@ pub mod open;
 pub mod progress;
 pub mod result;
 pub mod wizard;
+pub mod theme;
 pub mod wizard_view;
 
 use std::error::Error;
