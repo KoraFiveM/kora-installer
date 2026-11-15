@@ -308,3 +308,65 @@ fn production_health_failure_goes_back_to_the_previous_pin() {
     assert_eq!(head(&env.path(0)), c1);
     assert_eq!(ServerFile::load(&env.sf.dir).unwrap().resources[0].commit.as_deref(), Some(c1.as_str()));
 }
+
+fn status_of(env: &Env) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(env.sf.dir.join(".kora/update-status.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn events_stream_per_resource_in_order_from_inside_the_engine() {
+    let env = dev_env();
+    let (_, ev) = run(&env, Scope::All, opts(RestartPolicy::FullRestart, &[]), &Health::ok(), Some(0), 30);
+    let pos = |e: &UpdateEvent| ev.iter().position(|x| x == e).unwrap_or_else(|| panic!("missing {e:?} in {ev:?}"));
+    let snap = pos(&UpdateEvent::Snapshot("30".into()));
+    let upd = |id: &str, st: &str| pos(&UpdateEvent::Resource { id: id.into(), state: st.into() });
+    // each resource is announced, then done, before the next one starts; all after the snapshot
+    assert!(snap < upd("kora-chat", "updating"));
+    assert!(upd("kora-chat", "updating") < upd("kora-chat", "updated"));
+    assert!(upd("kora-chat", "updated") < upd("kora-hud", "updating"), "streamed one by one: {ev:?}");
+    let health = ev.iter().position(|e| matches!(e, UpdateEvent::Health(m) if m.contains("checking"))).unwrap();
+    assert!(upd("kora-core", "updated") < health);
+    assert_eq!(ev.last(), Some(&UpdateEvent::Done));
+}
+
+#[test]
+fn a_full_run_writes_the_status_file_for_the_manager() {
+    let env = dev_env();
+    preview_with(&env.sf, Scope::All, &GitCli::default(), None).unwrap();
+    let v = status_of(&env);
+    assert_eq!((v["updates"].clone(), v["attention"].clone()), (serde_json::json!(3), serde_json::json!(0)));
+    assert!(v["checked_at"].as_str().unwrap().ends_with('Z') && v["new_release"].is_null());
+    run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 31);
+    let v = status_of(&env);
+    assert_eq!((v["updates"].clone(), v["attention"].clone()), (serde_json::json!(0), serde_json::json!(0)));
+}
+
+#[test]
+fn status_counts_attention_and_waiting() {
+    let env = dev_env();
+    std::fs::write(env.path(1).join("a"), "my edit").unwrap();
+    run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 32);
+    assert_eq!(status_of(&env)["attention"], 1, "the dirty fork needs a person");
+    // players online: restart-needing core is deferred = still an update waiting
+    let env = dev_env();
+    run(&env, Scope::All, opts(RestartPolicy::WhenQuiet, &[]), &Health::ok(), Some(4), 33);
+    let v = status_of(&env);
+    assert!(v["updates"].as_u64().unwrap() >= 1, "{v}");
+}
+
+#[test]
+fn a_single_resource_apply_leaves_the_status_alone() {
+    let env = dev_env();
+    run(&env, Scope::Resources(vec!["kora-chat".into()]), opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 34);
+    assert!(!env.sf.dir.join(".kora/update-status.json").exists());
+}
+
+#[test]
+fn ensure_applies_files_and_says_plainly_that_nothing_was_restarted() {
+    let env = dev_env();
+    let h = Health::ok();
+    let (r, ev) = run(&env, Scope::All, opts(RestartPolicy::Ensure, &[]), &h, Some(0), 35);
+    assert!(!r.updated.is_empty());
+    assert!(!h.checks.borrow()[0].full_restart);
+    assert!(ev.iter().any(|e| matches!(e, UpdateEvent::Health(m) if m == ENSURE_NOTE)), "{ev:?}");
+}

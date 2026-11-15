@@ -267,6 +267,8 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
     };
     append_log(&dir, &line);
     if let Ok(report) = &res {
+        let now = now_unix();
+        crate::update::status::record(&dir, &crate::update::manual::apply_status(report, now, &None));
         let record = super::registry::ServerEntry { name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
         crate::notify::after_update(&record, report);
     }

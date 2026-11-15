@@ -6,6 +6,7 @@
 //! SQL migrations are flagged and never rolled back automatically.
 
 pub mod manual;
+pub mod status;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -402,6 +403,23 @@ pub struct RunOptions<'a> {
     pub restart: RestartDecision,
 }
 
+/// Progress the engine reports while it applies a plan (streamed, not only before/after).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunEvent {
+    /// The snapshot file was written (before anything moves).
+    Snapshotted,
+    /// About to move this resource.
+    Applying(String),
+    /// This resource moved to the new commit.
+    Applied(String),
+    /// Moving this resource failed.
+    ApplyFailed(String, String),
+    /// Restarting / checking the server.
+    HealthCheck,
+    /// This resource is being put back to the snapshot commit.
+    RollingBack(String),
+}
+
 /// Apply a plan: snapshot, fast-forward, health check, auto-rollback on failure.
 pub fn run_update(
     git: &dyn GitOps,
@@ -409,6 +427,18 @@ pub fn run_update(
     migrations: &dyn MigrationDetector,
     plan: &UpdatePlan,
     opts: &RunOptions,
+) -> Result<UpdateReport, UpdateError> {
+    run_update_with(git, health, migrations, plan, opts, &mut |_| {})
+}
+
+/// [`run_update`] that calls `events` as each step happens.
+pub fn run_update_with(
+    git: &dyn GitOps,
+    health: &dyn HealthCheck,
+    migrations: &dyn MigrationDetector,
+    plan: &UpdatePlan,
+    opts: &RunOptions,
+    events: &mut dyn FnMut(RunEvent),
 ) -> Result<UpdateReport, UpdateError> {
     let mut report = UpdateReport { server: opts.server.to_string(), ..Default::default() };
     let mut apply: Vec<&PlanItem> = Vec::new();
@@ -438,6 +468,7 @@ pub fn run_update(
             .collect(),
     }
     .save(opts.snapshot_file)?;
+    events(RunEvent::Snapshotted);
 
     let sql: Vec<bool> = apply
         .iter()
@@ -447,10 +478,16 @@ pub fn run_update(
     let mut applied: Vec<usize> = Vec::new();
     let mut failure: Option<(String, String)> = None;
     for (n, item) in apply.iter().enumerate() {
+        events(RunEvent::Applying(item.target.id.clone()));
         match git.fast_forward(&item.target.path, &item.target.upstream_ref) {
-            Ok(()) => applied.push(n),
+            Ok(()) => {
+                applied.push(n);
+                events(RunEvent::Applied(item.target.id.clone()));
+            }
             Err(e) => {
-                failure = Some((item.target.id.clone(), format!("fast-forward failed: {e}")));
+                let msg = format!("fast-forward failed: {e}");
+                events(RunEvent::ApplyFailed(item.target.id.clone(), msg.clone()));
+                failure = Some((item.target.id.clone(), msg));
                 break;
             }
         }
@@ -464,6 +501,7 @@ pub fn run_update(
         report.needs_attention.push((id.clone(), msg.clone()));
         to_roll = applied.clone();
     } else {
+        events(RunEvent::HealthCheck);
         let req = HealthRequest {
             full_restart,
             updated: applied.iter().map(|&n| apply[n].target.id.clone()).collect(),
@@ -485,6 +523,7 @@ pub fn run_update(
                 .push((id, format!("SQL migration included; not rolled back automatically ({reason})")));
             continue;
         }
+        events(RunEvent::RollingBack(id.clone()));
         match git.reset_to(&item.target.path, &item.current) {
             Ok(()) => {
                 kept.retain(|&k| k != n);

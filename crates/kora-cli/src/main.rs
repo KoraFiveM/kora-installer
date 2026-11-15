@@ -253,7 +253,7 @@ fn home_dir(windows: bool, get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> 
 enum RestartArg {
     /// Apply the files, restart nothing.
     None,
-    /// Ensure the updated resources live, no full restart.
+    /// Apply the files without restarting; the server loads them on its next restart or an `ensure` in txAdmin (Kora cannot do that for you without credentials).
     Ensure,
     /// Restart the whole server.
     Full,
@@ -1151,7 +1151,7 @@ fn update(a: UpdateArgs) -> i32 {
         match gitops::auto_update(&a.server) {
             Ok(report) => {
                 println!("{}", report.summary());
-                return i32::from(report.has_problems());
+                return m::exit_code(&report);
             }
             Err(e) => {
                 eprintln!("error: {e}");
