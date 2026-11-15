@@ -69,7 +69,7 @@ assert "chat fork moved" test "$before" != "$(head_of kora-chat)"
 assert_eq "the unchanged hud fork was left alone" "$hud_before" "$(head_of kora-hud)"
 assert "an update snapshot was recorded for rollback" test -s "$D/snapshots/last-update.json"
 
-step "3. diverged and dirty forks are skipped, exit non-zero"
+step "3. diverged and dirty forks are skipped, exit 3 (needs attention)"
 # map: local commit on the fork AND a new upstream commit = diverged
 fm="$(fork kora-map)"; echo local >> "$fm/file.txt"; g -C "$fm" commit -qam "local work"
 upstream_commit kora-map
@@ -79,7 +79,10 @@ fu="$(fork kora-ui)"; echo "my uncommitted notes" > "$fu/notes.txt"; echo edit >
 upstream_commit kora-ui
 ui_before="$(head_of kora-ui)"; ui_file="$(cat "$fu/file.txt")"
 kora update --auto $NAME
-assert "exit code is non-zero (needs attention)" test "$CODE" -ne 0
+assert_eq "exit code 3 (needs attention, same as the manual flow)" 3 "$CODE"
+assert "update-status.json written for the manager" test -s "$D/.kora/update-status.json"
+assert_eq "status: two forks need attention" 2 "$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["attention"])' "$D/.kora/update-status.json")"
+assert_matches "status: checked_at is RFC3339 UTC" "$(cat "$D/.kora/update-status.json")" '"checked_at": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z"'
 assert_matches "diverged fork is reported as skipped" "$OUT" "skipped kora-map: diverged"
 assert_matches "dirty fork is reported as skipped" "$OUT" "skipped kora-ui: uncommitted"
 assert_eq "diverged fork's HEAD untouched" "$map_before" "$(head_of kora-map)"
@@ -95,7 +98,7 @@ step "4. unhealthy after update: automatic rollback (KORA_TEST_FAIL_HEALTH)"
 core_before="$(head_of kora-core)"
 upstream_commit kora-core
 KORA_TEST_FAIL_HEALTH=1 kora update --auto $NAME
-assert "exit code is non-zero" test "$CODE" -ne 0
+assert_eq "exit code 1 (rolled back)" 1 "$CODE"
 assert_matches "summary says rolled back" "$OUT" "1 rolled back"
 assert_contains "names the resource" "$OUT" "rolled back kora-core"
 assert_eq "kora-core is back on the commit it had before" "$core_before" "$(head_of kora-core)"
@@ -103,6 +106,7 @@ assert "the update log recorded it" grep -q "rolled back" "$D/update.log"
 # and without the fault the same update goes through
 kora update --auto $NAME
 assert_eq "healthy retry: exit 0" 0 "$CODE"
+assert_eq "status: nothing left" 0 "$(python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["attention"]+s["updates"])' "$D/.kora/update-status.json")"
 assert_contains "retry updated kora-core" "$OUT" "updated kora-core"
 assert_eq "kora-core now equals upstream" "$(up_head kora-core)" "$(head_of kora-core)"
 
@@ -112,7 +116,7 @@ import json, sys
 p = sys.argv[1] + "/kora-server.json"; s = json.load(open(p)); s["mode"] = "production"; json.dump(s, open(p, "w"))
 PY
 kora update --auto $NAME
-assert "exit non-zero" test "$CODE" -ne 0
+assert_eq "exit 1 (failure)" 1 "$CODE"
 assert_contains "explains development only" "$OUT" "development"
 python3 -I - "$D" <<'PY'
 import json, sys

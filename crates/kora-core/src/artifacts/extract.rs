@@ -219,7 +219,7 @@ fn zip_(path: &Path, ctx: &mut Ctx) -> Result<()> {
 }
 
 fn seven(path: &Path, ctx: &mut Ctx) -> Result<()> {
-    let mut r = sevenz_rust::SevenZReader::open(path, sevenz_rust::Password::empty()).map_err(|e| ArtifactError::Archive(e.to_string()))?;
+    let mut r = sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty()).map_err(|e| ArtifactError::Archive(e.to_string()))?;
     let mut failure: Option<ArtifactError> = None;
     let res = r.for_each_entries(|entry, reader| {
         let step = (|| -> Result<()> {

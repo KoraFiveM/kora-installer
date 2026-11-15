@@ -98,7 +98,7 @@ fn windows_excluded(port: u16) -> bool {
         return false;
     }
     let r = RANGES.get_or_init(|| {
-        Command::new("netsh")
+        crate::sysexe::command("netsh")
             .args(["int", "ipv4", "show", "excludedportrange", "protocol=tcp"])
             .output()
             .map(|o| parse_excluded_ranges(&String::from_utf8_lossy(&o.stdout)))
@@ -202,9 +202,9 @@ pub fn install_effective(name: &str, dir: &Path, game: u16, txadmin: u16, prober
 /// Name of the program using `port` (best effort; `None` when unknown or the lookup fails).
 pub fn describe_port_user(port: u16) -> Option<String> {
     if cfg!(windows) {
-        let out = Command::new("netstat").args(["-ano"]).output().ok()?;
+        let out = crate::sysexe::command("netstat").args(["-ano"]).output().ok()?;
         let pid = parse_netstat(&String::from_utf8_lossy(&out.stdout), port)?;
-        let out = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output().ok()?;
+        let out = crate::sysexe::command("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output().ok()?;
         parse_tasklist(&String::from_utf8_lossy(&out.stdout))
     } else {
         let out = Command::new("ss").args(["-H", "-ltnup"]).output().ok()?;

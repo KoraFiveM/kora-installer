@@ -22,10 +22,20 @@ $stockRoot = 'C:\stock-mariadb'
 $mysqlSvc = Get-Service -Name 'MySQL*' -ErrorAction SilentlyContinue | Select-Object -First 1
 $stockPort = 3306
 if (-not $mysqlSvc) {
-    $ver = '11.4.14'
-    $zipUrl = "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip"
+    # Same source order as Kora itself: MariaDB's mirror-routed endpoint (fast), archive.mariadb.org as fallback,
+    # and the same pinned SHA-256 (11.4.13).
+    $ver = '11.4.13'
+    $pin = 'd62986d433eeebfde218560b276103831604a61e929e87f1a17f5aebd80257e2'
     $zip = Join-Path $env:RUNNER_TEMP 'stock-mariadb.zip'
-    Invoke-WebRequest $zipUrl -OutFile $zip
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        Invoke-WebRequest "https://downloads.mariadb.org/rest-api/mariadb/$ver/mariadb-$ver-winx64.zip" -OutFile $zip -TimeoutSec 600
+    } catch {
+        Write-Host "mirror download failed ($_); falling back to archive.mariadb.org"
+        Invoke-WebRequest "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip" -OutFile $zip
+    }
+    Write-Host ("stock MariaDB zip downloaded in {0:n0} s" -f $sw.Elapsed.TotalSeconds)
+    Assert-That ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -eq $pin) 'the stock MariaDB zip matches the pinned SHA-256'
     Expand-Archive $zip -DestinationPath 'C:\stock-extract' -Force
     Move-Item (Get-ChildItem 'C:\stock-extract' -Directory | Select-Object -First 1).FullName $stockRoot
     $r = Invoke-Native "$stockRoot\bin\mariadb-install-db.exe" @("--datadir=$stockRoot\data", '--service=MariaDB', '--password=root', '--port=3306')
@@ -80,6 +90,8 @@ $r = Invoke-Native $kora @('install', '--name', 'dbsmoke', '--dir', $d, '--game-
 Show 'kora install --db install' $r
 Assert-That ($r.Code -eq 0) 'kora install --db install exits 0'
 Assert-That ($r.Output -match 'MariaDB') 'the output mentions the MariaDB it installed'
+Assert-That ($r.Output -match 'Downloaded MariaDB 11\.4\.13 from \S+ \(SHA-256 verified\)') 'the log says which source delivered the verified MariaDB zip'
+if ($r.Output -match 'Downloaded MariaDB \S+ from (\S+) ') { Write-Host "MariaDB source used: $($Matches[1])" }
 $hold.Stop()
 $rec = Get-Content "$pd\mariadb.json" -Raw | ConvertFrom-Json
 Assert-That ($rec.port -ne 3306 -and $rec.port -ge 3307) "3306 was busy, so Kora's MariaDB uses port $($rec.port)"

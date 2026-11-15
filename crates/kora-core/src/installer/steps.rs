@@ -92,7 +92,7 @@ fn db_state_path(ctx: &Ctx) -> PathBuf {
 }
 
 fn db_client() -> String {
-    let ok = |c: &str| std::process::Command::new(c).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+    let ok = |c: &str| crate::sysexe::command(c).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
     if ok("mariadb") {
         return "mariadb".into();
     }
@@ -114,7 +114,7 @@ pub(crate) fn winget_code_is_fine(code: i32) -> bool {
 }
 
 fn winget_available() -> bool {
-    std::process::Command::new("winget").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+    crate::sysexe::command("winget").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// Where the MariaDB / MySQL installers put their command line client (Windows).
@@ -502,7 +502,7 @@ impl InstallStep {
             }
             if no_winget {
                 // No winget: the vendors' own installers, downloaded over HTTPS and run only if their SHA-256 matches.
-                let tmp = std::env::temp_dir().join(format!("kora-tools-{}", std::process::id()));
+                let tmp = windows_tools::private_tmp_dir()?;
                 let mut say = |m: &str| ctx.emit(self.id, StepStatus::Running, m.to_string(), 0.1);
                 let mut wanted = Vec::new();
                 if tools.git.is_none() {

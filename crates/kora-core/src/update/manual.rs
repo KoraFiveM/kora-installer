@@ -9,9 +9,10 @@
 
 use std::path::{Path, PathBuf};
 
+use super::status;
 use super::{
-    decide_restart, plan, rollback_snapshot, run_update, Action, DeferReason, GitOps, GitResult, HealthCheck, HealthOutcome,
-    HealthRequest, NoMigrations, QuietConfig, RestartDecision, ResourceClass, RunOptions, SkipReason, Snapshot, UpdateReport,
+    decide_restart, plan, rollback_snapshot, run_update_with, Action, DeferReason, GitOps, GitResult, HealthCheck, HealthOutcome,
+    HealthRequest, NoMigrations, QuietConfig, RestartDecision, ResourceClass, RunEvent, RunOptions, SkipReason, Snapshot, UpdateReport,
     UpdateTarget,
 };
 use crate::catalog::{self, normalize_id, Catalog};
@@ -23,6 +24,13 @@ use crate::installer::{InstallError, Result};
 
 /// A registered server as recorded in its `kora-server.json`.
 pub type ServerRecord = ServerFile;
+
+/// What `Restart::Ensure` really does. txAdmin 8.1.2 / FXServer expose no way to `ensure <resource>` on a running
+/// server without credentials (txAdmin's web API and live console need a signed-in admin session; FXServer's rcon is
+/// off unless the owner sets `rcon_password`), and Kora does not keep or reuse the txAdmin password. So `Ensure` applies
+/// the files, does NOT restart, and says so: the new files load on the next restart, or when an admin runs
+/// `ensure <resource>` in txAdmin's live console.
+pub const ENSURE_NOTE: &str = "files updated, server not restarted: restart the server, or run `ensure <resource>` in txAdmin's live console, to load them";
 
 /// How many commit subjects a changelog carries.
 const CHANGELOG_MAX: usize = 20;
@@ -67,7 +75,7 @@ pub struct UpdatePreview {
 pub enum RestartPolicy {
     /// Apply the files, restart nothing.
     None,
-    /// Ensure the updated resources live (no full restart).
+    /// Apply the files, no restart (a live `ensure` needs txAdmin credentials Kora does not keep: see [`ENSURE_NOTE`]).
     Ensure,
     /// Always restart the whole server.
     FullRestart,
@@ -280,7 +288,14 @@ pub fn preview_with(server: &ServerRecord, scope: Scope, git: &dyn GitOps, catal
     let g = git_view(server, git, &pinned);
     let p = plan(g, &sel.targets);
     let resources: Vec<ResourceChange> = p.items.iter().map(|i| change_of(g, i)).collect();
-    Ok(UpdatePreview { new_release: new_release(&resources, &sel.versions), resources })
+    let pre = UpdatePreview { new_release: new_release(&resources, &sel.versions), resources };
+    // Scope::All only: a one-resource preview says nothing about the server as a whole.
+    if scope == Scope::All {
+        let ready = pre.resources.iter().filter(|c| c.status == ChangeStatus::Clean).count();
+        let attention = pre.resources.iter().filter(|c| matches!(c.status, ChangeStatus::Dirty | ChangeStatus::Diverged)).count();
+        status::record(&server.dir, &status::UpdateStatus::new(now_unix(), ready, attention, pre.new_release.clone()));
+    }
+    Ok(pre)
 }
 
 /// The release version to announce: the core's when it changes, else the first changing resource's.
@@ -329,7 +344,11 @@ pub fn apply(server: &ServerRecord, scope: Scope, opts: ApplyOpts, sink: &mut dy
     let cat = load_catalog_if_needed(server)?;
     let health = service_health(&server.name, &server.dir, server);
     let players = if health.running() { online_players(server.ports.game) } else { Some(0) };
-    with_git(&server.dir, |g| apply_with(server, scope, opts, g, &health, cat.as_ref(), players, now_unix(), sink))
+    let report = with_git(&server.dir, |g| apply_with(server, scope, opts, g, &health, cat.as_ref(), players, now_unix(), sink))?;
+    // Same Discord notification as the automatic path (it never fails the update).
+    let record = crate::installer::registry::ServerEntry { name: server.name.clone(), dir: server.dir.clone(), mode: server.mode, ports: server.ports, created_unix: server.created_unix };
+    crate::notify::after_update(&record, &report);
+    Ok(report)
 }
 
 /// [`apply`] with injected git, health, catalog, player count and clock.
@@ -359,18 +378,25 @@ pub fn apply_with(
         .map(|i| i.target.id.as_str())
         .collect();
 
+    let pending_release = new_release(&the_plan.items.iter().map(|i| change_of(g, i)).collect::<Vec<_>>(), &sel.versions);
     let snaps = snapshot_dir(server);
     let id = new_snapshot_id(&snaps, now);
     let file = snaps.join(format!("{id}.json"));
-    if !will_apply.is_empty() {
-        sink(UpdateEvent::Snapshot(id.clone()));
-        for r in &will_apply {
-            sink(UpdateEvent::Resource { id: (*r).to_string(), state: "updating".into() });
-        }
-    }
     let ph = PolicyHealth { inner: health, policy: opts.restart };
     let run = RunOptions { server: &server.name, snapshot_file: &file, now_unix: now, restart };
-    let mut report = run_update(g, &ph, &NoMigrations, &the_plan, &run).map_err(|e| InstallError(e.to_string()))?;
+    // Streamed from inside the engine, so a front end sees each resource as it happens.
+    let mut report = {
+        let snap_id = id.clone();
+        let mut on = |e: RunEvent| match e {
+            RunEvent::Snapshotted => sink(UpdateEvent::Snapshot(snap_id.clone())),
+            RunEvent::Applying(r) => sink(UpdateEvent::Resource { id: r, state: "updating".into() }),
+            RunEvent::Applied(r) => sink(UpdateEvent::Resource { id: r, state: "updated".into() }),
+            RunEvent::ApplyFailed(r, why) => sink(UpdateEvent::Resource { id: r, state: format!("failed: {why}") }),
+            RunEvent::HealthCheck => sink(UpdateEvent::Health("checking the server".into())),
+            RunEvent::RollingBack(r) => sink(UpdateEvent::Resource { id: r, state: "rolling back".into() }),
+        };
+        run_update_with(g, &ph, &NoMigrations, &the_plan, &run, &mut on).map_err(|e| InstallError(e.to_string()))?
+    };
 
     if server.mode == Mode::Production && !report.updated.is_empty() {
         let moved: Vec<(String, String)> = report.updated.iter().map(|u| (u.id.clone(), u.to.clone())).collect();
@@ -379,9 +405,6 @@ pub fn apply_with(
         }
     }
 
-    for u in &report.updated {
-        sink(UpdateEvent::Resource { id: u.id.clone(), state: "updated".into() });
-    }
     for (id, why) in &report.skipped {
         sink(UpdateEvent::Resource { id: id.clone(), state: format!("skipped: {}", why.text()) });
     }
@@ -391,6 +414,9 @@ pub fn apply_with(
     for (id, why) in &report.rolled_back {
         sink(UpdateEvent::Resource { id: id.clone(), state: format!("rolled back: {why}") });
     }
+    if opts.restart == RestartPolicy::Ensure && !report.updated.is_empty() {
+        sink(UpdateEvent::Health(ENSURE_NOTE.into()));
+    }
     if !will_apply.is_empty() {
         sink(UpdateEvent::Health(if report.rolled_back.is_empty() {
             "server is healthy".into()
@@ -398,8 +424,22 @@ pub fn apply_with(
             "server did not come back healthy; went back to the snapshot".into()
         }));
     }
+    // The status file is about the whole server: after a single-resource apply it is left for the next full check.
+    if scope == Scope::All {
+        status::record(&server.dir, &apply_status(&report, now, &pending_release));
+    }
     sink(UpdateEvent::Done);
     Ok(report)
+}
+
+/// Status after a run: what is still waiting, what needs a person, and the release to announce while something is left.
+pub fn apply_status(report: &UpdateReport, now: u64, release: &Option<String>) -> status::UpdateStatus {
+    let mut attention: Vec<&str> = report.needs_attention.iter().map(|(i, _)| i.as_str()).chain(report.rolled_back.iter().map(|(i, _)| i.as_str())).collect();
+    attention.sort_unstable();
+    attention.dedup();
+    let waiting = report.deferred.len();
+    let leftover = waiting > 0 || !attention.is_empty();
+    status::UpdateStatus::new(now, waiting, attention.len(), if leftover { release.clone() } else { None })
 }
 
 fn defer_text(d: &DeferReason) -> String {

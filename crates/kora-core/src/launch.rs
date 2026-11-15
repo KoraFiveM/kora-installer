@@ -456,7 +456,7 @@ mod sys {
             return !ended;
         }
         use std::os::windows::process::CommandExt;
-        std::process::Command::new("tasklist")
+        crate::sysexe::command("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
             .creation_flags(0x0800_0000)
             .output()
@@ -487,7 +487,7 @@ mod sys {
     #[cfg(windows)]
     pub fn kill_tree(pid: u32) -> bool {
         use std::os::windows::process::CommandExt;
-        let ok = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).creation_flags(0x0800_0000).output().map(|o| o.status.success()).unwrap_or(false);
+        let ok = crate::sysexe::command("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).creation_flags(0x0800_0000).output().map(|o| o.status.success()).unwrap_or(false);
         reaped(pid);
         ok
     }

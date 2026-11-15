@@ -101,7 +101,7 @@ impl Hooks {
 pub fn is_admin() -> bool {
     if cfg!(windows) {
         // `net session` needs the Server service (often disabled); the token's integrity level does not.
-        std::process::Command::new("whoami")
+        crate::sysexe::command("whoami")
             .arg("/groups")
             .output()
             .map(|o| groups_show_elevated(&String::from_utf8_lossy(&o.stdout)))

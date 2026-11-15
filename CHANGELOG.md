@@ -5,6 +5,21 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Manual update flow (`kora update <server> --preview | --resource <id> | --all | --rollback <id>`): preview what changes, a snapshot before every apply, rollback, production servers move to the catalog's pinned release commits. Discord notifications (`kora webhook set|test|show|remove`) for update reports. `kora schedule` (see 0.2.1).
+- Every `kora update --auto` run, every full manual `--preview` and every full `--all` apply writes `<server>/.kora/update-status.json` (`{"checked_at": RFC3339 UTC, "updates": n waiting, "attention": n needing a person, "new_release": string|null}`, written atomically) so the manager can show badges.
+- Applying now reports each resource as it happens (the engine streams events: snapshot saved, resource updating, updated, rolling back, checking the server) instead of only before/after.
+
+### Changed
+- `kora update --auto` exits **3** when something needs attention (dirty or diverged fork, SQL migration to run), like the manual flow; **1** still means failed or rolled back, 0 means fine. Update any script that treated every non-zero as "rolled back".
+- A manual `apply` now sends the same Discord notification as the automatic update.
+
+### Known limitation
+- `--restart ensure` applies the files and does **not** restart or live-`ensure` anything: txAdmin 8.1.2 and FXServer expose no way to `ensure <resource>` on a running server without credentials (txAdmin's API and live console need a signed-in admin; rcon is off unless the owner sets `rcon_password`), and Kora does not store or reuse the txAdmin password. The apply output says so plainly: restart the server, or run `ensure <resource>` in txAdmin's live console, to load the new files.
+
+### Changed
+- MariaDB downloads now use the official mirror network (about 300x faster than archive.mariadb.org at its slowest) and are verified against a pinned SHA-256. Kora installs MariaDB 11.4.13 on Windows. The download shows progress and speed, resumes a broken connection, gives up on a source that sends nothing for 30 seconds and falls back to archive.mariadb.org; a file that does not match the pinned checksum is deleted and never installed.
+
 ## [0.2.1] - 2026-11-14
 
 ### Added

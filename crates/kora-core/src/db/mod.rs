@@ -106,8 +106,8 @@ pub struct SystemRunner;
 impl CommandRunner for SystemRunner {
     fn run(&self, spec: &CommandSpec) -> DbResult<CommandOutput> {
         use std::io::Write;
-        use std::process::{Command, Stdio};
-        let mut cmd = Command::new(&spec.program);
+        use std::process::Stdio;
+        let mut cmd = crate::sysexe::command(&spec.program);
         cmd.args(&spec.args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -457,9 +457,9 @@ pub mod sql {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepAction {
     Run(CommandSpec),
-    Download { url: String, dest: PathBuf },
-    /// Verify `file` against `sums` (a `sha256sums.txt`) entry `name`.
-    VerifySha256 { file: PathBuf, sums: PathBuf, name: String },
+    /// Download one of `sources` (in order) into `dest` and verify it: against a SHA-256 pinned in the program when
+    /// there is one for `name`, else against the entry in the `sums_url` list. Never unverified.
+    DownloadVerified { sources: Vec<String>, dest: PathBuf, name: String, sums_url: String },
     ExtractZip { archive: PathBuf, dest: PathBuf },
 }
 
@@ -540,19 +540,23 @@ pub fn plan_install_windows(
     let zip_name = format!("mariadb-{version}-winx64.zip");
     let base = format!("https://archive.mariadb.org/mariadb-{version}/winx64-packages/");
     let archive = root.join("mariadb.download.zip");
-    let sums = root.join("mariadb.sha256sums.txt");
     let dest = root.join("database");
     let data = root.join("database-data");
     let install_db = dest.join("bin").join("mariadb-install-db.exe");
     let s = |p: &Path| p.to_string_lossy().into_owned();
 
     let steps = vec![
-        step("db.download", "Download the official MariaDB zip", false,
-            StepAction::Download { url: format!("{base}{zip_name}"), dest: archive.clone() }),
-        step("db.download-sums", "Download MariaDB's official SHA-256 list", false,
-            StepAction::Download { url: format!("{base}sha256sums.txt"), dest: sums.clone() }),
-        step("db.verify", "Verify the download's SHA-256 checksum", false,
-            StepAction::VerifySha256 { file: archive.clone(), sums, name: zip_name }),
+        // Fastest first: MariaDB's mirror-routed endpoint redirects to a nearby mirror; the archive is the fallback.
+        step("db.download", "Download the official MariaDB zip and verify its SHA-256 checksum", false,
+            StepAction::DownloadVerified {
+                sources: vec![
+                    format!("https://downloads.mariadb.org/rest-api/mariadb/{version}/{zip_name}"),
+                    format!("{base}{zip_name}"),
+                ],
+                dest: archive.clone(),
+                name: zip_name,
+                sums_url: format!("{base}sha256sums.txt"),
+            }),
         step("db.extract", "Unpack MariaDB into the Kora folder", false,
             StepAction::ExtractZip { archive, dest }),
         step("db.initialise", &format!("Create the private MariaDB service '{service}' on 127.0.0.1:{port}"), true,
@@ -580,10 +584,9 @@ pub fn plan_install(os: Os, root: &Path, version: &str, port: u16, existing: &[S
     }
 }
 
-/// Check `file` bytes' SHA-256 against a `sha256sums.txt` entry for `name`.
-pub fn verify_sha256(file: &Path, sums_text: &str, name: &str) -> DbResult<()> {
-    use sha2::{Digest, Sha256};
-    let expected = sums_text
+/// The SHA-256 listed for `name` in a `sha256sums.txt`.
+pub fn sha256_from_sums(sums_text: &str, name: &str) -> DbResult<String> {
+    sums_text
         .lines()
         .filter_map(|l| {
             let mut it = l.split_whitespace();
@@ -594,21 +597,13 @@ pub fn verify_sha256(file: &Path, sums_text: &str, name: &str) -> DbResult<()> {
             (n == name).then(|| h.to_lowercase())
         })
         .next()
-        .ok_or_else(|| DbError::Checksum(format!("no checksum listed for {name}")))?;
-    let mut hasher = Sha256::new();
-    {
-        use std::io::Read;
-        let mut f = std::fs::File::open(file)?;
-        let mut buf = [0u8; 65536];
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-        }
-    }
-    let actual: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        .ok_or_else(|| DbError::Checksum(format!("no checksum listed for {name}")))
+}
+
+/// Check `file` bytes' SHA-256 against a `sha256sums.txt` entry for `name`.
+pub fn verify_sha256(file: &Path, sums_text: &str, name: &str) -> DbResult<()> {
+    let expected = sha256_from_sums(sums_text, name)?;
+    let actual = crate::installer::http::sha256_file(file)?;
     if actual == expected {
         Ok(())
     } else {
@@ -1068,8 +1063,7 @@ mod tests {
 
         let w = plan_install_windows("10.11.6", Path::new("C:\\k"), 3307, &["KoraMariaDB_x".into()]).unwrap();
         assert!(w.service_name.as_ref().unwrap().starts_with("KoraMariaDB_"));
-        assert!(w.steps.iter().any(|s| matches!(s.action, StepAction::VerifySha256 { .. })));
-        let verify = w.steps.iter().position(|s| matches!(s.action, StepAction::VerifySha256 { .. })).unwrap();
+        let verify = w.steps.iter().position(|s| matches!(s.action, StepAction::DownloadVerified { .. })).unwrap();
         let extract = w.steps.iter().position(|s| matches!(s.action, StepAction::ExtractZip { .. })).unwrap();
         assert!(verify < extract);
         assert!(plan_install_windows("1.0/../x", Path::new("C:\\k"), 1, &[]).is_err());
