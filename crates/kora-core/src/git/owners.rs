@@ -208,6 +208,46 @@ pub fn choose_owner(owners: &[Owner], requested: Option<&str>) -> Result<Owner, 
     }
 }
 
+/// A legal GitHub login: 1-39 characters of `[A-Za-z0-9-]`, no leading or trailing hyphen.
+pub fn check_login_syntax(login: &str) -> Result<(), String> {
+    let l = login.trim();
+    let legal = !l.is_empty()
+        && l.len() <= 39
+        && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !l.starts_with('-')
+        && !l.ends_with('-');
+    if legal {
+        Ok(())
+    } else {
+        Err(format!(
+            "'{login}' is not a valid GitHub user or organisation name (1-39 letters, digits or hyphens, not starting or ending with a hyphen)."
+        ))
+    }
+}
+
+/// Result of checking `--github-owner` before the install starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnerCheck {
+    /// Checked against the signed-in account's real list.
+    Verified(String),
+    /// `gh` is missing or signed out: the install bootstraps and signs in first, then checks again.
+    Deferred(String),
+}
+
+/// Up-front check of a requested owner. The name must be syntactically valid. With `gh` ready it is
+/// verified now (failing with the list of valid owners); without `gh` it is deferred to the install.
+pub fn check_requested_owner(runner: &dyn CommandRunner, requested: &str) -> Result<OwnerCheck, String> {
+    check_login_syntax(requested)?;
+    let want = requested.trim();
+    match gh_auth(runner) {
+        GhAuth::Missing | GhAuth::LoggedOut => Ok(OwnerCheck::Deferred(want.to_string())),
+        GhAuth::LoggedIn { .. } => {
+            let all = list_owners(runner).map_err(|e| format!("could not read your GitHub accounts ({e}). Is `gh` installed and logged in? Run `gh auth login`."))?;
+            choose_owner(&all, Some(want)).map(|o| OwnerCheck::Verified(o.login))
+        }
+    }
+}
+
 /// Plain-text list of the choices, unusable ones marked.
 pub fn format_owner_list(owners: &[Owner]) -> String {
     let mut s = String::from("Available choices:\n");
@@ -504,6 +544,9 @@ mod tests {
     /// A GitHub where `me` belongs to the given (org, role, members_can_create) list.
     fn github(orgs: Vec<(&'static str, &'static str, Option<bool>)>) -> Fake {
         Fake::new(move |l| {
+            if l == "gh auth status --hostname github.com" {
+                return ok("");
+            }
             if l == "gh api user" {
                 return ok(r#"{"login":"me","id":1}"#);
             }
@@ -529,6 +572,52 @@ mod tests {
             }
             fail("unexpected")
         })
+    }
+
+    #[test]
+    fn owner_syntax_table() {
+        let long_ok = "a".repeat(39);
+        let long_bad = "a".repeat(40);
+        for good in ["me", "a", "My-Org-2", "a-b", long_ok.as_str(), " me "] {
+            assert!(check_login_syntax(good).is_ok(), "{good:?}");
+        }
+        for bad in ["", " ", "-me", "me-", "a b", "me/x", "me_x", "mé", "me.x", "me@x", long_bad.as_str()] {
+            assert!(check_login_syntax(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn bad_syntax_fails_before_touching_gh() {
+        let f = github(vec![]);
+        assert!(check_requested_owner(&f, "-bad-").unwrap_err().contains("not a valid GitHub"));
+        assert!(f.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn gh_ready_and_valid_owner_is_verified() {
+        let f = github(vec![("Team", "member", Some(true))]);
+        assert_eq!(check_requested_owner(&f, "team").unwrap(), OwnerCheck::Verified("Team".into()));
+        assert_eq!(check_requested_owner(&f, "ME").unwrap(), OwnerCheck::Verified("me".into()));
+    }
+
+    #[test]
+    fn gh_ready_and_unknown_owner_fails_early_with_the_list() {
+        let f = github(vec![("Team", "member", Some(true))]);
+        let e = check_requested_owner(&f, "nobody").unwrap_err();
+        assert!(e.contains("'nobody' is not your GitHub account"), "{e}");
+        assert!(e.contains("me (your personal account)") && e.contains("Team"), "{e}");
+    }
+
+    #[test]
+    fn gh_missing_defers() {
+        let f = Fake::new(|_| Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no gh")));
+        assert_eq!(check_requested_owner(&f, "me").unwrap(), OwnerCheck::Deferred("me".into()));
+    }
+
+    #[test]
+    fn gh_signed_out_defers() {
+        let f = Fake::new(|_| fail("You are not logged into any GitHub hosts"));
+        assert_eq!(check_requested_owner(&f, "me").unwrap(), OwnerCheck::Deferred("me".into()));
     }
 
     #[test]
