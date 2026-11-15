@@ -853,7 +853,20 @@ mod tests {
         let rels: Vec<String> = sel.iter().map(|r| r.install_rel()).collect();
         assert_eq!(rels, ["[kora]/lib", "[compat]/a", "[compat]/b", "[bridges]/q", "[creators]/[acme]/r"]);
         let ensure = layout::ensure_for_new(rels.iter().map(String::as_str));
-        assert_eq!(ensure, layout::ENSURE_ORDER.map(String::from));
+        // [cfx-default] holds nothing here, so it is not ensured
+        assert_eq!(ensure, ["[compat]", "[kora]", "[bridges]", "[creators]", "[addons]", "[streamedassets]"]);
+    }
+
+    #[test]
+    fn only_kora_selection_does_not_ensure_empty_compat_bridges_creators() {
+        let cat = v3_catalog();
+        let sel = select_resources(&cat, &ResourceSelection::Only(vec![])).unwrap();
+        // kora-lib's dependency compat-a comes along, so [compat] is populated; bridges/creators are not
+        let rels: Vec<String> = sel.iter().map(|r| r.install_rel()).collect();
+        let ensure = layout::ensure_for_new(rels.iter().map(String::as_str));
+        assert_eq!(ensure, ["[compat]", "[kora]", "[addons]", "[streamedassets]"]);
+        let only_kora = layout::ensure_for_new(["[kora]/lib"]);
+        assert_eq!(only_kora, ["[kora]", "[addons]", "[streamedassets]"]);
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! Folder layout of a server's `resources/` and the matching `ensure [folder]` lines.
 //!
 //! New installs get `[cfx-default]`, `[compat]`, `[kora]`, `[bridges]`, `[creators]/[<creator>]`
-//! plus the always-present empty `[addons]` and `[streamedassets]/{cars,maps,props,peds}`.
+//! (only the ones holding installed resources are ensured) plus the always-present empty
+//! `[addons]` and `[streamedassets]/{cars,maps,props,peds}`.
 //! `server.cfg` loads folders, never single resources. Existing servers are never rearranged:
 //! only the folders a new resource needs are added (see [`append_ensures`]).
 
@@ -34,14 +35,20 @@ pub fn top_folder(rel: &str) -> String {
     first.to_string()
 }
 
-/// The folders to ensure for a new install holding `rels`, in load order: the fixed order of
-/// [`ENSURE_ORDER`] (all of it, so the empty add-on folders load too). Folders of older catalogs
-/// (`[pre]`, `[standalone]`, ...) are placed just before `[kora]`, in first-seen order.
+/// Folders that are always created on disk (empty) and therefore always ensured.
+const ALWAYS_ENSURED: [&str; 2] = ["[addons]", "[streamedassets]"];
+
+/// The folders to ensure for a new install holding `rels`, in load order: the order of
+/// [`ENSURE_ORDER`], keeping only folders that hold an installed resource plus the always-created
+/// `[addons]` and `[streamedassets]`. Folders of older catalogs (`[pre]`, `[standalone]`, ...)
+/// are placed just before `[kora]`, in first-seen order.
 pub fn ensure_for_new<'a>(rels: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let mut legacy: Vec<String> = Vec::new();
     let mut loose: Vec<String> = Vec::new();
+    let mut tops: Vec<String> = Vec::new();
     for rel in rels {
         let top = top_folder(rel);
+        tops.push(top.clone());
         if !top.starts_with('[') {
             if !loose.contains(&top) {
                 loose.push(top);
@@ -50,12 +57,15 @@ pub fn ensure_for_new<'a>(rels: impl IntoIterator<Item = &'a str>) -> Vec<String
             legacy.push(top);
         }
     }
+    let used = |f: &str| tops.iter().any(|t| t == f);
     let mut out: Vec<String> = Vec::new();
     for f in ENSURE_ORDER {
         if f == "[kora]" {
             out.extend(legacy.iter().cloned());
         }
-        out.push(f.to_string());
+        if ALWAYS_ENSURED.contains(&f) || used(f) {
+            out.push(f.to_string());
+        }
     }
     out.extend(loose);
     out
@@ -139,8 +149,26 @@ mod tests {
 
     #[test]
     fn new_install_ensures_folders_in_order() {
-        let v = ensure_for_new(["[cfx-default]", "[kora]/kora_core", "[kora]/kora_lib"]);
+        let v = ensure_for_new([
+            "[cfx-default]/a",
+            "[compat]/b",
+            "[kora]/kora_core",
+            "[bridges]/c",
+            "[creators]/[x]/d",
+        ]);
         assert_eq!(v, ENSURE_ORDER.map(String::from));
+    }
+
+    #[test]
+    fn only_kora_resources_skip_unused_folders() {
+        let v = ensure_for_new(["[kora]/kora_core", "[kora]/kora_lib"]);
+        assert_eq!(v, ["[kora]", "[addons]", "[streamedassets]"]);
+    }
+
+    #[test]
+    fn compat_resource_ensures_compat() {
+        let v = ensure_for_new(["[compat]/x", "[kora]/kora_core"]);
+        assert_eq!(v, ["[compat]", "[kora]", "[addons]", "[streamedassets]"]);
     }
 
     #[test]
@@ -153,16 +181,9 @@ mod tests {
             "[pre]/other",
         ]);
         assert_eq!(
-            &v[..5],
-            [
-                "[cfx-default]",
-                "[compat]",
-                "[pre]",
-                "[default-maps]",
-                "[standalone]"
-            ]
+            &v[..4],
+            ["[pre]", "[default-maps]", "[standalone]", "[kora]"]
         );
-        assert_eq!(v[5], "[kora]");
         assert_eq!(v.last().unwrap(), "[streamedassets]");
         assert!(ensure_for_new(["loose_res"]).contains(&"loose_res".to_string()));
     }
