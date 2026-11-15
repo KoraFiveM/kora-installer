@@ -565,7 +565,7 @@ pub fn task_xml(s: &ManagedServer, schedule: &Schedule, run_as: RunAs, user: &st
         }
     };
     Ok(format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n\
          <Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n\
          <RegistrationInfo><Description>{desc}</Description></RegistrationInfo>\n\
          <Triggers><CalendarTrigger><StartBoundary>2024-01-01T{t}:00</StartBoundary><Enabled>true</Enabled>{by}</CalendarTrigger></Triggers>\n\

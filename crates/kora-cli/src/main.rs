@@ -1247,14 +1247,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         None => K::Wizard,
         Some(Command::Install(a)) => K::Install { dry_run: a.dry_run },
         Some(Command::Manager) => K::Manager,
-<<<<<<< HEAD
         Some(Command::Update(a)) => K::Update { auto: a.auto },
-        Some(Command::Status) => K::Status,
-=======
-        Some(Command::Update { auto, .. }) => K::Update { auto: *auto },
         Some(Command::Status | Command::Schedule { cmd: ScheduleCmd::Show { .. } }) => K::Status,
         Some(Command::Schedule { .. }) => K::Restart,
->>>>>>> 36bb0ff (schedule: configurable auto-update (kora schedule), run as installing user by default, System optional)
         Some(Command::Delete { .. }) => K::Delete,
         Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. }) => K::Other,
         Some(Command::Start { .. }) => K::Start,
@@ -1350,11 +1345,8 @@ fn main() {
         Some(Command::Manager) => not_implemented("manager"),
         Some(Command::Update(a)) => update(a),
         Some(Command::Status) => status(),
-<<<<<<< HEAD
         Some(Command::Webhook { cmd }) => webhook(cmd),
-=======
         Some(Command::Schedule { cmd }) => schedule(cmd),
->>>>>>> 36bb0ff (schedule: configurable auto-update (kora schedule), run as installing user by default, System optional)
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {

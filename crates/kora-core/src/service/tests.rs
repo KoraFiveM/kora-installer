@@ -484,3 +484,23 @@ fn real_windows_scheduled_task_is_created_and_removed() {
         assert!(!query().success(), "task is still there after removing it ({run_as:?})");
     }
 }
+
+#[test]
+fn task_xml_is_written_as_utf16_le_with_a_bom_as_schtasks_requires() {
+    let xml = task_xml(&server(), &Schedule::default(), RunAs::System, "").unwrap();
+    assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-16\"?>"));
+    let b = super::file_bytes(&xml);
+    assert_eq!(&b[..2], &[0xFF, 0xFE], "byte-order mark");
+    let units: Vec<u16> = b[2..].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    assert_eq!(String::from_utf16(&units).unwrap().replace("\r\n", "\n"), xml, "round-trips, non-ASCII included");
+    let u = task_xml(&server(), &Schedule::default(), RunAs::InstallingUser, "PC-ÖZ\\Zoë").unwrap();
+    let b = super::file_bytes(&u);
+    let units: Vec<u16> = b[2..].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    assert!(String::from_utf16(&units).unwrap().contains("PC-ÖZ\\Zoë"));
+}
+
+#[test]
+fn other_files_stay_utf8() {
+    assert_eq!(super::file_bytes("[Unit]\nDescription=x\n"), b"[Unit]\nDescription=x\n");
+    assert_eq!(super::file_bytes("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<a/>"), "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<a/>".as_bytes());
+}
