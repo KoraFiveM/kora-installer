@@ -117,7 +117,19 @@ pub fn cleanup_old(fs: &dyn Fs, windows: bool, exe: &Path) -> bool {
         return false;
     }
     let old = backup_path(exe);
-    fs.exists(&old) && fs.remove_file(&old).is_ok()
+    if !fs.exists(&old) {
+        return false;
+    }
+    // The previous process may still be exiting (or a scanner holds the file): a few short retries.
+    for i in 0..5 {
+        if fs.remove_file(&old).is_ok() {
+            return true;
+        }
+        if i < 4 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+    false
 }
 
 #[cfg(test)]
