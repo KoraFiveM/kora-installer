@@ -12,6 +12,7 @@
 //! Steps run on a worker thread and report through a channel; the calling thread forwards events
 //! to the [`ProgressSink`], so long steps (parallel clones, downloads) report live.
 
+pub mod change_ports;
 pub mod gitops;
 pub mod host;
 pub mod http;
@@ -150,25 +151,28 @@ pub fn resource_name(r: &Resource) -> &str {
 
 use catalog::normalize_id as norm_id;
 
-/// Resolve the user's selection against the catalog, in install order. Never returns internal ones.
-/// Whatever a selected resource `dependsOn` (transitively) is added automatically.
-pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection) -> Result<Vec<&'a Resource>> {
+/// Resolve the user's selection against the catalog, in install order. Never returns internal ones,
+/// and never development-only ones unless `dev` (a development server). Whatever a selected resource
+/// `dependsOn` (transitively) is added automatically.
+pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection, dev: bool) -> Result<Vec<&'a Resource>> {
     let ordered = cat.install_order();
     let seeds: Vec<String> = match sel {
-        // Compat / bridge / creator resources are never selected by default (only through dependencies).
-        ResourceSelection::All => ordered.iter().filter(|r| r.res_type.is_none() && matches!(r.kind, Kind::Kora | Kind::Dependency)).map(|r| r.id.clone()).collect(),
+        // Compat / bridge / creator resources are never selected by default (only through dependencies),
+        // and development-only ones are never selected by default either.
+        ResourceSelection::All => ordered.iter().filter(|r| r.res_type.is_none() && !r.dev_only && matches!(r.kind, Kind::Kora | Kind::Dependency)).map(|r| r.id.clone()).collect(),
         ResourceSelection::Only(ids) => {
             for w in ids.iter().map(|i| norm_id(i)) {
                 match cat.find_normalized(&w) {
                     None => return err(format!("unknown resource '{w}' (not in the catalog)")),
                     Some(r) if r.is_internal() => return err(format!("resource '{w}' is not available for public installs")),
+                    Some(r) if !r.offered_to(dev) => return err(format!("resource '{w}' is only available for development servers")),
                     Some(_) => {}
                 }
             }
             // Dependencies + core (pre group) are always part of a custom selection.
             ids.iter()
                 .cloned()
-                .chain(ordered.iter().filter(|r| !r.is_internal() && r.res_type.is_none() && (r.kind == Kind::Dependency || r.group == catalog::Group::Pre)).map(|r| r.id.clone()))
+                .chain(ordered.iter().filter(|r| r.offered_to(dev) && r.res_type.is_none() && (r.kind == Kind::Dependency || r.group == catalog::Group::Pre)).map(|r| r.id.clone()))
                 .collect()
         }
     };
@@ -177,6 +181,7 @@ pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection) -> Result
         match cat.find_normalized(w) {
             None => return err(format!("a selected resource needs '{w}', which is not in the catalog")),
             Some(r) if r.is_internal() => return err(format!("a selected resource needs '{w}', which is not available for public installs")),
+            Some(r) if !r.offered_to(dev) => return err(format!("a selected resource needs '{w}', which is only available for development servers")),
             Some(_) => {}
         }
     }
@@ -573,7 +578,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
         }
     };
     notes.extend(cnote);
-    let selected = select_resources(&cat, &req.resources).unwrap_or_default();
+    let selected = select_resources(&cat, &req.resources, req.mode == Mode::Development).unwrap_or_default();
     match preflight(req, hooks, admin) {
         Ok(()) => notes.push("Free disk space and service-account access look fine.".into()),
         Err(e) => notes.push(format!("WARNING, a real install would stop here: {e}")),
@@ -757,16 +762,16 @@ mod tests {
     #[test]
     fn selection_never_includes_internal_and_always_core_and_deps() {
         let cat = Catalog::embedded().unwrap();
-        let all = select_resources(&cat, &ResourceSelection::All).unwrap();
+        let all = select_resources(&cat, &ResourceSelection::All, false).unwrap();
         assert!(all.iter().all(|r| !r.is_internal()));
         assert!(all.iter().any(|r| r.id == "kora-core"));
-        let only = select_resources(&cat, &ResourceSelection::Only(vec!["kora_chat".into()])).unwrap();
+        let only = select_resources(&cat, &ResourceSelection::Only(vec!["kora_chat".into()]), false).unwrap();
         assert!(only.iter().any(|r| r.id == "kora-chat"), "underscores normalise to dashes");
         assert!(only.iter().any(|r| r.id == "kora-core"), "core group always included");
         assert!(only.iter().any(|r| r.kind == Kind::Dependency));
         assert!(!only.iter().any(|r| r.id == "kora-hud"));
-        assert!(select_resources(&cat, &ResourceSelection::Only(vec!["nope".into()])).is_err());
-        assert!(select_resources(&cat, &ResourceSelection::Only(vec!["kora-scrapyard".into()])).is_err(), "internal is refused");
+        assert!(select_resources(&cat, &ResourceSelection::Only(vec!["nope".into()]), false).is_err());
+        assert!(select_resources(&cat, &ResourceSelection::Only(vec!["kora-scrapyard".into()]), false).is_err(), "internal is refused");
         // install order is respected
         let orders: Vec<u32> = all.iter().filter_map(|r| r.order).collect();
         assert!(orders.windows(2).all(|w| w[0] < w[1]));
@@ -789,7 +794,7 @@ mod tests {
     #[test]
     fn dependencies_are_added_automatically_and_transitively() {
         let cat = tiny_catalog("");
-        let ids = |s: &ResourceSelection| select_resources(&cat, s).unwrap().iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+        let ids = |s: &ResourceSelection| select_resources(&cat, s, false).unwrap().iter().map(|r| r.id.clone()).collect::<Vec<_>>();
         // core (pre) is always there; its dependsOn chain (theme -> icons) comes with it; kora-chat does not.
         assert_eq!(ids(&ResourceSelection::Only(vec![])), ["kora-lib", "kora-theme", "kora-icons"]);
         // choosing a dependency's dependent pulls it in, in install order, underscores accepted
@@ -802,7 +807,7 @@ mod tests {
         let cat = tiny_catalog(
             r#",{"id":"kora-x","repository":"https://github.com/o/x.git","path":"[kora]/x","group":"kora","kind":"kora","branch":"dev","order":5,"latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"dependsOn":["kora-chat"]}"#,
         );
-        let ids: Vec<String> = select_resources(&cat, &ResourceSelection::All).unwrap().iter().map(|r| r.id.clone()).collect();
+        let ids: Vec<String> = select_resources(&cat, &ResourceSelection::All, false).unwrap().iter().map(|r| r.id.clone()).collect();
         assert!(ids.contains(&"kora-chat".to_string()), "optional chat is needed by kora-x: {ids:?}");
     }
 
@@ -817,7 +822,7 @@ mod tests {
         // cycles are tolerated by selection
         let mut cat = tiny_catalog("");
         cat.resources[2].depends_on = vec!["kora-lib".into()];
-        assert_eq!(select_resources(&cat, &ResourceSelection::Only(vec![])).unwrap().len(), 3);
+        assert_eq!(select_resources(&cat, &ResourceSelection::Only(vec![]), false).unwrap().len(), 3);
     }
 
     fn v3_catalog() -> Catalog {
@@ -838,7 +843,7 @@ mod tests {
     #[test]
     fn typed_resources_are_never_default_selected_but_dependencies_come_along() {
         let cat = v3_catalog();
-        let ids = |sel: &ResourceSelection| -> Vec<String> { select_resources(&cat, sel).unwrap().iter().map(|r| r.id.clone()).collect() };
+        let ids = |sel: &ResourceSelection| -> Vec<String> { select_resources(&cat, sel, false).unwrap().iter().map(|r| r.id.clone()).collect() };
         // kora-lib needs compat-a (a dependency by dependsOn); compat-b, bridge-q, acme-r are not selected
         assert_eq!(ids(&ResourceSelection::All), ["kora-lib", "kora-x", "compat-a"]);
         assert_eq!(ids(&ResourceSelection::Only(vec![])), ["kora-lib", "compat-a"]);
@@ -849,7 +854,7 @@ mod tests {
     #[test]
     fn selection_folders_and_ensure_lines_for_a_new_install() {
         let cat = v3_catalog();
-        let sel = select_resources(&cat, &ResourceSelection::Only(vec!["acme-r".into()])).unwrap();
+        let sel = select_resources(&cat, &ResourceSelection::Only(vec!["acme-r".into()]), false).unwrap();
         let rels: Vec<String> = sel.iter().map(|r| r.install_rel()).collect();
         assert_eq!(rels, ["[kora]/lib", "[compat]/a", "[compat]/b", "[bridges]/q", "[creators]/[acme]/r"]);
         let ensure = layout::ensure_for_new(rels.iter().map(String::as_str));
@@ -860,7 +865,7 @@ mod tests {
     #[test]
     fn only_kora_selection_does_not_ensure_empty_compat_bridges_creators() {
         let cat = v3_catalog();
-        let sel = select_resources(&cat, &ResourceSelection::Only(vec![])).unwrap();
+        let sel = select_resources(&cat, &ResourceSelection::Only(vec![]), false).unwrap();
         // kora-lib's dependency compat-a comes along, so [compat] is populated; bridges/creators are not
         let rels: Vec<String> = sel.iter().map(|r| r.install_rel()).collect();
         let ensure = layout::ensure_for_new(rels.iter().map(String::as_str));
@@ -874,7 +879,7 @@ mod tests {
         let cat = Catalog::embedded().unwrap();
         assert!(cat.find("kora-theme").is_some());
         assert_eq!(cat.find("kora-lib").unwrap().depends_on, ["kora-theme"]);
-        let only = select_resources(&cat, &ResourceSelection::Only(vec!["kora_chat".into()])).unwrap();
+        let only = select_resources(&cat, &ResourceSelection::Only(vec!["kora_chat".into()]), false).unwrap();
         assert!(only.iter().any(|r| r.id == "kora-theme"), "kora-lib is always installed, so is its dependency");
         let mut v: serde_json::Value = serde_json::from_str(catalog::EMBEDDED_SNAPSHOT).unwrap();
         for r in v["resources"].as_array_mut().unwrap() {
@@ -1041,5 +1046,19 @@ mod tests {
         assert!(groups_show_elevated(elevated));
         assert!(!groups_show_elevated(normal), "a non-elevated administrator is not elevated");
         assert!(!groups_show_elevated(""));
+    }
+
+    #[test]
+    fn development_only_resources_are_for_development_servers() {
+        let extra = r#",{"id":"kora-fft","repository":"https://github.com/o/fft.git","path":"[kora]/kora_fft","group":"kora","kind":"optional","branch":"dev","order":5,"devOnly":true}"#;
+        let cat = tiny_catalog(extra);
+        let ids = |sel: &ResourceSelection, dev: bool| -> Vec<String> { select_resources(&cat, sel, dev).unwrap().iter().map(|r| r.id.clone()).collect() };
+        // Never auto-selected, on either kind of server.
+        assert!(!ids(&ResourceSelection::All, true).contains(&"kora-fft".to_string()));
+        assert!(!ids(&ResourceSelection::Only(vec![]), true).contains(&"kora-fft".to_string()));
+        // A production server is refused by name; a development server gets it with its dependencies.
+        let err = select_resources(&cat, &ResourceSelection::Only(vec!["kora_fft".into()]), false).unwrap_err();
+        assert!(err.to_string().contains("only available for development servers"), "{err}");
+        assert_eq!(ids(&ResourceSelection::Only(vec!["kora_fft".into()]), true), ["kora-lib", "kora-theme", "kora-icons", "kora-fft"]);
     }
 }

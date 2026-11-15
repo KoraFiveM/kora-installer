@@ -14,47 +14,62 @@ pub enum Section {
     Compat,
     Bridges,
     Creators,
+    /// Development-only options (`devOnly` resources); shown to development servers only.
+    Development,
 }
 
 impl Section {
+    /// The sections every server sees, in display order.
     pub const ALL: [Section; 3] = [Section::Compat, Section::Bridges, Section::Creators];
+
+    /// The sections a server of this mode sees, in display order.
+    pub fn for_mode(dev: bool) -> Vec<Section> {
+        let mut v = Self::ALL.to_vec();
+        if dev {
+            v.push(Section::Development);
+        }
+        v
+    }
 
     pub fn title(self) -> &'static str {
         match self {
             Section::Compat => "Compatibility",
             Section::Bridges => "Bridges",
             Section::Creators => "Creators",
+            Section::Development => "Development",
         }
     }
 
-    fn res_type(self) -> ResType {
+    /// Does this section hold `r`?
+    fn holds(self, r: &Resource) -> bool {
         match self {
-            Section::Compat => ResType::Compat,
-            Section::Bridges => ResType::Bridge,
-            Section::Creators => ResType::Creator,
+            Section::Compat => r.res_type == Some(ResType::Compat),
+            Section::Bridges => r.res_type == Some(ResType::Bridge),
+            Section::Creators => r.res_type == Some(ResType::Creator),
+            Section::Development => r.dev_only,
         }
     }
 }
 
 impl Catalog {
-    /// Public resources of a section, in install order.
-    pub fn section(&self, s: Section) -> Vec<&Resource> {
-        self.public_install_order()
+    /// Resources of a section a server of this mode may see, in install order.
+    pub fn section(&self, s: Section, dev: bool) -> Vec<&Resource> {
+        self.offered_install_order(dev)
             .into_iter()
-            .filter(|r| r.res_type == Some(s.res_type()))
+            .filter(|r| s.holds(r))
             .collect()
     }
 
-    /// Creators that have at least one public resource, in catalog order.
-    pub fn creators_with_resources(&self) -> Vec<&Creator> {
+    /// Creators that have at least one resource this mode may see, in catalog order.
+    pub fn creators_with_resources(&self, dev: bool) -> Vec<&Creator> {
         self.creators
             .iter()
-            .filter(|c| !self.creator_resources(&c.id).is_empty())
+            .filter(|c| !self.creator_resources(&c.id, dev).is_empty())
             .collect()
     }
 
-    pub fn creator_resources(&self, creator: &str) -> Vec<&Resource> {
-        self.public_install_order()
+    pub fn creator_resources(&self, creator: &str, dev: bool) -> Vec<&Resource> {
+        self.offered_install_order(dev)
             .into_iter()
             .filter(|r| {
                 r.res_type == Some(ResType::Creator) && r.creator.as_deref() == Some(creator)
@@ -69,6 +84,8 @@ pub enum PickError {
     Unknown(String),
     #[error("'{0}' is not available")]
     Internal(String),
+    #[error("'{0}' is only available for development servers")]
+    DevOnly(String),
     #[error("'{0}' is already installed")]
     Installed(String),
     #[error("'{id}' is needed by {}", .by.join(", "))]
@@ -81,24 +98,30 @@ pub struct Picker<'a> {
     cat: &'a Catalog,
     picked: BTreeSet<String>,
     installed: HashSet<String>,
+    /// Development server: development-only resources are offered too.
+    dev: bool,
 }
 
 impl<'a> Picker<'a> {
-    pub fn new(cat: &'a Catalog, installed: impl IntoIterator<Item = String>) -> Self {
+    /// `dev` = the server is a development server (see [`Resource::offered_to`]).
+    pub fn new(cat: &'a Catalog, installed: impl IntoIterator<Item = String>, dev: bool) -> Self {
         Self {
             cat,
             picked: BTreeSet::new(),
             installed: installed.into_iter().map(|i| normalize_id(&i)).collect(),
+            dev,
         }
     }
 
-    /// Start from explicit ids (e.g. the list a website code returned). Unknown or internal ids are an error.
+    /// Start from explicit ids (e.g. the list a website code returned). Unknown, internal, or
+    /// development-only ids (on a production server) are an error.
     pub fn with_ids(
         cat: &'a Catalog,
         installed: impl IntoIterator<Item = String>,
+        dev: bool,
         ids: &[String],
     ) -> Result<Self, PickError> {
-        let mut p = Self::new(cat, installed);
+        let mut p = Self::new(cat, installed, dev);
         for id in ids {
             p.check_pickable(id)?;
             if !p.is_installed(id) {
@@ -115,6 +138,9 @@ impl<'a> Picker<'a> {
             .ok_or_else(|| PickError::Unknown(id.to_string()))?;
         if r.is_internal() {
             return Err(PickError::Internal(id.to_string()));
+        }
+        if !r.offered_to(self.dev) {
+            return Err(PickError::DevOnly(id.to_string()));
         }
         Ok(r)
     }
@@ -170,7 +196,7 @@ impl<'a> Picker<'a> {
         }
     }
 
-    /// Select everything in `ids` (skips internal and installed ones).
+    /// Select everything in `ids` (skips internal, not-offered and installed ones).
     pub fn select_all<'i>(&mut self, ids: impl IntoIterator<Item = &'i str>) {
         for id in ids {
             if self.check_pickable(id).is_ok() && !self.is_installed(id) {
@@ -286,15 +312,15 @@ mod tests {
     #[test]
     fn sections_and_creators() {
         let c = cat();
-        assert_eq!(ids(c.section(Section::Compat)), ["compat-a"]);
-        assert_eq!(ids(c.section(Section::Bridges)), ["bridge-x"]);
+        assert_eq!(ids(c.section(Section::Compat, false)), ["compat-a"]);
+        assert_eq!(ids(c.section(Section::Bridges, false)), ["bridge-x"]);
         assert_eq!(
-            ids(c.creator_resources("acme")),
+            ids(c.creator_resources("acme", false)),
             ["acme-one", "acme-two"],
             "internal is hidden"
         );
         let cs: Vec<&str> = c
-            .creators_with_resources()
+            .creators_with_resources(false)
             .iter()
             .map(|c| c.id.as_str())
             .collect();
@@ -308,14 +334,14 @@ mod tests {
     #[test]
     fn nothing_is_selected_by_default() {
         let c = cat();
-        let p = Picker::new(&c, []);
+        let p = Picker::new(&c, [], false);
         assert!(p.is_empty() && p.resolved().is_empty());
     }
 
     #[test]
     fn dependencies_are_included_transitively() {
         let c = cat();
-        let mut p = Picker::new(&c, []);
+        let mut p = Picker::new(&c, [], false);
         assert_eq!(p.toggle("acme-one"), Ok(true));
         assert_eq!(ids(p.resolved()), ["compat-a", "bridge-x", "acme-one"]);
         assert!(p.is_checked("compat-a") && !p.is_picked("compat-a"));
@@ -325,7 +351,7 @@ mod tests {
     #[test]
     fn needed_dependency_cannot_be_deselected() {
         let c = cat();
-        let mut p = Picker::new(&c, []);
+        let mut p = Picker::new(&c, [], false);
         p.toggle("acme-one").unwrap();
         let e = p.toggle("bridge-x").unwrap_err();
         assert_eq!(
@@ -348,7 +374,7 @@ mod tests {
     #[test]
     fn select_all_and_deselect_all_respect_blocks() {
         let c = cat();
-        let mut p = Picker::new(&c, []);
+        let mut p = Picker::new(&c, [], false);
         p.select_all(["acme-one", "acme-two"]);
         assert!(p.all_checked(["acme-one", "acme-two"]));
         assert_eq!(p.resolved().len(), 4);
@@ -365,7 +391,7 @@ mod tests {
     #[test]
     fn installed_ones_are_satisfied_and_skipped() {
         let c = cat();
-        let mut p = Picker::new(&c, ["compat_a".to_string()]);
+        let mut p = Picker::new(&c, ["compat_a".to_string()], false);
         assert!(p.is_checked("compat-a"));
         assert_eq!(
             p.toggle("compat-a"),
@@ -378,11 +404,38 @@ mod tests {
     #[test]
     fn unknown_and_internal_are_rejected() {
         let c = cat();
-        let mut p = Picker::new(&c, []);
+        let mut p = Picker::new(&c, [], false);
         assert!(matches!(p.toggle("nope"), Err(PickError::Unknown(_))));
         assert!(matches!(p.toggle("hidden"), Err(PickError::Internal(_))));
-        assert!(Picker::with_ids(&c, [], &["acme-two".into(), "nope".into()]).is_err());
-        let p = Picker::with_ids(&c, [], &["acme-two".into()]).unwrap();
+        assert!(Picker::with_ids(&c, [], false, &["acme-two".into(), "nope".into()]).is_err());
+        let p = Picker::with_ids(&c, [], false, &["acme-two".into()]).unwrap();
         assert_eq!(ids(p.resolved()), ["acme-two"]);
+    }
+
+    #[test]
+    fn development_only_is_refused_on_production_servers() {
+        let json = r#"{"schemaVersion":3,"resources":[
+          {"id":"kora-x","repository":"https://github.com/o/x.git","path":"[kora]/x","group":"kora","kind":"optional","branch":"dev","devOnly":true}
+        ]}"#;
+        let c = Catalog::parse_validated(json).unwrap();
+        let mut prod = Picker::new(&c, [], false);
+        assert_eq!(prod.toggle("kora-x"), Err(PickError::DevOnly("kora-x".into())));
+        assert!(Picker::with_ids(&c, [], false, &["kora-x".into()]).is_err());
+        let mut dev = Picker::new(&c, [], true);
+        assert_eq!(dev.toggle("kora-x"), Ok(true));
+        assert_eq!(ids(dev.resolved()), ["kora-x"]);
+    }
+
+    #[test]
+    fn the_embedded_catalog_offers_fft_only_to_development_servers() {
+        let c = Catalog::embedded().unwrap();
+        assert_eq!(ids(c.section(Section::Development, true)), ["fft"]);
+        assert!(c.section(Section::Development, false).is_empty());
+        assert_eq!(Section::for_mode(false), Section::ALL.to_vec());
+        assert_eq!(Section::for_mode(true).last(), Some(&Section::Development));
+        let mut dev = Picker::new(&c, [], true);
+        assert_eq!(dev.toggle("fft"), Ok(true));
+        let mut prod = Picker::new(&c, [], false);
+        assert!(matches!(prod.toggle("fft"), Err(PickError::DevOnly(_))));
     }
 }

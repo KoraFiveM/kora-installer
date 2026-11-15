@@ -125,6 +125,16 @@ pub struct Resource {
     /// Schema v3: folder inside the repository that holds the resource, when it is not the repo root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subpath: Option<String>,
+    /// Offered only to development servers (never to production ones, never auto-selected).
+    /// Absent = false. Installers that predate this field ignore it and would offer the resource
+    /// to everyone, so the catalog should publish it only once the installer that understands it
+    /// is out.
+    #[serde(default, rename = "devOnly", skip_serializing_if = "is_false")]
+    pub dev_only: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -210,6 +220,12 @@ impl Resource {
 
     pub fn is_internal(&self) -> bool {
         self.kind == Kind::Internal
+    }
+
+    /// Whether a server of this mode may see and pick the resource. Internal resources never;
+    /// development-only resources only on development servers.
+    pub fn offered_to(&self, dev: bool) -> bool {
+        !self.is_internal() && (dev || !self.dev_only)
     }
 }
 
@@ -351,7 +367,8 @@ impl Catalog {
                     errs.push(format!("{}: latest {l} not in versions", r.id));
                 }
             }
-            if matches!(r.kind, Kind::Kora | Kind::Optional) && r.versions.is_empty() {
+            // Development-only resources track their branch head, so they need no release.
+            if matches!(r.kind, Kind::Kora | Kind::Optional) && r.versions.is_empty() && !r.dev_only {
                 errs.push(format!("{}: kora/optional resource needs a release", r.id));
             }
             for d in &r.depends_on {
@@ -402,9 +419,9 @@ impl Catalog {
         self.resources.iter().filter(|r| r.group == group).collect()
     }
 
-    /// Everything except `internal` resources (what public installs may see).
-    pub fn public(&self) -> Vec<&Resource> {
-        self.resources.iter().filter(|r| !r.is_internal()).collect()
+    /// Resources a server of the given mode may see (`dev` = development server).
+    pub fn offered(&self, dev: bool) -> Vec<&Resource> {
+        self.resources.iter().filter(|r| r.offered_to(dev)).collect()
     }
 
     /// Resources sorted by install order; those without `order` come last in catalog order.
@@ -414,9 +431,9 @@ impl Catalog {
         v.into_iter().map(|(_, r)| r).collect()
     }
 
-    /// Public resources in install order.
-    pub fn public_install_order(&self) -> Vec<&Resource> {
-        self.install_order().into_iter().filter(|r| !r.is_internal()).collect()
+    /// Resources a server of the given mode may see, in install order.
+    pub fn offered_install_order(&self, dev: bool) -> Vec<&Resource> {
+        self.install_order().into_iter().filter(|r| r.offered_to(dev)).collect()
     }
 }
 
@@ -468,7 +485,7 @@ mod tests {
         assert_eq!(c.schema_version, 3);
         assert!(c.resources.iter().any(|r| r.res_type == Some(ResType::Compat)));
         assert!(c.resources.iter().any(|r| r.res_type == Some(ResType::Bridge) && r.group == Group::Bridges));
-        assert_eq!(c.section(Section::Bridges).len(), 4);
+        assert_eq!(c.section(Section::Bridges, false).len(), 4);
     }
 
     #[test]
@@ -524,7 +541,7 @@ mod tests {
         }
         assert!(c.validate().is_ok());
         assert_eq!(c.install_order()[0].id, c.resources[0].id);
-        assert!(c.public().iter().all(|r| r.kind != Kind::Internal));
+        assert!(c.offered(false).iter().all(|r| r.kind != Kind::Internal));
         assert!(!c.by_group(Group::Kora).is_empty());
     }
 
@@ -626,5 +643,23 @@ mod tests {
         assert!(c.creators.is_empty());
         assert!(c.resources.iter().all(|r| r.res_type.is_none() && !r.is_third_party()));
         assert!(c.resources.iter().all(|r| r.install_rel() == r.path));
+    }
+
+    #[test]
+    fn dev_only_resources_are_offered_to_development_servers_only() {
+        let json = r#"{"schemaVersion":3,"resources":[
+          {"id":"kora-x","repository":"https://github.com/o/x.git","path":"[kora]/x","group":"kora","kind":"optional","branch":"dev","devOnly":true},
+          {"id":"kora-y","repository":"https://github.com/o/y.git","path":"[kora]/y","group":"kora","kind":"optional","branch":"dev","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"0123456789012345678901234567890123456789"}],"latest":"1.0.0"}
+        ]}"#;
+        // A development-only resource tracks its branch, so it may have no release.
+        let c = Catalog::parse_validated(json).unwrap();
+        let ids = |v: Vec<&Resource>| v.iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+        assert!(c.find("kora-x").unwrap().dev_only);
+        assert_eq!(ids(c.offered(false)), ["kora-y"]);
+        assert_eq!(ids(c.offered(true)), ["kora-x", "kora-y"]);
+        assert_eq!(ids(c.offered_install_order(false)), ["kora-y"]);
+        // The same resource without the flag is public and needs a release like any optional one.
+        let public = json.replace(r#""devOnly":true"#, r#""devOnly":false"#);
+        assert!(Catalog::parse_validated(&public).is_err());
     }
 }

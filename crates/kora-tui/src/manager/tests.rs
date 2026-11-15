@@ -129,7 +129,14 @@ fn start_stop_restart_follow_the_live_state() {
     assert!(notice(&a).contains("'alpha' started"));
     assert!(screen_text(&a).contains("● running"));
     assert!(clickable(&a, AREA, Hit::Act(Action::Stop)) && !clickable(&a, AREA, Hit::Act(Action::Start)));
+    // restart asks first: "no" changes nothing
     click(&mut a, AREA, Hit::Act(Action::Restart));
+    assert!(screen_text(&a).contains("Restart 'alpha' now?"));
+    chr(&mut a, 'n');
+    assert_eq!(s.borrow().calls, ["Start alpha"], "declining must not restart");
+    // restart asks first: "yes" restarts
+    click(&mut a, AREA, Hit::Act(Action::Restart));
+    chr(&mut a, 'y');
     click(&mut a, AREA, Hit::Act(Action::Stop));
     assert_eq!(s.borrow().calls, ["Start alpha", "Restart alpha", "Stop alpha"]);
     assert!(screen_text(&a).contains("○ stopped"));
@@ -1031,4 +1038,78 @@ fn reload_keeps_the_selected_server() {
     a.reload();
     assert!(a.sel < a.rows.len());
     let _: PathBuf = a.current().unwrap().entry.dir.clone();
+}
+
+// ------------------------------------------------------------ ports
+
+#[test]
+fn ports_screen_saves_new_ports_and_says_what_to_do_next() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut a, s) = two(d.path());
+    chr(&mut a, 'm');
+    let t = screen_text(&a);
+    assert!(t.contains("Game port:") && t.contains("30120") && t.contains("40120"), "{t}");
+    // Game port field: replace 30120 with 31120.
+    for _ in 0..5 {
+        key(&mut a, KeyCode::Backspace);
+    }
+    typed(&mut a, "31120");
+    // Letters are ignored, digits are kept.
+    typed(&mut a, "x");
+    key(&mut a, KeyCode::Tab);
+    for _ in 0..5 {
+        key(&mut a, KeyCode::Backspace);
+    }
+    typed(&mut a, "41121");
+    key(&mut a, KeyCode::Enter);
+    assert!(s.borrow().calls.iter().any(|c| c == "ports alpha 31120 41121"), "{:?}", s.borrow().calls);
+    assert!(notice(&a).contains("game port 31120") && notice(&a).contains("txAdmin port 41121"), "{}", notice(&a));
+    assert!(screen_text(&a).contains("Firewall rules were not changed"), "the notes are shown");
+}
+
+#[test]
+fn ports_screen_refuses_bad_numbers_without_calling_the_backend() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut a, s) = two(d.path());
+    chr(&mut a, 'm');
+    for _ in 0..5 {
+        key(&mut a, KeyCode::Backspace);
+    }
+    typed(&mut a, "80"); // below 1024
+    key(&mut a, KeyCode::Enter);
+    assert!(notice(&a).contains("1024 to 65535"), "{}", notice(&a));
+    assert!(s.borrow().calls.iter().all(|c| !c.starts_with("ports")));
+    // Unchanged ports are not a change.
+    for _ in 0..5 {
+        key(&mut a, KeyCode::Backspace);
+    }
+    typed(&mut a, "30120");
+    key(&mut a, KeyCode::Enter);
+    assert!(notice(&a).contains("already the ports"), "{}", notice(&a));
+}
+
+#[test]
+fn a_running_server_cannot_change_ports() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut a, s) = two(d.path());
+    // The list caches each row's status when it loads, so set it on the row itself.
+    a.rows[0].status = Status::Running;
+    chr(&mut a, 'm');
+    assert!(!screen_text(&a).contains("Game port:"), "the screen does not open");
+    assert!(notice(&a).contains("Stop the server first"), "{}", notice(&a));
+}
+
+#[test]
+fn a_backend_error_is_shown_and_the_old_ports_stay() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut a, s) = two(d.path());
+    s.borrow_mut().ports_error = Some("port 31120 is in use".into());
+    chr(&mut a, 'm');
+    for _ in 0..5 {
+        key(&mut a, KeyCode::Backspace);
+    }
+    typed(&mut a, "31120");
+    key(&mut a, KeyCode::Enter);
+    assert!(notice(&a).contains("Couldn't change the ports: port 31120 is in use"), "{}", notice(&a));
+    assert_eq!(a.rows[0].entry.ports.game, 30120, "the list keeps the old ports");
 }

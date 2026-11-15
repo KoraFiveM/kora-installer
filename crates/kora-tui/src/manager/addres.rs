@@ -6,6 +6,7 @@ use kora_core::addresources::{self as add, AddOutcome, AddPlan};
 use kora_core::catalog::{Catalog, PickError, Picker, Section};
 use kora_core::feedback::PrPlan;
 use kora_core::installer::registry::ServerEntry;
+use kora_core::installer::Mode;
 
 use super::app::{Action, Job, Level};
 use super::input::TextInput;
@@ -89,20 +90,25 @@ impl AddResState {
         }
     }
 
+    /// Development servers also offer development-only resources.
+    pub fn dev(&self) -> bool {
+        self.entry.mode == Mode::Development
+    }
+
     fn picker(&self) -> Option<Picker<'_>> {
         let cat = self.cat.as_ref()?;
-        Picker::with_ids(cat, self.installed.clone(), &self.picked).ok()
+        Picker::with_ids(cat, self.installed.clone(), self.dev(), &self.picked).ok()
     }
 
     /// Lines of the section list (Sections stage): title, count and a final "review" row.
     pub fn section_rows(&self) -> Vec<RowView> {
         let Some(cat) = &self.cat else { return vec![] };
-        let mut v: Vec<RowView> = Section::ALL
+        let mut v: Vec<RowView> = Section::for_mode(self.dev())
             .iter()
             .map(|s| {
                 let (n, what) = match s {
-                    Section::Creators => (cat.creators_with_resources().len(), "creators"),
-                    _ => (cat.section(*s).len(), "available"),
+                    Section::Creators => (cat.creators_with_resources(self.dev()).len(), "creators"),
+                    _ => (cat.section(*s, self.dev()).len(), "available"),
                 };
                 RowView {
                     label: s.title().to_string(),
@@ -148,13 +154,13 @@ impl AddResState {
                 .collect()
         };
         match &self.view {
-            ListView::Section(s) => res_rows(cat.section(*s)),
-            ListView::Creator(c) => res_rows(cat.creator_resources(c)),
+            ListView::Section(s) => res_rows(cat.section(*s, self.dev())),
+            ListView::Creator(c) => res_rows(cat.creator_resources(c, self.dev())),
             ListView::CreatorIndex => cat
-                .creators_with_resources()
+                .creators_with_resources(self.dev())
                 .into_iter()
                 .map(|c| {
-                    let list = cat.creator_resources(&c.id);
+                    let list = cat.creator_resources(&c.id, self.dev());
                     let on = list.iter().filter(|r| p.is_checked(&r.id)).count();
                     RowView {
                         label: c.name.clone(),
@@ -241,7 +247,7 @@ impl AddResState {
         let Some(cat) = self.cat.as_ref() else {
             return Effect::None;
         };
-        let Ok(mut p) = Picker::with_ids(cat, self.installed.clone(), &self.picked) else {
+        let Ok(mut p) = Picker::with_ids(cat, self.installed.clone(), self.dev(), &self.picked) else {
             return Effect::None;
         };
         match p.toggle(&id) {
@@ -267,7 +273,7 @@ impl AddResState {
         let Some(cat) = self.cat.as_ref() else {
             return Effect::None;
         };
-        let Ok(mut p) = Picker::with_ids(cat, self.installed.clone(), &self.picked) else {
+        let Ok(mut p) = Picker::with_ids(cat, self.installed.clone(), self.dev(), &self.picked) else {
             return Effect::None;
         };
         let refs = || ids.iter().map(String::as_str);
@@ -302,11 +308,10 @@ impl AddResState {
     /// Enter on a row.
     pub fn open(&mut self) -> Effect {
         match self.stage {
-            AddResStage::Sections => match self.sel {
-                0 => self.enter(ListView::Section(Section::Compat)),
-                1 => self.enter(ListView::Section(Section::Bridges)),
-                2 => self.enter(ListView::CreatorIndex),
-                _ => return self.review(),
+            AddResStage::Sections => match Section::for_mode(self.dev()).get(self.sel) {
+                Some(Section::Creators) => self.enter(ListView::CreatorIndex),
+                Some(s) => self.enter(ListView::Section(*s)),
+                None => return self.review(),
             },
             AddResStage::Items => match (&self.view, self.item_rows().get(self.sel)) {
                 (ListView::CreatorIndex, Some(r)) => {
@@ -401,7 +406,7 @@ impl AddResState {
         let Some(cat) = self.cat.as_ref() else {
             return Effect::None;
         };
-        match Picker::with_ids(cat, self.installed.clone(), ids) {
+        match Picker::with_ids(cat, self.installed.clone(), self.dev(), ids) {
             Ok(p) => {
                 self.picked = p.picked_ids();
                 self.from_code = true;

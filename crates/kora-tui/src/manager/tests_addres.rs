@@ -22,7 +22,7 @@ fn catalog() -> Catalog {
         )
     };
     let json = format!(
-        r#"{{"schemaVersion":3,"creators":[{{"id":"acme","name":"Acme Scripts","url":"https://acme.example","description":"Nice scripts"}}],"resources":[{},{},{},{}]}}"#,
+        r#"{{"schemaVersion":3,"creators":[{{"id":"acme","name":"Acme Scripts","url":"https://acme.example","description":"Nice scripts"}}],"resources":[{},{},{},{},{}]}}"#,
         r("compat-a", r#","type":"compat""#, 1),
         r(
             "bridge-x",
@@ -35,6 +35,7 @@ fn catalog() -> Catalog {
             3
         ),
         r("acme-two", r#","type":"creator","creator":"acme""#, 4),
+        r("fft", r#","devOnly":true"#, 5),
     );
     Catalog::parse_validated(&json).unwrap()
 }
@@ -387,4 +388,30 @@ fn pr_problems_are_shown_and_nothing_is_opened() {
     assert!(notice(&a).contains("no commits"));
     assert!(matches!(&a.screen, Screen::Feedback(f) if f.stage == FbStage::Pick));
     assert!(!s.borrow().calls.iter().any(|c| c.starts_with("pr_open")));
+}
+
+#[test]
+fn development_servers_can_add_fft_from_a_development_section_production_cannot() {
+    let (mut a, _s, _d) = setup(Mode::Development);
+    open_add(&mut a);
+    chr(&mut a, 'b');
+    let t = screen_text(&a);
+    assert!(t.contains("Development") && t.contains("1 available"), "{t}");
+    // Compatibility, Bridges, Creators, Development: three downs to reach it.
+    for _ in 0..3 {
+        key(&mut a, KeyCode::Down);
+    }
+    key(&mut a, KeyCode::Enter);
+    assert!(screen_text(&a).contains("fft title"), "{}", screen_text(&a));
+    key(&mut a, KeyCode::Enter);
+    let Screen::AddRes(s) = &a.screen else {
+        panic!()
+    };
+    assert_eq!(s.picked, vec!["fft".to_string()]);
+
+    let (mut p, _s, _d) = setup(Mode::Production);
+    open_add(&mut p);
+    chr(&mut p, 'b');
+    let t = screen_text(&p);
+    assert!(!t.contains("Development") && !t.contains("fft"), "{t}");
 }

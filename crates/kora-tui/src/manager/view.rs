@@ -185,7 +185,8 @@ type Hints = &'static [(&'static str, &'static str)];
 
 fn help_for(app: &App) -> Hints {
     match &app.screen {
-        Screen::Main => &[("↑↓", "select"), ("s", "start"), ("x", "stop"), ("r", "restart"), ("t", "txAdmin"), ("o", "folder"), ("l", "logs"), ("e", "ensure"), ("u", "update"), ("v", "check"), ("n", "notify"), ("c", "schedule"), ("d", "delete"), ("a", "add"), ("q", "quit")],
+        Screen::Main => &[("↑↓", "select"), ("s", "start"), ("x", "stop"), ("r", "restart"), ("t", "txAdmin"), ("o", "folder"), ("l", "logs"), ("e", "ensure"), ("u", "update"), ("v", "check"), ("n", "notify"), ("c", "schedule"), ("m", "ports"), ("d", "delete"), ("a", "add"), ("q", "quit")],
+        Screen::ConfirmRestart => &[("y", "restart"), ("n", "cancel"), ("Esc", "back")],
         Screen::Console(_) => &[("Enter", "send"), ("↑↓", "earlier commands"), ("PgUp PgDn", "scroll"), ("F2", "turn on"), ("Esc", "back")],
         Screen::Logs(_) => &[("↑↓ PgUp PgDn", "scroll"), ("Tab", "next file"), ("c", "copy"), ("r", "reload"), ("Esc", "back")],
         Screen::Ensure(_) => &[("type", "a name"), ("↑↓", "pick"), ("Enter", "ensure"), ("Tab", "restart on/off"), ("Esc", "back")],
@@ -197,6 +198,7 @@ fn help_for(app: &App) -> Hints {
         Screen::Update(_) => &[("↑↓", "move"), ("Space", "tick"), ("a", "all"), ("Enter", "update"), ("r", "restart policy"), ("s", "snapshots"), ("Esc", "back")],
         Screen::Notify(_) => &[("Enter", "save"), ("F4", "paste from clipboard"), ("F2", "send test"), ("F3", "remove"), ("Esc", "back")],
         Screen::Schedule(_) => &[("↑↓", "field"), ("←→", "change"), ("Enter", "save"), ("F3", "remove"), ("Esc", "back")],
+        Screen::Ports(_) => &[("type", "a port number"), ("Tab", "switch field"), ("Enter", "save"), ("Esc", "back")],
         Screen::Add(_) => &[("↑↓", "pick"), ("Enter", "add"), ("p", "type a folder"), ("Esc", "back")],
         Screen::AddRes(s) => match s.stage {
             AddResStage::Menu => &[("c", "website code"), ("b", "browse the catalog"), ("Esc", "back")],
@@ -351,6 +353,7 @@ fn main(app: &App, body: Rect, b: &mut Built) {
             btn(Action::CheckUpdates, "Check for updates (v)", there),
             btn(Action::Notify, "Notifications (n)", true),
             btn(Action::Schedule, "Schedule (c)", true),
+            btn(Action::Ports, "Change ports (m)", there && !run),
             btn(Action::Delete, if r.managed { "Delete (d)" } else { "Remove from list (d)" }, true),
         ]);
     } else {
@@ -365,6 +368,14 @@ fn screen(app: &App, s: &Screen, body: Rect) -> (String, Page) {
     let name = app.current().map(|r| r.entry.name.clone()).unwrap_or_default();
     let title = match s {
         Screen::Main => String::new(),
+        Screen::ConfirmRestart => {
+            p.text(&format!("Restart '{name}' now?"), bold());
+            p.blank();
+            p.text("Players are disconnected while the server restarts. Nothing is changed on disk.", dim());
+            p.blank();
+            p.buttons(&[btn(Action::Yes, "Yes, restart (y)", true), btn(Action::No, "No, cancel (n)", true), back()]);
+            format!(" Restart - {name} ")
+        }
         Screen::Console(c) => {
             console_screen(&mut p, c);
             format!(" Live console - {name} ")
@@ -388,6 +399,10 @@ fn screen(app: &App, s: &Screen, body: Rect) -> (String, Page) {
         Screen::Notify(s) => {
             notify(&mut p, s);
             format!(" Notifications - {name} ")
+        }
+        Screen::Ports(s) => {
+            ports(&mut p, s);
+            format!(" Ports - {name} ")
         }
         Screen::Schedule(s) => {
             schedule(&mut p, s);
@@ -528,11 +543,11 @@ fn section_tabs(s: &AddResState) -> Line<'static> {
     use kora_core::catalog::pick::Section;
     let t = theme();
     let cur = match &s.view {
-        ListView::Section(sec) => Section::ALL.iter().position(|x| x == sec).unwrap_or(0),
+        ListView::Section(sec) => Section::for_mode(s.dev()).iter().position(|x| x == sec).unwrap_or(0),
         _ => 2,
     };
     let mut spans = vec![Span::raw(" ")];
-    for (i, sec) in Section::ALL.iter().enumerate() {
+    for (i, sec) in Section::for_mode(s.dev()).iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled(format!("  {}  ", t.glyphs.vbar), t.disabled()));
         }
@@ -932,6 +947,25 @@ fn notify(p: &mut Page, s: &NotifyState) {
         btn(Action::Remove, "Remove (F3)", has),
         back(),
     ]);
+}
+
+fn ports(p: &mut Page, s: &PortsState) {
+    p.text("Change the game port (players connect here) and the txAdmin port (control panel). Stop the server first.", dim());
+    p.blank();
+    p.text(&format!("Now: game {}, txAdmin {}", s.entry.ports.game, s.entry.ports.txadmin), theme().success());
+    p.blank();
+    let mark = |f: usize| if s.focus == f { "> " } else { "  " };
+    p.text(&format!("{}Game port:    {}", mark(0), s.game.text()), Style::default());
+    p.text(&format!("{}txAdmin port: {}", mark(1), s.txadmin.text()), Style::default());
+    p.text("Ports must be from 1024 to 65535 and different. Kora checks that they are free.", dim());
+    let w = p.w();
+    for n in &s.notes {
+        for l in wrap(n, w) {
+            p.line(Line::styled(l, dim()));
+        }
+    }
+    p.blank();
+    p.buttons(&[btn(Action::Save, "Save (Enter)", true), back()]);
 }
 
 fn schedule(p: &mut Page, s: &ScheduleState) {

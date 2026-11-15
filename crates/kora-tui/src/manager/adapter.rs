@@ -265,6 +265,14 @@ impl Backend for SystemBackend {
         schedule::remove(e).map_err(err)
     }
 
+    fn ports_set(&mut self, e: &ServerEntry, p: kora_core::installer::Ports) -> Res<Vec<String>> {
+        // Only a stopped server: changing the ports under a running process would leave it on the old ones.
+        if self.status(e) != Status::Stopped {
+            return Err("Stop the server first, then change its ports.".into());
+        }
+        kora_core::installer::change_ports::change_ports(&e.dir, &e.name, p, &SystemProber).map(|c| c.notes).map_err(err)
+    }
+
     fn schedule_elevation(&mut self, e: &ServerEntry, set: Option<&ScheduleConfig>) -> Option<Vec<String>> {
         if kora_core::elevate::is_elevated() {
             return None;

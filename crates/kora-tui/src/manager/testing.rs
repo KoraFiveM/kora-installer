@@ -58,6 +58,7 @@ pub struct Fake {
     pub issue_result: Option<Res<String>>,
     pub pr_plan: Option<Res<PrPlan>>,
     pub pr_result: Option<Res<String>>,
+    pub ports_error: Option<String>,
 }
 
 pub type Shared = Rc<RefCell<Fake>>;
@@ -156,6 +157,15 @@ impl Backend for FakeBackend {
             None => f.preview.clone().unwrap_or_else(|| Ok(UpdatePreview { resources: vec![], new_release: None })).map(|p| super::backend::badge_of(&p)),
         }
     }
+    fn ports_set(&mut self, e: &ServerEntry, p: kora_core::installer::Ports) -> Res<Vec<String>> {
+        let mut f = self.0.borrow_mut();
+        f.calls.push(format!("ports {} {} {}", e.name, p.game, p.txadmin));
+        match &f.ports_error {
+            Some(msg) => Err(msg.clone()),
+            None => Ok(vec!["Firewall rules were not changed.".into()]),
+        }
+    }
+
     fn schedule_elevation(&mut self, _e: &ServerEntry, _set: Option<&ScheduleConfig>) -> Option<Vec<String>> {
         self.0.borrow().elevation.clone()
     }
