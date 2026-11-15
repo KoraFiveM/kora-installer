@@ -24,7 +24,7 @@ $cfg = Get-Content "$srv\server.cfg" -Raw
 Assert-That ($cfg -match 'exec secrets\.cfg') 'server.cfg execs secrets.cfg'
 Assert-That ($cfg -match 'endpoint_add_tcp "0\.0\.0\.0:31120"') 'server.cfg uses the game port 31120'
 Assert-That ($cfg -notmatch [regex]::Escape($fakeKey)) 'server.cfg holds no license key'
-Assert-That ($cfg -match 'ensure kora_lib') 'server.cfg ensures kora_lib'
+Assert-That ($cfg -match 'ensure \[pre\]') 'server.cfg ensures the [pre] folder (folders, not single resources)'
 $sec = Get-Content "$srv\secrets.cfg" -Raw
 Assert-That ($sec -match [regex]::Escape($fakeKey)) 'secrets.cfg holds the license key'
 $leak = Get-ChildItem $srv -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\(resources|artifacts)\\' -and $_.Name -ne 'secrets.cfg' } | Select-String -SimpleMatch $fakeKey -List
