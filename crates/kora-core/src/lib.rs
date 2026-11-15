@@ -15,6 +15,7 @@ pub mod service;
 pub mod site;
 pub mod space;
 pub mod steps;
+pub mod sysexe;
 pub mod txadmin;
 pub mod update;
 pub mod installer;

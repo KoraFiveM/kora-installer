@@ -196,9 +196,9 @@ pub fn relaunch_elevated(args: &[OsString]) -> Result<(), ElevateError> {
 
 #[cfg(windows)]
 fn relaunch_exe(exe: &std::path::Path, args: &[OsString]) -> Result<(), ElevateError> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     let script = powershell_script(&exe.to_string_lossy(), args);
-    let out = Command::new("powershell")
+    let out = crate::sysexe::command("powershell")
         .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
         .env(RELAUNCHED_ENV, "1")
         .stdin(Stdio::null())
@@ -210,7 +210,7 @@ fn relaunch_exe(exe: &std::path::Path, args: &[OsString]) -> Result<(), ElevateE
 #[cfg(unix)]
 fn relaunch_exe(exe: &std::path::Path, args: &[OsString]) -> Result<(), ElevateError> {
     use std::os::unix::process::CommandExt;
-    let Some(sudo) = find_in_path("sudo") else { return Err(ElevateError::Unsupported) };
+    let Some(sudo) = crate::sysexe::unix_sudo() else { return Err(ElevateError::Unsupported) };
     let keep: Vec<String> = SUDO_KEEP_ENV.iter().filter(|k| std::env::var_os(k).is_some()).map(|k| k.to_string()).collect();
     let err = std::process::Command::new(sudo).args(sudo_args(exe.as_os_str(), args, &keep)).env(RELAUNCHED_ENV, "1").exec();
     Err(ElevateError::Failed(err.to_string()))
@@ -219,11 +219,6 @@ fn relaunch_exe(exe: &std::path::Path, args: &[OsString]) -> Result<(), ElevateE
 #[cfg(not(any(windows, unix)))]
 fn relaunch_exe(_exe: &std::path::Path, _args: &[OsString]) -> Result<(), ElevateError> {
     Err(ElevateError::Unsupported)
-}
-
-#[cfg(unix)]
-fn find_in_path(name: &str) -> Option<std::path::PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -401,7 +396,7 @@ pub fn declined_message() -> &'static str {
 /// was declined, is unavailable, or `--no-elevate` was given).
 pub fn not_elevated_db_message(version: &str, folder: &str) -> String {
     format!(
-        "No MariaDB/MySQL database server was found, and setting one up needs administrator permission (it creates a Windows service), which Kora did not get. Run the install again and choose Yes when Windows asks for permission (don't use --no-elevate). Kora will then download the official MariaDB {version} from archive.mariadb.org, verify its checksum and put it in {folder}. Or install MariaDB yourself and use --db existing, or use --db skip."
+        "No MariaDB/MySQL database server was found, and setting one up needs administrator permission (it creates a Windows service), which Kora did not get. Run the install again and choose Yes when Windows asks for permission (don't use --no-elevate). Kora will then download the official MariaDB {version} from MariaDB's official download mirrors, verify its checksum and put it in {folder}. Or install MariaDB yourself and use --db existing, or use --db skip."
     )
 }
 

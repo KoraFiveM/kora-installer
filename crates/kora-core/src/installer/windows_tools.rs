@@ -111,6 +111,24 @@ pub fn install_command(tool: Tool, file: &Path) -> (String, Vec<String>) {
     }
 }
 
+/// A fresh folder only Administrators and SYSTEM can write (`%ProgramData%\\Kora\\tmp\\<random>`) for the installer
+/// we are about to verify and then run elevated. The user's `%TEMP%` would let any program of that user swap the
+/// file between the hash check and the run.
+pub fn private_tmp_dir() -> Result<std::path::PathBuf> {
+    let pd = std::env::var_os("ProgramData").filter(|p| !p.is_empty()).ok_or_else(|| InstallError("cannot find %ProgramData% for a private download folder".into()))?;
+    let mut rnd = [0u8; 8];
+    getrandom::fill(&mut rnd).map_err(|e| InstallError(format!("no random numbers for a private folder: {e}")))?;
+    let parent = std::path::PathBuf::from(pd).join("Kora").join("tmp");
+    std::fs::create_dir_all(&parent).map_err(|e| InstallError(format!("cannot create {}: {e}", parent.display())))?;
+    let dir = parent.join(hex::encode(rnd));
+    std::fs::create_dir(&dir).map_err(|e| InstallError(format!("cannot create {}: {e}", dir.display())))?;
+    if let Err(e) = super::windows_db::restrict(&dir, true, "restricting the download folder to administrators") {
+        let _ = std::fs::remove_dir(&dir);
+        return Err(e);
+    }
+    Ok(dir)
+}
+
 /// Download, verify and run the installer for `tool`. Needs administrator rights (the caller checks).
 pub fn install(tool: Tool, http: &dyn ArtifactSource, tmp: &Path, say: &mut dyn FnMut(&str)) -> Result<()> {
     say(&format!("Looking up the latest {} release on GitHub", tool.label()));
@@ -127,7 +145,7 @@ pub fn install(tool: Tool, http: &dyn ArtifactSource, tmp: &Path, say: &mut dyn 
     std::fs::create_dir_all(tmp).map_err(|e| InstallError(format!("cannot create {}: {e}", tmp.display())))?;
     let file = tmp.join(&d.name);
     say(&format!("Downloading {}", d.name));
-    let mut out = std::fs::File::create(&file).map_err(|e| InstallError(format!("cannot write {}: {e}", file.display())))?;
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&file).map_err(|e| InstallError(format!("cannot write {}: {e}", file.display())))?;
     http.download(&d.url, &mut out).map_err(|e| InstallError(format!("could not download {}: {e}", d.url)))?;
     drop(out);
     let actual = super::super::service::binary::file_sha256(&file).map_err(|e| InstallError(format!("cannot read {}: {e}", file.display())))?;
@@ -137,7 +155,7 @@ pub fn install(tool: Tool, http: &dyn ArtifactSource, tmp: &Path, say: &mut dyn 
     }
     say(&format!("Installing {} (Windows may ask you to confirm)", tool.label()));
     let (prog, args) = install_command(tool, &file);
-    let status = std::process::Command::new(&prog).args(&args).status().map_err(|e| InstallError(format!("could not run the {} installer: {e}", tool.label())))?;
+    let status = crate::sysexe::command(&prog).args(&args).status().map_err(|e| InstallError(format!("could not run the {} installer: {e}", tool.label())))?;
     let _ = std::fs::remove_file(&file);
     // 0 = ok, 3010 = ok but a restart is pending (msiexec).
     if matches!(status.code(), Some(0) | Some(3010)) {

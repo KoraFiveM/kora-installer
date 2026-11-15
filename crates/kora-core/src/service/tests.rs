@@ -504,3 +504,23 @@ fn other_files_stay_utf8() {
     assert_eq!(super::file_bytes("[Unit]\nDescription=x\n"), b"[Unit]\nDescription=x\n");
     assert_eq!(super::file_bytes("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<a/>"), "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<a/>".as_bytes());
 }
+
+#[test]
+fn a_folder_with_spaces_cannot_widen_the_units_write_access() {
+    // ReadWritePaths= is space separated: "/srv/a /etc" would make /etc writable for the service.
+    for bad in ["/srv/a /etc", "/srv/a\t/etc", "/srv/%h", "/srv/a\"b", "/srv/$x"] {
+        let mut s = server();
+        s.dir = bad.into();
+        assert!(systemd_unit(&s).is_err(), "{bad}");
+    }
+    let mut s = server();
+    s.env_file = Some("/srv/x/env /etc/shadow".into());
+    assert!(systemd_unit(&s).is_err());
+}
+
+#[test]
+fn a_quote_in_the_folder_cannot_add_arguments_to_the_windows_service_command() {
+    let mut s = server();
+    s.dir = "C:\\srv\" --evil \"x".into();
+    assert!(install_plan(&s, Platform::Windows).is_err());
+}

@@ -497,7 +497,7 @@ mod tests {
     }
 
     fn rec() -> super::super::windows_db::Record {
-        super::super::windows_db::Record { service: "KoraMariaDB_ab12".into(), version: "11.4.14".into(), port: 3307, root: PathBuf::from("C:\\PD\\Kora\\mariadb\\11.4.14"), client: PathBuf::from("c.exe") }
+        super::super::windows_db::Record { service: "KoraMariaDB_ab12".into(), version: "11.4.13".into(), port: 3307, root: PathBuf::from("C:\\PD\\Kora\\mariadb\\11.4.13"), client: PathBuf::from("c.exe") }
     }
 
     #[test]

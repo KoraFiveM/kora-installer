@@ -5,6 +5,9 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- MariaDB downloads now use the official mirror network (about 300x faster than archive.mariadb.org at its slowest) and are verified against a pinned SHA-256. Kora installs MariaDB 11.4.13 on Windows. The download shows progress and speed, resumes a broken connection, gives up on a source that sends nothing for 30 seconds and falls back to archive.mariadb.org; a file that does not match the pinned checksum is deleted and never installed.
+
 ## [0.2.1] - 2026-11-14
 
 ### Added

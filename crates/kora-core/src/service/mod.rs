@@ -100,7 +100,7 @@ pub struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn run(&self, program: &str, args: &[String]) -> io::Result<CommandOutput> {
-        let out = std::process::Command::new(program).args(args).output()?;
+        let out = crate::sysexe::command(program).args(args).output()?;
         Ok(CommandOutput {
             code: out.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -138,7 +138,14 @@ impl CommandRunner for SystemRunner {
         }
         // Copy next to the target and rename: a running copy of the old file is never half-written.
         let tmp = d.with_extension("kora-new");
+        let _ = std::fs::remove_file(&tmp);
         std::fs::copy(src, &tmp)?;
+        // `<root>/<version>-<sha12>/kora`: the copy must be the program the folder name promises, not whatever
+        // the source file became after it was hashed (a user-writable Downloads folder can be raced).
+        if let Err(e) = binary::verify_pinned_copy(d, &tmp) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         #[cfg(unix)]
         if let Some(m) = mode {
             use std::os::unix::fs::PermissionsExt;
@@ -348,7 +355,7 @@ impl ManagedServer {
                 "server name must be 1-48 characters: lowercase letters, digits, '-' or '_'".into(),
             ));
         }
-        if self.dir.is_empty() || bad_chars(&self.dir) {
+        if self.dir.is_empty() || bad_chars(&self.dir) || self.dir.contains('"') {
             return Err(ServiceError::Invalid("server folder is empty or has control characters".into()));
         }
         if self.start_command.is_empty() || self.start_command.iter().any(|a| bad_chars(a)) {
@@ -420,6 +427,13 @@ pub fn systemd_unit(server: &ManagedServer) -> ServiceResult<String> {
     let exec = server.start_command.iter().map(|a| systemd_quote(a)).collect::<Vec<_>>().join(" ");
     // PrivateTmp gives the service its own empty /tmp: a server folder under /tmp or /var/tmp would vanish.
     let dir = server.dir.as_str();
+    // `ReadWritePaths=` is a space separated list and `%` starts a specifier: a folder like "/srv/a /etc" would
+    // silently make /etc writable for the service. Refuse instead of guessing at systemd's escaping.
+    for (what, v) in [("server folder", dir), ("env file", server.env_file_path().as_str())] {
+        if v.contains(|c: char| c.is_whitespace() || matches!(c, '%' | '"' | '\\' | '$' | ';')) {
+            return Err(ServiceError::Invalid(format!("the {what} path ({v}) contains a space or a special character that a systemd unit cannot hold safely; use a path such as /srv/kora/<name>")));
+        }
+    }
     let under_tmp = ["/tmp", "/var/tmp"].iter().any(|t| dir == *t || dir.starts_with(&format!("{t}/")));
     let private_tmp = if under_tmp { "false" } else { "true" };
     Ok(format!(
