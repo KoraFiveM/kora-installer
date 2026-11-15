@@ -5,42 +5,50 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-15
+
 ### Added
-- `kora manager`: a full-screen manager for every registered server: start/stop/restart, open txAdmin or the folder, logs, ensure a resource, delete, add an existing server, and "Install a new server". Bare `kora` in a terminal opens it when at least one server is registered, and the install wizard otherwise.
-- Manager > Update: a preview table (resource, from -> to, commits behind, needs restart, Clean/Dirty/Diverged/Up to date) with the changelog of the highlighted resource, tick resources or tick all, a restart choice (none / ensure / full / when quiet), live per-resource progress, the snapshot id, [ Roll back ] after a failed update and a list of saved snapshots to roll back to.
-- Manager > Notifications: set, test and remove the Discord webhook; only the redacted address is ever shown. Manager > Schedule: see the schedule in plain words, change preset/time/day, choose "as you" or "System" (with the tradeoff explained), remove it; asks for administrator permission when needed.
-- Update badges in the server list (`<server>/.kora/update-status.json`) and a [ Check for updates ] action (a full preview; the core writes the file).
-- Manual update flow (`kora update <server> --preview | --resource <id> | --all | --rollback <id>`): preview what changes, a snapshot before every apply, rollback, production servers move to the catalog's pinned release commits. Discord notifications (`kora webhook set|test|show|remove`) for update reports. `kora schedule` (see 0.2.1).
-- Every `kora update --auto` run, every full manual `--preview` and every full `--all` apply writes `<server>/.kora/update-status.json` (`{"checked_at": RFC3339 UTC, "updates": n waiting, "attention": n needing a person, "new_release": string|null}`, written atomically) so the manager can show badges.
-- Applying now reports each resource as it happens (the engine streams events: snapshot saved, resource updating, updated, rolling back, checking the server) instead of only before/after.
+- Manual update flow: `kora update <server>` shows what would change and asks before touching anything. Development servers fast-forward clean forks only; production servers move to pinned commits. A snapshot is taken first and an update that fails is rolled back automatically. Flags: `--resource <id>` (repeatable) or `--all`, `--preview`, `--yes`/`-y`, `--restart none|ensure|full|when-quiet` (default `when-quiet`), `--rollback <snapshot>`, `--list-snapshots`. `--auto` (what the scheduler runs) is unchanged and cannot be combined with the others. Newer Kora releases are detected as well.
+- Discord notifications for update reports: `kora webhook set <server> [<url> | --stdin] [--test]`, `kora webhook test|show|remove <server>`. The webhook token is hidden in `show`; `--stdin` or `$KORA_DISCORD_WEBHOOK` keep it out of shell history. Reports are sent after automatic updates (`update --auto`).
+- Configurable update schedule: `kora schedule show|set|off <server>`; `set` takes `--daily HH:MM` or `--weekly DAY HH:MM`, and `--as-user` (default) or `--as-system`. Stored in `<server>/.kora/schedule.json`. Development servers default to daily 04:00.
+- The Kora app: the installer also installs `kora` on the machine so you can reopen it later. Windows: `%ProgramFiles%\Kora\kora.exe`, on the machine PATH, a "Kora" Start Menu shortcut (and optional Desktop shortcut) that asks for administrator permission, an "Apps & features" entry, and the Kora fox as the `kora.exe` icon. Linux: `/opt/kora/bin/kora`, a `/usr/local/bin/kora` command and a desktop launcher. `kora app install|status|uninstall` (`install` takes `--yes`, `--no-desktop-shortcut`, `--force`, `--dry-run`), `kora uninstall --app`, and `--no-app` / `--no-desktop-shortcut` on `kora install`. Removing the app never touches servers or databases.
+- Real Linux end-to-end smoke tests in CI (basics, production install, service install, automatic update, uninstall), next to the Windows smoke tests, which now also cover the app install and run on pull requests.
+- Dependabot for Cargo and GitHub Actions (weekly, grouped); supply-chain checks in CI (`deny.toml`).
+- `kora self-update [--check] [--yes] [--version vX.Y.Z]`: updates Kora itself. Picks the newest release (pre-releases included), never downgrades unless you pass `--version`, verifies the SHA-256 before replacing anything and keeps a `.old` copy for rollback. A one-line "Kora vX is available" notice is shown in interactive terminals (checked at most once a day; off in CI and with `KORA_NO_UPDATE_CHECK=1`).
+- `kora manager`: a screen for all your servers (list, details, start/stop, logs, update, webhook and schedule screens, add or adopt, delete). A bare `kora` opens it when servers exist and the install wizard otherwise.
 
 ### Changed
-- `kora update --auto` exits **3** when something needs attention (dirty or diverged fork, SQL migration to run), like the manual flow; **1** still means failed or rolled back, 0 means fine. Update any script that treated every non-zero as "rolled back".
-- A manual `apply` now sends the same Discord notification as the automatic update.
+- Windows now installs MariaDB 11.4.13 from the official mirror network (about 300x faster than archive.mariadb.org at its slowest) and verifies a pinned SHA-256. The download shows progress and speed, resumes a broken connection, gives up on a source that is silent for 30 seconds and falls back to archive.mariadb.org. A file that does not match the pinned checksum is deleted and never installed.
+- The automatic update runs as the person who installed (a "run only when logged on" task on Windows with no stored password; the installing user's git credentials on Linux) instead of SYSTEM, so private forks can be fetched. `--as-system` keeps the old behaviour. Schedules made by older versions are read back as SYSTEM. Linux timers add up to 10 minutes of random delay and catch up after downtime.
+- README rewritten; added CONTRIBUTING, SECURITY, Code of Conduct, issue/PR templates and CODEOWNERS. CI cancels superseded runs.
 
-### Known limitation
-- `--restart ensure` applies the files and does **not** restart or live-`ensure` anything: txAdmin 8.1.2 and FXServer expose no way to `ensure <resource>` on a running server without credentials (txAdmin's API and live console need a signed-in admin; rcon is off unless the owner sets `rcon_password`), and Kora does not store or reuse the txAdmin password. The apply output says so plainly: restart the server, or run `ensure <resource>` in txAdmin's live console, to load the new files.
+### Security
+Fixes from an internal security audit of 0.2.1 (no high-severity findings):
+- Downloads follow at most 5 redirects and every hop must be HTTPS (previously a redirect could drop to plain http). A host such as `localhost.evil.example` no longer passes the local-testing exception. Requests time out after 1 hour.
+- The Git/GitHub CLI installer is no longer downloaded to a predictable, user-writable temp folder and then run elevated; it now uses a private folder under `%ProgramData%\Kora\tmp` limited to Administrators and SYSTEM.
+- On Windows, system tools (`icacls`, `sc.exe`, `netsh`, `powershell`, `git` and others) are now resolved from `System32` / PATH instead of the folder containing `kora.exe`, so a file planted in Downloads can no longer run with administrator rights. `sudo` is only taken from system folders.
+- systemd unit paths are validated: server folders containing spaces or `% " \ $ ;` are refused (a folder such as `/srv/a /etc` could have made `/etc` writable to the service). Windows service paths reject `"`.
+- The copy of `kora` that the service runs is re-hashed against the hash in its folder name before it is put in place; a swapped file is deleted and the install stops.
+- `--license-key` is moved to the `CFX_LICENSE_KEY` environment variable for the elevated copy and removed from the relaunch command line, and Kora warns that a key on the command line is visible in process lists. Prefer the environment variable or the prompt.
+- The MariaDB zip extractor now enforces its size limit while copying, not afterwards.
+- Known and not fixed: the MariaDB root password is briefly in the arguments of `mariadb-install-db.exe` (administrators only); the MariaDB checksum list is not independent of the download host (now mitigated by the pinned 11.4.13 hash); GitHub Actions are pinned by tag, not commit; `KORA_*` environment overrides are honoured when elevated.
 
-### Changed
-- MariaDB downloads now use the official mirror network (about 300x faster than archive.mariadb.org at its slowest) and are verified against a pinned SHA-256. Kora installs MariaDB 11.4.13 on Windows. The download shows progress and speed, resumes a broken connection, gives up on a source that sends nothing for 30 seconds and falls back to archive.mariadb.org; a file that does not match the pinned checksum is deleted and never installed.
+### Fixed
+- The Windows MariaDB download no longer crawls or stalls: it shows progress, resumes, and falls back to a second source.
+- The automatic update no longer fails on forks of private repositories because it ran as SYSTEM (see Changed).
 
 ## [0.2.1] - 2026-11-14
 
 ### Added
 - The installer now starts your server when it finishes (final step "Start your server"): FXServer runs in the background (or through its service), Kora waits until txAdmin answers and tells you plainly if it does not come up (rejected licence key, port clash, crash, with the last log lines). The final screen has [ Open txAdmin ], [ Copy connect address ], [ Copy password ], [ Open folder ] and [ Stop server ] (or [ Start server ] when it is not running). `kora install --start` / `--no-start` for scripts (off by default there); `kora start`/`stop` work without a service; `kora status` shows the running state and port states.
 - Development mode: the installer signs you in to GitHub (one-time code, copy and open buttons) and lets you pick where your forks go - your own account or one of your organisations (greyed out with the reason when one can't be used) - or create a new organisation. Your last choice is remembered.
-- `kora schedule show|set|off <server> [--daily HH:MM | --weekly DAY HH:MM] [--as-user|--as-system]`: change when a development server updates itself, after install. The setting is stored in `<server>/.kora/schedule.json`.
-- The Kora app: the installer now also installs `kora` on the machine so you can open it again later. Windows: `%ProgramFiles%\Kora\kora.exe` on the machine PATH, a "Kora" Start Menu shortcut (and an optional Desktop shortcut) that always asks for administrator permission, and an "Apps & features" entry. Linux: `/opt/kora/bin/kora` plus a `/usr/local/bin/kora` command and, in desktop sessions, a launcher. New `kora app install|status|uninstall`, `kora uninstall --app`, and `--no-app` / `--no-desktop-shortcut` on `kora install`. Removing the app never touches servers or databases.
-- A bare `kora` opens the manager when servers exist and the install wizard otherwise.
-- The Kora fox is now the `kora.exe` icon.
 
 ### Fixed
-- The automatic update no longer runs as SYSTEM by default (SYSTEM has no GitHub sign-in, so forks of private repositories could not be fetched). It now runs as the person who installed: on Windows as a "run only when logged on" task (no password stored; a missed run happens at the next login), on Linux with the installing user's git credentials when they own the folder. SYSTEM stays available with `--as-system`. Schedules made by older versions are read back as SYSTEM. Timers now add up to 10 minutes of random delay and catch up after downtime.
 
 ### Changed
 - The generated txAdmin password is no longer printed in the install notes or log; it is in `secrets/txadmin-admin.txt` and shown on the final screen.
-- `kora status`/`start`/`stop` no longer treat a server without a systemd service as having a stopped one.
 - Kora now asks for administrator permission itself (Windows UAC prompt, or `sudo`) instead of telling you to "Run as administrator". On Windows, interactive commands (`kora`, `install`, `delete`, `uninstall`, `start`/`stop`/`restart`, `update`) reopen themselves elevated; `--version`, `--help`, `status`, dry runs and non-interactive use stay unelevated. `--no-elevate` turns this off.
+- `kora status`/`start`/`stop` no longer treat a server without a systemd service as having a stopped one.
 
 ## [0.2.0] - 2026-11-14
 
