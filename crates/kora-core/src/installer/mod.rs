@@ -15,6 +15,8 @@
 pub mod gitops;
 pub mod host;
 pub mod http;
+pub mod layout;
+pub mod pinned;
 pub mod registry;
 pub mod saved;
 mod steps;
@@ -140,9 +142,10 @@ pub fn repo_slug(url: &str) -> String {
     url.trim_start_matches("https://github.com/").trim_end_matches(".git").to_string()
 }
 
-/// Folder/resource name used in `ensure` lines (last path segment).
+/// Folder/resource name of a resource (last path segment of where it is installed).
 pub fn resource_name(r: &Resource) -> &str {
-    r.path.rsplit('/').next().unwrap_or(&r.path)
+    let p = r.path.as_str();
+    p.rsplit('/').next().unwrap_or(p)
 }
 
 use catalog::normalize_id as norm_id;
@@ -152,7 +155,8 @@ use catalog::normalize_id as norm_id;
 pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection) -> Result<Vec<&'a Resource>> {
     let ordered = cat.install_order();
     let seeds: Vec<String> = match sel {
-        ResourceSelection::All => ordered.iter().filter(|r| matches!(r.kind, Kind::Kora | Kind::Dependency)).map(|r| r.id.clone()).collect(),
+        // Compat / bridge / creator resources are never selected by default (only through dependencies).
+        ResourceSelection::All => ordered.iter().filter(|r| r.res_type.is_none() && matches!(r.kind, Kind::Kora | Kind::Dependency)).map(|r| r.id.clone()).collect(),
         ResourceSelection::Only(ids) => {
             for w in ids.iter().map(|i| norm_id(i)) {
                 match cat.find_normalized(&w) {
@@ -164,7 +168,7 @@ pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection) -> Result
             // Dependencies + core (pre group) are always part of a custom selection.
             ids.iter()
                 .cloned()
-                .chain(ordered.iter().filter(|r| !r.is_internal() && (r.kind == Kind::Dependency || r.group == catalog::Group::Pre)).map(|r| r.id.clone()))
+                .chain(ordered.iter().filter(|r| !r.is_internal() && r.res_type.is_none() && (r.kind == Kind::Dependency || r.group == catalog::Group::Pre)).map(|r| r.id.clone()))
                 .collect()
         }
     };
@@ -565,7 +569,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
         Ok(x) => x,
         Err(e) => {
             notes.push(format!("Catalog could not be loaded ({e}); resource list unavailable."));
-            (Catalog { schema_version: 2, resources: vec![] }, None)
+            (Catalog { schema_version: 3, resources: vec![], creators: vec![] }, None)
         }
     };
     notes.extend(cnote);
@@ -814,6 +818,55 @@ mod tests {
         let mut cat = tiny_catalog("");
         cat.resources[2].depends_on = vec!["kora-lib".into()];
         assert_eq!(select_resources(&cat, &ResourceSelection::Only(vec![])).unwrap().len(), 3);
+    }
+
+    fn v3_catalog() -> Catalog {
+        let rel = r#""latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]"#;
+        let json = format!(
+            r#"{{"schemaVersion":3,"creators":[{{"id":"acme","name":"Acme"}}],"resources":[
+            {{"id":"kora-lib","repository":"https://github.com/o/lib.git","path":"[kora]/lib","group":"pre","kind":"kora","branch":"dev","order":1,{rel},"dependsOn":["compat-a"]}},
+            {{"id":"kora-x","repository":"https://github.com/o/x.git","path":"[kora]/x","group":"kora","kind":"kora","branch":"dev","order":2,{rel}}},
+            {{"id":"compat-a","repository":"https://github.com/o/c.git","path":"a","group":"compat","kind":"dependency","branch":"main","order":3,"type":"compat",{rel}}},
+            {{"id":"compat-b","repository":"https://github.com/o/cb.git","path":"b","group":"compat","kind":"dependency","branch":"main","order":4,"type":"compat",{rel}}},
+            {{"id":"bridge-q","repository":"https://github.com/o/q.git","path":"q","group":"other","kind":"optional","branch":"main","order":5,"type":"bridge",{rel},"dependsOn":["compat-b"]}},
+            {{"id":"acme-r","repository":"https://github.com/o/r.git","path":"r","group":"other","kind":"optional","branch":"main","order":6,"type":"creator","creator":"acme",{rel},"dependsOn":["bridge-q"]}}
+            ]}}"#
+        );
+        Catalog::parse_validated(&json).unwrap()
+    }
+
+    #[test]
+    fn typed_resources_are_never_default_selected_but_dependencies_come_along() {
+        let cat = v3_catalog();
+        let ids = |sel: &ResourceSelection| -> Vec<String> { select_resources(&cat, sel).unwrap().iter().map(|r| r.id.clone()).collect() };
+        // kora-lib needs compat-a (a dependency by dependsOn); compat-b, bridge-q, acme-r are not selected
+        assert_eq!(ids(&ResourceSelection::All), ["kora-lib", "kora-x", "compat-a"]);
+        assert_eq!(ids(&ResourceSelection::Only(vec![])), ["kora-lib", "compat-a"]);
+        // picking a creator resource pulls the bridge and its compat transitively
+        assert_eq!(ids(&ResourceSelection::Only(vec!["acme-r".into()])), ["kora-lib", "compat-a", "compat-b", "bridge-q", "acme-r"]);
+    }
+
+    #[test]
+    fn selection_folders_and_ensure_lines_for_a_new_install() {
+        let cat = v3_catalog();
+        let sel = select_resources(&cat, &ResourceSelection::Only(vec!["acme-r".into()])).unwrap();
+        let rels: Vec<String> = sel.iter().map(|r| r.install_rel()).collect();
+        assert_eq!(rels, ["[kora]/lib", "[compat]/a", "[compat]/b", "[bridges]/q", "[creators]/[acme]/r"]);
+        let ensure = layout::ensure_for_new(rels.iter().map(String::as_str));
+        // [cfx-default] holds nothing here, so it is not ensured
+        assert_eq!(ensure, ["[compat]", "[kora]", "[bridges]", "[creators]", "[addons]", "[streamedassets]"]);
+    }
+
+    #[test]
+    fn only_kora_selection_does_not_ensure_empty_compat_bridges_creators() {
+        let cat = v3_catalog();
+        let sel = select_resources(&cat, &ResourceSelection::Only(vec![])).unwrap();
+        // kora-lib's dependency compat-a comes along, so [compat] is populated; bridges/creators are not
+        let rels: Vec<String> = sel.iter().map(|r| r.install_rel()).collect();
+        let ensure = layout::ensure_for_new(rels.iter().map(String::as_str));
+        assert_eq!(ensure, ["[compat]", "[kora]", "[addons]", "[streamedassets]"]);
+        let only_kora = layout::ensure_for_new(["[kora]/lib"]);
+        assert_eq!(only_kora, ["[kora]", "[addons]", "[streamedassets]"]);
     }
 
     #[test]

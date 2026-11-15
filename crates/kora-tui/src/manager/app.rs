@@ -5,9 +5,11 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use kora_core::installer::registry::{self, ServerEntry};
+use kora_core::installer::Mode;
 use kora_core::service::ControlAction;
 use ratatui::layout::{Position, Rect};
 
+use super::addres::{AddResStage, AddResState, Effect, FbKind, FbStage, FeedbackState};
 use super::adopt::{self, Candidate};
 use kora_core::notify::{self, NotifyConfig};
 use kora_core::service::{self as schedule, Preset, RunAs, ScheduleConfig};
@@ -86,6 +88,9 @@ pub enum Exit {
     Elevate(Vec<String>),
     /// The user asked to install a new server: run the install wizard, then come back.
     InstallNew,
+    /// GitHub sign-in is needed (for issues, pull requests or forking): run gh's login with the
+    /// terminal handed over, then come back.
+    GithubLogin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +164,14 @@ pub enum Action {
     Retry,
     Up,
     Down,
+    AddResources,
+    ReportIssue,
+    OpenPr,
+    Toggle,
+    Browse,
+    UseCode,
+    NextField,
+    Install,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -382,6 +395,8 @@ pub enum Screen {
     Notify(Box<NotifyState>),
     Schedule(Box<ScheduleState>),
     Add(Box<AddState>),
+    AddRes(Box<AddResState>),
+    Feedback(Box<FeedbackState>),
 }
 
 /// Slow work, run after the "working..." text has been drawn.
@@ -399,6 +414,12 @@ pub enum Job {
     NotifyTest,
     CheckUpdates,
     Snapshots,
+    AddLoad,
+    AddRedeem,
+    AddInstall,
+    IssueSend,
+    PrPlan,
+    PrOpen,
 }
 
 /// `ControlAction` without needing `Eq` on it.
@@ -440,6 +461,12 @@ impl Job {
             Job::NotifyTest => "Sending a test message...".into(),
             Job::CheckUpdates => "Checking for updates...".into(),
             Job::Snapshots => "Reading the saved snapshots...".into(),
+            Job::AddLoad => "Loading the resource catalog...".into(),
+            Job::AddRedeem => "Checking your code...".into(),
+            Job::AddInstall => "Adding the resources... (each one is downloaded; this can take a few minutes)".into(),
+            Job::IssueSend => "Sending the report to GitHub...".into(),
+            Job::PrPlan => "Checking your fork...".into(),
+            Job::PrOpen => "Pushing your branch and opening the pull request...".into(),
         }
     }
 }
@@ -541,6 +568,8 @@ impl App {
             Screen::Notify(s) => notify_key(s, k),
             Screen::Schedule(s) => schedule_key(s, k),
             Screen::Add(s) => add_key(s, k),
+            Screen::AddRes(s) => s.key(k),
+            Screen::Feedback(s) => s.key(k),
         };
         if let Some(a) = a {
             self.act(a);
@@ -561,6 +590,8 @@ impl App {
             Screen::Console(s) => Some(s.input.paste(text)),
             Screen::Schedule(s) if s.focus == 1 => Some(s.time.paste(text)),
             Screen::Add(s) if s.stage == AddStage::Path => Some(s.input.paste(text)),
+            Screen::AddRes(s) if s.stage == AddResStage::Code => Some(s.code.paste(text)),
+            Screen::Feedback(s) if s.stage == FbStage::Compose => Some(if s.focus == 0 { s.title.paste(text) } else { s.body.paste(text) }),
             _ => None,
         };
         if cut == Some(true) {
@@ -608,11 +639,23 @@ impl App {
             Screen::Update(s) if s.stage == UpStage::Snapshots => s.snap_sel = (s.snap_sel as isize + dir).clamp(0, s.snapshots.len().saturating_sub(1) as isize) as usize,
             Screen::Update(s) => s.sel = (s.sel as isize + dir).clamp(0, s.items.len().saturating_sub(1) as isize) as usize,
             Screen::Add(s) if s.stage == AddStage::Found => s.sel = (s.sel as isize + dir).clamp(0, s.found.len().saturating_sub(1) as isize) as usize,
+            Screen::AddRes(s) => s.move_sel(dir),
+            Screen::Feedback(s) if s.stage == FbStage::Pick => s.sel = (s.sel as isize + dir).clamp(0, s.choices.len().saturating_sub(1) as isize) as usize,
             _ => {}
         }
     }
 
     fn click_row(&mut self, i: usize) {
+        if let Screen::AddRes(s) = &mut self.screen {
+            let fx = s.click_row(i);
+            return self.effect(fx);
+        }
+        if let Screen::Feedback(s) = &mut self.screen {
+            if s.stage == FbStage::Pick {
+                s.sel = i.min(s.choices.len().saturating_sub(1));
+            }
+            return;
+        }
         match &mut self.screen {
             Screen::Main => self.sel = i.min(self.rows.len().saturating_sub(1)),
             Screen::Update(s) if s.stage == UpStage::Snapshots => s.snap_sel = i.min(s.snapshots.len().saturating_sub(1)),
@@ -710,6 +753,16 @@ impl App {
                     self.screen = Screen::Ensure(Box::new(EnsureState { entry: e, input: TextInput::new(100), choices, pick: None, restart: true }));
                 }
             }
+            Action::AddResources => {
+                if let Some(r) = self.current().filter(|r| r.status != Status::Missing) {
+                    let e = r.entry.clone();
+                    self.notice = None;
+                    self.screen = Screen::AddRes(Box::new(AddResState::new(e)));
+                    self.busy = Some(Job::AddLoad);
+                }
+            }
+            Action::ReportIssue => self.open_feedback(FbKind::Issue),
+            Action::OpenPr => self.open_feedback(FbKind::Pr),
             Action::Delete => {
                 let Some(r) = self.current() else { return };
                 let (entry, is_managed, status) = (r.entry.clone(), r.managed, r.status);
@@ -754,6 +807,15 @@ impl App {
     fn back(&mut self) {
         // One step back inside a multi-step screen, else to the list.
         match &mut self.screen {
+            Screen::AddRes(s) => {
+                if s.back() {
+                    return;
+                }
+            }
+            Screen::Feedback(s) if s.stage == FbStage::Compose => {
+                s.stage = FbStage::Pick;
+                return;
+            }
             Screen::Add(s) if s.stage != AddStage::Menu => {
                 s.stage = AddStage::Menu;
                 return;
@@ -772,7 +834,66 @@ impl App {
         self.reload();
     }
 
+    /// Carry out what an add-resources / feedback screen asked for.
+    fn effect(&mut self, fx: Effect) {
+        match fx {
+            Effect::None => {}
+            Effect::Say(l, t) => self.say(l, t),
+            Effect::Job(j) => self.busy = Some(j),
+            Effect::Close => {
+                self.screen = Screen::Main;
+                self.reload();
+            }
+        }
+    }
+
+    /// Open "Report an issue" / "Open a pull request" for the selected server.
+    fn open_feedback(&mut self, kind: FbKind) {
+        let Some(r) = self.current().filter(|r| r.status != Status::Missing) else { return };
+        let e = r.entry.clone();
+        if kind == FbKind::Pr && e.mode != Mode::Development {
+            return self.say(Level::Info, "Pull requests are for development servers: a production server holds pinned copies, not your forks. Use 'Report an issue' instead.");
+        }
+        if !self.svc.backend.github_signed_in() {
+            self.say(Level::Info, "You need to be signed in to GitHub for this. Opening the sign-in...");
+            self.exit = Some(Exit::GithubLogin);
+            return;
+        }
+        let choices = self.svc.backend.resources(&e);
+        if choices.is_empty() {
+            return self.say(Level::Info, "No resources are recorded for this server yet.");
+        }
+        self.notice = None;
+        self.screen = Screen::Feedback(Box::new(FeedbackState::new(e, kind, choices)));
+    }
+
+    /// A GitHub call said "not signed in": hand the terminal to gh's sign-in, then the manager returns.
+    fn github_error(&mut self, e: String) {
+        if e == kora_core::feedback::SIGN_IN_HINT {
+            self.say(Level::Info, "You need to be signed in to GitHub. Opening the sign-in...");
+            self.exit = Some(Exit::GithubLogin);
+        } else {
+            self.say(Level::Bad, e);
+        }
+    }
+
     fn screen_action(&mut self, a: Action) {
+        if let Screen::AddRes(s) = &mut self.screen {
+            let fx = s.act(a);
+            return self.effect(fx);
+        }
+        if let Screen::Feedback(s) = &mut self.screen {
+            if s.stage == FbStage::Done && a == Action::Copy {
+                let url = s.url.clone().unwrap_or_default();
+                match self.svc.clipboard.set_text(&url) {
+                    Ok(()) => self.say(Level::Good, "Address copied."),
+                    Err(_) => self.say(Level::Info, format!("Couldn't copy automatically: {url}")),
+                }
+                return;
+            }
+            let fx = s.act(a);
+            return self.effect(fx);
+        }
         let was_main = matches!(self.screen, Screen::Main);
         let mut screen = std::mem::replace(&mut self.screen, Screen::Main);
         match &mut screen {
@@ -943,6 +1064,7 @@ impl App {
                 }
                 _ => {}
             },
+            Screen::AddRes(_) | Screen::Feedback(_) => {}
         }
         self.screen = screen;
         if !was_main && matches!(self.screen, Screen::Main) {
@@ -1014,6 +1136,87 @@ impl App {
                         self.say(Level::Good, format!("'{}' {past}.", e.name));
                     }
                     Err(err) => self.say(Level::Bad, err),
+                }
+            }
+            Job::AddLoad => {
+                let Screen::AddRes(s) = &mut self.screen else { return };
+                let e = s.entry.clone();
+                match self.svc.backend.add_catalog(&e) {
+                    Ok((cat, installed, note)) => {
+                        s.cat = Some(cat);
+                        s.installed = installed;
+                        s.catalog_note = note;
+                    }
+                    Err(err) => {
+                        self.screen = Screen::Main;
+                        self.say(Level::Bad, format!("Couldn't load the resource catalog: {err}"));
+                    }
+                }
+            }
+            Job::AddRedeem => {
+                let Screen::AddRes(s) = &mut self.screen else { return };
+                let code = s.code.text();
+                match self.svc.backend.add_redeem(&code) {
+                    Ok(ids) => {
+                        let fx = s.use_code_ids(&ids);
+                        self.effect(fx);
+                    }
+                    Err(err) => self.say(Level::Bad, err),
+                }
+            }
+            Job::AddInstall => {
+                let Screen::AddRes(s) = &mut self.screen else { return };
+                let (e, ids) = (s.entry.clone(), s.picked.clone());
+                match self.svc.backend.add_install(&e, &ids) {
+                    Ok(o) => {
+                        let (n, bad) = (o.installed.len(), o.failed.len());
+                        s.stage = AddResStage::Result;
+                        s.installed.extend(o.installed.iter().cloned());
+                        s.picked.clear();
+                        s.outcome = Some(o);
+                        if bad == 0 {
+                            self.say(Level::Good, format!("Added {n} resource(s). Restart the server to load them."));
+                        } else {
+                            self.say(Level::Bad, format!("Added {n}, but {bad} could not be added. See the list."));
+                        }
+                    }
+                    Err(err) => self.github_error(err),
+                }
+            }
+            Job::IssueSend => {
+                let Screen::Feedback(s) = &mut self.screen else { return };
+                let (e, res, title, body) = (s.entry.clone(), s.resource.clone(), s.title.text(), s.body.text());
+                match self.svc.backend.report_issue(&e, &res, &title, &body) {
+                    Ok(url) => {
+                        s.url = Some(url);
+                        s.stage = FbStage::Done;
+                        self.say(Level::Good, "Thank you! Your report was sent.");
+                    }
+                    Err(err) => self.github_error(err),
+                }
+            }
+            Job::PrPlan => {
+                let Screen::Feedback(s) = &mut self.screen else { return };
+                let (e, res) = (s.entry.clone(), s.resource.clone());
+                match self.svc.backend.pr_plan(&e, &res) {
+                    Ok(plan) => {
+                        s.plan = Some(plan);
+                        s.stage = FbStage::Compose;
+                    }
+                    Err(err) => self.github_error(err),
+                }
+            }
+            Job::PrOpen => {
+                let Screen::Feedback(s) = &mut self.screen else { return };
+                let Some(plan) = s.plan.clone() else { return };
+                let (title, body) = (s.title.text(), s.body.text());
+                match self.svc.backend.pr_open(&plan, &title, &body) {
+                    Ok(url) => {
+                        s.url = Some(url);
+                        s.stage = FbStage::Done;
+                        self.say(Level::Good, "The pull request was opened.");
+                    }
+                    Err(err) => self.github_error(err),
                 }
             }
             Job::Ensure => {
@@ -1209,6 +1412,9 @@ fn main_key(k: KeyEvent) -> Option<Action> {
         KeyCode::Char('n') => Action::Notify,
         KeyCode::Char('c') => Action::Schedule,
         KeyCode::Char('a') => Action::Add,
+        KeyCode::Char('g') => Action::AddResources,
+        KeyCode::Char('b') => Action::ReportIssue,
+        KeyCode::Char('p') => Action::OpenPr,
         KeyCode::Char('i') => Action::InstallNew,
         KeyCode::Char('R') | KeyCode::F(5) => Action::Refresh,
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,

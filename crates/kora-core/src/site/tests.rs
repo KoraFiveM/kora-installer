@@ -275,3 +275,39 @@ fn apply_to_request_leaves_secrets_alone() {
     assert_eq!(req.github_owner.as_deref(), Some("me"), "fork owner is never taken from the website");
     assert_eq!(req.dir, std::path::PathBuf::from("/x"));
 }
+
+const ADD_BODY: &str = r#"{"config":{"mode":"addresources","resources":["bridge-x","acme_one","bridge-x"]},"github":{"login":"octo-cat"}}"#;
+
+#[test]
+fn add_resources_code_returns_the_id_list() {
+    let m = mock(200, ADD_BODY.into(), 0);
+    let a = match redeem_any_with("kora-7f3k-92qx", &m.base, &fast()).unwrap() {
+        Redemption::AddResources(a) => a,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(a.resources, ["bridge-x", "acme_one"], "duplicates are dropped");
+    assert_eq!(a.github_login.as_deref(), Some("octo-cat"));
+    assert!(m.seen.lock().unwrap()[0].contains("KORA-7F3K-92QX"));
+}
+
+#[test]
+fn the_two_kinds_of_code_are_not_mixed_up() {
+    let m = mock(200, ADD_BODY.into(), 0);
+    assert_eq!(redeem_with("kora-7f3k-92qx", &m.base, &fast()).unwrap_err(), SiteError::CodeIsForAddingResources);
+    let m = mock(200, OK_BODY.into(), 0);
+    let r = redeem_any_with("kora-7f3k-92qx", &m.base, &fast()).unwrap();
+    assert!(matches!(r, Redemption::Install(_)));
+}
+
+#[test]
+fn add_resources_reply_is_validated() {
+    for body in [
+        r#"{"config":{"mode":"addresources","resources":[]}}"#,
+        r#"{"config":{"mode":"addresources","resources":"all"}}"#,
+        r#"{"config":{"mode":"addresources","resources":["../x"]}}"#,
+        r#"{"config":{"mode":"addresources","resources":[1]}}"#,
+        r#"{"config":{"mode":"addresources"}}"#,
+    ] {
+        assert!(matches!(parse_any(body.as_bytes()), Err(SiteError::BadResponse(_))), "{body}");
+    }
+}

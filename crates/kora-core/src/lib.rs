@@ -3,6 +3,7 @@
 //! Implemented in M0: [`steps`] (step engine trait + persisted state).
 //! Everything else is a documented stub filled in during M2.
 
+pub mod addresources;
 pub mod app_install;
 pub mod artifacts;
 pub mod catalog;
@@ -10,6 +11,7 @@ pub mod console;
 pub mod db;
 pub mod elevate;
 pub mod firewall;
+pub mod feedback;
 pub mod fsutil;
 pub mod git;
 pub mod service;

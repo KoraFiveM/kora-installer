@@ -424,15 +424,38 @@ pub fn auth_status(r: &dyn CommandRunner) -> Result<AuthStatus> {
     Ok(AuthStatus { logged_in: o.ok(), scopes: if o.ok() { parse_scopes(&text) } else { vec![] } })
 }
 
+/// Arguments of `gh auth login` (device/browser flow, minimum scopes).
+pub fn login_args(admin_org: bool) -> Vec<String> {
+    let scopes = required_scopes(admin_org).join(",");
+    ["auth", "login", "--web", "--hostname", "github.com", "--git-protocol", "https", "--scopes", &scopes].iter().map(|s| s.to_string()).collect()
+}
+
+/// Is `gh` signed in to github.com (so issues and pull requests can be made)?
+pub fn is_signed_in(r: &dyn CommandRunner) -> bool {
+    auth_status(r).map(|s| s.logged_in).unwrap_or(false)
+}
+
+/// `gh auth login --web` with the terminal handed to gh, so the user sees its one-time code and
+/// address. For command-line use and for the manager (which closes its screen first). The token
+/// stays in gh's own store; Kora never sees it.
+pub fn auth_login_interactive() -> Result<()> {
+    let args = login_args(false);
+    let st = crate::sysexe::command("gh")
+        .args(&args)
+        .status()
+        .map_err(|e| GitError::Spawn("gh auth login".into(), e.to_string()))?;
+    if !st.success() {
+        return Err(GitError::Command { cmd: "gh auth login".into(), code: st.code().unwrap_or(-1), stderr: "login was not completed".into() });
+    }
+    run_ok(&SystemRunner, "gh", &["auth", "setup-git", "--hostname", "github.com"], None)?;
+    Ok(())
+}
+
 /// Device/browser flow via gh. gh keeps the token in its own store.
 pub fn auth_login(r: &dyn CommandRunner, admin_org: bool) -> Result<()> {
-    let scopes = required_scopes(admin_org).join(",");
-    run_ok(
-        r,
-        "gh",
-        &["auth", "login", "--web", "--hostname", "github.com", "--git-protocol", "https", "--scopes", &scopes],
-        None,
-    )?;
+    let args = login_args(admin_org);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_ok(r, "gh", &args, None)?;
     // Let git use gh's credentials for https clones/fetches.
     run_ok(r, "gh", &["auth", "setup-git", "--hostname", "github.com"], None)?;
     Ok(())
@@ -780,6 +803,86 @@ pub fn reset_to_commit(r: &dyn CommandRunner, repo: &Path, commit: &str) -> Resu
     check("commit", valid_commit(commit), commit)?;
     run_ok(r, "git", &["reset", "--hard", commit], Some(repo))?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------
+// Issues and pull requests (through `gh`; no token handling of our own)
+// ---------------------------------------------------------------------------------------------
+
+fn clean_text(what: &'static str, v: &str, max: usize, allow_newlines: bool) -> Result<()> {
+    let bad = v.chars().any(|c| c.is_control() && !(allow_newlines && matches!(c, '\n' | '\r' | '\t')));
+    check(what, !v.trim().is_empty() && v.chars().count() <= max && !bad, &v.chars().take(40).collect::<String>())
+}
+
+/// The first `https://github.com/...` line of gh's output.
+fn url_from(out: &Output, cmd: &str) -> Result<String> {
+    out.stdout
+        .lines()
+        .map(str::trim)
+        .rev()
+        .find(|l| l.starts_with("https://github.com/"))
+        .map(str::to_string)
+        .ok_or_else(|| GitError::Parse(cmd.to_string(), out.stdout.chars().take(200).collect()))
+}
+
+/// `gh issue create` in `repo` (`owner/name`). Returns the issue's address. Title and body are
+/// passed as separate arguments (never through a shell).
+pub fn create_issue(r: &dyn CommandRunner, repo: &str, title: &str, body: &str) -> Result<String> {
+    check("repo", valid_repo(repo), repo)?;
+    clean_text("issue title", title, 256, false)?;
+    clean_text("issue text", body, 60_000, true)?;
+    let o = run_ok(r, "gh", &["issue", "create", "--repo", repo, "--title", title, "--body", body], None)?;
+    url_from(&o, "gh issue create")
+}
+
+/// Current branch of a checkout; `None` when detached.
+pub fn current_branch(r: &dyn CommandRunner, repo: &Path) -> Result<Option<String>> {
+    let o = run_ok(r, "git", &["rev-parse", "--abbrev-ref", "HEAD"], Some(repo))?;
+    let b = o.stdout.trim();
+    Ok(if b.is_empty() || b == "HEAD" { None } else { Some(b.to_string()) })
+}
+
+/// `owner` of the `github.com/<owner>/<name>` remote (https or ssh form).
+pub fn remote_owner(r: &dyn CommandRunner, repo: &Path, remote: &str) -> Result<String> {
+    check("remote", valid_name(remote), remote)?;
+    let o = run_ok(r, "git", &["remote", "get-url", remote], Some(repo))?;
+    owner_of_url(o.stdout.trim()).ok_or_else(|| GitError::Parse(format!("git remote get-url {remote}"), o.stdout.trim().to_string()))
+}
+
+/// `owner` in `https://github.com/owner/name(.git)` or `git@github.com:owner/name(.git)`.
+pub fn owner_of_url(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://github.com/").or_else(|| url.strip_prefix("git@github.com:")).or_else(|| url.strip_prefix("ssh://git@github.com/"))?;
+    let (owner, name) = rest.split_once('/')?;
+    (valid_name(owner) && !name.is_empty()).then(|| owner.to_string())
+}
+
+/// Commits on HEAD that `upstream/<base>` does not have (fetches `upstream` first).
+pub fn ahead_of_upstream(r: &dyn CommandRunner, repo: &Path, base: &str) -> Result<u32> {
+    check("branch", valid_ref(base), base)?;
+    run_ok(r, "git", &["fetch", "upstream"], Some(repo))?;
+    let range = format!("upstream/{base}..HEAD");
+    let o = run_ok(r, "git", &["rev-list", "--count", &range], Some(repo))?;
+    o.stdout.trim().parse().map_err(|_| GitError::Parse("git rev-list --count".into(), o.stdout.trim().to_string()))
+}
+
+/// Push `branch` to the fork (`origin`).
+pub fn push_branch(r: &dyn CommandRunner, repo: &Path, branch: &str) -> Result<()> {
+    check("branch", valid_ref(branch), branch)?;
+    run_ok(r, "git", &["push", "--set-upstream", "origin", branch], Some(repo))?;
+    Ok(())
+}
+
+/// `gh pr create` from `<head_owner>:<head_branch>` into `<upstream>`'s `<base>`. Returns the address.
+pub fn create_pr(r: &dyn CommandRunner, upstream: &str, head_owner: &str, head_branch: &str, base: &str, title: &str, body: &str) -> Result<String> {
+    check("upstream repo", valid_repo(upstream), upstream)?;
+    check("fork owner", valid_name(head_owner), head_owner)?;
+    check("branch", valid_ref(head_branch), head_branch)?;
+    check("base branch", valid_ref(base), base)?;
+    clean_text("pull request title", title, 256, false)?;
+    clean_text("pull request text", body, 60_000, true)?;
+    let head = format!("{head_owner}:{head_branch}");
+    let o = run_ok(r, "gh", &["pr", "create", "--repo", upstream, "--head", &head, "--base", base, "--title", title, "--body", body], None)?;
+    url_from(&o, "gh pr create")
 }
 
 /// Prod: clone without checkout, then check out the pinned commit detached.
@@ -1164,5 +1267,42 @@ mod tests {
         assert_eq!(w.len(), 1);
         assert!(w[0].args.contains(&"Git.Git".to_string()));
         assert!(plan_bootstrap(Os::Unsupported, &none).is_err());
+    }
+
+    #[test]
+    fn issue_and_pr_commands_are_built_safely() {
+        let f = Fake::new(|l| if l.contains("issue create") { ok("Creating issue...\nhttps://github.com/KoraFiveM/kora_lib/issues/7\n") } else { ok("https://github.com/KoraFiveM/kora_lib/pull/9\n") });
+        let url = create_issue(&f, "KoraFiveM/kora_lib", "It breaks; \"quoted\" $(x)", "line1\nline2").unwrap();
+        assert_eq!(url, "https://github.com/KoraFiveM/kora_lib/issues/7");
+        assert_eq!(f.calls.borrow()[0], "gh issue create --repo KoraFiveM/kora_lib --title It breaks; \"quoted\" $(x) --body line1\nline2");
+        let url = create_pr(&f, "KoraFiveM/kora_lib", "me", "fix/x", "dev", "T", "B").unwrap();
+        assert!(url.ends_with("/pull/9"));
+        assert!(f.calls.borrow()[1].contains("--head me:fix/x --base dev"));
+        // bad inputs never reach gh
+        for bad in [("", "b"), ("t\nx", "b"), ("t", "")] {
+            assert!(create_issue(&f, "KoraFiveM/kora_lib", bad.0, bad.1).is_err());
+        }
+        assert!(create_issue(&f, "no-slash", "t", "b").is_err());
+        assert!(create_pr(&f, "KoraFiveM/kora_lib", "me", "--evil", "dev", "t", "b").is_err());
+        assert_eq!(f.calls.borrow().len(), 2);
+        // gh output without an address is an error, not a guess
+        let g = Fake::new(|_| ok("done\n"));
+        assert!(matches!(create_issue(&g, "a/b", "t", "b"), Err(GitError::Parse(..))));
+    }
+
+    #[test]
+    fn remote_owner_parses_both_url_forms() {
+        assert_eq!(owner_of_url("https://github.com/me/kora_lib.git").as_deref(), Some("me"));
+        assert_eq!(owner_of_url("git@github.com:me/kora_lib.git").as_deref(), Some("me"));
+        assert_eq!(owner_of_url("https://example.com/me/x"), None);
+        assert_eq!(owner_of_url("https://github.com/-bad/x"), None);
+    }
+
+    #[test]
+    fn login_arguments_use_the_minimum_scopes() {
+        let a = login_args(false);
+        assert!(a.contains(&"--web".to_string()) && a.contains(&"repo,read:org".to_string()));
+        assert!(!a.iter().any(|x| x.contains("admin:org")));
+        assert!(login_args(true).iter().any(|x| x.contains("admin:org")));
     }
 }

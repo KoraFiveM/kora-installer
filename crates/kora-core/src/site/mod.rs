@@ -38,6 +38,10 @@ pub enum SiteError {
     Server(u16),
     #[error("The Kora website sent an answer this installer does not understand ({0}). Update the installer, or continue without a code.")]
     BadResponse(String),
+    #[error("That setup code is for adding resources to an existing server. Use `kora add-resources` (or the manager's [ Add resources ] action) instead.")]
+    CodeIsForAddingResources,
+    #[error("That setup code is for a new install, not for adding resources. Run `kora install --code ...` instead.")]
+    CodeIsForInstall,
     #[error("The website address is not allowed: {0}")]
     BadUrl(String),
     #[error("Your setup code asks for FiveM server build {0}, which is not an official build we can verify. Pick the recommended build on the website, or continue without a code.")]
@@ -103,6 +107,22 @@ impl Redeemed {
             None => "Welcome! Your choices from the website were loaded.".to_string(),
         }
     }
+}
+
+/// What a code with `mode: "addresources"` carries: the resources chosen on the website. The server
+/// is chosen locally; nothing else (no name, ports, build) is part of such a code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddResourcesCode {
+    /// Catalog resource ids (dependencies are added by the installer, not listed here).
+    pub resources: Vec<String>,
+    pub github_login: Option<String>,
+}
+
+/// Either kind of redeemed code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Redemption {
+    Install(Box<Redeemed>),
+    AddResources(AddResourcesCode),
 }
 
 /// Client settings (tests shorten the timeouts).
@@ -176,6 +196,22 @@ pub fn redeem(code: &str, base_url: &str) -> Result<Redeemed> {
 }
 
 pub fn redeem_with(code: &str, base_url: &str, opts: &Options) -> Result<Redeemed> {
+    match redeem_any_with(code, base_url, opts)? {
+        Redemption::Install(r) => Ok(*r),
+        Redemption::AddResources(_) => Err(SiteError::CodeIsForAddingResources),
+    }
+}
+
+/// Redeem a code made for `kora add-resources` (mode `addresources`).
+pub fn redeem_add_resources(code: &str, base_url: &str) -> Result<AddResourcesCode> {
+    match redeem_any_with(code, base_url, &Options::default())? {
+        Redemption::AddResources(a) => Ok(a),
+        Redemption::Install(_) => Err(SiteError::CodeIsForInstall),
+    }
+}
+
+/// Redeem a code of either kind (single use: the website burns it on the first successful redeem).
+pub fn redeem_any_with(code: &str, base_url: &str, opts: &Options) -> Result<Redemption> {
     let code = normalize_code(code)?;
     let base = check_base_url(base_url)?;
     let url = format!("{base}/api/installer/redeem");
@@ -196,7 +232,7 @@ pub fn redeem_with(code: &str, base_url: &str, opts: &Options) -> Result<Redeeme
     if buf.len() > opts.max_body {
         return Err(SiteError::BadResponse("the answer is too large".into()));
     }
-    parse_response(&buf)
+    parse_any(&buf)
 }
 
 /// Redeem and resolve the artifact build in one go (what the front ends call).
@@ -281,6 +317,40 @@ fn local_name(site_name: &str) -> String {
     }
 }
 
+/// Parse a reply of either kind.
+fn parse_any(body: &[u8]) -> Result<Redemption> {
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|e| SiteError::BadResponse(e.to_string()))?;
+    if v.pointer("/config/mode").and_then(|m| m.as_str()) == Some("addresources") {
+        let ids = v.pointer("/config/resources").ok_or_else(|| SiteError::BadResponse("missing resources".into()))?;
+        let resources = parse_resource_ids(ids)?;
+        let github_login = clean_opt(v.pointer("/github/login").and_then(|l| l.as_str()).map(str::to_string), 64).filter(|l| l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+        return Ok(Redemption::AddResources(AddResourcesCode { resources, github_login }));
+    }
+    parse_response(body).map(|r| Redemption::Install(Box::new(r)))
+}
+
+/// The `resources` array of a reply: bounded list of plain ids. `all` is only allowed for installs.
+fn parse_resource_ids(v: &serde_json::Value) -> Result<Vec<String>> {
+    let serde_json::Value::Array(a) = v else { return bad("resources must be a list of ids") };
+    if a.is_empty() {
+        return bad("no resources were chosen");
+    }
+    if a.len() > MAX_RESOURCES {
+        return bad("too many resources");
+    }
+    let mut ids = Vec::new();
+    for v in a {
+        let Some(id) = v.as_str() else { return bad("resource ids must be text") };
+        if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || id.starts_with(['-', '.']) {
+            return bad("unexpected resource id");
+        }
+        if !ids.iter().any(|i| i == id) {
+            ids.push(id.to_string());
+        }
+    }
+    Ok(ids)
+}
+
 fn parse_response(body: &[u8]) -> Result<Redeemed> {
     let raw: RawResponse = serde_json::from_slice(body).map_err(|e| SiteError::BadResponse(e.to_string()))?;
     let c = raw.config;
@@ -295,20 +365,8 @@ fn parse_response(body: &[u8]) -> Result<Redeemed> {
     }
     let resources = match &c.resources {
         serde_json::Value::String(s) if s == "all" => ResourceSelection::All,
-        serde_json::Value::Array(a) => {
-            if a.len() > MAX_RESOURCES {
-                return bad("too many resources");
-            }
-            let mut ids = Vec::new();
-            for v in a {
-                let Some(id) = v.as_str() else { return bad("resource ids must be text") };
-                if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || id.starts_with(['-', '.']) {
-                    return bad("unexpected resource id");
-                }
-                ids.push(id.to_string());
-            }
-            ResourceSelection::Only(ids)
-        }
+        serde_json::Value::Array(a) if a.is_empty() => ResourceSelection::Only(vec![]),
+        serde_json::Value::Array(_) => ResourceSelection::Only(parse_resource_ids(&c.resources)?),
         _ => return bad("unknown resources value"),
     };
     let artifact = match (c.artifact.kind.as_str(), c.artifact.build) {

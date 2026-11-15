@@ -291,6 +291,24 @@ struct UpdateArgs {
     list_snapshots: bool,
 }
 
+#[derive(Args, Debug, Default)]
+struct AddResourcesArgs {
+    /// Server name or folder.
+    server: String,
+    /// A setup code made on the Kora website for adding resources (single use).
+    #[arg(long, value_name = "CODE", conflicts_with = "resource")]
+    code: Option<String>,
+    /// Catalog resource id to add (repeatable). Dependencies are added automatically.
+    #[arg(long = "resource", value_name = "ID")]
+    resource: Vec<String>,
+    /// Show what would be added, then stop.
+    #[arg(long)]
+    dry_run: bool,
+    /// Do not ask for confirmation.
+    #[arg(long, short = 'y')]
+    yes: bool,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Install a new Kora server (interactive TUI, or headless with options).
@@ -299,6 +317,8 @@ enum Command {
     Manager,
     /// Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers).
     Update(UpdateArgs),
+    /// Add compatibility, bridge or creator resources (or any catalog resource) to an installed server.
+    AddResources(AddResourcesArgs),
     /// Show registered servers.
     Status,
     /// Update the kora program itself to the newest release (checksum-verified).
@@ -690,6 +710,15 @@ fn manager() -> i32 {
             // The wizard reports its own errors and cancellation; either way the manager comes back.
             Ok(kora_tui::manager::Exit::InstallNew) => {
                 install(InstallArgs::default());
+            }
+            // Issues, pull requests and forking need GitHub: gh's own sign-in gets the terminal (it shows
+            // its one-time code and address), then the manager comes back. Kora never sees the token.
+            Ok(kora_tui::manager::Exit::GithubLogin) => {
+                println!("Signing in to GitHub. Follow the steps gh shows below.");
+                match kora_core::git::auth_login_interactive() {
+                    Ok(()) => println!("Signed in. Opening the manager again..."),
+                    Err(e) => eprintln!("Could not sign in to GitHub ({e}). Opening the manager again..."),
+                }
             }
             // Changing the schedule needs administrator rights: the terminal is back to normal here,
             // so the permission prompt (sudo / UAC) can be answered, then the manager comes back.
@@ -1308,6 +1337,107 @@ fn confirm(question: &str) -> bool {
     std::io::stdin().read_line(&mut line).is_ok() && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
+/// `kora add-resources <server> --code CODE | --resource ID...`. Browsing the catalog sections
+/// (with per-creator drill-in) is in the manager: `kora manager` > Add resources.
+fn add_resources(a: AddResourcesArgs) -> i32 {
+    use kora_core::addresources as add;
+    use kora_core::git::SystemRunner;
+    let mut server = match kora_core::update::manual::load_server(&a.server) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    let ids: Vec<String> = match (&a.code, a.resource.is_empty()) {
+        (Some(code), _) => match site::redeem_add_resources(code, &site::site_url_from_env()) {
+            Ok(c) => {
+                println!("Code accepted: {} resource(s) chosen on the website.", c.resources.len());
+                c.resources
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        },
+        (None, false) => a.resource.clone(),
+        (None, true) => {
+            eprintln!("error: say what to add: --code <CODE> from the website, or --resource <ID> (repeatable). To browse the catalog, open `kora manager` and choose Add resources.");
+            return 2;
+        }
+    };
+    let (cat, note) = match add::load_catalog() {
+        Ok(x) => x,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    if let Some(n) = note {
+        println!("note: {n}");
+    }
+    let plan = match add::plan(&cat, &server, &ids) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    for id in &plan.already {
+        println!("{id} is already installed.");
+    }
+    if plan.is_empty() {
+        println!("Nothing to add.");
+        return 0;
+    }
+    println!("Will add ({} mode):", if server.mode == Mode::Development { "development" } else { "production" });
+    for i in &plan.items {
+        let how = if i.third_party { "pinned, never forked" } else if i.fork { "your fork" } else if i.commit.is_some() { "pinned" } else { "branch head" };
+        println!("  {}{}  ->  resources/{}  ({how})", i.id, if i.dependency { " (needed by another)" } else { "" }, i.rel);
+    }
+    println!("server.cfg gets `ensure` lines for: {}", plan.ensure.join(", "));
+    if a.dry_run {
+        println!("Dry run: nothing was changed.");
+        return 0;
+    }
+    if !a.yes && !confirm("Add these now?") {
+        eprintln!("Cancelled.");
+        return 1;
+    }
+    if plan.items.iter().any(|i| i.fork) && !kora_core::git::is_signed_in(&SystemRunner) {
+        println!("Forking needs you to be signed in to GitHub.");
+        if let Err(e) = kora_core::git::auth_login_interactive() {
+            eprintln!("error: could not sign in to GitHub ({e}).");
+            return 1;
+        }
+    }
+    let cloner = add::GitCloner(&SystemRunner);
+    match add::execute(&cloner, &mut server, &plan, &mut |m| println!("{m}...")) {
+        Ok(out) => {
+            for id in &out.installed {
+                println!("[ok] {id}");
+            }
+            for (id, e) in &out.failed {
+                eprintln!("[!!] {id}: {e}");
+            }
+            for n in &out.notes {
+                println!("note: {n}");
+            }
+            if !out.ensured.is_empty() {
+                println!("Added to server.cfg: {}", out.ensured.iter().map(|f| format!("ensure {f}")).collect::<Vec<_>>().join(", "));
+            }
+            if !out.installed.is_empty() {
+                println!("Restart the server to load the new resources.");
+            }
+            i32::from(!out.ok())
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
 fn delete(server: &str, keep_files: bool, keep_db: bool, yes: bool) -> i32 {
     let reg = registry::Registry::load().unwrap_or_default();
     let (name, dir) = match reg.find(server) {
@@ -1432,6 +1562,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
         Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. }) => K::Other,
+        // Writes into the server folder, like a manual update: same privilege rules.
+        Some(Command::AddResources(_)) => K::Update { auto: false },
         Some(Command::Start { .. }) => K::Start,
         Some(Command::Stop { .. }) => K::Stop,
         Some(Command::Restart { .. }) => K::Restart,
@@ -1574,6 +1706,7 @@ fn main() {
         Some(Command::Install(a)) => install(*a),
         Some(Command::Manager) => manager(),
         Some(Command::Update(a)) => update(a),
+        Some(Command::AddResources(a)) => add_resources(a),
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
@@ -1623,6 +1756,25 @@ mod tests {
             cfx_username: Some("Sticky".into()),
             github_login: Some("octo".into()),
         }
+    }
+
+    fn parse_add(args: &[&str]) -> Result<AddResourcesArgs, clap::Error> {
+        let mut v = vec!["kora", "add-resources"];
+        v.extend_from_slice(args);
+        match Cli::try_parse_from(v)?.command {
+            Some(Command::AddResources(a)) => Ok(a),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn add_resources_arguments() {
+        let a = parse_add(&["srv", "--resource", "a", "--resource", "b", "--dry-run"]).unwrap();
+        assert_eq!((a.server.as_str(), a.resource.len(), a.dry_run, a.code.is_none()), ("srv", 2, true, true));
+        let a = parse_add(&["srv", "--code", "KORA-7F3K-92QX", "-y"]).unwrap();
+        assert!(a.code.is_some() && a.yes);
+        assert!(parse_add(&["srv", "--code", "KORA-7F3K-92QX", "--resource", "a"]).is_err(), "a code and a hand-picked list do not mix");
+        assert!(parse_add(&[]).is_err(), "the server is required");
     }
 
     fn parse_update(args: &[&str]) -> Result<UpdateArgs, clap::Error> {

@@ -214,7 +214,15 @@ fn select(server: &ServerRecord, scope: &Scope, skip: &[String], catalog: Option
         if wanted.as_ref().is_some_and(|w| !w.contains(&n)) || skip.contains(&n) {
             continue;
         }
+        // Development tracks forks; third-party (bridge / creator) clones are pinned and have no upstream.
+        if !prod && r.third_party {
+            continue;
+        }
         let path = server.dir.join("resources").join(&r.path);
+        // A copy of one subfolder of a repository has no git history to compare: left as installed.
+        if crate::installer::pinned::is_subpath_copy(&path) {
+            continue;
+        }
         let upstream_ref = match cat {
             None => format!("upstream/{}", r.branch),
             Some(c) => match c.find_normalized(&r.id).and_then(|res| res.latest_release()) {

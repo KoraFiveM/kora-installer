@@ -145,6 +145,10 @@ pub struct ResourceRecord {
     /// Pinned commit (production releases); `None` when tracking a branch head.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
+    /// A pinned copy: a bridge / creator resource (somebody else's repository) or a subpath install.
+    /// Never a fork, in any mode, so the development updater leaves it alone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub third_party: bool,
 }
 
 /// `<dir>/kora-server.json`: config and install result. Secret-free.
