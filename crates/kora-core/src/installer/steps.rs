@@ -113,6 +113,21 @@ pub(crate) fn winget_code_is_fine(code: i32) -> bool {
     matches!(code as u32, 0 | 0x8A15_0061 | 0x8A15_010D)
 }
 
+/// Open GitHub's device-login page in the default browser. Only ever a github.com address, never a shell.
+fn open_github_page(url: &str) -> bool {
+    if !url.starts_with("https://github.com/") || url.contains(|c: char| c.is_whitespace() || c.is_control() || c == '"') {
+        return false;
+    }
+    let (program, args): (&str, Vec<&str>) = if cfg!(windows) { ("explorer.exe", vec![url]) } else if cfg!(target_os = "macos") { ("open", vec![url]) } else { ("xdg-open", vec![url]) };
+    crate::sysexe::command(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
 fn winget_available() -> bool {
     crate::sysexe::command("winget").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
 }
@@ -483,6 +498,32 @@ impl InstallStep {
         }
     }
 
+    /// `gh auth login --web`: show the one-time code and open the GitHub page, then wait for the user.
+    fn sign_in_to_github(&self) -> Result<()> {
+        use git::owners::{begin_login, GhAuth, SystemLogin};
+        let ctx = &*self.ctx;
+        ctx.emit(self.id, StepStatus::Running, "Starting the GitHub sign-in...", 0.2);
+        let session = begin_login(&SystemLogin, false).map_err(|e| InstallError(format!("could not start the GitHub sign-in: {e}")))?;
+        let opened = open_github_page(&session.url);
+        let msg = format!(
+            "Sign in to GitHub: {} {} and enter this code: {}  (waiting for you, up to 15 minutes)",
+            if opened { "your browser is opening" } else { "open" },
+            session.url,
+            session.code
+        );
+        ctx.note(format!("GitHub sign-in code {} at {}", session.code, session.url));
+        ctx.emit(self.id, StepStatus::Running, msg, 0.5);
+        match session.wait() {
+            Ok(GhAuth::LoggedIn { login }) => {
+                let _ = git::CommandRunner::run(&git::SystemRunner, "gh", &["auth", "setup-git", "--hostname", "github.com"], None);
+                ctx.emit(self.id, StepStatus::Running, format!("Signed in to GitHub as {login}"), 0.8);
+                Ok(())
+            }
+            Ok(_) => err("GitHub sign-in was not completed (the code expired or was refused). Run the installer again to retry."),
+            Err(e) => err(format!("GitHub sign-in failed: {e}")),
+        }
+    }
+
     fn prepare_tools(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let r = git::SystemRunner;
@@ -545,9 +586,14 @@ impl InstallStep {
             if tools.gh.is_none() {
                 return err("the GitHub CLI (gh) is required for development installs");
             }
-            let st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
+            let mut st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
             if !st.logged_in {
-                return err("You are not signed in to GitHub. Run `gh auth login` (web/device flow), then run the installer again.");
+                // Just installed (or never signed in): do the browser sign-in now instead of failing.
+                self.sign_in_to_github()?;
+                st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
+                if !st.logged_in {
+                    return err("GitHub sign-in did not finish. Run the installer again to retry; your answers are saved.");
+                }
             }
             let missing = st.missing_scopes(false);
             if !missing.is_empty() {
