@@ -244,6 +244,27 @@ pub async fn install_log(Path(job): Path<String>) -> Result<Json<Value>, ApiErro
     .ok_or_else(|| ApiError::not_found("There is no install with that id."))
 }
 
+/// The install runs in the privileged helper as `kora install ...` (the same command the user would
+/// have been asked to run). The licence key and the database admin password go in the environment, never
+/// on the command. The helper's output lines become job events and go in the install log.
+fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &kora_core::installer::InstallRequest) -> Result<Value, String> {
+    let env = crate::elevated::secret_env(req.license_key.as_deref(), req.db_admin.as_ref().and_then(|a| a.password.as_deref()));
+    let r = crate::elevated::privileged(core::install_command(req), env, &mut |line| {
+        h.event(json!({"type": "status", "message": line}));
+        log_push(id, line.to_string());
+    });
+    log_finish(id, None);
+    match r {
+        Ok(_) => Ok(json!({
+            "name": req.name,
+            "dir": req.dir,
+            "txadmin_url": format!("http://127.0.0.1:{}", req.ports.txadmin),
+            "notes": ["Installed by the Kora helper."],
+        })),
+        Err(e) => Err(json!({"message": e.message, "kept": []}).to_string()),
+    }
+}
+
 // ---- starting an install --------------------------------------------------------------------
 
 /// `POST /installs`: body = the UI's install request. Validates like the CLI, then runs the
@@ -263,7 +284,7 @@ pub async fn install_start(
     let req = blocking(move || {
         let mut req = core::build_request(&wire).map_err(ApiError::bad_request)?;
         if req.dry_run {
-            return Ok(req);
+            return Ok((req, false));
         }
         if req.license_key.is_none() {
             return Err(ApiError::bad_request("A licence key is needed. Get one from the Cfx.re portal: https://portal.cfx.re/servers/registration-keys"));
@@ -282,15 +303,23 @@ pub async fn install_start(
         }
         let reasons = e2.admin_reasons(&req);
         if !reasons.is_empty() && !e2.is_elevated() {
-            return Err(ApiError::needs_elevation(core::elevation_message(&req, &reasons), core::install_command(&req)));
+            // With the helper installed the install runs there; otherwise the user gets the command.
+            if !crate::elevated::helper_installed() {
+                return Err(ApiError::needs_elevation(core::elevation_message(&req, &reasons), core::install_command(&req)));
+            }
+            return Ok((req, true));
         }
-        Ok(req)
+        Ok((req, false))
     })
     .await?;
+    let (req, via_helper) = req;
     let name = req.name.clone();
     st.spawn_job(Op::InstallStart, Some(name), move |h| {
         let id = h.id().0.clone();
         log_begin(&id);
+        if via_helper {
+            return install_via_helper(h, &id, &req);
+        }
         let fin = core::run_install(&*e, &req, |ev| {
             h.event(core::progress_json(ev));
             log_push(&id, core::log_line(ev));

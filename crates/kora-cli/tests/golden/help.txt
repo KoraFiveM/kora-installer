@@ -21,6 +21,7 @@ Commands:
   stop           Stop a server's background service
   restart        Restart a server's background service
   uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
+  helper         The optional privileged helper: lets the panel do the few things that need administrator rights
 
 Options:
       --no-elevate
@@ -95,11 +96,11 @@ Options:
       --db-admin-host <DB_ADMIN_HOST>
           Database server address for the admin login (default 127.0.0.1)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --db-admin-port <DB_ADMIN_PORT>
           Database server port for the admin login (default 3306)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --start
           Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)
@@ -653,6 +654,72 @@ Options:
       --app
           Remove only the Kora app (shortcuts, PATH entry, the installed copy); servers and databases are never touched
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper =====
+The optional privileged helper: lets the panel do the few things that need administrator rights
+
+Usage: kora helper [OPTIONS] <COMMAND>
+
+Commands:
+  serve      Run the helper (started by its system service; not for people)
+  install    Install the helper service for your user account (needs administrator rights; run with sudo)
+  uninstall  Remove the helper service (needs administrator rights)
+  status     Say whether the helper is installed and running
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper serve =====
+Run the helper (started by its system service; not for people)
+
+Usage: kora helper serve [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper install =====
+Install the helper service for your user account (needs administrator rights; run with sudo)
+
+Usage: kora helper install [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper uninstall =====
+Remove the helper service (needs administrator rights)
+
+Usage: kora helper uninstall [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper status =====
+Say whether the helper is installed and running
+
+Usage: kora helper status [OPTIONS]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
