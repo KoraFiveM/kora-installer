@@ -1,4 +1,4 @@
-//! The opt-in background panel: `kora panel --install-service` keeps `kora panel --no-open --port <p>`
+//! The opt-in background panel: `kora panel --install-service` keeps `kora panel --no-open --foreground --port <p>`
 //! running so monitoring and alerts work while nobody has the panel open.
 //!
 //! * Linux: a systemd **user** unit (`~/.config/systemd/user/kora-panel.service`), no administrator
@@ -174,7 +174,7 @@ pub fn systemd_unit(exe: &Path, port: u16, kora_home_env: Option<&Path>) -> Stri
         })
         .unwrap_or_default();
     format!(
-        "[Unit]\nDescription=Kora Panel (monitoring and alerts)\nAfter=network.target\n\n[Service]\nType=simple\n{env}ExecStart={} panel --no-open --port {port}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n",
+        "[Unit]\nDescription=Kora Panel (monitoring and alerts)\nAfter=network.target\n\n[Service]\nType=simple\n{env}ExecStart={} panel --no-open --foreground --port {port}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n",
         systemd_quote(&exe.display().to_string())
     )
 }
@@ -182,7 +182,7 @@ pub fn systemd_unit(exe: &Path, port: u16, kora_home_env: Option<&Path>) -> Stri
 /// The Windows script: starts the panel with no console window.
 pub fn startup_script(exe: &Path, port: u16) -> String {
     let exe = exe.display().to_string().replace('"', "");
-    format!("' Starts Kora Panel in the background at sign-in. Remove it with: kora panel --remove-service\r\nCreateObject(\"WScript.Shell\").Run \"\"\"{exe}\"\" panel --no-open --port {port}\", 0, False\r\n")
+    format!("' Starts Kora Panel in the background at sign-in. Remove it with: kora panel --remove-service\r\nCreateObject(\"WScript.Shell\").Run \"\"\"{exe}\"\" panel --no-open --foreground --port {port}\", 0, False\r\n")
 }
 
 pub struct InstallSpec<'a> {
@@ -350,7 +350,7 @@ mod tests {
             Some(Path::new("/data/kora home")),
         );
         assert!(
-            u.contains("ExecStart=\"/opt/my kora/kora\" panel --no-open --port 47200\n"),
+            u.contains("ExecStart=\"/opt/my kora/kora\" panel --no-open --foreground --port 47200\n"),
             "{u}"
         );
         assert!(
@@ -366,7 +366,7 @@ mod tests {
         let s = startup_script(Path::new(r"C:\Program Files\Kora\kora.exe"), 47120);
         assert!(
             s.contains(
-                r#"Run """C:\Program Files\Kora\kora.exe"" panel --no-open --port 47120", 0, False"#
+                r#"Run """C:\Program Files\Kora\kora.exe"" panel --no-open --foreground --port 47120", 0, False"#
             ),
             "{s}"
         );
