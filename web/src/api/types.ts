@@ -76,6 +76,8 @@ export interface SystemInfo {
   /** Same as `admin` (the backend sends both). */
   elevated?: boolean
   kora_home?: string
+  /** True when the panel can restart itself ("Restart now" after a self-update). */
+  can_restart?: boolean
 }
 
 export interface Ports {

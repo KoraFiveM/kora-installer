@@ -329,7 +329,7 @@ route('POST', '/session/link', () => {
   linkCodes.add(code)
   return { code, expires_in: 600 }
 })
-route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora' }) satisfies T.SystemInfo)
+route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -786,6 +786,13 @@ route('POST', '/self-update', (_m, b) => {
     prefs.version = String(b.version ?? '0.4.1')
     return { version: prefs.version }
   })
+})
+route('POST', '/panel/restart', () => {
+  if (beh.trouble) throw new Fail(409, 'conflict', 'This panel cannot restart itself. Run kora panel again.')
+  const p = prefs.version.split('.').map(Number)
+  p[2] = (p[2] ?? 0) + 1
+  prefs.version = p.join('.')
+  return { restarting: true }
 })
 route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.version : null, path: prefs.app ? 'C:\\Users\\sam\\AppData\\Local\\Kora\\kora.exe' : null, desktop_shortcut: prefs.desktopShortcut, supported: true }) satisfies T.AppStatus)
 route('PUT', '/app', (_m, b) => {

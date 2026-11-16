@@ -173,6 +173,9 @@ export const api = {
     remove: (name: string) => del<void>(`/users/${enc(name)}`),
   },
   system: () => get<T.SystemInfo>('/system'),
+  panel: {
+    restart: () => post<{ restarting: boolean }>('/panel/restart'),
+  },
   servers: {
     list: () => get<{ servers: T.ServerSummary[] }>('/servers').then((r) => r.servers),
     get: (name: string) => get<T.ServerDetail>(s(name)),
