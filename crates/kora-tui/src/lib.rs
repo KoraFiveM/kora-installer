@@ -69,23 +69,9 @@ impl Drop for Term {
 
 /// Run the story-style wizard. `Ok(None)` if the user quits.
 pub fn run_install_wizard() -> Result<Option<InstallRequest>, Box<dyn Error>> {
-    run_install_wizard_with(None, None)
-}
-
-/// Like [`run_install_wizard`], with a setup-code redeemer for the Welcome stage and/or answers
-/// the CLI already loaded from `--code`.
-pub fn run_install_wizard_with(
-    redeemer: Option<wizard::Redeemer>,
-    prefill: Option<kora_core::site::Redeemed>,
-) -> Result<Option<InstallRequest>, Box<dyn Error>> {
     let mut term = Term::new()?;
     let mut w = wizard::Wizard::new().with_github(github_screens::GithubFlow::new(std::sync::Arc::new(github_screens::SystemGithub)));
-    if let Some(r) = redeemer {
-        w = w.with_redeemer(r);
-    }
-    if let Some(p) = prefill {
-        w.apply_redeemed(p, true);
-    } else if let Some(saved) = kora_core::installer::saved::load() {
+    if let Some(saved) = kora_core::installer::saved::load() {
         w.restore_saved(&saved);
     }
     while w.state() == wizard::WizardState::Running {

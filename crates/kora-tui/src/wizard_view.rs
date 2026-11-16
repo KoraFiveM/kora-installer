@@ -320,29 +320,6 @@ pub fn view(w: &Wizard) -> View {
             v.lines = vec![l("Newer game versions are called builds. Leave empty to use the default.")];
             v.inputs = vec![inp("Game build", &w.game_build, "e.g. 3258", true)];
         }
-        Screen::SetupCode => {
-            v.title = l("Setup code (optional)");
-            match w.welcome_note() {
-                Some(n) => {
-                    v.lines = vec![
-                        n,
-                        String::new(),
-                        l("Questions the website already answered are skipped; you will see all of them again on the last screen before anything is changed."),
-                        String::new(),
-                        l("Your license key and database login are never sent by the website, so you will still be asked for those."),
-                    ];
-                }
-                None => {
-                    v.lines = vec![
-                        l("If you prepared your install on the Kora website you got a code like KORA-7F3K-92QX. Paste it here and press Enter to load your choices, or leave the box empty and press Next to answer everything here."),
-                        String::new(),
-                        l("A code works once and lasts 30 minutes."),
-                    ];
-                    v.inputs = vec![inp("Setup code", &w.setup_code, "KORA-XXXX-XXXX", true)];
-                }
-            }
-            v.help = l("Create a code on the Kora website (Installer page) after linking Discord, GitHub and your Cfx.re account. If it does not work you can simply continue without it.");
-        }
         Screen::Review => {
             v.title = l("Ready to install");
             v.next_label = l("Install");
@@ -397,9 +374,6 @@ pub fn view(w: &Wizard) -> View {
                 v.elevate_label = Some(l("[ Restart with permission ]"));
             } else if w.limited {
                 v.lines.insert(0, l("Limited setup: no database server, background service or firewall rules will be added. You can run Kora again later with sudo to add them."));
-            }
-            if w.redeemed.is_some() {
-                v.lines.insert(0, "Loaded from your setup code on the website: type, name, features, server software, ports and public name.".into());
             }
             v.lines.extend(w.system_changes().into_iter().map(|c| format!("  - {c}")));
             v.lines.push(String::new());
