@@ -115,5 +115,5 @@ finally {
 }
 
 Write-Host ''
-Write-Host 'Next step: run   kora install'
-Write-Host '(Add --service later if the server should start with Windows; that part needs an administrator terminal.)'
+Write-Host 'Next step: run   kora panel   (opens Kora Panel in your browser)'
+Write-Host 'Prefer the terminal? Run   kora install   instead.'
