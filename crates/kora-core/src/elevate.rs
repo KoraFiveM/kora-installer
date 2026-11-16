@@ -550,6 +550,8 @@ mod tests {
         assert_eq!(b.len(), 2);
     }
 
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
     #[test]
     fn the_sudo_relaunch_pins_the_users_kora_home() {
         let home = std::path::PathBuf::from("/home/sam/.kora");

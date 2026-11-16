@@ -436,6 +436,8 @@ mod tests {
         default_server_dir_with(env, false, "my-server")
     }
 
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
     #[test]
     fn a_normal_user_gets_a_folder_in_their_home() {
         let env = FakeEnv::new(1000).var("HOME", "/home/sam");
@@ -448,6 +450,8 @@ mod tests {
         );
     }
 
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
     #[test]
     fn sudo_from_a_normal_user_uses_that_users_home_not_roots() {
         let env = FakeEnv::new(0)
@@ -467,6 +471,8 @@ mod tests {
         assert_eq!(dir(&env).unwrap(), Path::new("/home/kora/my-server"));
     }
 
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
     #[test]
     fn without_home_the_passwd_entry_is_used_and_otherwise_a_clear_error() {
         let env = FakeEnv::new(1000);
@@ -494,6 +500,8 @@ mod tests {
         );
     }
 
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
     #[test]
     fn never_a_relative_path() {
         let cases = [
@@ -520,6 +528,8 @@ mod tests {
         );
     }
 
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
     #[test]
     fn sudo_user_is_validated() {
         for bad in [
@@ -659,6 +669,8 @@ mod tests {
         );
     }
 
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
     #[test]
     fn kora_home_is_pinned_before_sudo_unless_already_set() {
         assert_eq!(
