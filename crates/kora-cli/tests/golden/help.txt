@@ -11,7 +11,7 @@ Commands:
   add-resources  Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
   add-asset      Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal
   status         Show registered servers
-  self-update    Update the kora program itself to the newest release (checksum-verified)
+  self-update    Update the kora program itself to the newest stable release (checksum-verified)
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
@@ -378,7 +378,7 @@ Options:
           Print help
 
 ===== kora self-update =====
-Update the kora program itself to the newest release (checksum-verified)
+Update the kora program itself to the newest stable release (checksum-verified)
 
 Usage: kora self-update [OPTIONS]
 
@@ -390,7 +390,7 @@ Options:
           Do not ask for confirmation
 
       --version <vX.Y.Z>
-          Install exactly this release (also allows going back to an older one), e.g. v0.2.1
+          Install exactly this release (also an older one or a pre-release), e.g. v0.2.1
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

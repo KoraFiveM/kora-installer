@@ -393,7 +393,7 @@ enum Command {
     AddAsset(AddAssetArgs),
     /// Show registered servers.
     Status,
-    /// Update the kora program itself to the newest release (checksum-verified).
+    /// Update the kora program itself to the newest stable release (checksum-verified).
     SelfUpdate {
         /// Only say whether a newer version exists.
         #[arg(long)]
@@ -401,7 +401,7 @@ enum Command {
         /// Do not ask for confirmation.
         #[arg(long, short = 'y')]
         yes: bool,
-        /// Install exactly this release (also allows going back to an older one), e.g. v0.2.1.
+        /// Install exactly this release (also an older one or a pre-release), e.g. v0.2.1.
         #[arg(long, value_name = "vX.Y.Z")]
         version: Option<String>,
     },
