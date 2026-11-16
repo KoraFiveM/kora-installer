@@ -13,6 +13,13 @@ export interface Identity {
   role: Role
 }
 
+/** `POST /session`: the cookie is set; `secret` must come back with every request (`X-Kora-Session`). */
+export interface SessionCreated {
+  ok: boolean
+  identity: Identity
+  secret: string
+}
+
 export interface Meta {
   version: string
   api: number

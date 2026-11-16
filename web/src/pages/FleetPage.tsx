@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, Plus, RefreshCw, RotateCw, Square, Trash2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { ControlAction, FleetServer, HubNode } from '@/api/types'
+import { useRole } from '@/hooks/useRole'
 import { useAlerts } from '@/lib/app'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -158,6 +159,19 @@ function NodeCard({ n, onRemove }: { n: HubNode; onRemove: () => void }) {
 }
 
 export default function FleetPage() {
+  const { remote } = useRole()
+  if (remote) {
+    return (
+      <div className="space-y-6">
+        <h1 className="font-heading text-2xl font-bold">Fleet</h1>
+        <Alert tone="info">The fleet can only be opened on the computer that runs Kora, because it uses the sign-in tokens of the other panels.</Alert>
+      </div>
+    )
+  }
+  return <Fleet />
+}
+
+function Fleet() {
   const qc = useQueryClient()
   const { push } = useAlerts()
   const [adding, setAdding] = useState(false)
