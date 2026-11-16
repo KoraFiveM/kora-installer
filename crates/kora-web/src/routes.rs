@@ -84,6 +84,11 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::JobsGet => on_op(op, crate::jobs::job_get),
         Op::JobEvents => on_op(op, crate::jobs::job_events),
         Op::Events => on_op(op, handlers::system::events),
+        Op::MetricsGet => on_op(op, handlers::monitor::metrics_get),
+        Op::AlertsList => on_op(op, handlers::monitor::alerts_list),
+        Op::AlertsAck => on_op(op, handlers::monitor::alerts_ack),
+        Op::AlertSettingsGet => on_op(op, handlers::monitor::alert_settings_get),
+        Op::AlertSettingsSet => on_op(op, handlers::monitor::alert_settings_set),
     }
 }
 

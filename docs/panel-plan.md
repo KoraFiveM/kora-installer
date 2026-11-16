@@ -106,6 +106,11 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | jobs_get | GET /jobs/{id} | |
 | job_events | GET /jobs/{id}/events | SSE |
 | events | GET /events | SSE: server status / badge changes |
+| metrics_get | GET /servers/{s}/metrics | `?range=1h|6h|24h` (default 1h) → `{samples: [...], latest}`; a sample is `{t, up, players?, max_players?, cpu?, ram_mb?, sys_ram_pct?, disk_free_mb?, disk_free_pct?, game_up, txadmin_up, badge?}` (absent = not measurable). Thinned to at most 360 points. |
+| alerts_list | GET /alerts | `{alerts: [{id, server, kind, tone, title, message, raised, resolved, acked}]}` newest first; kinds `stopped`, `recovered`, `disk_low`, `ram_high`, `update_attention`; the UI polls it |
+| alerts_ack | POST /alerts/{id}/ack | 204; the alert stays listed |
+| alert_settings_get | GET /servers/{s}/alerts | `{enabled, rules{stopped,recovered,disk,ram,updates}, disk_min_gb, disk_min_percent, ram_max_percent, discord, webhook{configured, redacted}, email{supported:false}}`; the webhook address is never returned |
+| alert_settings_set | PUT /servers/{s}/alerts | partial update of the same fields plus `webhook_url` (`""`/null removes it) |
 
 ### 2.2 Conventions
 

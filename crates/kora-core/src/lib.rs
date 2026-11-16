@@ -23,5 +23,6 @@ pub mod txadmin;
 pub mod update;
 pub mod installer;
 pub mod launch;
+pub mod monitor;
 pub mod notify;
 pub mod self_update;

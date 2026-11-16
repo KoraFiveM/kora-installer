@@ -284,6 +284,15 @@ struct PanelArgs {
     /// Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop).
     #[arg(long)]
     no_open: bool,
+    /// Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed).
+    #[arg(long, conflicts_with_all = ["remove_service", "print_link"])]
+    install_service: bool,
+    /// Stop and remove the background panel installed with --install-service.
+    #[arg(long, conflicts_with_all = ["install_service", "print_link"])]
+    remove_service: bool,
+    /// Print the sign-in link of the background panel.
+    #[arg(long, conflicts_with_all = ["install_service", "remove_service"])]
+    print_link: bool,
 }
 
 #[derive(Subcommand)]
@@ -1053,6 +1062,12 @@ fn control(server: &str, action: kora_core::service::ControlAction) -> i32 {
         A::Stop => ("stop", "Stopped"),
         A::Restart => ("restart", "Restarted"),
     };
+    if action != A::Start {
+        // So the panel's monitor does not report this stop as a crash.
+        if let Some(e) = registry::Registry::load().ok().and_then(|r| r.servers.into_iter().find(|e| e.name == server)) {
+            kora_core::monitor::mark_stop_intent(&e.dir);
+        }
+    }
     let has_service = !matches!(host::service_state(server), Ok(ServiceState::NotInstalled) | Err(_));
     // Without a background service Kora runs FXServer itself (detached, pid in .kora/server.pid).
     if !has_service {
@@ -1523,8 +1538,72 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
 }
 
 fn panel(a: &PanelArgs) -> i32 {
-    let opts = kora_web::PanelOptions { port: a.port, open_browser: !a.no_open, ..Default::default() };
-    match kora_web::run(opts) {
+    use kora_core::monitor::panel_service as svc;
+    let home = svc::home();
+    if a.print_link {
+        return match svc::link(&home) {
+            Ok(link) => {
+                println!("{link}");
+                if let Some(port) = svc::saved_port(&home) {
+                    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+                    if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_err() {
+                        eprintln!("Note: nothing is answering on port {port} right now. The background panel may still be starting; check it with `systemctl --user status kora-panel` (Linux).");
+                    }
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                1
+            }
+        };
+    }
+    if a.install_service || a.remove_service {
+        let runner = kora_core::service::SystemRunner;
+        let platform = kora_core::service::Platform::current();
+        if a.remove_service {
+            return match svc::remove(&home, &runner, platform) {
+                Ok(()) => {
+                    println!("The background panel has been stopped and removed. Monitoring and alerts now only run while `kora panel` is open.");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("error: could not remove the background panel: {e}");
+                    1
+                }
+            };
+        }
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("error: cannot find the kora program to run in the background: {e}");
+                return 1;
+            }
+        };
+        let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
+        let spec = svc::InstallSpec { exe: &exe, port: a.port, kora_home_env: home_env.as_deref() };
+        return match svc::install(&home, &spec, &runner, platform) {
+            Ok(link) => {
+                println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
+                println!("Sign in with: {link}");
+                println!("Show the link again any time with `kora panel --print-link`; remove it with `kora panel --remove-service`.");
+                println!("The link contains your sign-in token: keep it private.");
+                0
+            }
+            Err(e) => {
+                eprintln!("error: could not set up the background panel: {e}");
+                1
+            }
+        };
+    }
+    // A saved token (made by --install-service) keeps the sign-in link the same every time.
+    let opts = kora_web::PanelOptions { port: a.port, open_browser: !a.no_open, token: svc::load_token(&home), ..Default::default() };
+    let pid_file = svc::pid_path(&home);
+    let _ = std::fs::create_dir_all(&home);
+    let _ = std::fs::write(&pid_file, std::process::id().to_string());
+    let result = kora_web::run(opts);
+    let _ = std::fs::remove_file(&pid_file);
+    match result {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {e}");

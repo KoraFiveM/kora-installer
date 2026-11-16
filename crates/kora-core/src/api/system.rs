@@ -184,6 +184,10 @@ impl Backend for SystemBackend {
     }
 
     fn control(&mut self, e: &ServerEntry, a: ControlAction) -> Res<()> {
+        if a != ControlAction::Start {
+            // So the monitor does not report this stop as a crash.
+            crate::monitor::mark_stop_intent(&e.dir);
+        }
         control_with(&SystemControl, &e.name, a)
     }
 

@@ -12,13 +12,16 @@ import { AddExistingDialog } from '@/components/AddExistingDialog'
 import { ModeChip, StatusChip, UpdateChip } from '@/components/Status'
 import { ServerControls } from '@/components/ServerControls'
 import { useServerControl } from '@/hooks/useServerControl'
+import { usePanelAlerts } from '@/hooks/usePanelAlerts'
+import { Badge } from '@/components/ui/badge'
 
-function Row({ s }: { s: ServerSummary }) {
+function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
   const ctl = useServerControl(s.name)
   return (
     <tr className="border-t border-border align-middle">
       <td className="px-4 py-3">
         <Link to={`/servers/${encodeURIComponent(s.name)}`} className="font-medium hover:underline">{s.name}</Link>
+        {alerts > 0 && <Link to={`/servers/${encodeURIComponent(s.name)}?tab=monitoring`} className="ml-2 align-middle"><Badge tone="danger">{alerts === 1 ? '1 alert' : `${alerts} alerts`}</Badge></Link>}
         {!s.managed && <div className="text-xs text-muted-foreground">Added from an existing folder</div>}
       </td>
       <td className="px-4 py-3"><ModeChip mode={s.mode} /></td>
@@ -36,6 +39,9 @@ export default function ServersPage() {
   const [adding, setAdding] = useState(false)
   const q = useQuery({ queryKey: ['servers'], queryFn: api.servers.list })
   const servers = q.data ?? []
+  const { open: openAlerts } = usePanelAlerts()
+  const running = servers.filter((x) => x.status === 'running').length
+  const stopped = servers.filter((x) => x.status === 'stopped').length
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -57,6 +63,13 @@ export default function ServersPage() {
         </Card>
       )}
       {servers.length > 0 && (
+        <p className="flex flex-wrap items-center gap-2 text-sm" aria-label="Health summary">
+          <Badge tone="success" dot>{running} running</Badge>
+          {stopped > 0 && <Badge tone="neutral" dot>{stopped} stopped</Badge>}
+          {openAlerts.length > 0 ? <Badge tone="danger">{openAlerts.length === 1 ? '1 alert needs attention' : `${openAlerts.length} alerts need attention`}</Badge> : <Badge tone="plain">No alerts</Badge>}
+        </p>
+      )}
+      {servers.length > 0 && (
         <Card className="overflow-x-auto">
           <table className="w-full min-w-[44rem] text-left text-sm">
             <caption className="sr-only">Your servers</caption>
@@ -67,7 +80,7 @@ export default function ServersPage() {
                 ))}
               </tr>
             </thead>
-            <tbody>{servers.map((s) => <Row key={s.name} s={s} />)}</tbody>
+            <tbody>{servers.map((s) => <Row key={s.name} s={s} alerts={openAlerts.filter((a) => a.server === s.name).length} />)}</tbody>
           </table>
         </Card>
       )}
