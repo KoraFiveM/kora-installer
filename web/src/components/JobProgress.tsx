@@ -84,19 +84,25 @@ export function ResourceProgress({ events }: { events: unknown[] }) {
   const evs = events.map(normaliseUpdateEvent)
   const rows = new Map<string, string>()
   const notes: string[] = []
+  // Step-by-step progress before the update itself (e.g. "Syncing your GitHub forks 3/14"): only the latest counts.
+  let progress: string | undefined
   for (const e of evs) {
     if (e.type === 'resource' && e.id) rows.set(e.id, e.state ?? '')
     else if (e.type === 'snapshot' && e.id) notes.push(`Safety copy saved (${e.id}). You can roll back to it.`)
     else if (e.type === 'health' && e.message) notes.push(e.message)
     else if (e.type === 'status' && e.message) notes.push(e.message)
+    else if (e.type === 'progress' && e.message) progress = e.message
   }
+  if (progress && rows.size === 0) notes.unshift(progress)
   return (
     <div className="space-y-3" aria-live="polite">
       {[...rows].map(([id, state]) => {
         const done = /updated|installed|rolled/.test(state)
+        // Finished, but not as hoped: skipped, failed, waiting for a quiet server, never reached.
+        const stopped = /^(skipped|failed|waiting|not attempted)/.test(state)
         return (
           <div key={id} className="flex items-center gap-3 text-sm">
-            {done ? <CheckCircle2 className="size-4 text-success" aria-hidden /> : <Loader2 className="size-4 animate-spin text-info" aria-hidden />}
+            {done ? <CheckCircle2 className="size-4 text-success" aria-hidden /> : stopped ? <MinusCircle className="size-4 text-amber" aria-hidden /> : <Loader2 className="size-4 animate-spin text-info" aria-hidden />}
             <span className="font-mono text-xs">{id}</span>
             <span className="text-muted-foreground">{state}</span>
           </div>

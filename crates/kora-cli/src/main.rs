@@ -252,7 +252,7 @@ enum RestartArg {
 #[derive(Args, Debug, Default)]
 struct UpdateArgs {
     /// Run unattended (fast-forward clean forks only).
-    #[arg(long, conflicts_with_all = ["resource", "all", "preview", "yes", "restart", "rollback", "list_snapshots"])]
+    #[arg(long, conflicts_with_all = ["resource", "all", "preview", "yes", "restart", "rollback", "list_snapshots", "force"])]
     auto: bool,
     /// Server name or id.
     server: String,
@@ -277,6 +277,9 @@ struct UpdateArgs {
     /// List saved snapshots.
     #[arg(long, conflicts_with_all = ["resource", "all"])]
     list_snapshots: bool,
+    /// With --rollback: roll back even resources with uncommitted changes of your own (they are thrown away).
+    #[arg(long, requires = "rollback")]
+    force: bool,
 }
 
 #[derive(Args, Debug, Default)]
@@ -1392,6 +1395,11 @@ fn update(a: UpdateArgs) -> i32 {
                 println!("{}", report.summary());
                 return m::exit_code(&report);
             }
+            // The scheduled run simply skips this time (already written to update.log).
+            Err(e) if kora_core::update::lock::is_busy_message(&e.to_string()) => {
+                println!("Skipped: {e}");
+                return 0;
+            }
             Err(e) => {
                 eprintln!("error: {e}");
                 return 1;
@@ -1416,11 +1424,16 @@ fn update(a: UpdateArgs) -> i32 {
         return 0;
     }
     if let Some(id) = &a.rollback {
-        if !a.yes && !confirm(&format!("Put '{}' back the way snapshot {id} saved it?", server.name)) {
+        let warn = if a.force {
+            " Changes of your own in those resources are thrown away."
+        } else {
+            ""
+        };
+        if !a.yes && !confirm(&format!("Put '{}' back the way snapshot {id} saved it? The server restarts if it is running.{warn}", server.name)) {
             println!("Nothing changed.");
             return 0;
         }
-        return match m::rollback(&server, id) {
+        return match m::rollback(&server, id, a.force) {
             Ok(()) => {
                 println!("Rolled back to snapshot {id}.");
                 0
@@ -1470,13 +1483,21 @@ fn update(a: UpdateArgs) -> i32 {
         RestartArg::WhenQuiet => m::RestartPolicy::WhenQuiet,
     };
     let mut snapshot = None;
-    let res = m::apply(&server, scope, m::ApplyOpts { restart, skip: Vec::new() }, &mut |e| match e {
+    // Exactly what was just shown, even if something new was published while you read it.
+    let opts = m::ApplyOpts {
+        targets: Some(m::planned_targets(&pre)),
+        ..m::ApplyOpts::new(restart)
+    };
+    let res = m::apply(&server, scope, opts, &mut |e| match e {
         m::UpdateEvent::Snapshot(id) => {
             println!("Saved snapshot {id}.");
             snapshot = Some(id);
         }
-        m::UpdateEvent::Resource { id, state } if state == "updating" => println!("Updating {id}..."),
+        m::UpdateEvent::Resource { id, state } if state == "updating" => {
+            println!("Updating {id}...")
+        }
         m::UpdateEvent::Health(h) => println!("{h}."),
+        m::UpdateEvent::Progress(p) => println!("{p}..."),
         _ => {}
     });
     match res {

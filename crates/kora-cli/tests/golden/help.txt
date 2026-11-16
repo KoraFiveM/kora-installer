@@ -300,6 +300,9 @@ Options:
       --list-snapshots
           List saved snapshots
 
+      --force
+          With --rollback: roll back even resources with uncommitted changes of your own (they are thrown away)
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

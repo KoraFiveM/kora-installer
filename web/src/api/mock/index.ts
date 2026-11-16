@@ -474,6 +474,9 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
       needs_attention: preview.resources.filter((r) => r.status === 'dirty').map((r) => [r.id, 'It has changes of your own, so it was not touched']),
       forks_synced: s.mode === 'development' ? ['kora_core'] : [],
       forks_left_alone: [],
+      not_attempted: [],
+      held: [],
+      notes: [],
     }
     const left = preview.resources.map((r) => (chosen.includes(r) ? { ...r, status: 'up_to_date' as const, behind: 0, from: r.to } : r))
     dirtyPreviewed[s.name] = { ...preview, resources: left }

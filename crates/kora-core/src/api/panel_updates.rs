@@ -30,6 +30,7 @@ pub fn update_event_json(e: &UpdateEvent) -> Value {
         }
         UpdateEvent::Snapshot(id) => json!({"type": "snapshot", "id": id}),
         UpdateEvent::Health(m) => json!({"type": "health", "message": m}),
+        UpdateEvent::Progress(m) => json!({"type": "progress", "message": m}),
         UpdateEvent::Done => json!({"type": "done"}),
     }
 }
@@ -66,6 +67,9 @@ pub fn report_json(r: &UpdateReport) -> Value {
         "needs_attention": r.needs_attention,
         "forks_synced": r.forks_synced,
         "forks_left_alone": r.forks_left_alone,
+        "not_attempted": r.not_attempted,
+        "held": r.held,
+        "notes": r.notes,
     })
 }
 

@@ -147,12 +147,14 @@ export const api = {
   },
   update: {
     preview: (name: string, scope: T.Scope = 'all') => post<T.JobStarted>(`${s(name)}/update/preview`, { scope }),
-    apply: (name: string, body: { scope: T.Scope; restart: T.RestartPolicy; skip: string[] }) => post<T.JobStarted>(`${s(name)}/update/apply`, body),
+    /** `targets`: the preview's planned commit per resource, so exactly what was shown is applied. */
+    apply: (name: string, body: { scope: T.Scope; restart: T.RestartPolicy; skip: string[]; targets?: Record<string, string> }) => post<T.JobStarted>(`${s(name)}/update/apply`, body),
     auto: (name: string) => post<T.JobStarted>(`${s(name)}/update/auto`),
   },
   snapshots: {
     list: (name: string) => get<{ snapshots: T.SnapshotInfo[] }>(`${s(name)}/snapshots`).then((r) => r.snapshots),
-    rollback: (name: string, id: string) => post<T.JobStarted>(`${s(name)}/snapshots/${enc(id)}/rollback`),
+    /** `force`: roll back even resources with uncommitted changes (they are thrown away). */
+    rollback: (name: string, id: string, force = false) => post<T.JobStarted>(`${s(name)}/snapshots/${enc(id)}/rollback`, force ? { force: true } : undefined),
   },
   webhook: {
     get: (name: string) => get<T.WebhookState>(`${s(name)}/webhook`),

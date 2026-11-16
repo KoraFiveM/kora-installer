@@ -95,6 +95,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("update --restart", Route(Op::UpdateApply)),
     ("update --rollback", Route(Op::SnapshotRollback)),
     ("update --list-snapshots", Route(Op::SnapshotsList)),
+    ("update --force", Route(Op::SnapshotRollback)),
     ("add-resources", Route(Op::ResourcesAdd)),
     ("add-resources <server>", Route(Op::ResourcesAdd)),
     (

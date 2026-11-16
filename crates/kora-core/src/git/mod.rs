@@ -1034,14 +1034,24 @@ pub struct SyncJob {
 
 /// Paced sync of many forks (same batches and pauses as forking). Stops at a persistent rate limit:
 /// the remaining jobs are reported as `Unknown("rate limited ...")` and left untouched.
-pub fn sync_forks_paced(r: &dyn CommandRunner, jobs: &[SyncJob], cfg: &ForkConfig) -> Vec<(String, SyncOutcome)> {
+/// `progress(done, total)` is called after each fork.
+pub fn sync_forks_paced(
+    r: &dyn CommandRunner,
+    jobs: &[SyncJob],
+    cfg: &ForkConfig,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Vec<(String, SyncOutcome)> {
     let counter = CountingRunner::new(r);
     let mut out = Vec::new();
     let mut in_batch = 0usize;
     let mut limited = false;
     for (i, j) in jobs.iter().enumerate() {
         if limited {
-            out.push((j.id.clone(), SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into())));
+            out.push((
+                j.id.clone(),
+                SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into()),
+            ));
+            progress(i + 1, jobs.len());
             continue;
         }
         let before = counter.calls();
@@ -1054,6 +1064,7 @@ pub fn sync_forks_paced(r: &dyn CommandRunner, jobs: &[SyncJob], cfg: &ForkConfi
             Err(e) => SyncOutcome::Unknown(e.to_string()),
         };
         out.push((j.id.clone(), res));
+        progress(i + 1, jobs.len());
         in_batch += (counter.calls() - before).max(1) as usize;
         if in_batch >= cfg.batch_calls && i + 1 < jobs.len() {
             in_batch = 0;
@@ -1430,11 +1441,21 @@ pub fn clone_default_head(r: &dyn CommandRunner, repo: &str, dest: &Path) -> Res
     Ok(())
 }
 
-/// Prod update: move an existing pinned clone to a newer pinned commit.
+/// Prod update: move an existing pinned clone to a newer pinned commit. No network when the
+/// commit is already in the clone (the preview usually fetched it).
 pub fn move_pinned(r: &dyn CommandRunner, repo: &Path, commit: &str) -> Result<String> {
     check("commit", valid_commit(commit), commit)?;
     let previous = head_commit(r, repo)?;
-    run_ok(r, "git", &["fetch", "origin"], Some(repo))?;
+    let present = run(
+        r,
+        "git",
+        &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+        Some(repo),
+    )?
+    .ok();
+    if !present {
+        run_ok(r, "git", &["fetch", "origin"], Some(repo))?;
+    }
     checkout_pinned(r, repo, commit)?;
     Ok(previous)
 }
@@ -2064,10 +2085,27 @@ mod tests {
 
     #[test]
     fn paced_job_sync_stops_at_a_persistent_rate_limit() {
-        let f = Fake::new(|c| if c.contains("/compare/") { fail("HTTP 429") } else { ok("") });
-        let job = |i: &str| SyncJob { id: i.into(), fork: format!("me/{i}"), upstream: format!("up/{i}"), branch: "dev".into() };
-        let out = sync_forks_paced(&f, &[job("a"), job("b")], &sync_cfg());
-        assert!(out.iter().all(|(_, o)| matches!(o, SyncOutcome::Unknown(w) if w.contains("rate limit"))));
+        let f = Fake::new(|c| {
+            if c.contains("/compare/") {
+                fail("HTTP 429")
+            } else {
+                ok("")
+            }
+        });
+        let job = |i: &str| SyncJob {
+            id: i.into(),
+            fork: format!("me/{i}"),
+            upstream: format!("up/{i}"),
+            branch: "dev".into(),
+        };
+        let mut seen = vec![];
+        let out = sync_forks_paced(&f, &[job("a"), job("b")], &sync_cfg(), &mut |d, t| {
+            seen.push((d, t))
+        });
+        assert_eq!(seen, vec![(1, 2), (2, 2)], "progress after each fork");
+        assert!(out
+            .iter()
+            .all(|(_, o)| matches!(o, SyncOutcome::Unknown(w) if w.contains("rate limit"))));
         assert_eq!(f.count("/compare/"), 5); // 1 + 4 retries, then b is not even tried
     }
 
@@ -2290,5 +2328,29 @@ mod tests {
         // an unexpected clone shape is not rewritten into git, it just runs as the user
         let i = sudo_invocation("gh", &["repo", "clone", "-x", "d"], None, Some(&u), ru, None, None);
         assert_eq!(i.args[..4], ["-u", "sam", "--", "gh"]);
+    }
+
+    #[test]
+    fn move_pinned_fetches_only_when_the_commit_is_missing() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let here = Fake::new(|l| {
+            if l.starts_with("git rev-parse HEAD") {
+                ok("aaa\n")
+            } else {
+                ok("")
+            }
+        });
+        assert_eq!(move_pinned(&here, Path::new("/r"), sha).unwrap(), "aaa");
+        assert_eq!(here.count("fetch"), 0, "{:?}", here.calls.borrow());
+        assert_eq!(here.count("checkout --detach"), 1);
+        let missing = Fake::new(|l| {
+            if l.starts_with("git cat-file") {
+                fail("fatal: Not a valid object name")
+            } else {
+                ok("")
+            }
+        });
+        move_pinned(&missing, Path::new("/r"), sha).unwrap();
+        assert_eq!(missing.count("git fetch origin"), 1);
     }
 }
