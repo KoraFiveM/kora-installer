@@ -47,10 +47,18 @@ pub fn parse_releases(body: &str) -> Result<Vec<Release>, String> {
     serde_json::from_str(body).map_err(|e| format!("unexpected answer from GitHub: {e}"))
 }
 
-/// Newest published release, pre-releases included: the first non-draft with a parseable tag
-/// (GitHub lists newest first; `/releases/latest` would skip pre-releases).
-pub fn pick_newest(releases: &[Release]) -> Option<&Release> {
-    releases.iter().find(|r| !r.draft && r.version().is_some())
+/// A pre-release by GitHub's flag or by its tag (`v0.3.0-rc1`): either one is enough.
+pub fn is_prerelease(r: &Release) -> bool {
+    r.prerelease || r.version().is_some_and(|v| v.is_prerelease())
+}
+
+/// Newest published release for a program running `current`: the first non-draft with a
+/// parseable tag (GitHub lists newest first). A stable build only moves to stable releases; a
+/// pre-release build also sees pre-releases, so a tester gets the next candidate and then the
+/// final. `--version` (`pick_tag`) can still pick any release.
+pub fn pick_newest<'a>(releases: &'a [Release], current: &Version) -> Option<&'a Release> {
+    let any = current.is_prerelease();
+    releases.iter().find(|r| !r.draft && r.version().is_some() && (any || !is_prerelease(r)))
 }
 
 /// A specific tag (`--version`), with or without the leading `v`.
@@ -104,12 +112,18 @@ mod tests {
     }
 
     #[test]
-    fn newest_includes_prereleases_and_skips_drafts() {
+    fn stable_builds_get_stable_releases_and_drafts_are_skipped() {
         let r = parse_releases(&json()).unwrap();
-        assert_eq!(pick_newest(&r).unwrap().tag_name, "v0.2.2-rc1");
+        let v = |s: &str| Version::parse(s).unwrap();
+        assert_eq!(pick_newest(&r, &v("0.2.0")).unwrap().tag_name, "v0.2.1", "a stable build skips pre-releases");
+        assert_eq!(pick_newest(&r, &v("0.2.0-rc1")).unwrap().tag_name, "v0.2.2-rc1", "a pre-release build sees them");
         assert_eq!(pick_tag(&r, "0.2.1").unwrap().tag_name, "v0.2.1");
+        assert_eq!(pick_tag(&r, "v0.2.2-rc1").unwrap().tag_name, "v0.2.2-rc1", "an explicit version may be a pre-release");
         assert!(pick_tag(&r, "v0.3.0").is_none(), "drafts are never offered");
-        assert!(pick_newest(&[]).is_none());
+        assert!(pick_newest(&[], &v("0.2.0")).is_none());
+        // A `-rc` tag counts as a pre-release even when GitHub's flag was left off.
+        let unflagged = parse_releases(r#"[{"tag_name":"v0.4.0-rc1"},{"tag_name":"v0.3.9"}]"#).unwrap();
+        assert_eq!(pick_newest(&unflagged, &v("0.3.0")).unwrap().tag_name, "v0.3.9");
     }
 
     #[test]
