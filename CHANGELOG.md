@@ -5,6 +5,16 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `kora install --hostname <TEXT>` and `--game-build <N>`: the public server name and a pinned game build, as real flags (before they could only come from a setup code). The hostname defaults to the server name.
+
+### Removed
+- Setup codes: `kora install --code` and `kora add-resources --code` still parse but stop at once with exit code 2 and a message pointing to the flags, `--resource` and `kora panel`. The wizard no longer has a setup-code screen.
+- macOS code and wording (Kora supports Linux and Windows).
+
+### Changed
+- Signing docs: SignPath is no longer mentioned. The Windows `.exe` is unsigned, SmartScreen may warn, the install scripts verify SHA-256 and the manual `.sha256` check is documented. The privacy line now says Kora contacts nothing unless you ask it to.
+
 ## [0.3.4] - 2026-11-15
 
 ### Added

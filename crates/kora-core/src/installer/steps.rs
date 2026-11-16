@@ -118,7 +118,7 @@ fn open_github_page(url: &str) -> bool {
     if !url.starts_with("https://github.com/") || url.contains(|c: char| c.is_whitespace() || c.is_control() || c == '"') {
         return false;
     }
-    let (program, args): (&str, Vec<&str>) = if cfg!(windows) { ("explorer.exe", vec![url]) } else if cfg!(target_os = "macos") { ("open", vec![url]) } else { ("xdg-open", vec![url]) };
+    let (program, args): (&str, Vec<&str>) = if cfg!(windows) { ("explorer.exe", vec![url]) } else { ("xdg-open", vec![url]) };
     crate::sysexe::command(program)
         .args(args)
         .stdin(std::process::Stdio::null())

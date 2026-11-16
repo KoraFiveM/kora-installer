@@ -8,7 +8,6 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use kora_core::elevate;
 use kora_core::firewall::ports::{self, PortProber, SystemProber};
 use kora_core::launch;
-use kora_core::site::{self, Redeemed};
 use kora_core::installer::{
     self, gitops, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection,
     RollbackOptions, StepStatus,
@@ -39,8 +38,8 @@ enum DbArg {
 
 #[derive(Args, Default, Clone)]
 struct InstallArgs {
-    /// Single-use setup code from the website (e.g. KORA-7F3K-92QX).
-    #[arg(long)]
+    /// REMOVED in 0.4.0 (setup codes no longer exist): use the flags below or `kora panel`.
+    #[arg(long, value_name = "CODE")]
     code: Option<String>,
     /// Server name (display + registry name).
     #[arg(long)]
@@ -112,11 +111,11 @@ struct InstallArgs {
     /// If a port is in use, silently use the next free one and say what changed.
     #[arg(long)]
     auto_ports: bool,
-    /// Filled from a setup code (not a flag).
-    #[arg(skip)]
+    /// Server hostname shown in the server list (default: the server name).
+    #[arg(long)]
     hostname: Option<String>,
-    /// Filled from a setup code (not a flag).
-    #[arg(skip)]
+    /// Pin the FiveM game build (e.g. 3258); default: the build the server ships with.
+    #[arg(long, value_name = "N")]
     game_build: Option<u32>,
     /// Do not ask anything (implied by any other option).
     #[arg(long, short = 'y')]
@@ -127,6 +126,8 @@ impl InstallArgs {
     fn any_given(&self) -> bool {
         self.name.is_some()
             || self.dir.is_some()
+            || self.hostname.is_some()
+            || self.game_build.is_some()
             || self.mode.is_some()
             || self.license_key.is_some()
             || self.game_port.is_some()
@@ -147,40 +148,6 @@ impl InstallArgs {
             || self.no_start
             || self.auto_ports
             || self.yes
-    }
-
-    /// Use the website's choices as defaults: anything given explicitly as a flag wins.
-    fn apply_redeemed(&mut self, r: &Redeemed) {
-        self.name.get_or_insert_with(|| r.name.clone());
-        self.mode.get_or_insert(match r.mode {
-            Mode::Production => ModeArg::Prod,
-            Mode::Development => ModeArg::Dev,
-        });
-        self.game_port.get_or_insert(r.ports.game);
-        self.txadmin_port.get_or_insert(r.ports.txadmin);
-        if self.resources.is_none() {
-            self.resources = Some(match &r.resources {
-                ResourceSelection::All => "all".to_string(),
-                ResourceSelection::Only(ids) => ids.join(","),
-            });
-        }
-        if self.artifact_url.is_none() {
-            self.artifact_url = r.artifact_url.clone();
-        }
-        if self.cfx_identifier.is_none() {
-            self.cfx_identifier = r.cfx_identifier.clone();
-        }
-        self.hostname = r.hostname.clone();
-        self.game_build = r.game_build;
-    }
-
-    /// True when, after a setup code, nothing is left to ask: license key, folder, a database
-    /// admin login (or no database) and, for development mode, the fork owner.
-    fn headless_ready(&self, dev: bool) -> bool {
-        let db_ok = matches!(self.db, Some(DbArg::Skip))
-            || self.db_admin_user.is_some()
-            || std::env::var("KORA_DB_ADMIN_PASSWORD").map(|p| !p.is_empty()).unwrap_or(false);
-        self.license_key.is_some() && self.dir.is_some() && db_ok && (!dev || self.github_owner.is_some())
     }
 
     fn into_request(self) -> Result<InstallRequest, String> {
@@ -295,8 +262,8 @@ struct UpdateArgs {
 struct AddResourcesArgs {
     /// Server name or folder.
     server: String,
-    /// A setup code made on the Kora website for adding resources (single use).
-    #[arg(long, value_name = "CODE", conflicts_with = "resource")]
+    /// REMOVED in 0.4.0 (setup codes no longer exist): use --resource or `kora panel`.
+    #[arg(long, value_name = "CODE")]
     code: Option<String>,
     /// Catalog resource id to add (repeatable). Dependencies are added automatically.
     #[arg(long = "resource", value_name = "ID")]
@@ -588,7 +555,7 @@ fn print_lines(prefix: &str, lines: &[String]) {
 fn app_install(force: bool, no_desktop_shortcut: bool, dry_run: bool) -> i32 {
     use kora_core::app_install as app;
     if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
-        eprintln!("error: installing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux/macOS).");
+        eprintln!("error: installing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
         return 1;
     }
     match app::install_app(&app::AppOptions { desktop_shortcut: !no_desktop_shortcut, force, dry_run }) {
@@ -619,7 +586,7 @@ fn app_status() -> i32 {
 fn app_uninstall(yes: bool, dry_run: bool) -> i32 {
     use kora_core::app_install as app;
     if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
-        eprintln!("error: removing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux/macOS).");
+        eprintln!("error: removing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
         return 1;
     }
     if !yes && !dry_run {
@@ -754,16 +721,13 @@ fn manager() -> i32 {
     }
 }
 
-/// Exchange a setup code for the website's choices (and verify the artifact build).
-fn redeem_code(code: &str) -> Result<Redeemed, String> {
-    site::redeem_and_resolve(code, &site::site_url_from_env(), &installer::HttpClient::default()).map_err(|e| e.to_string())
+/// Interactive wizard (`None` = the user quit without installing).
+fn interactive_install() -> Result<Option<InstallRequest>, String> {
+    kora_tui::run_install_wizard().map_err(|e| e.to_string())
 }
 
-/// Interactive wizard (`None` = the user quit without installing).
-fn interactive_install(prefill: Option<Redeemed>) -> Result<Option<InstallRequest>, String> {
-    let redeemer: kora_tui::wizard::Redeemer = Box::new(redeem_code);
-    kora_tui::run_install_wizard_with(Some(redeemer), prefill).map_err(|e| e.to_string())
-}
+/// Shown (exit code 2) when `--code` is used: setup codes are gone.
+const CODE_REMOVED: &str = "error: setup codes were removed in 0.4.0. Use the flags instead (see `kora install --help`), `kora add-resources <server> --resource <ID>`, or the panel (`kora panel`).";
 
 /// Sends every event to the progress screen and keeps a plain-text copy for the log file.
 struct ChannelSink {
@@ -814,7 +778,7 @@ fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber) -
     Err(text)
 }
 
-/// Dry-run header: the effective choices (website code + flags merged). Never includes secrets.
+/// Dry-run header: the effective choices (from the flags). Never includes secrets.
 fn request_summary(req: &InstallRequest) -> String {
     use kora_core::installer::{Mode, ResourceSelection};
     let resources = match &req.resources {
@@ -878,8 +842,8 @@ fn write_install_log(req: &InstallRequest, lines: &[String], error: Option<&str>
 }
 
 /// Wizard -> installer thread + progress screen -> outcome / error screen.
-fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>, no_app: bool, no_desktop_shortcut: bool) -> i32 {
-    let mut req = match interactive_install(prefill) {
+fn interactive_flow(catalog: Option<String>, no_app: bool, no_desktop_shortcut: bool) -> i32 {
+    let mut req = match interactive_install() {
         Ok(Some(r)) => r,
         Ok(None) => {
             // The wizard's goodbye screen already waited for a key: don't ask twice.
@@ -967,43 +931,24 @@ fn install(args: InstallArgs) -> i32 {
     if args.github_owner.as_deref().is_some_and(|o| o.eq_ignore_ascii_case("list")) {
         return github_owners();
     }
-    let mut redeemed: Option<Redeemed> = None;
-    if let Some(code) = args.code.take() {
-        match redeem_code(&code) {
-            Ok(r) => {
-                println!("{}", r.welcome());
-                redeemed = Some(r);
-            }
-            Err(e) => {
-                eprintln!("error: {e}");
-                return 1;
-            }
-        }
+    if args.code.is_some() {
+        eprintln!("{CODE_REMOVED}");
+        return 2;
     }
-    let mut headless = args.any_given();
-    if let Some(r) = &redeemed {
-        let dev = r.mode == Mode::Development;
-        if args.headless_ready(dev) {
-            headless = true;
-        } else if headless && dev && args.github_owner.is_none() {
-            eprintln!("error: your setup code is for a development server: pass --github-owner <your GitHub user or organisation> (`kora github owners` lists them; the website does not decide where to fork).");
-            return 2;
-        }
-        args.apply_redeemed(r);
-    }
+    let headless = args.any_given();
     if !headless {
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             eprintln!(
                 "error: `kora install` needs an interactive terminal to ask its questions. \
-                 Run it in a terminal, or pass options instead (with a setup code you still need --license-key, --dir and a database admin login: --db-admin-user or --db skip), e.g. `kora install --name \"My Server\" --dir ~/kora/my-server --license-key <key> -y` (see `kora install --help`)."
+                 Run it in a terminal, or pass options instead e.g. `kora install --name \"My Server\" --dir ~/kora/my-server --license-key <key> -y` (see `kora install --help`)."
             );
             return 2;
         }
         let catalog = args.catalog.or_else(|| std::env::var("KORA_CATALOG").ok().filter(|c| !c.is_empty()));
-        return interactive_flow(catalog, redeemed, args.no_app, args.no_desktop_shortcut);
+        return interactive_flow(catalog, args.no_app, args.no_desktop_shortcut);
     }
     let args_auto_ports = args.auto_ports;
-    let dev_mode = matches!(args.mode, Some(ModeArg::Dev)) || redeemed.as_ref().is_some_and(|r| r.mode == Mode::Development);
+    let dev_mode = matches!(args.mode, Some(ModeArg::Dev));
     if dev_mode && !args.dry_run {
         match resolve_github_owner(args.github_owner.as_deref()) {
             Ok(l) => args.github_owner = Some(l),
@@ -1352,9 +1297,13 @@ fn confirm(question: &str) -> bool {
     std::io::stdin().read_line(&mut line).is_ok() && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-/// `kora add-resources <server> --code CODE | --resource ID...`. Browsing the catalog sections
+/// `kora add-resources <server> --resource ID...`. Browsing the catalog sections
 /// (with per-creator drill-in) is in the manager: `kora manager` > Add resources.
 fn add_resources(a: AddResourcesArgs) -> i32 {
+    if a.code.is_some() {
+        eprintln!("{CODE_REMOVED}");
+        return 2;
+    }
     use kora_core::addresources as add;
     use kora_core::git::SystemRunner;
     let mut server = match kora_core::update::manual::load_server(&a.server) {
@@ -1364,22 +1313,11 @@ fn add_resources(a: AddResourcesArgs) -> i32 {
             return 1;
         }
     };
-    let ids: Vec<String> = match (&a.code, a.resource.is_empty()) {
-        (Some(code), _) => match site::redeem_add_resources(code, &site::site_url_from_env()) {
-            Ok(c) => {
-                println!("Code accepted: {} resource(s) chosen on the website.", c.resources.len());
-                c.resources
-            }
-            Err(e) => {
-                eprintln!("error: {e}");
-                return 1;
-            }
-        },
-        (None, false) => a.resource.clone(),
-        (None, true) => {
-            eprintln!("error: say what to add: --code <CODE> from the website, or --resource <ID> (repeatable). To browse the catalog, open `kora manager` and choose Add resources.");
-            return 2;
-        }
+    let ids: Vec<String> = if a.resource.is_empty() {
+        eprintln!("error: say what to add: --resource <ID> (repeatable). To browse the catalog, open `kora manager` and choose Add resources, or use `kora panel`.");
+        return 2;
+    } else {
+        a.resource.clone()
     };
     let (cat, note) = match add::load_catalog() {
         Ok(x) => x,
@@ -1590,13 +1528,13 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
     }
 }
 
-/// Linux/macOS: why this command needs root (empty = it does not). The wizard decides for itself later.
+/// Linux: why this command needs root (empty = it does not). The wizard decides for itself later.
 fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
     use kora_core::service::ServiceState;
     let one = |s: &str| vec![s.to_string()];
     match cmd {
         Some(Command::Install(a)) => {
-            let headless = a.any_given() || (a.code.is_some() && a.headless_ready(false));
+            let headless = a.any_given();
             if !headless {
                 return vec![];
             }
@@ -1629,7 +1567,7 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
 fn relaunch_args(cmd: &Option<Command>, original: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
     let mut args = original;
     if let Some(Command::Install(a)) = cmd {
-        if a.dir.is_none() && a.code.is_none() {
+        if a.dir.is_none() {
             if let Ok(req) = a.as_ref().clone().into_request() {
                 args.push("--dir".into());
                 args.push(req.dir.into_os_string());
@@ -1755,23 +1693,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kora_core::site::ArtifactChoice;
-
-    fn redeemed() -> Redeemed {
-        Redeemed {
-            mode: Mode::Development,
-            name: "Alpha One".into(),
-            resources: ResourceSelection::Only(vec!["a".into(), "b".into()]),
-            artifact: ArtifactChoice::Build(38621),
-            artifact_url: Some("https://runtime.fivem.net/x".into()),
-            game_build: Some(3258),
-            ports: Ports { game: 31120, txadmin: 41120 },
-            hostname: Some("Alpha RP".into()),
-            cfx_identifier: Some("fivem:1".into()),
-            cfx_username: Some("Sticky".into()),
-            github_login: Some("octo".into()),
-        }
-    }
 
     fn parse_add(args: &[&str]) -> Result<AddResourcesArgs, clap::Error> {
         let mut v = vec!["kora", "add-resources"];
@@ -1787,8 +1708,8 @@ mod tests {
         let a = parse_add(&["srv", "--resource", "a", "--resource", "b", "--dry-run"]).unwrap();
         assert_eq!((a.server.as_str(), a.resource.len(), a.dry_run, a.code.is_none()), ("srv", 2, true, true));
         let a = parse_add(&["srv", "--code", "KORA-7F3K-92QX", "-y"]).unwrap();
-        assert!(a.code.is_some() && a.yes);
-        assert!(parse_add(&["srv", "--code", "KORA-7F3K-92QX", "--resource", "a"]).is_err(), "a code and a hand-picked list do not mix");
+        assert!(a.code.is_some() && a.yes, "--code still parses (it fails at run time with exit 2)");
+        assert_eq!(add_resources(a), 2, "setup codes were removed");
         assert!(parse_add(&[]).is_err(), "the server is required");
     }
 
@@ -1884,31 +1805,55 @@ mod tests {
         assert_eq!(home_dir(true, &empty), PathBuf::new());
     }
 
+    /// The whole `kora --help` tree (every subcommand, long help, 100 columns, no colour).
+    fn full_help() -> String {
+        fn walk(cmd: &mut clap::Command, path: &str, out: &mut String) {
+            let rendered = cmd.clone().term_width(100).max_term_width(100).color(clap::ColorChoice::Never).render_long_help().to_string();
+            out.push_str(&format!("===== {path} =====\n{rendered}\n"));
+            let names: Vec<String> = cmd.get_subcommands().map(|c| c.get_name().to_string()).filter(|n| n != "help").collect();
+            for n in names {
+                if let Some(sub) = cmd.find_subcommand_mut(&n) {
+                    walk(sub, &format!("{path} {n}"), out);
+                }
+            }
+        }
+        use clap::CommandFactory;
+        let mut cmd = Cli::command().disable_help_subcommand(true);
+        cmd.build();
+        let mut out = String::new();
+        walk(&mut cmd, "kora", &mut out);
+        out
+    }
+
+    /// Compares `kora --help` (all subcommands) with `tests/golden/help.txt`.
+    /// After an intended change to flags or help text, regenerate it with
+    /// `KORA_UPDATE_GOLDEN=1 cargo test -p kora-cli help_tree_matches_golden`.
     #[test]
-    fn redeemed_values_become_defaults_and_flags_win() {
-        let mut a = InstallArgs { game_port: Some(30000), ..Default::default() };
-        a.apply_redeemed(&redeemed());
-        let r = a.into_request().unwrap();
-        assert_eq!(r.mode, Mode::Development);
-        assert_eq!((r.name.as_str(), r.hostname.as_str()), ("Alpha One", "Alpha RP"));
-        assert_eq!((r.ports.game, r.ports.txadmin), (30000, 41120), "explicit flag wins");
-        assert_eq!(r.resources, ResourceSelection::Only(vec!["a".into(), "b".into()]));
-        assert_eq!(r.game_build, Some(3258));
-        assert_eq!(r.cfx_identifier.as_deref(), Some("fivem:1"));
-        assert_eq!(r.artifact_url.as_deref(), Some("https://runtime.fivem.net/x"));
-        assert!(r.github_owner.is_none(), "fork owner never comes from the website");
-        assert!(r.license_key.is_none());
+    fn help_tree_matches_golden() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/help.txt");
+        let actual = full_help();
+        if std::env::var_os("KORA_UPDATE_GOLDEN").is_some_and(|v| !v.is_empty() && v != "0") {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &actual).unwrap();
+            return;
+        }
+        let golden = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+        assert!(golden == actual, "`kora --help` changed. If intended, regenerate: KORA_UPDATE_GOLDEN=1 cargo test -p kora-cli help_tree_matches_golden");
     }
 
     #[test]
-    fn headless_only_when_everything_secret_is_given() {
-        let base = || InstallArgs { license_key: Some("k".into()), dir: Some("/x".into()), db: Some(DbArg::Skip), ..Default::default() };
-        assert!(base().headless_ready(false));
-        assert!(!base().headless_ready(true), "dev needs --github-owner");
-        assert!(InstallArgs { github_owner: Some("me".into()), ..base() }.headless_ready(true));
-        assert!(!InstallArgs { license_key: None, ..base() }.headless_ready(false));
-        assert!(!InstallArgs { dir: None, ..base() }.headless_ready(false));
-        assert!(InstallArgs { db: None, db_admin_user: Some("root".into()), ..base() }.headless_ready(false));
+    fn hostname_and_game_build_flags() {
+        assert!(InstallArgs { hostname: Some("x".into()), ..Default::default() }.any_given());
+        assert!(InstallArgs { game_build: Some(3258), ..Default::default() }.any_given());
+        let r = InstallArgs { name: Some("Alpha".into()), ..Default::default() }.into_request().unwrap();
+        assert_eq!((r.hostname.as_str(), r.game_build), ("Alpha", None), "hostname defaults to the name");
+        let r = InstallArgs { name: Some("Alpha".into()), hostname: Some("Alpha RP".into()), game_build: Some(3258), ..Default::default() }.into_request().unwrap();
+        assert_eq!((r.hostname.as_str(), r.game_build), ("Alpha RP", Some(3258)));
+    }
+
+    #[test]
+    fn install_code_is_rejected_with_exit_2() {
+        assert_eq!(install(InstallArgs { code: Some("KORA-7F3K-92QX".into()), ..Default::default() }), 2);
     }
 
     /// Fake `gh`: `None` = not installed, `Some(false)` = signed out, `Some(true)` = signed in as `me` (org `Team`).
@@ -1974,8 +1919,18 @@ mod tests {
 
     #[test]
     fn dry_run_summary_shows_choices_but_no_secrets() {
-        let mut a = InstallArgs { license_key: Some("cfxk_secret".into()), ..Default::default() };
-        a.apply_redeemed(&redeemed());
+        let a = InstallArgs {
+            license_key: Some("cfxk_secret".into()),
+            name: Some("Alpha One".into()),
+            mode: Some(ModeArg::Dev),
+            resources: Some("a,b".into()),
+            game_port: Some(31120),
+            txadmin_port: Some(41120),
+            artifact_url: Some("https://runtime.fivem.net/x".into()),
+            game_build: Some(3258),
+            cfx_identifier: Some("fivem:1".into()),
+            ..Default::default()
+        };
         let text = request_summary(&a.into_request().unwrap());
         for want in ["Alpha One", "development", "2 chosen (a, b)", "game 31120, txAdmin 41120", "https://runtime.fivem.net/x", "3258", "fivem:1"] {
             assert!(text.contains(want), "missing {want}: {text}");
@@ -2019,9 +1974,8 @@ mod tests {
     }
 
     #[test]
-    fn ports_from_a_setup_code_are_rechecked_locally() {
-        let mut a = InstallArgs { auto_ports: true, dir: Some("/nonexistent/kora-ports-test".into()), ..Default::default() };
-        a.apply_redeemed(&redeemed());
+    fn ports_from_flags_are_rechecked_locally() {
+        let a = InstallArgs { auto_ports: true, game_port: Some(31120), txadmin_port: Some(41120), dir: Some("/nonexistent/kora-ports-test".into()), ..Default::default() };
         let mut r = a.into_request().unwrap();
         let changes = settle_ports(&mut r, true, &Busy(vec![31120])).unwrap();
         assert_eq!(changes, vec!["Port 31120 is in use, using 31121"]);

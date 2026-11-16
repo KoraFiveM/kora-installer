@@ -17,7 +17,7 @@ Kora Installer is pre-release software. Only the newest release receives securit
 ## In scope
 
 - **Privilege elevation:** UAC / `sudo` handling, anything that runs with more rights than needed, services and scheduled tasks.
-- **Secrets handling:** the txAdmin password, database passwords, licence key and setup codes (files, permissions, logs, clipboard).
+- **Secrets handling:** the txAdmin password, database passwords, licence key and tokens (files, permissions, logs, clipboard).
 - **Download verification:** SHA-256 checks and HTTPS enforcement in `kora` and in `install.sh` / `install.ps1`, and the release artifacts.
 - Overwriting or deleting files the installer should not touch.
 
