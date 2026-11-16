@@ -93,7 +93,7 @@ export function RemoteAccessCard() {
               Listening on <code className="font-mono text-xs">{s.bind}:{s.port}</code>{' '}
               {loopback ? <Badge tone="plain">this computer only</Badge> : <Badge tone="amber">reachable from the network</Badge>}
             </div>
-            {loopback && <Alert tone="info">To let other computers connect, restart the panel on an address they can reach, for example <code className="font-mono">kora panel --bind 100.x.y.z --remote</code> (your Tailscale address). Changing the address needs a restart.</Alert>}
+            {loopback && <Alert tone="info">To open the panel on your own phone or laptop, restart it with <code className="font-mono">kora panel --tailscale</code>. It then listens on your Tailscale address only, and you are signed in with your Tailscale account, with no token to copy. Do not put the panel behind a proxy or <code className="font-mono">tailscale serve</code>: it refuses those requests.</Alert>}
 
             <div className="space-y-3">
               <Checkbox label="Let people sign in with Tailscale" checked={s.tailscale} disabled={save.isPending} onChange={(e) => save.mutate({ tailscale: e.target.checked })}

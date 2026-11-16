@@ -118,8 +118,13 @@ impl Req {
         self.headers.push(("authorization", format!("Bearer {t}")));
         self
     }
+    /// A session as the helpers return it, `cookie|secret`: sends both, as the page does.
     fn cookie(mut self, c: &str) -> Self {
-        self.headers.push(("cookie", c.into()));
+        let (cookie, secret) = c.split_once('|').unwrap_or((c, ""));
+        self.headers.push(("cookie", cookie.into()));
+        if !secret.is_empty() {
+            self.headers.push(("x-kora-session", secret.into()));
+        }
         self
     }
     fn h(mut self, k: &'static str, v: &str) -> Self {
@@ -157,6 +162,7 @@ impl Req {
 struct Resp {
     status: u16,
     json: Value,
+    /// The first `Set-Cookie` (`name=value`), with `|secret` added when the answer carries one.
     cookie: Option<String>,
 }
 impl Resp {
@@ -175,6 +181,10 @@ impl Resp {
         } else {
             let bytes = axum::body::to_bytes(r.into_body(), 1 << 22).await.unwrap();
             serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+        };
+        let cookie = match (cookie, json["secret"].as_str()) {
+            (Some(c), Some(sec)) => Some(format!("{c}|{sec}")),
+            (c, _) => c,
         };
         Self {
             status,
@@ -400,7 +410,7 @@ async fn csrf_and_origin_still_apply_to_remote_sessions() {
 async fn token_sign_in_and_meta_identity() {
     let (w, [vera, _, _]) = with_users(enabled_cfg());
     let cookie = sign_in(&w.app, &vera).await;
-    assert!(cookie.starts_with("kora_session="));
+    assert!(cookie.starts_with("kora_session_47120="));
     let r = req("GET", "/api/v1/meta")
         .cookie(&cookie)
         .send(&w.app)
@@ -503,10 +513,19 @@ async fn tailscale_identity_comes_from_whois_only() {
             ("boss@example.com", Role::Admin),
         ],
     );
-    // The request claims to be the boss with the headers tailscale serve would add. They are ignored.
+    // The request claims to be the boss with the headers tailscale serve would add: refused outright.
     let r = req("POST", "/api/v1/session")
         .h("x-kora", "1")
         .h("tailscale-user-login", "boss@example.com")
+        .json(json!({}))
+        .send(&w.app)
+        .await;
+    assert_eq!(r.status, 403, "{:?}", r.json);
+    assert!(r.msg().contains("tailscale serve"), "{}", r.msg());
+    assert!(who.asked.lock().unwrap().is_empty());
+    // Other headers that only look like identity are ignored: the identity comes from whois.
+    let r = req("POST", "/api/v1/session")
+        .h("x-kora", "1")
         .h("x-forwarded-user", "boss@example.com")
         .json(json!({}))
         .send(&w.app)
@@ -541,15 +560,16 @@ async fn tailscale_identity_comes_from_whois_only() {
 #[tokio::test]
 async fn tailscale_identity_headers_alone_never_sign_anyone_in() {
     let (w, _) = tailscale_world("nobody@example.com", &[("boss@example.com", Role::Admin)]);
-    let r = req("GET", "/api/v1/servers")
-        .h("tailscale-user-login", "boss@example.com")
-        .send(&w.app)
-        .await;
-    assert_eq!(r.status, 401);
+    for h in ["tailscale-user-login", "tailscale-user-name"] {
+        let r = req("GET", "/api/v1/servers")
+            .h(h, "boss@example.com")
+            .send(&w.app)
+            .await;
+        assert_eq!(r.status, 403, "{h}");
+    }
     // whois says this peer is someone who is not listed: refused, with their login named.
     let r = req("POST", "/api/v1/session")
         .h("x-kora", "1")
-        .h("tailscale-user-login", "boss@example.com")
         .json(json!({}))
         .send(&w.app)
         .await;
@@ -843,6 +863,16 @@ async fn local_only_operations_are_never_available_remotely() {
         ),
         ("DELETE", "/api/v1/users/vera", None),
         ("POST", "/api/v1/servers/prod/open-folder", Some(json!({}))),
+        // The hub works with tokens of other panels stored here.
+        ("GET", "/api/v1/fleet", None),
+        ("GET", "/api/v1/nodes", None),
+        ("GET", "/api/v1/nodes/n1/servers", None),
+        (
+            "POST",
+            "/api/v1/nodes/n1/servers/prod/control",
+            Some(json!({"action": "stop"})),
+        ),
+        ("POST", "/api/v1/session/link", Some(json!({}))),
     ];
     for (m, uri, body) in cases {
         let s = status(&w, &adam, m, uri, body).await;
@@ -1244,7 +1274,7 @@ async fn logout_ends_the_session_and_clears_the_cookie() {
         .await;
     assert_eq!(r.status, 204);
     assert!(
-        r.cookie.is_some_and(|c| c == "kora_session="),
+        r.cookie.is_some_and(|c| c == "kora_session_47120="),
         "the cookie is cleared"
     );
     assert_eq!(
@@ -1261,4 +1291,148 @@ async fn logout_ends_the_session_and_clears_the_cookie() {
         .send(&w.app)
         .await;
     assert_eq!(r.status, 401);
+}
+
+// ---------- hardening: links, lockout per address, jobs, stream caps ----------
+
+#[tokio::test]
+async fn sign_in_links_are_for_this_computer_only() {
+    let (w, [_, _, adam]) = with_users(enabled_cfg());
+    // A remote admin cannot make one, by token or by session.
+    assert_eq!(status(&w, &adam, "POST", "/api/v1/session/link", None).await, 403);
+    let cookie = sign_in(&w.app, &adam).await;
+    let r = req("POST", "/api/v1/session/link")
+        .cookie(&cookie)
+        .h("x-kora", "1")
+        .send(&w.app)
+        .await;
+    assert_eq!(r.status, 403);
+    // A code made on this computer does not work from another one, and is not used up by trying.
+    let r = req("POST", "/api/v1/session/link")
+        .peer(LOOPBACK_PEER)
+        .bearer(LAUNCH)
+        .send(&w.app)
+        .await;
+    assert_eq!(r.status, 200);
+    let code = r.json["code"].as_str().unwrap().to_string();
+    let r = req("POST", "/api/v1/session")
+        .h("x-kora", "1")
+        .json(json!({"code": code}))
+        .send(&w.app)
+        .await;
+    assert_eq!(r.status, 403, "{:?}", r.json);
+    assert!(r.msg().contains("computer that runs Kora"), "{}", r.msg());
+    let r = req("POST", "/api/v1/session")
+        .peer(LOOPBACK_PEER)
+        .h("x-kora", "1")
+        .json(json!({"code": code}))
+        .send(&w.app)
+        .await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.json["identity"]["provider"], "local");
+}
+
+#[tokio::test]
+async fn the_remote_lockout_is_per_address() {
+    let (w, [_, _, adam]) = with_users(enabled_cfg());
+    for _ in 0..10 {
+        let r = req("POST", "/api/v1/session")
+            .h("x-kora", "1")
+            .json(json!({"token": "wrong"}))
+            .send(&w.app)
+            .await;
+        assert_eq!(r.status, 401);
+    }
+    let attempt = |peer: &'static str| {
+        let app = w.app.clone();
+        let adam = adam.clone();
+        async move {
+            req("POST", "/api/v1/session")
+                .peer(peer)
+                .h("x-kora", "1")
+                .json(json!({"token": adam}))
+                .send(&app)
+                .await
+                .status
+        }
+    };
+    assert_eq!(attempt(REMOTE_PEER).await, 429, "the guesser is locked out");
+    assert_eq!(attempt("100.64.0.21:40000").await, 200, "someone else is not");
+    // IPv6: one /64 is one network.
+    for _ in 0..10 {
+        req("POST", "/api/v1/session")
+            .peer("[fd7a:115c:a1e0:1::5]:5000")
+            .h("x-kora", "1")
+            .json(json!({"token": "wrong"}))
+            .send(&w.app)
+            .await;
+    }
+    assert_eq!(attempt("[fd7a:115c:a1e0:1::6]:5000").await, 429);
+    assert_eq!(attempt("[fd7a:115c:a1e0:2::6]:5000").await, 200);
+}
+
+#[tokio::test]
+async fn remote_callers_only_follow_jobs_their_role_allows() {
+    let (w, [vera, olly, adam]) = with_users(enabled_cfg());
+    let r = req("POST", "/api/v1/servers/prod/control")
+        .bearer(&olly)
+        .json(json!({"action": "restart"}))
+        .send(&w.app)
+        .await;
+    assert_eq!(r.status, 202);
+    let id = r.json["job"].as_str().unwrap().to_string();
+    let get = |tok: String, uri: String| {
+        let app = w.app.clone();
+        async move { req("GET", &uri).bearer(&tok).send(&app).await.status }
+    };
+    let job = format!("/api/v1/jobs/{id}");
+    let events = format!("/api/v1/jobs/{id}/events");
+    assert_eq!(get(vera.clone(), job.clone()).await, 403, "a viewer cannot restart, so cannot follow a restart");
+    assert_eq!(get(vera.clone(), events.clone()).await, 403);
+    assert_eq!(get(olly.clone(), job.clone()).await, 200);
+    assert_eq!(get(olly, events).await, 200);
+    assert_eq!(get(adam, job.clone()).await, 200);
+    // This computer can follow anything; unknown ids are still 404.
+    let r = req("GET", &job).peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
+    assert_eq!(r.status, 200);
+    assert_eq!(get(vera, "/api/v1/jobs/nope".into()).await, 404);
+}
+
+/// Open a live stream as `tok` from `peer` and keep it open (the response is the stream).
+async fn open_stream(w: &World, tok: &str, peer: &'static str) -> Response<Body> {
+    let mut r = Request::builder()
+        .method("GET")
+        .uri("/api/v1/events")
+        .header(header::HOST, BOUND)
+        .header(header::AUTHORIZATION, format!("Bearer {tok}"))
+        .body(Body::empty())
+        .unwrap();
+    r.extensions_mut()
+        .insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+    w.app.clone().oneshot(r).await.unwrap()
+}
+
+#[tokio::test]
+async fn live_streams_are_capped_per_remote_account() {
+    let (w, [vera, olly, _]) = with_users(enabled_cfg());
+    let mut open = Vec::new();
+    for _ in 0..kora_web::security::STREAMS_PER_IDENTITY {
+        let r = open_stream(&w, &vera, REMOTE_PEER).await;
+        assert_eq!(r.status(), 200);
+        open.push(r);
+    }
+    let r = open_stream(&w, &vera, REMOTE_PEER).await;
+    assert_eq!(r.status(), 429);
+    let j: Value = serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap()).unwrap();
+    assert!(j["error"]["message"].as_str().unwrap().contains("Close some panel tabs"));
+    // Someone else is not affected, nor is this computer.
+    assert_eq!(open_stream(&w, &olly, "100.64.0.21:40000").await.status(), 200);
+    for _ in 0..12 {
+        let r = open_stream(&w, LAUNCH, LOOPBACK_PEER).await;
+        assert_eq!(r.status(), 200);
+        open.push(r);
+    }
+    // Closing a tab frees its place.
+    open.remove(0);
+    assert_eq!(open_stream(&w, &vera, REMOTE_PEER).await.status(), 200);
 }

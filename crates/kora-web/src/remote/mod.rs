@@ -19,7 +19,7 @@ pub use config::{RemoteConfig, TokenUser};
 pub use roles::Role;
 pub use tailscale::{is_tailnet_ip, NoWhois, SystemWhois, TsSelf, Whois};
 
-use crate::security::Limiter;
+use crate::security::IpLimiter;
 
 /// How a session proved who it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -92,8 +92,9 @@ pub struct Remote {
     /// `--remote` on the command line: on for this run even if the saved settings say off.
     forced: bool,
     whois: Arc<dyn Whois>,
-    /// Failed remote sign-ins. Separate from the local limiter, so strangers cannot lock the owner out.
-    pub limiter: Limiter,
+    /// Failed remote sign-ins, per source address. Separate from the local limiter, so strangers cannot
+    /// lock the owner out, nor one remote user lock out another.
+    pub limiter: IpLimiter,
     dynamic_hosts: Mutex<Vec<String>>,
     /// Where tailnet devices open the panel, once it listens on Tailscale (`--tailscale`).
     tailnet_url: Mutex<Option<String>>,
@@ -112,7 +113,7 @@ impl Remote {
             store: Mutex::new(Store { cfg, path, stamp }),
             forced: false,
             whois: Arc::new(NoWhois),
-            limiter: Limiter::new(10, Duration::from_secs(60)),
+            limiter: IpLimiter::new(10, Duration::from_secs(60), Duration::from_secs(60), 4096),
             dynamic_hosts: Mutex::new(Vec::new()),
             tailnet_url: Mutex::new(None),
         }

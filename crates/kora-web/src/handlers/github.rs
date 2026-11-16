@@ -84,7 +84,7 @@ pub async fn github_login(State(st): State<AppState>) -> Result<Response, ApiErr
             let _guard = guard;
             wait().map(|user| json!({"user": user}))
         })
-        .map_err(|c| ApiError::conflict(c.to_string()))?;
+        .map_err(|c| ApiError::conflict(crate::conflict_message(&c)))?;
     Ok((
         StatusCode::ACCEPTED,
         Json(json!({"job": id.0, "code": code, "url": url})),

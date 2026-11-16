@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { bootstrapSession, tokenFromHash } from './session'
+import { bootstrapSession, codeFromHash, tokenFromHash } from './session'
+import { sessionSecret } from '@/api/client'
 import { jsonResponse } from '@/test/utils'
 
 const fetchMock = vi.fn()
@@ -19,10 +20,63 @@ describe('tokenFromHash', () => {
   })
 })
 
+describe('codeFromHash', () => {
+  it('reads the code', () => expect(codeFromHash('#code=ab12')).toBe('ab12'))
+  it('ignores other hashes', () => {
+    expect(codeFromHash('#token=abc')).toBeNull()
+    expect(codeFromHash('#code=')).toBeNull()
+  })
+})
+
+const meta = (over: object) => jsonResponse(200, { version: '0.5.1', api: 1, platform: 'linux', ops: [], node: 'n', identity: null, remote: false, ...over })
+const signedIn = { ok: true, identity: { name: 'me@example.com', provider: 'tailscale', role: 'viewer' }, secret: 'sec' }
+
 describe('bootstrapSession', () => {
-  it('does nothing without a token', async () => {
+  it('on this computer, without a link, only asks /meta', async () => {
+    fetchMock.mockResolvedValue(meta({}))
     expect(await bootstrapSession()).toEqual({ status: 'none' })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/meta')
+  })
+
+  it('exchanges a one-time code from the link, keeps the secret and clears the address bar', async () => {
+    history.replaceState(null, '', '/settings#code=0123abcd')
+    fetchMock.mockResolvedValue(jsonResponse(200, { ...signedIn, secret: 'from-code' }))
+    const r = await bootstrapSession()
+    expect(r.status).toBe('signed_in')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/session')
+    expect(JSON.parse(init.body)).toEqual({ code: '0123abcd' })
+    expect(window.location.hash).toBe('')
+    expect(window.location.pathname).toBe('/settings')
+    expect(sessionSecret()).toBe('from-code')
+  })
+
+  it('clears a used code from the address bar and says why it failed', async () => {
+    history.replaceState(null, '', '/#code=used')
+    fetchMock.mockResolvedValue(jsonResponse(401, { error: { code: 'unauthorized', message: 'That sign-in link has expired or was already used.' } }))
+    const r = await bootstrapSession()
+    expect(window.location.hash).toBe('')
+    expect(r.status).toBe('failed')
+  })
+
+  it('on another computer, tries the Tailscale sign-in once by itself', async () => {
+    fetchMock.mockResolvedValueOnce(meta({ remote: true })).mockResolvedValueOnce(jsonResponse(200, signedIn))
+    expect(await bootstrapSession()).toEqual({ status: 'signed_in' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({})
+    expect(sessionSecret()).toBe('sec')
+  })
+
+  it('shows the sign-in screen, without an error, when Tailscale does not let them in', async () => {
+    fetchMock.mockResolvedValueOnce(meta({ remote: true })).mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'Sign in with your user token.' } }))
+    expect(await bootstrapSession()).toEqual({ status: 'signed_out' })
+  })
+
+  it('does not sign in again when already signed in from another computer', async () => {
+    fetchMock.mockResolvedValue(meta({ remote: true, identity: signedIn.identity }))
+    expect(await bootstrapSession()).toEqual({ status: 'none' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('posts the token, then removes it from the address bar', async () => {

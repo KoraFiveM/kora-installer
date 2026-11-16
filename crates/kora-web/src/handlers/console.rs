@@ -13,13 +13,15 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use kora_core::api::Status;
 use kora_core::console;
 use serde::Deserialize;
 use serde_json::json;
 use tokio_stream::wrappers::ReceiverStream;
 
+use crate::remote::Caller;
+use crate::security::Limited;
 use crate::{blocking, ApiError, AppState};
 
 const POLL: Duration = Duration::from_millis(500);
@@ -79,8 +81,10 @@ impl Follower {
 
 pub async fn console_stream(
     State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(s): Path<String>,
-) -> Result<Sse<ReceiverStream<Result<Event, Infallible>>>, ApiError> {
+) -> Result<Sse<Limited<ReceiverStream<Result<Event, Infallible>>>>, ApiError> {
+    let permit = st.stream_permit(&caller)?;
     let e = blocking(move || st.entry(&s)).await?;
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
     tokio::spawn(async move {
@@ -119,7 +123,7 @@ pub async fn console_stream(
             }
         }
     });
-    Ok(Sse::new(ReceiverStream::new(rx))
+    Ok(Sse::new(Limited::new(ReceiverStream::new(rx), permit))
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 

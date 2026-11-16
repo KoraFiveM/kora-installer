@@ -322,6 +322,13 @@ route('DELETE', '/users/{name}', (m) => {
   return undefined
 })
 route('POST', '/session/logout', () => undefined)
+// One-time codes for sign-in links (the real panel keeps them ten minutes).
+const linkCodes = new Set<string>()
+route('POST', '/session/link', () => {
+  const code = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
+  linkCodes.add(code)
+  return { code, expires_in: 600 }
+})
 route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora' }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
 route('POST', '/servers/scan', () =>
@@ -846,13 +853,15 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   try {
     if (beh.auth === 'expired') throw new Fail(401, 'unauthorized', 'You are not signed in.')
     if (path === '/session' && method === 'POST') {
-      const token = (JSON.parse(String(init?.body ?? '{}')) as { token?: string }).token
-      if (!token || token === 'bad') {
+      // Like the real panel: a pasted token, or the one-time code from a sign-in link (`/#code=...`).
+      const b = JSON.parse(String(init?.body ?? '{}')) as { token?: string; code?: string }
+      const ok = b.code ? linkCodes.delete(b.code) : !!b.token && b.token !== 'bad'
+      if (!ok) {
         prefs.signedIn = false
         throw new Fail(401, 'unauthorized', 'That sign-in link is not valid or has expired.')
       }
       prefs.signedIn = true
-      return json(204, undefined)
+      return json(200, { ok: true, identity: { name: 'local', provider: 'local', role: 'admin' }, secret: 'mock-session-secret' } satisfies T.SessionCreated)
     }
     if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
