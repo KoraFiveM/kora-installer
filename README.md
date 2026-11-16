@@ -28,7 +28,7 @@ explicit version). `KORA_VERSION=vX.Y.Z` (or `-Version` on Windows) picks a rele
 
 ## What the wizard does
 
-1. **Welcome:** choose production or development, and optionally paste a setup code from the website.
+1. **Welcome:** choose the guided or advanced questions, then production or development.
 2. **Choices:** server name and folder, your Cfx.re licence key, ports, which resources to install.
 3. **Checks:** free disk space and port conflicts (with next-free-port suggestions) before anything is changed.
 4. **Install:** downloads and verifies FXServer, sets up the database, clones/installs resources, creates the service and firewall rules.
@@ -42,11 +42,6 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 - **Production:** a server that runs for players. Resources are installed from releases; updating to newer releases is manual for now.
 - **Development:** you sign in to GitHub in the wizard and pick where your forks go (your account or an organisation).
   The server updates itself on a schedule you choose (`kora schedule`).
-
-### Setup codes
-
-Generate a code at <https://koraframe.work/installer> and paste it in the Welcome step (or `kora install --code <code>`).
-The installer contacts koraframe.work to redeem it, see the [privacy policy](https://koraframe.work/privacy).
 
 ## Requirements
 
@@ -66,8 +61,8 @@ The installer contacts koraframe.work to redeem it, see the [privacy policy](htt
 - Linux is tested end to end. Windows is covered by CI smoke tests; real-machine runs have started, so please report problems.
 - Not released yet (see [RELEASE_NOTES.md](RELEASE_NOTES.md) and [CHANGELOG.md](CHANGELOG.md)): the `kora manager`
   screen, the Start Menu / app install, and automatic updates for production servers. Check the changelog for what is newer than the version you run.
-- **The Windows `.exe` is unsigned** until the SignPath application is approved, so SmartScreen warns ("More info", "Run anyway").
-  The install scripts verify checksums for you. To check by hand, compare with the `.sha256` file next to each download:
+- **The Windows `.exe` is unsigned**, so SmartScreen may warn ("More info", "Run anyway").
+  The install scripts verify the SHA-256 checksum for you. To check by hand, compare with the `.sha256` file next to each download:
 
 ```sh
 sha256sum -c kora-linux-x86_64.sha256
@@ -104,15 +99,11 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Code signing policy
+## Code signing and privacy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+The Windows `.exe` is **not code-signed**; SmartScreen may warn. The install scripts verify the SHA-256 of every download, and you can check it by hand against the `.sha256` file (see above). Details: [CODE_SIGNING.md](CODE_SIGNING.md).
 
-Windows binaries are signed only when they are built from this repository by the public GitHub Actions workflow, and only after a maintainer manually approves each release. Until the SignPath Foundation application is approved, releases are **unsigned** and Windows SmartScreen may warn; verify downloads with the published `.sha256` files. See [CODE_SIGNING.md](CODE_SIGNING.md) for the full policy.
-
-- **Committers and reviewers:** the Kora maintainers ([KoraFiveM members](https://github.com/orgs/KoraFiveM/people))
-- **Approvers:** the Kora maintainers (every signing request is approved by hand)
-- **Privacy policy:** this program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. When you use a website setup code, the installer contacts koraframe.work to redeem it; see <https://koraframe.work/privacy>.
+- **Privacy:** Kora contacts nothing unless you ask it to: GitHub releases (self-update), the public resource catalog, runtime.fivem.net (FXServer downloads) and GitHub through `gh` (development mode forks).
 
 ## License
 

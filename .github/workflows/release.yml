@@ -1,5 +1,4 @@
-# Release skeleton. Binaries must be built from source in CI (SignPath requirement).
-# The FIRST public release ships unsigned; apply to SignPath Foundation afterwards.
+# Release workflow. Binaries are built from source in CI. Windows binaries are unsigned; the install scripts verify SHA-256.
 name: Release
 on:
   push:
@@ -48,23 +47,6 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: dist/*
-
-  # TODO(SignPath): enable after the first public release and SignPath Foundation approval.
-  # sign-windows:
-  #   needs: build
-  #   runs-on: windows-latest
-  #   steps:
-  #     - uses: actions/upload-artifact@v7   # TODO: SignPath requires the unsigned artifact uploaded in this workflow run
-  #     - uses: signpath/github-action-submit-signing-request@v1
-  #       with:
-  #         # TODO: values below are placeholders issued by SignPath on approval; no secrets invented.
-  #         organization-id: "TODO"
-  #         project-slug: "TODO"
-  #         signing-policy-slug: "TODO"   # release signing requires manual approval
-  #         github-artifact-id: "TODO"
-  #         # TODO: api-token comes from a GitHub secret created by the owner after approval.
-  #         wait-for-completion: true
-  #         output-artifact-directory: signed
 
   verify:
     needs: build

@@ -30,7 +30,7 @@ Then run `kora install`. Or download the program below and check it yourself.
 
 ### Earlier: 0.3.0
 - **You need 0.3.0 or newer for the new catalog (schema v3):** run `kora self-update`, or use the install line above.
-- **Add resources to an existing server:** `kora add-resources <server> --code CODE` or `--resource ID`, or `g` in `kora manager`. Tidier folder layout for new servers; existing servers are not rearranged.
+- **Add resources to an existing server:** `kora add-resources <server> --resource ID`, or `g` in `kora manager`. Tidier folder layout for new servers; existing servers are not rearranged.
 - **Report an issue** (`b`) and **open a pull request** (`p`, development servers) from the manager, through the GitHub CLI; no paths, host names, ports, keys or passwords are sent. Third-party resources are always pinned to an exact commit, never forked.
 
 ### Earlier: 0.2.3
@@ -41,7 +41,7 @@ Then run `kora install`. Or download the program below and check it yourself.
 - `kora update <server>` with preview, snapshot and rollback; Discord notifications; update schedule you choose; Kora as an app (shortcut, `kora` command); faster Windows database setup; `kora self-update`; `kora manager`; security fixes. Details in the changelog.
 
 ### What works
-- Guided install (production and development), setup code from the website, resource dependencies, free-space and port checks, uninstall.
+- Guided install (production and development), resource dependencies, free-space and port checks, uninstall.
 - Add resources to an existing server, report an issue and open a pull request from the manager.
 - Manual update with preview, snapshot and rollback, Discord webhook, schedule, and the app install (shortcut, PATH, `kora` command).
 - **Linux:** tested end to end, including automated end-to-end tests in CI.
@@ -53,7 +53,7 @@ Then run `kora install`. Or download the program below and check it yourself.
 - Real Windows runs of the new features (app install, schedule as the installing user) are covered by CI only so far.
 - The new look is lightly tested in the Windows console; colours and symbols may render differently there. If it looks wrong, set `KORA_ASCII=1` and/or `NO_COLOR=1`, and please report it.
 - The MariaDB root password is briefly visible to administrators in the process list while the database is created (a limit of the MariaDB tool).
-- The Windows `.exe` is **unsigned** (SignPath application pending), so SmartScreen will warn ("More info" -> "Run anyway").
+- The Windows `.exe` is **unsigned**, so SmartScreen may warn ("More info" -> "Run anyway").
 
 ### Verify your download
 Each program has a `.sha256` file next to it. The install scripts check it automatically. By hand:
