@@ -1,0 +1,190 @@
+//! Job source abstraction + `GET /jobs/{id}` and the SSE stream.
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use axum::extract::{Path, State};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
+use axum::Json;
+use serde_json::{json, Value};
+use tokio_stream::wrappers::ReceiverStream;
+
+use crate::error::ApiError;
+use crate::AppState;
+
+#[derive(Debug, Clone)]
+pub enum JobMessage {
+    Event(Value),
+    Done(Value),
+    Failed(String),
+}
+
+pub trait Jobs: Send + Sync {
+    /// `{id, op, server, state, events, result, error}` or `None` when unknown.
+    fn get(&self, id: &str) -> Option<Value>;
+    /// Past events plus a receiver of later messages (ends with `Done`/`Failed`).
+    fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)>;
+}
+
+/// Job source used when nothing is plugged in: every id is unknown.
+pub struct NoJobs;
+impl Jobs for NoJobs {
+    fn get(&self, _: &str) -> Option<Value> {
+        None
+    }
+    fn subscribe(&self, _: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
+        None
+    }
+}
+
+#[derive(Default)]
+struct Entry {
+    events: Vec<Value>,
+    subs: Vec<Sender<JobMessage>>,
+    end: Option<JobMessage>,
+}
+
+/// In-memory implementation (tests and demos).
+#[derive(Default)]
+pub struct MemoryJobs {
+    inner: Mutex<HashMap<String, Entry>>,
+}
+
+impl MemoryJobs {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn create(&self, id: &str) {
+        self.inner
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), Entry::default());
+    }
+    pub fn push(&self, id: &str, ev: Value) {
+        if let Some(e) = self.inner.lock().unwrap().get_mut(id) {
+            e.events.push(ev.clone());
+            e.subs
+                .retain(|s| s.send(JobMessage::Event(ev.clone())).is_ok());
+        }
+    }
+    pub fn finish(&self, id: &str, result: Value) {
+        self.end(id, JobMessage::Done(result));
+    }
+    pub fn fail(&self, id: &str, err: &str) {
+        self.end(id, JobMessage::Failed(err.to_string()));
+    }
+    fn end(&self, id: &str, m: JobMessage) {
+        if let Some(e) = self.inner.lock().unwrap().get_mut(id) {
+            for s in e.subs.drain(..) {
+                let _ = s.send(m.clone());
+            }
+            e.end = Some(m);
+        }
+    }
+}
+
+impl Jobs for MemoryJobs {
+    fn get(&self, id: &str) -> Option<Value> {
+        let g = self.inner.lock().unwrap();
+        let e = g.get(id)?;
+        let (state, result, error) = match &e.end {
+            None => ("running", Value::Null, Value::Null),
+            Some(JobMessage::Done(r)) => ("done", r.clone(), Value::Null),
+            Some(JobMessage::Failed(m)) => ("failed", Value::Null, json!(m)),
+            Some(JobMessage::Event(_)) => ("running", Value::Null, Value::Null),
+        };
+        Some(
+            json!({"id": id, "op": "test", "server": null, "state": state,
+            "events": e.events, "result": result, "error": error}),
+        )
+    }
+    fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
+        let mut g = self.inner.lock().unwrap();
+        let e = g.get_mut(id)?;
+        let (tx, rx) = channel();
+        match &e.end {
+            Some(m) => {
+                let _ = tx.send(m.clone());
+            }
+            None => e.subs.push(tx),
+        }
+        Some((e.events.clone(), rx))
+    }
+}
+
+pub async fn job_get(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let jobs = st.jobs.clone();
+    crate::blocking(move || {
+        jobs.get(&id)
+            .map(Json)
+            .ok_or_else(|| ApiError::not_found("unknown job"))
+    })
+    .await
+}
+
+pub async fn job_events(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let jobs = st.jobs.clone();
+    let (past, rx) = crate::blocking(move || {
+        jobs.subscribe(&id)
+            .ok_or_else(|| ApiError::not_found("unknown job"))
+    })
+    .await?;
+    let (tx, trx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
+    // Bridge the blocking std receiver to the async stream on a dedicated thread.
+    std::thread::spawn(move || {
+        let send = |ev: Event| tx.blocking_send(Ok(ev)).is_ok();
+        for v in past {
+            if !send(progress(&v)) {
+                return;
+            }
+        }
+        loop {
+            if tx.is_closed() {
+                return;
+            }
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(JobMessage::Event(v)) => {
+                    if !send(progress(&v)) {
+                        return;
+                    }
+                }
+                Ok(JobMessage::Done(v)) => {
+                    send(Event::default().event("done").data(v.to_string()));
+                    return;
+                }
+                Ok(JobMessage::Failed(m)) => {
+                    send(
+                        Event::default()
+                            .event("failed")
+                            .data(json!({"error": m}).to_string()),
+                    );
+                    return;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    send(
+                        Event::default()
+                            .event("failed")
+                            .data(json!({"error": "job ended unexpectedly"}).to_string()),
+                    );
+                    return;
+                }
+            }
+        }
+    });
+    Ok(Sse::new(ReceiverStream::new(trx))
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+}
+
+fn progress(v: &Value) -> Event {
+    Event::default().event("progress").data(v.to_string())
+}
