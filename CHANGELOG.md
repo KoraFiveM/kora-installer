@@ -5,9 +5,31 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.4.3] - 2026-11-16
+## [0.5.0] - 2026-11-16
+
+0.4.3 was prepared but never published; its fix is included here.
+
+### Added
+- **Paid assets from the Cfx.re Portal.** Install escrowed assets from the `.zip` files you download at portal.cfx.re (Assets, Granted Assets): `kora add-asset <server> <zip>...` (`--dry-run`, `--yes`) or the panel's new **Paid assets** tab, where you upload a zip or pick a recent one from your Downloads folder. Kora checks the zip first (escrow `.fxap` files, unsafe paths, zip bombs, oversized content, name clashes), installs each asset into `resources/[paid]` without renaming anything, adds `ensure` to `server.cfg`, and keeps backups when you replace an asset with a newer zip. The panel explains the licence errors in the server console ("You lack the required entitlement", "Failed to verify protected resource") in plain words. Updates leave paid assets alone.
+- **The install scripts start Kora Panel for you.** After `install.sh` / `install.ps1`, Kora Panel is set up as a background service (it comes back after a restart), opens in your browser and the sign-in link is printed. On a server with no screen you get the `ssh -L` command to run on your own computer, filled in with the server's address. `KORA_NO_LAUNCH=1` (Windows: `-NoLaunch`) only installs the program.
+- `kora panel --setup` does the same without asking questions. `kora install --fix-permissions` lets the background service through private home folders (Linux).
+
+### Changed
+- **Linux: servers go in your home folder by default, not root's.** The suggested folder is `~/kora/<name>` for the person who ran Kora, also when Kora asks for `sudo`. Logged in as root, Kora suggests `/home/kora/<name>` and creates a normal `kora` account that owns it. If the background service cannot get into a private home folder, the wizard offers to let it pass through (`chmod o+x` on exactly those folders) or to use `/home/kora/<name>`. Kora decides the folder and your settings folder before asking for `sudo`, so your server list and saved answers stay yours, and in development mode GitHub commands use your own GitHub sign-in.
+- `kora panel` picks the next free port (47121-47140) when 47120 is taken, and a second `kora panel` shows the link of the one already running instead of failing. Opening the browser works on macOS and under `sudo` on Linux, and says so when it fails.
+- **Updates are safer.**
+  - One update runs per server at a time; the panel, the CLI and the nightly run wait their turn (the nightly run simply skips).
+  - On production servers Kora never moves a resource away from commits of your own and never downgrades it.
+  - If an update stops part way, every resource it did not reach is listed, and the server is only restarted if your restart choice allows it.
+  - Rolling back refuses to throw away changed files unless you choose "Roll back anyway" (`--force`).
+  - Automatic updates save snapshots you can undo from the panel or with `kora update --rollback` (the newest 20 are kept), and a version that had to be rolled back is not retried every night until a newer one appears.
+  - Updating applies exactly the versions you previewed. The panel warns when something needs a look, says when the built-in release list was used, and shows short commit ids. Panel updates default to restarting only when nobody is playing.
 
 ### Fixed
+- **Development installs reuse the fork you already have**, even if GitHub named it `name-1`, you renamed it, or it is a fork of another fork. Before, Kora forked again, waited five minutes on the wrong name, marked the resource as failed, and did it again on every run. Progress now says whether each fork was created or reused ("created 2 forks, reused 14 you already had"); the same applies when adding resources.
+- The background panel no longer waits on a question nobody can see when it starts in a hidden window (Windows, or a computer reached over SSH).
+- Discord update notifications are no longer sent twice; the update badge counts items that need attention and refreshes after single-resource updates.
+- `sd-lib` is no longer in the built-in resource list.
 - **The panel's install wizard no longer looks stuck while it waits.** The GitHub step shows a spinner while it loads your accounts and organisations (the list is disabled and says "Loading your accounts..."), and "Checking GitHub..." spins too. After you click "Install the server" the button shows "Starting..." with a note that Kora is checking ports, GitHub and permissions, and once the install has started the page shows "Getting ready" until the first step appears, instead of an empty progress bar.
 
 ## [0.4.2] - 2026-11-16
