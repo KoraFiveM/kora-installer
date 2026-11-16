@@ -2426,7 +2426,7 @@ mod tests {
         for k in ["core.sshCommand", "core.gitProxy", "core.askPass", "core.pager", "core.editor", "diff.external", "credential.helper", "protocol.ext.allow", "uploadpack.packObjectsHook"] {
             assert!(pairs.iter().any(|(pk, _)| *pk == k), "{k} must be pinned: {pairs:?}");
         }
-        assert_eq!(env_of(&i, "GIT_TERMINAL_PROMPT").as_deref(), Some("0"));
+        assert_eq!(env_of(&i, "GIT_TERMINAL_PROMPT"), Some("0"));
         assert!(pairs.contains(&("credential.https://github.com.helper", "!/usr/sbin/runuser -u sam -- gh auth git-credential")), "private forks still work: {pairs:?}");
         assert_eq!(i.env.iter().filter(|(k, _)| k == "GIT_CONFIG_COUNT").count(), 1);
         // The clone rewrite too, and even when the caller brought its own GIT_CONFIG_COUNT.
