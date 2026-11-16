@@ -18,7 +18,7 @@ versions follow [SemVer](https://semver.org/).
 - **Linux: servers go in your home folder by default, not root's.** The suggested folder is `~/kora/<name>` for the person who ran Kora, also when Kora asks for `sudo`. Logged in as root, Kora suggests `/home/kora/<name>` and creates a normal `kora` account that owns it. If the background service cannot get into a private home folder, the wizard offers to let it pass through (`chmod o+x` on exactly those folders) or to use `/home/kora/<name>`. Kora decides the folder and your settings folder before asking for `sudo`, so your server list and saved answers stay yours, and in development mode GitHub commands use your own GitHub sign-in.
 - `kora panel` picks the next free port (47121-47140) when 47120 is taken, and a second `kora panel` shows the link of the one already running instead of failing. Opening the browser works on macOS and under `sudo` on Linux, and says so when it fails.
 - **Updates are safer.**
-  - One update runs per server at a time; the panel, the CLI and the nightly run wait their turn (the nightly run simply skips).
+  - One update runs per server at a time. If another one is already running, the panel and the CLI say so ("Another update is running for this server") and the nightly run simply skips.
   - On production servers Kora never moves a resource away from commits of your own and never downgrades it.
   - If an update stops part way, every resource it did not reach is listed, and the server is only restarted if your restart choice allows it.
   - Rolling back refuses to throw away changed files unless you choose "Roll back anyway" (`--force`).

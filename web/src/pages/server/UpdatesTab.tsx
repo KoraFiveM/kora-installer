@@ -50,7 +50,7 @@ function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, checked
   return (
     <li className="space-y-2 py-3">
       <div className="flex items-start gap-3">
-        <input type="checkbox" aria-label={`Update ${r.id}`} className="mt-1 size-4 accent-[#a8ff00]" checked={selected} disabled={!selectable} onChange={onToggle} />
+        <input type="checkbox" aria-label={`Update ${r.id}`} className="mt-1 size-4 accent-lime" checked={selected} disabled={!selectable} onChange={onToggle} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm">{r.id}</span>
