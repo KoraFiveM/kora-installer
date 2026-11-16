@@ -20,57 +20,7 @@ const ADDR: &str = "127.0.0.1:47120";
 ///
 /// MUST BE EMPTY AT MERGE (`allowed_501_is_empty_at_merge` below checks it; it is ignored until then).
 /// The maintenance, jobs, meta and session operations are never allowed here.
-const ALLOWED_501: &[Op] = &[
-    Op::SystemInfo,
-    Op::ServersList,
-    Op::ServerGet,
-    Op::ServerControl,
-    Op::ServerDelete,
-    Op::ServerUnregister,
-    Op::ServersScan,
-    Op::ServersAdopt,
-    Op::ServerOpenFolder,
-    Op::LogsList,
-    Op::LogsTail,
-    Op::ConsoleStream,
-    Op::ConsoleSend,
-    Op::ConsoleEnable,
-    Op::ResourcesList,
-    Op::ResourceEnsure,
-    Op::UpdatePreview,
-    Op::UpdateApply,
-    Op::UpdateAuto,
-    Op::SnapshotsList,
-    Op::SnapshotRollback,
-    Op::CatalogForServer,
-    Op::ResourcesPlan,
-    Op::ResourcesAdd,
-    Op::WebhookGet,
-    Op::WebhookSet,
-    Op::WebhookRemove,
-    Op::WebhookTest,
-    Op::ScheduleGet,
-    Op::ScheduleSet,
-    Op::ScheduleRemove,
-    Op::PortsSet,
-    Op::IssueReport,
-    Op::PrPlan,
-    Op::PrOpen,
-    Op::GithubStatus,
-    Op::GithubLogin,
-    Op::GithubOwners,
-    Op::CatalogGet,
-    Op::ArtifactsList,
-    Op::InstallDefaults,
-    Op::InstallSavedClear,
-    Op::CheckPorts,
-    Op::CheckDisk,
-    Op::CheckDbLogin,
-    Op::InstallPlan,
-    Op::InstallStart,
-    Op::InstallLog,
-    Op::Events,
-];
+const ALLOWED_501: &[Op] = &[];
 
 fn uri_for(op: Op) -> String {
     let path = op
@@ -87,6 +37,7 @@ fn uri_for(op: Op) -> String {
 async fn every_op_has_a_real_route() {
     // Maintenance operations must never touch the machine: they run against a fake.
     maintenance::set_override(Some(FakeMaintenance::new(false)));
+    offline::install();
     let fake = FakeBackend::sample();
     let st = AppState::system(TOKEN.into(), ADDR.parse().unwrap())
         .with_backend(Arc::new(move || Box::new(fake.clone())));
@@ -111,7 +62,12 @@ async fn every_op_has_a_real_route() {
                 Body::from("{}")
             })
             .unwrap();
+        let t0 = std::time::Instant::now();
         let r = app.clone().oneshot(req).await.unwrap();
+        // Offline fakes answer at once; a slow route means something real ran (network, gh, ...).
+        if t0.elapsed() > std::time::Duration::from_secs(2) {
+            bad.push(format!("{} took {:?}: it touched the real machine or network", op.name(), t0.elapsed()));
+        }
         let status = r.status().as_u16();
         // Streams (console, events) never finish: look at the head only.
         let is_stream = r
@@ -141,6 +97,7 @@ async fn every_op_has_a_real_route() {
         }
     }
     maintenance::set_override(None);
+    offline::remove();
     assert!(
         bad.is_empty(),
         "operations without a working route:\n{}",
@@ -168,10 +125,104 @@ fn maintenance_ops_are_never_allowed_to_be_stubs() {
 }
 
 #[test]
-#[ignore = "only meaningful once every handler is implemented (run with --ignored at merge)"]
 fn allowed_501_is_empty_at_merge() {
     assert!(
         ALLOWED_501.is_empty(),
         "ALLOWED_501 must be empty at merge: {ALLOWED_501:?}"
     );
+}
+
+/// Offline stand-ins for every seam that would otherwise reach the machine, the network or `gh`.
+mod offline {
+    use std::io;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use kora_core::api::install::github::{GithubEnv, GithubUser, LoginFlow, OwnerChoice};
+    use kora_core::api::install::InstallEnv;
+    use kora_core::artifacts::ArtifactList;
+    use kora_core::firewall::ports::PortProber;
+    use kora_core::installer::{DbAdmin, InstallOutcome, InstallRequest, ProgressSink};
+    use kora_core::space::DiskInfo;
+    use kora_web::handlers::{github, install, resources, servers, system, updates};
+
+    struct Env;
+    impl PortProber for Env {
+        fn tcp_free(&self, _: u16) -> bool {
+            true
+        }
+        fn udp_free(&self, _: u16) -> bool {
+            true
+        }
+    }
+    impl DiskInfo for Env {
+        fn free_bytes(&self, _: &Path) -> io::Result<u64> {
+            Ok(100 << 30)
+        }
+        fn volume_key(&self, _: &Path) -> String {
+            "v".into()
+        }
+    }
+    impl InstallEnv for Env {
+        fn prober(&self) -> &dyn PortProber {
+            self
+        }
+        fn disk(&self) -> &dyn DiskInfo {
+            self
+        }
+        fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+            Ok(())
+        }
+        fn artifacts(&self) -> Result<ArtifactList, String> {
+            Err("offline".into())
+        }
+        fn is_elevated(&self) -> bool {
+            true
+        }
+        fn admin_reasons(&self, _: &InstallRequest) -> Vec<String> {
+            vec![]
+        }
+        fn saved_load(&self) -> Option<InstallRequest> {
+            None
+        }
+        fn saved_save(&self, _: &InstallRequest) -> bool {
+            true
+        }
+        fn saved_clear(&self) {}
+        fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+            Err("offline".into())
+        }
+    }
+    impl GithubEnv for Env {
+        fn auth(&self) -> GithubUser {
+            GithubUser { signed_in: false, user: None }
+        }
+        fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+            Ok(vec![])
+        }
+        fn begin_login(&self) -> Result<LoginFlow, String> {
+            Err("offline".into())
+        }
+        fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
+            Err("offline".into())
+        }
+    }
+
+    pub fn install() {
+        install::set_env(Some(Arc::new(Env)));
+        github::set_env(Some(Arc::new(Env)));
+        resources::set_catalog_loader(Some(Arc::new(|| Err("offline".into()))));
+        updates::set_auto_runner(Some(Arc::new(|_| Err("offline".into()))));
+        servers::set_opener(Some(Box::new(|_| Ok(()))));
+        system::seam::set_headless(Some(true));
+    }
+
+    pub fn remove() {
+        install::set_env(None);
+        github::set_env(None);
+        resources::set_catalog_loader(None);
+        updates::set_auto_runner(None);
+        servers::set_opener(None);
+        system::seam::set_headless(None);
+    }
 }
