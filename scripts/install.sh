@@ -3,6 +3,11 @@
 # checks its SHA-256 and puts it on your PATH. It does not need root and never replaces a file
 # it cannot identify as an earlier kora.
 #
+# Then it starts Kora Panel as a background service (a systemd user service that also starts after
+# a restart) with `kora panel --setup`, opens it in your browser when there is a screen and prints
+# the sign-in link (plus the SSH tunnel command on a server with no screen). If that step fails the
+# install still counts as done and the manual next step is printed.
+#
 #   curl -fsSL <release-base>/install.sh | sh
 #
 # Settings (environment variables, all optional):
@@ -10,6 +15,7 @@
 #   KORA_RELEASE_BASE  where the release files live. Must be https:// (http:// only for localhost).
 #   KORA_INSTALL_DIR   target folder. Default: /usr/local/bin as root, else ~/.local/bin.
 #   KORA_FORCE=1       replace an existing file at the target even if it is not a kora program.
+#   KORA_NO_LAUNCH=1   only install the program: do not start Kora Panel or open a browser.
 
 set -eu
 
@@ -137,11 +143,27 @@ if [ "${NEXT_ONLY:-}" != "1" ]; then
   say "Installed kora to $DEST"
 fi
 
-# --- next step -----------------------------------------------------------------------------
+# --- start Kora Panel ----------------------------------------------------------------------
 case ":$PATH:" in
   *":$DEST_DIR:"*) ;;
   *) say "Note: $DEST_DIR is not on your PATH yet. Add it:  export PATH=\"$DEST_DIR:\$PATH\"" ;;
 esac
 say ""
-say "Next step: run   kora panel   (opens Kora Panel in your browser)"
-say "Prefer the terminal? Run   kora install   instead. (On a server with no screen: kora panel --no-open)"
+if [ "${KORA_NO_LAUNCH:-}" = "1" ]; then
+  say "Next step: run   kora panel   (opens Kora Panel in your browser)"
+  say "Prefer the terminal? Run   kora install   instead. (On a server with no screen: kora panel --no-open)"
+  exit 0
+fi
+say "Starting Kora Panel ..."
+# Absolute path: the folder may not be on PATH yet. stdin is the piped script under `curl | sh`, so
+# the program must not read it. A failure here does not undo the install.
+if "$DEST" panel --setup </dev/null; then
+  say ""
+  say "Prefer the terminal? Run   kora install   instead."
+else
+  say ""
+  say "Kora Panel did not start by itself. kora is installed; start the panel with:"
+  say "    $DEST panel"
+  say "Prefer the terminal? Run   kora install   instead."
+fi
+exit 0

@@ -207,18 +207,10 @@ fn non_empty(s: &Option<String>) -> Option<String> {
         .map(String::from)
 }
 
-/// Default install folder per OS (the wizard's `default_dir`).
+/// Default install folder (see `userhome::default_server_dir`); empty when no home folder can be
+/// found (the user then has to choose one).
 pub fn default_dir(name: &str) -> String {
-    let s = match slug(name) {
-        s if s.is_empty() => "my-server".to_string(),
-        s => s,
-    };
-    if cfg!(windows) {
-        format!("C:\\Kora\\{s}")
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/opt".into());
-        format!("{}/kora/{s}", home.trim_end_matches('/'))
-    }
+    crate::userhome::default_server_dir(&slug(name)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// The wizard's name rules.
@@ -258,7 +250,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
     let name = w.name.trim().to_string();
     let dir_text = w.dir.trim();
     let dir = if dir_text.is_empty() {
-        PathBuf::from(default_dir(&name))
+        crate::userhome::default_server_dir(&slug(&name))?
     } else {
         PathBuf::from(dir_text)
     };

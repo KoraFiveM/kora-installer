@@ -3,6 +3,7 @@ mod error;
 pub mod elevated;
 pub mod handlers;
 mod jobs;
+pub mod launch;
 pub mod remote;
 pub mod routes;
 pub mod security;
@@ -325,34 +326,6 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-fn is_headless() -> bool {
-    if std::env::var_os("SSH_CONNECTION").is_some() {
-        return true;
-    }
-    cfg!(unix)
-        && !cfg!(target_os = "macos")
-        && std::env::var_os("DISPLAY").is_none()
-        && std::env::var_os("WAYLAND_DISPLAY").is_none()
-}
-
-fn open_browser(url: &str) -> bool {
-    use std::process::{Command, Stdio};
-    let mut c = if cfg!(windows) {
-        let mut c = Command::new("rundll32");
-        c.args(["url.dll,FileProtocolHandler", url]);
-        c
-    } else {
-        let mut c = Command::new("xdg-open");
-        c.arg(url);
-        c
-    };
-    c.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .is_ok()
-}
-
 /// Run the panel until Ctrl+C. Blocking; builds its own tokio runtime.
 pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
     let path = opts.remote_config.clone().unwrap_or_else(remote::config::default_path);
@@ -388,11 +361,17 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
             println!("Kora Panel: {url}");
             // The tunnel hint is for people on a machine without a desktop, whether or not we would have
             // tried to open a browser (`--no-open` must not hide it).
-            if is_headless() {
-                println!("No local desktop session detected; open the URL on your machine with:");
-                println!("  ssh -L {0}:127.0.0.1:{0} user@host", addr.port());
-            } else if opts.open_browser && !open_browser(&url) {
-                println!("Could not open a browser; open the URL above manually.");
+            if launch::is_headless() {
+                println!("No screen here: on your own computer, run this first, then open the link there:");
+                println!("  {}", launch::ssh_hint(addr.port(), &launch::real_env));
+            } else if opts.open_browser {
+                // Waits for the opener's exit status, so keep it off the server's threads.
+                let url = url.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = launch::open_browser(&url) {
+                        println!("Could not open a browser ({e}); open the link above yourself.");
+                    }
+                });
             }
         }
         println!("Press Ctrl+C to stop.");

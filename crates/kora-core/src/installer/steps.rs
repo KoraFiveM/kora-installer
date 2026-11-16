@@ -24,6 +24,23 @@ pub(crate) fn build(ctx: &Arc<Ctx>) -> Vec<Box<dyn Step>> {
         .collect()
 }
 
+/// Runs before the step engine (the server folder lives in the `kora` account's home, so the account
+/// comes first). Reported as the `prepare.account` step. Idempotent.
+pub(crate) fn prepare_account(ctx: &Ctx, runner: &dyn service::CommandRunner) -> Result<()> {
+    let id = "prepare.account";
+    ctx.emit(id, StepStatus::Running, "Checking the 'kora' user account", 0.0);
+    match crate::userhome::ensure_kora_user(runner) {
+        Ok(detail) => {
+            ctx.emit(id, StepStatus::Done, detail, 1.0);
+            Ok(())
+        }
+        Err(e) => {
+            ctx.emit(id, StepStatus::Failed, e.clone(), 0.0);
+            err(e)
+        }
+    }
+}
+
 struct InstallStep {
     ctx: Arc<Ctx>,
     id: &'static str,
@@ -294,9 +311,9 @@ struct CloneItem {
 fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
     let sh = ctx.shared.lock().unwrap();
     let root = res_dir(ctx);
-    let fork_owner = if ctx.req.mode == Mode::Development {
+    let fork_state = if ctx.req.mode == Mode::Development {
         let st = std::fs::read(forks_path(ctx)).ok().and_then(|b| serde_json::from_slice::<git::ForkState>(&b).ok());
-        Some(st.map(|s| s.target_owner).ok_or_else(|| InstallError("fork state missing".into()))?)
+        Some(st.ok_or_else(|| InstallError("fork state missing".into()))?)
     } else {
         None
     };
@@ -305,7 +322,6 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
         .iter()
         .map(|r| {
             let repo = repo_slug(&r.repository);
-            let name = repo.rsplit('/').next().unwrap_or("").to_string();
             // Pinned copies (bridge / creator resources, subpath installs) are never forked, in any mode.
             let commit = match (ctx.req.mode == Mode::Production || r.is_pinned_copy(), r.resolve(catalog::Mode::Prod)) {
                 (true, ResolvedVersion::Pinned { commit, .. }) => Some(commit),
@@ -316,7 +332,8 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
                 id: r.id.clone(),
                 dest: root.join(&rel),
                 rel,
-                fork: if r.is_pinned_copy() { None } else { fork_owner.as_ref().map(|o| format!("{o}/{name}")) },
+                // The real fork (its name may differ from the upstream's).
+                fork: if r.is_pinned_copy() { None } else { fork_state.as_ref().map(|s| s.fork_of(&repo)) },
                 subpath: r.subpath.clone(),
                 repo,
                 commit,
@@ -342,6 +359,55 @@ mod fork_sync_tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("me/three") && lines[0].contains("cd resources/three && git fetch upstream && git merge upstream/dev") && lines[0].contains("Nothing was changed"), "{}", lines[0]);
         assert!(lines[1].contains("me/four") && lines[1].contains("2 commit(s) of its own") && lines[1].contains("Nothing was changed"));
+        // the line names the real fork, not the upstream's name
+        st.forks.insert("a/three".into(), "me/three-1".into());
+        let (_, lines) = fork_sync_report(&st, &|r| r.to_string());
+        assert!(lines[0].starts_with("me/three-1 (dev)"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn development_clones_come_from_the_recorded_fork() {
+        let d = tempfile::tempdir().unwrap();
+        let req = InstallRequest {
+            mode: Mode::Development,
+            name: "s".into(),
+            dir: d.path().to_path_buf(),
+            hostname: "s".into(),
+            license_key: None,
+            cfx_identifier: None,
+            ports: Ports::default(),
+            txadmin_public: false,
+            artifact_url: None,
+            game_build: None,
+            resources: ResourceSelection::All,
+            db: DbChoice::Skip,
+            service: false,
+            firewall: false,
+            github_owner: None,
+            catalog: None,
+            dry_run: true,
+            db_admin: None,
+            start: false,
+            app: None,
+        };
+        let ctx = new_ctx(&req, &Hooks::default(), false, std::sync::mpsc::channel().0, false, false);
+        let rel = r#""latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"0123456789012345678901234567890123456789"}]"#;
+        let cat = Catalog::parse_validated(&format!(
+            r#"{{"schemaVersion":3,"resources":[
+            {{"id":"kora-core","repository":"https://github.com/KoraFiveM/kora_core.git","path":"[kora]/kora_core","group":"kora","kind":"kora","branch":"dev","order":1,{rel}}},
+            {{"id":"kora-lib","repository":"https://github.com/KoraFiveM/kora_lib.git","path":"[kora]/kora_lib","group":"kora","kind":"kora","branch":"dev","order":2,{rel}}}]}}"#
+        ))
+        .unwrap();
+        ctx.shared.lock().unwrap().selected = cat.resources.clone();
+        std::fs::create_dir_all(ctx.meta_dir()).unwrap();
+        // kora_core's fork got a `-1`; kora_lib's entry is missing (an older forks.json)
+        let mut st = git::ForkState::new("me", false, &[]);
+        st.forks.insert("KoraFiveM/kora_core".into(), "me/kora_core-1".into());
+        std::fs::write(forks_path(&ctx), serde_json::to_vec(&st).unwrap()).unwrap();
+        let it = items(&ctx).unwrap();
+        let fork = |id: &str| it.iter().find(|i| i.id == id).unwrap().fork.clone();
+        assert_eq!(fork("kora-core").as_deref(), Some("me/kora_core-1"));
+        assert_eq!(fork("kora-lib").as_deref(), Some("me/kora_lib"));
     }
 }
 
@@ -483,6 +549,8 @@ impl InstallStep {
     fn is_done(&self) -> bool {
         let ctx = &self.ctx;
         match self.id {
+            // Done before the engine starts (see `prepare_account`).
+            "prepare.account" => true,
             "prepare.dir" => ctx.req.dir.is_dir() && ctx.meta_dir().is_dir(),
             "build.forks" => std::fs::read(forks_path(ctx))
                 .ok()
@@ -532,6 +600,7 @@ impl InstallStep {
                 sh.catalog = Some(cat);
                 Ok(format!("{n} resources selected"))
             }
+            "prepare.account" => Ok("Already done".into()),
             "prepare.tools" => self.prepare_tools(),
             "build.forks" => self.forks(),
             "build.resources" => self.resources(),
@@ -771,11 +840,13 @@ impl InstallStep {
             }
         };
         save(&state);
+        ctx.emit(self.id, StepStatus::Running, format!("Looking for forks you already have in {}", state.target_owner), 0.0);
         let mut on_progress = |s: &git::ForkState| {
             save(s);
-            ctx.emit(self.id, StepStatus::Running, format!("Forked {}/{total} (owner {})", s.done.len(), s.target_owner), s.done.len() as f32 / total as f32);
+            let what = s.last_event.clone().unwrap_or_else(|| format!("Checking your forks in {}", s.target_owner));
+            ctx.emit(self.id, StepStatus::Running, format!("{what} ({}/{total})", s.done.len()), s.done.len() as f32 / total as f32);
         };
-        let cfg = git::ForkConfig { sync_existing: true, ..git::ForkConfig::default() };
+        let cfg = git::ForkConfig { sync_existing: true, cache_path: Some(git::forkfind::default_cache_path()), ..git::ForkConfig::default() };
         let out = git::run_forks(&r, &mut state, &cfg, &mut on_progress).map_err(|e| InstallError(e.to_string()))?;
         match out {
             git::ForkOutcome::Paused => err("GitHub rate limit reached. Progress is saved: run the installer again later to resume forking."),
@@ -792,7 +863,7 @@ impl InstallStep {
                     ctx.emit(self.id, StepStatus::Running, l.clone(), 1.0);
                     ctx.note(l.clone());
                 }
-                Ok(format!("{} forks ready in {}{headline}", state.done.len(), state.target_owner))
+                Ok(format!("{} forks ready in {} ({}){headline}", state.done.len(), state.target_owner, state.counts_text()))
             }
         }
     }
@@ -1075,7 +1146,18 @@ impl InstallStep {
         let kora_exe = own_copy.as_ref().map_or_else(|| exe.to_string_lossy().into_owned(), |p| p.to_string_lossy().into_owned());
 
         let server = managed_server(ctx, &account, &kora_exe)?;
-        let mut head = Vec::new(); // account + program copy
+        let mut head = Vec::new(); // folder access + account + program copy
+        if platform == SvcPlatform::Linux && ctx.hooks.fix_permissions {
+            // --fix-permissions: exactly the private folders on the way to the server folder (see preflight).
+            let blocked = super::service_blocking_dirs(&ctx.req.dir);
+            if !blocked.is_empty() {
+                ctx.note(format!(
+                    "Let the server's own account pass through {} (chmod o+x) so it can reach the server folder.",
+                    blocked.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            head.extend(service::binary::traverse_plan(&blocked).steps);
+        }
         if create_account {
             head.extend(service::account::create_plan(&account).map_err(|e| InstallError(e.to_string()))?.steps);
         }
@@ -1245,6 +1327,12 @@ impl InstallStep {
         let mut reg = io(Registry::load(), "cannot read the server registry")?;
         reg.upsert(ServerEntry { name: req.name.clone(), dir: req.dir.clone(), mode: req.mode, ports: PortsRecord::from(&req.ports), created_unix: now });
         io(reg.save(), "cannot write the server registry")?;
+        // A server in the `kora` account's home without a service belongs to `kora` (with a service the
+        // service step already handed it to the service's own account).
+        if ctx.admin && !req.service && ctx.plan.iter().any(|p| p.id == "prepare.account") {
+            let plan = crate::userhome::chown_to_kora_plan(std::slice::from_ref(&req.dir), true);
+            service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+        }
         Ok(format!("Registered '{}' in {}", req.name, registry::registry_path().display()))
     }
 
