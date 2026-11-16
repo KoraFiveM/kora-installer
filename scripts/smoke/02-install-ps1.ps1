@@ -54,6 +54,25 @@ try {
     Write-Host $out
     Assert-That ($code -eq 0 -and $out -match 'already up to date') 'second run reports up to date'
     Assert-That ($out -match 'Starting Kora Panel') 'the panel is started after installing'
+    if ($out -notmatch 'Sign in to Kora Panel') {
+        # Diagnostics: why did the background panel not answer?
+        Write-Host '== diagnostics: kora processes'
+        Get-CimInstance Win32_Process -Filter "Name='kora.exe' or Name='wscript.exe'" | Select-Object ProcessId, CommandLine | Format-List | Out-Host
+        Write-Host '== diagnostics: listeners on 4712x'
+        netstat -ano | Select-String ':4712' | Out-Host
+        Write-Host '== diagnostics: startup script'
+        Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup" -ErrorAction SilentlyContinue | Out-Host
+        Get-Content "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Kora Panel.vbs" -ErrorAction SilentlyContinue | Out-Host
+        Write-Host '== diagnostics: kora home'
+        Get-ChildItem "$env:LOCALAPPDATA\Kora" -Recurse -File -ErrorAction SilentlyContinue | Select-Object FullName, Length | Out-Host
+        Write-Host '== diagnostics: the same command run directly for 10 s'
+        $o = Join-Path $env:TEMP 'kora-panel-diag.out'; $e = Join-Path $env:TEMP 'kora-panel-diag.err'
+        $dp = Start-Process -FilePath "$default\kora.exe" -ArgumentList 'panel', '--no-open', '--port', '47139' -RedirectStandardOutput $o -RedirectStandardError $e -PassThru -WindowStyle Hidden
+        Start-Sleep -Seconds 10
+        Write-Host "exited: $($dp.HasExited) code: $(if ($dp.HasExited) { $dp.ExitCode })"
+        Get-Content $o, $e -ErrorAction SilentlyContinue | Out-Host
+        if (-not $dp.HasExited) { Stop-Process -Id $dp.Id -Force }
+    }
     Assert-That ($out -match 'Sign in to Kora Panel' -and $out -match 'http://127\.0\.0\.1:\d+/#token=[0-9a-f]+') 'the background panel answers and the sign-in link is printed'
     Assert-That ($out -match 'ssh -L \d+:127\.0\.0\.1:\d+ \S+@198\.51\.100\.2') 'with no screen the SSH tunnel command is printed'
     Assert-That ($sw.Elapsed.TotalSeconds -lt 60) 'the launch returns instead of keeping the shell busy'
