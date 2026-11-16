@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { GithubLoginStart } from '@/api/types'
@@ -30,7 +31,7 @@ export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
       setError(e)
     }
   }
-  if (status.isLoading) return <p className="text-sm text-muted-foreground">Checking GitHub...</p>
+  if (status.isLoading) return <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden /> Checking GitHub...</p>
   if (status.data?.signed_in) return <div className="flex items-center gap-2 text-sm"><Badge tone="success" dot>Signed in</Badge><span>as {status.data.user}</span></div>
   return (
     <div className="space-y-3">

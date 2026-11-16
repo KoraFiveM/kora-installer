@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
@@ -148,7 +148,13 @@ export default function InstallWizard() {
         <Card>
           <CardContent className="space-y-5 p-6">
             {run.phase === 'running' && <p className="text-sm text-muted-foreground">This takes a few minutes. You can leave this page open; it keeps going.</p>}
-            <StepProgress events={run.events as ProgressEvent[]} />
+            {(run.phase === 'idle' || run.phase === 'running') && run.events.length === 0 ? (
+              <p role="status" className="flex items-center gap-2 text-sm">
+                <Loader2 className="size-4 animate-spin text-info" aria-hidden /> Getting ready. The first step shows up in a moment...
+              </p>
+            ) : (
+              <StepProgress events={run.events as ProgressEvent[]} />
+            )}
             {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
             {run.phase === 'failed' && (
               <div className="space-y-4">
@@ -205,11 +211,18 @@ export default function InstallWizard() {
           {id === 'github' && <GithubStep {...common} signedIn={!!gh.data?.signed_in} onSignedIn={() => void gh.refetch()} />}
           {id === 'review' && <ReviewStep f={f} req={req} onDisk={setDiskOk} />}
           <ErrorNotice error={startErr} />
+          {starting && (
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your answers (ports, GitHub, permissions) and starting the install. This can take a few seconds.
+            </p>
+          )}
           {problem && !last && <p className="text-sm text-muted-foreground">{problem}</p>}
           <div className="flex justify-between pt-2">
             <Button disabled={step === 0} onClick={() => setStep((s) => s - 1)}>Back</Button>
             {last ? (
-              <Button variant="default" disabled={starting || !diskOk} onClick={start}>Install the server</Button>
+              <Button variant="default" disabled={starting || !diskOk} aria-busy={starting} onClick={start}>
+                {starting ? <><Loader2 className="animate-spin" aria-hidden /> Starting...</> : 'Install the server'}
+              </Button>
             ) : (
               <Button variant="default" disabled={!!problem} onClick={() => setStep((s) => s + 1)}>Next</Button>
             )}

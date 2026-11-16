@@ -5,6 +5,11 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-16
+
+### Fixed
+- **The panel's install wizard no longer looks stuck while it waits.** The GitHub step shows a spinner while it loads your accounts and organisations (the list is disabled and says "Loading your accounts..."), and "Checking GitHub..." spins too. After you click "Install the server" the button shows "Starting..." with a note that Kora is checking ports, GitHub and permissions, and once the install has started the page shows "Getting ready" until the first step appears, instead of an empty progress bar.
+
 ## [0.4.2] - 2026-11-16
 
 ### Changed
