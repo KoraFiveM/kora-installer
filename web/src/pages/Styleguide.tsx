@@ -25,16 +25,16 @@ import { Skeleton } from '@/components/Skeleton'
 import { ModeChip, StatusChip, UpdateChip } from '@/components/Status'
 
 const TOKENS: { name: string; hex: string; cssVar: string; use: string }[] = [
-  { name: 'Kora Lime', hex: '#A8FF00', cssVar: '--kora-lime', use: 'primary action, active state (sparingly: one lime element per view)' },
-  { name: 'Charcoal', hex: '#1D1E24', cssVar: '--kora-charcoal', use: 'cards, surfaces' },
-  { name: 'Ink', hex: '#111315', cssVar: '--kora-ink', use: 'page background' },
-  { name: 'Mist', hex: '#BCBDC0', cssVar: '--kora-mist', use: 'secondary text' },
-  { name: 'White', hex: '#FFFFFF', cssVar: '--kora-white', use: 'primary text' },
+  { name: 'Kora Lime', hex: '#95FF00', cssVar: '--kora-lime', use: 'primary action, active state (sparingly: one lime element per view)' },
+  { name: 'Charcoal', hex: '#151515', cssVar: '--kora-charcoal', use: 'cards, surfaces' },
+  { name: 'Ink', hex: '#0F0F0F', cssVar: '--kora-ink', use: 'page background' },
+  { name: 'Mist', hex: '#8E8E8E', cssVar: '--kora-mist', use: 'secondary text' },
+  { name: 'Text', hex: '#EDEDED', cssVar: '--kora-white', use: 'primary text' },
   { name: 'Signal Blue', hex: '#4AA8FF', cssVar: '--kora-blue', use: 'info' },
-  { name: 'Success', hex: '#2ECC71', cssVar: '--kora-success', use: 'online, done' },
+  { name: 'Success', hex: '#22C55E', cssVar: '--kora-success', use: 'online, done' },
   { name: 'Amber', hex: '#F5A623', cssVar: '--kora-amber', use: 'restarting, pending' },
   { name: 'Orange', hex: '#E67E22', cssVar: '--kora-orange', use: 'notices' },
-  { name: 'Danger', hex: '#E74C3C', cssVar: '--kora-danger', use: 'offline, errors, destructive' },
+  { name: 'Danger', hex: '#EF4444', cssVar: '--kora-danger', use: 'offline, errors, destructive' },
   { name: 'Steel', hex: '#95A5A6', cssVar: '--kora-steel', use: 'neutral' },
 ]
 const SEMANTIC = ['background', 'foreground', 'card', 'primary', 'primary-foreground', 'secondary', 'muted', 'muted-foreground', 'accent', 'destructive', 'border', 'input', 'ring']
@@ -309,7 +309,7 @@ export default function Styleguide() {
         <p className="text-sm text-muted-foreground">Demo page (mock builds only). Tokens live in <code className="font-mono text-xs">src/index.css</code>; components in <code className="font-mono text-xs">src/components/</code>.</p>
       </header>
 
-      <Section id="sg-colours" title="Brand colours" note="docs/panel-plan.md section 5. Change them in src/index.css (--kora-*).">
+      <Section id="sg-colours" title="Brand colours" note="Same tokens as the Kora website (ki-site2 src/app/globals.css). Change them in src/index.css (--kora-*).">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
           {TOKENS.map((t) => (
             <div key={t.name} className="overflow-hidden rounded-lg border border-border">
@@ -331,11 +331,11 @@ export default function Styleguide() {
         </div>
       </Section>
 
-      <Section id="sg-type" title="Typography" note="Inter Tight for headings, Inter for body, JetBrains Mono for console and code (bundled in src/fonts.css).">
+      <Section id="sg-type" title="Typography" note="Big Shoulders for headings, Inter for body, IBM Plex Mono for console and code (bundled in src/fonts.css).">
         <div className="grid gap-4 md:grid-cols-3">
-          <Card><CardContent className="space-y-1 p-5"><div className="text-xs text-muted-foreground">font-heading: Inter Tight</div><div className="font-heading text-3xl font-bold">Servers, updated.</div><div className="font-heading text-xl font-semibold">Semibold heading</div></CardContent></Card>
+          <Card><CardContent className="space-y-1 p-5"><div className="text-xs text-muted-foreground">font-heading: Big Shoulders</div><div className="font-heading text-3xl font-bold">Servers, updated.</div><div className="font-heading text-xl font-semibold">Semibold heading</div></CardContent></Card>
           <Card><CardContent className="space-y-1 p-5"><div className="text-xs text-muted-foreground">font-sans: Inter</div><div className="text-base">The quick brown fox jumps over the lazy dog 0123456789</div><div className="text-sm text-muted-foreground">Secondary text in Mist.</div></CardContent></Card>
-          <Card><CardContent className="space-y-1 p-5"><div className="text-xs text-muted-foreground">font-mono: JetBrains Mono</div><div className="font-mono text-sm">ensure kora_core</div><div className="font-mono text-xs">30120 / 40120 {'{ } [ ] => 0O1lI'}</div></CardContent></Card>
+          <Card><CardContent className="space-y-1 p-5"><div className="text-xs text-muted-foreground">font-mono: IBM Plex Mono</div><div className="font-mono text-sm">ensure kora_core</div><div className="font-mono text-xs">30120 / 40120 {'{ } [ ] => 0O1lI'}</div></CardContent></Card>
         </div>
         <div className="space-y-2">
           {TYPE_SCALE.map(([c, label]) => <div key={c} className="flex items-baseline gap-4"><div className="w-56 shrink-0 text-xs text-muted-foreground">{label}</div><div className={c}>The quick brown fox jumps over the lazy dog</div></div>)}

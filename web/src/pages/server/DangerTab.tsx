@@ -96,14 +96,14 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
           onConfirm={() => { if (stage === 'files') setStage('db'); else if (stage === 'db') setStage('name'); else if (typed === s.name) void start() }}>
           {stage === 'files' && (
             <div className="space-y-2" role="radiogroup" aria-label="Server files">
-              <label className="flex items-center gap-2 text-sm"><input type="radio" name="files" className="accent-[#a8ff00]" checked={keepFiles} onChange={() => setKeepFiles(true)} /> Keep the files</label>
-              <label className="flex items-center gap-2 text-sm"><input type="radio" name="files" className="accent-[#a8ff00]" checked={!keepFiles} onChange={() => setKeepFiles(false)} /> Delete the files</label>
+              <label className="flex items-center gap-2 text-sm"><input type="radio" name="files" className="accent-lime" checked={keepFiles} onChange={() => setKeepFiles(true)} /> Keep the files</label>
+              <label className="flex items-center gap-2 text-sm"><input type="radio" name="files" className="accent-lime" checked={!keepFiles} onChange={() => setKeepFiles(false)} /> Delete the files</label>
             </div>
           )}
           {stage === 'db' && (
             <div className="space-y-2" role="radiogroup" aria-label="Database">
-              <label className="flex items-center gap-2 text-sm"><input type="radio" name="db" className="accent-[#a8ff00]" checked={keepDb} onChange={() => setKeepDb(true)} /> Keep the database</label>
-              <label className="flex items-center gap-2 text-sm"><input type="radio" name="db" className="accent-[#a8ff00]" checked={!keepDb} onChange={() => setKeepDb(false)} /> Delete the database</label>
+              <label className="flex items-center gap-2 text-sm"><input type="radio" name="db" className="accent-lime" checked={keepDb} onChange={() => setKeepDb(true)} /> Keep the database</label>
+              <label className="flex items-center gap-2 text-sm"><input type="radio" name="db" className="accent-lime" checked={!keepDb} onChange={() => setKeepDb(false)} /> Delete the database</label>
             </div>
           )}
           {stage === 'name' && (

@@ -233,19 +233,23 @@ Off by default: nothing above changes for `kora panel` as it is today.
 
 | Token | Hex | Use |
 |---|---|---|
-| Kora Lime | #A8FF00 | primary action, active state (sparingly: one lime element per view) |
-| Charcoal | #1D1E24 | cards, surfaces |
-| Ink | #111315 | page background |
-| Mist | #BCBDC0 | secondary text |
-| White | #FFFFFF | primary text |
+The panel uses the same tokens as the Kora website (`ki-site2`, `src/app/globals.css`), so the two look like one product. The status hues have no website equivalent and are kept from the earlier brand.
+
+| Token | Hex | Use |
+|---|---|---|
+| Kora Lime | #95FF00 | primary action, active state (sparingly: one lime element per view) |
+| Charcoal | #151515 | cards, surfaces |
+| Ink | #0F0F0F | page background |
+| Mist | #8E8E8E | secondary text |
+| Text | #EDEDED | primary text |
 | Signal Blue | #4AA8FF | info |
-| Success | #2ECC71 | online, done |
+| Success | #22C55E | online, done |
 | Amber | #F5A623 | restarting, pending |
 | Orange | #E67E22 | notices |
-| Danger | #E74C3C | offline, errors, destructive |
+| Danger | #EF4444 | offline, errors, destructive |
 | Steel | #95A5A6 | neutral |
 
-Fonts, bundled (no CDN): Inter Tight (headings), Inter (body), JetBrains Mono (console, code).
+Fonts, bundled (no CDN), same families as the website: Big Shoulders (headings), Inter (body), IBM Plex Mono (console, code).
 Dark theme only.
 
 ## 6. Wave 1 work split (parallel, one branch each, merged into `feat/panel`)

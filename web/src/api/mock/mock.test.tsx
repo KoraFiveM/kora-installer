@@ -111,7 +111,7 @@ describe('styleguide', () => {
     for (const h of ['Brand colours', 'Typography', 'Buttons', 'Form controls', 'Badges and status chips', 'Alerts and error notices', 'Job progress', 'Cards and empty state', 'Table with long content', 'Console view', 'Dialogs, tabs, loading']) {
       expect(screen.getByRole('heading', { name: h })).toBeInTheDocument()
     }
-    expect(screen.getByText('#A8FF00')).toBeInTheDocument()
+    expect(screen.getByText('#95FF00')).toBeInTheDocument()
     expect(await screen.findAllByLabelText('Command to run')).not.toHaveLength(0)
   })
 })
