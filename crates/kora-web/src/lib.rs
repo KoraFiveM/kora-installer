@@ -1,7 +1,8 @@
 //! Kora Panel HTTP server: security middleware, sessions, jobs/SSE, embedded UI.
 mod error;
+pub mod handlers;
 mod jobs;
-pub mod ops_placeholder;
+pub mod routes;
 pub mod security;
 mod static_ui;
 
@@ -12,8 +13,9 @@ use std::time::Duration;
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
 use axum::{middleware, Json, Router};
+use kora_core::api::{Backend, JobRegistry, Op};
+use kora_core::installer::registry::ServerEntry;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -53,13 +55,20 @@ impl Default for PanelOptions {
     }
 }
 
+/// Makes a [`Backend`] for one request (the real one is `SystemBackend`; tests use a fake).
+pub type BackendFactory = Arc<dyn Fn() -> Box<dyn Backend + Send> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub token: Arc<String>,
     pub allowed_hosts: Arc<Vec<String>>,
     pub sessions: Arc<security::Sessions>,
     pub limiter: Arc<security::Limiter>,
+    /// What `GET /jobs/{id}` and its SSE stream read.
     pub jobs: Arc<dyn Jobs>,
+    /// Where handlers start jobs. In `run()` this is also `jobs`.
+    pub registry: JobRegistry,
+    pub backend: BackendFactory,
 }
 
 impl AppState {
@@ -75,6 +84,45 @@ impl AppState {
             sessions: Arc::default(),
             limiter: Arc::new(security::Limiter::new(10, Duration::from_secs(60))),
             jobs,
+            registry: JobRegistry::new(),
+            backend: Arc::new(|| Box::new(kora_core::api::SystemBackend)),
+        }
+    }
+    /// The real setup: `SystemBackend` and one registry that both starts and serves jobs.
+    pub fn system(token: String, addr: SocketAddr) -> Self {
+        let registry = JobRegistry::new();
+        let mut st = Self::new(token, addr, Arc::new(registry.clone()));
+        st.registry = registry;
+        st
+    }
+    pub fn with_backend(mut self, f: BackendFactory) -> Self {
+        self.backend = f;
+        self
+    }
+    /// Use `registry` for starting jobs and for `GET /jobs/...`.
+    pub fn with_registry(mut self, registry: JobRegistry) -> Self {
+        self.jobs = Arc::new(registry.clone());
+        self.registry = registry;
+        self
+    }
+    pub fn backend(&self) -> Box<dyn Backend + Send> {
+        (self.backend)()
+    }
+    /// Find a registered server by name (blocking: call inside [`blocking`]).
+    pub fn entry(&self, name: &str) -> Result<ServerEntry, ApiError> {
+        let list = self.backend().list().map_err(ApiError::internal)?;
+        list.into_iter()
+            .find(|e| e.name == name)
+            .ok_or_else(|| ApiError::not_found(format!("There is no server named '{name}'.")))
+    }
+    /// Start a job for `op`; `202 {"job": id}`, or `409 conflict` when the server is busy.
+    pub fn spawn_job<F>(&self, op: Op, server: Option<String>, f: F) -> Result<Response, ApiError>
+    where
+        F: FnOnce(&kora_core::api::JobHandle) -> Result<Value, String> + Send + 'static,
+    {
+        match self.registry.spawn(op, server, f) {
+            Ok(id) => Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response()),
+            Err(c) => Err(ApiError::conflict(c.to_string())),
         }
     }
     pub fn with_limiter(mut self, max: u32, lockout: Duration) -> Self {
@@ -88,13 +136,13 @@ struct SessionReq {
     token: String,
 }
 
-async fn meta() -> Json<Value> {
+pub(crate) async fn meta() -> Json<Value> {
     let platform = if cfg!(windows) { "windows" } else { "linux" };
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "api": 1,
         "platform": platform,
-        "ops": ops_placeholder::OPS,
+        "ops": Op::ALL.iter().map(|o| o.name()).collect::<Vec<_>>(),
         "node": hostname(),
     }))
 }
@@ -114,7 +162,7 @@ fn hostname() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-async fn session_create(
+pub(crate) async fn session_create(
     State(st): State<AppState>,
     Json(req): Json<SessionReq>,
 ) -> Result<Response, ApiError> {
@@ -153,12 +201,7 @@ async fn fallback(req: Request) -> Response {
 }
 
 pub fn router(state: AppState) -> Router {
-    let api = Router::new()
-        .route("/meta", get(meta))
-        .route("/session", post(session_create))
-        .route("/jobs/:id", get(jobs::job_get))
-        .route("/jobs/:id/events", get(jobs::job_events))
-        .fallback(|| async { ApiError::not_found("unknown API route") });
+    let api = routes::api_routes().fallback(|| async { ApiError::not_found("unknown API route") });
     Router::new()
         .nest("/api/v1", api)
         .fallback(fallback)
@@ -210,7 +253,7 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
             .map_err(|source| PanelError::Bind { addr, source })?;
         let addr = listener.local_addr()?;
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
-        let state = AppState::new(token.clone(), addr, Arc::new(NoJobs));
+        let state = AppState::system(token.clone(), addr);
         let url = format!("http://{addr}/#token={token}");
         println!("Kora Panel: {url}");
         if opts.open_browser {

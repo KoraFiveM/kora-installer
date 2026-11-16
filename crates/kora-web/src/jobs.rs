@@ -15,18 +15,23 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::error::ApiError;
 use crate::AppState;
 
-#[derive(Debug, Clone)]
-pub enum JobMessage {
-    Event(Value),
-    Done(Value),
-    Failed(String),
-}
+pub use kora_core::api::JobMessage;
 
 pub trait Jobs: Send + Sync {
     /// `{id, op, server, state, events, result, error}` or `None` when unknown.
     fn get(&self, id: &str) -> Option<Value>;
     /// Past events plus a receiver of later messages (ends with `Done`/`Failed`).
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)>;
+}
+
+/// The real source: kora-core's std-thread registry.
+impl Jobs for kora_core::api::JobRegistry {
+    fn get(&self, id: &str) -> Option<Value> {
+        kora_core::api::JobRegistry::get(self, id).and_then(|s| serde_json::to_value(s).ok())
+    }
+    fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
+        kora_core::api::JobRegistry::subscribe(self, id)
+    }
 }
 
 /// Job source used when nothing is plugged in: every id is unknown.

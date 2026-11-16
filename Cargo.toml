@@ -18,6 +18,7 @@ ratatui = "0.30"
 crossterm = "0.29"
 kora-core = { path = "crates/kora-core" }
 kora-tui = { path = "crates/kora-tui" }
+kora-web = { path = "crates/kora-web" }
 tempfile = "3"
 
 [profile.release]

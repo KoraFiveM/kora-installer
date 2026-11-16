@@ -45,6 +45,20 @@ impl ApiError {
         e.command = Some(command);
         e
     }
+    /// 501: the route exists but this build cannot serve it yet.
+    pub fn not_implemented(op: kora_core::api::Op) -> Self {
+        Self::new(StatusCode::NOT_IMPLEMENTED, "not_implemented", format!("'{}' is not available in this version", op.name()))
+    }
+    /// Map a core error string (`Res<T>`) to an API error. Core messages are written for people.
+    pub fn core(m: impl Into<String>) -> Self {
+        let m = m.into();
+        let lower = m.to_lowercase();
+        if lower.contains("not found") || lower.contains("no server named") || lower.contains("unknown server") {
+            Self::not_found(m)
+        } else {
+            Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_request", m)
+        }
+    }
     /// 429; `rate_limited` is an addition to the plan's code list.
     pub fn rate_limited(m: impl Into<String>) -> Self {
         Self::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited", m)

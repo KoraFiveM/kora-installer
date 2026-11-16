@@ -276,12 +276,24 @@ struct AddResourcesArgs {
     yes: bool,
 }
 
+#[derive(Args, Debug)]
+struct PanelArgs {
+    /// Port to listen on (127.0.0.1 only).
+    #[arg(long, default_value_t = kora_web::DEFAULT_PORT)]
+    port: u16,
+    /// Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop).
+    #[arg(long)]
+    no_open: bool,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Install a new Kora server (interactive TUI, or headless with options).
     Install(Box<InstallArgs>),
     /// Open the multi-server manager.
     Manager,
+    /// Open the Kora Panel: install, manage and monitor servers in your web browser (local only).
+    Panel(PanelArgs),
     /// Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers).
     Update(UpdateArgs),
     /// Add compatibility, bridge or creator resources (or any catalog resource) to an installed server.
@@ -752,6 +764,12 @@ fn already_installed(req: &InstallRequest) -> bool {
 /// is an error naming the port, the next free port and how to apply it.
 fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber) -> Result<Vec<String>, String> {
     let avoid = ports::registered_ports_except(&req.name, Some(&req.dir));
+    settle_ports_avoiding(req, auto, prober, &avoid)
+}
+
+/// `settle_ports` with the other servers' ports given (tests pass none, so this machine's servers don't matter).
+fn settle_ports_avoiding(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber, avoid: &[u16]) -> Result<Vec<String>, String> {
+    let avoid = avoid.to_vec();
     let (game, tx) = (req.ports.game, req.ports.txadmin);
     let report = ports::check_ports(game, tx, &avoid, prober);
     if report.all_free() {
@@ -1504,6 +1522,17 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
     i32::from(!summary.ok())
 }
 
+fn panel(a: &PanelArgs) -> i32 {
+    let opts = kora_web::PanelOptions { port: a.port, open_browser: !a.no_open, ..Default::default() };
+    match kora_web::run(opts) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
 fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
     use elevate::CmdKind as K;
     match cmd {
@@ -1514,7 +1543,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Status | Command::Schedule { cmd: ScheduleCmd::Show { .. } }) => K::Status,
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. }) => K::Other,
+        // The panel runs as the user; privileged actions report the command to run instead.
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },
         Some(Command::Start { .. }) => K::Start,
@@ -1658,6 +1688,7 @@ fn main() {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
         Some(Command::Manager) => manager(),
+        Some(Command::Panel(a)) => panel(&a),
         Some(Command::Update(a)) => update(a),
         Some(Command::AddResources(a)) => add_resources(a),
         Some(Command::Status) => status(),
@@ -1957,34 +1988,34 @@ mod tests {
     #[test]
     fn busy_port_fails_with_a_message_naming_port_and_next_free() {
         let mut r = req_with_ports(30120, 40120);
-        let e = settle_ports(&mut r, false, &Busy(vec![30120])).unwrap_err();
+        let e = settle_ports_avoiding(&mut r, false, &Busy(vec![30120]), &[]).unwrap_err();
         assert!(e.contains("Port 30120 (game)") && e.contains("next free port is 30121") && e.contains("--game-port 30121 --txadmin-port 40120") && e.contains("--auto-ports"), "{e}");
         assert_eq!(r.ports.game, 30120, "nothing changed without --auto-ports");
-        assert!(settle_ports(&mut r, false, &Busy(vec![])).unwrap().is_empty());
+        assert!(settle_ports_avoiding(&mut r, false, &Busy(vec![]), &[]).unwrap().is_empty());
     }
 
     #[test]
     fn auto_ports_picks_next_free_and_says_so() {
         let mut r = req_with_ports(30120, 40120);
-        let changes = settle_ports(&mut r, true, &Busy(vec![30120, 30121, 40120])).unwrap();
+        let changes = settle_ports_avoiding(&mut r, true, &Busy(vec![30120, 30121, 40120]), &[]).unwrap();
         assert_eq!(changes, vec!["Port 30120 is in use, using 30122", "Port 40120 is in use, using 40121"]);
         assert_eq!((r.ports.game, r.ports.txadmin), (30122, 40121));
         let mut r = req_with_ports(65535, 40120);
-        assert!(settle_ports(&mut r, true, &Busy(vec![65535])).is_err(), "exhausted");
+        assert!(settle_ports_avoiding(&mut r, true, &Busy(vec![65535]), &[]).is_err(), "exhausted");
     }
 
     #[test]
     fn ports_from_flags_are_rechecked_locally() {
         let a = InstallArgs { auto_ports: true, game_port: Some(31120), txadmin_port: Some(41120), dir: Some("/nonexistent/kora-ports-test".into()), ..Default::default() };
         let mut r = a.into_request().unwrap();
-        let changes = settle_ports(&mut r, true, &Busy(vec![31120])).unwrap();
+        let changes = settle_ports_avoiding(&mut r, true, &Busy(vec![31120]), &[]).unwrap();
         assert_eq!(changes, vec!["Port 31120 is in use, using 31121"]);
     }
 
     #[test]
     fn dry_run_shows_the_effective_ports() {
         let mut r = req_with_ports(30120, 40120);
-        settle_ports(&mut r, true, &Busy(vec![30120])).unwrap();
+        settle_ports_avoiding(&mut r, true, &Busy(vec![30120]), &[]).unwrap();
         assert!(request_summary(&r).contains("game 30121, txAdmin 40120"));
     }
 

@@ -1240,6 +1240,7 @@ dependencies = [
  "clap",
  "kora-core",
  "kora-tui",
+ "kora-web",
  "winresource",
 ]
 
@@ -1283,6 +1284,7 @@ version = "0.3.4"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
+ "kora-core",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

@@ -20,7 +20,6 @@ impl super::app::Launcher for SystemLauncher {
         }
         let (program, args): (&str, Vec<&str>) = match crate::open::OsKind::current() {
             crate::open::OsKind::Windows => ("rundll32.exe", vec!["url.dll,FileProtocolHandler", url]),
-            crate::open::OsKind::Mac => ("open", vec![url]),
             crate::open::OsKind::Other => ("xdg-open", vec![url]),
         };
         std::process::Command::new(program)

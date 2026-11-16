@@ -6,6 +6,7 @@ Usage: kora [OPTIONS] [COMMAND]
 Commands:
   install        Install a new Kora server (interactive TUI, or headless with options)
   manager        Open the multi-server manager
+  panel          Open the Kora Panel: install, manage and monitor servers in your web browser (local only)
   update         Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers)
   add-resources  Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
   status         Show registered servers
@@ -91,11 +92,11 @@ Options:
       --db-admin-user <DB_ADMIN_USER>
           Database admin user used once to create the new database + user (password: KORA_DB_ADMIN_PASSWORD)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --db-admin-host <DB_ADMIN_HOST>
           Database server address for the admin login (default 127.0.0.1)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --db-admin-port <DB_ADMIN_PORT>
           Database server port for the admin login (default 3306)
@@ -136,6 +137,26 @@ Open the multi-server manager
 Usage: kora manager [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel =====
+Open the Kora Panel: install, manage and monitor servers in your web browser (local only)
+
+Usage: kora panel [OPTIONS]
+
+Options:
+      --port <PORT>
+          Port to listen on (127.0.0.1 only)
+          
+          [default: 47120]
+
+      --no-open
+          Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop)
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

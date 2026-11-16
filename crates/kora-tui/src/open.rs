@@ -7,8 +7,6 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OsKind {
     Windows,
-    // TODO(panel merge): remove with manager/adapter.rs (never constructed any more).
-    Mac,
     Other,
 }
 
@@ -55,7 +53,6 @@ pub fn open_command(os: OsKind, target: &Path, root: &Path) -> Result<OpenComman
         // explorer is not a shell, so `&`, spaces and `%` in the path stay literal. (It exits
         // with code 1 even on success, so callers must not treat its exit status as failure.)
         OsKind::Windows => ("explorer.exe", vec![target.as_os_str().to_owned()]),
-        OsKind::Mac => ("xdg-open", vec![target.as_os_str().to_owned()]), // TODO(panel merge): remove
         OsKind::Other => ("xdg-open", vec![target.as_os_str().to_owned()]),
     };
     Ok(OpenCommand { program: program.into(), args })
@@ -69,7 +66,6 @@ pub fn open_url_command(os: OsKind, url: &str) -> Result<OpenCommand, String> {
     }
     let program = match os {
         OsKind::Windows => "explorer.exe",
-        OsKind::Mac => "xdg-open", // TODO(panel merge): remove
         OsKind::Other => "xdg-open",
     };
     Ok(OpenCommand { program: program.into(), args: vec![OsString::from(url)] })
