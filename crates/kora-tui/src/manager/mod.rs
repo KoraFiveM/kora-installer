@@ -13,6 +13,7 @@ pub mod backend;
 pub mod console;
 pub mod input;
 pub mod logs;
+pub mod parity;
 pub mod view;
 
 #[cfg(test)]

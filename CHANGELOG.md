@@ -5,6 +5,67 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-16
+
+### Fixed
+- **The panel's install wizard no longer looks stuck while it waits.** The GitHub step shows a spinner while it loads your accounts and organisations (the list is disabled and says "Loading your accounts..."), and "Checking GitHub..." spins too. After you click "Install the server" the button shows "Starting..." with a note that Kora is checking ports, GitHub and permissions, and once the install has started the page shows "Getting ready" until the first step appears, instead of an empty progress bar.
+
+## [0.4.2] - 2026-11-16
+
+### Changed
+- **`kora panel` on a server with no screen now offers to run in the background.** A panel started in an SSH window stopped as soon as the window closed. Now `kora panel` asks "Keep it running in the background instead? [Y/n]" (Enter = yes), sets up the background service and prints the sign-in link and the `ssh -L` tunnel line. Running `kora panel` again shows the link of the running background panel instead of starting a second one. Scripts and pipes are never asked. New `--foreground` runs it in the current window only.
+
+## [0.4.1] - 2026-11-16
+
+### Added
+- **Your Cfx.re account becomes the txAdmin admin.** The terminal wizard and the panel's install wizard ask for your Cfx.re username (after the licence key), look the account up on forum.cfx.re (only the name is sent) and set it up as the txAdmin admin with admin rights in `permissions.cfg`, so you can sign in to txAdmin with your Cfx.re account straight away. Leave it empty to keep the generated local admin.
+- `kora install --cfx-user <NAME>` does the same from the command line. New panel route `POST /api/v1/checks/cfx`.
+- **Check one resource at a time.** On the panel's Updates tab each resource has a Check button that looks at just that resource, and shows when it was last checked.
+
+### Changed
+- **Checking for updates is much faster.** Resources are fetched in parallel (up to 6 at once) and, for development servers, one request to the KoraFiveM organisation on GitHub lets Kora skip repositories that have not changed. Anything uncertain is still fetched, so an update is never missed (the hint can be up to a minute old; set `KORA_NO_ORG_HINT` to turn it off). In our test, checking 36 resources went from about 17-29 s to 3-13 s, and about 0.6 s when nothing had changed.
+- Applying an update right after a check no longer fetches the same resources again.
+- Actions the panel cannot do for a server that was added from an existing folder now say so in plain words instead of showing a file error.
+
+### Fixed
+- The panel's website and install scripts now point to `kora panel` as the next step after installing.
+- **Deleting a server in the panel when the database needs its admin password.** The delete used to fail with a message about an environment variable and `kora delete`. The panel now says what happened in plain words, asks for the database administrator password (used once, never stored), and offers to keep the database and finish.
+
+## [0.4.0] - 2026-11-16
+
+### Added
+- **Kora Panel:** `kora panel` opens a local web panel that installs, manages and updates servers in your browser (servers list, start/stop/restart, console, logs, updates with preview, snapshots and rollback, resources, schedule, Discord webhook, ports, GitHub (issues and pull requests), delete, the install wizard, and Settings with self-update, the Kora app and uninstall). `--port` (default 47120), `--no-open`. Guide: `docs/panel.md`.
+- Headless use: over SSH or without a desktop the panel prints the sign-in link and an `ssh -L` tunnel hint (also with `--no-open`).
+- Panel API (`/api/v1`): every operation is one `kora_core::api::Op`, served through the shared `Backend` trait, with jobs and server-sent events for slow operations, structured errors (`needs_elevation` carries the command to run) and write-only secrets.
+- Parity tests: every CLI subcommand and flag, every manager action and wizard screen must map to an operation (or be listed as CLI-only or removed), every operation must have a handler, and the HTTP handlers are tested against a fake backend. A golden file of `kora --help` stops flags disappearing silently.
+- `kora install --hostname <TEXT>` and `--game-build <N>`: the public server name and a pinned game build, as real flags (before they could only come from a setup code). The hostname defaults to the server name.
+- Privileged helper: `kora helper install|uninstall|status|serve` (Linux), so the panel can run administrator actions without asking each time. It accepts only Kora's existing privileged actions and only from the installing user.
+- Monitoring tab: server up/down, players, CPU and memory, disk, ports and the update badge, with about 24 hours of history; alerts as a panel banner, a Discord webhook or a generic webhook.
+- Opt-in background panel service: `kora panel --install-service`, `--remove-service`, `--print-link`.
+- Remote access: `kora panel --bind <ip> --remote`, panel users with `kora panel user add|list|remove`, roles viewer / operator / admin.
+- Tailscale identity for remote sign-in (checked with the local tailscaled, never from request headers).
+- Delete, uninstall and console input are off for remote sessions by default and need the server name typed.
+- Hub: any panel can list and manage other panels as nodes (bearer tokens; nodes advertise version and supported operations).
+
+### Changed
+- The terminal manager and the CLI now use the same shared engine interface as the panel (`kora_core::api`); the start/stop behaviour of `kora start|stop|restart` and the manager no longer differs.
+- Minimum supported Rust version is 1.93.
+- CI builds, lints, tests and audits (`npm audit --omit=dev --audit-level=high`) the panel UI; releases embed it. Built UI files are not committed. `cargo build` without Node still works and `kora panel` shows a "UI not built" page.
+- Signing docs: SignPath is no longer mentioned. The Windows `.exe` is unsigned, SmartScreen may warn, the install scripts verify SHA-256 and the manual `.sha256` check is documented. The privacy line now says Kora contacts nothing unless you ask it to.
+
+### Removed
+- Setup codes: `kora install --code` and `kora add-resources --code` still parse but stop at once with exit code 2 and a message pointing to the flags, `--resource` and `kora panel`. The wizard no longer has a setup-code screen.
+- macOS code and wording (Kora supports Linux and Windows).
+
+### Security
+- The panel listens on `127.0.0.1` only by default, signs you in with a random one-time token exchanged for an `HttpOnly; SameSite=Strict` cookie, rate-limits wrong tokens, checks the `Host` header (DNS rebinding) and `Origin` plus `X-Kora` on changing requests (CSRF), and sends a strict Content-Security-Policy, `nosniff` and `no-referrer`. Licence keys, database passwords and webhook addresses are never returned to the browser.
+- The panel UI is installed with `npm ci --ignore-scripts` from a committed lockfile and audited in CI.
+
+### Fixed
+
+- Downloads no longer fail when a signal (for example a child process ending) interrupts a read; the read is retried.
+- Monitoring reads a server's `players.json` reply even when the server closes the connection early.
+
 ## [0.3.4] - 2026-11-15
 
 ### Added

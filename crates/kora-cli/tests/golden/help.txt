@@ -1,0 +1,820 @@
+===== kora =====
+Kora installer and server manager
+
+Usage: kora [OPTIONS] [COMMAND]
+
+Commands:
+  install        Install a new Kora server (interactive TUI, or headless with options)
+  manager        Open the multi-server manager
+  panel          Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up)
+  update         Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers)
+  add-resources  Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
+  status         Show registered servers
+  self-update    Update the kora program itself to the newest release (checksum-verified)
+  webhook        Discord notifications for update reports
+  delete         Delete a server: removes what the installer created (files, database + user, registry entry)
+  schedule       Show or change when a development server updates itself
+  app            The Kora app: the `kora` command / Start Menu shortcut that reopens the manager
+  github         GitHub helpers for development mode
+  service-host   Run a server's FXServer (used by the Windows service and supervisors)
+  start          Start a server's background service
+  stop           Stop a server's background service
+  restart        Restart a server's background service
+  uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
+  helper         The optional privileged helper: lets the panel do the few things that need administrator rights
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
+
+===== kora install =====
+Install a new Kora server (interactive TUI, or headless with options)
+
+Usage: kora install [OPTIONS]
+
+Options:
+      --code <CODE>
+          REMOVED in 0.4.0 (setup codes no longer exist): use the flags below or `kora panel`
+
+      --name <NAME>
+          Server name (display + registry name)
+
+      --dir <DIR>
+          Server folder
+
+      --mode <MODE>
+          prod = pinned release clones, dev = forks on your GitHub account
+          
+          [possible values: prod, dev]
+
+      --license-key <LICENSE_KEY>
+          Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable)
+          
+          [env: CFX_LICENSE_KEY]
+
+      --game-port <GAME_PORT>
+          
+
+      --txadmin-port <TXADMIN_PORT>
+          
+
+      --txadmin-public
+          Also open the txAdmin port in the firewall (default: txAdmin stays private)
+
+      --cfx-identifier <CFX_IDENTIFIER>
+          Cfx.re account that becomes the txAdmin master, e.g. fivem:123456 (default: a generated local admin)
+
+      --cfx-user <NAME>
+          Your Cfx.re username (the name on forum.cfx.re). Kora looks up your account id and makes you the txAdmin admin
+
+      --artifact-url <ARTIFACT_URL>
+          Official runtime.fivem.net artifact URL (default: the recommended build)
+
+      --resources <RESOURCES>
+          `all` or a comma separated list of resource ids (dependencies and core are always included)
+
+      --db <DB>
+          existing = use the local MariaDB, install = install it if missing, skip = no database
+          
+          [possible values: existing, install, skip]
+
+      --service
+          Install and enable the OS service (needs admin)
+
+      --firewall
+          Open the game port in the OS firewall (needs admin)
+
+      --github-owner <GITHUB_OWNER>
+          Dev mode: GitHub user or organisation to fork into (`list` shows the choices)
+
+      --db-admin-user <DB_ADMIN_USER>
+          Database admin user used once to create the new database + user (password: KORA_DB_ADMIN_PASSWORD)
+
+      --db-admin-host <DB_ADMIN_HOST>
+          Database server address for the admin login (default 127.0.0.1)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+      --db-admin-port <DB_ADMIN_PORT>
+          Database server port for the admin login (default 3306)
+
+      --start
+          Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)
+
+      --no-start
+          Do not start the server after installing (start it later with `kora start <name>`)
+
+      --dry-run
+          Show the full plan and change nothing
+
+      --no-app
+          Do not install the Kora app (the `kora` command and Start Menu shortcut) next to the server
+
+      --no-desktop-shortcut
+          With the Kora app: no desktop shortcut (Windows)
+
+      --auto-ports
+          If a port is in use, silently use the next free one and say what changed
+
+      --hostname <HOSTNAME>
+          Server hostname shown in the server list (default: the server name)
+
+      --game-build <N>
+          Pin the FiveM game build (e.g. 3258); default: the build the server ships with
+
+  -y, --yes
+          Do not ask anything (implied by any other option)
+
+  -h, --help
+          Print help
+
+===== kora manager =====
+Open the multi-server manager
+
+Usage: kora manager [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel =====
+Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up)
+
+Usage: kora panel [OPTIONS] [COMMAND]
+
+Commands:
+  user  Manage the people who may sign in to the panel remotely (each has a token and a role)
+
+Options:
+      --port <PORT>
+          Port to listen on
+          
+          [default: 47120]
+
+      --bind <BIND>
+          Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard
+          
+          [default: 127.0.0.1]
+
+      --remote
+          Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings)
+
+      --no-open
+          Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop)
+
+      --foreground
+          Run the panel in this window and stop it when the window closes: do not offer or use the background panel
+
+      --install-service
+          Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed)
+
+      --remove-service
+          Stop and remove the background panel installed with --install-service
+
+      --print-link
+          Print the sign-in link of the background panel
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user =====
+Manage the people who may sign in to the panel remotely (each has a token and a role)
+
+Usage: kora panel user [OPTIONS] <COMMAND>
+
+Commands:
+  add     Add a user and print their token once (it cannot be shown again)
+  list    List the users and their roles
+  remove  Remove a user; their sessions stop working at once
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user add =====
+Add a user and print their token once (it cannot be shown again)
+
+Usage: kora panel user add [OPTIONS] --role <ROLE> <NAME>
+
+Arguments:
+  <NAME>
+          A name for this person (letters, numbers, dots, dashes, underscores)
+
+Options:
+      --role <ROLE>
+          What they may do: viewer (look only), operator (run servers, updates, logs) or admin (everything)
+          
+          [possible values: viewer, operator, admin]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user list =====
+List the users and their roles
+
+Usage: kora panel user list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user remove =====
+Remove a user; their sessions stop working at once
+
+Usage: kora panel user remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user to remove
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora update =====
+Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers)
+
+Usage: kora update [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or id
+
+Options:
+      --auto
+          Run unattended (fast-forward clean forks only)
+
+      --resource <ID>
+          Update only this resource (repeatable)
+
+      --all
+          Update every resource
+
+      --preview
+          Show what would change, then stop
+
+  -y, --yes
+          Do not ask for confirmation
+
+      --restart <RESTART>
+          What to do about restarts
+
+          Possible values:
+          - none:       Apply the files, restart nothing
+          - ensure:     Apply the files without restarting; the server loads them on its next restart or an `ensure` in txAdmin (Kora cannot do that for you without credentials)
+          - full:       Restart the whole server
+          - when-quiet: Restart only when nobody is playing (default)
+
+      --rollback <SNAPSHOT>
+          Put everything back the way a snapshot saved it
+
+      --list-snapshots
+          List saved snapshots
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+===== kora add-resources =====
+Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
+
+Usage: kora add-resources [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --code <CODE>
+          REMOVED in 0.4.0 (setup codes no longer exist): use --resource or `kora panel`
+
+      --resource <ID>
+          Catalog resource id to add (repeatable). Dependencies are added automatically
+
+      --dry-run
+          Show what would be added, then stop
+
+  -y, --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora status =====
+Show registered servers
+
+Usage: kora status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora self-update =====
+Update the kora program itself to the newest release (checksum-verified)
+
+Usage: kora self-update [OPTIONS]
+
+Options:
+      --check
+          Only say whether a newer version exists
+
+  -y, --yes
+          Do not ask for confirmation
+
+      --version <vX.Y.Z>
+          Install exactly this release (also allows going back to an older one), e.g. v0.2.1
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora webhook =====
+Discord notifications for update reports
+
+Usage: kora webhook [OPTIONS] <COMMAND>
+
+Commands:
+  set     Save a Discord webhook for a server. Prefer --stdin or $KORA_DISCORD_WEBHOOK so the URL stays out of shell history
+  test    Send a test message
+  show    Show whether a webhook is set (the token is hidden)
+  remove  Delete the saved webhook
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora webhook set =====
+Save a Discord webhook for a server. Prefer --stdin or $KORA_DISCORD_WEBHOOK so the URL stays out of shell history
+
+Usage: kora webhook set [OPTIONS] <SERVER> [URL]
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+  [URL]
+          The webhook URL (https://discord.com/api/webhooks/<id>/<token>)
+
+Options:
+      --stdin
+          Read the URL from standard input
+
+      --test
+          Send a test message after saving
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora webhook test =====
+Send a test message
+
+Usage: kora webhook test [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora webhook show =====
+Show whether a webhook is set (the token is hidden)
+
+Usage: kora webhook show [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora webhook remove =====
+Delete the saved webhook
+
+Usage: kora webhook remove [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora delete =====
+Delete a server: removes what the installer created (files, database + user, registry entry)
+
+Usage: kora delete [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+Options:
+      --keep-files
+          Keep the server folder and files
+
+      --keep-db
+          Keep the database and its user
+
+  -y, --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora schedule =====
+Show or change when a development server updates itself
+
+Usage: kora schedule [OPTIONS] <COMMAND>
+
+Commands:
+  show  Show the current schedule in plain language
+  set   Change the schedule (needs administrator rights; Kora asks for them)
+  off   Turn automatic updates off
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora schedule show =====
+Show the current schedule in plain language
+
+Usage: kora schedule show [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora schedule set =====
+Change the schedule (needs administrator rights; Kora asks for them)
+
+Usage: kora schedule set [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+Options:
+      --daily <HH:MM>
+          Every day at HH:MM (24 hours, this computer's time). The default is 04:00
+
+      --weekly <DAY> <HH:MM>
+          Every week on DAY (mon..sun) at HH:MM
+
+      --as-user
+          Run as you, the person who installed (default): your GitHub sign-in works for private forks
+
+      --as-system
+          Run as the system account: works when nobody is logged in, but cannot fetch private forks
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+Run as you (recommended): the update uses YOUR GitHub / git sign-in, so forks of private repositories work. On Windows it runs only while you are logged in (no password is stored); if the PC was off or you were signed out at that time, it runs at your next login. On Linux it runs from the system timer as the folder's owner and also catches up after downtime.
+Run as the system account: runs even when nobody is logged in (good for always-on servers), but the system account has no GitHub sign-in, so forks of PRIVATE repositories cannot be fetched.
+
+===== kora schedule off =====
+Turn automatic updates off
+
+Usage: kora schedule off [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora app =====
+The Kora app: the `kora` command / Start Menu shortcut that reopens the manager
+
+Usage: kora app [OPTIONS] <COMMAND>
+
+Commands:
+  install    Install or update the Kora app (idempotent)
+  status     Show whether the Kora app is installed (`key: value` lines)
+  uninstall  Remove the Kora app. Servers and databases are never touched
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora app install =====
+Install or update the Kora app (idempotent)
+
+Usage: kora app install [OPTIONS]
+
+Options:
+  -y, --yes
+          Do not ask (nothing is asked today; accepted for scripts)
+
+      --no-desktop-shortcut
+          No desktop shortcut (Windows)
+
+      --force
+          Replace a newer installed copy with this program
+
+      --dry-run
+          List every change and make none
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora app status =====
+Show whether the Kora app is installed (`key: value` lines)
+
+Usage: kora app status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora app uninstall =====
+Remove the Kora app. Servers and databases are never touched
+
+Usage: kora app uninstall [OPTIONS]
+
+Options:
+  -y, --yes
+          
+
+      --dry-run
+          
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora github =====
+GitHub helpers for development mode
+
+Usage: kora github [OPTIONS] <COMMAND>
+
+Commands:
+  owners  List the GitHub accounts and organisations your forks can go into
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora github owners =====
+List the GitHub accounts and organisations your forks can go into
+
+Usage: kora github owners [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service-host =====
+Run a server's FXServer (used by the Windows service and supervisors)
+
+Usage: kora service-host [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Registry name, or the server folder (absolute path)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora start =====
+Start a server's background service
+
+Usage: kora start [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora stop =====
+Stop a server's background service
+
+Usage: kora stop [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora restart =====
+Restart a server's background service
+
+Usage: kora restart [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora uninstall =====
+Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
+
+Usage: kora uninstall [OPTIONS] [SERVER]
+
+Arguments:
+  [SERVER]
+          Only this server (registry name or folder); default: every registered server
+
+Options:
+      --dry-run
+          Show everything that would be removed and change nothing
+
+  -y, --yes
+          Do not ask: remove the system changes, keep server folders and databases
+
+      --delete-files
+          Also delete the server folders (only what Kora created in them)
+
+      --delete-databases
+          Also drop the databases and database users Kora created
+
+      --app
+          Remove only the Kora app (shortcuts, PATH entry, the installed copy); servers and databases are never touched
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper =====
+The optional privileged helper: lets the panel do the few things that need administrator rights
+
+Usage: kora helper [OPTIONS] <COMMAND>
+
+Commands:
+  serve      Run the helper (started by its system service; not for people)
+  install    Install the helper service for your user account (needs administrator rights; run with sudo)
+  uninstall  Remove the helper service (needs administrator rights)
+  status     Say whether the helper is installed and running
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper serve =====
+Run the helper (started by its system service; not for people)
+
+Usage: kora helper serve [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper install =====
+Install the helper service for your user account (needs administrator rights; run with sudo)
+
+Usage: kora helper install [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper uninstall =====
+Remove the helper service (needs administrator rights)
+
+Usage: kora helper uninstall [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora helper status =====
+Say whether the helper is installed and running
+
+Usage: kora helper status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+

@@ -6,6 +6,7 @@
 //! SQL migrations are flagged and never rolled back automatically.
 
 pub mod manual;
+pub mod orgcache;
 pub mod status;
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,36 @@ pub enum UpdateError {
 
 pub type GitResult<T> = Result<T, UpdateError>;
 
+/// Most fetches that run at the same time.
+pub const FETCH_PARALLEL: usize = 6;
+
+/// How fresh a fetch must be. `Fresh` always asks the remote; `AllowRecent` may reuse a fetch this process made
+/// moments ago (an apply right after the preview the person just looked at).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchMode {
+    Fresh,
+    AllowRecent,
+}
+
+/// Run `f` over `items` on at most `limit` threads; results keep the order of `items`.
+pub fn par_map<I: Send, O: Send>(items: Vec<I>, limit: usize, f: impl Fn(I) -> O + Sync) -> Vec<O> {
+    use std::sync::Mutex;
+    let n = items.len();
+    let queue: Mutex<std::vec::IntoIter<(usize, I)>> = Mutex::new(items.into_iter().enumerate().collect::<Vec<_>>().into_iter());
+    let out: Mutex<Vec<Option<O>>> = Mutex::new((0..n).map(|_| None).collect());
+    std::thread::scope(|sc| {
+        for _ in 0..limit.max(1).min(n) {
+            sc.spawn(|| loop {
+                let job = queue.lock().unwrap_or_else(|e| e.into_inner()).next();
+                let Some((i, item)) = job else { break };
+                let r = f(item);
+                out.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(r);
+            });
+        }
+    });
+    out.into_inner().unwrap_or_else(|e| e.into_inner()).into_iter().flatten().collect()
+}
+
 /// Git operations the engine needs. Implemented by the git module (shells out to `git`).
 /// `upstream` is a ref such as `upstream/dev`; `rev` is `"HEAD"` or a ref/commit.
 pub trait GitOps {
@@ -38,6 +69,18 @@ pub trait GitOps {
     fn is_diverged(&self, repo: &Path, upstream: &str) -> GitResult<bool>;
     /// Commits in `upstream` that are not in HEAD.
     fn behind_count(&self, repo: &Path, upstream: &str) -> GitResult<u32>;
+    /// Fetch what each target needs, possibly in parallel; one result per target, in order. Default: one by one.
+    fn fetch_many(&self, targets: &[&UpdateTarget], _mode: FetchMode) -> Vec<GitResult<()>> {
+        targets.iter().map(|t| self.fetch(&t.path)).collect()
+    }
+    /// Is `rev` a ref or commit this checkout already has? (local only; default: unknown = false)
+    fn has_ref(&self, _repo: &Path, _rev: &str) -> bool {
+        false
+    }
+    /// `owner/name` of a remote's GitHub URL (default: unknown).
+    fn remote_slug(&self, _repo: &Path, _remote: &str) -> Option<String> {
+        None
+    }
     /// Production: fetch `origin` (where pinned release commits live).
     fn fetch_origin(&self, _repo: &Path) -> GitResult<()> {
         Ok(())
@@ -200,8 +243,7 @@ impl UpdatePlan {
     }
 }
 
-fn classify(git: &dyn GitOps, t: &UpdateTarget) -> GitResult<PlanItem> {
-    git.fetch(&t.path)?;
+fn classify_fetched(git: &dyn GitOps, t: &UpdateTarget) -> GitResult<PlanItem> {
     let current = git.head_commit(&t.path, "HEAD")?;
     let upstream = git.head_commit(&t.path, &t.upstream_ref)?;
     let behind = git.behind_count(&t.path, &t.upstream_ref)?;
@@ -224,10 +266,31 @@ fn classify(git: &dyn GitOps, t: &UpdateTarget) -> GitResult<PlanItem> {
 
 /// Fetch and classify every target. Per-resource git errors become `Skipped(Error)`.
 pub fn plan(git: &dyn GitOps, targets: &[UpdateTarget]) -> UpdatePlan {
+    plan_fetch(git, targets, FetchMode::Fresh, &[]).0
+}
+
+/// [`plan`] with every fetch done first through [`GitOps::fetch_many`] (parallel on the real adapter). Targets whose id
+/// is in `skip_fetch` are not fetched (the caller knows their remote has not moved). Also returns the ids that were
+/// really fetched successfully.
+pub fn plan_fetch(git: &dyn GitOps, targets: &[UpdateTarget], mode: FetchMode, skip_fetch: &[String]) -> (UpdatePlan, Vec<String>) {
+    let to_fetch: Vec<&UpdateTarget> = targets.iter().filter(|t| !skip_fetch.contains(&t.id)).collect();
+    let results = git.fetch_many(&to_fetch, mode);
+    let mut fetched = Vec::new();
+    let mut failed: Vec<(String, String)> = Vec::new();
+    for (t, r) in to_fetch.iter().zip(results) {
+        match r {
+            Ok(()) => fetched.push(t.id.clone()),
+            Err(e) => failed.push((t.id.clone(), e.to_string())),
+        }
+    }
     let items = targets
         .iter()
         .map(|t| {
-            classify(git, t).unwrap_or_else(|e| PlanItem {
+            match failed.iter().find(|(id, _)| *id == t.id) {
+                Some((_, e)) => Err(UpdateError::Git(e.trim_start_matches("git error: ").to_string())),
+                None => classify_fetched(git, t),
+            }
+            .unwrap_or_else(|e| PlanItem {
                 target: t.clone(),
                 current: String::new(),
                 upstream: String::new(),
@@ -236,7 +299,7 @@ pub fn plan(git: &dyn GitOps, targets: &[UpdateTarget]) -> UpdatePlan {
             })
         })
         .collect();
-    UpdatePlan { items }
+    (UpdatePlan { items }, fetched)
 }
 
 // ---------------------------------------------------------------- snapshot
@@ -841,5 +904,23 @@ mod tests {
         let s = Snapshot { created_unix: 1, entries: vec![SnapshotEntry { id: "a".into(), path: "/a".into(), commit: "old".into() }] };
         assert!(rollback_snapshot(&git, &s)[0].1.is_ok());
         assert_eq!(git.head("/a"), "old");
+    }
+
+    #[test]
+    fn par_map_keeps_order_and_never_exceeds_the_limit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (now, peak) = (AtomicUsize::new(0), AtomicUsize::new(0));
+        let out = par_map((0..30).collect::<Vec<u32>>(), 4, |i| {
+            let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(n, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            now.fetch_sub(1, Ordering::SeqCst);
+            i * 2
+        });
+        assert_eq!(out, (0..30).map(|i| i * 2).collect::<Vec<_>>());
+        let p = peak.load(Ordering::SeqCst);
+        assert!((2..=4).contains(&p), "peak {p}");
+        assert_eq!(par_map(Vec::<u8>::new(), 6, |x| x), Vec::<u8>::new());
+        assert_eq!(par_map(vec![1, 2, 3], 0, |x| x + 1), vec![2, 3, 4], "a zero limit still runs everything");
     }
 }

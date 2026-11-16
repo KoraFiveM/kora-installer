@@ -71,7 +71,6 @@ pub fn url_command(os: OsKind, url: &str) -> Result<OpenCommand, String> {
     }
     let program = match os {
         OsKind::Windows => "explorer.exe",
-        OsKind::Mac => "open",
         OsKind::Other => "xdg-open",
     };
     Ok(OpenCommand { program: program.into(), args: vec![url.into()] })
@@ -995,10 +994,11 @@ impl Wizard {
     /// Poll background work (call a few times a second). Returns true when the screen changed.
     pub fn tick(&mut self) -> bool {
         let on = self.gh_on_screen();
-        let changed = match (&mut self.gh, on) {
+        let mut changed = match (&mut self.gh, on) {
             (Some(g), true) => g.tick(),
             _ => false,
         };
+        changed |= self.cfx_tick();
         if let Some(s) = self.gh.as_mut().and_then(|g| g.status.take()) {
             self.status = Some(s);
         }
@@ -1007,7 +1007,7 @@ impl Wizard {
 
     /// True when the screen animates or waits for background work (the runner polls instead of blocking).
     pub fn wants_tick(&self) -> bool {
-        self.gh_on_screen() && self.gh.as_ref().is_some_and(GithubFlow::wants_tick)
+        self.cfx_checking() || (self.gh_on_screen() && self.gh.as_ref().is_some_and(GithubFlow::wants_tick))
     }
 }
 

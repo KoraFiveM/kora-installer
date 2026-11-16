@@ -95,7 +95,7 @@ pub fn report_issue(
 }
 
 /// What a pull request would contain; shown to the user before anything is sent.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PrPlan {
     pub resource: String,
     /// `owner/name` of the upstream (catalog) repository.

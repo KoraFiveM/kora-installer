@@ -300,6 +300,17 @@ pub fn send_test(cfg: &NotifyConfig, server_name: &str) -> Result<(), NotifyErro
     std::panic::catch_unwind(|| post(url, &test_payload(server_name), &real_net())).unwrap_or(Err(NotifyError::Network))
 }
 
+/// Post a short monitoring alert (title and one line of text; no paths, addresses or secrets).
+pub fn send_alert(cfg: &NotifyConfig, title: &str, text: &str, colour: u32) -> Result<(), NotifyError> {
+    let url = configured(cfg)?;
+    let body = serde_json::json!({
+        "username": "Kora Monitor",
+        "allowed_mentions": {"parse": []},
+        "embeds": [{"title": title, "description": text, "color": colour}]
+    });
+    std::panic::catch_unwind(|| post(url, &body, &real_net())).unwrap_or(Err(NotifyError::Network))
+}
+
 // ------------------------------------------------------------------- hook
 
 /// Is this report worth a message? Runs that changed or broke nothing stay quiet.

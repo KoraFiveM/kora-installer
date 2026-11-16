@@ -7,14 +7,18 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use kora_core::firewall::ports::{suggest_free_port, PortProber, SystemProber};
 use kora_core::firewall::PortRequest;
 use kora_core::installer::{DbAdmin, DbChoice, InstallRequest, Mode, Ports, ResourceSelection, ServerEntry};
-use kora_core::site::Redeemed;
 use ratatui::layout::Rect;
 use std::path::{Path, PathBuf};
 
-use crate::clipboard::{format_setup_code, sanitize_paste, Clipboard, SystemClipboard};
+use crate::clipboard::{sanitize_paste, Clipboard, SystemClipboard};
 use crate::elev::{self, Elevator};
 use crate::wizard_view;
 use std::ffi::OsString;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
+
+/// Looks a Cfx.re username up (the real forum in the app, a fake in tests).
+pub type CfxLookup = Arc<dyn Fn(&str) -> Result<kora_core::cfx::CfxAccount, String> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -38,6 +42,8 @@ pub enum Screen {
     /// Windows: put a Kora shortcut on the desktop (the Start Menu entry is always added).
     Shortcut,
     License,
+    /// Cfx.re username, so the person installing becomes the txAdmin admin (optional).
+    Cfx,
     // Advanced only
     Hostname,
     GithubOwner,
@@ -45,7 +51,6 @@ pub enum Screen {
     GithubAccount,
     GameBuild,
     TxAdminPublic,
-    SetupCode,
     Review,
 }
 
@@ -85,10 +90,6 @@ pub struct PortLine {
 /// Real database login check (fake-able in tests). `None` = automatic (environment / root socket).
 pub type DbTester = fn(Option<&DbAdmin>) -> Result<(), String>;
 
-/// Setup-code redeemer (injected: the CLI talks to the website, tests use a fake). The error text
-/// is shown to the user as is.
-pub type Redeemer = Box<dyn FnMut(&str) -> Result<Redeemed, String>>;
-
 pub struct Wizard {
     pub screen: Screen,
     pub(crate) state: WizardState,
@@ -116,14 +117,13 @@ pub struct Wizard {
     pub github_owner: String,
     pub(crate) gh: Option<crate::github_screens::GithubFlow>,
     pub game_build: String,
-    /// Setup code typed on the Welcome stage.
-    pub setup_code: String,
-    /// Answers loaded from a setup code (website). Their screens are skipped but shown on Review.
-    pub redeemed: Option<Redeemed>,
-    /// The code was already redeemed by the CLI, so the code screen is not offered.
-    cli_prefilled: bool,
     cfx_identifier: Option<String>,
-    redeemer: Option<Redeemer>,
+    /// The Cfx.re username as typed on the Cfx screen (kept when going back).
+    pub cfx_name: String,
+    /// The name Cfx.re spells for the resolved account (shown on Review).
+    cfx_username: Option<String>,
+    cfx_lookup: CfxLookup,
+    cfx_job: Option<Receiver<Result<kora_core::cfx::CfxAccount, String>>>,
     /// Selected row for choice screens.
     pub selected: usize,
     /// Focused input for text screens.
@@ -150,10 +150,8 @@ pub struct Wizard {
     /// Live status of the game / txAdmin port boxes (refreshed whenever they change).
     pub ports_status: [Option<PortLine>; 2],
     ports_touched: bool,
-    /// Why the Ports screen is shown for a website-chosen port that is taken.
+    /// Why the ports were changed (the usual ones are taken).
     pub ports_note: Option<String>,
-    /// A website-chosen port was taken: keep the Ports screen in the flow.
-    web_ports_shown: bool,
     /// After a re-check sent the user back to Ports, return straight to Review.
     jump_review: bool,
     db_tester: DbTester,
@@ -180,7 +178,6 @@ impl std::fmt::Debug for Wizard {
             .field("name", &self.name)
             .field("dir", &self.dir)
             .field("license", &if self.license.is_empty() { "<empty>" } else { "<redacted>" })
-            .field("setup_code", &if self.setup_code.is_empty() { "<empty>" } else { "<redacted>" })
             .field("dba_pass", &if self.dba_pass.is_empty() { "<empty>" } else { "<redacted>" })
             .finish_non_exhaustive()
     }
@@ -323,11 +320,11 @@ impl Wizard {
             github_owner: String::new(),
             gh: None,
             game_build: String::new(),
-            setup_code: String::new(),
-            redeemed: None,
-            cli_prefilled: false,
             cfx_identifier: None,
-            redeemer: None,
+            cfx_name: String::new(),
+            cfx_username: None,
+            cfx_lookup: Arc::new(kora_core::cfx::lookup),
+            cfx_job: None,
             selected: 0,
             focus: 0,
             help_open: false,
@@ -346,7 +343,6 @@ impl Wizard {
             ports_status: [None, None],
             ports_touched: false,
             ports_note: None,
-            web_ports_shown: false,
             jump_review: false,
             db_tester,
             dba_custom: false,
@@ -367,24 +363,16 @@ impl Wizard {
     /// Screens in the current order (depends on earlier answers).
     pub fn flow(&self) -> Vec<Screen> {
         use Screen::*;
-        let web = self.redeemed.is_some();
         let mut v = vec![];
         if self.elevate_offer {
             v.push(Permission);
         }
         v.push(Welcome);
-        if !self.cli_prefilled {
-            v.push(SetupCode);
-        }
         v.push(Prepare);
-        if !web {
-            v.extend([Mode, Name]);
-        }
+        v.extend([Mode, Name]);
         v.push(Folder);
-        if !web || self.web_ports_shown {
-            v.push(Ports);
-        }
-        if !web {
+        v.push(Ports);
+        {
             v.push(Artifact);
             if self.artifact_custom {
                 v.push(ArtifactUrl);
@@ -406,18 +394,17 @@ impl Wizard {
             v.push(Shortcut);
         }
         v.push(License);
-        if self.advanced && !web {
+        v.push(Cfx);
+        if self.advanced {
             v.push(Hostname);
         }
         if self.mode == kora_core::installer::Mode::Development && self.gh.is_some() {
             v.push(GithubAccount);
-        } else if (self.advanced || web) && self.mode == kora_core::installer::Mode::Development {
+        } else if self.advanced && self.mode == kora_core::installer::Mode::Development {
             v.push(GithubOwner);
         }
         if self.advanced {
-            if !web {
-                v.push(GameBuild);
-            }
+            v.push(GameBuild);
             v.push(TxAdminPublic);
         }
         v.push(Review);
@@ -432,7 +419,7 @@ impl Wizard {
     /// Which of the four stages (Welcome, Prepare, Choose, Review) is active.
     pub fn stage(&self) -> usize {
         match self.screen {
-            Screen::Permission | Screen::Welcome | Screen::SetupCode => 0,
+            Screen::Permission | Screen::Welcome => 0,
             Screen::Prepare => 1,
             Screen::Review => 3,
             _ => 2,
@@ -452,10 +439,10 @@ impl Wizard {
             | Screen::ArtifactUrl
             | Screen::ResourceList
             | Screen::License
+            | Screen::Cfx
             | Screen::Hostname
             | Screen::GithubOwner
             | Screen::GameBuild => 1,
-            Screen::SetupCode => usize::from(self.redeemed.is_none()),
             _ => 0,
         }
     }
@@ -483,10 +470,10 @@ impl Wizard {
             (Screen::ArtifactUrl, _) => &mut self.artifact_url,
             (Screen::ResourceList, _) => &mut self.resource_ids,
             (Screen::License, _) => &mut self.license,
+            (Screen::Cfx, _) => &mut self.cfx_name,
             (Screen::Hostname, _) => &mut self.hostname,
             (Screen::GithubOwner, _) => &mut self.github_owner,
             (Screen::GameBuild, _) => &mut self.game_build,
-            (Screen::SetupCode, _) => &mut self.setup_code,
             _ => return None,
         })
     }
@@ -586,6 +573,12 @@ impl Wizard {
             }
             Screen::Folder => self.dir_touched = true,
             Screen::Hostname => self.host_touched = true,
+            Screen::Cfx => {
+                // A different name is a different account: forget the earlier answer and any lookup in flight.
+                self.cfx_identifier = None;
+                self.cfx_username = None;
+                self.cfx_job = None;
+            }
             Screen::DbAdminLogin => self.db_test = None,
             _ => {}
         }
@@ -660,50 +653,6 @@ impl Wizard {
         }
     }
 
-    /// Install the function that exchanges a setup code for the website's choices.
-    pub fn with_redeemer(mut self, r: Redeemer) -> Self {
-        self.redeemer = Some(r);
-        self
-    }
-
-    /// Load the website's choices (used after a successful redeem, or by the CLI when it already
-    /// redeemed `--code`, in which case the code screen is not offered).
-    pub fn apply_redeemed(&mut self, r: Redeemed, from_cli: bool) {
-        self.mode = r.mode;
-        self.name = r.name.clone();
-        if !self.dir_touched {
-            self.dir = default_dir(&self.name);
-        }
-        self.hostname = r.hostname.clone().unwrap_or_else(|| r.name.clone());
-        self.host_touched = true;
-        self.game_port = r.ports.game.to_string();
-        self.tx_port = r.ports.txadmin.to_string();
-        self.artifact_custom = r.artifact_url.is_some();
-        self.artifact_url = r.artifact_url.clone().unwrap_or_default();
-        match &r.resources {
-            ResourceSelection::All => self.resources_all = true,
-            ResourceSelection::Only(ids) => {
-                self.resources_all = false;
-                self.resource_ids = ids.join(", ");
-            }
-        }
-        self.game_build = r.game_build.map(|g| g.to_string()).unwrap_or_default();
-        self.cfx_identifier = r.cfx_identifier.clone();
-        if self.github_owner.trim().is_empty() {
-            // Only a suggestion: the GitHub screen is still shown in development mode.
-            self.github_owner = r.github_login.clone().unwrap_or_default();
-        }
-        self.cli_prefilled = from_cli;
-        self.redeemed = Some(r);
-        self.error = None;
-        // Ports from the website are not trusted: they were free on the website's side, not here.
-        self.refresh_ports();
-        if let Some(l) = self.ports_status.iter().flatten().find(|l| !l.ok) {
-            self.ports_note = Some(format!("The website chose port {} but it is already used on this computer, so please pick another.", l.port));
-            self.web_ports_shown = true;
-        }
-    }
-
     /// Fill the answers from an earlier install that failed (secrets are never saved, so the license
     /// key and database password are asked for again).
     pub fn restore_saved(&mut self, r: &InstallRequest) {
@@ -742,33 +691,12 @@ impl Wizard {
         self.refresh_ports();
     }
 
-    /// Welcome text after a code was loaded.
+    /// Welcome text when answers from an earlier attempt were restored.
     pub fn welcome_note(&self) -> Option<String> {
-        if self.restored && self.redeemed.is_none() {
+        if self.restored {
             return Some("Your answers from the last attempt are filled in, so you can go straight through. Kora continues where it stopped. For your safety the license key and database password are not saved, so you will type those again.".into());
         }
-        self.redeemed.as_ref().map(|r| r.welcome())
-    }
-
-    fn try_redeem(&mut self) {
-        let code = match kora_core::site::normalize_code(&self.setup_code) {
-            Ok(c) => c,
-            Err(e) => {
-                self.error = Some(e.to_string());
-                return;
-            }
-        };
-        let Some(redeemer) = self.redeemer.as_mut() else {
-            self.error = Some("Setup codes can't be used here. Leave the box empty to continue.".into());
-            return;
-        };
-        match redeemer(&code) {
-            Ok(r) => {
-                self.setup_code = code;
-                self.apply_redeemed(r, false);
-            }
-            Err(e) => self.error = Some(e),
-        }
+        None
     }
 
     /// Use another clipboard (tests inject a fake one).
@@ -782,10 +710,10 @@ impl Wizard {
         match (self.screen, self.focus) {
             (Screen::Ports, _) | (Screen::DbAdminLogin, 4) => 5,
             (Screen::GameBuild, _) => 8,
-            (Screen::SetupCode, _) => 32,
             (Screen::Name, _) | (Screen::Hostname, _) => 64,
             (Screen::GithubOwner, _) | (Screen::DbAdminLogin, 0) => 64,
             (Screen::License, _) => 128,
+            (Screen::Cfx, _) => 32,
             (Screen::DbAdminLogin, 1) | (Screen::DbAdminLogin, 2) => 256,
             (Screen::DbAdminLogin, 3) => 255,
             (Screen::Folder, _) => 260,
@@ -823,14 +751,8 @@ impl Wizard {
             // "Copy as path" in Windows Explorer wraps the path in quotes.
             raw = raw.trim_matches('"');
         }
-        let (clean, cut) = if screen == Screen::SetupCode {
-            let c = format_setup_code(raw);
-            let cut = c.chars().count() > max;
-            (c.chars().take(max).collect::<String>(), cut)
-        } else {
-            let used = self.field_mut().map_or(0, |f| f.chars().count());
-            sanitize_paste(raw, max.saturating_sub(used))
-        };
+        let used = self.field_mut().map_or(0, |f| f.chars().count());
+        let (clean, cut) = sanitize_paste(raw, max.saturating_sub(used));
         let clean = if screen == Screen::Ports { clean.chars().filter(char::is_ascii_digit).collect() } else { clean };
         let n = clean.chars().count();
         if n == 0 {
@@ -838,11 +760,7 @@ impl Wizard {
             return;
         }
         if let Some(f) = self.field_mut() {
-            if screen == Screen::SetupCode {
-                *f = clean;
-            } else {
-                f.push_str(&clean);
-            }
+            f.push_str(&clean);
         }
         self.after_edit(screen);
         self.status = Some(if cut {
@@ -1078,9 +996,9 @@ impl Wizard {
         Some((ng, nt))
     }
 
-    /// If the default ports (untouched, not from a website code) are taken, fill in free ones.
+    /// If the default ports (untouched) are taken, fill in free ones.
     fn prefill_free_ports(&mut self) {
-        if self.ports_touched || self.redeemed.is_some() {
+        if self.ports_touched {
             self.refresh_ports();
             return;
         }
@@ -1124,9 +1042,6 @@ impl Wizard {
     /// meantime, go back to the Ports screen. Returns true when it did.
     fn recheck_ports_or_redirect(&mut self) -> bool {
         let Some(problem) = self.port_problem() else { return false };
-        if self.redeemed.is_some() {
-            self.web_ports_shown = true;
-        }
         self.screen = Screen::Ports;
         self.load_selection();
         self.jump_review = true;
@@ -1136,6 +1051,7 @@ impl Wizard {
 
     pub fn go_back(&mut self) {
         self.error = None;
+        self.cfx_job = None;
         if let (Screen::GithubAccount, Some(g)) = (self.screen, self.gh.as_mut()) {
             g.leave();
         }
@@ -1195,13 +1111,11 @@ impl Wizard {
             }
             self.choose_limited();
         }
-        if self.screen == Screen::Review && !self.review_reasons().is_empty() {
-            self.error = Some("Kora needs your permission first: press R (or click Restart with permission), or go back and change those answers.".into());
+        if self.screen == Screen::Cfx && self.cfx_step() {
             return;
         }
-        if self.screen == Screen::SetupCode && self.redeemed.is_none() && !self.setup_code.trim().is_empty() {
-            // The first Enter exchanges the code; the next one continues.
-            self.try_redeem();
+        if self.screen == Screen::Review && !self.review_reasons().is_empty() {
+            self.error = Some("Kora needs your permission first: press R (or click Restart with permission), or go back and change those answers.".into());
             return;
         }
         if let Err(e) = self.validate_current() {
@@ -1285,6 +1199,72 @@ impl Wizard {
         }
     }
 
+    /// Use another Cfx.re lookup (tests inject a fake one, so they never reach the network).
+    pub fn with_cfx_lookup(mut self, f: CfxLookup) -> Self {
+        self.cfx_lookup = f;
+        self
+    }
+
+    /// A Cfx.re lookup is running in the background.
+    pub fn cfx_checking(&self) -> bool {
+        self.cfx_job.is_some()
+    }
+
+    /// Resolved admin for the Review screen: `(username, identifier)`.
+    pub fn cfx_account(&self) -> Option<(String, String)> {
+        Some((self.cfx_username.clone().unwrap_or_default(), self.cfx_identifier.clone()?))
+    }
+
+    /// Enter on the Cfx screen. Returns true when it handled the key (a lookup started or is running, or the name is wrong);
+    /// false when the screen can be left (empty = skip, or the name is already resolved).
+    fn cfx_step(&mut self) -> bool {
+        if self.cfx_job.is_some() {
+            return true;
+        }
+        let name = self.cfx_name.trim().trim_start_matches('@').to_string();
+        if name.is_empty() {
+            self.cfx_identifier = None;
+            self.cfx_username = None;
+            return false;
+        }
+        if self.cfx_identifier.is_some() && self.cfx_username.is_some() {
+            return false;
+        }
+        if !kora_core::cfx::valid_username(&name) {
+            self.error = Some("A Cfx.re username has 3 to 20 letters, numbers, dots, dashes or underscores. It is the name on your forum.cfx.re profile. Or leave it empty to skip.".into());
+            return true;
+        }
+        self.error = None;
+        let (tx, rx) = mpsc::channel();
+        let f = self.cfx_lookup.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(f(&name));
+        });
+        self.cfx_job = Some(rx);
+        true
+    }
+
+    /// Poll the Cfx.re lookup. Found: remember the account and continue; failed: stay and show why.
+    pub(crate) fn cfx_tick(&mut self) -> bool {
+        let Some(rx) = &self.cfx_job else { return false };
+        let r = match rx.try_recv() {
+            Ok(r) => r,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err("The Cfx.re check stopped unexpectedly. Try again, or leave the name empty to skip.".into()),
+        };
+        self.cfx_job = None;
+        match r {
+            Ok(a) => {
+                self.status = Some(format!("Found {} ({})", a.username, a.identifier()));
+                self.cfx_identifier = Some(a.identifier());
+                self.cfx_username = Some(a.username);
+                self.go_next();
+            }
+            Err(e) => self.error = Some(e),
+        }
+        true
+    }
+
     /// Which ports will be opened in the firewall, in plain words (also says when none are).
     pub fn firewall_line(&self) -> String {
         let (g, t) = (self.game_port.trim(), self.tx_port.trim());
@@ -1348,6 +1328,9 @@ impl Wizard {
         }
         if !self.license.trim().is_empty() {
             v.push("Save your license key inside the server's private settings file (it never leaves this computer)".into());
+        }
+        if self.cfx_identifier.is_some() {
+            v.push("Send your Cfx.re username to forum.cfx.re once (already done) and make that account the txAdmin admin".into());
         }
         v
     }
@@ -1458,8 +1441,6 @@ mod tests {
         let mut w = wiz();
         assert_eq!(w.screen, Screen::Welcome);
         w.handle_key(key(KeyCode::Enter));
-        assert_eq!(w.screen, Screen::SetupCode);
-        w.handle_key(key(KeyCode::Enter)); // empty code = skip
         assert_eq!(w.screen, Screen::Prepare);
         w.handle_key(key(KeyCode::Enter));
         assert_eq!(w.screen, Screen::Mode);
@@ -1474,8 +1455,8 @@ mod tests {
     #[test]
     fn full_happy_path_builds_request() {
         let mut w = wiz();
-        for _ in 0..4 {
-            w.handle_key(key(KeyCode::Enter)); // welcome, setup code (empty), prepare, mode(prod)
+        for _ in 0..3 {
+            w.handle_key(key(KeyCode::Enter)); // welcome, prepare, mode(prod)
         }
         assert_eq!(w.screen, Screen::Name);
         for _ in 0..w.name.len() {
@@ -1529,8 +1510,6 @@ mod tests {
         let mut w = wiz();
         w.handle_key(key(KeyCode::Down)); // advanced
         assert!(w.advanced);
-        assert!(w.flow().contains(&Screen::SetupCode));
-        w.handle_key(key(KeyCode::Enter));
         w.handle_key(key(KeyCode::Enter));
         w.handle_key(key(KeyCode::Enter));
         w.handle_key(key(KeyCode::Char('2'))); // development
@@ -1608,7 +1587,7 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         };
         w.handle_mouse(click(l.next), area);
-        assert_eq!(w.screen, Screen::SetupCode);
+        assert_eq!(w.screen, Screen::Prepare);
         let l = wizard_view::layout(area, &w.view());
         w.handle_mouse(click(l.back), area);
         assert_eq!(w.screen, Screen::Welcome);
@@ -1819,140 +1798,11 @@ mod tests {
         assert_eq!(w.screen, Screen::Firewall);
     }
 
-    fn sample_redeemed() -> Redeemed {
-        use kora_core::site::ArtifactChoice;
-        Redeemed {
-            mode: Mode::Development,
-            name: "Alpha One".into(),
-            resources: ResourceSelection::Only(vec!["kora_banking".into(), "kora_jobs".into()]),
-            artifact: ArtifactChoice::Build(38621),
-            artifact_url: Some("https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/38621-5412ed0c3a7e0b5b2b1e8d6d1d3c4a5b6c7d8e9f/fx.tar.xz".into()),
-            game_build: Some(3258),
-            ports: Ports { game: 31120, txadmin: 41120 },
-            hostname: Some("Alpha RP".into()),
-            cfx_identifier: Some("fivem:123456".into()),
-            cfx_username: Some("Sticky".into()),
-            github_login: Some("octo-cat".into()),
-        }
-    }
-
-    fn code_wiz() -> Wizard {
-        wiz().with_redeemer(Box::new(|c| match c {
-            "KORA-7F3K-92QX" => Ok(sample_redeemed()),
-            _ => Err("That setup code is not valid: it may have expired.".to_string()),
-        }))
-    }
-
     fn render_text(w: &Wizard) -> String {
         let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(110, 40)).unwrap();
         t.draw(|f| wizard_view::render(f, w)).unwrap();
         let b = t.backend().buffer().clone();
         (0..b.area.height).map(|y| (0..b.area.width).map(|x| b[(x, y)].symbol().to_string()).collect::<String>()).collect::<Vec<_>>().join("\n")
-    }
-
-    #[test]
-    fn code_success_prefills_and_skips_screens() {
-        let mut w = code_wiz();
-        w.handle_key(key(KeyCode::Enter)); // -> setup code
-        assert_eq!(w.screen, Screen::SetupCode);
-        w.handle_paste("kora-7f3k-92qx");
-        assert!(render_text(&w).contains("Setup code"));
-        w.handle_key(key(KeyCode::Enter)); // redeem
-        assert_eq!(w.screen, Screen::SetupCode, "stays to show the greeting");
-        assert!(w.error.is_none());
-        let text = render_text(&w);
-        assert!(text.contains("Welcome, Sticky! Your choices from the website were loaded."), "{text}");
-        let flow = w.flow();
-        for gone in [Screen::Mode, Screen::Name, Screen::Ports, Screen::Artifact, Screen::Resources, Screen::ResourceList, Screen::Hostname, Screen::GameBuild] {
-            assert!(!flow.contains(&gone), "{gone:?}");
-        }
-        for kept in [Screen::Folder, Screen::Database, Screen::License, Screen::GithubOwner, Screen::Review] {
-            assert!(flow.contains(&kept), "{kept:?}");
-        }
-        w.handle_key(key(KeyCode::Enter));
-        assert_eq!(w.screen, Screen::Prepare);
-        w.handle_key(key(KeyCode::Enter));
-        assert_eq!(w.screen, Screen::Folder);
-        assert!(w.dir.ends_with("alpha-one"));
-        // GitHub owner is suggested but still asked.
-        let mut guard = 0;
-        while w.screen != Screen::GithubOwner && guard < 20 {
-            w.handle_key(key(KeyCode::Enter));
-            guard += 1;
-        }
-        assert_eq!(w.screen, Screen::GithubOwner);
-        assert_eq!(w.github_owner, "octo-cat");
-        while w.state() == WizardState::Running && guard < 40 {
-            w.handle_key(key(KeyCode::Enter));
-            guard += 1;
-        }
-        assert_eq!(w.state(), WizardState::Done);
-        let r = w.build_request();
-        assert_eq!(r.mode, Mode::Development);
-        assert_eq!((r.name.as_str(), r.hostname.as_str()), ("Alpha One", "Alpha RP"));
-        assert_eq!((r.ports.game, r.ports.txadmin), (31120, 41120));
-        assert_eq!(r.resources, ResourceSelection::Only(vec!["kora_banking".into(), "kora_jobs".into()]));
-        assert!(r.artifact_url.unwrap().contains("38621-"));
-        assert_eq!(r.game_build, Some(3258));
-        assert_eq!(r.cfx_identifier.as_deref(), Some("fivem:123456"));
-        assert_eq!(r.github_owner.as_deref(), Some("octo-cat"));
-        assert!(r.license_key.is_none() && r.db_admin.is_none(), "secrets are never prefilled");
-    }
-
-    #[test]
-    fn skipped_screens_are_shown_on_review() {
-        let mut w = code_wiz();
-        w.screen = Screen::SetupCode;
-        w.handle_paste("KORA-7F3K-92QX");
-        w.go_next();
-        w.screen = Screen::Review;
-        let text = render_text(&w);
-        assert!(text.contains("Loaded from your setup code"), "{text}");
-        assert!(text.contains("Alpha One") && text.contains("Development") && text.contains("31120") && text.contains("kora_banking"), "{text}");
-        assert!(text.contains("Game build: 3258"));
-    }
-
-    #[test]
-    fn code_failure_shows_friendly_error_and_keeps_wizard_intact() {
-        let mut w = code_wiz();
-        w.screen = Screen::SetupCode;
-        w.handle_paste("KORA-AAAA-BBBB");
-        w.handle_key(key(KeyCode::Enter));
-        assert_eq!(w.screen, Screen::SetupCode);
-        assert!(w.error.as_ref().unwrap().contains("expired"));
-        assert!(w.redeemed.is_none() && w.flow().contains(&Screen::Mode));
-        assert!(render_text(&w).contains("expired"));
-        // a malformed code is rejected before the redeemer is called
-        w.setup_code.clear();
-        w.handle_paste("nope");
-        w.handle_key(key(KeyCode::Enter));
-        assert!(w.error.as_ref().unwrap().contains("KORA-7F3K-92QX"));
-        // clearing the box lets the user continue without a code
-        for _ in 0..4 {
-            w.handle_key(key(KeyCode::Backspace));
-        }
-        w.handle_key(key(KeyCode::Enter));
-        assert_eq!(w.screen, Screen::Prepare);
-    }
-
-    #[test]
-    fn no_redeemer_gives_friendly_message() {
-        let mut w = wiz();
-        w.screen = Screen::SetupCode;
-        w.handle_paste("KORA-7F3K-92QX");
-        w.go_next();
-        assert!(w.error.as_ref().unwrap().contains("Leave the box empty"));
-    }
-
-    #[test]
-    fn cli_prefill_skips_code_screen() {
-        let mut w = wiz();
-        w.apply_redeemed(sample_redeemed(), true);
-        assert!(!w.flow().contains(&Screen::SetupCode));
-        assert!(render_text(&w).contains("Welcome, Sticky!"));
-        w.handle_key(key(KeyCode::Enter));
-        assert_eq!(w.screen, Screen::Prepare);
-        assert!(!format!("{w:?}").contains("octo"), "{w:?}");
     }
 
     // ---- paste / clear / clipboard ----
@@ -2029,24 +1879,6 @@ mod tests {
     }
 
     #[test]
-    fn setup_code_is_autoformatted_from_any_paste() {
-        for pasted in ["kora-7f3k-92qx", "KORA7F3K92QX", "7f3k92qx", "  kora 7f3k 92qx\n"] {
-            let mut w = code_wiz();
-            w.screen = Screen::SetupCode;
-            w.handle_paste(pasted);
-            assert_eq!(w.setup_code, "KORA-7F3K-92QX", "{pasted:?}");
-            w.go_next();
-            assert!(w.redeemed.is_some(), "{pasted:?}");
-        }
-        // pasting twice replaces rather than appends
-        let mut w = code_wiz();
-        w.screen = Screen::SetupCode;
-        w.handle_paste("KORA-AAAA-BBBB");
-        w.handle_paste("kora-7f3k-92qx");
-        assert_eq!(w.setup_code, "KORA-7F3K-92QX");
-    }
-
-    #[test]
     fn keyboard_paste_variants_and_failure_message() {
         let mut w = cwiz(Some("Beta"));
         w.screen = Screen::Name;
@@ -2088,9 +1920,6 @@ mod tests {
                 assert!(!l.paste[i].intersects(l.clear[i]) && !l.paste[i].intersects(l.inputs[i]));
                 let text = render_text(&w);
                 assert!(text.contains("[ Paste ]") && text.contains("[ Clear ]"), "{s:?}");
-                if s == Screen::SetupCode {
-                    continue; // code screens are covered by their own test
-                }
                 w.handle_mouse(left_click(l.clear[i]), area);
                 assert_eq!(w.focus, i);
                 assert_eq!(w.status.as_deref(), Some("Cleared"), "{s:?}/{i}");
@@ -2251,52 +2080,10 @@ mod tests {
     }
 
     #[test]
-    fn website_ports_are_rechecked_and_the_screen_is_shown_when_taken() {
-        // free: the Ports screen stays skipped
-        let f = Fake::default();
-        let mut w = pwiz(&f).with_redeemer(Box::new(|_| Ok(sample_redeemed())));
-        w.screen = Screen::SetupCode;
-        w.handle_paste("KORA-7F3K-92QX");
-        w.go_next();
-        assert!(!w.flow().contains(&Screen::Ports));
-        // taken here: shown, with the plain explanation and the suggestion, nothing silently changed
-        let f = Fake::default();
-        f.take(&[31120]);
-        let mut w = pwiz(&f).with_redeemer(Box::new(|_| Ok(sample_redeemed())));
-        w.screen = Screen::SetupCode;
-        w.handle_paste("KORA-7F3K-92QX");
-        w.go_next();
-        assert!(w.flow().contains(&Screen::Ports));
-        assert!(w.flow().iter().position(|s| *s == Screen::Folder) < w.flow().iter().position(|s| *s == Screen::Ports));
-        walk_to(&mut w, Screen::Folder);
-        w.go_next();
-        assert_eq!(w.screen, Screen::Ports);
-        assert_eq!(w.game_port, "31120", "the website's choice is kept until the user accepts a change");
-        let t = render_text(&w);
-        assert!(t.contains("The website chose port 31120 but it is already used on this computer"), "{t}");
-        assert!(t.contains("31120 is already in use - 31121 is free") && t.contains("[ Use 31121 ]"), "{t}");
-        w.go_next();
-        assert_eq!(w.screen, Screen::Ports, "blocked");
-        w.handle_key(key(KeyCode::Char('u')));
-        assert_eq!(w.game_port, "31121");
-        w.go_next();
-        assert_eq!(w.screen, Screen::Database);
-        // once shown, the screen stays in the flow so going back never lands somewhere odd
-        assert!(w.flow().contains(&Screen::Ports));
-        // the CLI-prefilled path is checked too
-        let f = Fake::default();
-        f.take(&[41120]);
-        let mut w = pwiz(&f);
-        w.apply_redeemed(sample_redeemed(), true);
-        assert!(w.flow().contains(&Screen::Ports));
-        assert!(w.ports_note.as_ref().unwrap().contains("41120"));
-    }
-
-    #[test]
     fn ports_are_rechecked_on_the_way_into_review_and_when_installing() {
         let f = Fake::default();
         let mut w = pwiz(&f);
-        walk_to(&mut w, Screen::License);
+        walk_to(&mut w, Screen::Cfx);
         f.take(&[30120]); // someone grabs the port after it was chosen
         w.go_next();
         assert_eq!(w.screen, Screen::Ports, "sent back instead of reaching Review");
@@ -2426,7 +2213,7 @@ mod tests {
     fn permission_screen_is_first_only_when_not_elevated() {
         let (w, _) = ewiz(false, Ok(()));
         assert_eq!(w.screen, Screen::Permission);
-        assert_eq!(w.flow()[..3], [Screen::Permission, Screen::Welcome, Screen::SetupCode]);
+        assert_eq!(w.flow()[..3], [Screen::Permission, Screen::Welcome, Screen::Prepare]);
         let t = rendered(&w);
         for want in ["To set up your server Kora needs your permission to:", "install the database server", "run your server in the background", "open the firewall ports", "sudo password", "[ Continue", "[ Not now - limited setup ]"] {
             assert!(t.contains(want), "missing {want:?}\n{t}");
@@ -2571,5 +2358,164 @@ mod tests {
         let mut w = wiz();
         w.screen = Screen::Review;
         let _ = w.view().help; // still renders
+    }
+
+    // ---- Cfx.re account screen ----
+
+    use std::sync::Mutex;
+
+    /// A fake forum: answers by name and records every lookup.
+    fn cfx_wiz(calls: &Arc<Mutex<Vec<String>>>) -> Wizard {
+        let calls = calls.clone();
+        wiz().with_cfx_lookup(Arc::new(move |n: &str| {
+            calls.lock().unwrap().push(n.to_string());
+            match n.to_ascii_lowercase().as_str() {
+                "jsixty" => Ok(kora_core::cfx::CfxAccount { id: 4465268, username: "JSixty".into() }),
+                "offline" => Err("Could not reach forum.cfx.re. Check the internet connection and try again.".into()),
+                _ => Err(format!("There is no Cfx.re account called '{n}'.")),
+            }
+        }))
+    }
+
+    fn at_cfx(w: &mut Wizard) {
+        w.screen = Screen::Cfx;
+        w.load_selection();
+    }
+
+    fn type_text(w: &mut Wizard, s: &str) {
+        for c in s.chars() {
+            w.handle_key(key(KeyCode::Char(c)));
+        }
+    }
+
+    /// Enter, then wait for the background lookup like the runner's tick loop does.
+    fn enter_and_wait(w: &mut Wizard) {
+        w.handle_key(key(KeyCode::Enter));
+        for _ in 0..500 {
+            if !w.cfx_checking() {
+                return;
+            }
+            w.tick();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("lookup did not finish");
+    }
+
+    #[test]
+    fn the_cfx_screen_comes_after_the_licence_key_and_before_review() {
+        let flow = wiz().flow();
+        let at = flow.iter().position(|s| *s == Screen::Cfx).unwrap();
+        assert_eq!((flow[at - 1], flow[at + 1]), (Screen::License, Screen::Review));
+        let mut w = wiz();
+        w.advanced = true;
+        w.mode = Mode::Development;
+        let f = w.flow();
+        let at = f.iter().position(|s| *s == Screen::Cfx).unwrap();
+        assert_eq!(f[at - 1], Screen::License);
+        assert_eq!(&f[at + 1..at + 3], &[Screen::Hostname, Screen::GithubOwner]);
+    }
+
+    #[test]
+    fn a_found_account_goes_into_the_request_and_onto_the_review_screen() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        type_text(&mut w, "@jsixty");
+        w.handle_key(key(KeyCode::Enter));
+        assert!(w.cfx_checking(), "the lookup runs in the background");
+        assert_eq!(w.screen, Screen::Cfx);
+        for _ in 0..500 {
+            if w.screen != Screen::Cfx {
+                break;
+            }
+            w.tick();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(w.screen, Screen::Review);
+        assert!(w.error.is_none());
+        assert_eq!(w.status.as_deref(), Some("Found JSixty (fivem:4465268)"));
+        assert_eq!(w.build_request().cfx_identifier.as_deref(), Some("fivem:4465268"));
+        assert_eq!(calls.lock().unwrap().as_slice(), ["jsixty"]);
+        assert!(w.view().lines.join("\n").contains("Admin: JSixty (fivem:4465268)"));
+        assert!(w.system_changes().iter().any(|c| c.contains("forum.cfx.re")));
+    }
+
+    #[test]
+    fn not_found_and_network_errors_keep_you_on_the_screen_with_the_message() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        type_text(&mut w, "nobodyhere");
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Cfx);
+        assert!(w.error.as_deref().unwrap().contains("no Cfx.re account called 'nobodyhere'"));
+        assert_eq!(w.build_request().cfx_identifier, None);
+        // Retry with another name (typing clears the message), then a network failure.
+        w.clear_field();
+        type_text(&mut w, "offline");
+        assert!(w.error.is_none());
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Cfx);
+        assert!(w.error.as_deref().unwrap().contains("Could not reach forum.cfx.re"));
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        // And it can still be skipped.
+        w.clear_field();
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Review);
+        assert_eq!(w.build_request().cfx_identifier, None);
+    }
+
+    #[test]
+    fn empty_skips_without_any_lookup_and_review_says_generated_local_account() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::Review);
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(w.build_request().cfx_identifier, None);
+        assert!(w.view().lines.join("\n").contains("Admin: generated local account"));
+    }
+
+    #[test]
+    fn invalid_characters_are_rejected_before_any_lookup() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        for bad in ["ab", "a b c", "../etc", "x?y=1", "näme", "way-too-long-name-for-cfx-account"] {
+            w.clear_field();
+            type_text(&mut w, bad);
+            w.handle_key(key(KeyCode::Enter));
+            assert_eq!(w.screen, Screen::Cfx, "{bad}");
+            assert!(!w.cfx_checking(), "{bad}");
+            assert!(w.error.as_deref().unwrap().contains("3 to 20"), "{bad}");
+        }
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn going_back_keeps_the_typed_name_and_the_found_account() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        type_text(&mut w, "jsixty");
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Review);
+        w.go_back();
+        assert_eq!(w.screen, Screen::Cfx);
+        assert_eq!(w.cfx_name, "jsixty");
+        w.handle_key(key(KeyCode::Enter)); // already found: no second lookup
+        assert_eq!(w.screen, Screen::Review);
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert_eq!(w.build_request().cfx_identifier.as_deref(), Some("fivem:4465268"));
+        // Editing the name forgets the old account.
+        w.go_back();
+        w.handle_key(key(KeyCode::Backspace));
+        assert_eq!(w.build_request().cfx_identifier, None);
+        // Back from the screen itself goes to the licence key and keeps the text.
+        w.go_back();
+        assert_eq!(w.screen, Screen::License);
+        w.go_next();
+        assert_eq!(w.cfx_name, "jsixt");
     }
 }

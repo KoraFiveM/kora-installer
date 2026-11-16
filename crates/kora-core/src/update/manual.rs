@@ -10,8 +10,9 @@
 use std::path::{Path, PathBuf};
 
 use super::status;
+use super::orgcache::{self, OrgHints};
 use super::{
-    decide_restart, plan, rollback_snapshot, run_update_with, Action, DeferReason, GitOps, GitResult, HealthCheck, HealthOutcome,
+    decide_restart, plan_fetch, FetchMode, rollback_snapshot, run_update_with, Action, DeferReason, GitOps, GitResult, HealthCheck, HealthOutcome,
     HealthRequest, NoMigrations, QuietConfig, RestartDecision, ResourceClass, RunEvent, RunOptions, SkipReason, Snapshot, UpdateReport,
     UpdateTarget,
 };
@@ -35,13 +36,15 @@ pub const ENSURE_NOTE: &str = "files updated, server not restarted: restart the 
 /// How many commit subjects a changelog carries.
 const CHANGELOG_MAX: usize = 20;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Scope {
     All,
     Resources(Vec<String>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ChangeStatus {
     UpToDate,
     /// Can be updated.
@@ -52,7 +55,7 @@ pub enum ChangeStatus {
     Diverged,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResourceChange {
     pub id: String,
     pub from: String,
@@ -64,14 +67,15 @@ pub struct ResourceChange {
     pub status: ChangeStatus,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UpdatePreview {
     pub resources: Vec<ResourceChange>,
     /// Production: the newest release version the catalog offers, when it is newer than what is installed.
     pub new_release: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RestartPolicy {
     /// Apply the files, restart nothing.
     None,
@@ -83,14 +87,15 @@ pub enum RestartPolicy {
     WhenQuiet,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ApplyOpts {
     pub restart: RestartPolicy,
     /// Resource ids to leave alone.
     pub skip: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UpdateEvent {
     Resource { id: String, state: String },
     /// A snapshot with this id was saved.
@@ -99,7 +104,7 @@ pub enum UpdateEvent {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotInfo {
     pub id: String,
     pub created_unix: u64,
@@ -152,6 +157,16 @@ impl GitOps for PinnedGit<'_> {
         // Best effort: the commit may already be present, and moving fetches it by id anyway.
         let _ = self.0.fetch_origin(repo);
         Ok(())
+    }
+    fn fetch_many(&self, targets: &[&UpdateTarget], mode: FetchMode) -> Vec<GitResult<()>> {
+        // Best effort, like `fetch`: a failed fetch is not an error when the pinned commit is already here.
+        self.0.fetch_many(targets, mode).into_iter().map(|_| Ok(())).collect()
+    }
+    fn has_ref(&self, repo: &Path, rev: &str) -> bool {
+        self.0.has_ref(repo, rev)
+    }
+    fn remote_slug(&self, repo: &Path, remote: &str) -> Option<String> {
+        self.0.remote_slug(repo, remote)
     }
     fn head_commit(&self, repo: &Path, rev: &str) -> GitResult<String> {
         if rev == "HEAD" {
@@ -278,7 +293,49 @@ fn change_of(git: &dyn GitOps, item: &super::PlanItem) -> ResourceChange {
 /// Fetch and compare. Changes nothing in any checkout.
 pub fn preview(server: &ServerRecord, scope: Scope) -> Result<UpdatePreview> {
     let cat = load_catalog_if_needed(server)?;
-    with_git(&server.dir, |g| preview_with(server, scope, g, cat.as_ref()))
+    // One organisation-level request tells which repositories moved (whole-server checks only: a single resource is one fetch).
+    let mut hints = org_hints_for(server, &scope);
+    with_git(&server.dir, |g| preview_with_hints(server, scope, g, cat.as_ref(), hints.as_mut()))
+}
+
+/// The organisation hint for a whole-server check of a development server (None otherwise, or when `KORA_NO_ORG_HINT` is set).
+fn org_hints_for(server: &ServerRecord, scope: &Scope) -> Option<OrgHints> {
+    (server.mode == Mode::Development && *scope == Scope::All && std::env::var_os("KORA_NO_ORG_HINT").is_none())
+        .then(|| OrgHints::load(&orgcache::HttpOrg, Some(&orgcache::cache_path()), now_unix()))
+}
+
+/// Ids of the targets whose remote has not moved since this clone was last fetched (per the organisation), plus the
+/// `owner/name` of every KoraFiveM target so the ones that do get fetched can be recorded.
+fn hint_skips(g: &dyn GitOps, hints: Option<&OrgHints>, targets: &[UpdateTarget]) -> (Vec<String>, Vec<(String, String)>) {
+    let mut skip = Vec::new();
+    let mut slugs = Vec::new();
+    let Some(h) = hints.filter(|h| h.is_live()) else { return (skip, slugs) };
+    for t in targets.iter().filter(|t| t.upstream_ref.starts_with("upstream/")) {
+        let Some(slug) = g.remote_slug(&t.path, "upstream") else { continue };
+        if !slug.to_ascii_lowercase().starts_with(&format!("{}/", orgcache::ORG.to_ascii_lowercase())) {
+            continue;
+        }
+        // Only when the remote-tracking branch is really here: otherwise the plan could not even compare.
+        if h.is_current(&t.path, &slug) && g.has_ref(&t.path, &t.upstream_ref) {
+            skip.push(t.id.clone());
+        }
+        slugs.push((t.id.clone(), slug));
+    }
+    (skip, slugs)
+}
+
+fn record_hints(hints: Option<&mut OrgHints>, targets: &[UpdateTarget], slugs: &[(String, String)], fetched: &[String], skipped: &[String]) {
+    let Some(h) = hints.filter(|h| h.is_live()) else { return };
+    for t in targets {
+        let Some((_, slug)) = slugs.iter().find(|(id, _)| *id == t.id) else { continue };
+        if fetched.contains(&t.id) {
+            h.mark_fetched(&t.path, slug);
+        } else if !skipped.contains(&t.id) {
+            // The fetch failed: nothing is known about this clone any more.
+            h.forget(&t.path, slug);
+        }
+    }
+    h.save();
 }
 
 fn load_catalog_if_needed(server: &ServerRecord) -> Result<Option<Catalog>> {
@@ -291,10 +348,17 @@ fn load_catalog_if_needed(server: &ServerRecord) -> Result<Option<Catalog>> {
 
 /// [`preview`] with injected git and catalog.
 pub fn preview_with(server: &ServerRecord, scope: Scope, git: &dyn GitOps, catalog: Option<&Catalog>) -> Result<UpdatePreview> {
+    preview_with_hints(server, scope, git, catalog, None)
+}
+
+/// [`preview_with`] with an organisation hint (None: every resource is fetched, in parallel).
+pub fn preview_with_hints(server: &ServerRecord, scope: Scope, git: &dyn GitOps, catalog: Option<&Catalog>, hints: Option<&mut OrgHints>) -> Result<UpdatePreview> {
     let sel = select(server, &scope, &[], catalog)?;
     let pinned = PinnedGit(git);
     let g = git_view(server, git, &pinned);
-    let p = plan(g, &sel.targets);
+    let (skip, slugs) = hint_skips(g, hints.as_deref(), &sel.targets);
+    let (p, fetched) = plan_fetch(g, &sel.targets, FetchMode::Fresh, &skip);
+    record_hints(hints, &sel.targets, &slugs, &fetched, &skip);
     let resources: Vec<ResourceChange> = p.items.iter().map(|i| change_of(g, i)).collect();
     let pre = UpdatePreview { new_release: new_release(&resources, &sel.versions), resources };
     // Scope::All only: a one-resource preview says nothing about the server as a whole.
@@ -352,7 +416,8 @@ pub fn apply(server: &ServerRecord, scope: Scope, opts: ApplyOpts, sink: &mut dy
     let cat = load_catalog_if_needed(server)?;
     let health = service_health(&server.name, &server.dir, server);
     let players = if health.running() { online_players(server.ports.game) } else { Some(0) };
-    let report = with_git(&server.dir, |g| apply_with(server, scope, opts, g, &health, cat.as_ref(), players, now_unix(), sink))?;
+    let mut hints = org_hints_for(server, &scope);
+    let report = with_git(&server.dir, |g| apply_with_hints(server, scope, opts, g, &health, cat.as_ref(), players, now_unix(), sink, hints.as_mut()))?;
     // Same Discord notification as the automatic path (it never fails the update).
     let record = crate::installer::registry::ServerEntry { name: server.name.clone(), dir: server.dir.clone(), mode: server.mode, ports: server.ports, created_unix: server.created_unix };
     crate::notify::after_update(&record, &report);
@@ -372,12 +437,31 @@ pub fn apply_with(
     now: u64,
     sink: &mut dyn FnMut(UpdateEvent),
 ) -> Result<UpdateReport> {
+    apply_with_hints(server, scope, opts, git, health, catalog, players, now, sink, None)
+}
+
+/// [`apply_with`] with an organisation hint. Fetches the preview just made are not repeated.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_with_hints(
+    server: &ServerRecord,
+    scope: Scope,
+    opts: ApplyOpts,
+    git: &dyn GitOps,
+    health: &dyn HealthCheck,
+    catalog: Option<&Catalog>,
+    players: Option<u32>,
+    now: u64,
+    sink: &mut dyn FnMut(UpdateEvent),
+    hints: Option<&mut OrgHints>,
+) -> Result<UpdateReport> {
     let sel = select(server, &scope, &opts.skip, catalog)?;
     let pinned = PinnedGit(git);
     let g = git_view(server, git, &pinned);
     // Development: fast-forward the user's forks on GitHub first (never forced); production has no forks.
     let fork_sync = if server.mode == Mode::Development { g.sync_forks(&sel.targets) } else { Vec::new() };
-    let the_plan = plan(g, &sel.targets);
+    let (skip, slugs) = hint_skips(g, hints.as_deref(), &sel.targets);
+    let (the_plan, fetched) = plan_fetch(g, &sel.targets, FetchMode::AllowRecent, &skip);
+    record_hints(hints, &sel.targets, &slugs, &fetched, &skip);
     let restart = match opts.restart {
         RestartPolicy::WhenQuiet => decide_restart(players, 0, &QuietConfig { window: None, max_players: 0 }),
         _ => RestartDecision::Proceed,

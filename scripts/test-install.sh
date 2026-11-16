@@ -46,7 +46,7 @@ D="$WORK/t1/bin"
 check "fresh install succeeds" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D"
 check "binary is installed and executable" test -x "$D/kora"
 check "installed file is the downloaded one" test "$(sha256sum "$D/kora" | cut -d ' ' -f 1)" = "$GOOD"
-check "next step is printed" out_has "Next step: run   kora install"
+check "next step is printed" out_has "Next step: run   kora panel"
 check "PATH hint is printed when the folder is not on PATH" out_has "not on your PATH"
 check "no temp files left behind" test "$(find "$D" -mindepth 1 ! -name kora | wc -l)" -eq 0
 

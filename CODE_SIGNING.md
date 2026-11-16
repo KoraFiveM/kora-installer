@@ -1,32 +1,19 @@
-# Code signing policy
+# Code signing
 
-> Signing is pending: the SignPath Foundation application is made after the first public
-> (unsigned) release. Releases are unsigned until it is approved.
+The Windows `kora.exe` is **not code-signed**, so Windows SmartScreen may warn ("More info", then "Run anyway").
 
-Free code signing provided by SignPath.io, certificate by SignPath Foundation
+Instead, every release is built from this public repository by the GitHub Actions workflow, and each download has a
+SHA-256 file next to it (`.sha256`):
 
-## Roles
+- The install scripts (`install.sh`, `install.ps1`) verify the SHA-256 before running anything.
+- To check by hand, compare the hash with the `.sha256` file:
 
-All members must use multi-factor authentication on GitHub and SignPath.
+```sh
+sha256sum -c kora-linux-x86_64.sha256
+```
+```powershell
+(Get-FileHash kora-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()   # compare with the .sha256 file
+```
 
-| Role | Responsibility | Members |
-|---|---|---|
-| Authors | Write code that is built and signed | The Kora maintainers ([KoraFiveM](https://github.com/orgs/KoraFiveM/people)) |
-| Reviewers | Review changes before merge | The Kora maintainers ([KoraFiveM](https://github.com/orgs/KoraFiveM/people)) |
-| Approvers | Manually approve every release signing request | The Kora maintainers ([KoraFiveM](https://github.com/orgs/KoraFiveM/people)) |
-
-## Scope
-
-- Only Kora's own binaries, built from source in CI from this public repository. No third-party binaries are signed.
-- Every release signing request requires manual approval by an approver.
-- Kora changes your system (services, scheduled tasks, firewall rules, registry entry). The installer lists every change before it happens, and `kora uninstall` removes them.
-
-## Privacy policy
-
-Privacy policy: <https://koraframe.work/privacy>. Usage statistics and error reports are
-opt-in, described in the policy, shown during install, and can be disabled at any time.
-
-## Build and metadata
-
-Windows file metadata (product name "Kora", version) is set from the workspace version via
-`crates/kora-cli/build.rs`. No packers (e.g. UPX) are used.
+Kora changes your system (services, scheduled tasks, firewall rules, registry entry). The installer lists every change
+before it happens, and `kora uninstall` removes them. No packers (e.g. UPX) are used.
