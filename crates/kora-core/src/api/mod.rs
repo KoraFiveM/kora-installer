@@ -10,6 +10,7 @@ pub mod backend;
 pub mod dto;
 #[cfg(any(test, feature = "fake"))]
 pub mod fake;
+pub mod install;
 pub mod jobs;
 pub mod logs;
 pub mod ops;
