@@ -644,7 +644,7 @@ pub fn inspect(server_dir: &Path, zip: &Path) -> ImportPlan {
         }
         plan.resources.push(FoundResource {
             name,
-            zip_path: root.display().to_string(),
+            zip_path: zip_display(root),
             has_fxmanifest: true,
             has_fxap,
             escrowed,
@@ -699,7 +699,7 @@ pub fn inspect(server_dir: &Path, zip: &Path) -> ImportPlan {
         ));
         plan.resources.push(FoundResource {
             name,
-            zip_path: t.display().to_string(),
+            zip_path: zip_display(&t),
             has_fxmanifest: false,
             has_fxap: false,
             escrowed: false,
@@ -873,6 +873,14 @@ pub fn list(dir: &Path) -> Res<Vec<PaidAsset>> {
     Ok(out)
 }
 
+/// A folder inside the zip as people read it: always `/`, whatever the computer uses.
+fn zip_display(p: &Path) -> String {
+    p.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 // ------------------------------------------------------------------------------------------- import
 
 #[cfg(test)]
@@ -1009,7 +1017,7 @@ pub fn import(
     for r in plan.importable() {
         let root = roots
             .iter()
-            .find(|p| p.display().to_string() == r.zip_path)
+            .find(|p| zip_display(p) == r.zip_path)
             .ok_or("The zip changed while it was being imported. Try again.")?;
         say(&format!("Unpacking {}", r.name));
         let to = staging.0.join(&r.name);
