@@ -9,6 +9,7 @@ import { CopyButton } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { formatBytes } from '@/lib/utils'
+import { parseAnsi } from '@/lib/ansi'
 
 export function LogsTab({ server: s }: { server: ServerDetail }) {
   const files = useQuery({ queryKey: ['logs', s.name], queryFn: () => api.logs.list(s.name) })
@@ -34,7 +35,7 @@ export function LogsTab({ server: s }: { server: ServerDetail }) {
       </div>
       {files.isSuccess && files.data.length === 0 && <p className="text-sm text-muted-foreground">There are no log files yet. They appear after the server has run.</p>}
       <ErrorNotice error={tail.error} />
-      {file && <pre tabIndex={0} aria-label={`Last lines of ${file}`} className="h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-ink p-3 font-mono text-xs leading-relaxed">{text || (tail.isLoading ? 'Loading...' : 'This file is empty.')}</pre>}
+      {file && <pre tabIndex={0} aria-label={`Last lines of ${file}`} className="h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-ink p-3 font-mono text-xs leading-relaxed">{text ? parseAnsi(text) : (tail.isLoading ? 'Loading...' : 'This file is empty.')}</pre>}
       <p className="text-xs text-muted-foreground">Shows the last 300 lines.</p>
     </div>
   )

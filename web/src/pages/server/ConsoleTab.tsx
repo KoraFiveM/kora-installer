@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { parseAnsi } from '@/lib/ansi'
 
 const MAX_LINES = 1000
 
@@ -95,7 +96,7 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
       {s.status !== 'running' && <Alert tone="warning">The server is not running, so there is no live output. Start it from the Overview tab.</Alert>}
       <div className="relative">
         <div ref={box} onScroll={onScroll} role="log" aria-label="Server console output" tabIndex={0} className="h-96 overflow-y-auto rounded-lg border border-border bg-ink p-3 font-mono text-xs leading-relaxed">
-          {lines.length === 0 ? <span className="text-muted-foreground">Waiting for output...</span> : lines.map((l, i) => <div key={i} className="whitespace-pre-wrap break-words">{l}</div>)}
+          {lines.length === 0 ? <span className="text-muted-foreground">Waiting for output...</span> : lines.map((l, i) => <div key={i} className="whitespace-pre-wrap break-words">{parseAnsi(l)}</div>)}
         </div>
         {paused && <Button size="sm" className="absolute bottom-3 right-5" onClick={jump}><ArrowDown /> Paused. Jump to latest</Button>}
       </div>
