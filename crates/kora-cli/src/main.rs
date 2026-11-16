@@ -1893,6 +1893,12 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
 
 fn panel(a: &PanelArgs) -> i32 {
     use kora_core::monitor::panel_service as svc;
+    // SECURITY.md: the panel runs as the installing user, never as administrator/root. A root panel
+    // would keep its token and state in root's home and run every action with full rights.
+    if kora_core::elevate::is_elevated() && std::env::var_os("KORA_ALLOW_ROOT_PANEL").is_none_or(|v| v != "1") {
+        eprintln!("error: Kora Panel does not run as administrator/root. Run `kora panel` from your normal account (without sudo). It asks for administrator rights only when an action needs them.");
+        return 1;
+    }
     let home = svc::home();
     match &a.cmd {
         Some(PanelCmd::User { cmd }) => return panel_user(cmd),

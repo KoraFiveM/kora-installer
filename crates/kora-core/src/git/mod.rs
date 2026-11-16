@@ -191,11 +191,35 @@ pub fn sudo_invocation(
 /// it (see [`sudo_invocation`]), passed the same way.
 pub fn root_git_env(isolate: bool, credential: Option<&str>) -> Vec<(String, String)> {
     let mut env = Vec::new();
+    // Environment variables git also turns into programs or prompts.
+    for (k, v) in [("GIT_TERMINAL_PROMPT", "0"), ("GIT_SSH_COMMAND", "ssh"), ("GIT_EXTERNAL_DIFF", ""), ("GIT_ASKPASS", ""), ("GIT_PROXY_COMMAND", ""), ("GIT_EDITOR", "true"), ("GIT_PAGER", "cat")] {
+        env.push((k.to_string(), v.to_string()));
+    }
     if isolate {
         env.push(("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()));
         env.push(("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()));
     }
-    let mut pairs = vec![("core.hooksPath".to_string(), "/dev/null".to_string()), ("core.fsmonitor".to_string(), "false".to_string())];
+    // Every repository-local setting that makes git run a program. Command-line (env) config beats
+    // `.git/config`, so these cannot be set by whoever owns the repository folder. (`filter.*` drivers
+    // cannot be blanked by name; they only run on a checkout of a repo whose `.gitattributes` names one.)
+    let mut pairs: Vec<(String, String)> = [
+        ("core.hooksPath", "/dev/null"),
+        ("core.fsmonitor", "false"),
+        ("core.sshCommand", "ssh"),
+        ("core.gitProxy", ""),
+        ("core.askPass", ""),
+        ("core.pager", "cat"),
+        ("core.editor", "true"),
+        ("diff.external", ""),
+        ("gpg.program", "gpg"),
+        ("protocol.ext.allow", "never"),
+        ("uploadpack.packObjectsHook", ""),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    // A repo-local `credential.helper` is reset for every host (an empty value clears the list).
+    pairs.push(("credential.helper".to_string(), String::new()));
     if let Some(c) = credential {
         let key = "credential.https://github.com.helper".to_string();
         pairs.push((key.clone(), String::new()));
@@ -2397,6 +2421,12 @@ mod tests {
             .map(|n| (env_of(&i, &format!("GIT_CONFIG_KEY_{n}")).unwrap(), env_of(&i, &format!("GIT_CONFIG_VALUE_{n}")).unwrap()))
             .collect();
         assert!(pairs.contains(&("core.hooksPath", "/dev/null")) && pairs.contains(&("core.fsmonitor", "false")), "{pairs:?}");
+        // Every other repo-local setting that runs a program is overridden too (a repository's own
+        // `.git/config` is writable by whoever owns the folder).
+        for k in ["core.sshCommand", "core.gitProxy", "core.askPass", "core.pager", "core.editor", "diff.external", "credential.helper", "protocol.ext.allow", "uploadpack.packObjectsHook"] {
+            assert!(pairs.iter().any(|(pk, _)| *pk == k), "{k} must be pinned: {pairs:?}");
+        }
+        assert_eq!(env_of(&i, "GIT_TERMINAL_PROMPT").as_deref(), Some("0"));
         assert!(pairs.contains(&("credential.https://github.com.helper", "!/usr/sbin/runuser -u sam -- gh auth git-credential")), "private forks still work: {pairs:?}");
         assert_eq!(i.env.iter().filter(|(k, _)| k == "GIT_CONFIG_COUNT").count(), 1);
         // The clone rewrite too, and even when the caller brought its own GIT_CONFIG_COUNT.

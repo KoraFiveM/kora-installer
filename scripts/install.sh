@@ -191,13 +191,17 @@ main() {
   if [ "${NEXT_ONLY:-}" != "1" ]; then
     mkdir -p "$DEST_DIR" || die "cannot create $DEST_DIR"
     [ -w "$DEST_DIR" ] || die "cannot write to $DEST_DIR. Run with sudo, or set KORA_INSTALL_DIR to a folder you own."
-    cp "$TMP/kora" "$DEST_DIR/.kora.new.$$" || die "cannot write to $DEST_DIR"
-    chmod 0755 "$DEST_DIR/.kora.new.$$"
+    # mktemp creates the file exclusively (mode 0600), so a planted symlink or a guessable name in a
+    # shared folder cannot redirect the write. It is only made executable after the copy.
+    NEW="$(mktemp "$DEST_DIR/.kora.new.XXXXXX")" || die "cannot write to $DEST_DIR"
+    trap 'rm -rf "$TMP"; rm -f "$NEW"' EXIT INT TERM
+    cp "$TMP/kora" "$NEW" || die "cannot write to $DEST_DIR"
+    chmod 0755 "$NEW"
     if [ -n "$BACKUP" ]; then
       mv -f "$DEST" "$BACKUP"
       say "The earlier version was kept as $BACKUP."
     fi
-    mv -f "$DEST_DIR/.kora.new.$$" "$DEST"
+    mv -f "$NEW" "$DEST"
     say "Installed kora to $DEST"
   fi
 
@@ -210,6 +214,13 @@ main() {
   if [ "${KORA_NO_LAUNCH:-}" = "1" ]; then
     say "Next step: run   kora panel   (opens Kora Panel in your browser)"
     say "Prefer the terminal? Run   kora install   instead. (On a server with no screen: kora panel --no-open)"
+    exit 0
+  fi
+  # Kora Panel is for a normal account, never root (it would then sit in root's home and run with full
+  # rights). Under `sudo`/as root the program is installed and the person is told how to start it.
+  if [ "$(id -u)" = "0" ] && [ "${KORA_ALLOW_ROOT_PANEL:-}" != "1" ]; then
+    say "Kora is installed. Kora Panel is not started from a root shell."
+    say "As your normal user (not root / not sudo), run:   kora panel --setup"
     exit 0
   fi
   say "Starting Kora Panel ..."

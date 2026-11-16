@@ -51,7 +51,9 @@ done
 
 BASE="http://127.0.0.1:$PORT"
 run() { # run <extra env...> -- ; always with a private HOME, output into $WORK/out
-  env HOME="$WORK/home" "$@" sh "$SCRIPT" >"$WORK/out" 2>&1
+  # KORA_ALLOW_ROOT_PANEL=1 first so the tests can start the (fake) panel even when run as root;
+  # a test can override it by passing its own value.
+  env HOME="$WORK/home" KORA_ALLOW_ROOT_PANEL=1 "$@" sh "$SCRIPT" >"$WORK/out" 2>&1
 }
 out_has() { grep -q -- "$1" "$WORK/out"; }
 
@@ -65,6 +67,15 @@ check "  ... says it is starting" out_has "Starting Kora Panel"
 check "  ... without the setup reading stdin" eval '! out_has "FAKE: setup read stdin"'
 check "PATH hint is printed when the folder is not on PATH" out_has "not on your PATH"
 check "no temp files left behind" test "$(find "$D" -mindepth 1 ! -name kora | wc -l)" -eq 0
+
+# 1b. As root the panel is never started (unless explicitly allowed); the install itself still works.
+if [ "$(id -u)" = "0" ]; then
+  D="$WORK/t1root/bin"; RLOG="$WORK/t1root.log"
+  check "as root: install succeeds" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D" KORA_TEST_LOG="$RLOG" KORA_ALLOW_ROOT_PANEL=0
+  check "  ... binary installed" test -x "$D/kora"
+  check "  ... says the panel is not started from a root shell" out_has "not started from a root shell"
+  check "  ... and did not run the panel" eval '! [ -s "$RLOG" ]'
+fi
 
 # 2. idempotent: same version again
 check "re-run with identical file succeeds" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D"
@@ -89,7 +100,7 @@ check "  ... kora is installed" test -x "$D/kora"
 check "  ... the manual next step is printed" out_has "did not start by itself"
 check "  ... with the full path" out_has "$D/kora panel"
 # bash reads a piped script a byte at a time, so a launch that read stdin would swallow the rest of it.
-check "the curl | bash shape works (script on a pipe)" sh -c "cat '$SCRIPT' | env HOME='$WORK/home' KORA_RELEASE_BASE='$BASE' KORA_INSTALL_DIR='$WORK/t2e/bin' bash > '$WORK/out' 2>&1"
+check "the curl | bash shape works (script on a pipe)" sh -c "cat '$SCRIPT' | env HOME='$WORK/home' KORA_ALLOW_ROOT_PANEL=1 KORA_RELEASE_BASE='$BASE' KORA_INSTALL_DIR='$WORK/t2e/bin' bash > '$WORK/out' 2>&1"
 check "  ... setup ran and did not eat the script" out_has "Prefer the terminal"
 check "  ... setup did not read stdin" eval '! out_has "FAKE: setup read stdin"'
 
