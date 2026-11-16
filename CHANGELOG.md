@@ -20,6 +20,9 @@ versions follow [SemVer](https://semver.org/).
 - Every GitHub Action in the build and release workflows is pinned to a full commit SHA, and CI fails if one is not.
 
 ### Fixed
+- Paste a sign-in code or a whole sign-in link into the sign-in box; signing in again ends the old session. A failed sign-in in a new tab no longer signs out your other tabs.
+- Installing into `/home/kora` through the helper works when `/home` is a symbolic link; `kora panel --install-service` works when `~/.config/systemd/user` is one.
+- `kora self-update` finds the latest stable release behind many pre-releases. `install.sh` works with BusyBox wget (https only).
 - `kora panel --bind <address> --remote` no longer prints the 127.0.0.1 link of the panel already running in the background and stops: it starts the panel on that address.
 
 ### Security
@@ -36,6 +39,12 @@ versions follow [SemVer](https://semver.org/).
 - **FXServer downloads can no longer write outside their folder through symlinks** in the Linux archive. Resources installed from a repository subfolder refuse symlinks, catalogue paths with a drive letter or `:` are refused and every clone or copy must land inside `resources`, and resource names `.`, `..` and names starting with `-` are refused.
 - Windows: Kora's folders in `%ProgramData%` must belong to administrators; a folder someone else created first is refused.
 - `kora self-update` no longer carries setuid/setgid bits over, and private files can no longer keep looser permissions from a file left behind by an earlier run.
+- `kora delete` takes the server's name and ports from your server list, not from files the server's account can change; a folder that is not in the list gets no system-wide changes. Delete only drops databases Kora created, never another server's or MariaDB's own.
+- Root never writes into a server folder through a planted symbolic link, hard link or FIFO (update log and lock, state files, configs, secrets), and an install refuses a symbolic link another account could have planted on the way to the server folder. A re-run install always runs the server as its own `kora-<name>` account.
+- Older root auto-update jobs that run a program other accounts can change are repaired automatically the next time Kora runs as root.
+- A program on the panel's own computer can no longer sign in through the computer's Tailscale address and be taken for its owner.
+- Alert webhook addresses set from another computer are read the way they are sent (a backslash can no longer hide the real host), more internal IPv6 forms are refused, and the address is checked again before every send.
+- A cookie planted by another service on the same host no longer locks you out; wrong user tokens on ordinary requests count towards that address's lockout; the session secret in a URL is only accepted on live streams.
 
 ## [0.5.0] - 2026-11-16
 
