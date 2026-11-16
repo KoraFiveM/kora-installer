@@ -52,7 +52,6 @@ pub struct Fake {
     /// Catalog + installed ids for the add-resources screen.
     pub add_catalog: Option<(Catalog, Vec<String>)>,
     pub add_catalog_error: Option<String>,
-    pub add_redeem: Option<Res<Vec<String>>>,
     pub add_result: Option<Res<AddOutcome>>,
     pub signed_in: bool,
     pub issue_result: Option<Res<String>>,
@@ -176,11 +175,6 @@ impl Backend for FakeBackend {
         }
         let (c, i) = f.add_catalog.clone().expect("a catalog");
         Ok((c, i, None))
-    }
-    fn add_redeem(&mut self, code: &str) -> Res<Vec<String>> {
-        let mut f = self.0.borrow_mut();
-        f.calls.push(format!("add_redeem {code}"));
-        f.add_redeem.clone().unwrap_or_else(|| Err("no".into()))
     }
     fn add_plan(&mut self, _e: &ServerEntry, ids: &[String]) -> Res<AddPlan> {
         let f = self.0.borrow();

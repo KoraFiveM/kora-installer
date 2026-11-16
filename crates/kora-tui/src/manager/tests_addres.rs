@@ -215,52 +215,6 @@ fn review_without_a_choice_says_so() {
 }
 
 #[test]
-fn a_website_code_goes_straight_to_the_review() {
-    let (mut a, s, _d) = setup(Mode::Production);
-    s.borrow_mut().add_redeem = Some(Ok(vec!["bridge-x".into()]));
-    open_add(&mut a);
-    chr(&mut a, 'c');
-    typed(&mut a, "KORA-7F3K-92QX");
-    key(&mut a, KeyCode::Enter);
-    assert!(s
-        .borrow()
-        .calls
-        .iter()
-        .any(|c| c == "add_redeem KORA-7F3K-92QX"));
-    let t = screen_text(&a);
-    assert!(
-        t.contains("[bridges]/bridge-x") && t.contains("[compat]/compat-a"),
-        "{t}"
-    );
-    // an unknown id in the code is refused as a whole
-    let (mut a, s, _d) = setup(Mode::Production);
-    s.borrow_mut().add_redeem = Some(Ok(vec!["nope".into()]));
-    open_add(&mut a);
-    chr(&mut a, 'c');
-    typed(&mut a, "KORA-7F3K-92QX");
-    key(&mut a, KeyCode::Enter);
-    assert!(notice(&a).contains("does not offer"), "{}", notice(&a));
-    let Screen::AddRes(st) = &a.screen else {
-        panic!()
-    };
-    assert_eq!(st.stage, AddResStage::Code);
-}
-
-#[test]
-fn a_bad_code_and_an_empty_code_stay_on_the_code_screen() {
-    let (mut a, s, _d) = setup(Mode::Production);
-    s.borrow_mut().add_redeem = Some(Err("That setup code is not valid".into()));
-    open_add(&mut a);
-    chr(&mut a, 'c');
-    key(&mut a, KeyCode::Enter);
-    assert!(notice(&a).contains("Type or paste the code"));
-    typed(&mut a, "KORA-7F3K-92QX");
-    key(&mut a, KeyCode::Enter);
-    assert!(notice(&a).contains("not valid"));
-    assert!(matches!(&a.screen, Screen::AddRes(st) if st.stage == AddResStage::Code));
-}
-
-#[test]
 fn catalog_load_failure_returns_to_the_list() {
     let (mut a, s, _d) = setup(Mode::Production);
     s.borrow_mut().add_catalog_error = Some("offline".into());

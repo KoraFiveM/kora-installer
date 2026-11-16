@@ -1091,7 +1091,7 @@ fn ports_screen_refuses_bad_numbers_without_calling_the_backend() {
 #[test]
 fn a_running_server_cannot_change_ports() {
     let d = tempfile::tempdir().unwrap();
-    let (mut a, s) = two(d.path());
+    let (mut a, _s) = two(d.path());
     // The list caches each row's status when it loads, so set it on the row itself.
     a.rows[0].status = Status::Running;
     chr(&mut a, 'm');

@@ -5,6 +5,41 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-16
+
+### Added
+- **Kora Panel:** `kora panel` opens a local web panel that installs, manages and updates servers in your browser (servers list, start/stop/restart, console, logs, updates with preview, snapshots and rollback, resources, schedule, Discord webhook, ports, GitHub (issues and pull requests), delete, the install wizard, and Settings with self-update, the Kora app and uninstall). `--port` (default 47120), `--no-open`. Guide: `docs/panel.md`.
+- Headless use: over SSH or without a desktop the panel prints the sign-in link and an `ssh -L` tunnel hint (also with `--no-open`).
+- Panel API (`/api/v1`): every operation is one `kora_core::api::Op`, served through the shared `Backend` trait, with jobs and server-sent events for slow operations, structured errors (`needs_elevation` carries the command to run) and write-only secrets.
+- Parity tests: every CLI subcommand and flag, every manager action and wizard screen must map to an operation (or be listed as CLI-only or removed), every operation must have a handler, and the HTTP handlers are tested against a fake backend. A golden file of `kora --help` stops flags disappearing silently.
+- `kora install --hostname <TEXT>` and `--game-build <N>`: the public server name and a pinned game build, as real flags (before they could only come from a setup code). The hostname defaults to the server name.
+- Privileged helper: `kora helper install|uninstall|status|serve` (Linux), so the panel can run administrator actions without asking each time. It accepts only Kora's existing privileged actions and only from the installing user.
+- Monitoring tab: server up/down, players, CPU and memory, disk, ports and the update badge, with about 24 hours of history; alerts as a panel banner, a Discord webhook or a generic webhook.
+- Opt-in background panel service: `kora panel --install-service`, `--remove-service`, `--print-link`.
+- Remote access: `kora panel --bind <ip> --remote`, panel users with `kora panel user add|list|remove`, roles viewer / operator / admin.
+- Tailscale identity for remote sign-in (checked with the local tailscaled, never from request headers).
+- Delete, uninstall and console input are off for remote sessions by default and need the server name typed.
+- Hub: any panel can list and manage other panels as nodes (bearer tokens; nodes advertise version and supported operations).
+
+### Changed
+- The terminal manager and the CLI now use the same shared engine interface as the panel (`kora_core::api`); the start/stop behaviour of `kora start|stop|restart` and the manager no longer differs.
+- Minimum supported Rust version is 1.93.
+- CI builds, lints, tests and audits (`npm audit --omit=dev --audit-level=high`) the panel UI; releases embed it. Built UI files are not committed. `cargo build` without Node still works and `kora panel` shows a "UI not built" page.
+- Signing docs: SignPath is no longer mentioned. The Windows `.exe` is unsigned, SmartScreen may warn, the install scripts verify SHA-256 and the manual `.sha256` check is documented. The privacy line now says Kora contacts nothing unless you ask it to.
+
+### Removed
+- Setup codes: `kora install --code` and `kora add-resources --code` still parse but stop at once with exit code 2 and a message pointing to the flags, `--resource` and `kora panel`. The wizard no longer has a setup-code screen.
+- macOS code and wording (Kora supports Linux and Windows).
+
+### Security
+- The panel listens on `127.0.0.1` only by default, signs you in with a random one-time token exchanged for an `HttpOnly; SameSite=Strict` cookie, rate-limits wrong tokens, checks the `Host` header (DNS rebinding) and `Origin` plus `X-Kora` on changing requests (CSRF), and sends a strict Content-Security-Policy, `nosniff` and `no-referrer`. Licence keys, database passwords and webhook addresses are never returned to the browser.
+- The panel UI is installed with `npm ci --ignore-scripts` from a committed lockfile and audited in CI.
+
+### Fixed
+
+- Downloads no longer fail when a signal (for example a child process ending) interrupts a read; the read is retried.
+- Monitoring reads a server's `players.json` reply even when the server closes the connection early.
+
 ## [0.3.4] - 2026-11-15
 
 ### Added

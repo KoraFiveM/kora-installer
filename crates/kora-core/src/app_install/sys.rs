@@ -132,7 +132,7 @@ impl Sys for RealSys {
         #[cfg(not(unix))]
         {
             let _ = target;
-            Err(AppError("links are only used on Linux/macOS".into()))
+            Err(AppError("links are only used on Linux".into()))
         }
     }
 

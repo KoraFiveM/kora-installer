@@ -1,5 +1,5 @@
-# Release skeleton. Binaries must be built from source in CI (SignPath requirement).
-# The FIRST public release ships unsigned; apply to SignPath Foundation afterwards.
+# Release. Binaries are built from source in CI, including the panel UI (web/), and ship unsigned
+# with a .sha256 next to each one.
 name: Release
 on:
   push:
@@ -27,6 +27,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the panel UI (embedded in the binary)
+        working-directory: web
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: The UI build exists and has no mock data
+        shell: bash
+        run: |
+          [ -s web/dist/index.html ] || { echo "web/dist/index.html is missing"; exit 1; }
+          if grep -rl "mock backend" web/dist; then echo "mock data in the release UI"; exit 1; fi
       - run: cargo build --release --locked -p kora-cli
       - name: Binary reports the Cargo version
         shell: bash
@@ -48,23 +63,6 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: dist/*
-
-  # TODO(SignPath): enable after the first public release and SignPath Foundation approval.
-  # sign-windows:
-  #   needs: build
-  #   runs-on: windows-latest
-  #   steps:
-  #     - uses: actions/upload-artifact@v7   # TODO: SignPath requires the unsigned artifact uploaded in this workflow run
-  #     - uses: signpath/github-action-submit-signing-request@v1
-  #       with:
-  #         # TODO: values below are placeholders issued by SignPath on approval; no secrets invented.
-  #         organization-id: "TODO"
-  #         project-slug: "TODO"
-  #         signing-policy-slug: "TODO"   # release signing requires manual approval
-  #         github-artifact-id: "TODO"
-  #         # TODO: api-token comes from a GitHub secret created by the owner after approval.
-  #         wait-for-completion: true
-  #         output-artifact-directory: signed
 
   verify:
     needs: build

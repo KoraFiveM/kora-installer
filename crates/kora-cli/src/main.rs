@@ -8,7 +8,6 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use kora_core::elevate;
 use kora_core::firewall::ports::{self, PortProber, SystemProber};
 use kora_core::launch;
-use kora_core::site::{self, Redeemed};
 use kora_core::installer::{
     self, gitops, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection,
     RollbackOptions, StepStatus,
@@ -39,8 +38,8 @@ enum DbArg {
 
 #[derive(Args, Default, Clone)]
 struct InstallArgs {
-    /// Single-use setup code from the website (e.g. KORA-7F3K-92QX).
-    #[arg(long)]
+    /// REMOVED in 0.4.0 (setup codes no longer exist): use the flags below or `kora panel`.
+    #[arg(long, value_name = "CODE")]
     code: Option<String>,
     /// Server name (display + registry name).
     #[arg(long)]
@@ -112,11 +111,11 @@ struct InstallArgs {
     /// If a port is in use, silently use the next free one and say what changed.
     #[arg(long)]
     auto_ports: bool,
-    /// Filled from a setup code (not a flag).
-    #[arg(skip)]
+    /// Server hostname shown in the server list (default: the server name).
+    #[arg(long)]
     hostname: Option<String>,
-    /// Filled from a setup code (not a flag).
-    #[arg(skip)]
+    /// Pin the FiveM game build (e.g. 3258); default: the build the server ships with.
+    #[arg(long, value_name = "N")]
     game_build: Option<u32>,
     /// Do not ask anything (implied by any other option).
     #[arg(long, short = 'y')]
@@ -127,6 +126,8 @@ impl InstallArgs {
     fn any_given(&self) -> bool {
         self.name.is_some()
             || self.dir.is_some()
+            || self.hostname.is_some()
+            || self.game_build.is_some()
             || self.mode.is_some()
             || self.license_key.is_some()
             || self.game_port.is_some()
@@ -147,40 +148,6 @@ impl InstallArgs {
             || self.no_start
             || self.auto_ports
             || self.yes
-    }
-
-    /// Use the website's choices as defaults: anything given explicitly as a flag wins.
-    fn apply_redeemed(&mut self, r: &Redeemed) {
-        self.name.get_or_insert_with(|| r.name.clone());
-        self.mode.get_or_insert(match r.mode {
-            Mode::Production => ModeArg::Prod,
-            Mode::Development => ModeArg::Dev,
-        });
-        self.game_port.get_or_insert(r.ports.game);
-        self.txadmin_port.get_or_insert(r.ports.txadmin);
-        if self.resources.is_none() {
-            self.resources = Some(match &r.resources {
-                ResourceSelection::All => "all".to_string(),
-                ResourceSelection::Only(ids) => ids.join(","),
-            });
-        }
-        if self.artifact_url.is_none() {
-            self.artifact_url = r.artifact_url.clone();
-        }
-        if self.cfx_identifier.is_none() {
-            self.cfx_identifier = r.cfx_identifier.clone();
-        }
-        self.hostname = r.hostname.clone();
-        self.game_build = r.game_build;
-    }
-
-    /// True when, after a setup code, nothing is left to ask: license key, folder, a database
-    /// admin login (or no database) and, for development mode, the fork owner.
-    fn headless_ready(&self, dev: bool) -> bool {
-        let db_ok = matches!(self.db, Some(DbArg::Skip))
-            || self.db_admin_user.is_some()
-            || std::env::var("KORA_DB_ADMIN_PASSWORD").map(|p| !p.is_empty()).unwrap_or(false);
-        self.license_key.is_some() && self.dir.is_some() && db_ok && (!dev || self.github_owner.is_some())
     }
 
     fn into_request(self) -> Result<InstallRequest, String> {
@@ -295,8 +262,8 @@ struct UpdateArgs {
 struct AddResourcesArgs {
     /// Server name or folder.
     server: String,
-    /// A setup code made on the Kora website for adding resources (single use).
-    #[arg(long, value_name = "CODE", conflicts_with = "resource")]
+    /// REMOVED in 0.4.0 (setup codes no longer exist): use --resource or `kora panel`.
+    #[arg(long, value_name = "CODE")]
     code: Option<String>,
     /// Catalog resource id to add (repeatable). Dependencies are added automatically.
     #[arg(long = "resource", value_name = "ID")]
@@ -309,12 +276,69 @@ struct AddResourcesArgs {
     yes: bool,
 }
 
+#[derive(Args, Debug)]
+struct PanelArgs {
+    /// Port to listen on.
+    #[arg(long, default_value_t = kora_web::DEFAULT_PORT)]
+    port: u16,
+    /// Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard.
+    #[arg(long, default_value = "127.0.0.1")]
+    bind: std::net::IpAddr,
+    /// Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings).
+    #[arg(long)]
+    remote: bool,
+    /// Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop).
+    #[arg(long)]
+    no_open: bool,
+    /// Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed).
+    #[arg(long, conflicts_with_all = ["remove_service", "print_link"])]
+    install_service: bool,
+    /// Stop and remove the background panel installed with --install-service.
+    #[arg(long, conflicts_with_all = ["install_service", "print_link"])]
+    remove_service: bool,
+    /// Print the sign-in link of the background panel.
+    #[arg(long, conflicts_with_all = ["install_service", "remove_service"])]
+    print_link: bool,
+    #[command(subcommand)]
+    cmd: Option<PanelCmd>,
+}
+
+#[derive(Subcommand, Debug)]
+enum PanelCmd {
+    /// Manage the people who may sign in to the panel remotely (each has a token and a role).
+    User {
+        #[command(subcommand)]
+        cmd: PanelUserCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PanelUserCmd {
+    /// Add a user and print their token once (it cannot be shown again).
+    Add {
+        /// A name for this person (letters, numbers, dots, dashes, underscores).
+        name: String,
+        /// What they may do: viewer (look only), operator (run servers, updates, logs) or admin (everything).
+        #[arg(long, value_parser = ["viewer", "operator", "admin"])]
+        role: String,
+    },
+    /// List the users and their roles.
+    List,
+    /// Remove a user; their sessions stop working at once.
+    Remove {
+        /// The user to remove.
+        name: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Install a new Kora server (interactive TUI, or headless with options).
     Install(Box<InstallArgs>),
     /// Open the multi-server manager.
     Manager,
+    /// Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up).
+    Panel(PanelArgs),
     /// Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers).
     Update(UpdateArgs),
     /// Add compatibility, bridge or creator resources (or any catalog resource) to an installed server.
@@ -408,6 +432,101 @@ enum Command {
         #[arg(long)]
         app: bool,
     },
+    /// The optional privileged helper: lets the panel do the few things that need administrator rights.
+    Helper {
+        #[command(subcommand)]
+        cmd: HelperCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum HelperCmd {
+    /// Run the helper (started by its system service; not for people).
+    Serve,
+    /// Install the helper service for your user account (needs administrator rights; run with sudo).
+    Install,
+    /// Remove the helper service (needs administrator rights).
+    Uninstall,
+    /// Say whether the helper is installed and running.
+    Status,
+}
+
+/// The helper's allow-list, checked with this very command-line definition: the arguments must parse
+/// as one of the privileged commands the panel otherwise asks the user to run, and nothing else.
+fn helper_validate(verb: &str, args: &[String]) -> Result<(), String> {
+    let deny = || Err("That command is not one the helper runs.".to_string());
+    let argv = ["kora", "--no-elevate", verb].into_iter().map(String::from).chain(args.iter().cloned());
+    let Ok(cli) = Cli::try_parse_from(argv) else { return deny() };
+    match cli.command {
+        Some(Command::Install(a)) if a.code.is_none() && verb == "install" => Ok(()),
+        Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
+        Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
+        Some(Command::App { cmd: AppCmd::Install { .. } | AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
+        Some(Command::Uninstall { .. }) if verb == "uninstall" => Ok(()),
+        _ => deny(),
+    }
+}
+
+fn helper(cmd: HelperCmd) -> i32 {
+    use kora_core::helper as h;
+    let fail = |m: String| {
+        eprintln!("error: {m}");
+        1
+    };
+    if cfg!(windows) {
+        return fail("the Kora helper is not available on Windows yet; the panel shows the command to run as administrator instead".into());
+    }
+    let apply = |plan: kora_core::service::Plan| -> i32 {
+        for d in plan.descriptions() {
+            println!("- {d}");
+        }
+        match kora_core::service::apply_plan(&plan, &kora_core::service::SystemRunner) {
+            Ok(()) => 0,
+            Err(e) => fail(e.to_string()),
+        }
+    };
+    match cmd {
+        HelperCmd::Serve => match h::server::run(std::sync::Arc::new(helper_validate)) {
+            Ok(()) => 0,
+            Err(e) => fail(e),
+        },
+        HelperCmd::Install => {
+            let cfg = match h::install::resolve_user(std::env::var("SUDO_UID").ok().as_deref(), std::env::var("KORA_HOME").ok(), &h::install::lookup_account) {
+                Ok(c) => c,
+                Err(e) => return fail(e),
+            };
+            let exe = match std::env::current_exe() {
+                Ok(e) => e.to_string_lossy().into_owned(),
+                Err(e) => return fail(e.to_string()),
+            };
+            let code = apply(h::install::install_plan(&cfg, &exe));
+            if code == 0 {
+                println!("The Kora helper is installed for the user '{}'. The panel can now do these actions itself.", cfg.user);
+            }
+            code
+        }
+        HelperCmd::Uninstall => {
+            let code = apply(h::install::uninstall_plan());
+            if code == 0 {
+                println!("The Kora helper is removed. The panel will show commands to run as administrator again.");
+            }
+            code
+        }
+        HelperCmd::Status => {
+            let cfg = h::server::load_config(std::path::Path::new(h::CONFIG_PATH)).ok();
+            let client = h::client::SocketClient::default();
+            let running = h::client::Helper::available(&client);
+            println!("installed: {}", if std::path::Path::new(h::UNIT_PATH).exists() { "yes" } else { "no" });
+            println!("running: {}", if running { "yes" } else { "no" });
+            if let Some(c) = cfg {
+                println!("user: {}", c.user);
+            }
+            if let Some(v) = client.version() {
+                println!("version: {v}");
+            }
+            0
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -588,7 +707,7 @@ fn print_lines(prefix: &str, lines: &[String]) {
 fn app_install(force: bool, no_desktop_shortcut: bool, dry_run: bool) -> i32 {
     use kora_core::app_install as app;
     if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
-        eprintln!("error: installing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux/macOS).");
+        eprintln!("error: installing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
         return 1;
     }
     match app::install_app(&app::AppOptions { desktop_shortcut: !no_desktop_shortcut, force, dry_run }) {
@@ -619,7 +738,7 @@ fn app_status() -> i32 {
 fn app_uninstall(yes: bool, dry_run: bool) -> i32 {
     use kora_core::app_install as app;
     if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
-        eprintln!("error: removing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux/macOS).");
+        eprintln!("error: removing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
         return 1;
     }
     if !yes && !dry_run {
@@ -754,16 +873,13 @@ fn manager() -> i32 {
     }
 }
 
-/// Exchange a setup code for the website's choices (and verify the artifact build).
-fn redeem_code(code: &str) -> Result<Redeemed, String> {
-    site::redeem_and_resolve(code, &site::site_url_from_env(), &installer::HttpClient::default()).map_err(|e| e.to_string())
+/// Interactive wizard (`None` = the user quit without installing).
+fn interactive_install() -> Result<Option<InstallRequest>, String> {
+    kora_tui::run_install_wizard().map_err(|e| e.to_string())
 }
 
-/// Interactive wizard (`None` = the user quit without installing).
-fn interactive_install(prefill: Option<Redeemed>) -> Result<Option<InstallRequest>, String> {
-    let redeemer: kora_tui::wizard::Redeemer = Box::new(redeem_code);
-    kora_tui::run_install_wizard_with(Some(redeemer), prefill).map_err(|e| e.to_string())
-}
+/// Shown (exit code 2) when `--code` is used: setup codes are gone.
+const CODE_REMOVED: &str = "error: setup codes were removed in 0.4.0. Use the flags instead (see `kora install --help`), `kora add-resources <server> --resource <ID>`, or the panel (`kora panel`).";
 
 /// Sends every event to the progress screen and keeps a plain-text copy for the log file.
 struct ChannelSink {
@@ -788,6 +904,12 @@ fn already_installed(req: &InstallRequest) -> bool {
 /// is an error naming the port, the next free port and how to apply it.
 fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber) -> Result<Vec<String>, String> {
     let avoid = ports::registered_ports_except(&req.name, Some(&req.dir));
+    settle_ports_avoiding(req, auto, prober, &avoid)
+}
+
+/// `settle_ports` with the other servers' ports given (tests pass none, so this machine's servers don't matter).
+fn settle_ports_avoiding(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber, avoid: &[u16]) -> Result<Vec<String>, String> {
+    let avoid = avoid.to_vec();
     let (game, tx) = (req.ports.game, req.ports.txadmin);
     let report = ports::check_ports(game, tx, &avoid, prober);
     if report.all_free() {
@@ -814,7 +936,7 @@ fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber) -
     Err(text)
 }
 
-/// Dry-run header: the effective choices (website code + flags merged). Never includes secrets.
+/// Dry-run header: the effective choices (from the flags). Never includes secrets.
 fn request_summary(req: &InstallRequest) -> String {
     use kora_core::installer::{Mode, ResourceSelection};
     let resources = match &req.resources {
@@ -878,8 +1000,8 @@ fn write_install_log(req: &InstallRequest, lines: &[String], error: Option<&str>
 }
 
 /// Wizard -> installer thread + progress screen -> outcome / error screen.
-fn interactive_flow(catalog: Option<String>, prefill: Option<Redeemed>, no_app: bool, no_desktop_shortcut: bool) -> i32 {
-    let mut req = match interactive_install(prefill) {
+fn interactive_flow(catalog: Option<String>, no_app: bool, no_desktop_shortcut: bool) -> i32 {
+    let mut req = match interactive_install() {
         Ok(Some(r)) => r,
         Ok(None) => {
             // The wizard's goodbye screen already waited for a key: don't ask twice.
@@ -967,43 +1089,24 @@ fn install(args: InstallArgs) -> i32 {
     if args.github_owner.as_deref().is_some_and(|o| o.eq_ignore_ascii_case("list")) {
         return github_owners();
     }
-    let mut redeemed: Option<Redeemed> = None;
-    if let Some(code) = args.code.take() {
-        match redeem_code(&code) {
-            Ok(r) => {
-                println!("{}", r.welcome());
-                redeemed = Some(r);
-            }
-            Err(e) => {
-                eprintln!("error: {e}");
-                return 1;
-            }
-        }
+    if args.code.is_some() {
+        eprintln!("{CODE_REMOVED}");
+        return 2;
     }
-    let mut headless = args.any_given();
-    if let Some(r) = &redeemed {
-        let dev = r.mode == Mode::Development;
-        if args.headless_ready(dev) {
-            headless = true;
-        } else if headless && dev && args.github_owner.is_none() {
-            eprintln!("error: your setup code is for a development server: pass --github-owner <your GitHub user or organisation> (`kora github owners` lists them; the website does not decide where to fork).");
-            return 2;
-        }
-        args.apply_redeemed(r);
-    }
+    let headless = args.any_given();
     if !headless {
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             eprintln!(
                 "error: `kora install` needs an interactive terminal to ask its questions. \
-                 Run it in a terminal, or pass options instead (with a setup code you still need --license-key, --dir and a database admin login: --db-admin-user or --db skip), e.g. `kora install --name \"My Server\" --dir ~/kora/my-server --license-key <key> -y` (see `kora install --help`)."
+                 Run it in a terminal, or pass options instead e.g. `kora install --name \"My Server\" --dir ~/kora/my-server --license-key <key> -y` (see `kora install --help`)."
             );
             return 2;
         }
         let catalog = args.catalog.or_else(|| std::env::var("KORA_CATALOG").ok().filter(|c| !c.is_empty()));
-        return interactive_flow(catalog, redeemed, args.no_app, args.no_desktop_shortcut);
+        return interactive_flow(catalog, args.no_app, args.no_desktop_shortcut);
     }
     let args_auto_ports = args.auto_ports;
-    let dev_mode = matches!(args.mode, Some(ModeArg::Dev)) || redeemed.as_ref().is_some_and(|r| r.mode == Mode::Development);
+    let dev_mode = matches!(args.mode, Some(ModeArg::Dev));
     if dev_mode && !args.dry_run {
         match resolve_github_owner(args.github_owner.as_deref()) {
             Ok(l) => args.github_owner = Some(l),
@@ -1090,6 +1193,12 @@ fn control(server: &str, action: kora_core::service::ControlAction) -> i32 {
         A::Stop => ("stop", "Stopped"),
         A::Restart => ("restart", "Restarted"),
     };
+    if action != A::Start {
+        // So the panel's monitor does not report this stop as a crash.
+        if let Some(e) = registry::Registry::load().ok().and_then(|r| r.servers.into_iter().find(|e| e.name == server)) {
+            kora_core::monitor::mark_stop_intent(&e.dir);
+        }
+    }
     let has_service = !matches!(host::service_state(server), Ok(ServiceState::NotInstalled) | Err(_));
     // Without a background service Kora runs FXServer itself (detached, pid in .kora/server.pid).
     if !has_service {
@@ -1352,9 +1461,13 @@ fn confirm(question: &str) -> bool {
     std::io::stdin().read_line(&mut line).is_ok() && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-/// `kora add-resources <server> --code CODE | --resource ID...`. Browsing the catalog sections
+/// `kora add-resources <server> --resource ID...`. Browsing the catalog sections
 /// (with per-creator drill-in) is in the manager: `kora manager` > Add resources.
 fn add_resources(a: AddResourcesArgs) -> i32 {
+    if a.code.is_some() {
+        eprintln!("{CODE_REMOVED}");
+        return 2;
+    }
     use kora_core::addresources as add;
     use kora_core::git::SystemRunner;
     let mut server = match kora_core::update::manual::load_server(&a.server) {
@@ -1364,22 +1477,11 @@ fn add_resources(a: AddResourcesArgs) -> i32 {
             return 1;
         }
     };
-    let ids: Vec<String> = match (&a.code, a.resource.is_empty()) {
-        (Some(code), _) => match site::redeem_add_resources(code, &site::site_url_from_env()) {
-            Ok(c) => {
-                println!("Code accepted: {} resource(s) chosen on the website.", c.resources.len());
-                c.resources
-            }
-            Err(e) => {
-                eprintln!("error: {e}");
-                return 1;
-            }
-        },
-        (None, false) => a.resource.clone(),
-        (None, true) => {
-            eprintln!("error: say what to add: --code <CODE> from the website, or --resource <ID> (repeatable). To browse the catalog, open `kora manager` and choose Add resources.");
-            return 2;
-        }
+    let ids: Vec<String> = if a.resource.is_empty() {
+        eprintln!("error: say what to add: --resource <ID> (repeatable). To browse the catalog, open `kora manager` and choose Add resources, or use `kora panel`.");
+        return 2;
+    } else {
+        a.resource.clone()
     };
     let (cat, note) = match add::load_catalog() {
         Ok(x) => x,
@@ -1566,6 +1668,132 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
     i32::from(!summary.ok())
 }
 
+fn panel(a: &PanelArgs) -> i32 {
+    if let Some(PanelCmd::User { cmd }) = &a.cmd {
+        return panel_user(cmd);
+    }
+    use kora_core::monitor::panel_service as svc;
+    let home = svc::home();
+    if a.print_link {
+        return match svc::link(&home) {
+            Ok(link) => {
+                println!("{link}");
+                if let Some(port) = svc::saved_port(&home) {
+                    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+                    if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_err() {
+                        eprintln!("Note: nothing is answering on port {port} right now. The background panel may still be starting; check it with `systemctl --user status kora-panel` (Linux).");
+                    }
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                1
+            }
+        };
+    }
+    if a.install_service || a.remove_service {
+        let runner = kora_core::service::SystemRunner;
+        let platform = kora_core::service::Platform::current();
+        if a.remove_service {
+            return match svc::remove(&home, &runner, platform) {
+                Ok(()) => {
+                    println!("The background panel has been stopped and removed. Monitoring and alerts now only run while `kora panel` is open.");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("error: could not remove the background panel: {e}");
+                    1
+                }
+            };
+        }
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("error: cannot find the kora program to run in the background: {e}");
+                return 1;
+            }
+        };
+        let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
+        let spec = svc::InstallSpec { exe: &exe, port: a.port, kora_home_env: home_env.as_deref() };
+        return match svc::install(&home, &spec, &runner, platform) {
+            Ok(link) => {
+                println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
+                println!("Sign in with: {link}");
+                println!("Show the link again any time with `kora panel --print-link`; remove it with `kora panel --remove-service`.");
+                println!("The link contains your sign-in token: keep it private.");
+                0
+            }
+            Err(e) => {
+                eprintln!("error: could not set up the background panel: {e}");
+                1
+            }
+        };
+    }
+    // A saved token (made by --install-service) keeps the sign-in link the same every time.
+    let opts = kora_web::PanelOptions { bind: a.bind, port: a.port, open_browser: !a.no_open, remote: a.remote, token: svc::load_token(&home), ..Default::default() };
+    let pid_file = svc::pid_path(&home);
+    let _ = std::fs::create_dir_all(&home);
+    let _ = std::fs::write(&pid_file, std::process::id().to_string());
+    let result = kora_web::run(opts);
+    let _ = std::fs::remove_file(&pid_file);
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+/// `kora panel user ...`: edits `<kora home>/panel.json`. A running panel notices the change by itself.
+fn panel_user(cmd: &PanelUserCmd) -> i32 {
+    use kora_web::remote::{config, RemoteConfig, Role};
+    let path = config::default_path();
+    let mut cfg = match RemoteConfig::load(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    let result: Result<(), String> = match cmd {
+        PanelUserCmd::Add { name, role } => role.parse::<Role>().and_then(|role| {
+            let token = cfg.add_user(name, role)?;
+            cfg.save(&path)?;
+            println!("Added {} ({role}).", name.trim());
+            println!("Token (shown once, keep it safe): {token}");
+            if !cfg.enabled {
+                println!("Remote access is still off. Start the panel with `kora panel --bind <address> --remote`, or turn it on in the panel's Settings.");
+            }
+            Ok(())
+        }),
+        PanelUserCmd::List => {
+            if cfg.users.is_empty() {
+                println!("No users yet. Add one with: kora panel user add <name> --role admin");
+            }
+            for u in &cfg.users {
+                println!("{:<24} {}", u.name, u.role);
+            }
+            Ok(())
+        }
+        PanelUserCmd::Remove { name } => {
+            if cfg.remove_user(name) {
+                cfg.save(&path).map(|()| println!("Removed {name}."))
+            } else {
+                Err(format!("There is no user named '{name}'."))
+            }
+        }
+    };
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
 fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
     use elevate::CmdKind as K;
     match cmd {
@@ -1576,7 +1804,10 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Status | Command::Schedule { cmd: ScheduleCmd::Show { .. } }) => K::Status,
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. }) => K::Other,
+        // The panel runs as the user; privileged actions report the command to run instead.
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
+        Some(Command::Helper { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },
         Some(Command::Start { .. }) => K::Start,
@@ -1590,13 +1821,13 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
     }
 }
 
-/// Linux/macOS: why this command needs root (empty = it does not). The wizard decides for itself later.
+/// Linux: why this command needs root (empty = it does not). The wizard decides for itself later.
 fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
     use kora_core::service::ServiceState;
     let one = |s: &str| vec![s.to_string()];
     match cmd {
         Some(Command::Install(a)) => {
-            let headless = a.any_given() || (a.code.is_some() && a.headless_ready(false));
+            let headless = a.any_given();
             if !headless {
                 return vec![];
             }
@@ -1620,6 +1851,7 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
         Some(Command::App { cmd: AppCmd::Install { dry_run: false, .. } | AppCmd::Uninstall { dry_run: false, .. } }) => one("install or remove the Kora app (the command, shortcuts and the installed program)"),
+        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
         _ => vec![],
     }
 }
@@ -1629,7 +1861,7 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
 fn relaunch_args(cmd: &Option<Command>, original: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
     let mut args = original;
     if let Some(Command::Install(a)) = cmd {
-        if a.dir.is_none() && a.code.is_none() {
+        if a.dir.is_none() {
             if let Ok(req) = a.as_ref().clone().into_request() {
                 args.push("--dir".into());
                 args.push(req.dir.into_os_string());
@@ -1714,12 +1946,13 @@ fn main() {
     elevate_if_needed(&cli, if bare.is_some() { &bare } else { &cli.command });
     let command = if bare.is_some() { bare } else { cli.command };
     // "New version available": background check, interactive runs only (never CI, pipes, services).
-    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Update(UpdateArgs { auto: true, .. })));
+    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::Update(UpdateArgs { auto: true, .. })));
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
     let code = match command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
         Some(Command::Manager) => manager(),
+        Some(Command::Panel(a)) => panel(&a),
         Some(Command::Update(a)) => update(a),
         Some(Command::AddResources(a)) => add_resources(a),
         Some(Command::Status) => status(),
@@ -1738,6 +1971,7 @@ fn main() {
         Some(Command::Start { server }) => control(&server, kora_core::service::ControlAction::Start),
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
+        Some(Command::Helper { cmd }) => helper(cmd),
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
@@ -1753,25 +1987,11 @@ fn main() {
 }
 
 #[cfg(test)]
+mod parity;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use kora_core::site::ArtifactChoice;
-
-    fn redeemed() -> Redeemed {
-        Redeemed {
-            mode: Mode::Development,
-            name: "Alpha One".into(),
-            resources: ResourceSelection::Only(vec!["a".into(), "b".into()]),
-            artifact: ArtifactChoice::Build(38621),
-            artifact_url: Some("https://runtime.fivem.net/x".into()),
-            game_build: Some(3258),
-            ports: Ports { game: 31120, txadmin: 41120 },
-            hostname: Some("Alpha RP".into()),
-            cfx_identifier: Some("fivem:1".into()),
-            cfx_username: Some("Sticky".into()),
-            github_login: Some("octo".into()),
-        }
-    }
 
     fn parse_add(args: &[&str]) -> Result<AddResourcesArgs, clap::Error> {
         let mut v = vec!["kora", "add-resources"];
@@ -1787,8 +2007,8 @@ mod tests {
         let a = parse_add(&["srv", "--resource", "a", "--resource", "b", "--dry-run"]).unwrap();
         assert_eq!((a.server.as_str(), a.resource.len(), a.dry_run, a.code.is_none()), ("srv", 2, true, true));
         let a = parse_add(&["srv", "--code", "KORA-7F3K-92QX", "-y"]).unwrap();
-        assert!(a.code.is_some() && a.yes);
-        assert!(parse_add(&["srv", "--code", "KORA-7F3K-92QX", "--resource", "a"]).is_err(), "a code and a hand-picked list do not mix");
+        assert!(a.code.is_some() && a.yes, "--code still parses (it fails at run time with exit 2)");
+        assert_eq!(add_resources(a), 2, "setup codes were removed");
         assert!(parse_add(&[]).is_err(), "the server is required");
     }
 
@@ -1860,6 +2080,51 @@ mod tests {
     }
 
     #[test]
+    fn the_helper_runs_only_the_privileged_commands() {
+        let v = |verb: &str, a: &[&str]| helper_validate(verb, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        for (verb, a) in [
+            ("install", &["--name", "a", "--dir", "/srv/a", "--mode", "prod", "--service", "--firewall"][..]),
+            ("self-update", &["--yes"]),
+            ("self-update", &["--yes", "--version", "v0.3.4"]),
+            ("schedule", &["set", "dev", "--daily", "04:00", "--as-user"]),
+            ("schedule", &["off", "dev"]),
+            ("app", &["install", "--yes", "--force"]),
+            ("app", &["uninstall", "--yes"]),
+            ("uninstall", &["--yes", "--delete-files"]),
+            ("uninstall", &["--app", "--yes"]),
+        ] {
+            assert!(v(verb, a).is_ok(), "{verb} {a:?}");
+        }
+        for (verb, a) in [
+            ("delete", &["srv", "--yes"][..]),
+            ("service-host", &["srv"]),
+            ("start", &["srv"]),
+            ("panel", &[]),
+            ("helper", &["install"]),
+            ("webhook", &["show", "x"]),
+            ("install", &["--code", "KORA-7F3K-92QX"]),
+            ("install", &["--name", "a", "--bogus"]),
+            ("schedule", &["show", "dev"]),
+            ("app", &["status"]),
+            ("uninstall", &["--help"]),
+            ("self-update", &["--version"]),
+            ("--version", &[]),
+            ("install", &["--", "x"]),
+        ] {
+            assert!(v(verb, a).is_err(), "{verb} {a:?}");
+        }
+    }
+
+    #[test]
+    fn the_helper_command_is_classified() {
+        use elevate::CmdKind as K;
+        let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
+        assert_eq!(command_kind(&parse(&["helper", "install"])), K::Uninstall { dry_run: false });
+        assert_eq!(command_kind(&parse(&["helper", "status"])), K::Other);
+        assert_eq!(command_kind(&parse(&["helper", "serve"])), K::Other);
+    }
+
+    #[test]
     fn app_commands_are_classified_for_elevation() {
         use elevate::CmdKind as K;
         let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
@@ -1884,31 +2149,55 @@ mod tests {
         assert_eq!(home_dir(true, &empty), PathBuf::new());
     }
 
+    /// The whole `kora --help` tree (every subcommand, long help, 100 columns, no colour).
+    fn full_help() -> String {
+        fn walk(cmd: &mut clap::Command, path: &str, out: &mut String) {
+            let rendered = cmd.clone().term_width(100).max_term_width(100).color(clap::ColorChoice::Never).render_long_help().to_string();
+            out.push_str(&format!("===== {path} =====\n{rendered}\n"));
+            let names: Vec<String> = cmd.get_subcommands().map(|c| c.get_name().to_string()).filter(|n| n != "help").collect();
+            for n in names {
+                if let Some(sub) = cmd.find_subcommand_mut(&n) {
+                    walk(sub, &format!("{path} {n}"), out);
+                }
+            }
+        }
+        use clap::CommandFactory;
+        let mut cmd = Cli::command().disable_help_subcommand(true);
+        cmd.build();
+        let mut out = String::new();
+        walk(&mut cmd, "kora", &mut out);
+        out
+    }
+
+    /// Compares `kora --help` (all subcommands) with `tests/golden/help.txt`.
+    /// After an intended change to flags or help text, regenerate it with
+    /// `KORA_UPDATE_GOLDEN=1 cargo test -p kora-cli help_tree_matches_golden`.
     #[test]
-    fn redeemed_values_become_defaults_and_flags_win() {
-        let mut a = InstallArgs { game_port: Some(30000), ..Default::default() };
-        a.apply_redeemed(&redeemed());
-        let r = a.into_request().unwrap();
-        assert_eq!(r.mode, Mode::Development);
-        assert_eq!((r.name.as_str(), r.hostname.as_str()), ("Alpha One", "Alpha RP"));
-        assert_eq!((r.ports.game, r.ports.txadmin), (30000, 41120), "explicit flag wins");
-        assert_eq!(r.resources, ResourceSelection::Only(vec!["a".into(), "b".into()]));
-        assert_eq!(r.game_build, Some(3258));
-        assert_eq!(r.cfx_identifier.as_deref(), Some("fivem:1"));
-        assert_eq!(r.artifact_url.as_deref(), Some("https://runtime.fivem.net/x"));
-        assert!(r.github_owner.is_none(), "fork owner never comes from the website");
-        assert!(r.license_key.is_none());
+    fn help_tree_matches_golden() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/help.txt");
+        let actual = full_help();
+        if std::env::var_os("KORA_UPDATE_GOLDEN").is_some_and(|v| !v.is_empty() && v != "0") {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &actual).unwrap();
+            return;
+        }
+        let golden = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+        assert!(golden == actual, "`kora --help` changed. If intended, regenerate: KORA_UPDATE_GOLDEN=1 cargo test -p kora-cli help_tree_matches_golden");
     }
 
     #[test]
-    fn headless_only_when_everything_secret_is_given() {
-        let base = || InstallArgs { license_key: Some("k".into()), dir: Some("/x".into()), db: Some(DbArg::Skip), ..Default::default() };
-        assert!(base().headless_ready(false));
-        assert!(!base().headless_ready(true), "dev needs --github-owner");
-        assert!(InstallArgs { github_owner: Some("me".into()), ..base() }.headless_ready(true));
-        assert!(!InstallArgs { license_key: None, ..base() }.headless_ready(false));
-        assert!(!InstallArgs { dir: None, ..base() }.headless_ready(false));
-        assert!(InstallArgs { db: None, db_admin_user: Some("root".into()), ..base() }.headless_ready(false));
+    fn hostname_and_game_build_flags() {
+        assert!(InstallArgs { hostname: Some("x".into()), ..Default::default() }.any_given());
+        assert!(InstallArgs { game_build: Some(3258), ..Default::default() }.any_given());
+        let r = InstallArgs { name: Some("Alpha".into()), ..Default::default() }.into_request().unwrap();
+        assert_eq!((r.hostname.as_str(), r.game_build), ("Alpha", None), "hostname defaults to the name");
+        let r = InstallArgs { name: Some("Alpha".into()), hostname: Some("Alpha RP".into()), game_build: Some(3258), ..Default::default() }.into_request().unwrap();
+        assert_eq!((r.hostname.as_str(), r.game_build), ("Alpha RP", Some(3258)));
+    }
+
+    #[test]
+    fn install_code_is_rejected_with_exit_2() {
+        assert_eq!(install(InstallArgs { code: Some("KORA-7F3K-92QX".into()), ..Default::default() }), 2);
     }
 
     /// Fake `gh`: `None` = not installed, `Some(false)` = signed out, `Some(true)` = signed in as `me` (org `Team`).
@@ -1974,8 +2263,18 @@ mod tests {
 
     #[test]
     fn dry_run_summary_shows_choices_but_no_secrets() {
-        let mut a = InstallArgs { license_key: Some("cfxk_secret".into()), ..Default::default() };
-        a.apply_redeemed(&redeemed());
+        let a = InstallArgs {
+            license_key: Some("cfxk_secret".into()),
+            name: Some("Alpha One".into()),
+            mode: Some(ModeArg::Dev),
+            resources: Some("a,b".into()),
+            game_port: Some(31120),
+            txadmin_port: Some(41120),
+            artifact_url: Some("https://runtime.fivem.net/x".into()),
+            game_build: Some(3258),
+            cfx_identifier: Some("fivem:1".into()),
+            ..Default::default()
+        };
         let text = request_summary(&a.into_request().unwrap());
         for want in ["Alpha One", "development", "2 chosen (a, b)", "game 31120, txAdmin 41120", "https://runtime.fivem.net/x", "3258", "fivem:1"] {
             assert!(text.contains(want), "missing {want}: {text}");
@@ -2002,35 +2301,34 @@ mod tests {
     #[test]
     fn busy_port_fails_with_a_message_naming_port_and_next_free() {
         let mut r = req_with_ports(30120, 40120);
-        let e = settle_ports(&mut r, false, &Busy(vec![30120])).unwrap_err();
+        let e = settle_ports_avoiding(&mut r, false, &Busy(vec![30120]), &[]).unwrap_err();
         assert!(e.contains("Port 30120 (game)") && e.contains("next free port is 30121") && e.contains("--game-port 30121 --txadmin-port 40120") && e.contains("--auto-ports"), "{e}");
         assert_eq!(r.ports.game, 30120, "nothing changed without --auto-ports");
-        assert!(settle_ports(&mut r, false, &Busy(vec![])).unwrap().is_empty());
+        assert!(settle_ports_avoiding(&mut r, false, &Busy(vec![]), &[]).unwrap().is_empty());
     }
 
     #[test]
     fn auto_ports_picks_next_free_and_says_so() {
         let mut r = req_with_ports(30120, 40120);
-        let changes = settle_ports(&mut r, true, &Busy(vec![30120, 30121, 40120])).unwrap();
+        let changes = settle_ports_avoiding(&mut r, true, &Busy(vec![30120, 30121, 40120]), &[]).unwrap();
         assert_eq!(changes, vec!["Port 30120 is in use, using 30122", "Port 40120 is in use, using 40121"]);
         assert_eq!((r.ports.game, r.ports.txadmin), (30122, 40121));
         let mut r = req_with_ports(65535, 40120);
-        assert!(settle_ports(&mut r, true, &Busy(vec![65535])).is_err(), "exhausted");
+        assert!(settle_ports_avoiding(&mut r, true, &Busy(vec![65535]), &[]).is_err(), "exhausted");
     }
 
     #[test]
-    fn ports_from_a_setup_code_are_rechecked_locally() {
-        let mut a = InstallArgs { auto_ports: true, dir: Some("/nonexistent/kora-ports-test".into()), ..Default::default() };
-        a.apply_redeemed(&redeemed());
+    fn ports_from_flags_are_rechecked_locally() {
+        let a = InstallArgs { auto_ports: true, game_port: Some(31120), txadmin_port: Some(41120), dir: Some("/nonexistent/kora-ports-test".into()), ..Default::default() };
         let mut r = a.into_request().unwrap();
-        let changes = settle_ports(&mut r, true, &Busy(vec![31120])).unwrap();
+        let changes = settle_ports_avoiding(&mut r, true, &Busy(vec![31120]), &[]).unwrap();
         assert_eq!(changes, vec!["Port 31120 is in use, using 31121"]);
     }
 
     #[test]
     fn dry_run_shows_the_effective_ports() {
         let mut r = req_with_ports(30120, 40120);
-        settle_ports(&mut r, true, &Busy(vec![30120])).unwrap();
+        settle_ports_avoiding(&mut r, true, &Busy(vec![30120]), &[]).unwrap();
         assert!(request_summary(&r).contains("game 30121, txAdmin 40120"));
     }
 

@@ -574,7 +574,8 @@ pub fn uninstall_plan(server: &ManagedServer, platform: Platform) -> ServiceResu
 }
 
 /// start/stop/restart verbs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ControlAction {
     Start,
     Stop,

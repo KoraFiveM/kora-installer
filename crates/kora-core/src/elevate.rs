@@ -168,7 +168,7 @@ pub fn interpret_powershell_exit(code: Option<i32>, stderr: &str) -> Result<(), 
 }
 
 /// Environment variables worth carrying through `sudo` (its default resets the environment).
-pub const SUDO_KEEP_ENV: &[&str] = &["CFX_LICENSE_KEY", "KORA_DB_ADMIN_PASSWORD", "KORA_CATALOG", "KORA_SITE_URL", "KORA_HOME", "NO_COLOR"];
+pub const SUDO_KEEP_ENV: &[&str] = &["CFX_LICENSE_KEY", "KORA_DB_ADMIN_PASSWORD", "KORA_CATALOG", "KORA_HOME", "NO_COLOR"];
 
 /// `sudo` arguments (after the program name) for re-running `exe args` as root.
 pub fn sudo_args(exe: &OsStr, args: &[OsString], keep_env: &[String]) -> Vec<OsString> {

@@ -35,13 +35,15 @@ pub const ENSURE_NOTE: &str = "files updated, server not restarted: restart the 
 /// How many commit subjects a changelog carries.
 const CHANGELOG_MAX: usize = 20;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Scope {
     All,
     Resources(Vec<String>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ChangeStatus {
     UpToDate,
     /// Can be updated.
@@ -52,7 +54,7 @@ pub enum ChangeStatus {
     Diverged,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResourceChange {
     pub id: String,
     pub from: String,
@@ -64,14 +66,15 @@ pub struct ResourceChange {
     pub status: ChangeStatus,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UpdatePreview {
     pub resources: Vec<ResourceChange>,
     /// Production: the newest release version the catalog offers, when it is newer than what is installed.
     pub new_release: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RestartPolicy {
     /// Apply the files, restart nothing.
     None,
@@ -83,14 +86,15 @@ pub enum RestartPolicy {
     WhenQuiet,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ApplyOpts {
     pub restart: RestartPolicy,
     /// Resource ids to leave alone.
     pub skip: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UpdateEvent {
     Resource { id: String, state: String },
     /// A snapshot with this id was saved.
@@ -99,7 +103,7 @@ pub enum UpdateEvent {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotInfo {
     pub id: String,
     pub created_unix: u64,

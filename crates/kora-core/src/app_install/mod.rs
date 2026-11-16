@@ -4,7 +4,7 @@
 //! * Windows: `%ProgramFiles%\Kora\kora.exe`, on the machine `PATH`, a Start Menu shortcut "Kora" (and
 //!   optionally a Desktop shortcut) that runs `kora.exe manager` with "Run as administrator" set, and an
 //!   "Apps & features" entry whose uninstaller is `kora.exe uninstall --app`.
-//! * Linux/macOS: `/opt/kora/bin/kora`, a `/usr/local/bin/kora` symlink and (desktop sessions only) a
+//! * Linux: `/opt/kora/bin/kora`, a `/usr/local/bin/kora` symlink and (desktop sessions only) a
 //!   `kora.desktop` launcher that opens the manager in a terminal.
 //!
 //! Everything is decided by a pure planner ([`plan_install`] / [`plan_uninstall`]) that only *reads*

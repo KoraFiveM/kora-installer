@@ -71,7 +71,6 @@ pub fn url_command(os: OsKind, url: &str) -> Result<OpenCommand, String> {
     }
     let program = match os {
         OsKind::Windows => "explorer.exe",
-        OsKind::Mac => "open",
         OsKind::Other => "xdg-open",
     };
     Ok(OpenCommand { program: program.into(), args: vec![url.into()] })

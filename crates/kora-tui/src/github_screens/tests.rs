@@ -542,7 +542,6 @@ fn only_https_addresses_are_opened() {
     let c = url_command(OsKind::Other, "https://github.com/login/device").unwrap();
     assert_eq!((c.program.as_str(), c.args.len()), ("xdg-open", 1));
     assert_eq!(url_command(OsKind::Windows, "https://github.com/x").unwrap().program, "explorer.exe");
-    assert_eq!(url_command(OsKind::Mac, "https://github.com/x").unwrap().program, "open");
     for bad in ["file:///etc/passwd", "http://x", "https://a b", "https://x\"&calc", "javascript:alert(1)"] {
         assert!(url_command(OsKind::Windows, bad).is_err(), "{bad}");
     }
@@ -709,32 +708,6 @@ fn production_mode_never_shows_the_github_screens() {
     walk_to(&mut w, Screen::Review);
     assert!(!w.gh.as_ref().unwrap().busy(), "nothing was started");
     assert_eq!(w.build_request().github_owner, None);
-}
-
-#[test]
-fn a_setup_code_does_not_skip_the_github_screens_in_development_mode() {
-    let s = Setup::new(logged_in(), Ok(sample()));
-    let mut w = wiz(&s, Mode::Development, true);
-    w.apply_redeemed(
-        kora_core::site::Redeemed {
-            mode: Mode::Development,
-            name: "Alpha One".into(),
-            resources: kora_core::installer::ResourceSelection::All,
-            artifact: kora_core::site::ArtifactChoice::Build(38621),
-            artifact_url: None,
-            game_build: None,
-            ports: kora_core::installer::Ports { game: 31120, txadmin: 41120 },
-            hostname: None,
-            cfx_identifier: None,
-            cfx_username: None,
-            github_login: Some("team-b".into()),
-        },
-        true,
-    );
-    assert!(w.flow().contains(&Screen::GithubAccount));
-    walk_to(&mut w, Screen::GithubAccount);
-    tick_until(&mut w, "the list", |w| !w.wants_tick());
-    assert_eq!(w.gh.as_ref().unwrap().chosen().as_deref(), Some("team-b"), "the website's suggestion is only a preselection");
 }
 
 #[test]

@@ -60,21 +60,6 @@ pub fn sanitize_paste(text: &str, max: usize) -> (String, bool) {
     }
 }
 
-/// Format a pasted setup code as KORA-XXXX-XXXX. Accepts it with or without dashes/prefix and in
-/// any case; anything that doesn't look like a code is returned cleaned but unchanged.
-pub fn format_setup_code(text: &str) -> String {
-    let (clean, _) = sanitize_paste(text, 64);
-    let mut s: String = clean.chars().filter(|c| !matches!(c, '-' | ' ' | '_')).collect::<String>().to_ascii_uppercase();
-    if s.len() == 12 && s.starts_with("KORA") {
-        s.drain(..4);
-    }
-    if s.len() == 8 && s.chars().all(|c| c.is_ascii_alphanumeric()) {
-        format!("KORA-{}-{}", &s[..4], &s[4..])
-    } else {
-        clean
-    }
-}
-
 /// Last `n` lines of a text (for "Copy details").
 pub fn last_lines(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
@@ -117,14 +102,6 @@ mod tests {
         assert_eq!(sanitize_paste("abcdef", 3), ("abc".to_string(), true));
         assert_eq!(sanitize_paste("\n\n", 5), (String::new(), false));
         assert_eq!(sanitize_paste("ééé", 2).0, "éé");
-    }
-
-    #[test]
-    fn setup_codes_are_formatted() {
-        for input in ["kora-7f3k-92qx", "KORA7F3K92QX", "7f3k92qx", " 7F3K 92QX\n", "KORA-7F3K-92QX"] {
-            assert_eq!(format_setup_code(input), "KORA-7F3K-92QX", "{input:?}");
-        }
-        assert_eq!(format_setup_code("nope"), "nope");
     }
 
     #[test]

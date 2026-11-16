@@ -28,12 +28,12 @@ body:
       label: Log
       description: |
         Paste the content of the failure screen's **Copy details** button, or the end of `<server folder>/.kora/install.log`.
-        **Remove secrets first**: licence keys, passwords, setup codes, tokens.
+        **Remove secrets first**: licence keys, passwords, tokens.
       render: text
   - type: checkboxes
     id: secrets
     attributes:
       label: Checks
       options:
-        - label: I removed licence keys, passwords, setup codes and tokens from everything I pasted.
+        - label: I removed licence keys, passwords and tokens from everything I pasted.
           required: true

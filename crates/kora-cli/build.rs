@@ -1,4 +1,4 @@
-// Windows file metadata (SignPath requires consistent product name/version).
+// Windows file metadata (consistent product name and version).
 fn main() {
     println!("cargo:rerun-if-changed=../../assets/kora.ico");
     #[cfg(windows)]
