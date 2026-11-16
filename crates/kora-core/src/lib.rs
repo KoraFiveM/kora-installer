@@ -4,6 +4,7 @@
 //! Everything else is a documented stub filled in during M2.
 
 pub mod addresources;
+pub mod api;
 pub mod app_install;
 pub mod artifacts;
 pub mod catalog;

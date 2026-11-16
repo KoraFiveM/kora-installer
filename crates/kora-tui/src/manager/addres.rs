@@ -26,8 +26,6 @@ pub enum Effect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddResStage {
     Menu,
-    /// Typing a website code.
-    Code,
     /// The three catalog sections.
     Sections,
     /// A list of resources (or creators) inside a section.
@@ -64,12 +62,10 @@ pub struct AddResState {
     pub installed: Vec<String>,
     /// Explicit picks (catalog ids). Dependencies are derived, never stored.
     pub picked: Vec<String>,
-    pub code: TextInput,
     pub sel: usize,
     pub view: ListView,
     pub plan: Option<AddPlan>,
     pub outcome: Option<AddOutcome>,
-    pub from_code: bool,
 }
 
 impl AddResState {
@@ -81,12 +77,10 @@ impl AddResState {
             catalog_note: None,
             installed: vec![],
             picked: vec![],
-            code: TextInput::new(40),
             sel: 0,
             view: ListView::Section(Section::Compat),
             plan: None,
             outcome: None,
-            from_code: false,
         }
     }
 
@@ -376,7 +370,7 @@ impl AddResState {
     pub fn back(&mut self) -> bool {
         match (self.stage, &self.view) {
             (AddResStage::Menu | AddResStage::Result, _) => false,
-            (AddResStage::Code | AddResStage::Sections, _) => {
+            (AddResStage::Sections, _) => {
                 self.stage = AddResStage::Menu;
                 true
             }
@@ -391,31 +385,9 @@ impl AddResState {
                 true
             }
             (AddResStage::Review, _) => {
-                self.stage = if self.from_code {
-                    AddResStage::Menu
-                } else {
-                    AddResStage::Sections
-                };
+                self.stage = AddResStage::Sections;
                 true
             }
-        }
-    }
-
-    /// Use the ids a website code returned. Unknown ids are refused as a whole.
-    pub fn use_code_ids(&mut self, ids: &[String]) -> Effect {
-        let Some(cat) = self.cat.as_ref() else {
-            return Effect::None;
-        };
-        match Picker::with_ids(cat, self.installed.clone(), self.dev(), ids) {
-            Ok(p) => {
-                self.picked = p.picked_ids();
-                self.from_code = true;
-                if self.picked.is_empty() {
-                    return Effect::Say(Level::Info, "Everything from that code is already installed.".into());
-                }
-                self.review()
-            }
-            Err(e) => Effect::Say(Level::Bad, format!("That code lists something this catalog does not offer ({e}). Update Kora, or pick by hand with Browse.")),
         }
     }
 
@@ -423,13 +395,7 @@ impl AddResState {
         use AddResStage as S;
         match (self.stage, k.code) {
             (_, KeyCode::Esc) => Some(Action::Back),
-            (S::Menu, KeyCode::Char('c')) => Some(Action::UseCode),
             (S::Menu, KeyCode::Char('b')) => Some(Action::Browse),
-            (S::Code, KeyCode::Enter) => Some(Action::Confirm),
-            (S::Code, _) => {
-                self.code.key(k);
-                None
-            }
             (S::Sections | S::Items, KeyCode::Up | KeyCode::Char('k')) => Some(Action::Up),
             (S::Sections | S::Items, KeyCode::Down | KeyCode::Char('j')) => Some(Action::Down),
             (S::Sections | S::Items, KeyCode::Enter | KeyCode::Right) => Some(Action::Confirm),
@@ -446,24 +412,10 @@ impl AddResState {
     pub fn act(&mut self, a: Action) -> Effect {
         use AddResStage as S;
         match (self.stage, a) {
-            (S::Menu, Action::UseCode) => {
-                self.stage = S::Code;
-                Effect::None
-            }
             (S::Menu, Action::Browse) => {
                 self.stage = S::Sections;
                 self.sel = 0;
                 Effect::None
-            }
-            (S::Code, Action::Confirm) => {
-                if self.code.text().trim().is_empty() {
-                    Effect::Say(
-                        Level::Info,
-                        "Type or paste the code from the website (KORA-XXXX-XXXX).".into(),
-                    )
-                } else {
-                    Effect::Job(Job::AddRedeem)
-                }
             }
             (S::Sections | S::Items, Action::Up) => {
                 self.move_sel(-1);
