@@ -3,7 +3,7 @@
 //! can fail with "Access is denied" / "being used by another process" and succeed a moment later.
 
 use std::io;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 /// Retry policy: `attempts` tries with `pause` between them.
@@ -34,10 +34,30 @@ pub fn rename_retrying(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
+/// `root/rel` when `rel` is a plain relative path that stays inside `root`. On Windows a `rel`
+/// such as `C:/x` or `\\server\share` would make `join` throw `root` away, so anything with a
+/// drive, root or `..` is refused (`None`).
+pub fn join_inside(root: &Path, rel: &str) -> Option<PathBuf> {
+    if rel.is_empty() || rel.contains(':') || !Path::new(rel).components().all(|c| matches!(c, Component::Normal(_))) {
+        return None;
+    }
+    let p = root.join(rel);
+    (p.starts_with(root) && p != root).then_some(p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn join_inside_keeps_paths_under_the_root() {
+        let root = Path::new("srv/resources");
+        assert_eq!(join_inside(root, "[kora]/a"), Some(root.join("[kora]/a")));
+        for evil in ["", "..", "a/../../x", "/etc", "C:/x", "C:x", "./a", "a:b"] {
+            assert_eq!(join_inside(root, evil), None, "{evil}");
+        }
+    }
 
     #[test]
     fn missing_source_fails_at_once_without_waiting() {

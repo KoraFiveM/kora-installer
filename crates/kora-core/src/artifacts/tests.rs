@@ -262,3 +262,81 @@ fn absolute_links_only_allowed_inside_alpine_rootfs() {
         assert!(extract_archive(&f, &dest, Platform::Linux, ExtractLimits::default()).is_err(), "{link} -> {target}");
     }
 }
+
+/// Entries for a crafted tar.xz: `Ok(data)` is a file, `Err(target)` a symlink.
+#[cfg(unix)]
+fn tar_entries(entries: &[(&str, std::result::Result<&str, &str>)]) -> Vec<u8> {
+    let mut tb = tar::Builder::new(Vec::new());
+    for (name, kind) in entries {
+        let mut h = tar::Header::new_gnu();
+        match kind {
+            Ok(data) => {
+                h.set_size(data.len() as u64);
+                h.set_mode(0o755);
+                h.set_entry_type(tar::EntryType::Regular);
+                tb.append_data(&mut h, name, data.as_bytes()).unwrap();
+            }
+            Err(target) => {
+                h.set_entry_type(tar::EntryType::Symlink);
+                h.set_size(0);
+                tb.append_link(&mut h, name, target).unwrap();
+            }
+        }
+    }
+    let raw = tb.into_inner().unwrap();
+    let mut e = xz2::write::XzEncoder::new(Vec::new(), 1);
+    e.write_all(&raw).unwrap();
+    e.finish().unwrap()
+}
+
+#[test]
+#[cfg(unix)]
+fn nothing_is_written_through_a_link() {
+    let d = tempfile::tempdir().unwrap();
+    let outside = d.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    let out = outside.to_str().unwrap();
+    let cases: Vec<Vec<(&str, std::result::Result<&str, &str>)>> = vec![
+        // An absolute rootfs link, then a link created beneath it.
+        vec![("run.sh", Ok("x")), ("alpine/a", Err(out)), ("alpine/a/pwn", Err("/x"))],
+        // The same with a file: the file would land wherever the link points.
+        vec![("run.sh", Ok("x")), ("alpine/a", Err(out)), ("alpine/a/pwn", Ok("x"))],
+        vec![("run.sh", Ok("x")), ("alpine/a/pwn", Ok("x")), ("alpine/a", Err(out))],
+        // A relative chain that each looks fine on its own: d/l -> root, d/l/z -> root/..
+        vec![("run.sh", Ok("x")), ("d/l", Err("..")), ("d/l/z", Err("../.."))],
+        // `..` after passing through a link: a/b/l -> a, so a/m -> b/l/../.. is root/..
+        vec![("run.sh", Ok("x")), ("a/b/l", Err("..")), ("a/m", Err("b/l/../.."))],
+    ];
+    for (i, entries) in cases.iter().enumerate() {
+        let f = d.path().join(format!("c{i}.tar.xz"));
+        std::fs::write(&f, tar_entries(entries)).unwrap();
+        let dest = d.path().join(format!("c{i}"));
+        std::fs::create_dir(&dest).unwrap();
+        assert!(extract_archive(&f, &dest, Platform::Linux, ExtractLimits::default()).is_err(), "case {i}");
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0, "case {i} wrote outside");
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn ordinary_rootfs_links_still_extract() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("ok.tar.xz");
+    let entries: [(&str, std::result::Result<&str, &str>); 8] = [
+        ("run.sh", Ok("x")),
+        ("alpine/bin/busybox", Ok("x")),
+        ("alpine/bin/ls", Err("/bin/busybox")),
+        ("alpine/lib/ld-musl-x86_64.so.1", Err("/lib/libc.musl-x86_64.so.1")),
+        ("alpine/usr/bin/env", Err("../../bin/busybox")),
+        ("alpine/sbin", Err("bin")),
+        ("alpine/usr/lib/libz.so", Err("libz.so.1.3")),
+        ("alpine/usr/sbin/sh", Err("../../sbin/ls")),
+    ];
+    std::fs::write(&f, tar_entries(&entries)).unwrap();
+    let dest = d.path().join("ok");
+    std::fs::create_dir(&dest).unwrap();
+    extract_archive(&f, &dest, Platform::Linux, ExtractLimits::default()).unwrap();
+    assert_eq!(std::fs::read_link(dest.join("alpine/usr/bin/env")).unwrap().to_str(), Some("../../bin/busybox"));
+    assert!(dest.join("alpine/usr/bin/env").is_file());
+    assert_eq!(std::fs::read_link(dest.join("alpine/bin/ls")).unwrap().to_str(), Some("/bin/busybox"));
+}

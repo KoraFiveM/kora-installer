@@ -630,3 +630,11 @@ fn hints_are_read_from_the_server_console_log() {
     assert_eq!(h.len(), 1);
     assert_eq!(h[0].resource.as_deref(), Some("qs-housing"));
 }
+
+#[test]
+fn asset_names_that_are_paths_or_options_are_refused() {
+    for evil in [".", "..", "-x", "[x]", "a/b", "a\\b"] {
+        assert!(!valid_asset_name(evil), "{evil}");
+    }
+    assert!(valid_asset_name("cool_car-v2.1"));
+}

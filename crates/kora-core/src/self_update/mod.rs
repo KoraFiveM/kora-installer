@@ -90,7 +90,8 @@ pub enum Decision {
     Update(Release),
 }
 
-/// Without `want`: only ever move forward. With `want` (`--version`): exactly that release, any direction.
+/// Without `want`: only ever move forward, and to stable releases only unless `current` is itself a
+/// pre-release. With `want` (`--version`): exactly that release, any direction, pre-releases too.
 pub fn decide(current: &Version, releases: &[Release], want: Option<&str>) -> Result<Decision, SelfUpdateError> {
     if let Some(w) = want {
         return pick_tag(releases, w)
@@ -98,7 +99,7 @@ pub fn decide(current: &Version, releases: &[Release], want: Option<&str>) -> Re
             .map(Decision::Update)
             .ok_or_else(|| SelfUpdateError::Release(format!("there is no published release {w}")));
     }
-    let newest = pick_newest(releases).ok_or_else(|| SelfUpdateError::Release("no published release was found".into()))?;
+    let newest = pick_newest(releases, current).ok_or_else(|| SelfUpdateError::Release("no published release was found".into()))?;
     let v = newest.version().expect("picked releases have versions");
     Ok(if &v > current { Decision::Update(newest.clone()) } else { Decision::UpToDate { latest: v } })
 }
@@ -187,7 +188,8 @@ fn temp_in(dir: &Path) -> (PathBuf, std::io::Result<std::fs::File>) {
 #[cfg(unix)]
 fn finish_permissions(tmp: &Path, target: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(target).map(|m| m.permissions().mode() & 0o7777).unwrap_or(0o755) | 0o100;
+    // Plain rwx bits only: a setuid/setgid/sticky bit on the old file is never carried over.
+    let mode = std::fs::metadata(target).map(|m| m.permissions().mode() & 0o777).unwrap_or(0o755) | 0o100;
     std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(mode))
 }
 #[cfg(not(unix))]

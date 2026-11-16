@@ -73,8 +73,11 @@ impl Sys for RealSys {
         #[cfg(unix)]
         {
             use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            // `mode` only applies to a new file: a leftover temp file keeps whatever it had, so set it
+            // explicitly before anything is written.
             let mut f = io(std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(mode).open(&tmp), format!("cannot write {}", p.display()))?;
+            io(f.set_permissions(std::fs::Permissions::from_mode(mode)), format!("cannot write {}", p.display()))?;
             io(f.write_all(bytes), format!("cannot write {}", p.display()))?;
         }
         #[cfg(not(unix))]

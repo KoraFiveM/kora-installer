@@ -224,8 +224,10 @@ impl AddOutcome {
     }
 }
 
-fn dest_of(server_dir: &Path, rel: &str) -> PathBuf {
-    server_dir.join("resources").join(rel)
+/// `None` for a path that would leave `resources/` (the catalog is checked when loaded; this is
+/// a second guard right where folders are created).
+fn dest_of(server_dir: &Path, rel: &str) -> Option<PathBuf> {
+    crate::fsutil::join_inside(&server_dir.join("resources"), rel)
 }
 
 /// A folder the new resource would land in is itself (inside) another resource's clone.
@@ -275,9 +277,10 @@ pub fn execute(
     }
     let mut done_rels: Vec<String> = Vec::new();
     for item in &plan.items {
-        let dest = dest_of(&server.dir, &item.rel);
         say(&format!("Getting {}", item.id));
         let step = (|| -> std::result::Result<bool, String> {
+            let dest = dest_of(&server.dir, &item.rel)
+                .ok_or_else(|| format!("unsafe folder '{}'", item.rel))?;
             let present = if item.subpath.is_some() {
                 item.commit
                     .as_deref()

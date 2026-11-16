@@ -69,11 +69,12 @@ fn fresh(c: &Cache, now: u64) -> bool {
     now.saturating_sub(c.checked_unix) < TTL_SECS && c.checked_unix <= now + 60
 }
 
-/// Ask GitHub for the newest release (pre-releases included) and store it. Blocking, bounded by `net`.
+/// Ask GitHub for the newest release this build would update to (stable only, unless this build is a
+/// pre-release) and store it. Blocking, bounded by `net`.
 pub fn refresh(src: &Source, net: &Net, path: &Path, now: u64) -> Result<Version, String> {
     let body = net.get_text(&releases_url(&src.api_base), super::net::MAX_TEXT)?;
     let rels = parse_releases(&body)?;
-    let v = pick_newest(&rels).and_then(|r| r.version()).ok_or("no published release found")?;
+    let v = pick_newest(&rels, &super::running_version()).and_then(|r| r.version()).ok_or("no published release found")?;
     write_cache(path, &Cache { checked_unix: now, latest: v.to_string() });
     Ok(v)
 }
