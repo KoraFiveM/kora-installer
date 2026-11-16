@@ -70,7 +70,6 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 - Linux is tested end to end. Windows is covered by CI smoke tests; real-machine runs have started, so please report problems.
 - Not released yet: automatic updates for production servers. See [RELEASE_NOTES.md](RELEASE_NOTES.md) and
   [CHANGELOG.md](CHANGELOG.md); check the changelog for what is newer than the version you run.
-- Setup codes (`--code`) no longer exist; use `kora panel` or the install flags.
 - **The Windows `.exe` is unsigned**, so SmartScreen may warn ("More info", "Run anyway").
   The install scripts verify the SHA-256 checksum for you. To check by hand, compare with the `.sha256` file next to each download:
 
