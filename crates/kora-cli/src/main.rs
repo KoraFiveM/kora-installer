@@ -44,7 +44,7 @@ struct InstallArgs {
     /// Server name (display + registry name).
     #[arg(long)]
     name: Option<String>,
-    /// Server folder.
+    /// Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: %USERPROFILE%\kora\<name>).
     #[arg(long)]
     dir: Option<PathBuf>,
     /// prod = pinned release clones, dev = forks on your GitHub account.
@@ -120,6 +120,11 @@ struct InstallArgs {
     /// Pin the FiveM game build (e.g. 3258); default: the build the server ships with.
     #[arg(long, value_name = "N")]
     game_build: Option<u32>,
+    /// Linux, with --service: when the server folder is inside a private folder (such as your home
+    /// folder) that the service's own account cannot enter, let it pass through exactly those
+    /// folders (`chmod o+x`) instead of stopping.
+    #[arg(long)]
+    fix_permissions: bool,
     /// Do not ask anything (implied by any other option).
     #[arg(long, short = 'y')]
     yes: bool,
@@ -151,6 +156,7 @@ impl InstallArgs {
             || self.start
             || self.no_start
             || self.auto_ports
+            || self.fix_permissions
             || self.yes
     }
 
@@ -169,9 +175,7 @@ impl InstallArgs {
         let name = self.name.unwrap_or_else(|| "kora".into());
         let dir = match self.dir {
             Some(d) => d,
-            None => {
-                home_dir(cfg!(windows), &|k| std::env::var_os(k)).join("kora").join(installer::slug(&name))
-            }
+            None => default_dir(&name)?,
         };
         let resources = match self.resources.as_deref().map(str::trim) {
             None | Some("") | Some("all") => ResourceSelection::All,
@@ -212,11 +216,24 @@ impl InstallArgs {
     }
 }
 
+/// The folder used when `--dir` is not given. Linux/macOS: `kora_core::userhome::default_server_dir`
+/// (the home folder of the person installing, also under sudo; `/home/kora/<name>` when logged in as
+/// root). Windows: `%USERPROFILE%\kora\<name>` as before. Never relative.
+fn default_dir(name: &str) -> Result<PathBuf, String> {
+    let slug = installer::slug(name);
+    if !cfg!(windows) {
+        return kora_core::userhome::default_server_dir(&slug);
+    }
+    home_dir(true, &|k| std::env::var_os(k))
+        .map(|h| h.join("kora").join(&slug))
+        .ok_or_else(|| format!("Kora could not find your user folder (USERPROFILE is not set). Choose the server folder with --dir, for example --dir C:\\Kora\\{slug}."))
+}
+
 /// The user's home folder: USERPROFILE first on Windows (HOME may point elsewhere under Git Bash),
-/// HOME first elsewhere.
-fn home_dir(windows: bool, get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+/// HOME first elsewhere. `None` when neither is set (never an empty, relative path).
+fn home_dir(windows: bool, get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
     let order = if windows { ["USERPROFILE", "HOME"] } else { ["HOME", "USERPROFILE"] };
-    order.iter().find_map(|k| get(k).filter(|v| !v.is_empty())).map(PathBuf::from).unwrap_or_default()
+    order.iter().find_map(|k| get(k).filter(|v| !v.is_empty())).map(PathBuf::from).filter(|p| windows || p.is_absolute())
 }
 
 /// What to do when an update needs a restart.
@@ -1125,6 +1142,7 @@ fn install(args: InstallArgs) -> i32 {
         }
     }
     let args_auto_ports = args.auto_ports;
+    let fix_permissions = args.fix_permissions;
     let dev_mode = matches!(args.mode, Some(ModeArg::Dev));
     if dev_mode && !args.dry_run {
         match resolve_github_owner(args.github_owner.as_deref()) {
@@ -1160,7 +1178,8 @@ fn install(args: InstallArgs) -> i32 {
         print!("{}", request_summary(&req));
     }
     let mut sink = Printer { last: None };
-    match installer::run(&req, &mut sink) {
+    let hooks = installer::Hooks { fix_permissions, ..installer::Hooks::from_env() };
+    match installer::run_with(&req, &mut sink, &hooks) {
         Ok(out) => {
             print_outcome(&out, dry);
             0
@@ -1957,11 +1976,12 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
 }
 
 /// The arguments for the elevated copy: the original ones, plus the folder when it was only implied
-/// (a different account's home folder would otherwise change where the server goes).
+/// (decided here, before `sudo` changes HOME to root's). Only for an install with options: a bare
+/// `kora install` is the wizard, and an extra `--dir` would turn it into an install without questions.
 fn relaunch_args(cmd: &Option<Command>, original: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
     let mut args = original;
     if let Some(Command::Install(a)) = cmd {
-        if a.dir.is_none() {
+        if a.dir.is_none() && a.any_given() {
             if let Ok(req) = a.as_ref().clone().into_request() {
                 args.push("--dir".into());
                 args.push(req.dir.into_os_string());
@@ -2241,12 +2261,38 @@ mod tests {
             "USERPROFILE" => Some("C:\\Users\\Real".into()),
             _ => None,
         };
-        assert_eq!(home_dir(true, &env), PathBuf::from("C:\\Users\\Real"));
-        assert_eq!(home_dir(false, &env), PathBuf::from("/c/Users/Git Bash Home"));
+        assert_eq!(home_dir(true, &env), Some(PathBuf::from("C:\\Users\\Real")));
+        assert_eq!(home_dir(false, &env), Some(PathBuf::from("/c/Users/Git Bash Home")));
         let only_home = |k: &str| (k == "HOME").then(|| "/home/me".into());
-        assert_eq!(home_dir(true, &only_home), PathBuf::from("/home/me"), "falls back");
+        assert_eq!(home_dir(true, &only_home), Some(PathBuf::from("/home/me")), "falls back");
         let empty = |k: &str| (k == "USERPROFILE").then(|| "".into());
-        assert_eq!(home_dir(true, &empty), PathBuf::new());
+        assert_eq!(home_dir(true, &empty), None, "never an empty (relative) folder");
+        let relative = |k: &str| (k == "HOME").then(|| "rel/home".into());
+        assert_eq!(home_dir(false, &relative), None);
+    }
+
+    #[test]
+    fn the_implied_folder_is_absolute_and_decided_before_the_relaunch() {
+        // No --dir: the folder comes from kora_core::userhome and is never relative.
+        let r = InstallArgs { name: Some("Alpha".into()), ..Default::default() }.into_request().unwrap();
+        assert!(r.dir.is_absolute() && r.dir.ends_with("alpha"), "{:?}", r.dir);
+        let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
+        let os = |a: &[&str]| a.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+        // an install with options and no --dir: the resolved folder is added
+        let cmd = parse(&["install", "--name", "Alpha", "--service"]);
+        let args = relaunch_args(&cmd, os(&["install", "--name", "Alpha", "--service"]));
+        assert_eq!(args[..4], os(&["install", "--name", "Alpha", "--service"])[..]);
+        assert_eq!(args[4], "--dir");
+        assert_eq!(PathBuf::from(&args[5]), r.dir);
+        // --dir given: left alone
+        let cmd = parse(&["install", "--name", "Alpha", "--dir", "/srv/a"]);
+        assert_eq!(relaunch_args(&cmd, os(&["install", "--name", "Alpha", "--dir", "/srv/a"])), os(&["install", "--name", "Alpha", "--dir", "/srv/a"]));
+        // bare `kora install` is the wizard: an extra --dir would make it skip the questions
+        let cmd = parse(&["install"]);
+        assert_eq!(relaunch_args(&cmd, os(&["install"])), os(&["install"]));
+        // --fix-permissions is an install option (no questions) and is passed on as it is
+        let cmd = parse(&["install", "--fix-permissions", "--dir", "/srv/a"]);
+        assert!(matches!(&cmd, Some(Command::Install(a)) if a.fix_permissions && a.any_given()));
     }
 
     /// The whole `kora --help` tree (every subcommand, long help, 100 columns, no colour).

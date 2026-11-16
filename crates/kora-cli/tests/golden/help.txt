@@ -46,7 +46,7 @@ Options:
           Server name (display + registry name)
 
       --dir <DIR>
-          Server folder
+          Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: %USERPROFILE%\kora\<name>)
 
       --mode <MODE>
           prod = pinned release clones, dev = forks on your GitHub account
@@ -128,6 +128,9 @@ Options:
 
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
+
+      --fix-permissions
+          Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
 
   -y, --yes
           Do not ask anything (implied by any other option)
