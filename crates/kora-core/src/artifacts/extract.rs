@@ -45,7 +45,7 @@ fn clean_name(name: &str) -> Result<Option<PathBuf>> {
 /// The Linux FXServer archive ships an Alpine root filesystem under `alpine/` whose symlinks are
 /// absolute *inside that rootfs* (e.g. `alpine/bin/ls -> /bin/busybox`), resolved by proot at
 /// runtime. Accept absolute targets only there, and never with `..`. Links are created after all
-/// files are written, so nothing can be extracted through one.
+/// files are written, and never beneath another link, so nothing can be written through one.
 fn rootfs_absolute_link_ok(link: &Path, target: &str) -> bool {
     link.starts_with("alpine")
         && target.starts_with('/')
@@ -53,18 +53,23 @@ fn rootfs_absolute_link_ok(link: &Path, target: &str) -> bool {
         && !Path::new(target).components().any(|c| matches!(c, Component::ParentDir))
 }
 
-/// A relative symlink target is acceptable only if it stays inside the extraction root.
-fn link_target_ok(link: &Path, target: &str) -> bool {
+/// A relative symlink target is acceptable only if it stays inside the extraction root. `links`
+/// holds every link in the archive: a `..` after passing through one of them would be resolved
+/// from wherever that link points (so `a -> b/l/../..` with `b/l -> ..` escapes), so it is refused.
+fn link_target_ok(link: &Path, target: &str, links: &HashSet<PathBuf>) -> bool {
     if target.is_empty() || target.contains(['\\', '\0']) || Path::new(target).is_absolute() {
         return false;
     }
-    let mut depth = link.parent().map(|p| p.components().count() as i64).unwrap_or(0);
+    let mut cur = link.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut through_link = false;
     for c in Path::new(target).components() {
         match c {
-            Component::Normal(_) => depth += 1,
+            Component::Normal(p) => {
+                cur.push(p);
+                through_link |= links.contains(&cur);
+            }
             Component::ParentDir => {
-                depth -= 1;
-                if depth < 0 {
+                if through_link || !cur.pop() {
                     return false;
                 }
             }
@@ -73,6 +78,23 @@ fn link_target_ok(link: &Path, target: &str) -> bool {
         }
     }
     true
+}
+
+/// Create `root/rel` and any missing parents, refusing to go through a symlink or a file. Unlike
+/// `create_dir_all`, this never follows a link, so it cannot be steered outside `root`.
+fn make_dirs(root: &Path, rel: &Path) -> Result<()> {
+    let mut p = root.to_path_buf();
+    for c in rel.components() {
+        p.push(c);
+        match fs::symlink_metadata(&p) {
+            Ok(m) if m.file_type().is_symlink() => return bad(format!("{} goes through a link", rel.display())),
+            Ok(m) if m.is_dir() => {}
+            Ok(_) => return bad(format!("{} goes through a file", rel.display())),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => fs::create_dir(&p)?,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
 }
 
 struct Ctx<'a> {
@@ -94,13 +116,13 @@ impl Ctx<'_> {
         Ok(())
     }
     fn dir(&mut self, rel: &Path) -> Result<()> {
-        fs::create_dir_all(self.root.join(rel))?;
-        Ok(())
+        make_dirs(self.root, rel)
     }
     fn file(&mut self, rel: &Path, r: &mut dyn Read, mode: Option<u32>) -> Result<()> {
         if let Some(p) = rel.parent() {
-            fs::create_dir_all(self.root.join(p))?;
+            make_dirs(self.root, p)?;
         }
+        // `create_new` also refuses an existing symlink at the final component.
         let path = self.root.join(rel);
         let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
         let left = self.limits.max_total - self.total;
@@ -121,9 +143,7 @@ impl Ctx<'_> {
         Ok(())
     }
     fn link(&mut self, rel: &Path, target: &str) -> Result<()> {
-        if !link_target_ok(rel, target) && !rootfs_absolute_link_ok(rel, target) {
-            return bad(format!("link {} escapes the archive root", rel.display()));
-        }
+        // Targets are checked in `finish`, once every link in the archive is known.
         self.links.push((rel.to_path_buf(), target.to_string()));
         Ok(())
     }
@@ -132,12 +152,26 @@ impl Ctx<'_> {
         if !self.links.is_empty() {
             return bad("symlinks are not supported on this platform");
         }
+        let all: HashSet<PathBuf> = self.links.iter().map(|(rel, _)| rel.clone()).collect();
+        for (rel, target) in &self.links {
+            if !link_target_ok(rel, target, &all) && !rootfs_absolute_link_ok(rel, target) {
+                return bad(format!("link {} escapes the archive root", rel.display()));
+            }
+            // Nothing may live beneath a link: it would be written wherever the link points.
+            if rel.ancestors().skip(1).any(|a| all.contains(a)) {
+                return bad(format!("{} is inside another link", rel.display()));
+            }
+        }
         #[cfg(unix)]
         for (rel, target) in self.links {
             if let Some(p) = rel.parent() {
-                fs::create_dir_all(self.root.join(p))?;
+                make_dirs(self.root, p)?;
             }
-            std::os::unix::fs::symlink(&target, self.root.join(&rel))?;
+            let path = self.root.join(&rel);
+            if fs::symlink_metadata(&path).is_ok() {
+                return bad(format!("link {} would replace another entry", rel.display()));
+            }
+            std::os::unix::fs::symlink(&target, path)?;
         }
         Ok(())
     }

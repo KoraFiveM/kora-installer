@@ -565,6 +565,10 @@ pub fn plan_install_windows(
                 args: vec![
                     format!("--datadir={}", s(&data)),
                     format!("--service={service}"),
+                    // mariadb-install-db.exe takes the root password only on its command line (no
+                    // stdin, file or environment option). It runs elevated, and ordinary accounts
+                    // cannot read an elevated process's command line; installing first and setting the
+                    // password afterwards would leave root without one on the port meanwhile.
                     format!("--password={}", password.expose()),
                     format!("--port={port}"),
                 ],
@@ -679,8 +683,9 @@ pub struct ProvisionState {
 }
 
 impl ProvisionState {
+    /// Root writes this into `<server>/.kora`: never through a planted link.
     pub fn save(&self, path: &Path) -> DbResult<()> {
-        std::fs::write(path, serde_json::to_vec_pretty(self)?)?;
+        crate::fsutil::write_no_follow(path, &serde_json::to_vec_pretty(self)?, 0o644)?;
         Ok(())
     }
     pub fn load(path: &Path) -> DbResult<Self> {
@@ -774,6 +779,13 @@ pub fn provision(
 
 /// Drop only what `state` says this run created. Safe to call repeatedly.
 pub fn rollback(runner: &dyn CommandRunner, admin: &AdminConn, state: &mut ProvisionState) -> DbResult<()> {
+    // The state file lives in the server folder, which the server's own account can change: only
+    // names Kora makes (`kora_<random>`) are ever dropped, never `mysql` or `root`.
+    for (what, name, created) in [("database", &state.database, state.created_database), ("user", &state.user, state.created_user)] {
+        if created && !name.starts_with(NAME_PREFIX) {
+            return Err(DbError::InvalidValue(format!("the {what} '{name}' in Kora's records is not one Kora creates ({NAME_PREFIX}...), so it was not dropped")));
+        }
+    }
     if state.created_user {
         admin.exec(runner, &sql::drop_user(&state.user, &state.host)?)?;
         state.created_user = false;
@@ -816,7 +828,6 @@ pub fn write_secret_file(
     contents: &str,
     windows_user: Option<&str>,
 ) -> DbResult<()> {
-    use std::io::Write;
     if os == Os::Windows {
         let user = windows_user.ok_or_else(|| DbError::InvalidValue("windows user required".into()))?;
         std::fs::File::create(path)?;
@@ -828,15 +839,12 @@ pub fn write_secret_file(
         std::fs::write(path, contents)?;
         return Ok(());
     }
+    // 0600 from the start, and never through a link planted in the server folder.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        f.write_all(contents.as_bytes())?;
-    }
+    crate::fsutil::write_no_follow(path, contents.as_bytes(), 0o600)?;
     #[cfg(not(unix))]
     {
+        use std::io::Write;
         let mut f = std::fs::File::create(path)?;
         f.write_all(contents.as_bytes())?;
     }
@@ -988,6 +996,13 @@ mod tests {
     fn rollback_skips_objects_not_created() {
         let admin = AdminConn::socket_root("mariadb");
         // DB created, user creation never happened.
+        // Forged records naming the server's own system database or root: nothing is dropped.
+        for (database, user) in [("mysql", "kora_a1"), ("kora_a1", "root")] {
+            let f = db_fake();
+            let mut st = ProvisionState { database: database.into(), user: user.into(), host: "localhost".into(), created_database: true, created_user: true, ..Default::default() };
+            assert!(rollback(&f, &admin, &mut st).is_err());
+            assert!(f.sqls().is_empty(), "{database}/{user}");
+        }
         let mut st = ProvisionState { database: "kora_a1".into(), user: "kora_a1".into(), host: "127.0.0.1".into(), created_database: true, ..Default::default() };
         let f = db_fake();
         rollback(&f, &admin, &mut st).unwrap();

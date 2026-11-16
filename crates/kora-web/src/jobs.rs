@@ -8,11 +8,14 @@ use std::time::Duration;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
-use axum::Json;
+use axum::{Extension, Json};
+use kora_core::api::Op;
 use serde_json::{json, Value};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::error::ApiError;
+use crate::remote::{roles, Caller};
+use crate::security::Limited;
 use crate::AppState;
 
 pub use kora_core::api::JobMessage;
@@ -22,6 +25,32 @@ pub trait Jobs: Send + Sync {
     fn get(&self, id: &str) -> Option<Value>;
     /// Past events plus a receiver of later messages (ends with `Done`/`Failed`).
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)>;
+    /// The operation that started the job (`None`: unknown job, or not one of ours).
+    fn op(&self, id: &str) -> Option<Op> {
+        let v = self.get(id)?;
+        let name = v.get("op")?.as_str()?;
+        Op::ALL.iter().copied().find(|o| o.name() == name)
+    }
+}
+
+/// May `caller` read the job started by `op`? This computer: always. A remote caller: only with the role
+/// the operation itself needs, and never a local-only operation's job (its events can hold what the
+/// operation keeps from remote sessions).
+pub(crate) fn may_read(caller: &Caller, op: Option<Op>) -> Result<(), ApiError> {
+    if !caller.remote {
+        return Ok(());
+    }
+    let refuse = || ApiError::forbidden("Your account cannot follow this job.");
+    let op = op.ok_or_else(refuse)?;
+    if roles::local_only(op) {
+        return Err(ApiError::forbidden(
+            "This job can only be followed on the computer that runs Kora.",
+        ));
+    }
+    match &caller.identity {
+        Some(id) if id.role >= roles::min_role(op) => Ok(()),
+        _ => Err(refuse()),
+    }
 }
 
 /// The real source: kora-core's std-thread registry.
@@ -35,6 +64,9 @@ impl Jobs for kora_core::api::JobRegistry {
     }
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
         kora_core::api::JobRegistry::subscribe(self, id)
+    }
+    fn op(&self, id: &str) -> Option<Op> {
+        kora_core::api::JobRegistry::get(self, id).map(|s| s.op)
     }
 }
 
@@ -142,27 +174,35 @@ impl Jobs for MemoryJobs {
 
 pub async fn job_get(
     State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let jobs = st.jobs.clone();
     crate::blocking(move || {
-        jobs.get(&id)
-            .map(Json)
-            .ok_or_else(|| ApiError::not_found("unknown job"))
+        let v = jobs.get(&id).ok_or_else(|| ApiError::not_found("unknown job"))?;
+        may_read(&caller, jobs.op(&id))?;
+        Ok(Json(v))
     })
     .await
 }
 
 pub async fn job_events(
     State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let jobs = st.jobs.clone();
+    let c = caller.clone();
     let (past, rx) = crate::blocking(move || {
+        if jobs.get(&id).is_none() {
+            return Err(ApiError::not_found("unknown job"));
+        }
+        may_read(&c, jobs.op(&id))?;
         jobs.subscribe(&id)
             .ok_or_else(|| ApiError::not_found("unknown job"))
     })
     .await?;
+    let permit = st.stream_permit(&caller)?;
     let (tx, trx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
     // Bridge the blocking std receiver to the async stream on a dedicated thread.
     std::thread::spawn(move || {
@@ -206,7 +246,7 @@ pub async fn job_events(
             }
         }
     });
-    Ok(Sse::new(ReceiverStream::new(trx))
+    Ok(Sse::new(Limited::new(ReceiverStream::new(trx), permit))
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
@@ -216,8 +256,30 @@ fn progress(v: &Value) -> Event {
 
 #[cfg(test)]
 mod tests {
-    use super::job_error;
+    use super::{job_error, may_read};
+    use crate::remote::{Caller, Identity, Provider, Role};
+    use kora_core::api::Op;
     use serde_json::json;
+
+    fn remote(role: Role) -> Caller {
+        Caller {
+            remote: true,
+            peer: Some("100.64.0.9:5000".parse().unwrap()),
+            identity: Some(Identity { name: "x".into(), provider: Provider::Token, role }),
+        }
+    }
+
+    #[test]
+    fn remote_callers_read_only_the_jobs_their_role_could_start() {
+        assert!(may_read(&Caller::local(), Some(Op::InstallStart)).is_ok());
+        assert!(may_read(&Caller::local(), None).is_ok());
+        assert!(may_read(&remote(Role::Viewer), Some(Op::ServerControl)).is_err());
+        assert!(may_read(&remote(Role::Operator), Some(Op::ServerControl)).is_ok());
+        assert!(may_read(&remote(Role::Operator), Some(Op::InstallStart)).is_err());
+        assert!(may_read(&remote(Role::Admin), Some(Op::InstallStart)).is_ok());
+        assert!(may_read(&remote(Role::Admin), Some(Op::NodeServerControl)).is_err(), "local-only");
+        assert!(may_read(&remote(Role::Admin), None).is_err(), "unknown op");
+    }
 
     #[test]
     fn job_errors_have_the_ui_shape() {

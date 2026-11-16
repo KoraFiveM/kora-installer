@@ -60,10 +60,14 @@ fn rule_name(server: &str, label: &str, port: u16, proto: &str) -> String {
 }
 
 fn plan(req: &PortRequest, kind: FirewallKind, open: bool) -> ServiceResult<Plan> {
+    plan_for(req, kind, open, req.rules())
+}
+
+fn plan_for(req: &PortRequest, kind: FirewallKind, open: bool, rules: Vec<(&'static str, u16, &'static str)>) -> ServiceResult<Plan> {
     req.validate()?;
     let verb = if open { "Open" } else { "Close" };
     let mut steps = Vec::new();
-    for (label, port, proto) in req.rules() {
+    for (label, port, proto) in rules {
         let what = format!("{verb} {proto_u} port {port} ({label}) for '{}'", req.server, proto_u = proto.to_uppercase());
         let step = match kind {
             FirewallKind::Ufw if open => SystemStep::run(
@@ -110,7 +114,7 @@ fn plan(req: &PortRequest, kind: FirewallKind, open: bool) -> ServiceResult<Plan
         };
         steps.push(step);
     }
-    if kind == FirewallKind::Firewalld {
+    if kind == FirewallKind::Firewalld && !steps.is_empty() {
         steps.push(SystemStep::run("Apply the firewalld changes", "firewall-cmd", &["--reload"]));
     }
     Ok(Plan::new(steps))
@@ -126,6 +130,57 @@ pub fn close_plan(req: &PortRequest, kind: FirewallKind) -> ServiceResult<Plan> 
     let mut all = req.clone();
     all.expose_txadmin = true; // removal is tolerant: missing rules are fine
     plan(&all, kind, false)
+}
+
+/// The ports `sshd` listens on, from the `Port` lines of its configuration files (22 is always
+/// included). Kora never closes these, whatever a server's records say.
+pub fn ssh_ports() -> Vec<u16> {
+    let mut texts: Vec<String> = std::fs::read_to_string("/etc/ssh/sshd_config").into_iter().collect();
+    if let Ok(rd) = std::fs::read_dir("/etc/ssh/sshd_config.d") {
+        texts.extend(rd.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "conf")).filter_map(|e| std::fs::read_to_string(e.path()).ok()));
+    }
+    parse_ssh_ports(&texts)
+}
+
+pub fn parse_ssh_ports(texts: &[String]) -> Vec<u16> {
+    let mut v = vec![22];
+    for line in texts.iter().flat_map(|t| t.lines()) {
+        let mut w = line.split_whitespace();
+        if w.next().is_some_and(|k| k.eq_ignore_ascii_case("port")) {
+            if let Some(p) = w.next().and_then(|p| p.parse::<u16>().ok()) {
+                if !v.contains(&p) {
+                    v.push(p);
+                }
+            }
+        }
+    }
+    v
+}
+
+/// [`close_plan`] for removing what a server's records say Kora opened. Those records live in the
+/// server folder, which other accounts can change, so: nothing at all when one of the ports is this
+/// machine's SSH port (`ssh`), and with ufw only the rules that carry Kora's own comment for this
+/// server (`ufw status` is asked through `runner`). The note says what was left alone and why.
+pub fn close_plan_checked(req: &PortRequest, kind: FirewallKind, runner: &dyn CommandRunner, ssh: &[u16]) -> ServiceResult<(Plan, Option<String>)> {
+    req.validate()?;
+    let mut all = req.clone();
+    all.expose_txadmin = true;
+    if let Some(p) = [all.game_port, all.txadmin_port].into_iter().find(|p| ssh.contains(p)) {
+        return Ok((Plan::default(), Some(format!("Port {p} is this machine's SSH port, so Kora will not close it (the server's records may have been changed). Nothing was changed in the firewall."))));
+    }
+    if kind != FirewallKind::Ufw {
+        // firewalld rules carry no comment; Windows rules are removed by their Kora-only names.
+        return Ok((plan(&all, kind, false)?, None));
+    }
+    let status = runner.run("ufw", &["status".to_string()]).ok().filter(|o| o.success()).map(|o| o.stdout).unwrap_or_default();
+    let ours = |label: &str, port: u16, proto: &str| {
+        let rule = format!("{port}/{proto}");
+        let tag = format!("# Kora {} {label}", all.server);
+        status.lines().any(|l| l.split_whitespace().next() == Some(rule.as_str()) && l.trim_end().ends_with(&tag))
+    };
+    let rules: Vec<_> = all.rules().into_iter().filter(|(l, p, pr)| ours(l, *p, pr)).collect();
+    let note = rules.is_empty().then(|| format!("No ufw rule labelled 'Kora {}' was found, so nothing was closed (rules without Kora's label are left alone).", all.server));
+    Ok((plan_for(&all, kind, false, rules)?, note))
 }
 
 /// Detect the active firewall for `platform`; `None` if none is active.
@@ -291,6 +346,38 @@ mod tests {
     fn step_descriptions_plain() {
         let p = open_plan(&req(false), FirewallKind::Ufw).unwrap();
         assert_eq!(p.descriptions()[0], "Open TCP port 30120 (game) for 'main' in the Ubuntu/Debian firewall (ufw)");
+    }
+
+    #[test]
+    fn ssh_ports_come_from_the_sshd_config() {
+        assert_eq!(parse_ssh_ports(&[]), vec![22]);
+        assert_eq!(parse_ssh_ports(&["# Port 1\nPort 2222\n  port 2223 \nListenAddress x\n".into()]), vec![22, 2222, 2223]);
+    }
+
+    #[test]
+    fn checked_close_never_touches_ssh_or_rules_kora_did_not_label() {
+        let r = FakeRunner::default();
+        r.respond(
+            "ufw status",
+            0,
+            "Status: active\n\nTo                         Action      From\n--                         ------      ----\n2222/tcp                   ALLOW       Anywhere\n30120/tcp                  ALLOW       Anywhere                   # Kora main game\n30120/udp                  ALLOW       Anywhere                   # Kora main game\n30120/tcp (v6)             ALLOW       Anywhere (v6)              # Kora main game\n",
+        );
+        let (p, note) = close_plan_checked(&req(false), FirewallKind::Ufw, &r, &[22]).unwrap();
+        assert_eq!(lines(&p), ["ufw delete allow 30120/tcp", "ufw delete allow 30120/udp"], "txAdmin had no Kora rule: left alone");
+        assert!(note.is_none());
+        // A forged record pointing at the SSH port (2222 here): nothing at all.
+        let forged = PortRequest { server: "main".into(), game_port: 2222, txadmin_port: 40120, expose_txadmin: false };
+        let (p, note) = close_plan_checked(&forged, FirewallKind::Ufw, &r, &[22, 2222]).unwrap();
+        assert!(p.steps.is_empty() && note.unwrap().contains("SSH"));
+        let (p, _) = close_plan_checked(&forged, FirewallKind::Firewalld, &r, &[22, 2222]).unwrap();
+        assert!(p.steps.is_empty());
+        // ... and a port someone else opened (no Kora label) is not closed either.
+        let other = PortRequest { server: "main".into(), game_port: 2222, txadmin_port: 40120, expose_txadmin: false };
+        let (p, note) = close_plan_checked(&other, FirewallKind::Ufw, &r, &[22]).unwrap();
+        assert!(p.steps.is_empty() && note.unwrap().contains("left alone"));
+        // firewalld: the normal case still closes the ports.
+        let (p, _) = close_plan_checked(&req(false), FirewallKind::Firewalld, &r, &[22]).unwrap();
+        assert!(lines(&p).iter().any(|l| l.contains("--remove-port=30120/udp")));
     }
 
     #[test]

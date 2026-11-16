@@ -2,7 +2,12 @@
 //! `kora delete` (rollback of the service step) and `kora uninstall`.
 //!
 //! Everything here is derived from the server's own records (`.kora/created.json` and
-//! `.kora/request.json`): nothing is removed that the records do not name.
+//! `.kora/request.json`): nothing is removed that the records do not name. Those records live in
+//! the server folder, which the server's service account (running third-party resource code) and
+//! the panel's user can change, while this runs as root. So every value is checked before root
+//! acts on it: only the `kora-<name>` system account of THIS server is deleted, the program copy
+//! only inside Kora's own program folder, ownership is only handed back to a plain `uid:gid`, and
+//! firewall rules are closed only when they carry Kora's label and are never the SSH port.
 
 use std::path::{Path, PathBuf};
 
@@ -108,12 +113,11 @@ pub fn items_for(
     if c.firewall {
         let preq = PortRequest { server: slug(&t.name), game_port: t.game_port, txadmin_port: t.txadmin_port, expose_txadmin: t.txadmin_public };
         match firewall::detect(platform, runner) {
-            Some(kind) => v.push(Item {
-                kind: Kind::Firewall,
-                title: format!("Close the firewall ports Kora opened ({} / {})", t.game_port, t.txadmin_port),
-                plan: firewall::close_plan(&preq, kind).map_err(err)?,
-                note: None,
-            }),
+            Some(kind) => {
+                let ssh = if platform == Platform::Linux { firewall::ssh_ports() } else { vec![] };
+                let (plan, note) = firewall::close_plan_checked(&preq, kind, runner, &ssh).map_err(err)?;
+                v.push(Item { kind: Kind::Firewall, title: format!("Close the firewall ports Kora opened ({} / {})", t.game_port, t.txadmin_port), plan, note })
+            }
             None => v.push(Item {
                 kind: Kind::Firewall,
                 title: "Close the firewall ports Kora opened".into(),
@@ -125,25 +129,32 @@ pub fn items_for(
     if c.service_account_created {
         if let Some(name) = c.service_account.as_deref() {
             if platform == Platform::Linux {
+                let refuse = |why: String| Item { kind: Kind::ServiceAccount, title: format!("Delete the system account '{name}'"), plan: Plan::default(), note: Some(why) };
+                // Only the account Kora makes for THIS server (records could name any account).
+                let expected = account::account_name(&slug(&t.name));
                 match account::user_status(runner, name).map_err(err)? {
+                    _ if name != expected => v.push(refuse(format!("'{name}' is not the account Kora makes for this server ('{expected}'): Kora will not touch it."))),
                     account::UserStatus::Missing => {}
-                    account::UserStatus::Exists(0) => {
-                        v.push(Item {
-                            kind: Kind::ServiceAccount,
-                            title: format!("Delete the system account '{name}'"),
-                            plan: Plan::default(),
-                            note: Some(format!("'{name}' now has uid 0 (root): Kora will not touch it.")),
-                        });
+                    account::UserStatus::Exists(0) => v.push(refuse(format!("'{name}' now has uid 0 (root): Kora will not touch it."))),
+                    account::UserStatus::Exists(uid) if !account::is_system_uid(uid, account::uid_min()) => {
+                        v.push(refuse(format!("'{name}' is not a system account (uid {uid}), so it is not one Kora created: Kora will not touch it.")))
                     }
                     account::UserStatus::Exists(_) => {
                         let mut steps: Vec<SystemStep> = Vec::new();
                         if keep_files {
-                            if let Some(owner) = &c.dir_owner {
-                                steps.push(SystemStep::run(
+                            match c.dir_owner.as_deref() {
+                                Some(owner) if valid_owner(owner) => steps.push(SystemStep::run(
                                     format!("Give the kept server folder back to its previous owner ({owner}) before the account '{name}' is deleted"),
                                     "chown",
-                                    &["-R", owner, &t.dir.to_string_lossy()],
-                                ));
+                                    &["-R", "--", owner, &t.dir.to_string_lossy()],
+                                )),
+                                Some(owner) => v.push(Item {
+                                    kind: Kind::ServiceAccount,
+                                    title: "Give the kept server folder back to its previous owner".into(),
+                                    plan: Plan::default(),
+                                    note: Some(format!("The recorded owner '{owner}' is not a plain uid:gid, so the folder's owner is left as it is.")),
+                                }),
+                                None => {}
                             }
                         }
                         steps.extend(account::delete_plan(name).map_err(err)?.steps);
@@ -160,13 +171,21 @@ pub fn items_for(
     }
     if let Some(path) = c.binary.as_deref() {
         let title = format!("Delete the root-owned copy of the kora program ({path})");
-        if binary_still_used {
+        let ours = binary::default_root(platform).is_some_and(|root| binary::is_pinned_copy_path(Path::new(path), &root, platform));
+        if !ours {
+            v.push(Item { kind: Kind::Binary, title, plan: Plan::default(), note: Some(format!("{path} is not a copy inside Kora's own program folder, so Kora will not delete it.")) });
+        } else if binary_still_used {
             v.push(Item { kind: Kind::Binary, title, plan: Plan::default(), note: Some("Another Kora server still runs this copy: kept.".into()) });
         } else {
             v.push(Item { kind: Kind::Binary, title, plan: binary::remove_plan(Path::new(path)), note: None });
         }
     }
     Ok(v)
+}
+
+/// `uid:gid` in digits, as the installer records the previous owner (nothing `chown` could read as an option).
+fn valid_owner(s: &str) -> bool {
+    s.split_once(':').is_some_and(|(u, g)| [u, g].iter().all(|p| !p.is_empty() && p.len() <= 10 && p.bytes().all(|b| b.is_ascii_digit())))
 }
 
 /// Should the record be cleared after this item was handled? Yes when commands ran, and for a
@@ -206,10 +225,12 @@ mod tests {
             service_account: Some("kora-my-server".into()),
             service_account_created: true,
             dir_owner: Some("0:0".into()),
-            binary: Some("/opt/kora/0.1.0-abc/kora".into()),
+            binary: Some(BIN.into()),
             ..Created::default()
         }
     }
+
+    const BIN: &str = "/opt/kora/0.1.0-0123456789ab/kora";
 
     fn lines(i: &Item) -> Vec<String> {
         i.plan.steps.iter().map(|s| s.command_line().unwrap_or_else(|| format!("{:?}", s.action))).collect()
@@ -242,11 +263,11 @@ mod tests {
     #[test]
     fn firewall_rules_are_removed_with_the_detected_tool() {
         let r = FakeRunner::default();
-        r.respond("ufw status", 0, "Status: active\n");
+        r.respond("ufw status", 0, "Status: active\n\n31120/tcp ALLOW Anywhere # Kora my-server game\n31120/udp ALLOW Anywhere # Kora my-server game\n");
         let c = Created { firewall: true, ..Created::default() };
         let items = items_for(&target(), &c, Platform::Linux, &r, false, false).unwrap();
         let l = lines(&items[0]);
-        assert!(!l.is_empty() && l.iter().all(|x| x.starts_with("ufw")), "{l:?}");
+        assert_eq!(l, ["ufw delete allow 31120/tcp", "ufw delete allow 31120/udp"]);
     }
 
     #[test]
@@ -258,7 +279,7 @@ mod tests {
         // flag set but the account is already gone: nothing to do either
         let gone = FakeRunner::default();
         gone.respond("id -u", 1, "");
-        let c = Created { service_account: Some("kora-x".into()), service_account_created: true, ..Created::default() };
+        let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, ..Created::default() };
         assert!(items_for(&target(), &c, Platform::Linux, &gone, false, false).unwrap().is_empty());
         // and one that has become uid 0 is refused
         let root = FakeRunner::default();
@@ -271,15 +292,47 @@ mod tests {
     fn kept_files_are_handed_back_before_the_account_is_deleted() {
         let r = FakeRunner::default();
         r.respond("id -u", 0, "998\n");
-        let c = Created { service_account: Some("kora-x".into()), service_account_created: true, dir_owner: Some("1000:1000".into()), ..Created::default() };
+        let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, dir_owner: Some("1000:1000".into()), ..Created::default() };
         let items = items_for(&target(), &c, Platform::Linux, &r, true, false).unwrap();
-        assert_eq!(lines(&items[0]), ["chown -R 1000:1000 /srv/kora/my-server", "userdel kora-x"]);
+        assert_eq!(lines(&items[0]), ["chown -R -- 1000:1000 /srv/kora/my-server", "userdel kora-my-server"]);
+    }
+
+    #[test]
+    fn forged_records_cannot_delete_other_accounts_or_files() {
+        let r = FakeRunner::default();
+        r.respond("id -u kora-my-server", 0, "998\n");
+        r.respond("id -u alice", 0, "1000\n");
+        r.respond("id -u kora-other", 0, "997\n");
+        // Another account than this server's own: never deleted, whatever the flag says.
+        for name in ["alice", "kora-other", "sshd"] {
+            let c = Created { service_account: Some(name.into()), service_account_created: true, ..Created::default() };
+            let items = items_for(&target(), &c, Platform::Linux, &r, false, false).unwrap();
+            assert!(items.iter().all(|i| i.plan.steps.is_empty()), "{name}: {:?}", items);
+            assert!(items[0].note.as_deref().unwrap().contains("will not touch"), "{name}");
+        }
+        // This server's account name, but an ordinary (person's) account: refused.
+        let person = FakeRunner::default();
+        person.respond("id -u", 0, "1001\n");
+        let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, ..Created::default() };
+        let items = items_for(&target(), &c, Platform::Linux, &person, false, false).unwrap();
+        assert!(items[0].plan.steps.is_empty() && items[0].note.as_deref().unwrap().contains("not a system account"));
+        // A recorded owner that chown could read as an option: no chown.
+        let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, dir_owner: Some("--reference=/etc/shadow".into()), ..Created::default() };
+        let items = items_for(&target(), &c, Platform::Linux, &r, true, false).unwrap();
+        assert!(!items.iter().flat_map(lines).any(|l| l.starts_with("chown")), "{items:?}");
+        assert!(items.iter().flat_map(lines).any(|l| l == "userdel kora-my-server"));
+        // A program path outside Kora's program folder: never deleted.
+        for bin in ["/etc/passwd", "/usr/bin/sudo", "/opt/kora/../../etc/0.1.0-0123456789ab/kora", "/opt/kora/v/kora"] {
+            let c = Created { binary: Some(bin.into()), ..Created::default() };
+            let items = items_for(&target(), &c, Platform::Linux, &r, false, false).unwrap();
+            assert!(items[0].plan.steps.is_empty() && items[0].note.as_deref().unwrap().contains("will not delete"), "{bin}");
+        }
     }
 
     #[test]
     fn a_shared_program_copy_is_kept_while_another_server_uses_it() {
         let r = FakeRunner::default();
-        let c = Created { binary: Some("/opt/kora/v/kora".into()), ..Created::default() };
+        let c = Created { binary: Some(BIN.into()), ..Created::default() };
         let kept = items_for(&target(), &c, Platform::Linux, &r, false, true).unwrap();
         assert!(kept[0].plan.steps.is_empty() && kept[0].note.is_some());
         let gone = items_for(&target(), &c, Platform::Linux, &r, false, false).unwrap();

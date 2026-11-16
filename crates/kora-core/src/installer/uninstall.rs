@@ -84,11 +84,11 @@ pub fn run(
     save: &mut dyn FnMut(&Registry) -> std::io::Result<()>,
 ) -> Summary {
     let mut sum = Summary::default();
-    let names: Vec<(String, std::path::PathBuf)> = reg
+    let names: Vec<(String, std::path::PathBuf, super::registry::PortsRecord)> = reg
         .servers
         .iter()
         .filter(|s| opts.only.as_deref().is_none_or(|o| s.name == o || slug(&s.name) == o || super::registry::same_path(&s.dir, Path::new(o))))
-        .map(|s| (s.name.clone(), s.dir.clone()))
+        .map(|s| (s.name.clone(), s.dir.clone(), s.ports))
         .collect();
     if names.is_empty() {
         say(&match &opts.only {
@@ -98,7 +98,7 @@ pub fn run(
         return sum;
     }
     let verb = if opts.dry_run { "Would" } else { "Will" };
-    for (name, dir) in names {
+    for (name, dir, ports) in names {
         say(&format!("\n== {name} ({})", dir.display()));
         let (Some(req), Some(created)) = (load_request_from(&dir), load_created_from(&dir)) else {
             say("  This folder has no Kora records (it is missing or was not installed by Kora), so Kora cannot tell what it created for it and will not guess.");
@@ -113,7 +113,11 @@ pub fn run(
             }
             continue;
         };
-        let target = Target::from_request(&req);
+        // The name and ports come from the operator's own server list, not from `request.json`:
+        // the server folder can be changed by its service account, the list cannot.
+        let mut target = Target::from_request(&req);
+        target.name = name.clone();
+        (target.game_port, target.txadmin_port) = (ports.game, ports.txadmin);
         let has_db = !matches!(req.db, super::DbChoice::Skip) && dir.join(".kora").join("db-provision.json").is_file();
 
         // Files and databases first: they decide how the system items are undone (kept files are handed back).
@@ -314,6 +318,8 @@ mod tests {
         ServerEntry { name: name.into(), dir, mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 }
     }
 
+    const BIN: &str = "/opt/kora/0.1.0-0123456789ab/kora";
+
     fn created(account: &str, bin: &str) -> Created {
         Created {
             service_unit: Some(format!("/etc/systemd/system/kora-{account}.service")),
@@ -351,7 +357,7 @@ mod tests {
     #[test]
     fn dry_run_lists_everything_and_changes_nothing() {
         let t = tempfile::tempdir().unwrap();
-        let mut reg = Registry { servers: vec![server(t.path(), "alpha", &created("alpha", "/opt/kora/v/kora"))] };
+        let mut reg = Registry { servers: vec![server(t.path(), "alpha", &created("alpha", BIN))] };
         let r = FakeRunner::default();
         r.respond("id -u", 0, "998\n");
         let mut del = vec![];
@@ -368,7 +374,7 @@ mod tests {
     #[test]
     fn defaults_remove_system_items_keep_files_and_databases_and_forget_the_entry() {
         let t = tempfile::tempdir().unwrap();
-        let entry = server(t.path(), "alpha", &created("alpha", "/opt/kora/v/kora"));
+        let entry = server(t.path(), "alpha", &created("alpha", BIN));
         let dir = entry.dir.clone();
         let mut reg = Registry { servers: vec![entry] };
         let r = FakeRunner::default();
@@ -378,11 +384,11 @@ mod tests {
         let calls = r.calls();
         assert!(calls.iter().any(|c| c == "systemctl stop kora-alpha"), "{calls:?}");
         assert!(calls.iter().any(|c| c == "remove /etc/systemd/system/kora-alpha.service"));
-        assert!(calls.iter().any(|c| *c == "chown -R 0:0 ".to_string() + &dir.to_string_lossy()), "kept folder is handed back first: {calls:?}");
+        assert!(calls.iter().any(|c| *c == "chown -R -- 0:0 ".to_string() + &dir.to_string_lossy()), "kept folder is handed back first: {calls:?}");
         let chown = calls.iter().position(|c| c.starts_with("chown")).unwrap();
         let userdel = calls.iter().position(|c| c == "userdel kora-alpha").unwrap();
         assert!(chown < userdel);
-        assert!(calls.iter().any(|c| c == "remove /opt/kora/v/kora"));
+        assert!(calls.iter().any(|c| *c == format!("remove {BIN}")));
         assert!(del.is_empty(), "files and databases are kept by default");
         assert!(dir.join("precious.txt").is_file());
         assert!(reg.servers.is_empty(), "entry forgotten");
@@ -395,14 +401,14 @@ mod tests {
     #[test]
     fn declining_an_item_keeps_it_and_each_item_is_asked_separately() {
         let t = tempfile::tempdir().unwrap();
-        let mut reg = Registry { servers: vec![server(t.path(), "alpha", &created("alpha", "/opt/kora/v/kora"))] };
+        let mut reg = Registry { servers: vec![server(t.path(), "alpha", &created("alpha", BIN))] };
         let r = FakeRunner::default();
         r.respond("id -u", 0, "998\n");
         let mut ask = Script(vec![("system account", false)], vec![]);
         let mut del = vec![];
         let (sum, _) = go(&mut reg, &Options::default(), true, &r, &mut ask, &mut del);
         assert!(!r.calls().iter().any(|c| c.starts_with("userdel")), "declined");
-        assert!(r.calls().iter().any(|c| c == "remove /opt/kora/v/kora"));
+        assert!(r.calls().iter().any(|c| *c == format!("remove {BIN}")));
         assert!(sum.kept.iter().any(|k| k.contains("system account")));
         // service, account, binary, files, forget-entry... each its own question
         assert!(ask.1.len() >= 5, "{:?}", ask.1);
@@ -439,13 +445,35 @@ mod tests {
     #[test]
     fn without_admin_rights_system_items_are_reported_not_attempted() {
         let t = tempfile::tempdir().unwrap();
-        let mut reg = Registry { servers: vec![server(t.path(), "alpha", &created("alpha", "/opt/kora/v/kora"))] };
+        let mut reg = Registry { servers: vec![server(t.path(), "alpha", &created("alpha", BIN))] };
         let r = FakeRunner::default();
         r.respond("id -u", 0, "998\n");
         let mut del = vec![];
         let (sum, _) = go(&mut reg, &Options::default(), false, &r, &mut Defaults, &mut del);
         assert!(sum.failed.iter().any(|f| f.contains("administrator")), "{sum:?}");
         assert!(!r.calls().iter().any(|c| c.starts_with("systemctl") || c.starts_with("userdel") || c.starts_with("remove")), "{:?}", r.calls());
+    }
+
+    #[test]
+    fn forged_records_in_the_server_folder_cannot_aim_root_elsewhere() {
+        // The service account rewrote both records: another server's account, the SSH port, a
+        // system file as the program copy. The registry (not in the folder) names the server.
+        let t = tempfile::tempdir().unwrap();
+        let c = Created { service_account: Some("kora-beta".into()), service_account_created: true, binary: Some("/etc/shadow".into()), firewall: true, ..Created::default() };
+        let entry = server(t.path(), "alpha", &c);
+        let mut req = request("beta", &entry.dir);
+        req.ports.game = 2222;
+        std::fs::write(entry.dir.join(".kora/request.json"), serde_json::to_vec(&req).unwrap()).unwrap();
+        let mut reg = Registry { servers: vec![entry] };
+        let r = FakeRunner::default();
+        r.respond("id -u", 0, "998\n");
+        r.respond("ufw status", 0, "Status: active\n\n2222/tcp ALLOW Anywhere\n");
+        let mut del = vec![];
+        let (_, rig) = go(&mut reg, &Options::default(), true, &r, &mut Defaults, &mut del);
+        let calls = r.calls();
+        assert!(!calls.iter().any(|c| c.starts_with("userdel") || c.contains("shadow") || c.contains("2222") || c.starts_with("ufw delete")), "{calls:?}");
+        let text = rig.out.join("\n");
+        assert!(text.contains("will not touch") && text.contains("will not delete"), "{text}");
     }
 
     #[test]
@@ -466,7 +494,7 @@ mod tests {
     #[test]
     fn a_shared_program_copy_goes_only_with_the_last_server_that_uses_it() {
         let t = tempfile::tempdir().unwrap();
-        let bin = "/opt/kora/shared/kora";
+        let bin = "/opt/kora/0.2.0-aaaaaaaaaaaa/kora";
         let (a, b) = (server(t.path(), "a", &created("a", bin)), server(t.path(), "b", &created("b", bin)));
         let mut reg = Registry { servers: vec![a, b] };
         let r = FakeRunner::default();

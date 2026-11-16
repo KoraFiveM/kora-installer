@@ -336,17 +336,9 @@ impl Snapshot {
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        std::fs::create_dir_all(dir)?;
-        let name = file
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "snapshot".into());
-        let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
-        if let Err(e) = std::fs::rename(&tmp, file) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e.into());
-        }
+        // Root (the update timer) writes this into the server folder: never through a planted link.
+        let name = file.file_name().map(|n| n.to_os_string()).unwrap_or_else(|| "snapshot".into());
+        crate::fsutil::write_no_follow(&dir.join(name), &serde_json::to_vec_pretty(self)?, 0o644)?;
         Ok(())
     }
     pub fn load(file: &Path) -> Result<Snapshot, UpdateError> {
@@ -432,16 +424,9 @@ fn save_holds(server_dir: &Path, h: &std::collections::BTreeMap<String, String>)
         let _ = std::fs::remove_file(&p);
         return;
     }
-    let Some(dir) = p.parent() else { return };
-    let _ = std::fs::create_dir_all(dir);
-    let tmp = dir.join(format!("held.json.{}.tmp", std::process::id()));
-    if serde_json::to_vec_pretty(h)
-        .ok()
-        .and_then(|b| std::fs::write(&tmp, b).ok())
-        .is_some()
-        && std::fs::rename(&tmp, &p).is_err()
-    {
-        let _ = std::fs::remove_file(&tmp);
+    // Never through a planted link (root writes this too).
+    if let Ok(b) = serde_json::to_vec_pretty(h) {
+        let _ = crate::fsutil::write_no_follow(&p, &b, 0o644);
     }
 }
 

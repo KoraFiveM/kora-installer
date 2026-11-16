@@ -102,6 +102,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::UserAdd => on_op(op, handlers::remote::user_add),
         Op::UserRemove => on_op(op, handlers::remote::user_remove),
         Op::SessionLogout => on_op(op, crate::session_logout),
+        Op::SessionLink => on_op(op, crate::session_link),
         Op::CheckCfx => on_op(op, handlers::install::check_cfx),
         Op::AssetsList => on_op(op, handlers::assets::assets_list),
         // The zip is the request body: streamed to a file, so the panel-wide 1 MiB limit does not apply.

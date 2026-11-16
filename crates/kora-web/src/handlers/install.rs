@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use axum::Json;
+use axum::{Extension, Json};
 use kora_core::api::install::{
     self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall,
 };
@@ -21,6 +21,7 @@ use kora_core::api::Op;
 use kora_core::installer::{slug, Mode};
 use serde_json::{json, Value};
 
+use crate::remote::Caller;
 use crate::{blocking, ApiError, AppState};
 
 static ENV: RwLock<Option<Arc<dyn InstallEnv>>> = RwLock::new(None);
@@ -254,7 +255,15 @@ fn log_finish(job: &str, path: Option<PathBuf>) {
 }
 
 /// `GET /installs/{job}/log` → `{path, lines}` (the end of the log; `path` is empty until the log is written).
-pub async fn install_log(Path(job): Path<String>) -> Result<Json<Value>, ApiError> {
+pub async fn install_log(
+    State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(job): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    // The log belongs to the install job: a remote caller needs the role that job needs.
+    if caller.remote {
+        crate::jobs::may_read(&caller, st.jobs.op(&job))?;
+    }
     with_logs(|l| {
         l.by_job.get(&job).map(|e| {
             let start = e.lines.len().saturating_sub(TAIL);

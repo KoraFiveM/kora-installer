@@ -105,11 +105,24 @@ pub fn ensure_token(home: &Path) -> Result<String, String> {
     Ok(t)
 }
 
+fn saved_info(home: &Path) -> Option<serde_json::Value> {
+    serde_json::from_slice(&std::fs::read(info_path(home)).ok()?).ok()
+}
+
 /// The port the installed service was set up with.
 pub fn saved_port(home: &Path) -> Option<u16> {
-    let v: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(info_path(home)).ok()?).ok()?;
-    u16::try_from(v["port"].as_u64()?).ok()
+    u16::try_from(saved_info(home)?["port"].as_u64()?).ok()
+}
+
+/// Was the installed service set up to listen on Tailscale too (`kora panel --tailscale`)?
+pub fn saved_tailscale(home: &Path) -> bool {
+    saved_info(home).is_some_and(|v| v["tailscale"].as_bool() == Some(true))
+}
+
+/// Make a new sign-in token (the old link stops working once the panel restarts with it).
+pub fn rotate_token(home: &Path) -> Result<String, String> {
+    let _ = std::fs::remove_file(token_path(home));
+    ensure_token(home)
 }
 
 /// The sign-in link of the installed service (needs no running process: the token is on disk).
@@ -163,8 +176,15 @@ fn systemd_quote(s: &str) -> String {
     )
 }
 
+/// The panel's command line in the service (after the program).
+fn service_args(port: u16, tailscale: bool) -> String {
+    // `--listen-tailscale` only listens; `--tailscale` would also redo the set-up at every start.
+    let ts = if tailscale { " --listen-tailscale" } else { "" };
+    format!("panel --no-open --foreground --port {port}{ts}")
+}
+
 /// The systemd user unit. `kora_home` is passed on only when it was customised.
-pub fn systemd_unit(exe: &Path, port: u16, kora_home_env: Option<&Path>) -> String {
+pub fn systemd_unit(exe: &Path, port: u16, tailscale: bool, kora_home_env: Option<&Path>) -> String {
     let env = kora_home_env
         .map(|h| {
             format!(
@@ -174,20 +194,28 @@ pub fn systemd_unit(exe: &Path, port: u16, kora_home_env: Option<&Path>) -> Stri
         })
         .unwrap_or_default();
     format!(
-        "[Unit]\nDescription=Kora Panel (monitoring and alerts)\nAfter=network.target\n\n[Service]\nType=simple\n{env}ExecStart={} panel --no-open --foreground --port {port}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n",
-        systemd_quote(&exe.display().to_string())
+        "[Unit]\nDescription=Kora Panel (monitoring and alerts)\nAfter=network.target\n\n[Service]\nType=simple\n{env}ExecStart={} {}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n",
+        systemd_quote(&exe.display().to_string()),
+        service_args(port, tailscale)
     )
 }
 
 /// The Windows script: starts the panel with no console window.
-pub fn startup_script(exe: &Path, port: u16) -> String {
+pub fn startup_script(exe: &Path, port: u16, tailscale: bool) -> String {
     let exe = exe.display().to_string().replace('"', "");
-    format!("' Starts Kora Panel in the background at sign-in. Remove it with: kora panel --remove-service\r\nCreateObject(\"WScript.Shell\").Run \"\"\"{exe}\"\" panel --no-open --foreground --port {port}\", 0, False\r\n")
+    let args = service_args(port, tailscale);
+    format!("' Starts Kora Panel in the background at sign-in. Remove it with: kora panel --remove-service\r\nCreateObject(\"WScript.Shell\").Run \"\"\"{exe}\"\" {args}\", 0, False\r\n")
 }
 
 pub struct InstallSpec<'a> {
     pub exe: &'a Path,
     pub port: u16,
+    /// Also listen on the Tailscale addresses (`kora panel --tailscale`).
+    pub tailscale: bool,
+    /// Windows: the running background panel to stop first. There is no service manager to restart it,
+    /// and a new panel cannot take the port while the old one holds it (so a new token or setting
+    /// would silently not apply). Only set when that process is known to be our panel.
+    pub stop_pid: Option<u32>,
     /// Set when `KORA_HOME` is customised, so the service sees the same home.
     pub kora_home_env: Option<&'a Path>,
 }
@@ -201,7 +229,7 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
                 SystemStep::write(
                     "Write the Kora Panel user service",
                     &unit.display().to_string(),
-                    systemd_unit(spec.exe, spec.port, spec.kora_home_env),
+                    systemd_unit(spec.exe, spec.port, spec.tailscale, spec.kora_home_env),
                     0o644,
                 )
                 .user_level(),
@@ -236,17 +264,30 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
         }
         Platform::Windows => {
             let script = startup_script_path().display().to_string();
-            Plan::new(vec![
+            let mut steps = Vec::new();
+            if let Some(pid) = spec.stop_pid {
+                steps.push(
+                    SystemStep::run_owned(
+                        "Stop the running panel",
+                        "taskkill.exe",
+                        vec!["/PID".into(), pid.to_string(), "/F".into()],
+                    )
+                    .user_level()
+                    .tolerant(),
+                );
+            }
+            steps.extend([
                 SystemStep::write(
                     "Write the Kora Panel start-up script",
                     &script,
-                    startup_script(spec.exe, spec.port),
+                    startup_script(spec.exe, spec.port, spec.tailscale),
                     0o644,
                 )
                 .user_level(),
                 SystemStep::run("Start the panel now", "wscript.exe", &["//nologo", &script])
                     .user_level(),
-            ])
+            ]);
+            Plan::new(steps)
         }
     }
 }
@@ -308,7 +349,7 @@ pub fn install(
     platform: Platform,
 ) -> ServiceResult<String> {
     ensure_token(home).map_err(ServiceError::Other)?;
-    let info = serde_json::json!({"port": spec.port}).to_string();
+    let info = serde_json::json!({"port": spec.port, "tailscale": spec.tailscale}).to_string();
     std::fs::create_dir_all(home)?;
     std::fs::write(info_path(home), info)?;
     apply_plan(&install_plan(spec, platform), runner)?;
@@ -347,6 +388,7 @@ mod tests {
         let u = systemd_unit(
             Path::new("/opt/my kora/kora"),
             47200,
+            false,
             Some(Path::new("/data/kora home")),
         );
         assert!(
@@ -358,12 +400,14 @@ mod tests {
                 && u.contains("WantedBy=default.target")
                 && u.contains("Restart=on-failure")
         );
-        assert!(!systemd_unit(Path::new("/k"), 1, None).contains("Environment="));
+        assert!(!systemd_unit(Path::new("/k"), 1, false, None).contains("Environment="));
+        assert!(systemd_unit(Path::new("/k"), 1, true, None).contains("ExecStart=\"/k\" panel --no-open --foreground --port 1 --listen-tailscale\n"));
     }
 
     #[test]
     fn the_windows_script_is_hidden_and_quotes_the_path() {
-        let s = startup_script(Path::new(r"C:\Program Files\Kora\kora.exe"), 47120);
+        let s = startup_script(Path::new(r"C:\Program Files\Kora\kora.exe"), 47120, false);
+        assert!(startup_script(Path::new("k.exe"), 1, true).contains("--port 1 --listen-tailscale\", 0, False"));
         assert!(
             s.contains(
                 r#"Run """C:\Program Files\Kora\kora.exe"" panel --no-open --foreground --port 47120", 0, False"#
@@ -377,6 +421,8 @@ mod tests {
         let spec = InstallSpec {
             exe: Path::new("/k/kora"),
             port: 47120,
+            tailscale: false,
+            stop_pid: None,
             kora_home_env: None,
         };
         for p in [Platform::Linux, Platform::Windows] {
@@ -398,6 +444,10 @@ mod tests {
             .steps
             .iter()
             .any(|s| s.command_line().is_some_and(|l| l.contains("/PID 7"))));
+        // Windows: a running panel is stopped first, so the new token or settings take effect.
+        let restart = InstallSpec { exe: Path::new("k.exe"), port: 1, tailscale: false, stop_pid: Some(42), kora_home_env: None };
+        let lines: Vec<String> = install_plan(&restart, Platform::Windows).steps.iter().filter_map(SystemStep::command_line).collect();
+        assert!(lines[0].contains("taskkill.exe /PID 42 /F") && lines[1].contains("wscript.exe"), "{lines:?}");
         assert!(!remove_plan(Platform::Windows, None)
             .steps
             .iter()
@@ -443,9 +493,14 @@ mod tests {
         let spec = InstallSpec {
             exe: Path::new("/k/kora"),
             port: 47123,
+            tailscale: true,
+            stop_pid: None,
             kora_home_env: None,
         };
         let link = install(home.path(), &spec, &rn, Platform::Linux).unwrap();
+        assert!(saved_tailscale(home.path()));
+        let old = load_token(home.path()).unwrap();
+        assert_ne!(rotate_token(home.path()).unwrap(), old, "a new token");
         assert!(link.starts_with("http://127.0.0.1:47123/#token="));
         assert!(
             rn.calls()

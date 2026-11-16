@@ -11,7 +11,7 @@ Commands:
   add-resources  Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
   add-asset      Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal
   status         Show registered servers
-  self-update    Update the kora program itself to the newest release (checksum-verified)
+  self-update    Update the kora program itself to the newest stable release (checksum-verified)
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
@@ -157,7 +157,8 @@ Open the Kora Panel: install, manage and monitor servers in your web browser (th
 Usage: kora panel [OPTIONS] [COMMAND]
 
 Commands:
-  user  Manage the people who may sign in to the panel remotely (each has a token and a role)
+  user       Manage the people who may sign in to the panel remotely (each has a token and a role)
+  tailscale  Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
 
 Options:
       --port <PORT>
@@ -171,6 +172,18 @@ Options:
       --remote
           Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings)
 
+      --tailscale
+          Open the panel to your own devices over Tailscale: it keeps running in the background, also listens on this computer's Tailscale address, and you sign in with your Tailscale account (no link, no tunnel). Run it once; with --foreground it runs in this window instead
+
+      --admin <LOGIN>
+          With --tailscale: the Tailscale account (name@example.com) that becomes the panel's admin. Without it Kora uses the account you are connected from, else the one that added this computer to Tailscale
+
+      --allow-public
+          Let --bind be a public address or every interface (0.0.0.0). The panel is plain HTTP, so on the internet sign-in tokens could be read on the way: use --tailscale or an SSH tunnel instead
+
+      --new-token
+          Make a new sign-in token, so links shown before stop working (restarts the background panel)
+
       --no-open
           Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop)
 
@@ -178,7 +191,7 @@ Options:
           Run the panel in this window and stop it when the window closes: do not offer or use the background panel
 
       --setup
-          Make sure the background panel is set up and running, then open it in your browser and print the sign-in link. Never asks questions (the install scripts run this)
+          Make sure the background panel is set up and running, then open it in your browser and print the sign-in link (the install scripts run this). Never reads standard input; on a server with Tailscale it asks once on the terminal whether to use it (KORA_TAILSCALE=1 or 0 answers in advance)
 
       --install-service
           Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed)
@@ -253,6 +266,86 @@ Usage: kora panel user remove [OPTIONS] <NAME>
 Arguments:
   <NAME>
           The user to remove
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tailscale =====
+Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
+
+Usage: kora panel tailscale [OPTIONS] <COMMAND>
+
+Commands:
+  allow   Let a Tailscale account sign in to the panel, with a role
+  remove  Stop letting a Tailscale account sign in; their sessions end at once
+  list    List the Tailscale accounts that may sign in
+  off     Turn Tailscale access off: the panel listens on this computer only again
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tailscale allow =====
+Let a Tailscale account sign in to the panel, with a role
+
+Usage: kora panel tailscale allow [OPTIONS] <LOGIN>
+
+Arguments:
+  <LOGIN>
+          Their Tailscale login, for example name@example.com (GitHub accounts look like name@github)
+
+Options:
+      --role <ROLE>
+          What they may do: viewer (look only), operator (run servers, updates, logs) or admin (everything)
+          
+          [default: operator]
+          [possible values: viewer, operator, admin]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tailscale remove =====
+Stop letting a Tailscale account sign in; their sessions end at once
+
+Usage: kora panel tailscale remove [OPTIONS] <LOGIN>
+
+Arguments:
+  <LOGIN>
+          The Tailscale login to remove
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tailscale list =====
+List the Tailscale accounts that may sign in
+
+Usage: kora panel tailscale list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tailscale off =====
+Turn Tailscale access off: the panel listens on this computer only again
+
+Usage: kora panel tailscale off [OPTIONS]
 
 Options:
       --no-elevate
@@ -378,7 +471,7 @@ Options:
           Print help
 
 ===== kora self-update =====
-Update the kora program itself to the newest release (checksum-verified)
+Update the kora program itself to the newest stable release (checksum-verified)
 
 Usage: kora self-update [OPTIONS]
 
@@ -390,7 +483,7 @@ Options:
           Do not ask for confirmation
 
       --version <vX.Y.Z>
-          Install exactly this release (also allows going back to an older one), e.g. v0.2.1
+          Install exactly this release (also an older one or a pre-release), e.g. v0.2.1
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

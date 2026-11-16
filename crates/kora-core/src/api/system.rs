@@ -31,10 +31,15 @@ use super::backend::{Backend, Res, Status, StatusDetail, UpdateBadge};
 #[derive(Default)]
 pub struct SystemBackend;
 
-/// Is `name` something we may write into server.cfg?
+/// Is `name` something we may write into server.cfg? It is also used as a folder name, so `.`,
+/// `..` (or any all-dots name) and a leading `-` (read as an option by git and other tools) are refused.
 pub fn valid_resource_name(v: &str) -> bool {
     let core = v.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(v);
-    !core.is_empty() && v.len() <= 100 && core.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+    !core.is_empty()
+        && v.len() <= 100
+        && !core.starts_with('-')
+        && !core.bytes().all(|b| b == b'.')
+        && core.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
 }
 
 /// `cfg` with `ensure <name>` added at the end, or `None` when it is already ensured.
@@ -390,6 +395,12 @@ mod tests {
         assert!(!valid_resource_name("a b"));
         assert!(!valid_resource_name("x;quit"));
         assert!(!valid_resource_name("[]"));
+        for evil in [".", "..", "...", "[..]", "-x", "--upload-pack=x", "[-x]"] {
+            assert!(!valid_resource_name(evil), "{evil}");
+        }
+        for ok in ["a-b", "a.b", "x-", "v1.2"] {
+            assert!(valid_resource_name(ok), "{ok}");
+        }
     }
 
     #[test]

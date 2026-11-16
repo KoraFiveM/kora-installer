@@ -183,6 +183,57 @@ pub fn sign_in_link(port: u16, token: &str) -> String {
     format!("http://127.0.0.1:{port}/#token={token}")
 }
 
+/// A sign-in link with a one-time code (works once, for a few minutes), so the long-lived token
+/// never sits in a browser's history.
+pub fn code_link(port: u16, code: &str) -> String {
+    format!("http://127.0.0.1:{port}/#code={code}")
+}
+
+/// Ask the panel on 127.0.0.1:`port` for a one-time sign-in code, proving who we are with its token
+/// (`POST /api/v1/session/link`). `Err` when it does not answer, or is a version without codes.
+pub fn request_link_code(port: u16, token: &str) -> Result<String, String> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut s = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).map_err(|e| e.to_string())?;
+    s.set_read_timeout(Some(Duration::from_secs(3))).map_err(|e| e.to_string())?;
+    s.set_write_timeout(Some(Duration::from_secs(3))).map_err(|e| e.to_string())?;
+    let body = "{}";
+    let req = format!(
+        "POST /api/v1/session/link HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nX-Kora: 1\r\n\
+Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    let _ = s.take(64 * 1024).read_to_end(&mut buf);
+    parse_link_code(&String::from_utf8_lossy(&buf))
+}
+
+/// The code from the raw answer to `POST /api/v1/session/link`.
+pub fn parse_link_code(response: &str) -> Result<String, String> {
+    let (head, body) = response.split_once("\r\n\r\n").ok_or("no answer")?;
+    let status = head.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("");
+    if status != "200" && status != "201" {
+        return Err(format!("the panel answered {status}"));
+    }
+    let v: serde_json::Value = serde_json::from_str(body.trim()).map_err(|_| "not JSON".to_string())?;
+    let code = v["code"].as_str().unwrap_or("");
+    // Only a plain code goes into a link.
+    if code.len() >= 16 && code.len() <= 128 && code.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        Ok(code.to_string())
+    } else {
+        Err("no code in the answer".into())
+    }
+}
+
+/// The best link to sign in to the panel on `port`: a one-time code when the panel gives one,
+/// else (an older panel, or it is not answering) the token link.
+pub fn fresh_link(port: u16, token: &str) -> String {
+    match request_link_code(port, token) {
+        Ok(code) => code_link(port, &code),
+        Err(_) => sign_in_link(port, token),
+    }
+}
+
 /// What to print once the panel is up. `opened` is the browser result (`None`: not tried).
 pub fn ready_message(
     link: &str,
@@ -211,7 +262,11 @@ pub fn ready_message(
         out.push(format!("  {}", ssh_hint(port, env)));
         out.push("then open the link above in your browser there.".into());
     }
-    out.push("The link contains your sign-in token: keep it private. Show it again with `kora panel --print-link`.".into());
+    if link.contains("#code=") {
+        out.push("The link works once, within 10 minutes. Get a new one with `kora panel --print-link`.".into());
+    } else {
+        out.push("The link contains your sign-in token: keep it private. Show it again with `kora panel --print-link`.".into());
+    }
     out
 }
 
@@ -498,6 +553,8 @@ mod tests {
             text.contains("ssh -L 47120:127.0.0.1:47120 sam@10.0.0.5"),
             "{text}"
         );
+        let once = ready_message(&code_link(47120, "c0de"), 47120, true, None, &env).join("\n");
+        assert!(once.contains("works once") && !once.contains("contains your sign-in token"), "{once}");
         let text = ready_message(&link, 47120, false, Some(&Ok(())), &env).join("\n");
         assert!(
             text.contains("open in your browser")
@@ -511,6 +568,38 @@ mod tests {
             text.contains("Could not open a browser") && text.contains(&link),
             "{text}"
         );
+    }
+
+    #[test]
+    fn link_codes_are_read_strictly() {
+        let ok = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"code\":\"0123456789abcdef0123456789abcdef\",\"expires_in\":600}";
+        assert_eq!(parse_link_code(ok).unwrap(), "0123456789abcdef0123456789abcdef");
+        assert!(parse_link_code("HTTP/1.1 404 Not Found\r\n\r\n{\"error\":\"x\"}").is_err(), "an older panel");
+        assert!(parse_link_code("HTTP/1.1 200 OK\r\n\r\n{\"code\":\"abc&x=<script>\"}").is_err(), "only a plain code goes in a link");
+        assert!(parse_link_code("HTTP/1.1 200 OK\r\n\r\n{\"code\":\"short\"}").is_err());
+        assert!(parse_link_code("").is_err());
+        assert_eq!(code_link(47120, "abcd"), "http://127.0.0.1:47120/#code=abcd");
+    }
+
+    #[test]
+    fn a_fresh_link_asks_the_panel_and_falls_back_to_the_token() {
+        use std::net::TcpListener;
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = c.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            c.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"code\":\"feedfacefeedfacefeedfacefeedface\"}").unwrap();
+            req
+        });
+        assert_eq!(fresh_link(port, "tok"), format!("http://127.0.0.1:{port}/#code=feedfacefeedfacefeedfacefeedface"));
+        let req = server.join().unwrap();
+        assert!(req.starts_with("POST /api/v1/session/link ") && req.contains("Authorization: Bearer tok"), "{req}");
+        // Nobody answering: the token link, so the person is never left without a way in.
+        let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        assert_eq!(fresh_link(free, "tok"), format!("http://127.0.0.1:{free}/#token=tok"));
     }
 
     struct Fake {

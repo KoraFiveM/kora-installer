@@ -48,16 +48,8 @@ impl UpdateStatus {
 
 /// Write atomically (temp file in the same folder, then rename), so a reader never sees half a file.
 pub fn write(server_dir: &Path, st: &UpdateStatus) -> std::io::Result<()> {
-    let p = path(server_dir);
-    let dir = p.parent().expect("status path has a parent");
-    std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("update-status.json.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, serde_json::to_vec_pretty(st).map_err(std::io::Error::other)?)?;
-    if let Err(e) = std::fs::rename(&tmp, &p) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    Ok(())
+    // Root (the update timer) writes this into the server folder: never through a planted link.
+    crate::fsutil::write_no_follow(&path(server_dir), &serde_json::to_vec_pretty(st).map_err(std::io::Error::other)?, 0o644)
 }
 
 /// Best effort: a status file that cannot be written never fails an update.

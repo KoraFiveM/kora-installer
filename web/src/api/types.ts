@@ -13,6 +13,13 @@ export interface Identity {
   role: Role
 }
 
+/** `POST /session`: the cookie is set; `secret` must come back with every request (`X-Kora-Session`). */
+export interface SessionCreated {
+  ok: boolean
+  identity: Identity
+  secret: string
+}
+
 export interface Meta {
   version: string
   api: number
@@ -39,6 +46,8 @@ export interface RemoteSettings {
   enabled_by_flag: boolean
   bind: string
   port: number
+  /** Where Tailscale devices open the panel, while it also listens there (`kora panel --tailscale`). */
+  tailnet_url: string | null
   tailscale: boolean
   tailscale_users: Record<string, Role>
   allowed_hosts: string[]

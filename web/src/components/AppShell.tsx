@@ -27,7 +27,8 @@ export function AppShell() {
       <aside className="border-b border-border bg-card md:min-h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r">
         <div className="px-5 py-4 font-heading text-xl font-bold tracking-tight">Kora</div>
         <nav aria-label="Main" className="flex gap-1 px-3 pb-3 md:flex-col md:pb-0">
-          {nav.map(({ to, label, icon: Icon, end }) => (
+          {/* The fleet uses the tokens of other panels stored here, so it is only offered on this computer. */}
+          {nav.filter((n) => !(n.to === '/fleet' && meta.data?.remote)).map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}

@@ -38,9 +38,8 @@ impl ArtifactStore {
         }
     }
     fn save(&self, s: &StoreState) -> Result<()> {
-        let tmp = self.root.join("state.json.tmp");
-        fs::write(&tmp, serde_json::to_vec_pretty(s).map_err(|e| ArtifactError::Store(e.to_string()))?)?;
-        fs::rename(tmp, self.state_path())?;
+        // Never through a link planted in the server folder (root installs and swaps builds).
+        crate::fsutil::write_no_follow(&self.state_path(), &serde_json::to_vec_pretty(s).map_err(|e| ArtifactError::Store(e.to_string()))?, 0o644)?;
         Ok(())
     }
 

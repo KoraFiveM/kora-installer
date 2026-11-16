@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, setUnauthorizedHandler } from './client'
+import { api, ApiError, sessionSecret, setUnauthorizedHandler } from './client'
 import { commandLine, toNotice } from '@/components/ErrorNotice'
 import { jsonResponse } from '@/test/utils'
 
@@ -11,6 +11,63 @@ beforeEach(() => {
 afterEach(() => {
   setUnauthorizedHandler(null)
   vi.unstubAllGlobals()
+})
+
+describe('session secret', () => {
+  it('keeps the secret from sign-in and sends it with every request and stream', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, identity: { name: 'local', provider: 'local', role: 'admin' }, secret: 's3cr3t' }))
+    await api.session.createByCode('c0de')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ code: 'c0de' })
+    expect(sessionSecret()).toBe('s3cr3t')
+    expect(window.localStorage.getItem('kora_session_secret')).toBe('s3cr3t')
+    fetchMock.mockImplementation(async () => jsonResponse(200, { servers: [] }))
+    await api.servers.list()
+    expect(fetchMock.mock.calls[1][1].headers['X-Kora-Session']).toBe('s3cr3t')
+    await api.servers.control('a', 'start')
+    expect(fetchMock.mock.calls[2][1].headers['X-Kora-Session']).toBe('s3cr3t')
+    // EventSource cannot send headers: the streams carry it in the query.
+    expect(api.eventsUrl()).toBe('/api/v1/events?ks=s3cr3t')
+    expect(api.jobs.eventsUrl('j 1')).toBe('/api/v1/jobs/j%201/events?ks=s3cr3t')
+    expect(api.console.streamUrl('my server')).toBe('/api/v1/servers/my%20server/console/stream?ks=s3cr3t')
+  })
+
+  it('sends nothing extra before sign-in', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { servers: [] }))
+    await api.servers.list()
+    expect(fetchMock.mock.calls[0][1].headers['X-Kora-Session']).toBeUndefined()
+    expect(api.eventsUrl()).toBe('/api/v1/events')
+  })
+
+  it('keeps the secret when a sign-in fails (a stale link in a new tab must not sign the other tabs out)', async () => {
+    window.localStorage.setItem('kora_session_secret', 'theirs')
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'That sign-in link has expired or was already used.' } }))
+    await expect(api.session.createByCode('used')).rejects.toBeInstanceOf(ApiError)
+    expect(sessionSecret()).toBe('theirs')
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'invalid token' } }))
+    await api.session.create('wrong').catch(() => undefined)
+    expect(sessionSecret()).toBe('theirs')
+  })
+
+  it('keeps a secret another tab stored while the failing request was on its way', async () => {
+    window.localStorage.setItem('kora_session_secret', 'old')
+    fetchMock.mockImplementationOnce(async () => {
+      window.localStorage.setItem('kora_session_secret', 'new')
+      return jsonResponse(401, { error: { code: 'unauthorized', message: 'missing or invalid session' } })
+    })
+    await api.servers.list().catch(() => undefined)
+    expect(sessionSecret()).toBe('new')
+  })
+
+  it('forgets the secret when the session ends or the user signs out', async () => {
+    window.localStorage.setItem('kora_session_secret', 'old')
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'missing or invalid session' } }))
+    await api.servers.list().catch(() => undefined)
+    expect(sessionSecret()).toBeNull()
+    window.localStorage.setItem('kora_session_secret', 'old')
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    await api.session.logout()
+    expect(sessionSecret()).toBeNull()
+  })
 })
 
 describe('api client', () => {

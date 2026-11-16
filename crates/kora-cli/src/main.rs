@@ -326,13 +326,28 @@ struct PanelArgs {
     /// Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings).
     #[arg(long)]
     remote: bool,
+    /// Open the panel to your own devices over Tailscale: it keeps running in the background, also listens on this computer's Tailscale address, and you sign in with your Tailscale account (no link, no tunnel). Run it once; with --foreground it runs in this window instead.
+    #[arg(long, conflicts_with_all = ["remove_service", "print_link", "setup", "new_token"])]
+    tailscale: bool,
+    /// With --tailscale: the Tailscale account (name@example.com) that becomes the panel's admin. Without it Kora uses the account you are connected from, else the one that added this computer to Tailscale.
+    #[arg(long, value_name = "LOGIN", requires = "tailscale")]
+    admin: Option<String>,
+    /// Also listen on this computer's Tailscale addresses, with the saved settings (the background service uses this; `--tailscale` sets it up).
+    #[arg(long, hide = true, conflicts_with = "tailscale")]
+    listen_tailscale: bool,
+    /// Let --bind be a public address or every interface (0.0.0.0). The panel is plain HTTP, so on the internet sign-in tokens could be read on the way: use --tailscale or an SSH tunnel instead.
+    #[arg(long)]
+    allow_public: bool,
+    /// Make a new sign-in token, so links shown before stop working (restarts the background panel).
+    #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link", "setup", "foreground"])]
+    new_token: bool,
     /// Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop).
     #[arg(long)]
     no_open: bool,
     /// Run the panel in this window and stop it when the window closes: do not offer or use the background panel.
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link", "setup"])]
     foreground: bool,
-    /// Make sure the background panel is set up and running, then open it in your browser and print the sign-in link. Never asks questions (the install scripts run this).
+    /// Make sure the background panel is set up and running, then open it in your browser and print the sign-in link (the install scripts run this). Never reads standard input; on a server with Tailscale it asks once on the terminal whether to use it (KORA_TAILSCALE=1 or 0 answers in advance).
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link"])]
     setup: bool,
     /// Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed).
@@ -354,6 +369,11 @@ enum PanelCmd {
     User {
         #[command(subcommand)]
         cmd: PanelUserCmd,
+    },
+    /// Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`).
+    Tailscale {
+        #[command(subcommand)]
+        cmd: panel_tailscale::TailscaleCmd,
     },
 }
 
@@ -393,7 +413,7 @@ enum Command {
     AddAsset(AddAssetArgs),
     /// Show registered servers.
     Status,
-    /// Update the kora program itself to the newest release (checksum-verified).
+    /// Update the kora program itself to the newest stable release (checksum-verified).
     SelfUpdate {
         /// Only say whether a newer version exists.
         #[arg(long)]
@@ -401,7 +421,7 @@ enum Command {
         /// Do not ask for confirmation.
         #[arg(long, short = 'y')]
         yes: bool,
-        /// Install exactly this release (also allows going back to an older one), e.g. v0.2.1.
+        /// Install exactly this release (also an older one or a pre-release), e.g. v0.2.1.
         #[arg(long, value_name = "vX.Y.Z")]
         version: Option<String>,
     },
@@ -501,12 +521,40 @@ enum HelperCmd {
 
 /// The helper's allow-list, checked with this very command-line definition: the arguments must parse
 /// as one of the privileged commands the panel otherwise asks the user to run, and nothing else.
+/// The install folder must be one the helper's user could have made themselves (see
+/// `kora_core::helper::dirs`).
 fn helper_validate(verb: &str, args: &[String]) -> Result<(), String> {
+    use kora_core::helper as h;
+    let uid = h::server::load_config(std::path::Path::new(h::CONFIG_PATH)).map(|c| c.uid);
+    helper_validate_for(verb, args, &|dir| match &uid {
+        Ok(u) => h::dirs::check_install_dir(dir, *u, &h::dirs::kora_account()),
+        Err(e) => Err(e.clone()),
+    })
+}
+
+/// [`helper_validate`] with the folder check given (tests).
+fn helper_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&std::path::Path) -> Result<(), String>) -> Result<(), String> {
     let deny = || Err("That command is not one the helper runs.".to_string());
     let argv = ["kora", "--no-elevate", verb].into_iter().map(String::from).chain(args.iter().cloned());
     let Ok(cli) = Cli::try_parse_from(argv) else { return deny() };
     match cli.command {
-        Some(Command::Install(a)) if a.code.is_none() && verb == "install" => Ok(()),
+        Some(Command::Install(a)) if a.code.is_none() && verb == "install" => {
+            // Another catalogue is a list of repositories that root would clone and run setup for.
+            if a.catalog.is_some() {
+                return Err("The helper does not install from another catalogue (--catalog). Run the install command yourself with sudo to use one.".into());
+            }
+            match &a.dir {
+                Some(dir) => check_dir(dir),
+                None => Err("The helper needs the server folder (--dir).".into()),
+            }
+        }
+        // Going back to an older release (which may have known problems) is not something the
+        // panel's user may do as root on their own: they run it themselves with sudo.
+        Some(Command::SelfUpdate { version: Some(v), .. })
+            if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) =>
+        {
+            Err(format!("The helper only updates Kora to a newer version. To go back to {v}, run `sudo kora self-update --version {v}` yourself."))
+        }
         Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
         Some(Command::App { cmd: AppCmd::Install { .. } | AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
@@ -1844,20 +1892,40 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
 }
 
 fn panel(a: &PanelArgs) -> i32 {
-    if let Some(PanelCmd::User { cmd }) = &a.cmd {
-        return panel_user(cmd);
-    }
     use kora_core::monitor::panel_service as svc;
     let home = svc::home();
+    match &a.cmd {
+        Some(PanelCmd::User { cmd }) => return panel_user(cmd),
+        Some(PanelCmd::Tailscale { cmd }) => return panel_tailscale::command(cmd, &home),
+        None => {}
+    }
+    if a.new_token {
+        return panel_tailscale::new_token(&home);
+    }
+    if a.tailscale {
+        // Set up who may sign in, then keep it running in the background (or here with --foreground).
+        let ts = match panel_tailscale::configure(a.admin.as_deref()) {
+            Ok(ts) => ts,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        };
+        if !a.foreground {
+            return panel_tailscale::start_background(a, &home, &ts);
+        }
+    }
     if a.print_link {
         return match svc::link(&home) {
             Ok(link) => {
-                println!("{link}");
-                if let Some(port) = svc::saved_port(&home) {
-                    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-                    if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_err() {
-                        eprintln!("Note: nothing is answering on port {port} right now. The background panel may still be starting; check it with `systemctl --user status kora-panel` (Linux).");
-                    }
+                let port = svc::saved_port(&home).unwrap_or(kora_web::DEFAULT_PORT);
+                // A panel that is still starting gets a moment, so the link can carry a one-time code.
+                let up = kora_web::launch::wait_for_panel(port, std::time::Duration::from_secs(5), std::time::Duration::from_millis(250), &kora_web::launch::SystemPorts);
+                println!("{}", one_time_link(&link, port));
+                if !up {
+                    eprintln!("Note: nothing is answering on port {port} right now. The background panel may still be starting; check it with `systemctl --user status kora-panel` (Linux).");
+                } else {
+                    eprintln!("The link works once, within 10 minutes. Run this again for a new one.");
                 }
                 0
             }
@@ -1872,7 +1940,7 @@ fn panel(a: &PanelArgs) -> i32 {
     }
     let ports = kora_web::launch::SystemPorts;
     let platform = kora_core::service::Platform::current();
-    if !a.install_service && !a.remove_service && !a.foreground {
+    if !a.install_service && !a.remove_service && !a.foreground && may_reuse_running(a) {
         let running = running_panel(&home, &ports, platform);
         let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
         match panel_start_mode(headless_session(), tty, running.is_some()) {
@@ -1925,7 +1993,19 @@ fn panel(a: &PanelArgs) -> i32 {
     };
     // A saved token (made by --install-service) keeps the sign-in link the same every time.
     let token = svc::load_token(&home).unwrap_or_else(kora_web::security::random_hex);
-    let opts = kora_web::PanelOptions { bind: a.bind, port, open_browser: !a.no_open, remote: a.remote, token: Some(token.clone()), ..Default::default() };
+    if !a.bind.is_loopback() {
+        println!("This panel runs in this window only and stops when you close it.{}", if a.tailscale { "" } else { " With Tailscale, `kora panel --tailscale` keeps one running in the background instead." });
+    }
+    let opts = kora_web::PanelOptions {
+        bind: a.bind,
+        port,
+        open_browser: !a.no_open,
+        remote: a.remote,
+        token: Some(token.clone()),
+        tailscale: a.tailscale || a.listen_tailscale,
+        allow_public: a.allow_public,
+        ..Default::default()
+    };
     let pid = std::process::id();
     let pid_file = svc::pid_path(&home);
     let _ = std::fs::create_dir_all(&home);
@@ -1944,6 +2024,13 @@ fn panel(a: &PanelArgs) -> i32 {
             1
         }
     }
+}
+
+/// May `kora panel` answer with the link of a panel that already runs? Not when it was asked for a
+/// different address (`--bind`, `--remote`, Tailscale): that is a different panel, and answering with the
+/// 127.0.0.1 link silently ignored those options.
+fn may_reuse_running(a: &PanelArgs) -> bool {
+    a.bind.is_loopback() && !a.remote && !a.tailscale && !a.listen_tailscale
 }
 
 /// What `kora panel` does when started without options.
@@ -1965,6 +2052,11 @@ fn panel_start_mode(headless: bool, interactive: bool, already_running: bool) ->
     } else {
         PanelStart::Foreground
     }
+}
+
+/// Running as root (Linux)?
+fn launch_uid_is_root() -> bool {
+    kora_web::launch::current_uid() == Some(0)
 }
 
 /// No desktop to open a browser on: an SSH session, or no display on Linux.
@@ -2024,8 +2116,19 @@ fn process_alive(pid: u32) -> bool {
     }
 }
 
+/// Swap the token in a `#token=` link for a one-time code from the panel on `port`, so the long-lived
+/// token does not end up in a browser's history. Unchanged when the panel cannot give one (an older
+/// version, or not answering).
+fn one_time_link(link: &str, port: u16) -> String {
+    match link.split_once("#token=") {
+        Some((_, token)) => kora_web::launch::fresh_link(port, token),
+        None => link.to_string(),
+    }
+}
+
 fn print_running(r: &Running) {
     let (port, link) = r.port_and_link();
+    let link = &one_time_link(link, port);
     match r {
         Running::Background { .. } => println!("Kora Panel is already running in the background."),
         Running::Window { .. } => println!("Kora Panel is already running in another window."),
@@ -2033,6 +2136,9 @@ fn print_running(r: &Running) {
     println!("Sign in with: {link}");
     if headless_session() {
         println!("On a server with no screen, open a tunnel from your own computer first:  {}", kora_web::launch::ssh_hint(port, &kora_web::launch::real_env));
+    }
+    if matches!(r, Running::Background { .. }) {
+        panel_tailscale::print_tailnet_address(&kora_core::monitor::panel_service::home(), port);
     }
     match r {
         Running::Background { .. } => println!("(`kora panel --remove-service` stops and removes it; `kora panel --foreground` runs a separate one in this window.)"),
@@ -2057,6 +2163,11 @@ fn ask_yes_no(question: &str) -> bool {
 fn background_port(a: &PanelArgs, home: &std::path::Path, ports: &dyn kora_web::launch::PortCheck) -> Result<u16, String> {
     use kora_core::monitor::panel_service as svc;
     let preferred = a.port.or_else(|| svc::saved_port(home)).unwrap_or(kora_web::DEFAULT_PORT);
+    // Our own background panel on its saved port is about to be restarted, not "another program":
+    // keep the port, so links, bookmarks, tunnels and firewall rules stay right.
+    if svc::saved_port(home) == Some(preferred) && ports.is_kora_panel(preferred) {
+        return Ok(preferred);
+    }
     match kora_web::launch::pick_port(preferred, a.port.is_some(), ports) {
         Some(p) => {
             if p != preferred {
@@ -2078,8 +2189,14 @@ fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {
             return 1;
         }
     };
-    match start_background_service(home, port) {
+    match start_background_service(home, port, svc_tailscale(home)) {
         Ok(link) => {
+            let ports = kora_web::launch::SystemPorts;
+            let link = if kora_web::launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), &ports) {
+                one_time_link(&link, port)
+            } else {
+                link
+            };
             println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
             println!("Sign in with: {link}");
             if headless_session() {
@@ -2096,14 +2213,27 @@ fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {
     }
 }
 
+/// Does the installed background panel also listen on Tailscale? Kept when it is set up again.
+fn svc_tailscale(home: &std::path::Path) -> bool {
+    kora_core::monitor::panel_service::saved_tailscale(home)
+}
+
 /// Write and start the background service on `port`. Returns the sign-in link.
-fn start_background_service(home: &std::path::Path, port: u16) -> Result<String, String> {
+fn start_background_service(home: &std::path::Path, port: u16, tailscale: bool) -> Result<String, String> {
     use kora_core::monitor::panel_service as svc;
     let runner = kora_core::service::SystemRunner;
     let platform = kora_core::service::Platform::current();
     let exe = std::env::current_exe().map_err(|e| format!("cannot find the kora program to run in the background: {e}"))?;
     let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
-    let spec = svc::InstallSpec { exe: &exe, port, kora_home_env: home_env.as_deref() };
+    // Windows has no service manager to restart the panel: stop the running one (only when it really is
+    // our panel answering on its saved port), else the new one cannot take the port.
+    let stop_pid = (platform == kora_core::service::Platform::Windows)
+        .then(|| svc::saved_port(home))
+        .flatten()
+        .filter(|p| kora_web::launch::PortCheck::is_kora_panel(&kora_web::launch::SystemPorts, *p))
+        .and_then(|_| std::fs::read_to_string(svc::pid_path(home)).ok())
+        .and_then(|t| t.trim().parse().ok());
+    let spec = svc::InstallSpec { exe: &exe, port, tailscale, stop_pid, kora_home_env: home_env.as_deref() };
     svc::install(home, &spec, &runner, platform).map_err(|e| e.to_string())
 }
 
@@ -2156,7 +2286,7 @@ fn panel_setup(a: &PanelArgs, home: &std::path::Path) -> i32 {
                 }
             };
             println!("Starting Kora Panel in the background (it also starts by itself after a restart) ...");
-            let link = match start_background_service(home, port) {
+            let link = match start_background_service(home, port, svc_tailscale(home)) {
                 Ok(l) => l,
                 Err(e) => {
                     print_setup_fallback(&format!("the background panel could not be set up: {e}"));
@@ -2174,10 +2304,12 @@ fn panel_setup(a: &PanelArgs, home: &std::path::Path) -> i32 {
             (port, link)
         }
     };
+    let link = one_time_link(&link, port);
     let opened = (!headless && !a.no_open).then(|| launch::open_browser(&link));
     for line in launch::ready_message(&link, port, headless, opened.as_ref(), &launch::real_env) {
         println!("{line}");
     }
+    panel_tailscale::after_setup(a, home, headless);
     0
 }
 
@@ -2393,6 +2525,16 @@ fn main() {
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::Update(UpdateArgs { auto: true, .. })));
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
+    // Already running as root for these: repair update jobs an older Kora pointed at a program other
+    // accounts can change (`~/.local/bin/kora`). Does nothing when not root or nothing is wrong.
+    let repairs = match &command {
+        Some(Command::Install(a)) => !a.dry_run,
+        Some(Command::Update(_) | Command::Schedule { .. }) | None => true,
+        _ => false,
+    };
+    if repairs {
+        kora_core::service::repair_root_update_units(&mut |line| println!("{line}"));
+    }
     let code = match command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
@@ -2431,6 +2573,8 @@ fn main() {
     }
     finish(code);
 }
+
+mod panel_tailscale;
 
 #[cfg(test)]
 mod parity;
@@ -2545,11 +2689,12 @@ mod tests {
 
     #[test]
     fn the_helper_runs_only_the_privileged_commands() {
-        let v = |verb: &str, a: &[&str]| helper_validate(verb, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let any_dir = |_: &std::path::Path| Ok(());
+        let v = |verb: &str, a: &[&str]| helper_validate_for(verb, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &any_dir);
         for (verb, a) in [
             ("install", &["--name", "a", "--dir", "/srv/a", "--mode", "prod", "--service", "--firewall"][..]),
             ("self-update", &["--yes"]),
-            ("self-update", &["--yes", "--version", "v0.3.4"]),
+            ("self-update", &["--yes", "--version", "v99.0.0"]),
             ("schedule", &["set", "dev", "--daily", "04:00", "--as-user"]),
             ("schedule", &["off", "dev"]),
             ("app", &["install", "--yes", "--force"]),
@@ -2574,9 +2719,28 @@ mod tests {
             ("self-update", &["--version"]),
             ("--version", &[]),
             ("install", &["--", "x"]),
+            // root would clone and set up whatever another catalogue lists
+            ("install", &["--name", "a", "--dir", "/srv/a", "--catalog", "https://evil.example/c.json"]),
+            ("install", &["--name", "a", "--dir", "/srv/a", "--catalog=/tmp/c.json"]),
+            // the folder must be given (so it can be checked)
+            ("install", &["--name", "a", "--mode", "prod"]),
+            // no going back to an older (or the same) release through the helper
+            ("self-update", &["--yes", "--version", "v0.3.4"]),
+            ("self-update", &["--yes", "--version", env!("CARGO_PKG_VERSION")]),
+            ("self-update", &["--yes", "--version", "nonsense"]),
         ] {
             assert!(v(verb, a).is_err(), "{verb} {a:?}");
         }
+        assert!(v("self-update", &["--version", "v0.3.4"]).unwrap_err().contains("sudo kora self-update --version v0.3.4"));
+    }
+
+    #[test]
+    fn the_helper_installs_only_into_folders_the_check_accepts() {
+        let only_home = |d: &std::path::Path| if d.starts_with("/home/sam") { Ok(()) } else { Err(format!("not {}", d.display())) };
+        let v = |a: &[&str]| helper_validate_for("install", &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &only_home);
+        assert!(v(&["--name", "a", "--dir", "/home/sam/kora/a", "--mode", "prod"]).is_ok());
+        assert_eq!(v(&["--name", "a", "--dir", "/etc/systemd/system", "--mode", "prod"]), Err("not /etc/systemd/system".into()));
+        assert!(v(&["--name", "a", "--dir=/root/x", "--mode", "prod"]).is_err());
     }
 
     #[test]
@@ -2856,6 +3020,17 @@ mod tests {
         assert!(p.setup && p.port.is_none(), "no --port means: pick a free one");
         assert_eq!(panel(&["--setup", "--port", "47200"]).unwrap().port, Some(47200));
         assert!(panel(&["--setup", "--no-open"]).is_ok());
+        // A panel for another address is never answered with the link of the one on 127.0.0.1.
+        assert!(may_reuse_running(&panel(&[]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--bind", "100.64.0.5", "--remote"]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--remote"]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--tailscale"]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--listen-tailscale"]).unwrap()));
+        assert!(panel(&["--admin", "a@b"]).is_err(), "--admin goes with --tailscale");
+        assert!(panel(&["--tailscale", "--admin", "a@b"]).is_ok());
+        assert!(panel(&["--tailscale", "--foreground"]).is_ok());
+        assert!(panel(&["--tailscale", "--listen-tailscale"]).is_err());
+        assert!(panel(&["--tailscale", "--setup"]).is_err());
         for clash in ["--foreground", "--install-service", "--remove-service", "--print-link"] {
             assert!(panel(&["--setup", clash]).is_err(), "{clash}");
         }
@@ -2897,6 +3072,11 @@ mod tests {
             port,
             bind: "127.0.0.1".parse().unwrap(),
             remote: false,
+            tailscale: false,
+            admin: None,
+            listen_tailscale: false,
+            allow_public: false,
+            new_token: false,
             no_open: true,
             foreground: false,
             setup: true,
@@ -2910,7 +3090,14 @@ mod tests {
         assert!(background_port(&args(Some(47120)), home.path(), &Ports(vec![47120])).unwrap_err().contains("47120 is already in use"));
         std::fs::write(kora_core::monitor::panel_service::info_path(home.path()), r#"{"port":47130}"#).unwrap();
         assert_eq!(background_port(&args(None), home.path(), &Ports(vec![])), Ok(47130), "the saved port is kept");
-        assert_eq!(background_port(&args(None), home.path(), &Ports(vec![47130])), Ok(47120));
+        // `Ports` says 47130 is busy AND a Kora panel: our own panel, restarted on the same port.
+        assert_eq!(background_port(&args(None), home.path(), &Ports(vec![47130])), Ok(47130), "our own running panel keeps its port");
+        struct Other;
+        impl kora_web::launch::PortCheck for Other {
+            fn is_free(&self, p: u16) -> bool { p != 47130 }
+            fn is_kora_panel(&self, _: u16) -> bool { false }
+        }
+        assert_eq!(background_port(&args(None), home.path(), &Other), Ok(47120), "someone else's program on the saved port");
     }
 
     #[test]
