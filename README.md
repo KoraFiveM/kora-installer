@@ -21,13 +21,13 @@ Guide: [docs/panel.md](docs/panel.md). The terminal wizard (`kora install`) and 
 Linux (Debian 12+ / Ubuntu 22.04+):
 
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.0/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.1/install.sh | sh
 ```
 
 Windows 10/11 or Server 2019+ (PowerShell):
 
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.0/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.1/install.ps1 | iex
 ```
 
 When the script finishes, Kora Panel starts by itself and opens in your browser. It runs in the background

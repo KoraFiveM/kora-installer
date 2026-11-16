@@ -5,6 +5,12 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-16
+
+### Changed
+- **The resource list comes straight from GitHub.** Kora reads the resource catalog from the docs repository's `catalog/resources.json` on raw.githubusercontent.com instead of the docs website, so a change to the list is live as soon as it is merged (no wait for the docs site to rebuild). Without internet it still uses the copy built into the program. `--catalog` / `KORA_CATALOG` still override it.
+- `sd-lib` is no longer offered. The catalog keeps published entries for history, so it is marked `"retired": true` there; Kora skips retired resources (servers that already have one keep it).
+
 ## [0.5.0] - 2026-11-16
 
 0.4.3 was prepared but never published; its fix is included here.

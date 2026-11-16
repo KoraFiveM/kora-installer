@@ -9,8 +9,10 @@ use std::collections::HashSet;
 pub mod pick;
 pub use pick::{PickError, Picker, Section};
 
-/// Public catalog location.
-pub const CATALOG_URL: &str = "https://docs.koraframe.work/resources.json";
+/// Public catalog location: the catalog file itself in the docs repository (read straight from
+/// GitHub, so a change is live as soon as it is merged, without waiting for the docs site to deploy).
+pub const CATALOG_URL: &str =
+    "https://raw.githubusercontent.com/KoraFiveM/kora_docs_next/main/catalog/resources.json";
 
 /// Snapshot of the catalog embedded in the binary (refreshed by CI).
 pub const EMBEDDED_SNAPSHOT: &str = include_str!("../../assets/resources.json");
@@ -131,6 +133,11 @@ pub struct Resource {
     /// is out.
     #[serde(default, rename = "devOnly", skip_serializing_if = "is_false")]
     pub dev_only: bool,
+    /// No longer offered. Published catalog entries are append-only, so a resource is retired
+    /// instead of removed; [`Catalog::parse`] drops retired entries, so nothing offers them.
+    /// Servers that already have it keep it (updates list it as no longer in the catalog).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub retired: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -263,8 +270,11 @@ pub fn is_valid_repo_url(url: &str) -> bool {
 
 impl Catalog {
     pub fn parse(json: &str) -> Result<Catalog, CatalogError> {
-        match serde_json::from_str(json) {
-            Ok(c) => Ok(c),
+        match serde_json::from_str::<Catalog>(json) {
+            Ok(mut c) => {
+                c.resources.retain(|r| !r.retired);
+                Ok(c)
+            }
             Err(e) => Err(Self::explain_unrecognised(json).unwrap_or(CatalogError::Parse(e))),
         }
     }
@@ -470,6 +480,24 @@ mod tests {
         fn fetch(&self, _: &str) -> Result<String, String> {
             self.0.clone()
         }
+    }
+
+    #[test]
+    fn retired_resources_are_not_offered() {
+        let mut v: serde_json::Value = serde_json::from_str(EMBEDDED_SNAPSHOT).unwrap();
+        let first = v["resources"][0]["id"].as_str().unwrap().to_string();
+        let res = v["resources"].as_array_mut().unwrap();
+        // retire a resource nothing depends on (the last one), keep everything else
+        let last = res.last_mut().unwrap();
+        let retired = last["id"].as_str().unwrap().to_string();
+        last["retired"] = serde_json::Value::Bool(true);
+        let c = Catalog::parse_validated(&v.to_string()).unwrap();
+        assert!(c.find(&retired).is_none(), "{retired} is retired");
+        assert!(c.find(&first).is_some());
+        let all = Catalog::embedded().unwrap().resources.len();
+        assert_eq!(c.resources.len(), all - 1);
+        // an older catalog without the flag is unchanged
+        assert!(Catalog::parse_validated(EMBEDDED_SNAPSHOT).unwrap().resources.iter().all(|r| !r.retired));
     }
 
     #[test]
