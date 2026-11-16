@@ -1890,12 +1890,14 @@ fn panel(a: &PanelArgs) -> i32 {
     if a.print_link {
         return match svc::link(&home) {
             Ok(link) => {
-                println!("{link}");
-                if let Some(port) = svc::saved_port(&home) {
-                    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-                    if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_err() {
-                        eprintln!("Note: nothing is answering on port {port} right now. The background panel may still be starting; check it with `systemctl --user status kora-panel` (Linux).");
-                    }
+                let port = svc::saved_port(&home).unwrap_or(kora_web::DEFAULT_PORT);
+                // A panel that is still starting gets a moment, so the link can carry a one-time code.
+                let up = kora_web::launch::wait_for_panel(port, std::time::Duration::from_secs(5), std::time::Duration::from_millis(250), &kora_web::launch::SystemPorts);
+                println!("{}", one_time_link(&link, port));
+                if !up {
+                    eprintln!("Note: nothing is answering on port {port} right now. The background panel may still be starting; check it with `systemctl --user status kora-panel` (Linux).");
+                } else {
+                    eprintln!("The link works once, within 10 minutes. Run this again for a new one.");
                 }
                 0
             }
@@ -2086,8 +2088,19 @@ fn process_alive(pid: u32) -> bool {
     }
 }
 
+/// Swap the token in a `#token=` link for a one-time code from the panel on `port`, so the long-lived
+/// token does not end up in a browser's history. Unchanged when the panel cannot give one (an older
+/// version, or not answering).
+fn one_time_link(link: &str, port: u16) -> String {
+    match link.split_once("#token=") {
+        Some((_, token)) => kora_web::launch::fresh_link(port, token),
+        None => link.to_string(),
+    }
+}
+
 fn print_running(r: &Running) {
     let (port, link) = r.port_and_link();
+    let link = &one_time_link(link, port);
     match r {
         Running::Background { .. } => println!("Kora Panel is already running in the background."),
         Running::Window { .. } => println!("Kora Panel is already running in another window."),
@@ -2145,6 +2158,12 @@ fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {
     };
     match start_background_service(home, port, svc_tailscale(home)) {
         Ok(link) => {
+            let ports = kora_web::launch::SystemPorts;
+            let link = if kora_web::launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), &ports) {
+                one_time_link(&link, port)
+            } else {
+                link
+            };
             println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
             println!("Sign in with: {link}");
             if headless_session() {
@@ -2244,6 +2263,7 @@ fn panel_setup(a: &PanelArgs, home: &std::path::Path) -> i32 {
             (port, link)
         }
     };
+    let link = one_time_link(&link, port);
     let opened = (!headless && !a.no_open).then(|| launch::open_browser(&link));
     for line in launch::ready_message(&link, port, headless, opened.as_ref(), &launch::real_env) {
         println!("{line}");
