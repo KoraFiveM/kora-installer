@@ -122,7 +122,9 @@ pub fn private_tmp_dir() -> Result<std::path::PathBuf> {
     std::fs::create_dir_all(&parent).map_err(|e| InstallError(format!("cannot create {}: {e}", parent.display())))?;
     let dir = parent.join(hex::encode(rnd));
     std::fs::create_dir(&dir).map_err(|e| InstallError(format!("cannot create {}: {e}", dir.display())))?;
-    if let Err(e) = super::windows_db::restrict(&dir, true, "restricting the download folder to administrators") {
+    // `Kora` and `Kora\tmp` too: whoever created them owns them and could swap the folder's contents.
+    let kora = parent.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    if let Err(e) = super::windows_db::secure_dirs(&crate::db::SystemRunner, &[kora, parent.clone(), dir.clone()]) {
         let _ = std::fs::remove_dir(&dir);
         return Err(e);
     }

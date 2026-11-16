@@ -10,7 +10,7 @@
 //! `sudo` directly. No link is followed: a folder that is a symbolic link is refused, and the
 //! parent's owner is read from where its path really leads.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The `kora` account (owner of `/home/kora`), if it exists: `(home, uid)`.
 pub type KoraAccount = Option<(PathBuf, u32)>;
@@ -27,7 +27,7 @@ fn refuse(dir: &Path, why: &str) -> String {
 #[cfg(unix)]
 pub fn check_install_dir(dir: &Path, user_uid: u32, kora: &KoraAccount) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
-    if !dir.is_absolute() || dir.components().any(|c| matches!(c, Component::ParentDir | Component::CurDir)) || dir.parent().is_none() {
+    if !dir.is_absolute() || dir.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir)) || dir.parent().is_none() {
         return Err(refuse(dir, "it is not a full folder path (or it contains '..')"));
     }
     let kora_home = Path::new(crate::userhome::KORA_USER_HOME);
