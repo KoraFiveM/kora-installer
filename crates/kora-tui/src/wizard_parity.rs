@@ -23,6 +23,7 @@ pub fn screen(s: Screen) -> Parity {
         | Screen::Firewall
         | Screen::Service
         | Screen::Shortcut => Route(Op::InstallStart),
+        Screen::Cfx => Route(Op::CheckCfx),
         Screen::License
         | Screen::Hostname
         | Screen::GithubOwner
@@ -90,6 +91,7 @@ mod tests {
         Screen::Service,
         Screen::Shortcut,
         Screen::License,
+        Screen::Cfx,
         Screen::Hostname,
         Screen::GithubOwner,
         Screen::GithubAccount,
