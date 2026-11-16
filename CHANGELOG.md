@@ -5,6 +5,21 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-16
+
+### Added
+- **Your Cfx.re account becomes the txAdmin admin.** The terminal wizard and the panel's install wizard ask for your Cfx.re username (after the licence key), look the account up on forum.cfx.re (only the name is sent) and set it up as the txAdmin admin with admin rights in `permissions.cfg`, so you can sign in to txAdmin with your Cfx.re account straight away. Leave it empty to keep the generated local admin.
+- `kora install --cfx-user <NAME>` does the same from the command line. New panel route `POST /api/v1/checks/cfx`.
+- **Check one resource at a time.** On the panel's Updates tab each resource has a Check button that looks at just that resource, and shows when it was last checked.
+
+### Changed
+- **Checking for updates is much faster.** Resources are fetched in parallel (up to 6 at once) and, for development servers, one request to the KoraFiveM organisation on GitHub lets Kora skip repositories that have not changed. Anything uncertain is still fetched, so an update is never missed (the hint can be up to a minute old; set `KORA_NO_ORG_HINT` to turn it off). In our test, checking 36 resources went from about 17-29 s to 3-13 s, and about 0.6 s when nothing had changed.
+- Applying an update right after a check no longer fetches the same resources again.
+- Actions the panel cannot do for a server that was added from an existing folder now say so in plain words instead of showing a file error.
+
+### Fixed
+- The panel's website and install scripts now point to `kora panel` as the next step after installing.
+
 ## [0.4.0] - 2026-11-16
 
 ### Added
