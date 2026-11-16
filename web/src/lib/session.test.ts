@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { bootstrapSession, codeFromHash, tokenFromHash } from './session'
+import { bootstrapSession, codeFromHash, pastedSecret, signIn, tokenFromHash } from './session'
 import { sessionSecret } from '@/api/client'
 import { jsonResponse } from '@/test/utils'
 
@@ -100,5 +100,28 @@ describe('bootstrapSession', () => {
     expect(window.location.hash).toBe('')
     expect(r.status).toBe('failed')
     if (r.status === 'failed') expect(r.error.message).toBe('That sign-in link has expired.')
+  })
+})
+
+describe('the sign-in box', () => {
+  it('takes a code, a token or a whole sign-in link', () => {
+    expect(pastedSecret(' ab12 ')).toEqual({ token: 'ab12' })
+    expect(pastedSecret('http://127.0.0.1:47120/#code=ab12')).toEqual({ code: 'ab12' })
+    expect(pastedSecret('  http://localhost:47120/settings#code=ab12\n')).toEqual({ code: 'ab12' })
+    expect(pastedSecret('http://127.0.0.1:47120/#token=launch')).toEqual({ token: 'launch' })
+    expect(pastedSecret('http://127.0.0.1:47120/#code=')).toEqual({ token: 'http://127.0.0.1:47120/#code=' })
+  })
+
+  it('sends a pasted link as its code', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { ...signedIn, secret: 'pasted' }))
+    expect(await signIn('http://127.0.0.1:47120/#code=0123abcd')).toEqual({ status: 'signed_in' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ code: '0123abcd' })
+    expect(sessionSecret()).toBe('pasted')
+  })
+
+  it('sends anything else as typed', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, signedIn))
+    await signIn(' c0de ')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ token: 'c0de' })
   })
 })

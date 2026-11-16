@@ -32,10 +32,11 @@ export function SignedOut({ error, onToken, onIdentity }: { error: ApiError | nu
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              To keep your servers safe, this page needs a fresh sign-in link. Run <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel</code> on this computer and open the link it prints (each link works once). If you have a sign-in code instead, paste it below.
+              To keep your servers safe, this page needs a fresh sign-in link. Run <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel</code> on this computer and open the link it prints (each link works once). If you have a sign-in code or link instead, paste it below.
             </p>
           )}
           {err && <Alert tone="danger">{err.message}</Alert>}
+          {/* Only from other devices: Tailscale cannot vouch for this computer, so it is not offered here. */}
           {remote && onIdentity && (
             <Button variant="default" disabled={busy} onClick={async () => { setBusy(true); setErr(await onIdentity()); setBusy(false) }}>Sign in with Tailscale</Button>
           )}
@@ -49,19 +50,13 @@ export function SignedOut({ error, onToken, onIdentity }: { error: ApiError | nu
               setBusy(false)
             }}
           >
-            <Field label={remote ? 'User token' : 'Sign-in code'}>
+            <Field label={remote ? 'User token' : 'Sign-in code or link'}>
               <Input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
             </Field>
             <Button type="submit" variant={remote ? 'secondary' : 'default'} disabled={busy || !token.trim()}>
               Sign in
             </Button>
           </form>
-          {!remote && onIdentity && (
-            <div className="space-y-2 border-t border-border pt-4">
-              <p className="text-sm text-muted-foreground">On a private network with Tailscale? If an administrator has added your account, you can sign in without a code.</p>
-              <Button variant="secondary" disabled={busy} onClick={async () => { setBusy(true); setErr(await onIdentity()); setBusy(false) }}>Sign in with Tailscale</Button>
-            </div>
-          )}
         </CardContent>
       </Card>
     </main>

@@ -1262,6 +1262,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "ureq",
+ "url",
  "windows-service",
  "xz2",
  "zip",

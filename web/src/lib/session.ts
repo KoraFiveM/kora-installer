@@ -61,9 +61,26 @@ async function attempt(fn: () => Promise<void>): Promise<BootResult> {
   }
 }
 
-/** Exchange a token for a session (also used by the "paste a token" field). */
+/**
+ * What was pasted in the sign-in box: a whole sign-in link (`http://.../#code=...` or `#token=...`) is
+ * cut down to its code or token; anything else is sent as it is (the panel takes a code there too).
+ */
+export function pastedSecret(value: string): { code: string } | { token: string } {
+  const v = value.trim()
+  for (const key of ['code', 'token'] as const) {
+    const at = v.indexOf(`#${key}=`)
+    if (at >= 0) {
+      const found = fromHash(v.slice(at), key)
+      if (found) return key === 'code' ? { code: found } : { token: found }
+    }
+  }
+  return { token: v }
+}
+
+/** Exchange what was pasted (a token, a code or a whole sign-in link) for a session. */
 export async function signIn(token: string): Promise<BootResult> {
-  return attempt(() => api.session.create(token.trim()))
+  const p = pastedSecret(token)
+  return attempt(() => ('code' in p ? api.session.createByCode(p.code) : api.session.create(p.token)))
 }
 
 /** Sign in with no token: the panel asks Tailscale who is connecting (remote access only). */
