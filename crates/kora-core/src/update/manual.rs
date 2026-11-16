@@ -1012,7 +1012,7 @@ fn rollback_locked(
             .collect();
         if !dirty.is_empty() {
             return err(format!(
-                "nothing was changed: {} {} changed files of your own that a rollback would throw away. Put your changes aside first (for example `git stash` in the resource folder), or roll back anyway with --force",
+                "nothing was changed: {} {} changed files of your own that a rollback would throw away. Put your changes aside first (for example `git stash` in the resource folder), or roll back anyway, which throws them away (`--force` on the command line)",
                 dirty.join(", "),
                 if dirty.len() == 1 { "has" } else { "have" }
             ));
