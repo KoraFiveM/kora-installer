@@ -227,7 +227,7 @@ fn a_crash_within_ten_seconds_shows_the_last_log_lines() {
     f.log = vec![(secs(1), "line1\nline2\nSegmentation fault\n".into())];
     let (r, _) = run(&f);
     assert_eq!(r.problem, Some(Problem::Crashed));
-    assert!(r.message.contains("right after starting"));
+    assert_eq!(r.message, "The server stopped right after starting. The last lines of its log are below; the full log is in the panel's Logs tab.");
     assert_eq!(r.log_tail, ["line1", "line2", "Segmentation fault"]);
     assert_eq!(*f.pid_file.borrow(), None, "the dead pid is forgotten");
 }
@@ -250,6 +250,17 @@ fn a_bind_error_in_the_log_is_a_port_clash() {
     let (r, _) = run(&f);
     assert_eq!(r.problem, Some(Problem::PortInUse));
     assert!(!r.log_tail.is_empty());
+    assert_eq!(r.message, "The server stopped because port 41120 is already used by another program. Change the port in the panel's Ports tab, or stop the other program.");
+}
+
+#[test]
+fn a_port_clash_names_a_port_only_when_the_log_line_has_one_of_ours() {
+    let s = spec();
+    assert!(port_clash_message("ok 31120\nbind: Address already in use [::]:31120\n", &s).contains("because port 31120 is already used"));
+    // Another number on the line (or our port on another line) is not taken for the port.
+    let m = port_clash_message("listening on 41120\nError 10048: failed to bind 0.0.0.0:8080\n", &s);
+    assert!(m.contains("one of its ports (31120 for players, 41120 for txAdmin)") && !m.contains("8080"), "{m}");
+    assert!(m.ends_with("Change the port in the panel's Ports tab, or stop the other program."));
 }
 
 #[test]

@@ -159,6 +159,12 @@ fn control_with(ops: &dyn ControlOps, server: &str, a: ControlAction) -> Res<()>
     ops.service_control(server, a).map_err(|e| format!("could not {verb} '{server}': {e}"))
 }
 
+/// The folder name (last part of the recorded path) of the resource with this id.
+fn folder_of(sf: &ServerFile, id: &str) -> Option<String> {
+    let r = sf.resources.iter().find(|r| r.id == id)?;
+    r.path.rsplit(['/', '\\']).next().filter(|f| !f.is_empty()).map(str::to_string)
+}
+
 impl Backend for SystemBackend {
     fn list(&mut self) -> Res<Vec<ServerEntry>> {
         Registry::load().map(|r| r.servers).map_err(|e| format!("Can't read the server list ({}): {e}", registry::registry_path().display()))
@@ -203,10 +209,17 @@ impl Backend for SystemBackend {
         ServerFile::load(&e.dir).map(|s| s.resources.into_iter().map(|r| r.id).collect()).unwrap_or_default()
     }
 
+    fn resource_folder(&mut self, e: &ServerEntry, id: &str) -> Option<String> {
+        folder_of(&ServerFile::load(&e.dir).ok()?, id)
+    }
+
     fn ensure(&mut self, e: &ServerEntry, name: &str, restart: bool) -> Res<String> {
         if !valid_resource_name(name) {
             return Err(format!("'{name}' is not a resource name (letters, digits, _ . - only)."));
         }
+        // The panel lists resources by their catalog id (`kora-lib`); server.cfg needs the folder (`kora_lib`).
+        let folder = self.resource_folder(e, name);
+        let name = folder.as_deref().unwrap_or(name);
         let cfg_path = e.dir.join("server.cfg");
         let cfg = std::fs::read_to_string(&cfg_path).map_err(|x| format!("Can't read {}: {x}", cfg_path.display()))?;
         let mut said = match with_ensure(&cfg, name) {
@@ -401,6 +414,30 @@ mod tests {
         for ok in ["a-b", "a.b", "x-", "v1.2"] {
             assert!(valid_resource_name(ok), "{ok}");
         }
+    }
+
+    #[test]
+    fn the_folder_fxserver_knows_comes_from_the_recorded_path_not_the_id() {
+        use crate::installer::registry::{PortsRecord, ResourceRecord};
+        let rec = |id: &str, path: &str| ResourceRecord { id: id.into(), path: path.into(), ..Default::default() };
+        let sf = ServerFile {
+            name: "a".into(),
+            mode: installer::Mode::Production,
+            dir: PathBuf::from("/srv/a"),
+            ports: PortsRecord { game: 30120, txadmin: 40120 },
+            game_build: 0,
+            artifact_build: 0,
+            database: None,
+            github_owner: None,
+            created_unix: 0,
+            kora_version: String::new(),
+            resources: vec![rec("kora-lib", "[pre]/kora_lib"), rec("c-one", "[creators]/[acme]/c_one"), rec("plain", "plain"), rec("odd", "")],
+        };
+        assert_eq!(folder_of(&sf, "kora-lib").as_deref(), Some("kora_lib"));
+        assert_eq!(folder_of(&sf, "c-one").as_deref(), Some("c_one"));
+        assert_eq!(folder_of(&sf, "plain").as_deref(), Some("plain"));
+        assert_eq!(folder_of(&sf, "kora_lib"), None, "looked up by id, like the list the panel shows");
+        assert_eq!(folder_of(&sf, "odd"), None);
     }
 
     #[test]

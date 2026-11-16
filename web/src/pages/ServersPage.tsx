@@ -29,7 +29,7 @@ function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
       <td className="px-4 py-3"><StatusChip status={s.status} pending={ctl.pending} /></td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.game}</td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.txadmin}</td>
-      <td className="px-4 py-3"><UpdateChip badge={s.badge} /></td>
+      <td className="px-4 py-3"><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></td>
       <td className="px-4 py-3"><ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} /></td>
     </tr>
   )

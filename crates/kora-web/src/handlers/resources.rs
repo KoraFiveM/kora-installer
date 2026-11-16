@@ -134,17 +134,24 @@ pub async fn resource_control(
             "'{name}' is not a resource name."
         )));
     }
-    if verb == "stop" && name == console::RESOURCE {
-        return Err(ApiError::bad_request(
-            "Kora uses this resource to send commands to the server, so it cannot be stopped from here.",
-        ));
-    }
     blocking(move || {
         let e = st.entry(&s)?;
-        if !st.backend().resources(&e).contains(&name) {
+        // FXServer knows a resource by its folder name, which is not always the id the list shows
+        // (`kora-lib` is the folder `kora_lib`): the command must use the folder name.
+        let Some(folder) = st.backend().resource_folder(&e, &name) else {
             return Err(ApiError::not_found(format!(
                 "'{name}' is not installed on this server."
             )));
+        };
+        if !valid_resource_name(&folder) {
+            return Err(ApiError::conflict(format!(
+                "The folder of '{name}' ('{folder}') has a name that cannot be sent as a command. Use the server's own console for this one."
+            )));
+        }
+        if verb == "stop" && (name == console::RESOURCE || folder == console::RESOURCE) {
+            return Err(ApiError::bad_request(
+                "Kora uses this resource to send commands to the server, so it cannot be stopped from here.",
+            ));
         }
         // An update is swapping files: loading a resource now could load half of it.
         if verb != "stop" && lock::is_busy(&e.dir) {
@@ -160,9 +167,12 @@ pub async fn resource_control(
                 "The live console is not switched on for this server yet. Turn it on in the Console tab first (it needs a restart).",
             ));
         }
-        console::send(&e.dir, &format!("{verb} {name}")).map_err(ApiError::internal)?;
+        if console::waiting_for_restart(&e.dir) {
+            return Err(ApiError::conflict(console::NEEDS_RESTART));
+        }
+        console::send(&e.dir, &format!("{verb} {folder}")).map_err(ApiError::internal)?;
         Ok(Json(json!({
-            "message": format!("Asked the server to {said} {name}. The Console tab shows what happened.")
+            "message": format!("Asked the server to {said} {folder}. The Console tab shows what happened.")
         })))
     })
     .await

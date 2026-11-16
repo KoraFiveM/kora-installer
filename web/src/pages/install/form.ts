@@ -40,24 +40,34 @@ export interface WizardForm {
 export type StepId = 'mode' | 'name' | 'ports' | 'build' | 'resources' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
 
 export const STEP_LABEL: Record<StepId, string> = {
-  mode: 'Mode',
-  name: 'Name and folder',
+  mode: 'Kind of server',
+  name: 'Name your server',
   ports: 'Ports',
   build: 'FiveM server build',
   resources: 'Resources',
   database: 'Database',
   options: 'Options',
-  licence: 'Licence key',
+  licence: 'Your licence key',
   cfx: 'Your Cfx.re account',
   github: 'GitHub',
-  review: 'Review',
+  review: 'Check and install',
 }
 
+/** Every step, one after the other ("Choose everything myself"). */
 export function stepsFor(mode: Mode): StepId[] {
   const s: StepId[] = ['mode', 'name', 'ports', 'build', 'resources', 'database', 'options', 'licence', 'cfx']
   if (mode === 'development') s.push('github')
   s.push('review')
   return s
+}
+
+/**
+ * The short path: only what a person must answer. Everything else keeps its default and is listed on
+ * the last screen, where each line can be changed. A development server cannot work without GitHub,
+ * so that step joins in.
+ */
+export function quickStepsFor(mode: Mode): StepId[] {
+  return mode === 'development' ? ['licence', 'name', 'github', 'review'] : ['licence', 'name', 'review']
 }
 
 export function dirBase(dir: string): string {
@@ -140,15 +150,30 @@ export function dbLoginProblem(f: WizardForm): string | null {
   return null
 }
 
-/** Why the Next button is disabled for a step (null = fine). Messages are shown to the user. */
-export function stepProblem(step: StepId, f: WizardForm, ctx: { portsOk: boolean; githubSignedIn: boolean }): string | null {
+/** What Kora knows about the two ports: still asking, both free, one taken, or the check itself failed. */
+export type PortsState = 'checking' | 'ok' | 'taken' | 'unknown'
+
+export interface ProblemContext {
+  ports: PortsState
+  githubSignedIn: boolean
+}
+
+const PORTS_MESSAGE: Record<PortsState, string | null> = {
+  ok: null,
+  checking: 'Checking that the ports are free...',
+  taken: 'One of the ports is already in use. Pick a free one.',
+  unknown: 'Kora could not check that the ports are free.',
+}
+
+/** Why a step is not finished (null = fine). Messages are shown to the user. */
+export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): string | null {
   switch (step) {
     case 'name':
       if (!slug(f.name)) return 'Give the server a name.'
       if (!f.dir.trim()) return 'Choose a folder for the server.'
       return null
     case 'ports':
-      return validatePorts(f.game, f.tx) ?? (ctx.portsOk ? null : 'One of the ports is already in use. Pick a free one.')
+      return validatePorts(f.game, f.tx) ?? PORTS_MESSAGE[ctx.ports]
     case 'build':
       if (f.artifact === 'custom' && !/^https:\/\/\S+$/.test(f.artifactUrl.trim())) return 'Type a download address that starts with https://.'
       if (f.artifact === 'pick' && f.artifactBuild === null) return 'Pick a build from the list.'
@@ -168,4 +193,14 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: { portsOk: boolean
     default:
       return null
   }
+}
+
+/** Every step that still has a problem, whether or not the person opened it. Used by the last screen. */
+export function allProblems(f: WizardForm, ctx: ProblemContext): Partial<Record<StepId, string>> {
+  const out: Partial<Record<StepId, string>> = {}
+  for (const id of stepsFor(f.mode)) {
+    const p = stepProblem(id, f, ctx)
+    if (p) out[id] = p
+  }
+  return out
 }

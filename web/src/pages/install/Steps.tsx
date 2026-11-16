@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { DbChoice, PortsCheck } from '@/api/types'
+import type { DbChoice } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
@@ -13,6 +13,7 @@ import { GithubSignIn } from '@/components/GithubSignIn'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { slug, validatePorts } from '@/lib/utils'
 import { dbLoginProblem, dirBase, folderFor, type WizardForm } from './form'
+import type { PortsChecked } from './ports'
 
 export interface StepProps {
   f: WizardForm
@@ -31,45 +32,45 @@ export function ModeStep({ f, set }: StepProps) {
   )
 }
 
-export function NameStep({ f, set, advanced, defaultsDir }: StepProps) {
+export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & { /** The short path: the folder and the kind of server are shown as plain text until asked for. */ quick?: boolean }) {
   const base = dirBase(defaultsDir)
+  const [folderOpen, setFolderOpen] = useState(false)
+  const [kindOpen, setKindOpen] = useState(false)
+  const showFolder = !quick || advanced || folderOpen || f.dirTouched
+  const showKind = kindOpen || f.mode === 'development'
   return (
     <div className="space-y-4">
       <Field label="Server name" hint={`Used for the folder, the service and the database. Saved as "${slug(f.name) || '...'}".`}>
         <Input value={f.name} onChange={(e) => set({ name: e.target.value, ...(f.dirTouched ? {} : { dir: folderFor(base, e.target.value) }) })} autoComplete="off" />
       </Field>
-      <Field label="Server folder" hint="Where the server files go. It is suggested from the name.">
-        <Input value={f.dir} onChange={(e) => set({ dir: e.target.value, dirTouched: true })} autoComplete="off" />
-      </Field>
+      {showFolder ? (
+        <Field label="Server folder" hint="Where the server files go. It is suggested from the name.">
+          <Input value={f.dir} onChange={(e) => set({ dir: e.target.value, dirTouched: true })} autoComplete="off" />
+        </Field>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          The server files go in <code className="break-all font-mono text-xs text-foreground">{f.dir}</code>.{' '}
+          <Button variant="link" className="h-auto p-0" onClick={() => setFolderOpen(true)}>Use another folder</Button>
+        </p>
+      )}
       {advanced && (
         <Field label="Server name shown to players (hostname)" hint="Shown in the FiveM server list.">
           <Input value={f.hostname} onChange={(e) => set({ hostname: e.target.value })} />
         </Field>
       )}
+      {quick && (showKind ? <ModeStep f={f} set={set} advanced={advanced} defaultsDir={defaultsDir} /> : (
+        <p className="text-sm text-muted-foreground">
+          This will be a server for players.{' '}
+          <Button variant="link" className="h-auto p-0" onClick={() => setKindOpen(true)}>Make a development server instead</Button>
+        </p>
+      ))}
     </div>
   )
 }
 
-export function PortsStep({ f, set, onOk }: StepProps & { onOk: (ok: boolean) => void }) {
-  const [check, setCheck] = useState<PortsCheck | null>(null)
-  const [err, setErr] = useState<unknown>(null)
+export function PortsStep({ f, set, ports }: StepProps & { ports: PortsChecked }) {
+  const { check } = ports
   const problem = validatePorts(f.game, f.tx)
-  useEffect(() => {
-    if (problem) {
-      setCheck(null)
-      onOk(false)
-      return
-    }
-    let stale = false
-    onOk(false)
-    const t = setTimeout(() => {
-      api.installs.checkPorts({ game: Number(f.game), txadmin: Number(f.tx) }).then(
-        (c) => { if (!stale) { setCheck(c); setErr(null); onOk(c.game.ok && c.txadmin.ok) } },
-        (e) => { if (!stale) setErr(e) },
-      )
-    }, 250)
-    return () => { stale = true; clearTimeout(t) }
-  }, [f.game, f.tx, problem, onOk])
   const line = (label: string, key: 'game' | 'txadmin', field: 'game' | 'tx') => {
     const l = check?.[key]
     return (
@@ -92,7 +93,8 @@ export function PortsStep({ f, set, onOk }: StepProps & { onOk: (ok: boolean) =>
         {line('txAdmin port', 'txadmin', 'tx')}
       </div>
       {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
-      <ErrorNotice error={err} />
+      <ErrorNotice error={ports.error} />
+      {ports.state === 'unknown' && <Button onClick={ports.retry}>Check the ports again</Button>}
     </div>
   )
 }

@@ -39,7 +39,8 @@ enum DbArg {
 #[derive(Args, Default, Clone)]
 struct InstallArgs {
     /// REMOVED in 0.4.0 (setup codes no longer exist): use the flags below or `kora panel`.
-    #[arg(long, value_name = "CODE")]
+    /// Hidden from help; it still parses so an old script gets the explanation instead of a usage error.
+    #[arg(long, value_name = "CODE", hide = true)]
     code: Option<String>,
     /// Server name (display + registry name).
     #[arg(long)]
@@ -287,7 +288,8 @@ struct AddResourcesArgs {
     /// Server name or folder.
     server: String,
     /// REMOVED in 0.4.0 (setup codes no longer exist): use --resource or `kora panel`.
-    #[arg(long, value_name = "CODE")]
+    /// Hidden from help; it still parses so an old script gets the explanation instead of a usage error.
+    #[arg(long, value_name = "CODE", hide = true)]
     code: Option<String>,
     /// Catalog resource id to add (repeatable). Dependencies are added automatically.
     #[arg(long = "resource", value_name = "ID")]
@@ -477,6 +479,7 @@ enum Command {
         cmd: GithubCmd,
     },
     /// Run a server's FXServer (used by the Windows service and supervisors).
+    #[command(hide = true)]
     ServiceHost {
         /// Registry name, or the server folder (absolute path).
         name: String,
@@ -527,6 +530,7 @@ enum Command {
 #[derive(Subcommand)]
 enum HelperCmd {
     /// Run the helper (started by its system service; not for people).
+    #[command(hide = true)]
     Serve,
     /// Install the helper service for your user account (needs administrator rights; run with sudo).
     Install,

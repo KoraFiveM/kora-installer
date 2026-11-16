@@ -31,6 +31,8 @@ pub struct FakeState {
     pub ensure_error: Option<String>,
     pub delete_error: Option<String>,
     pub resources: Vec<String>,
+    /// Resource id -> folder name, for ids whose folder is named differently.
+    pub resource_folders: HashMap<String, String>,
     pub roots: Vec<PathBuf>,
     pub preview: Option<Res<UpdatePreview>>,
     pub apply: Option<Res<UpdateReport>>,
@@ -127,6 +129,10 @@ impl Backend for FakeBackend {
     }
     fn resources(&mut self, _e: &ServerEntry) -> Vec<String> {
         self.state().resources.clone()
+    }
+    fn resource_folder(&mut self, _e: &ServerEntry, id: &str) -> Option<String> {
+        let s = self.state();
+        s.resources.iter().any(|r| r == id).then(|| s.resource_folders.get(id).cloned().unwrap_or_else(|| id.to_string()))
     }
     fn ensure(&mut self, e: &ServerEntry, name: &str, restart: bool) -> Res<String> {
         let mut s = self.state();

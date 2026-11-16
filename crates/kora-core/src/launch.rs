@@ -131,6 +131,22 @@ pub fn port_clash(log: &str) -> bool {
     ["address already in use", "eaddrinuse", "only one usage of each socket address", "failed to bind", "could not bind"].iter().any(|k| l.contains(k))
 }
 
+/// What to say after a bind error in the log. Names the port only when a line with the error
+/// carries one of this server's two ports.
+fn port_clash_message(log: &str, spec: &Spec) -> String {
+    let named = log.lines().filter(|l| port_clash(l)).find_map(|l| {
+        let mut nums = l.split(|c: char| !c.is_ascii_digit()).filter_map(|n| n.parse::<u16>().ok());
+        nums.find(|n| *n == spec.game_port || *n == spec.txadmin_port)
+    });
+    match named {
+        Some(port) => format!("The server stopped because port {port} is already used by another program. Change the port in the panel's Ports tab, or stop the other program."),
+        None => format!(
+            "The server stopped because one of its ports ({} for players, {} for txAdmin) is already used by another program. Change the port in the panel's Ports tab, or stop the other program.",
+            spec.game_port, spec.txadmin_port
+        ),
+    }
+}
+
 /// Remove terminal colour codes (`ESC [ ... letter`) from a log line.
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -273,11 +289,11 @@ fn wait_ready(env: &dyn LaunchEnv, spec: &Spec, progress: &mut dyn FnMut(&str, f
                 env.remove_pid_file(spec);
             }
             let (p, m) = if port_clash(&text) {
-                (Problem::PortInUse, "FXServer stopped because a port is already in use. Close the other program or pick other ports.")
+                (Problem::PortInUse, port_clash_message(&text, spec))
             } else if el <= CRASH_WINDOW {
-                (Problem::Crashed, "FXServer stopped right after starting. The last log lines are below.")
+                (Problem::Crashed, "The server stopped right after starting. The last lines of its log are below; the full log is in the panel's Logs tab.".to_string())
             } else {
-                (Problem::Crashed, "FXServer stopped while starting. The last log lines are below.")
+                (Problem::Crashed, "The server stopped while starting. The last lines of its log are below; the full log is in the panel's Logs tab.".to_string())
             };
             return done(method, pid, up, game, Some(p), m, tail());
         }

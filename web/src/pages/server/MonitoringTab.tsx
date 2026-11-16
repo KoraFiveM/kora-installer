@@ -145,6 +145,8 @@ function SettingsForm({ name, cur }: { name: string; cur: AlertSettings }) {
 export function MonitoringTab({ server: s }: { server: ServerDetail }) {
   const [range, setRange] = useState<MetricsRange>('1h')
   const blocked = whyNot(useRole(), 'admin')
+  // `can_restart` is only true when this panel is the installed background service, so it keeps running by itself.
+  const sys = useQuery({ queryKey: ['system'], queryFn: api.system, staleTime: 60_000 })
   const settings = useQuery({ queryKey: ['alert-settings', s.name], queryFn: () => api.alerts.settings(s.name), enabled: !blocked })
   return (
     <div className="space-y-5">
@@ -161,7 +163,9 @@ export function MonitoringTab({ server: s }: { server: ServerDetail }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <Charts name={s.name} range={range} />
-          <p className="text-xs text-muted-foreground">Kora only measures while the panel is running. To keep watching when this page is closed, run <code>kora panel --install-service</code> on the machine.</p>
+          {sys.data?.can_restart
+            ? <p className="text-xs text-muted-foreground">Kora Panel runs in the background on this machine, so it keeps measuring when this page is closed.</p>
+            : <p className="text-xs text-muted-foreground">Kora only measures while the panel is running. To keep watching when this page is closed, run <code>kora panel --install-service</code> on the machine.</p>}
         </CardContent>
       </Card>
       <Card className="max-w-3xl">

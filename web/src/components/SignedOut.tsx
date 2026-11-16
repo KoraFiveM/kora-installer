@@ -24,16 +24,16 @@ export function SignedOut({ error, onToken, onIdentity }: { error: ApiError | nu
       <KoraLogo className="h-9 w-auto text-foreground" />
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Session expired, or not signed in</CardTitle>
+          <CardTitle className="text-xl">Sign in to Kora</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {remote ? (
             <p className="text-sm text-muted-foreground">
-              Sign in with your Tailscale account if an administrator has added it (they can, on the computer that runs Kora, with <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel tailscale allow you@example.com</code>). Or paste the user token you were given.
+              Sign in with your Tailscale account if an administrator has added it (they can, on the computer that runs Kora, with <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel tailscale allow you@example.com</code>). Or paste your user token below.
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              To keep your servers safe, this page needs a fresh sign-in link. Run <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel</code> on this computer and open the link it prints (each link works once). If you have a sign-in code or link instead, paste it below.
+              To keep your servers safe, this page needs a sign-in link. Run <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel --print-link</code> on this computer to get a new sign-in link. Open that link, or paste it below. If the command says the background service is not installed, run <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel</code> instead and use the link it prints.
             </p>
           )}
           {err && <Alert tone="danger">{err.message}</Alert>}
@@ -51,7 +51,12 @@ export function SignedOut({ error, onToken, onIdentity }: { error: ApiError | nu
               setBusy(false)
             }}
           >
-            <Field label={remote ? 'User token' : 'Sign-in code or link'}>
+            <Field
+              label={remote ? 'User token' : 'Sign-in link'}
+              hint={remote
+                ? 'Paste the token an administrator gave you. They make it in Kora Panel under Settings, or with the command kora panel user add. It is shown only once, so ask them for a new one if it is lost.'
+                : 'Paste the whole link the command printed. It starts with http://.'}
+            >
               <Input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
             </Field>
             <Button type="submit" variant={remote ? 'secondary' : 'default'} disabled={busy || !token.trim()}>

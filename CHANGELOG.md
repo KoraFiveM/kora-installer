@@ -5,6 +5,20 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-16
+
+### Changed
+- **A much shorter install wizard.** A default install is three screens: your licence key, the server's name, and a summary of everything Kora will do, each line with a "Change" link. "Choose everything myself" brings back the step-by-step wizard. Ports are checked before you click Install.
+- Plainer words in the panel: "Sign in to Kora" with where to get a link, "Start a resource with the server" instead of "Ensure a resource", clearer help when a resource has changes of your own, a Start button where the console says the server is stopped, and next steps on common errors.
+- When the server stops while starting, the message now says what to do next: a port clash names the port (when the server's log shows it) and points to the panel's Ports tab; a crash says the full log is in the panel's Logs tab.
+- `kora --help` no longer lists the commands that only the operating system runs (`service-host`, `helper serve`) or the removed `--code` option. They work as before.
+- The live console empties its command file (`.kora/console.in`) when the server starts, so it no longer grows forever. Servers get this the next time the live console is switched on for them (new installs have it).
+
+### Fixed
+- **Start, Stop and Restart of one resource used the wrong name.** The panel sent the catalog id (`kora-lib`) where FXServer expects the folder name (`kora_lib`), so the command did nothing for most resources. It now sends the folder name.
+- "Start a resource with the server" (ensure) wrote the catalog id into `server.cfg` for the same reason; it now writes the folder name.
+- Turning on the live console while the server runs no longer accepts commands that would never run: until the server has been restarted, the console and the resource buttons answer "The live console starts working after the server's next restart. Restart the server, then try again."
+
 ## [0.6.2] - 2026-11-16
 
 ### Added

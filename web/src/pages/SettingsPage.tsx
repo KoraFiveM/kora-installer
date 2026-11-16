@@ -170,7 +170,7 @@ export default function SettingsPage() {
           <p>Kora Panel {meta.data?.version}. It manages FiveM servers on {meta.data?.platform === 'windows' ? 'Windows' : 'Linux'}{sys.data?.helper_installed ? ', with the administrator helper installed' : ''}.</p>
           <p className="text-muted-foreground">Website: koraframe.work</p>
           <p className="text-muted-foreground">Documentation: docs.koraframe.work/guides/installer/overview</p>
-          <p className="text-muted-foreground">Source and releases: github.com/KoraFiveM/kora-installer</p>
+          <p className="text-muted-foreground">Source and releases: <a className="text-info underline" href="https://github.com/KoraFiveM/kora-installer" target="_blank" rel="noopener noreferrer">github.com/KoraFiveM/kora-installer</a></p>
           <p className="text-muted-foreground">This page makes no requests to other websites. Everything it shows comes from Kora on this computer.</p>
         </CardContent>
       </Card>
