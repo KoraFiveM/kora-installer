@@ -521,12 +521,40 @@ enum HelperCmd {
 
 /// The helper's allow-list, checked with this very command-line definition: the arguments must parse
 /// as one of the privileged commands the panel otherwise asks the user to run, and nothing else.
+/// The install folder must be one the helper's user could have made themselves (see
+/// `kora_core::helper::dirs`).
 fn helper_validate(verb: &str, args: &[String]) -> Result<(), String> {
+    use kora_core::helper as h;
+    let uid = h::server::load_config(std::path::Path::new(h::CONFIG_PATH)).map(|c| c.uid);
+    helper_validate_for(verb, args, &|dir| match &uid {
+        Ok(u) => h::dirs::check_install_dir(dir, *u, &h::dirs::kora_account()),
+        Err(e) => Err(e.clone()),
+    })
+}
+
+/// [`helper_validate`] with the folder check given (tests).
+fn helper_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&std::path::Path) -> Result<(), String>) -> Result<(), String> {
     let deny = || Err("That command is not one the helper runs.".to_string());
     let argv = ["kora", "--no-elevate", verb].into_iter().map(String::from).chain(args.iter().cloned());
     let Ok(cli) = Cli::try_parse_from(argv) else { return deny() };
     match cli.command {
-        Some(Command::Install(a)) if a.code.is_none() && verb == "install" => Ok(()),
+        Some(Command::Install(a)) if a.code.is_none() && verb == "install" => {
+            // Another catalogue is a list of repositories that root would clone and run setup for.
+            if a.catalog.is_some() {
+                return Err("The helper does not install from another catalogue (--catalog). Run the install command yourself with sudo to use one.".into());
+            }
+            match &a.dir {
+                Some(dir) => check_dir(dir),
+                None => Err("The helper needs the server folder (--dir).".into()),
+            }
+        }
+        // Going back to an older release (which may have known problems) is not something the
+        // panel's user may do as root on their own: they run it themselves with sudo.
+        Some(Command::SelfUpdate { version: Some(v), .. })
+            if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) =>
+        {
+            Err(format!("The helper only updates Kora to a newer version. To go back to {v}, run `sudo kora self-update --version {v}` yourself."))
+        }
         Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
         Some(Command::App { cmd: AppCmd::Install { .. } | AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
@@ -2638,11 +2666,12 @@ mod tests {
 
     #[test]
     fn the_helper_runs_only_the_privileged_commands() {
-        let v = |verb: &str, a: &[&str]| helper_validate(verb, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let any_dir = |_: &std::path::Path| Ok(());
+        let v = |verb: &str, a: &[&str]| helper_validate_for(verb, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &any_dir);
         for (verb, a) in [
             ("install", &["--name", "a", "--dir", "/srv/a", "--mode", "prod", "--service", "--firewall"][..]),
             ("self-update", &["--yes"]),
-            ("self-update", &["--yes", "--version", "v0.3.4"]),
+            ("self-update", &["--yes", "--version", "v99.0.0"]),
             ("schedule", &["set", "dev", "--daily", "04:00", "--as-user"]),
             ("schedule", &["off", "dev"]),
             ("app", &["install", "--yes", "--force"]),
@@ -2667,9 +2696,28 @@ mod tests {
             ("self-update", &["--version"]),
             ("--version", &[]),
             ("install", &["--", "x"]),
+            // root would clone and set up whatever another catalogue lists
+            ("install", &["--name", "a", "--dir", "/srv/a", "--catalog", "https://evil.example/c.json"]),
+            ("install", &["--name", "a", "--dir", "/srv/a", "--catalog=/tmp/c.json"]),
+            // the folder must be given (so it can be checked)
+            ("install", &["--name", "a", "--mode", "prod"]),
+            // no going back to an older (or the same) release through the helper
+            ("self-update", &["--yes", "--version", "v0.3.4"]),
+            ("self-update", &["--yes", "--version", env!("CARGO_PKG_VERSION")]),
+            ("self-update", &["--yes", "--version", "nonsense"]),
         ] {
             assert!(v(verb, a).is_err(), "{verb} {a:?}");
         }
+        assert!(v("self-update", &["--version", "v0.3.4"]).unwrap_err().contains("sudo kora self-update --version v0.3.4"));
+    }
+
+    #[test]
+    fn the_helper_installs_only_into_folders_the_check_accepts() {
+        let only_home = |d: &std::path::Path| if d.starts_with("/home/sam") { Ok(()) } else { Err(format!("not {}", d.display())) };
+        let v = |a: &[&str]| helper_validate_for("install", &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &only_home);
+        assert!(v(&["--name", "a", "--dir", "/home/sam/kora/a", "--mode", "prod"]).is_ok());
+        assert_eq!(v(&["--name", "a", "--dir", "/etc/systemd/system", "--mode", "prod"]), Err("not /etc/systemd/system".into()));
+        assert!(v(&["--name", "a", "--dir=/root/x", "--mode", "prod"]).is_err());
     }
 
     #[test]

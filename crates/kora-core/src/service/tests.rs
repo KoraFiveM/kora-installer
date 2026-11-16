@@ -184,13 +184,14 @@ fn schtasks_plan_for_system_and_installing_user() {
     let sys = scheduler_install_plan(&server(), &Schedule::default(), Platform::Windows).unwrap();
     assert_eq!(sys.steps.len(), 3);
     let Action::WriteFile { path, contents, .. } = &sys.steps[0].action else { panic!() };
-    assert_eq!(path, "/srv/kora/main/.kora/update-task.xml");
+    // Never in the server folder (other accounts could swap it before schtasks reads it).
+    assert!(path.ends_with("\\Kora\\tasks\\update-main.xml") && !path.contains("/srv/kora/main"), "{path}");
     assert!(contents.contains("<UserId>S-1-5-18</UserId>") && !contents.contains("InteractiveToken"));
     assert!(contents.contains("<StartWhenAvailable>true</StartWhenAvailable>"));
     assert!(contents.contains("<StartBoundary>2024-01-01T04:00:00</StartBoundary>") && contents.contains("<DaysInterval>1</DaysInterval>"));
     let Action::Run { program, args } = &sys.steps[1].action else { panic!() };
     assert_eq!(program, "schtasks.exe");
-    assert_eq!(args, &["/Create", "/TN", "Kora\\Update main", "/XML", "/srv/kora/main/.kora/update-task.xml", "/F"].map(String::from));
+    assert_eq!(args, &["/Create".to_string(), "/TN".into(), "Kora\\Update main".into(), "/XML".into(), path.clone(), "/F".into()]);
     assert!(matches!(sys.steps[2].action, Action::RemoveFile { .. }));
 
     let cfg = ScheduleConfig { preset: Preset::Weekly, time: "23:15".into(), weekday: Some(4), run_as: RunAs::InstallingUser, enabled: true };
@@ -540,4 +541,33 @@ fn an_existing_file_is_locked_down_before_the_contents_go_in() {
     let q = d.path().join("plain.txt");
     SystemRunner.write_file(q.to_str().unwrap(), "x", None).unwrap();
     assert_eq!(std::fs::read_to_string(&q).unwrap(), "x");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_forged_binary_in_created_json_never_becomes_the_root_update_job() {
+    // `created.json` is in the server folder, which the service account and the panel's user can
+    // write: a program named there must not end up in the ExecStart= of the root update unit.
+    let t = tempfile::tempdir().unwrap();
+    let dir = t.path().join("srv");
+    std::fs::create_dir_all(dir.join(".kora")).unwrap();
+    std::fs::write(dir.join(".kora/created.json"), r#"{"created_dir":false,"resources":[],"artifacts":false,"files":[],"service_unit":null,"firewall":false,"registered":true,"binary":"/tmp/evil"}"#).unwrap();
+    let rec = crate::installer::registry::ServerEntry {
+        name: "main".into(),
+        dir: dir.clone(),
+        mode: crate::installer::Mode::Production,
+        ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
+        created_unix: 0,
+    };
+    let s = managed_for(&rec);
+    assert_ne!(s.kora_exe, "/tmp/evil");
+    // This test program itself when it is root-owned all the way down, else a pinned root-owned copy.
+    let me = std::env::current_exe().unwrap();
+    if super::binary::exe_is_service_safe(&me) {
+        assert_eq!(s.kora_exe, me.to_string_lossy());
+    } else {
+        assert!(s.kora_exe.starts_with("/opt/kora/"), "{}", s.kora_exe);
+    }
+    let unit = systemd_update_unit(&s).unwrap();
+    assert!(!unit.contains("/tmp/evil"), "{unit}");
 }

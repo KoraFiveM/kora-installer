@@ -435,18 +435,6 @@ fn item_ok(it: &CloneItem) -> bool {
     }
 }
 
-fn prune_empty_parents(root: &Path, mut p: PathBuf) {
-    while p != root && p.starts_with(root) {
-        if std::fs::remove_dir(&p).is_err() {
-            break;
-        }
-        match p.parent() {
-            Some(q) => p = q.to_path_buf(),
-            None => break,
-        }
-    }
-}
-
 fn clone_one(ctx: &Ctx, it: &CloneItem) -> Result<()> {
     let r = git::SystemRunner;
     if item_ok(it) {
@@ -502,13 +490,11 @@ fn service_user_override() -> Option<String> {
     std::env::var("KORA_SERVICE_USER").ok().filter(|u| !u.is_empty() && u != "root")
 }
 
-/// The kora program a service runs: the root-owned copy when one was made, else this program.
-fn kora_exe_for(created: &Created) -> String {
-    created
-        .binary
-        .clone()
-        .or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| "kora".into())
+/// The kora program a root-run job may execute (see `binary::choose_root_exe`): the recorded copy only
+/// when it really is Kora's root-owned pinned copy, else this program when it is safe, else a copy
+/// of it that has to be made first.
+fn root_exe_for(created: &Created) -> Result<service::binary::RootExe> {
+    service::binary::root_exe(created.binary.as_deref()).map_err(InstallError)
 }
 
 fn managed_server(ctx: &Ctx, user: &str, kora_exe: &str) -> Result<ManagedServer> {
@@ -1133,18 +1119,15 @@ impl InstallStep {
             }
         };
 
-        // Which program does the service run? Not one in a folder ordinary users can write to.
+        // Which program does the service run? Not one in a folder ordinary users can write to, and
+        // not simply the one `created.json` names (that file is in the server folder; see root_exe_for).
         let exe = std::env::current_exe().map_err(|e| InstallError(format!("cannot find the kora program: {e}")))?;
-        let own_copy = match (created.binary.clone(), service::binary::exe_is_service_safe(&exe)) {
-            (Some(b), _) => Some(PathBuf::from(b)),
-            (None, true) => None,
-            (None, false) => {
-                let root = service::binary::default_root(platform).ok_or_else(|| InstallError("cannot find a program folder for the service copy of kora (ProgramFiles is not set)".into()))?;
-                let sha = service::binary::file_sha256(&exe).map_err(|e| InstallError(format!("cannot read the kora program: {e}")))?;
-                Some(service::binary::versioned_path(&root, env!("CARGO_PKG_VERSION"), &sha, platform))
-            }
+        let choice = root_exe_for(&created)?;
+        let own_copy = match &choice {
+            service::binary::RootExe::Ready(p) if *p == exe => None,
+            other => Some(other.path().to_path_buf()),
         };
-        let kora_exe = own_copy.as_ref().map_or_else(|| exe.to_string_lossy().into_owned(), |p| p.to_string_lossy().into_owned());
+        let kora_exe = choice.path().to_string_lossy().into_owned();
 
         let server = managed_server(ctx, &account, &kora_exe)?;
         let mut head = Vec::new(); // folder access + account + program copy
@@ -1162,10 +1145,8 @@ impl InstallStep {
         if create_account {
             head.extend(service::account::create_plan(&account).map_err(|e| InstallError(e.to_string()))?.steps);
         }
-        if let Some(dest) = &own_copy {
-            if !dest.is_file() {
-                head.extend(service::binary::install_plan(&exe.to_string_lossy(), dest).steps);
-            }
+        if let service::binary::RootExe::Copy { src, dest } = &choice {
+            head.extend(service::binary::install_plan(&src.to_string_lossy(), dest).steps);
         }
         let mut tail = Vec::new();
         if platform == SvcPlatform::Linux {
@@ -1212,15 +1193,25 @@ impl InstallStep {
         let ctx = &*self.ctx;
         let created = ctx.load_created();
         let user = created.service_account.clone().unwrap_or_else(|| format!("kora-{}", slug(&ctx.req.name)));
-        let server = managed_server(ctx, &user, &kora_exe_for(&created))?;
+        let exe = root_exe_for(&created)?;
+        let server = managed_server(ctx, &user, &exe.path().to_string_lossy())?;
         let cfg = service::ScheduleConfig::default_for_install();
         let who = service::installing_user();
-        let plan = service::schedule_install_plan(&server, &cfg, &who, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
+        let mut plan = service::Plan::default();
+        if let service::binary::RootExe::Copy { src, dest } = &exe {
+            plan.extend(service::binary::install_plan(&src.to_string_lossy(), dest));
+        }
+        plan.extend(service::schedule_install_plan(&server, &cfg, &who, svc_platform()).map_err(|e| InstallError(e.to_string()))?);
         if !ctx.admin {
             ctx.note(format!("Auto-update schedule NOT created (needs administrator rights). Re-run as root/Administrator to: {}", plan.descriptions().join("; ")));
             return Ok("Skipped (needs admin); see notes".into());
         }
-        ctx.update_created(|c| c.update_timer = true)?;
+        ctx.update_created(|c| {
+            c.update_timer = true;
+            if let service::binary::RootExe::Copy { dest, .. } = &exe {
+                c.binary = Some(dest.to_string_lossy().into_owned());
+            }
+        })?;
         service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         service::save_schedule(&ctx.req.dir, &cfg, &who).map_err(|e| InstallError(e.to_string()))?;
         Ok(format!("Auto-update scheduled: {} (change it with `kora schedule set {}`)", service::describe_for(&cfg, &who), server.name))
@@ -1349,20 +1340,34 @@ impl InstallStep {
                 Ok("Forks left in place".into())
             }
             "build.resources" if !ctx.keep_files => {
-                let root = res_dir(ctx);
+                // `created.resources` comes from a file the service account can change: every entry
+                // must stay inside `<dir>/resources`, and nothing on the way may be a link.
+                let dir = &ctx.req.dir;
+                let res = Path::new("resources");
                 for rel in &created.resources {
-                    let p = root.join(rel);
-                    if p.exists() {
-                        io(std::fs::remove_dir_all(&p), "cannot remove a resource folder")?;
+                    let r = res.join(rel);
+                    match crate::fsutil::remove_inside(dir, &r) {
+                        Ok(_) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                            ctx.note(format!("Kept '{rel}' from Kora's records: {e}."));
+                            continue;
+                        }
+                        Err(e) => return err(format!("cannot remove a resource folder: {e}")),
                     }
-                    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    let _ = std::fs::remove_dir_all(p.with_file_name(format!("{name}.kora-partial")));
-                    if let Some(parent) = p.parent() {
-                        prune_empty_parents(&root, parent.to_path_buf());
+                    let name = r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let _ = crate::fsutil::remove_inside(dir, &r.with_file_name(format!("{name}.kora-partial")));
+                    let mut parent = r.parent().map(Path::to_path_buf);
+                    while let Some(p) = parent.filter(|p| p != res && p.starts_with(res)) {
+                        if !crate::fsutil::remove_empty_dir_inside(dir, &p) {
+                            break;
+                        }
+                        parent = p.parent().map(Path::to_path_buf);
                     }
                 }
-                layout::remove_empty_dirs(&root);
-                let _ = std::fs::remove_dir(&root);
+                if !crate::fsutil::is_symlink(&res_dir(ctx)) {
+                    layout::remove_empty_dirs(&res_dir(ctx));
+                }
+                crate::fsutil::remove_empty_dir_inside(dir, res);
                 Ok(format!("Removed {} resources", created.resources.len()))
             }
             "build.db" if !ctx.keep_db => {
@@ -1388,7 +1393,7 @@ impl InstallStep {
                 Ok("Database kept".into())
             }
             "build.artifact" if !ctx.keep_files && created.artifacts => {
-                let _ = std::fs::remove_dir_all(ctx.req.dir.join("artifacts"));
+                let _ = crate::fsutil::remove_inside(&ctx.req.dir, Path::new("artifacts"));
                 Ok("Removed the server build".into())
             }
             "build.config" if !ctx.keep_files => {
@@ -1396,11 +1401,11 @@ impl InstallStep {
                     if f == "database.json" || f == "kora-server.json" {
                         continue;
                     }
-                    let p = ctx.req.dir.join(f);
-                    if p.is_dir() {
-                        let _ = std::fs::remove_dir_all(&p);
-                    } else {
-                        let _ = std::fs::remove_file(&p);
+                    // Only inside the server folder, never through a link (the list is in a file other accounts can change).
+                    if let Err(e) = crate::fsutil::remove_inside(&ctx.req.dir, Path::new(f)) {
+                        if e.kind() == std::io::ErrorKind::PermissionDenied {
+                            ctx.note(format!("Kept '{f}' from Kora's records: {e}."));
+                        }
                     }
                 }
                 Ok("Removed generated configuration".into())
@@ -1409,7 +1414,11 @@ impl InstallStep {
                 let preq = PortRequest { server: slug(&ctx.req.name), game_port: ctx.req.ports.game, txadmin_port: ctx.req.ports.txadmin, expose_txadmin: ctx.req.txadmin_public };
                 let rn = service::SystemRunner;
                 if let Some(kind) = firewall::detect(svc_platform(), &rn) {
-                    let plan = firewall::close_plan(&preq, kind).map_err(|e| InstallError(e.to_string()))?;
+                    let ssh = if svc_platform() == SvcPlatform::Linux { firewall::ssh_ports() } else { vec![] };
+                    let (plan, note) = firewall::close_plan_checked(&preq, kind, &rn, &ssh).map_err(|e| InstallError(e.to_string()))?;
+                    if let Some(n) = note {
+                        ctx.note(n);
+                    }
                     if ctx.admin {
                         service::apply_plan(&plan, &rn).map_err(|e| InstallError(e.to_string()))?;
                     } else {
@@ -1494,7 +1503,7 @@ pub(crate) fn finish_rollback(ctx: &Ctx) -> Result<()> {
         return Ok(());
     }
     let created = ctx.load_created();
-    let _ = std::fs::remove_dir_all(ctx.meta_dir());
+    let _ = crate::fsutil::remove_inside(&ctx.req.dir, Path::new(".kora"));
     if created.created_dir {
         io(std::fs::remove_dir_all(&ctx.req.dir), "cannot remove the server folder")?;
     } else {

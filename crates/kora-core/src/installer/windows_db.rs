@@ -243,6 +243,67 @@ fn run_checked(spec: &CommandSpec, what: &str) -> Result<db::CommandOutput> {
     Ok(out)
 }
 
+/// Well-known SIDs that may own Kora's machine-wide folders: Administrators, SYSTEM, TrustedInstaller.
+const TRUSTED_OWNERS: &[&str] = &["S-1-5-32-544", "S-1-5-18", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"];
+
+/// PowerShell that prints the owner SID of `path` (a SID, so no language differences).
+pub fn owner_sid_command(path: &Path) -> CommandSpec {
+    let quoted = path.to_string_lossy().replace('\'', "''");
+    CommandSpec::new(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", &format!("(Get-Acl -LiteralPath '{quoted}').GetOwner([System.Security.Principal.SecurityIdentifier]).Value")],
+    )
+}
+
+/// Make the folders that will hold Kora's MariaDB administrator-only, or refuse. `dirs` = the
+/// folders from the outside in (`%ProgramData%\Kora`, then `...\mariadb`), already created.
+/// Anyone may create folders in `%ProgramData%`, and whoever creates one owns it and can change its
+/// permissions back after `icacls` restricted them. So each folder must be a real folder (not a
+/// link) owned by Administrators / SYSTEM, checked AFTER it was created (a folder planted first is
+/// caught, not overlooked); its owner is then set to Administrators explicitly. The innermost one
+/// is also restricted to Administrators and SYSTEM.
+pub fn secure_dirs(runner: &dyn db::CommandRunner, dirs: &[PathBuf]) -> Result<()> {
+    for d in dirs {
+        if crate::fsutil::is_symlink(d) {
+            return err(format!("{} is a link, so Kora will not put the database server there. Delete it (as administrator) and try again.", d.display()));
+        }
+        let out = runner.run(&owner_sid_command(d)).map_err(|e| InstallError(format!("cannot read the owner of {}: {e}", d.display())))?;
+        let sid = out.stdout.trim();
+        if !out.ok() || sid.is_empty() {
+            return err(format!("cannot read the owner of {} ({}).", d.display(), out.stderr.lines().next().unwrap_or("").trim()));
+        }
+        if !TRUSTED_OWNERS.contains(&sid) {
+            return err(format!(
+                "{} already exists and belongs to another account ({sid}), which could change it later. Kora will not put the database server there: delete that folder (as administrator) and try again.",
+                d.display()
+            ));
+        }
+        let own = CommandSpec::new("icacls", &[&d.to_string_lossy(), "/setowner", "*S-1-5-32-544"]);
+        let o = runner.run(&own).map_err(|e| InstallError(format!("setting the owner of {}: {e}", d.display())))?;
+        if !o.ok() {
+            return err(format!("setting the owner of {} to Administrators failed: {}", d.display(), o.stdout.lines().next().unwrap_or("").trim()));
+        }
+    }
+    if let Some(inner) = dirs.last() {
+        let spec = CommandSpec { program: "icacls".into(), args: admin_only_acl_args(inner, true), ..CommandSpec::default() };
+        let o = runner.run(&spec).map_err(|e| InstallError(format!("restricting the MariaDB folder to administrators: {e}")))?;
+        if !o.ok() {
+            return err(format!("restricting the MariaDB folder to administrators failed: {}", o.stdout.lines().next().unwrap_or("").trim()));
+        }
+    }
+    Ok(())
+}
+
+/// `%ProgramData%\Kora` (when `base` is the default `...\Kora\mariadb`) and `base`, outside in.
+fn base_and_parent(base: &Path) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(p) = base.parent().filter(|p| p.file_name().is_some_and(|n| n == "Kora")) {
+        v.push(p.to_path_buf());
+    }
+    v.push(base.to_path_buf());
+    v
+}
+
 pub(super) fn restrict(path: &Path, is_dir: bool, what: &str) -> Result<()> {
     let spec = CommandSpec { program: "icacls".into(), args: admin_only_acl_args(path, is_dir), ..CommandSpec::default() };
     run_checked(&spec, what).map(|_| ())
@@ -298,7 +359,7 @@ pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Re
         return err(format!("{} already holds a MariaDB folder that is not registered with Kora. Move or delete it (or install MariaDB yourself and use --db existing).", root.display()));
     }
     std::fs::create_dir_all(&root).map_err(|e| InstallError(format!("cannot create {}: {e}", root.display())))?;
-    restrict(&base, true, "restricting the MariaDB folder to administrators")?;
+    secure_dirs(&db::SystemRunner, &base_and_parent(&base))?;
     let client = root.join("database").join("bin").join("mariadb.exe");
     let datadir = root.join("database-data");
 
@@ -481,6 +542,37 @@ mod tests {
         assert!(dest.join("bin").join("mariadb-install-db.exe").is_file());
         assert!(dest.join("share").join("a.txt").is_file());
         assert!(!dest.join("mariadb-1").exists());
+    }
+
+    struct Owners(std::cell::RefCell<Vec<String>>, &'static str);
+    impl db::CommandRunner for Owners {
+        fn run(&self, spec: &CommandSpec) -> db::DbResult<db::CommandOutput> {
+            self.0.borrow_mut().push(format!("{} {}", spec.program, spec.args.join(" ")));
+            let stdout = if spec.program == "powershell" { format!("{}\r\n", self.1) } else { String::new() };
+            Ok(db::CommandOutput { status: 0, stdout, stderr: String::new() })
+        }
+    }
+
+    #[test]
+    fn a_folder_planted_by_another_account_is_refused_and_ours_is_taken_over() {
+        let dirs = base_and_parent(&PathBuf::from("C:\\ProgramData").join("Kora").join("mariadb"));
+        assert_eq!(dirs.len(), 2, "%ProgramData%\\Kora is checked too: {dirs:?}");
+        // Owned by an ordinary user (they created it before Kora did): nothing is changed.
+        let r = Owners(Default::default(), "S-1-5-21-1-2-3-1001");
+        let e = secure_dirs(&r, &dirs).unwrap_err().to_string();
+        assert!(e.contains("belongs to another account") && e.contains("S-1-5-21-1-2-3-1001"), "{e}");
+        assert!(!r.0.borrow().iter().any(|c| c.starts_with("icacls")), "{:?}", r.0.borrow());
+        // Owned by Administrators: owner set explicitly, the inner folder restricted.
+        let r = Owners(Default::default(), "S-1-5-32-544");
+        secure_dirs(&r, &dirs).unwrap();
+        let calls = r.0.borrow();
+        assert_eq!(calls.iter().filter(|c| c.contains("/setowner *S-1-5-32-544")).count(), 2, "{calls:?}");
+        assert!(calls.last().unwrap().contains("/inheritance:r") && calls.last().unwrap().contains("mariadb"));
+        // A path with a quote cannot break out of the PowerShell string.
+        let c = owner_sid_command(Path::new("C:\\a'b"));
+        assert!(c.args.last().unwrap().contains("'C:\\a''b'"));
+        // An override folder (KORA_MARIADB_HOME) is checked on its own.
+        assert_eq!(base_and_parent(Path::new("D:\\db")), vec![PathBuf::from("D:\\db")]);
     }
 
     #[test]

@@ -86,6 +86,109 @@ pub fn remove_plan(dest: &Path) -> Plan {
     Plan::new(steps)
 }
 
+/// Is `path` shaped like a copy [`install_plan`] makes inside `root`: exactly
+/// `<root>/<version>-<sha12>/kora[.exe]`, with no `..` or other tricks? (A path read from a record
+/// in a server folder is only trusted, for running or deleting, when it is.)
+pub fn is_pinned_copy_path(path: &Path, root: &Path, platform: Platform) -> bool {
+    let name = if platform == Platform::Windows { "kora.exe" } else { "kora" };
+    let plain = path.components().all(|c| !matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir));
+    let same = |a: &Path, b: &Path| if platform == Platform::Windows { a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()) } else { a == b };
+    plain
+        && path.file_name().is_some_and(|n| n == name)
+        && pinned_sha12(path).is_some()
+        && path.parent().and_then(Path::parent).is_some_and(|r| same(r, root))
+}
+
+/// Which kora program a job that runs as root / SYSTEM (the update timer or scheduled task) runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RootExe {
+    /// Safe as it is.
+    Ready(PathBuf),
+    /// Copy this program (`src`) to the pinned, root-owned `dest` first, then run `dest`.
+    Copy { src: PathBuf, dest: PathBuf },
+}
+
+impl RootExe {
+    pub fn path(&self) -> &Path {
+        match self {
+            RootExe::Ready(p) | RootExe::Copy { dest: p, .. } => p,
+        }
+    }
+}
+
+/// The facts [`choose_root_exe`] needs (a seam: tests fill them in).
+pub struct ExeFacts<'a> {
+    pub platform: Platform,
+    /// Kora's own program folder ([`default_root`]).
+    pub root: Option<PathBuf>,
+    /// This program.
+    pub current: PathBuf,
+    /// Could anyone but root / administrators change this file? (`false` = safe)
+    pub is_safe: &'a dyn Fn(&Path) -> bool,
+    /// SHA-256 of this program (only asked when a copy is needed).
+    pub current_sha256: &'a dyn Fn() -> std::io::Result<String>,
+    pub version: &'a str,
+}
+
+/// Root must only ever execute a program nobody else can change. `recorded` is the program a
+/// server's `created.json` names: that file lives in a folder the service account and the panel's
+/// user can write to, so it is only a hint, used when it is a pinned copy inside Kora's own program
+/// folder AND safe. Otherwise this program when it is safe (for example `/usr/local/bin/kora` from
+/// `install.sh`), else a pinned copy of this program (made first).
+pub fn choose_root_exe(recorded: Option<&str>, f: &ExeFacts) -> Result<RootExe, String> {
+    if let (Some(r), Some(root)) = (recorded, f.root.as_deref()) {
+        let p = Path::new(r);
+        if is_pinned_copy_path(p, root, f.platform) && (f.is_safe)(p) {
+            return Ok(RootExe::Ready(p.to_path_buf()));
+        }
+    }
+    if (f.is_safe)(&f.current) {
+        return Ok(RootExe::Ready(f.current.clone()));
+    }
+    let root = f.root.clone().ok_or_else(|| "cannot find a program folder for the root-owned copy of kora (ProgramFiles is not set)".to_string())?;
+    let sha = (f.current_sha256)().map_err(|e| format!("cannot read the kora program: {e}"))?;
+    let dest = versioned_path(&root, f.version, &sha, f.platform);
+    if (f.is_safe)(&dest) {
+        return Ok(RootExe::Ready(dest));
+    }
+    Ok(RootExe::Copy { src: f.current.clone(), dest })
+}
+
+/// Safe to run as root / SYSTEM. Unix: root owns the file and every folder above it and nobody else
+/// can write them ([`exe_is_service_safe`]). Windows: a pinned copy inside `%ProgramFiles%\Kora\bin`
+/// (administrators only) whose content matches the hash in its folder name.
+fn root_safe(p: &Path, platform: Platform, root: Option<&Path>) -> bool {
+    match platform {
+        Platform::Linux => exe_is_service_safe(p),
+        Platform::Windows => {
+            root.is_some_and(|r| is_pinned_copy_path(p, r, platform))
+                && !crate::fsutil::is_symlink(p)
+                && p.is_file()
+                && pinned_sha12(p).is_some_and(|want| file_sha256(p).is_ok_and(|got| got.starts_with(&want)))
+        }
+    }
+}
+
+/// [`choose_root_exe`] for this machine and this program.
+pub fn root_exe(recorded: Option<&str>) -> Result<RootExe, String> {
+    let platform = Platform::current();
+    let current = std::env::current_exe().map_err(|e| format!("cannot find the kora program: {e}"))?;
+    let root = default_root(platform);
+    let r2 = root.clone();
+    let cur = current.clone();
+    choose_root_exe(
+        recorded,
+        &ExeFacts {
+            platform,
+            root,
+            current,
+            is_safe: &|p| root_safe(p, platform, r2.as_deref()),
+            current_sha256: &|| file_sha256(&cur),
+            version: env!("CARGO_PKG_VERSION"),
+        },
+    )
+}
+
 /// Owner and permission bits of one path component (Unix).
 #[cfg(unix)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -230,6 +333,54 @@ mod tests {
         // not a pinned folder: no claim to check
         assert!(verify_pinned_copy(Path::new("/opt/kora/kora"), &src).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn facts<'a>(safe: &'a dyn Fn(&Path) -> bool, platform: Platform) -> ExeFacts<'a> {
+        ExeFacts { platform, root: Some(PathBuf::from("/opt/kora")), current: PathBuf::from("/home/me/kora"), is_safe: safe, current_sha256: &|| Ok("0123456789abcdef".into()), version: "0.5.0" }
+    }
+
+    #[test]
+    fn a_forged_record_never_chooses_what_root_runs() {
+        // Only the real pinned copy (and only while it is root-owned) is believed.
+        let safe = |p: &Path| p.starts_with("/opt/kora") || p == Path::new("/usr/local/bin/kora");
+        let f = facts(&safe, Platform::Linux);
+        for forged in ["/tmp/evil", "/home/me/srv/.kora/kora", "/opt/kora/../../tmp/x/0.1.0-0123456789ab/kora", "/opt/kora/0.1.0-0123456789ab/sh", "/opt/kora/x/kora", "/opt/kora/a/0.1.0-0123456789ab/kora"] {
+            let got = choose_root_exe(Some(forged), &f).unwrap();
+            assert_ne!(got.path(), Path::new(forged), "{forged}");
+            assert_eq!(got, RootExe::Ready(PathBuf::from("/opt/kora/0.5.0-0123456789ab/kora")), "{forged}");
+        }
+        // The genuine copy is used as recorded.
+        let real = "/opt/kora/0.4.0-aaaaaaaaaaaa/kora";
+        assert_eq!(choose_root_exe(Some(real), &f).unwrap(), RootExe::Ready(PathBuf::from(real)));
+        // ... unless it is no longer root-owned.
+        let none_safe = |_: &Path| false;
+        let f = facts(&none_safe, Platform::Linux);
+        assert_eq!(choose_root_exe(Some(real), &f).unwrap(), RootExe::Copy { src: "/home/me/kora".into(), dest: "/opt/kora/0.5.0-0123456789ab/kora".into() });
+    }
+
+    #[test]
+    fn a_safe_program_is_run_as_it_is_and_an_unsafe_one_is_copied_first() {
+        let installed = |p: &Path| p == Path::new("/usr/local/bin/kora");
+        let mut f = facts(&installed, Platform::Linux);
+        f.current = "/usr/local/bin/kora".into();
+        assert_eq!(choose_root_exe(None, &f).unwrap(), RootExe::Ready("/usr/local/bin/kora".into()));
+        let nothing = |_: &Path| false;
+        let f = facts(&nothing, Platform::Linux);
+        assert!(matches!(choose_root_exe(None, &f).unwrap(), RootExe::Copy { .. }));
+        let mut f = facts(&nothing, Platform::Linux);
+        f.root = None;
+        assert!(choose_root_exe(None, &f).is_err());
+    }
+
+    #[test]
+    fn pinned_copy_paths_are_exact() {
+        let root = Path::new("/opt/kora");
+        assert!(is_pinned_copy_path(Path::new("/opt/kora/0.1.0-0123456789ab/kora"), root, Platform::Linux));
+        assert!(!is_pinned_copy_path(Path::new("/opt/kora/0.1.0-0123456789ab/kora.exe"), root, Platform::Linux));
+        assert!(!is_pinned_copy_path(Path::new("/opt/kora/0.1.0-0123456789ab/../../../etc/kora"), root, Platform::Linux));
+        assert!(!is_pinned_copy_path(Path::new("/etc/0.1.0-0123456789ab/kora"), root, Platform::Linux));
+        let w = Path::new("C:\\Program Files\\Kora\\bin");
+        assert!(is_pinned_copy_path(&w.join("0.1.0-0123456789ab").join("kora.exe"), w, Platform::Windows));
     }
 
     #[test]

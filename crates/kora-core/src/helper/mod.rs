@@ -34,6 +34,16 @@
 //!   example `schedule set|off`, `app install|uninstall`, `install` without `--code`). So the
 //!   helper can never run anything the CLI could not, and `delete`, `service-host`, `--code`,
 //!   unknown verbs, `--license-key` on the command line and unknown environment names are refused.
+//!   Some valid invocations would still hand the user more than the panel needs, so they are refused
+//!   too: `install` must name its folder (`--dir`), and only a folder the user could have made
+//!   themselves is accepted ([`dirs`]); `install --catalog` (root would clone and set up whatever
+//!   another list names); `self-update --version` to an older or the same release.
+//! * **Root's git ignores the user's git settings.** The child gets the user's `HOME`, so every
+//!   `git` that runs as root reads no system or global config file and runs no hooks or fsmonitor
+//!   (`git::root_git_env`); the user's `gh` sign-in is still used for GitHub through the
+//!   credential helper passed in the environment.
+//! * **What this means.** Installing the helper gives the panel's user (and anything running as
+//!   them) the same power as passwordless `sudo` for these Kora actions.
 //! * **No shell.** The child is the same `kora` binary, spawned with an argument vector
 //!   (`--no-elevate <verb> <args>...`), never through a shell: metacharacters are plain argument
 //!   text. The binary is a root-owned copy made by `helper install`
@@ -55,6 +65,7 @@
 //! not available on Windows and the panel keeps answering `needs_elevation` there.
 
 pub mod client;
+pub mod dirs;
 pub mod install;
 pub mod server;
 

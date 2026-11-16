@@ -565,6 +565,10 @@ pub fn plan_install_windows(
                 args: vec![
                     format!("--datadir={}", s(&data)),
                     format!("--service={service}"),
+                    // mariadb-install-db.exe takes the root password only on its command line (no
+                    // stdin, file or environment option). It runs elevated, and ordinary accounts
+                    // cannot read an elevated process's command line; installing first and setting the
+                    // password afterwards would leave root without one on the port meanwhile.
                     format!("--password={}", password.expose()),
                     format!("--port={port}"),
                 ],

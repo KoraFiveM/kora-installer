@@ -183,6 +183,10 @@ When you ask for one of these, the panel does one of two things:
   finishes, return to the panel and refresh.
 - **Uses the helper, if it is installed (Linux only for now).** The helper is a small system service, installed once with
   `sudo kora helper install`, that runs those same actions for the panel without a prompt each time. It accepts only the fixed list of privileged actions Kora already has and checks which user is asking. Check it with `kora helper status`, remove it with `kora helper uninstall`.
+  Be aware of what it means: with the helper installed, your account (and any program running as you) has the same
+  power as passwordless `sudo` for these Kora actions, so only install it on an account you keep safe. Through the
+  helper, servers are installed only into a new or empty folder in your home folder or in `/home/kora`, never from
+  another catalogue, and Kora is only updated to a newer version; for anything else run the command yourself with `sudo`.
 
 The Settings page says when the helper is installed. On Windows the panel always shows the command to run.
 

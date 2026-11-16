@@ -108,25 +108,10 @@ impl CommandRunner for SystemRunner {
         })
     }
 
+    /// Never through a symbolic link: some targets (`<server>/secrets.env`) are in folders the
+    /// service account can change, and a planted link would make root overwrite or chmod any file.
     fn write_file(&self, path: &str, contents: &str, mode: Option<u32>) -> io::Result<()> {
-        let p = std::path::Path::new(path);
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        // With a mode, the permissions are set on the open (emptied) file before the contents go in:
-        // writing first would leave an owner-only file readable by others for a moment, and `mode`
-        // on open only applies to a new file, not to one that already exists.
-        #[cfg(unix)]
-        if let Some(m) = mode {
-            use std::io::Write;
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(m).open(p)?;
-            f.set_permissions(std::fs::Permissions::from_mode(m))?;
-            return f.write_all(&file_bytes(contents));
-        }
-        #[cfg(not(unix))]
-        let _ = mode;
-        std::fs::write(p, file_bytes(contents))
+        crate::fsutil::write_no_follow(std::path::Path::new(path), &file_bytes(contents), mode.unwrap_or(0o644))
     }
 
     fn remove_file(&self, path: &str) -> io::Result<()> {
