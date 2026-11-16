@@ -3,15 +3,18 @@ mod error;
 pub mod elevated;
 pub mod handlers;
 mod jobs;
+pub mod remote;
 pub mod routes;
 pub mod security;
 mod static_ui;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::Extension;
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{middleware, Json, Router};
@@ -33,6 +36,9 @@ pub enum PanelError {
         addr: SocketAddr,
         source: std::io::Error,
     },
+    /// Remote access is not set up for this bind, or its settings file cannot be read.
+    #[error("{0}")]
+    Remote(String),
     #[error("server error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -43,6 +49,10 @@ pub struct PanelOptions {
     pub port: u16,
     pub open_browser: bool,
     pub token: Option<String>,
+    /// `--remote`: allow remote access for this run (a non-loopback `bind` needs this or saved settings).
+    pub remote: bool,
+    /// Where the remote access settings live; `None` is `<kora home>/panel.json`.
+    pub remote_config: Option<PathBuf>,
 }
 
 impl Default for PanelOptions {
@@ -52,6 +62,8 @@ impl Default for PanelOptions {
             port: DEFAULT_PORT,
             open_browser: true,
             token: None,
+            remote: false,
+            remote_config: None,
         }
     }
 }
@@ -70,6 +82,10 @@ pub struct AppState {
     /// Where handlers start jobs. In `run()` this is also `jobs`.
     pub registry: JobRegistry,
     pub backend: BackendFactory,
+    /// The bound address (its port is part of every allowed `Host`).
+    pub addr: SocketAddr,
+    /// Optional remote access: settings, identity providers, roles. Off unless configured.
+    pub remote: Arc<remote::Remote>,
 }
 
 impl AppState {
@@ -87,7 +103,22 @@ impl AppState {
             jobs,
             registry: JobRegistry::new(),
             backend: Arc::new(|| Box::new(kora_core::api::SystemBackend)),
+            addr,
+            // Memory only by default: nothing on disk is read, so tests and embedders stay local.
+            remote: Arc::new(remote::Remote::memory()),
         }
+    }
+    pub fn with_remote(mut self, r: Arc<remote::Remote>) -> Self {
+        self.remote = r;
+        self
+    }
+    /// Is `host` (a `Host` header, or the host part of an `Origin`) one this panel answers to? The bound
+    /// address and `localhost` always; names from the remote settings only while remote access is on.
+    pub fn host_ok(&self, host: &str) -> bool {
+        if self.allowed_hosts.iter().any(|a| a.eq_ignore_ascii_case(host)) {
+            return true;
+        }
+        self.remote.enabled() && remote::extra_host_allowed(host, &self.remote.extra_hosts(), self.addr.port())
     }
     /// The real setup: `SystemBackend` and one registry that both starts and serves jobs.
     pub fn system(token: String, addr: SocketAddr) -> Self {
@@ -126,6 +157,11 @@ impl AppState {
             Err(c) => Err(ApiError::conflict(c.to_string())),
         }
     }
+    /// Replace where session expiry reads the time (tests).
+    pub fn with_session_clock(mut self, clock: security::Clock) -> Self {
+        self.sessions = Arc::new(security::Sessions::with_clock(clock));
+        self
+    }
     pub fn with_limiter(mut self, max: u32, lockout: Duration) -> Self {
         self.limiter = Arc::new(security::Limiter::new(max, lockout));
         self
@@ -134,10 +170,15 @@ impl AppState {
 
 #[derive(Deserialize)]
 struct SessionReq {
-    token: String,
+    /// Local: the launch token. Remote: a user token, or absent to sign in by Tailscale identity.
+    #[serde(default)]
+    token: Option<String>,
 }
 
-pub(crate) async fn meta() -> Json<Value> {
+/// `GET /meta`. `identity` is `null` unless the request carries a valid session or bearer token;
+/// then it is `{name, provider: local|tailscale|token, role: viewer|operator|admin}` and `remote` says
+/// whether the request came from another computer. The UI reads these to hide what the role cannot do.
+pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st): State<AppState>) -> Json<Value> {
     let platform = if cfg!(windows) { "windows" } else { "linux" };
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
@@ -145,6 +186,9 @@ pub(crate) async fn meta() -> Json<Value> {
         "platform": platform,
         "ops": Op::ALL.iter().map(|o| o.name()).collect::<Vec<_>>(),
         "node": hostname(),
+        "identity": caller.identity,
+        "remote": caller.remote,
+        "allow_remote_destructive": caller.remote && caller.identity.is_some() && st.remote.config().allow_remote_destructive,
     }))
 }
 
@@ -165,29 +209,96 @@ fn hostname() -> String {
 
 pub(crate) async fn session_create(
     State(st): State<AppState>,
+    Extension(caller): Extension<remote::Caller>,
     Json(req): Json<SessionReq>,
 ) -> Result<Response, ApiError> {
-    if st.limiter.locked() {
-        return Err(ApiError::rate_limited(
-            "too many failed attempts, try again later",
-        ));
-    }
-    if !security::ct_eq(&req.token, &st.token) {
-        st.limiter.failure();
-        return Err(ApiError::unauthorized("invalid token"));
-    }
-    st.limiter.success();
-    let id = st.sessions.create();
+    let token = req.token.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let (id, identity) = if caller.remote {
+        remote_sign_in(&st, &caller, token).await?
+    } else {
+        if st.limiter.locked() {
+            return Err(ApiError::rate_limited(
+                "too many failed attempts, try again later",
+            ));
+        }
+        if !token.is_some_and(|t| security::ct_eq(t, &st.token)) {
+            st.limiter.failure();
+            return Err(ApiError::unauthorized("invalid token"));
+        }
+        st.limiter.success();
+        (st.sessions.create(), remote::Identity::local())
+    };
     let cookie = format!(
         "{}={id}; HttpOnly; SameSite=Strict; Path=/",
         security::COOKIE
     );
-    let mut r = Json(json!({"ok": true})).into_response();
+    let mut r = Json(json!({"ok": true, "identity": identity})).into_response();
     r.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_str(&cookie).expect("ascii cookie"),
     );
     Ok(r)
+}
+
+/// `POST /session/logout`: forget this session and clear the cookie. 204.
+pub(crate) async fn session_logout(State(st): State<AppState>, req_headers: axum::http::HeaderMap) -> Response {
+    for v in req_headers.get_all(header::COOKIE) {
+        for part in v.to_str().unwrap_or("").split(';') {
+            if let Some((k, id)) = part.trim().split_once('=') {
+                if k == security::COOKIE {
+                    st.sessions.remove(id);
+                }
+            }
+        }
+    }
+    let mut r = StatusCode::NO_CONTENT.into_response();
+    r.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&format!("{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0", security::COOKIE)).expect("ascii cookie"),
+    );
+    r
+}
+
+/// Sign in from another computer: a per-user token, or (no token) the Tailscale identity of the peer.
+/// The launch token is not accepted here. Failed tokens are counted on their own limiter.
+async fn remote_sign_in(
+    st: &AppState,
+    caller: &remote::Caller,
+    token: Option<&str>,
+) -> Result<(String, remote::Identity), ApiError> {
+    let r = &st.remote;
+    if r.limiter.locked() {
+        return Err(ApiError::rate_limited("too many failed attempts, try again later"));
+    }
+    let identity = match token {
+        Some(t) => {
+            let found = r.identity_for_token(t);
+            if found.is_none() {
+                r.limiter.failure();
+                return Err(ApiError::unauthorized("invalid token"));
+            }
+            found
+        }
+        None => {
+            if !r.config().tailscale {
+                return Err(ApiError::unauthorized("Sign in with your user token."));
+            }
+            let peer = caller.peer.ok_or_else(|| ApiError::unauthorized("Could not tell where you are connecting from."))?;
+            let remote = st.remote.clone();
+            let login = blocking(move || remote.whois(peer).map_err(ApiError::unauthorized)).await?;
+            let found = r.identity_for_tailscale(&login);
+            if found.is_none() {
+                return Err(ApiError::unauthorized(format!(
+                    "The Tailscale account {login} is not allowed on this panel. Ask an administrator to add it."
+                )));
+            }
+            found
+        }
+    };
+    let identity = identity.expect("checked above");
+    r.limiter.success();
+    let id = st.sessions.create_for(identity.provider, &identity.name, true, identity.role);
+    Ok((id, identity))
 }
 
 async fn fallback(req: Request) -> Response {
@@ -244,6 +355,17 @@ fn open_browser(url: &str) -> bool {
 
 /// Run the panel until Ctrl+C. Blocking; builds its own tokio runtime.
 pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
+    let path = opts.remote_config.clone().unwrap_or_else(remote::config::default_path);
+    let rem = remote::Remote::from_file(path)
+        .map_err(PanelError::Remote)?
+        .forced(opts.remote)
+        .with_whois(Arc::new(remote::SystemWhois));
+    let non_loopback = !opts.bind.to_canonical().is_loopback();
+    if non_loopback && rem.enabled() {
+        rem.learn_self_names();
+    }
+    let warnings = remote::bind_plan(opts.bind, rem.enabled(), &rem.config(), &rem.extra_hosts()).map_err(PanelError::Remote)?;
+    let rem = Arc::new(rem);
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -254,25 +376,36 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
             .map_err(|source| PanelError::Bind { addr, source })?;
         let addr = listener.local_addr()?;
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
-        let state = AppState::system(token.clone(), addr);
-        let url = format!("http://{addr}/#token={token}");
-        println!("Kora Panel: {url}");
-        // The tunnel hint is for people on a machine without a desktop, whether or not we would have
-        // tried to open a browser (`--no-open` must not hide it).
-        if is_headless() {
-            println!("No local desktop session detected; open the URL on your machine with:");
-            println!("  ssh -L {0}:127.0.0.1:{0} user@host", addr.port());
-        } else if opts.open_browser && !open_browser(&url) {
-            println!("Could not open a browser; open the URL above manually.");
+        let state = AppState::system(token.clone(), addr).with_remote(rem);
+        for w in &warnings {
+            eprintln!("{w}");
+        }
+        if non_loopback {
+            println!("Kora Panel: http://{addr}/");
+            println!("Sign in with a user token (kora panel user add <name> --role <role>) or, if set up, your Tailscale account.");
+        } else {
+            let url = format!("http://{addr}/#token={token}");
+            println!("Kora Panel: {url}");
+            // The tunnel hint is for people on a machine without a desktop, whether or not we would have
+            // tried to open a browser (`--no-open` must not hide it).
+            if is_headless() {
+                println!("No local desktop session detected; open the URL on your machine with:");
+                println!("  ssh -L {0}:127.0.0.1:{0} user@host", addr.port());
+            } else if opts.open_browser && !open_browser(&url) {
+                println!("Could not open a browser; open the URL above manually.");
+            }
         }
         println!("Press Ctrl+C to stop.");
         // Sample the servers and raise alerts for as long as the panel runs.
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
-        let served = axum::serve(listener, router(state))
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
-            .await;
+        let served = axum::serve(
+            listener,
+            router(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await;
         monitor.stop();
         served?;
         Ok(())

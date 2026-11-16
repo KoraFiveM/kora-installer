@@ -290,7 +290,33 @@ const route = (method: string, pattern: string, h: Handler) => {
 const dec = (s: string) => decodeURIComponent(s)
 installHubMock(route, startJob, Fail, () => servers)
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)' }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
+
+// Remote access (demo data: nothing is really opened to the network).
+const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
+route('GET', '/remote', () => structuredClone(remoteState))
+route('PUT', '/remote', (_m, b) => {
+  const u = b as T.RemoteSettingsUpdate
+  for (const h of u.allowed_hosts ?? []) if (/[\s/]/.test(h)) throw new Fail(400, 'bad_request', `'${h}' is not a host name or address. Use just the name, for example box.example.ts.net.`)
+  Object.assign(remoteState, u)
+  return structuredClone(remoteState)
+})
+route('GET', '/users', () => ({ users: structuredClone(remoteState.users) }))
+route('POST', '/users', (_m, b) => {
+  const name = String(b.name ?? '').trim()
+  if (!/^[A-Za-z0-9._-]{1,40}$/.test(name)) throw new Fail(400, 'bad_request', 'A user name uses letters, numbers, dots, dashes and underscores, up to 40 characters.')
+  if (remoteState.users.some((x) => x.name.toLowerCase() === name.toLowerCase())) throw new Fail(409, 'conflict', `There is already a user named '${name}'.`)
+  const role = b.role as T.Role
+  remoteState.users.push({ name, role, created: Math.floor(Date.now() / 1000) })
+  return { name, role, token: 'demo-' + Math.random().toString(16).slice(2).padEnd(56, '0') } satisfies T.NewUser
+})
+route('DELETE', '/users/{name}', (m) => {
+  const n = dec(m[1])
+  if (!remoteState.users.some((x) => x.name === n)) throw new Fail(404, 'not_found', `There is no user named '${n}'.`)
+  remoteState.users = remoteState.users.filter((x) => x.name !== n)
+  return undefined
+})
+route('POST', '/session/logout', () => undefined)
 route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora' }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
 route('POST', '/servers/scan', () =>

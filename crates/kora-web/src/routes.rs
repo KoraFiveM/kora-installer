@@ -95,6 +95,12 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::NodeServers => on_op(op, handlers::hub::node_servers),
         Op::NodeServerControl => on_op(op, handlers::hub::node_server_control),
         Op::Fleet => on_op(op, handlers::hub::fleet),
+        Op::RemoteGet => on_op(op, handlers::remote::remote_get),
+        Op::RemoteSet => on_op(op, handlers::remote::remote_set),
+        Op::UsersList => on_op(op, handlers::remote::users_list),
+        Op::UserAdd => on_op(op, handlers::remote::user_add),
+        Op::UserRemove => on_op(op, handlers::remote::user_remove),
+        Op::SessionLogout => on_op(op, crate::session_logout),
     }
 }
 

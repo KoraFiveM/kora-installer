@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { UninstallItem } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
+import { useRole, whyNot } from '@/hooks/useRole'
+import { RemoteAccessCard, SignedInCard } from '@/components/RemoteAccess'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,6 +22,8 @@ function SelfUpdate() {
   const [version, setVersion] = useState('')
   const [job, setJob] = useState<string | null>(null)
   const [err, setErr] = useState<unknown>(null)
+  const role = useRole()
+  const blocked = whyNot(role, 'admin', true)
   const run = useJob(job, () => { void qc.invalidateQueries({ queryKey: ['meta'] }); void qc.invalidateQueries({ queryKey: ['self-update'] }) })
   const go = async (v?: string) => { setErr(null); try { setJob((await api.selfUpdate.apply(v)).job) } catch (e) { setErr(e) } }
   return (
@@ -32,10 +36,11 @@ function SelfUpdate() {
           <Button size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>Check again</Button>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <Button variant={q.data?.available ? 'default' : 'secondary'} disabled={run.phase === 'running' || !q.data?.latest} onClick={() => go()}>Update to the latest</Button>
+          <Button variant={q.data?.available ? 'default' : 'secondary'} disabled={run.phase === 'running' || !q.data?.latest || blocked !== null} onClick={() => go()}>Update to the latest</Button>
           <div className="w-48"><Field label="Or a specific version"><Select value={version} onChange={(e) => setVersion(e.target.value)}><option value="">Choose...</option>{(q.data?.versions ?? []).map((v) => <option key={v}>{v}</option>)}</Select></Field></div>
-          <Button disabled={!version || run.phase === 'running'} onClick={() => go(version)}>Install this version</Button>
+          <Button disabled={!version || run.phase === 'running' || blocked !== null} onClick={() => go(version)}>Install this version</Button>
         </div>
+        {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
         {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
         {run.phase === 'done' && <Alert tone="success">Updated. Restart the panel (run kora panel again) to use the new version.</Alert>}
         {run.phase === 'failed' && <ErrorNotice error={run.error} />}
@@ -49,10 +54,12 @@ function AppCard() {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['app'], queryFn: api.app.status })
   const [shortcut, setShortcut] = useState(true)
+  const role = useRole()
   const refresh = () => qc.invalidateQueries({ queryKey: ['app'] })
   const install = useMutation({ mutationFn: () => api.app.install({ desktop_shortcut: shortcut, force: false, dry_run: false }), onSuccess: refresh })
   const remove = useMutation({ mutationFn: () => api.app.uninstall(false), onSuccess: refresh })
   if (q.data && !q.data.supported) return null
+  if (!role.can('admin')) return null
   return (
     <Card>
       <CardHeader><CardTitle>Kora app</CardTitle></CardHeader>
@@ -61,7 +68,7 @@ function AppCard() {
         <div className="text-sm">{q.data?.installed ? <Badge tone="success" dot>Installed{q.data.version ? ` (${q.data.version})` : ''}</Badge> : <Badge tone="neutral" dot>Not installed</Badge>}</div>
         {q.data?.path && <div className="font-mono text-xs text-muted-foreground">{q.data.path}</div>}
         {q.data?.installed ? (
-          <Button variant="destructive" onClick={() => remove.mutate()} disabled={remove.isPending}>Remove the Kora app</Button>
+          <Button variant="destructive" onClick={() => remove.mutate()} disabled={remove.isPending || !role.canDestroy} title={whyNot(role, 'admin', true) ?? undefined}>Remove the Kora app</Button>
         ) : (
           <div className="space-y-3">
             <Checkbox label="Also put a shortcut on the desktop" checked={shortcut} onChange={(e) => setShortcut(e.target.checked)} />
@@ -75,6 +82,7 @@ function AppCard() {
 }
 
 function Uninstall() {
+  const role = useRole()
   const [items, setItems] = useState<UninstallItem[] | null>(null)
   const [typed, setTyped] = useState('')
   const [job, setJob] = useState<string | null>(null)
@@ -90,12 +98,14 @@ function Uninstall() {
     onSuccess: (r) => setJob(r.job),
   })
   const danger = (items ?? []).some((i) => i.remove && (i.kind === 'folder' || i.kind === 'database'))
+  if (!role.can('admin')) return null
   return (
     <Card className="border-destructive/50">
       <CardHeader><CardTitle>Uninstall Kora</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">Removes what Kora added to this computer. By default your server folders and databases are kept.</p>
-        {!items && <Button onClick={() => plan.mutate()} disabled={plan.isPending}>Show what would be removed</Button>}
+        {!role.canDestroy && <p className="text-xs text-muted-foreground">{whyNot(role, 'admin', true)}</p>}
+        {!items && <Button onClick={() => plan.mutate()} disabled={plan.isPending || !role.canDestroy}>Show what would be removed</Button>}
         {items && !job && (
           <div className="space-y-4">
             <fieldset className="space-y-3">
@@ -121,9 +131,11 @@ function Uninstall() {
 export default function SettingsPage() {
   const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta })
   const sys = useQuery({ queryKey: ['system'], queryFn: api.system })
+  const role = useRole()
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <h1 className="font-heading text-2xl font-bold">Settings</h1>
+      {role.remote ? <SignedInCard /> : <RemoteAccessCard />}
       <SelfUpdate />
       <AppCard />
       <Card><CardHeader><CardTitle>GitHub account</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>

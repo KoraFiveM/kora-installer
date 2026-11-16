@@ -94,6 +94,12 @@ pub enum Op {
     NodeServers,
     NodeServerControl,
     Fleet,
+    RemoteGet,
+    RemoteSet,
+    UsersList,
+    UserAdd,
+    UserRemove,
+    SessionLogout,
 }
 
 impl Op {
@@ -169,6 +175,12 @@ impl Op {
         Op::NodeServers,
         Op::NodeServerControl,
         Op::Fleet,
+        Op::RemoteGet,
+        Op::RemoteSet,
+        Op::UsersList,
+        Op::UserAdd,
+        Op::UserRemove,
+        Op::SessionLogout,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -245,6 +257,12 @@ impl Op {
             Op::NodeServers => "node_servers",
             Op::NodeServerControl => "node_server_control",
             Op::Fleet => "fleet",
+            Op::RemoteGet => "remote_get",
+            Op::RemoteSet => "remote_set",
+            Op::UsersList => "users_list",
+            Op::UserAdd => "user_add",
+            Op::UserRemove => "user_remove",
+            Op::SessionLogout => "session_logout",
         }
     }
 
@@ -322,6 +340,12 @@ impl Op {
             Op::NodeServers => (Method::Get, "/nodes/{id}/servers"),
             Op::NodeServerControl => (Method::Post, "/nodes/{id}/servers/{s}/control"),
             Op::Fleet => (Method::Get, "/fleet"),
+            Op::RemoteGet => (Method::Get, "/remote"),
+            Op::RemoteSet => (Method::Put, "/remote"),
+            Op::UsersList => (Method::Get, "/users"),
+            Op::UserAdd => (Method::Post, "/users"),
+            Op::UserRemove => (Method::Delete, "/users/{name}"),
+            Op::SessionLogout => (Method::Post, "/session/logout"),
         }
     }
 
@@ -474,13 +498,19 @@ mod tests {
             | Op::NodeRemove
             | Op::NodeServers
             | Op::NodeServerControl
-            | Op::Fleet => Op::ALL.contains(&op),
+            | Op::Fleet
+            | Op::RemoteGet
+            | Op::RemoteSet
+            | Op::UsersList
+            | Op::UserAdd
+            | Op::UserRemove
+            | Op::SessionLogout => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 71);
+        assert_eq!(Op::ALL.len(), 77);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

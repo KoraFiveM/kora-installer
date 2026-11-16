@@ -117,6 +117,12 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | node_servers | GET /nodes/{id}/servers | hub: a node's servers with the `actions` it supports. Operator or above (read: viewer). |
 | node_server_control | POST /nodes/{id}/servers/{s}/control | hub: `{action}`; job proxied to the node's own job (events relayed, result as local); refused with `node_unsupported` when the node's `/meta` lacks `server_control`. Operator or above. |
 | fleet | GET /fleet | hub: this panel's servers plus every node's, fetched in parallel; partial when a node is down (`partial`, per-node `last_error`). Viewer or above. |
+| remote_get | GET /remote | remote access settings (no token hashes); local sessions only |
+| remote_set | PUT /remote | `{enabled?, tailscale?, tailscale_users?, allowed_hosts?, allow_remote_destructive?}`; local sessions only |
+| users_list | GET /users | `{users: [{name, role, created}]}`; local sessions only |
+| user_add | POST /users | `{name, role}` → 201 `{name, role, token}`; the token is shown once; local sessions only |
+| user_remove | DELETE /users/{name} | 204; their sessions end at once; local sessions only |
+| session_logout | POST /session/logout | ends this session, clears the cookie; 204 |
 
 ### 2.2 Conventions
 
@@ -141,6 +147,59 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 - Response headers: strict CSP (`default-src 'self'`, no inline script, no external origins),
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `frame-ancestors 'none'`.
 
+### 2.4 Remote access (phase 6)
+
+Off by default: nothing above changes for `kora panel` as it is today.
+
+- **Binding.** `kora panel --bind <ip>` (default `127.0.0.1`). A non-loopback bind needs remote access on
+  (`--remote` for one run, or `enabled` in `<kora home>/panel.json`), otherwise the panel refuses to
+  start. It then prints that traffic is plain HTTP and should only cross a private network (Tailscale,
+  WireGuard) or an SSH tunnel. `0.0.0.0` / `::` also needs `allowed_hosts` or a known MagicDNS name and
+  prints a louder warning. Allowed `Host` values: the bound address, `localhost` (loopback binds), the
+  machine's MagicDNS names (from tailscaled), and `allowed_hosts` from the settings (each on the
+  panel's port); the extra names only count while remote access is on. `Origin` follows the same rule.
+- **Who is a remote request?** Any peer that is not a loopback address. A request with no peer
+  information (tests calling the router) counts as local. Loopback requests keep today's rules: the
+  launch token or its session, and they are admin.
+- **Identity providers.**
+  - *Token*: `kora panel user add <name> --role <role>` prints a random 256-bit token once; only
+    `sha256(salt || token)` is stored; compared in constant time against every user. Sent as
+    `Authorization: Bearer` or exchanged at `POST /session {token}` for the usual cookie. The launch
+    token is not accepted from a remote peer, and a remote token is not accepted on loopback.
+  - *Tailscale*: `POST /session {}` from a remote peer makes the panel ask the local tailscaled
+    `whois` for the peer address (Linux: HTTP over `/var/run/tailscale/tailscaled.sock`, otherwise and on
+    Windows `tailscale whois --json`). The login name must be in `tailscale_users`. Identity headers
+    (`Tailscale-User-Login`, `X-Forwarded-*`) are never read. Tagged devices have no login and are refused.
+- **Roles** (`remote/roles.rs`, an exhaustive `match` over `Op`, so a new op must be classified):
+  - *viewer*: status and lists (GET), including job results. No logs, no console.
+  - *operator*: viewer + start/stop/restart, update preview/apply/auto, ensure, scan, resource plan,
+    log list/tail, console output (SSE), webhook test, port/disk checks, install log.
+  - *admin*: everything else, subject to the next two rules.
+  - *local-only* (refused remotely for every role): `remote_get/set`, `users_list/add/remove`,
+    `server_open_folder`.
+  - *remote-destructive* (refused remotely, even for admins, unless `allow_remote_destructive` is on):
+    `server_delete`, `server_unregister`, `uninstall_run`, `app_uninstall`, `console_send`,
+    `install_start`, `self_update_apply`, `schedule_set`, `schedule_remove`. Turning it on does not
+    skip the typed-name confirmation the handlers enforce.
+- **Sessions.** Same cookie flow for local and remote. A session records provider, name and (remote) the
+  role it was made with; every request looks the user up again, so a removed user, a changed role, or
+  Tailscale being switched off ends the session (401, the UI shows its sign-in screen). A cookie made for a
+  remote peer does not work from loopback, and the other way round. Idle timeout 12 h, absolute lifetime
+  7 days, for all sessions. Remote sign-in failures have their own limiter (10 per 60 s), so strangers
+  cannot lock the owner out of the local one.
+- **Who am I?** `GET /meta` carries `identity` (`null` when not signed in, else `{name, provider:
+  local|tailscale|token, role}`), `remote` (this request came from another computer) and
+  `allow_remote_destructive`. The UI's `useRole()` reads them to hide or disable what the role cannot do.
+- **Settings file.** `<kora home>/panel.json`, mode 0600 on Unix, written atomically. The panel notices
+  changes made by `kora panel user ...` while it runs.
+- **Threat model.** See the remote access section of the wave-3 report: a viewer sees status only;
+  an operator can run and update servers and read logs/console output; an admin can additionally change
+  settings that touch the machine, but cannot delete, uninstall, type console commands, install or
+  change schedules unless the owner switches that on locally, and can never manage remote access.
+  The channel is plain HTTP: anyone who can read the network path can read tokens and cookies, so the
+  path must be private. A malicious *local* user on a shared machine can read `panel.json` only if the
+  file mode lets them (0600 prevents that on Unix).
+
 ## 3. Phases
 
 1. **Baseline.** Golden test of the whole `kora --help` tree; `--hostname`, `--game-build`;
@@ -152,7 +211,7 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 4. **Wizard in the panel + root helper.**
 5. **Monitoring.** Sampler (status, players from `/players.json`, CPU/RAM of the process tree,
    disk, ports, badge), 24 h history, alerts, opt-in panel service.
-6. **Remote access.** Bind + identity providers (tailscaled whois, token), roles.
+6. **Remote access.** Bind + identity providers (tailscaled whois, token), roles. See 2.4.
 7. **Hub.** `RemoteBackend`, fleet view, capability-based version skew (`/meta`; v1 is additive only).
 
 ## 4. Parity tests

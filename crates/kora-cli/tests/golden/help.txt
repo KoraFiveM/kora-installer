@@ -6,7 +6,7 @@ Usage: kora [OPTIONS] [COMMAND]
 Commands:
   install        Install a new Kora server (interactive TUI, or headless with options)
   manager        Open the multi-server manager
-  panel          Open the Kora Panel: install, manage and monitor servers in your web browser (local only)
+  panel          Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up)
   update         Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers)
   add-resources  Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
   status         Show registered servers
@@ -145,15 +145,26 @@ Options:
           Print help
 
 ===== kora panel =====
-Open the Kora Panel: install, manage and monitor servers in your web browser (local only)
+Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up)
 
-Usage: kora panel [OPTIONS]
+Usage: kora panel [OPTIONS] [COMMAND]
+
+Commands:
+  user  Manage the people who may sign in to the panel remotely (each has a token and a role)
 
 Options:
       --port <PORT>
-          Port to listen on (127.0.0.1 only)
+          Port to listen on
           
           [default: 47120]
+
+      --bind <BIND>
+          Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard
+          
+          [default: 127.0.0.1]
+
+      --remote
+          Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings)
 
       --no-open
           Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop)
@@ -167,6 +178,72 @@ Options:
       --print-link
           Print the sign-in link of the background panel
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user =====
+Manage the people who may sign in to the panel remotely (each has a token and a role)
+
+Usage: kora panel user [OPTIONS] <COMMAND>
+
+Commands:
+  add     Add a user and print their token once (it cannot be shown again)
+  list    List the users and their roles
+  remove  Remove a user; their sessions stop working at once
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user add =====
+Add a user and print their token once (it cannot be shown again)
+
+Usage: kora panel user add [OPTIONS] --role <ROLE> <NAME>
+
+Arguments:
+  <NAME>
+          A name for this person (letters, numbers, dots, dashes, underscores)
+
+Options:
+      --role <ROLE>
+          What they may do: viewer (look only), operator (run servers, updates, logs) or admin (everything)
+          
+          [possible values: viewer, operator, admin]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user list =====
+List the users and their roles
+
+Usage: kora panel user list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user remove =====
+Remove a user; their sessions stop working at once
+
+Usage: kora panel user remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user to remove
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

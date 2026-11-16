@@ -62,9 +62,15 @@ pub(crate) fn http_get_local(port: u16, path: &str) -> Option<String> {
     let mut s = TcpStream::connect_timeout(&addr, HTTP_TIMEOUT).ok()?;
     s.set_read_timeout(Some(HTTP_TIMEOUT)).ok()?;
     s.set_write_timeout(Some(HTTP_TIMEOUT)).ok()?;
-    write!(s, "GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nUser-Agent: kora-monitor\r\nConnection: close\r\n\r\n").ok()?;
+    // One write, so the whole request arrives together.
+    let request = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nUser-Agent: kora-monitor\r\nConnection: close\r\n\r\n");
+    s.write_all(request.as_bytes()).ok()?;
     let mut raw = Vec::new();
-    s.take(HTTP_MAX).read_to_end(&mut raw).ok()?;
+    // A server that closes with part of the request unread resets the connection after it has sent
+    // its answer: keep what arrived, and only give up when nothing did.
+    if s.take(HTTP_MAX).read_to_end(&mut raw).is_err() && raw.is_empty() {
+        return None;
+    }
     let text = String::from_utf8_lossy(&raw);
     let (head, body) = text.split_once("\r\n\r\n")?;
     let status = head.lines().next()?.split_whitespace().nth(1)?;

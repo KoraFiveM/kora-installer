@@ -33,3 +33,13 @@ export async function signIn(token: string): Promise<BootResult> {
     return { status: 'failed', error: e instanceof ApiError ? e : new ApiError(0, { code: 'network', message: 'Could not sign in.' }) }
   }
 }
+
+/** Sign in with no token: the panel asks Tailscale who is connecting (remote access only). */
+export async function signInByIdentity(): Promise<BootResult> {
+  try {
+    await api.session.createByIdentity()
+    return { status: 'signed_in' }
+  } catch (e) {
+    return { status: 'failed', error: e instanceof ApiError ? e : new ApiError(0, { code: 'network', message: 'Could not sign in.' }) }
+  }
+}

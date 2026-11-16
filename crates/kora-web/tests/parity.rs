@@ -29,7 +29,8 @@ fn uri_for(op: Op) -> String {
         .replace("{s}", "prod")
         .replace("{id}", "fakeid")
         .replace("{file}", "server.log")
-        .replace("{job}", "fakejob");
+        .replace("{job}", "fakejob")
+        .replace("{name}", "nobody");
     format!("/api/v1{path}")
 }
 

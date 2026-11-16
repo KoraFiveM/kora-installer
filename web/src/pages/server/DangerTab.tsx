@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import type { ServerDetail } from '@/api/types'
 import { useAlerts } from '@/lib/app'
 import { useJob } from '@/hooks/useJob'
+import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +21,8 @@ type Stage = 'files' | 'db' | 'name'
 export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, 'name' | 'managed' | 'dir' | 'status'>; onDone?: () => void }) {
   const qc = useQueryClient()
   const { push } = useAlerts()
+  const role = useRole()
+  const blocked = whyNot(role, 'admin', true)
   const [open, setOpen] = useState(false)
   const [stage, setStage] = useState<Stage>('files')
   const [keepFiles, setKeepFiles] = useState(true)
@@ -44,7 +47,8 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
         <CardHeader><CardTitle>Remove from list</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">You added this server from an existing folder. Kora will stop managing it, but your files and database are not touched.</p>
-          <Button variant="destructive" onClick={() => setOpen(true)}>Remove from list</Button>
+          <Button variant="destructive" disabled={blocked !== null} onClick={() => setOpen(true)}>Remove from list</Button>
+          {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
           <ErrorNotice error={err} />
           <ConfirmDialog open={open} onOpenChange={close} title={`Remove ${s.name} from the list?`} description="Your files stay where they are." confirmLabel="Remove from list" destructive
             onConfirm={async () => { try { await api.servers.unregister(s.name); await qc.invalidateQueries({ queryKey: ['servers'] }); push('success', `${s.name} was removed from your list.`); onDone?.() } catch (e) { setErr(e); setOpen(false) } }} />
@@ -66,7 +70,8 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
       <CardHeader><CardTitle>Delete server</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">Stops the server, removes its background service and firewall rules, and takes it out of your list. You choose what happens to the files and the database.</p>
-        <Button variant="destructive" disabled={view.phase === 'running'} onClick={() => setOpen(true)}>Delete server...</Button>
+        <Button variant="destructive" disabled={view.phase === 'running' || blocked !== null} onClick={() => setOpen(true)}>Delete server...</Button>
+        {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
         {view.phase !== 'idle' && <ResourceProgress events={view.events} />}
         {view.phase === 'failed' && <ErrorNotice error={view.error} title="The server could not be deleted" />}
         <ErrorNotice error={err} />

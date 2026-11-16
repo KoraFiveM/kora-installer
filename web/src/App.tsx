@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ApiError, setUnauthorizedHandler } from '@/api/client'
 import { AlertsProvider } from '@/lib/app'
-import { signIn, type BootResult } from '@/lib/session'
+import { signIn, signInByIdentity, type BootResult } from '@/lib/session'
 import { AppShell } from '@/components/AppShell'
 import { SignedOut } from '@/components/SignedOut'
 import ServersPage from '@/pages/ServersPage'
@@ -37,6 +37,15 @@ export function App({ boot }: { boot: BootResult }) {
     return (
       <SignedOut
         error={signedOut instanceof ApiError ? signedOut : null}
+        onIdentity={async () => {
+          const r = await signInByIdentity()
+          if (r.status === 'signed_in') {
+            client.clear()
+            setSignedOut(false)
+            return null
+          }
+          return r.status === 'failed' ? r.error : null
+        }}
         onToken={async (t) => {
           const r = await signIn(t)
           if (r.status === 'signed_in') {
