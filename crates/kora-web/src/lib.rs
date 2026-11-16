@@ -506,6 +506,20 @@ async fn serve_tailnet(state: AppState, port: u16) {
     }
 }
 
+/// Listen on `addr`, waiting up to 10 s while the port is still taken: right after a restart the old
+/// panel may not have let go of it yet.
+async fn bind_retrying(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match tokio::net::TcpListener::bind(addr).await {
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && std::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            r => return r,
+        }
+    }
+}
+
 /// Run the panel until Ctrl+C. Blocking; builds its own tokio runtime.
 pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
     let path = opts.remote_config.clone().unwrap_or_else(remote::config::default_path);
@@ -530,7 +544,7 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         .build()?;
     rt.block_on(async move {
         let addr = SocketAddr::new(opts.bind, opts.port);
-        let listener = tokio::net::TcpListener::bind(addr)
+        let listener = bind_retrying(addr)
             .await
             .map_err(|source| PanelError::Bind { addr, source })?;
         let addr = listener.local_addr()?;

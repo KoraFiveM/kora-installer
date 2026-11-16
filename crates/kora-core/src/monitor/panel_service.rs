@@ -85,6 +85,67 @@ pub fn service_installed(platform: Platform) -> bool {
     }
 }
 
+/// What decides whether this panel may restart itself (`POST /panel/restart`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RestartFacts {
+    /// The background service is set up (unit file / start-up script present).
+    pub installed: bool,
+    /// Linux: this process runs inside the `kora-panel.service` unit (its cgroup says so).
+    pub in_service_unit: bool,
+    /// Windows: the pid in the panel pid file, our pid, our port and the service's saved port.
+    pub pid_file: Option<u32>,
+    pub our_pid: u32,
+    pub our_port: u16,
+    pub saved_port: Option<u16>,
+}
+
+/// Can this panel restart itself? Only when it is the background service: Linux asks systemd to
+/// restart the unit; Windows starts the start-up script's command line again and exits.
+pub fn can_restart(platform: Platform, f: &RestartFacts) -> bool {
+    f.installed
+        && match platform {
+            Platform::Linux => f.in_service_unit,
+            Platform::Windows => f.pid_file == Some(f.our_pid) && f.saved_port == Some(f.our_port),
+        }
+}
+
+/// Does a `/proc/self/cgroup` text put us in the panel's unit?
+pub fn cgroup_is_service(cgroup: &str) -> bool {
+    cgroup
+        .lines()
+        .any(|l| l.rsplit('/').next() == Some(UNIT_NAME))
+}
+
+/// Gather [`RestartFacts`] for this process.
+pub fn restart_facts(home: &Path, platform: Platform, our_port: u16) -> RestartFacts {
+    RestartFacts {
+        installed: service_installed(platform),
+        in_service_unit: platform == Platform::Linux
+            && std::fs::read_to_string("/proc/self/cgroup").is_ok_and(|c| cgroup_is_service(&c)),
+        pid_file: std::fs::read_to_string(pid_path(home))
+            .ok()
+            .and_then(|t| t.trim().parse().ok()),
+        our_pid: std::process::id(),
+        our_port,
+        saved_port: saved_port(home),
+    }
+}
+
+/// The command that restarts the background panel: Linux the systemd unit, Windows the start-up
+/// script's command line (the caller then exits so the new panel can take the port).
+pub fn restart_command(platform: Platform, exe: &Path, port: u16, tailscale: bool) -> (String, Vec<String>) {
+    match platform {
+        Platform::Linux => (
+            "systemctl".into(),
+            vec!["--user".into(), "restart".into(), UNIT_NAME.into()],
+        ),
+        Platform::Windows => (
+            exe.display().to_string(),
+            service_args(port, tailscale).split(' ').map(String::from).collect(),
+        ),
+    }
+}
+
 /// The saved sign-in token, when a service has been installed.
 pub fn load_token(home: &Path) -> Option<String> {
     let t = std::fs::read_to_string(token_path(home)).ok()?;
@@ -382,6 +443,44 @@ pub fn home() -> PathBuf {
 mod tests {
     use super::*;
     use crate::service::testing::FakeRunner;
+
+    #[test]
+    fn only_the_background_service_can_restart() {
+        let linux = RestartFacts { installed: true, in_service_unit: true, ..Default::default() };
+        assert!(can_restart(Platform::Linux, &linux));
+        assert!(!can_restart(Platform::Linux, &RestartFacts { installed: false, ..linux }));
+        assert!(!can_restart(Platform::Linux, &RestartFacts { in_service_unit: false, ..linux }));
+        let win = RestartFacts {
+            installed: true,
+            pid_file: Some(42),
+            our_pid: 42,
+            our_port: 47130,
+            saved_port: Some(47130),
+            ..Default::default()
+        };
+        assert!(can_restart(Platform::Windows, &win));
+        assert!(!can_restart(Platform::Windows, &RestartFacts { pid_file: Some(7), ..win }));
+        assert!(!can_restart(Platform::Windows, &RestartFacts { saved_port: Some(1), ..win }));
+        assert!(!can_restart(Platform::Windows, &RestartFacts { installed: false, ..win }));
+        // The cgroup check does not matter on Windows, the pid file does not on Linux.
+        assert!(!can_restart(Platform::Linux, &RestartFacts { in_service_unit: false, ..win }));
+    }
+
+    #[test]
+    fn cgroup_names_the_unit() {
+        assert!(cgroup_is_service("0::/user.slice/user-1000.slice/user@1000.service/app.slice/kora-panel.service\n"));
+        assert!(!cgroup_is_service("0::/user.slice/user-1000.slice/session-3.scope\n"));
+        assert!(!cgroup_is_service("0::/x/not-kora-panel.service.d\n"));
+    }
+
+    #[test]
+    fn restart_commands() {
+        let (p, a) = restart_command(Platform::Linux, Path::new("/k"), 1, false);
+        assert_eq!((p.as_str(), a.join(" ").as_str()), ("systemctl", "--user restart kora-panel.service"));
+        let (p, a) = restart_command(Platform::Windows, Path::new(r"C:\k\kora.exe"), 47130, true);
+        assert_eq!(p, r"C:\k\kora.exe");
+        assert_eq!(a.join(" "), "panel --no-open --foreground --port 47130 --listen-tailscale");
+    }
 
     #[test]
     fn the_unit_runs_the_panel_without_a_browser_and_quotes_paths() {

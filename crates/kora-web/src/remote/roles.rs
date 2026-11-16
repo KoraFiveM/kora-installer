@@ -140,6 +140,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::Fleet
         // Mints sign-in codes for the launch link (local only).
         | Op::SessionLink
+        | Op::PanelRestart
         // Uploading, importing and removing paid assets writes into the server folder.
         | Op::AssetInspect
         | Op::AssetImport
@@ -215,6 +216,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::Events
         | Op::SessionLogout
         | Op::SessionLink
+        | Op::PanelRestart
         | Op::RemoteGet
         | Op::RemoteSet
         | Op::UsersList
@@ -261,6 +263,8 @@ pub fn local_only(op: Op) -> bool {
         | Op::Fleet
         // Sign-in codes stand in for the launch token, which never leaves this computer.
         | Op::SessionLink
+        // Restarting stops this computer's panel (and drops every session).
+        | Op::PanelRestart
         // Lists files in the Downloads folder of the computer that runs Kora.
         | Op::AssetDownloads => true,
         Op::Meta
@@ -482,7 +486,7 @@ mod tests {
 
     #[test]
     fn hub_and_sign_in_links_are_local_only() {
-        for op in [Op::NodesList, Op::NodeAdd, Op::NodeRemove, Op::NodeServers, Op::NodeServerControl, Op::Fleet, Op::SessionLink] {
+        for op in [Op::NodesList, Op::NodeAdd, Op::NodeRemove, Op::NodeServers, Op::NodeServerControl, Op::Fleet, Op::SessionLink, Op::PanelRestart] {
             assert!(local_only(op), "{op:?}");
         }
         assert_eq!(op_for("POST", "/api/v1/session/link"), Some(Op::SessionLink));

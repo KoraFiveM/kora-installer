@@ -1496,3 +1496,28 @@ async fn bearer_guesses_lock_out_only_that_address() {
     assert_eq!(r.status, 200, "another address is fine");
     assert!(w.remote.limiter.locked(REMOTE_PEER.parse::<SocketAddr>().unwrap().ip()));
 }
+
+#[tokio::test]
+async fn panel_restart_is_local_and_only_for_the_service() {
+    use kora_web::handlers::system::seam;
+    let (w, [_, _, adam]) = with_users(enabled_cfg());
+    // A remote admin cannot restart the panel.
+    assert_eq!(status(&w, &adam, "POST", "/api/v1/panel/restart", None).await, 403);
+    // Not the background service: 409 with a plain message.
+    seam::set_can_restart(Some(false));
+    let r = req("POST", "/api/v1/panel/restart").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
+    assert_eq!(r.status, 409, "{:?}", r.json);
+    assert!(r.msg().contains("background service"), "{}", r.msg());
+    let r = req("GET", "/api/v1/system").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
+    assert_eq!(r.json["can_restart"], json!(false));
+    // The service: 202, and a restart is asked for.
+    seam::set_can_restart(Some(true));
+    let before = seam::restarts();
+    let r = req("POST", "/api/v1/panel/restart").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
+    assert_eq!(r.status, 202, "{:?}", r.json);
+    assert_eq!(r.json, json!({"restarting": true}));
+    assert_eq!(seam::restarts(), before + 1);
+    let r = req("GET", "/api/v1/system").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
+    assert_eq!(r.json["can_restart"], json!(true));
+    seam::set_can_restart(None);
+}

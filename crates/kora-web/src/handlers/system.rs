@@ -49,6 +49,27 @@ pub mod seam {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = v;
     }
+    static CAN_RESTART: Mutex<Option<bool>> = Mutex::new(None);
+    static RESTARTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// Tests only: force the "can restart" answer. While set, a restart only counts (no command runs).
+    pub fn set_can_restart(v: Option<bool>) {
+        *CAN_RESTART
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = v;
+    }
+    /// Tests only: how many restarts were asked for while [`set_can_restart`] was set.
+    pub fn restarts() -> usize {
+        RESTARTS.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    pub(super) fn can_restart_override() -> Option<bool> {
+        *CAN_RESTART
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    pub(super) fn count_restart() {
+        RESTARTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     pub(super) fn headless_override() -> Option<bool> {
         *HEADLESS
             .lock()
@@ -56,7 +77,72 @@ pub mod seam {
     }
 }
 
+/// Is this panel the background service, so it can restart itself (after a self-update)?
+fn can_restart(port: u16) -> bool {
+    use kora_core::monitor::panel_service as svc;
+    if let Some(v) = seam::can_restart_override() {
+        return v;
+    }
+    let platform = kora_core::service::Platform::current();
+    svc::can_restart(platform, &svc::restart_facts(&svc::home(), platform, port))
+}
+
+/// `POST /panel/restart`: 202 `{"restarting": true}`, then the panel restarts (local admin only).
+/// Sign-in sessions live in memory, so the page signs in again afterwards.
+pub async fn panel_restart(
+    State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+    if caller.remote {
+        return Err(ApiError::forbidden("The panel can only be restarted from the computer that runs Kora."));
+    }
+    let port = st.addr.port();
+    if !blocking(move || Ok(can_restart(port))).await? {
+        return Err(ApiError::conflict(
+            "This panel is not the background service, so it cannot restart itself. Stop it and run `kora panel` again.",
+        ));
+    }
+    if seam::can_restart_override().is_some() {
+        seam::count_restart();
+    } else {
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            restart_now(port);
+        });
+    }
+    Ok((axum::http::StatusCode::ACCEPTED, Json(json!({"restarting": true}))))
+}
+
+/// Start the restart (Linux: systemd restarts the unit, and so us; Windows: start a new panel, exit).
+fn restart_now(port: u16) {
+    use kora_core::monitor::panel_service as svc;
+    let platform = kora_core::service::Platform::current();
+    let home = svc::home();
+    let exe = std::env::current_exe().unwrap_or_default();
+    let (program, args) = svc::restart_command(platform, &exe, port, svc::saved_tailscale(&home));
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW | DETACHED_PROCESS
+        cmd.creation_flags(0x0800_0000 | 0x0000_0008);
+    }
+    match cmd.spawn() {
+        Ok(_) if platform == kora_core::service::Platform::Windows => {
+            // The new panel waits for the port (see `bind_retrying`).
+            std::process::exit(0);
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("Could not restart the panel: {e}"),
+    }
+}
+
 pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let port = st.addr.port();
     let loopback = st
         .allowed_hosts
         .iter()
@@ -74,6 +160,7 @@ pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiE
             "headless": headless,
             "local": loopback && !headless,
             "kora_home": kora_core::installer::registry::kora_home(),
+            "can_restart": can_restart(port),
         })))
     })
     .await
