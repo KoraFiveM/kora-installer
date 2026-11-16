@@ -12,6 +12,8 @@ pub mod dto;
 pub mod fake;
 pub mod jobs;
 pub mod logs;
+pub mod maintenance;
+pub mod parity;
 pub mod panel_updates;
 pub mod ops;
 pub mod system;

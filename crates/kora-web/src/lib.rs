@@ -256,13 +256,13 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let state = AppState::system(token.clone(), addr);
         let url = format!("http://{addr}/#token={token}");
         println!("Kora Panel: {url}");
-        if opts.open_browser {
-            if is_headless() {
-                println!("No local desktop session detected; open the URL on your machine with:");
-                println!("  ssh -L {0}:127.0.0.1:{0} user@host", addr.port());
-            } else if !open_browser(&url) {
-                println!("Could not open a browser; open the URL above manually.");
-            }
+        // The tunnel hint is for people on a machine without a desktop, whether or not we would have
+        // tried to open a browser (`--no-open` must not hide it).
+        if is_headless() {
+            println!("No local desktop session detected; open the URL on your machine with:");
+            println!("  ssh -L {0}:127.0.0.1:{0} user@host", addr.port());
+        } else if opts.open_browser && !open_browser(&url) {
+            println!("Could not open a browser; open the URL above manually.");
         }
         println!("Press Ctrl+C to stop.");
         axum::serve(listener, router(state))

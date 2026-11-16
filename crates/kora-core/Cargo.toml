@@ -4,6 +4,7 @@ description = "Kora installer/manager core: step engine, state, and (stubbed) su
 version.workspace = true
 license.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
