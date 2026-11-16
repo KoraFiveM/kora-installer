@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/kora-core", "crates/kora-cli", "crates/kora-tui"]
+members = ["crates/kora-core", "crates/kora-cli", "crates/kora-tui", "crates/kora-web"]
 
 [workspace.package]
 version = "0.3.4"
