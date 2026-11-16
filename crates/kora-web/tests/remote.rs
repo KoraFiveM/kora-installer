@@ -798,7 +798,7 @@ async fn destructive_actions_are_refused_remotely_even_for_admins() {
         let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
         assert_eq!(r.status, 403, "{m} {uri}");
         assert!(
-            r.msg().contains("turned off for remote access"),
+            r.msg().contains("turned off for remote sign-ins"),
             "{m} {uri}: {}",
             r.msg()
         );
@@ -823,7 +823,7 @@ async fn destructive_actions_pass_the_guard_when_enabled_and_keep_their_own_conf
         // A handler may still answer 403 itself (needs_elevation when this process is not root,
         // as on a CI runner): what matters is that the remote guard did not refuse it.
         assert!(
-            !r.msg().contains("turned off for remote access"),
+            !r.msg().contains("turned off for remote sign-ins"),
             "{m} {uri} should reach the handler: {}",
             r.msg()
         );

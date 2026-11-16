@@ -221,6 +221,13 @@ main() {
   if [ "$(id -u)" = "0" ] && [ "${KORA_ALLOW_ROOT_PANEL:-}" != "1" ]; then
     say "Kora is installed. Kora Panel is not started from a root shell."
     say "As your normal user (not root / not sudo), run:   kora panel --setup"
+    say ""
+    say "If this server only has the root account, create a user for Kora first (it asks you to choose a password):"
+    say "    adduser kora"
+    say "    usermod -aG sudo kora"
+    say "    loginctl enable-linger kora"
+    say "    su - kora"
+    say "Then, as that user, run:   kora panel --setup"
     exit 0
   fi
   say "Starting Kora Panel ..."

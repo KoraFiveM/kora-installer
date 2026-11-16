@@ -217,10 +217,11 @@ export function PaidAssetsTab({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()
   const role = useRole()
   const canImport = role.can('admin')
+  const noList = whyNot(role, 'operator')
   const local = !role.remote
   const fileInput = useRef<HTMLInputElement>(null)
   const [removed, setRemoved] = useState<string[] | null>(null)
-  const list = useQuery({ queryKey: ['paid-assets', s.name], queryFn: () => api.assets.list(s.name) })
+  const list = useQuery({ queryKey: ['paid-assets', s.name], queryFn: () => api.assets.list(s.name), enabled: !noList })
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['paid-assets', s.name] })
     void qc.invalidateQueries({ queryKey: ['resources', s.name] })
@@ -242,11 +243,11 @@ export function PaidAssetsTab({ server: s }: { server: ServerDetail }) {
         </Card>
         <Hints hints={list.data?.hints ?? []} />
         <Card>
-          <CardHeader><CardTitle>Imported paid assets ({assets.length})</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Imported paid assets{noList ? '' : ` (${assets.length})`}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <ErrorNotice error={list.error} />
             {removed && <Alert tone="success" title="Removed">{removed.map((n, i) => <p key={i}>{n}</p>)}</Alert>}
-            {assets.length === 0 && !list.isLoading ? <p className="text-sm text-muted-foreground">No paid assets have been imported yet.</p> : (
+            {noList ? <Alert tone="info">{noList}</Alert> : assets.length === 0 && !list.isLoading ? <p className="text-sm text-muted-foreground">No paid assets have been imported yet.</p> : (
               <ul className="divide-y divide-border rounded-md border border-border">
                 {assets.map((a) => <AssetRow key={a.name} server={s.name} asset={a} canChange={canImport} onReplace={() => fileInput.current?.click()} onRemoved={(n) => { setRemoved(n); refresh() }} />)}
               </ul>

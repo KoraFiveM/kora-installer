@@ -511,6 +511,43 @@ async fn next_chunk(body: &mut axum::body::BodyDataStream) -> String {
 }
 
 #[tokio::test]
+async fn resource_control_queues_a_fixed_command() {
+    let d = tempfile::tempdir().unwrap();
+    let f = FakeBackend::sample();
+    managed_server(&f, "mine", Mode::Production, d.path());
+    f.state().resources = vec!["kora_core".into(), "kora_console".into()];
+    let a = app(&f);
+    let ctl = |n: &str, action: &str| {
+        let path = format!("/servers/mine/resources/{n}/control");
+        let body = json!({"action": action});
+        let a = &a;
+        async move { call(a, "POST", &path, Some(body)).await }
+    };
+    // Validation first.
+    assert_eq!(ctl("kora_core", "explode").await.status(), 400);
+    assert_eq!(ctl("kora_console", "stop").await.status(), 400);
+    assert_eq!(ctl("not-installed-here", "start").await.status(), 404);
+    assert_eq!(ctl("kora_core", "start").await.status(), 409, "the server is stopped");
+    f.state().status.insert("mine".into(), Status::Running);
+    let r = ctl("kora_core", "start").await;
+    assert_eq!(r.status(), 409);
+    assert!(json_of(r).await["error"]["message"].as_str().unwrap().contains("live console"));
+    assert_eq!(call(&a, "PUT", "/servers/mine/console/enabled", Some(json!({"enabled": true}))).await.status(), 204);
+    for action in ["start", "stop", "restart"] {
+        let r = ctl("kora_core", action).await;
+        assert_eq!(r.status(), 200, "{action}");
+        assert!(json_of(r).await["message"].as_str().unwrap().contains(action));
+    }
+    // Restart is `ensure`: it also starts a resource that was not running.
+    assert_eq!(
+        std::fs::read_to_string(d.path().join(".kora/console.in")).unwrap(),
+        "start kora_core\nstop kora_core\nensure kora_core\n"
+    );
+    assert_eq!(ctl("kora_console", "restart").await.status(), 200);
+    assert_eq!(call(&a, "POST", "/servers/nope/resources/x/control", Some(json!({"action": "start"}))).await.status(), 404);
+}
+
+#[tokio::test]
 async fn console_stream_replays_then_follows() {
     let d = tempfile::tempdir().unwrap();
     let f = FakeBackend::sample();

@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { ServerDetail } from '@/api/types'
+import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 
@@ -13,10 +15,14 @@ export function NotificationsTab({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['webhook', s.name], queryFn: () => api.webhook.get(s.name) })
   const [url, setUrl] = useState('')
+  const [confirm, setConfirm] = useState(false)
+  const role = useRole()
+  const noChange = whyNot(role, 'admin')
+  const noTest = whyNot(role, 'operator')
   const refresh = () => qc.invalidateQueries({ queryKey: ['webhook', s.name] })
   const set = useMutation({ mutationFn: () => api.webhook.set(s.name, url.trim()), onSuccess: () => { setUrl(''); return refresh() } })
   const test = useMutation({ mutationFn: () => api.webhook.test(s.name) })
-  const remove = useMutation({ mutationFn: () => api.webhook.remove(s.name), onSuccess: refresh })
+  const remove = useMutation({ mutationFn: () => api.webhook.remove(s.name), onSuccess: () => { setConfirm(false); return refresh() } })
   return (
     <Card className="max-w-2xl">
       <CardHeader><CardTitle>Discord notifications</CardTitle></CardHeader>
@@ -26,19 +32,30 @@ export function NotificationsTab({ server: s }: { server: ServerDetail }) {
           <div className="space-y-3">
             <div className="text-sm">Current webhook: <code className="break-all rounded bg-ink px-2 py-1 font-mono text-xs">{q.data.redacted}</code></div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => test.mutate()} disabled={test.isPending}>Send a test message</Button>
-              <Button variant="destructive" onClick={() => remove.mutate()} disabled={remove.isPending}>Remove webhook</Button>
+              <Button onClick={() => test.mutate()} disabled={test.isPending || !!noTest} title={noTest ?? undefined}>Send a test message</Button>
+              <Button variant="destructive" onClick={() => setConfirm(true)} disabled={remove.isPending || !!noChange} title={noChange ?? undefined}>Remove webhook</Button>
             </div>
           </div>
         ) : <p className="text-sm">No webhook is set.</p>}
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (url.trim()) set.mutate() }}>
           <Field label={q.data?.configured ? 'Replace the webhook address' : 'Webhook address'} hint="The address is kept secret: it is never shown in full again.">
-            <Input type="password" autoComplete="off" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://discord.com/api/webhooks/..." />
+            <Input type="password" autoComplete="off" disabled={!!noChange} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://discord.com/api/webhooks/..." />
           </Field>
-          <Button type="submit" variant="default" disabled={!url.trim() || set.isPending}>{q.data?.configured ? 'Replace webhook' : 'Save webhook'}</Button>
+          <Button type="submit" variant="default" disabled={!url.trim() || set.isPending || !!noChange} title={noChange ?? undefined}>{q.data?.configured ? 'Replace webhook' : 'Save webhook'}</Button>
         </form>
+        {noChange && <p className="text-xs text-muted-foreground">{noChange}</p>}
         {test.isSuccess && <Alert tone="success">Test message sent. Check your Discord channel.</Alert>}
         <ErrorNotice error={set.error ?? test.error ?? remove.error ?? q.error} />
+        <ConfirmDialog
+          open={confirm}
+          onOpenChange={setConfirm}
+          title="Remove the webhook?"
+          description="Alerts stop being sent. You will need the address again to turn them back on."
+          confirmLabel="Remove webhook"
+          destructive
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate()}
+        />
       </CardContent>
     </Card>
   )

@@ -64,6 +64,7 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | console_enable | PUT /servers/{s}/console/enabled | installs `kora_console` |
 | resources_list | GET /servers/{s}/resources | |
 | resource_ensure | POST /servers/{s}/ensure | `{name, restart}` |
+| resource_control | POST /servers/{s}/resources/{name}/control | `{action: start\|stop\|restart}` for an installed resource → `{message}`. Queues `start`/`stop`/`ensure <name>` through the console helper; 409 when the server is stopped or the console is off; `kora_console` cannot be stopped. Operator or above. |
 | update_preview | POST /servers/{s}/update/preview | `{scope}`; job |
 | update_apply | POST /servers/{s}/update/apply | `{scope, restart, skip, targets?}` (restart defaults to `when_quiet`; `targets` = the preview's `{id: commit}` to apply exactly); job with events; 409 while another update runs for the server |
 | update_auto | POST /servers/{s}/update/auto | job |
@@ -177,7 +178,7 @@ Off by default: nothing above changes for `kora panel` as it is today.
     (`Tailscale-User-Login`, `X-Forwarded-*`) are never read. Tagged devices have no login and are refused.
 - **Roles** (`remote/roles.rs`, an exhaustive `match` over `Op`, so a new op must be classified):
   - *viewer*: status and lists (GET), including job results. No logs, no console.
-  - *operator*: viewer + start/stop/restart, update preview/apply/auto, ensure, scan, resource plan,
+  - *operator*: viewer + start/stop/restart, update preview/apply/auto, ensure, resource start/stop/restart, scan, resource plan,
     log list/tail, console output (SSE), webhook test, port/disk checks, install log.
   - *admin*: everything else, subject to the next two rules.
   - *local-only* (refused remotely for every role): `remote_get/set`, `users_list/add/remove`,

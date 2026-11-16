@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { AlertSettings, AlertSettingsUpdate, MetricSample, MetricsRange, ServerDetail } from '@/api/types'
+import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -143,7 +144,8 @@ function SettingsForm({ name, cur }: { name: string; cur: AlertSettings }) {
 
 export function MonitoringTab({ server: s }: { server: ServerDetail }) {
   const [range, setRange] = useState<MetricsRange>('1h')
-  const settings = useQuery({ queryKey: ['alert-settings', s.name], queryFn: () => api.alerts.settings(s.name) })
+  const blocked = whyNot(useRole(), 'admin')
+  const settings = useQuery({ queryKey: ['alert-settings', s.name], queryFn: () => api.alerts.settings(s.name), enabled: !blocked })
   return (
     <div className="space-y-5">
       <Card>
@@ -165,6 +167,7 @@ export function MonitoringTab({ server: s }: { server: ServerDetail }) {
       <Card className="max-w-3xl">
         <CardHeader><CardTitle>Alerts</CardTitle></CardHeader>
         <CardContent>
+          {blocked && <Alert tone="info" title="Alert settings are not available to you">{blocked}</Alert>}
           {settings.isLoading && <Skeleton className="h-48" />}
           {settings.isError && <ErrorNotice error={settings.error} />}
           {settings.data && <SettingsForm key={s.name} name={s.name} cur={settings.data} />}

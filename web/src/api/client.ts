@@ -198,6 +198,8 @@ export const api = {
   resources: {
     list: (name: string) => get<{ resources: string[] }>(`${s(name)}/resources`).then((r) => r.resources),
     ensure: (name: string, body: { name: string; restart: boolean }) => post<{ message: string }>(`${s(name)}/ensure`, body),
+    /** Start, stop or restart one resource on a running server. */
+    control: (name: string, resource: string, action: T.ControlAction) => post<{ message: string }>(`${s(name)}/resources/${encodeURIComponent(resource)}/control`, { action }),
     plan: (name: string, ids: string[]) => post<T.AddPlan>(`${s(name)}/resources/plan`, { ids }),
     add: (name: string, ids: string[]) => post<T.JobStarted>(`${s(name)}/resources`, { ids }),
     catalog: (name: string) => get<T.ServerCatalog>(`${s(name)}/catalog`),

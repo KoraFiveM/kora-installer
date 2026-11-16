@@ -375,6 +375,23 @@ enum PanelCmd {
         #[command(subcommand)]
         cmd: panel_tailscale::TailscaleCmd,
     },
+    /// Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again.
+    Restart,
+    /// Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default.
+    RemoteActions {
+        #[command(subcommand)]
+        cmd: RemoteActionsCmd,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteActionsCmd {
+    /// Allow these actions for remote administrators.
+    On,
+    /// Refuse these actions for everyone who signs in remotely (the default).
+    Off,
+    /// Show whether they are on or off.
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1891,18 +1908,39 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
     i32::from(!summary.ok())
 }
 
+/// Printed on Linux when `kora panel` is run as root: many rented servers only have the root account.
+/// `adduser` and the `sudo` group are right for Debian and Ubuntu, the systems Kora supports. Enabling
+/// linger starts the new user's service manager, so the background panel can be set up after `su`.
+const ROOT_ONLY_HELP: &[&str] = &[
+    "",
+    "If this server only has the root account, create a user for Kora first (it asks you to choose a password):",
+    "  adduser kora",
+    "  usermod -aG sudo kora",
+    "  loginctl enable-linger kora",
+    "  su - kora",
+    "Then, as that user, run:",
+    "  kora panel --setup",
+];
+
 fn panel(a: &PanelArgs) -> i32 {
     use kora_core::monitor::panel_service as svc;
     // SECURITY.md: the panel runs as the installing user, never as administrator/root. A root panel
     // would keep its token and state in root's home and run every action with full rights.
     if kora_core::elevate::is_elevated() && std::env::var_os("KORA_ALLOW_ROOT_PANEL").is_none_or(|v| v != "1") {
         eprintln!("error: Kora Panel does not run as administrator/root. Run `kora panel` from your normal account (without sudo). It asks for administrator rights only when an action needs them.");
+        if cfg!(target_os = "linux") {
+            for line in ROOT_ONLY_HELP {
+                eprintln!("{line}");
+            }
+        }
         return 1;
     }
     let home = svc::home();
     match &a.cmd {
         Some(PanelCmd::User { cmd }) => return panel_user(cmd),
         Some(PanelCmd::Tailscale { cmd }) => return panel_tailscale::command(cmd, &home),
+        Some(PanelCmd::Restart) => return panel_restart(&home),
+        Some(PanelCmd::RemoteActions { cmd }) => return panel_remote_actions(*cmd, &kora_web::remote::config::default_path()),
         None => {}
     }
     if a.new_token {
@@ -2233,14 +2271,90 @@ fn start_background_service(home: &std::path::Path, port: u16, tailscale: bool) 
     let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
     // Windows has no service manager to restart the panel: stop the running one (only when it really is
     // our panel answering on its saved port), else the new one cannot take the port.
-    let stop_pid = (platform == kora_core::service::Platform::Windows)
+    let stop_pid = windows_panel_pid(home, platform);
+    let spec = svc::InstallSpec { exe: &exe, port, tailscale, stop_pid, kora_home_env: home_env.as_deref() };
+    svc::install(home, &spec, &runner, platform).map_err(|e| e.to_string())
+}
+
+/// Windows: the process of the running background panel, only when it really is our panel answering
+/// on its saved port. `None` on Linux, where systemd stops it.
+fn windows_panel_pid(home: &std::path::Path, platform: kora_core::service::Platform) -> Option<u32> {
+    use kora_core::monitor::panel_service as svc;
+    (platform == kora_core::service::Platform::Windows)
         .then(|| svc::saved_port(home))
         .flatten()
         .filter(|p| kora_web::launch::PortCheck::is_kora_panel(&kora_web::launch::SystemPorts, *p))
         .and_then(|_| std::fs::read_to_string(svc::pid_path(home)).ok())
-        .and_then(|t| t.trim().parse().ok());
-    let spec = svc::InstallSpec { exe: &exe, port, tailscale, stop_pid, kora_home_env: home_env.as_deref() };
-    svc::install(home, &spec, &runner, platform).map_err(|e| e.to_string())
+        .and_then(|t| t.trim().parse().ok())
+}
+
+/// What `kora panel restart` can do.
+#[derive(Debug, PartialEq, Eq)]
+enum PanelRestart {
+    /// The background panel is set up: restart it (this also starts it when it had stopped).
+    Background,
+    /// Only a `kora panel` in a window runs: it has to be stopped there.
+    Window,
+    /// Nothing to restart.
+    NotRunning,
+}
+
+fn panel_restart_mode(background_installed: bool, window_running: bool) -> PanelRestart {
+    if background_installed {
+        PanelRestart::Background
+    } else if window_running {
+        PanelRestart::Window
+    } else {
+        PanelRestart::NotRunning
+    }
+}
+
+/// `kora panel restart`: restart the background panel and print where to sign in. Token, port and
+/// settings stay as they are.
+fn panel_restart(home: &std::path::Path) -> i32 {
+    use kora_core::monitor::panel_service as svc;
+    use kora_core::service::Platform;
+    let ports = kora_web::launch::SystemPorts;
+    let platform = Platform::current();
+    let installed = svc::service_installed(platform);
+    let window = !installed && running_panel(home, &ports, platform).is_some();
+    match panel_restart_mode(installed, window) {
+        PanelRestart::Background => {}
+        PanelRestart::Window => {
+            eprintln!("error: Kora Panel runs in a window here, not in the background, so it cannot be restarted from another window. Stop it there (Ctrl+C) and run `kora panel` again.");
+            eprintln!("(`kora panel --install-service` keeps one running in the background instead.)");
+            return 1;
+        }
+        PanelRestart::NotRunning => {
+            eprintln!("error: Kora Panel is not running, so there is nothing to restart. Start it with `kora panel` (or keep it running in the background with `kora panel --install-service`).");
+            return 1;
+        }
+    }
+    if platform == Platform::Linux && !user_services_available() {
+        eprintln!("error: this session cannot reach the background panel (common after sudo or su). Sign in as the user who runs it (not with sudo) and run `kora panel restart` again.");
+        return 1;
+    }
+    let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
+    if let Err(e) = svc::restart(&kora_core::service::SystemRunner, platform, windows_panel_pid(home, platform)) {
+        eprintln!("error: could not restart the background panel: {e}");
+        return 1;
+    }
+    if !kora_web::launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), &ports) {
+        eprintln!("Kora Panel was restarted, but did not answer within {} seconds.", SETUP_WAIT.as_secs());
+        if platform == Platform::Linux {
+            eprintln!("See what happened with:  systemctl --user status kora-panel");
+        }
+        return 1;
+    }
+    println!("Kora Panel restarted. Pages that were open sign in again.");
+    if let Ok(link) = svc::link(home) {
+        println!("Sign in with: {}", one_time_link(&link, port));
+    }
+    if headless_session() {
+        println!("On a server with no screen, open a tunnel from your own computer first:  {}", kora_web::launch::ssh_hint(port, &kora_web::launch::real_env));
+    }
+    panel_tailscale::print_tailnet_address(home, port);
+    0
 }
 
 /// Can this session use systemd user services? Under `sudo` or `su` there is often no user service
@@ -2325,6 +2439,45 @@ fn print_setup_fallback(why: &str) {
     eprintln!("  kora panel --foreground");
     eprintln!("To keep it running in the background, sign in as the user who should run it (not with sudo) and run:");
     eprintln!("  kora panel --setup");
+}
+
+/// What `kora panel remote-actions on|off|status` prints.
+fn remote_actions_message(cmd: RemoteActionsCmd, on: bool) -> &'static str {
+    match (cmd, on) {
+        (RemoteActionsCmd::Status, true) => "Remote actions are on: remote administrators can install, delete and uninstall servers, send console commands, change schedules and update Kora. Turn them off with `kora panel remote-actions off`.",
+        (RemoteActionsCmd::Status, false) => "Remote actions are off: nobody who signs in from another computer can install, delete or uninstall servers, send console commands, change schedules or update Kora. Turn them on with `kora panel remote-actions on`.",
+        (_, true) => "Remote administrators can now install, delete and uninstall servers, send console commands, change schedules and update Kora. Deleting still asks for the server's name. Only people with the admin role can do this, so only give that role to people you trust.",
+        (_, false) => "Remote actions are turned off. Nobody who signs in from another computer can install, delete or uninstall servers, send console commands, change schedules or update Kora. These still work on this computer.",
+    }
+}
+
+/// `kora panel remote-actions on|off|status`: the "destructive actions" switch of Settings > Remote
+/// access, for a server with no local browser. Saved through the same `Remote::update` the panel uses;
+/// a running panel notices the changed file by itself, so no restart is needed.
+fn panel_remote_actions(cmd: RemoteActionsCmd, path: &std::path::Path) -> i32 {
+    let run = || -> Result<bool, String> {
+        let remote = kora_web::remote::Remote::from_file(path.to_path_buf())?;
+        match cmd {
+            RemoteActionsCmd::Status => Ok(remote.config().allow_remote_destructive),
+            RemoteActionsCmd::On | RemoteActionsCmd::Off => remote.update(|cfg| {
+                cfg.allow_remote_destructive = cmd == RemoteActionsCmd::On;
+                Ok(cfg.allow_remote_destructive)
+            }),
+        }
+    };
+    match run() {
+        Ok(on) => {
+            println!("{}", remote_actions_message(cmd, on));
+            if cmd != RemoteActionsCmd::Status {
+                println!("A running panel uses the new setting right away. No restart is needed.");
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
 }
 
 /// `kora panel user ...`: edits `<kora home>/panel.json`. A running panel notices the change by itself.
@@ -3040,6 +3193,74 @@ mod tests {
         for clash in ["--foreground", "--install-service", "--remove-service", "--print-link"] {
             assert!(panel(&["--setup", clash]).is_err(), "{clash}");
         }
+    }
+
+    #[test]
+    fn panel_remote_actions_switches_the_saved_setting() {
+        use kora_web::remote::RemoteConfig;
+        let cmd = |a: &[&str]| match Cli::try_parse_from(a).map(|c| c.command) {
+            Ok(Some(Command::Panel(p))) => Ok(p.cmd),
+            Ok(_) => panic!("not the panel command"),
+            Err(e) => Err(e.to_string()),
+        };
+        assert!(matches!(cmd(&["kora", "panel", "remote-actions", "on"]), Ok(Some(PanelCmd::RemoteActions { cmd: RemoteActionsCmd::On }))));
+        assert!(matches!(cmd(&["kora", "panel", "remote-actions", "off"]), Ok(Some(PanelCmd::RemoteActions { cmd: RemoteActionsCmd::Off }))));
+        assert!(matches!(cmd(&["kora", "panel", "remote-actions", "status"]), Ok(Some(PanelCmd::RemoteActions { cmd: RemoteActionsCmd::Status }))));
+        assert!(cmd(&["kora", "panel", "remote-actions"]).is_err(), "it needs on, off or status");
+        assert!(cmd(&["kora", "panel", "remote-actions", "maybe"]).is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("panel.json");
+        let saved = || RemoteConfig::load(&path).unwrap().allow_remote_destructive;
+        // Nothing saved yet: off, and asking does not create the file.
+        assert_eq!(panel_remote_actions(RemoteActionsCmd::Status, &path), 0);
+        assert!(!path.exists());
+        // The rest of the settings is kept.
+        let mut cfg = RemoteConfig { enabled: true, ..Default::default() };
+        cfg.add_user("sam", kora_web::remote::Role::Admin).unwrap();
+        cfg.save(&path).unwrap();
+        assert_eq!(panel_remote_actions(RemoteActionsCmd::On, &path), 0);
+        assert!(saved());
+        assert_eq!(panel_remote_actions(RemoteActionsCmd::Status, &path), 0);
+        assert!(saved(), "status changes nothing");
+        assert_eq!(panel_remote_actions(RemoteActionsCmd::Off, &path), 0);
+        assert!(!saved());
+        let after = RemoteConfig::load(&path).unwrap();
+        assert!(after.enabled && after.user("sam").is_some());
+        // A damaged file is reported, never replaced.
+        std::fs::write(&path, "{not json").unwrap();
+        assert_eq!(panel_remote_actions(RemoteActionsCmd::On, &path), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
+
+        assert!(remote_actions_message(RemoteActionsCmd::On, true).starts_with("Remote administrators can now install, delete and uninstall servers"));
+        assert!(remote_actions_message(RemoteActionsCmd::Off, false).starts_with("Remote actions are turned off."));
+        assert!(remote_actions_message(RemoteActionsCmd::Status, true).contains("kora panel remote-actions off"));
+        assert!(remote_actions_message(RemoteActionsCmd::Status, false).contains("kora panel remote-actions on"));
+    }
+
+    #[test]
+    fn root_only_help_gives_the_commands_to_continue() {
+        let text = ROOT_ONLY_HELP.join("\n");
+        for want in ["adduser kora", "usermod -aG sudo kora", "loginctl enable-linger kora", "su - kora", "kora panel --setup"] {
+            assert!(text.contains(want), "{want}");
+        }
+    }
+
+    #[test]
+    fn panel_restart_restarts_only_the_background_panel() {
+        let cmd = |a: &[&str]| match Cli::try_parse_from(a).map(|c| c.command) {
+            Ok(Some(Command::Panel(p))) => Ok(p.cmd),
+            Ok(_) => panic!("not the panel command"),
+            Err(e) => Err(e.to_string()),
+        };
+        assert!(matches!(cmd(&["kora", "panel", "restart"]), Ok(Some(PanelCmd::Restart))));
+        assert!(cmd(&["kora", "panel", "restart", "now"]).is_err(), "it takes no arguments");
+        assert!(matches!(cmd(&["kora", "panel"]), Ok(None)));
+        // (background panel set up, a `kora panel` window running)
+        assert_eq!(panel_restart_mode(true, false), PanelRestart::Background);
+        assert_eq!(panel_restart_mode(true, true), PanelRestart::Background, "the background panel is the one to restart");
+        assert_eq!(panel_restart_mode(false, true), PanelRestart::Window, "a window is stopped by hand");
+        assert_eq!(panel_restart_mode(false, false), PanelRestart::NotRunning);
     }
 
     struct Ports(Vec<u16>);

@@ -428,6 +428,18 @@ route('POST', '/servers/{s}/ensure', (m, b) => {
   if (!installed[s.name].includes(name)) throw new Fail(404, 'not_found', `"${name}" is not installed on this server.`)
   return { message: b.restart ? `Added "ensure ${name}" and restarted ${s.name}.` : `Added "ensure ${name}" to server.cfg. It loads the next time the server restarts.` }
 })
+route('POST', '/servers/{s}/resources/{name}/control', (m, b) => {
+  const s = find(dec(m[1]))
+  const name = dec(m[2])
+  const action = String(b.action ?? '')
+  if (!['start', 'stop', 'restart'].includes(action)) throw new Fail(400, 'bad_request', 'The action must be start, stop or restart.')
+  if (action === 'stop' && name === 'kora_console') throw new Fail(400, 'bad_request', 'Kora uses this resource to send commands to the server, so it cannot be stopped from here.')
+  if (!installed[s.name].includes(name)) throw new Fail(404, 'not_found', `'${name}' is not installed on this server.`)
+  if (s.status !== 'running') throw new Fail(409, 'conflict', 'The server is not running. Start the server first; its resources start with it.')
+  if (!consoleEnabled[s.name]) throw new Fail(409, 'conflict', 'The live console is not switched on for this server yet. Turn it on in the Console tab first (it needs a restart).')
+  pushConsole(s.name, `> ${action === 'restart' ? 'ensure' : action} ${name}`)
+  return { message: `Asked the server to ${action} ${name}. The Console tab shows what happened.` }
+})
 route('POST', '/servers/{s}/update/preview', (m, b) => {
   const s = find(dec(m[1]))
   const only = (b.scope as { resources?: string[] } | undefined)?.resources

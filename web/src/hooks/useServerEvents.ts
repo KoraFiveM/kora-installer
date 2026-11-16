@@ -23,6 +23,22 @@ export function useServerEvents(): void {
     if (typeof EventSource === 'undefined') startPolling()
     else {
       es = new EventSource(api.eventsUrl())
+      // The panel sends the whole list each time something changes.
+      es.addEventListener('servers', (m) => {
+        let list: ServerSummary[] | undefined
+        try {
+          list = (JSON.parse((m as MessageEvent<string>).data) as { servers?: ServerSummary[] }).servers
+        } catch {
+          return
+        }
+        if (!Array.isArray(list)) return
+        const before = qc.getQueryData<ServerSummary[]>(['servers'])
+        qc.setQueryData<ServerSummary[]>(['servers'], list)
+        // Refresh the open server pages only when a status really changed (the first message repeats what is known).
+        const was = new Map((before ?? []).map((s) => [s.name, s.status]))
+        if (before && (before.length !== list.length || list.some((s) => was.get(s.name) !== s.status))) void qc.invalidateQueries({ queryKey: ['server'] })
+      })
+      // One server at a time (older panels).
       es.addEventListener('server', (m) => {
         let ev: ServerEvent
         try {

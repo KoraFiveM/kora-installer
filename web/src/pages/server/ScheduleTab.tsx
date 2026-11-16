@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { RunAs, ScheduleConfig, ServerDetail } from '@/api/types'
+import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +16,8 @@ type Kind = 'off' | 'daily' | 'weekly'
 
 export function ScheduleTab({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()
+  const role = useRole()
+  const blocked = whyNot(role, 'admin', true)
   const q = useQuery({ queryKey: ['schedule', s.name], queryFn: () => api.schedule.get(s.name) })
   const [kind, setKind] = useState<Kind>('off')
   const [time, setTime] = useState('04:00')
@@ -31,9 +34,13 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
   }, [q.data])
   const save = useMutation({
     mutationFn: async () => {
-      if (kind === 'off') return api.schedule.remove(s.name)
+      if (kind === 'off') {
+        await api.schedule.remove(s.name)
+        return 'Automatic updates are off.'
+      }
       const cfg: ScheduleConfig = { preset: kind, time, weekday: kind === 'weekly' ? day : null, run_as: runAs, enabled: true }
       await api.schedule.set(s.name, cfg)
+      return `Saved. The server updates itself every ${kind === 'weekly' ? DAYS[day] : 'day'} at ${time}.`
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schedule', s.name] }),
   })
@@ -63,8 +70,9 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
             </fieldset>
           </>
         )}
-        <Button variant="default" disabled={save.isPending || bad} onClick={() => save.mutate()}>{kind === 'off' ? 'Turn schedule off' : 'Save schedule'}</Button>
-        {save.isSuccess && <Alert tone="success">Saved.</Alert>}
+        <Button variant="default" disabled={save.isPending || bad || !!blocked} title={blocked ?? undefined} onClick={() => save.mutate()}>{kind === 'off' ? 'Turn schedule off' : 'Save schedule'}</Button>
+        {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
+        {save.isSuccess && <Alert tone="success">{save.data}</Alert>}
         <ErrorNotice error={save.error} />
       </CardContent>
     </Card>

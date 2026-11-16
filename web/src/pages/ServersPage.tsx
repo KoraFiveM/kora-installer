@@ -14,6 +14,7 @@ import { ServerControls } from '@/components/ServerControls'
 import { useServerControl } from '@/hooks/useServerControl'
 import { usePanelAlerts } from '@/hooks/usePanelAlerts'
 import { Badge } from '@/components/ui/badge'
+import { useInstallBlock } from './install/access'
 
 function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
   const ctl = useServerControl(s.name)
@@ -36,6 +37,7 @@ function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
 
 export default function ServersPage() {
   const nav = useNavigate()
+  const installBlock = useInstallBlock()
   const [adding, setAdding] = useState(false)
   const q = useQuery({ queryKey: ['servers'], queryFn: api.servers.list })
   const servers = q.data ?? []
@@ -58,7 +60,8 @@ export default function ServersPage() {
           <CardContent className="flex flex-col items-start gap-4 p-8">
             <h2 className="font-heading text-xl font-semibold">No servers yet</h2>
             <p className="max-w-prose text-muted-foreground">Kora can set up a new FiveM server for you in a few minutes: the server files, database and resources. Or add one you already have.</p>
-            <Button variant="default" onClick={() => nav('/install')}><Plus /> Install your first server</Button>
+            <Button variant="default" disabled={!!installBlock} title={installBlock?.reason} aria-describedby={installBlock ? 'install-blocked' : undefined} onClick={() => nav('/install')}><Plus /> Install your first server</Button>
+            {installBlock && <p id="install-blocked" className="max-w-prose text-sm text-muted-foreground">{installBlock.reason}</p>}
           </CardContent>
         </Card>
       )}

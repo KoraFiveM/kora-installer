@@ -1,19 +1,28 @@
-## Kora Installer v0.6.0
+## Kora Installer v0.6.2
 
 Install and manage a Kora FiveM server from your browser: run `kora panel`.
 
 ### Install
 Linux:
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.6.0/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.sh | sh
 ```
 Windows (PowerShell):
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.6.0/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.ps1 | iex
 ```
 Already have Kora? Run `kora self-update`.
 
-### New in 0.6.0
+### New in 0.6.2
+- **Start, stop and restart a single resource** from the server's Resources tab, without typing console commands.
+- **The Resources tab remembers what it was doing.** Check for updates, open another tab, come back: the check is still there, and so is what it found.
+- **`kora panel restart`** restarts the background panel.
+- **`kora panel remote-actions on`** lets you install and delete servers when you reach the panel from another computer (for example over Tailscale). The panel now tells you this before you fill in the install wizard, not after.
+- **An easier first install.** The database is set up for you by default, the licence key step links straight to the Cfx.re portal, and a server that only has the root account is told how to create a user for Kora.
+- **Server status updates by itself again** in the panel, and buttons you may not use are switched off with the reason instead of failing after the click.
+
+### New in 0.6.0 and 0.6.1
+- **Kora Panel no longer runs as root** (0.6.1); `git` run as root trusts less of a repository's own settings.
 - **Open Kora Panel from your own devices with Tailscale, in one step.** On the server run `kora panel --tailscale` (the install line offers it when Tailscale is running). Open the address it prints, for example `http://myserver.tail1234.ts.net:47120`, on any device signed in to Tailscale: you are signed in with your Tailscale account, with no link, token or SSH tunnel. Let others in with `kora panel tailscale allow name@example.com --role operator`.
 - **Sign-in links work once.** The link `kora panel` prints holds a one-time code, so the panel's token never lands in your browser history.
 - **A large security update.** Root no longer trusts files in a server folder (update jobs, delete, uninstall), the panel's session can no longer be taken over through other services on the same machine, proxies and public addresses are refused, and downloads stay on https. Release files now have build provenance: `gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer`.

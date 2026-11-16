@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { api } from '@/api/client'
 import type { ServerDetail } from '@/api/types'
+import { useRole, whyNot } from '@/hooks/useRole'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/input'
 import { CopyButton } from '@/components/CopyButton'
@@ -12,13 +14,15 @@ import { formatBytes } from '@/lib/utils'
 import { parseAnsi } from '@/lib/ansi'
 
 export function LogsTab({ server: s }: { server: ServerDetail }) {
-  const files = useQuery({ queryKey: ['logs', s.name], queryFn: () => api.logs.list(s.name) })
+  const blocked = whyNot(useRole(), 'operator')
+  const files = useQuery({ queryKey: ['logs', s.name], queryFn: () => api.logs.list(s.name), enabled: !blocked })
   const [file, setFile] = useState('')
   useEffect(() => {
     if (!file && files.data?.length) setFile(files.data[0].name)
   }, [files.data, file])
-  const tail = useQuery({ queryKey: ['log', s.name, file], queryFn: () => api.logs.tail(s.name, file, 300), enabled: !!file })
+  const tail = useQuery({ queryKey: ['log', s.name, file], queryFn: () => api.logs.tail(s.name, file, 300), enabled: !!file && !blocked })
   const text = (tail.data?.lines ?? []).join('\n')
+  if (blocked) return <Alert tone="info" title="The logs are not available to you">{blocked}</Alert>
   return (
     <div className="space-y-3">
       <ErrorNotice error={files.error} />

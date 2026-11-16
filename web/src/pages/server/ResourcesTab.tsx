@@ -1,25 +1,30 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Play, RefreshCw, RotateCw, Square } from 'lucide-react'
 import { api } from '@/api/client'
-import type { AddOutcome, AddPlan, ResourceChange, ServerDetail, UpdatePreview, UpdateReport } from '@/api/types'
+import type { AddOutcome, AddPlan, ControlAction, ServerDetail } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
+import { useRole, whyNot } from '@/hooks/useRole'
+import { useKept } from '@/lib/kept'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { ResourceProgress } from '@/components/JobProgress'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
-import { ReportView, reportHasProblems, shortSha, STATUS_INFO, UpdatesPanel } from './UpdatesPanel'
+import { STATUS_INFO, UpdatesPanel } from './UpdatesPanel'
+import { useUpdates, type Updates } from './useUpdates'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
   const [name, setName] = useState('')
   const [restart, setRestart] = useState(false)
   const m = useMutation({ mutationFn: () => api.resources.ensure(s.name, { name: name.trim(), restart }) })
+  const no = whyNot(useRole(), 'operator')
   return (
     <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (name.trim()) m.mutate() }}>
       <Field label="Resource name" hint="Adds an ensure line for an installed resource to server.cfg, so it starts with the server.">
@@ -27,7 +32,8 @@ export function EnsureForm({ server: s, installed }: { server: ServerDetail; ins
       </Field>
       <datalist id="installed-resources">{installed.map((r) => <option key={r} value={r} />)}</datalist>
       <Checkbox label="Restart the server now" hint="Otherwise the resource loads the next time the server restarts." checked={restart} onChange={(e) => setRestart(e.target.checked)} />
-      <Button type="submit" variant="default" disabled={!name.trim() || m.isPending}>Ensure resource</Button>
+      <Button type="submit" variant="default" disabled={!name.trim() || m.isPending || no !== null} title={no ?? undefined}>Ensure resource</Button>
+      {no && <p className="text-xs text-muted-foreground">{no}</p>}
       {m.isSuccess && <Alert tone="success">{m.data.message}</Alert>}
       <ErrorNotice error={m.error} />
     </form>
@@ -68,8 +74,10 @@ function AddResources({ server: s }: { server: ServerDetail }) {
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [plan, setPlan] = useState<AddPlan | null>(null)
-  const [job, setJob] = useState<string | null>(null)
+  // Kept for the server, so an install that is still running is shown again after opening another tab.
+  const [job, setJob] = useKept<string | null>(`add:${s.name}:job`, null)
   const [err, setErr] = useState<unknown>(null)
+  const no = whyNot(useRole(), 'admin')
   const run = useJob<AddOutcome>(job, () => {
     void qc.invalidateQueries({ queryKey: ['resources', s.name] })
     void qc.invalidateQueries({ queryKey: ['server-catalog', s.name] })
@@ -95,8 +103,9 @@ function AddResources({ server: s }: { server: ServerDetail }) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Button disabled={picked.size === 0} onClick={async () => { setErr(null); try { setPlan(await api.resources.plan(s.name, [...picked])) } catch (e) { setErr(e) } }}>Preview what will be added</Button>
-        {plan && plan.items.length > 0 && <Button variant="default" disabled={run.phase === 'running'} onClick={async () => { setErr(null); try { setJob((await api.resources.add(s.name, [...picked])).job) } catch (e) { setErr(e) } }}>Install {plan.items.length} resource{plan.items.length === 1 ? '' : 's'}</Button>}
+        {plan && plan.items.length > 0 && <Button variant="default" disabled={run.phase === 'running' || no !== null} title={no ?? undefined} onClick={async () => { setErr(null); try { setJob((await api.resources.add(s.name, [...picked])).job) } catch (e) { setErr(e) } }}>Install {plan.items.length} resource{plan.items.length === 1 ? '' : 's'}</Button>}
       </div>
+      {no && <p className="text-xs text-muted-foreground">{no}</p>}
       {plan && <PlanView plan={plan} dev={s.mode === 'development'} />}
       <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
       {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
@@ -111,95 +120,131 @@ function AddResources({ server: s }: { server: ServerDetail }) {
   )
 }
 
-/** One installed resource. Its name checks just this resource; the result shows under the row, with the same apply as the update list when it is a simple update. */
-function InstalledResource({ server: s, id }: { server: ServerDetail; id: string }) {
-  const qc = useQueryClient()
-  const [checkJob, setCheckJob] = useState<string | null>(null)
-  const [applyJob, setApplyJob] = useState<string | null>(null)
-  const [result, setResult] = useState<ResourceChange | null>(null)
-  const [checked, setChecked] = useState(false)
-  const [err, setErr] = useState<unknown>(null)
-  const check = useJob<UpdatePreview>(checkJob, (j) => {
-    if (j.state === 'done' && j.result) {
-      setResult(j.result.resources.find((r) => r.id === id) ?? null)
-      setChecked(true)
-    }
-  })
-  const apply = useJob<UpdateReport>(applyJob, () => {
-    void qc.invalidateQueries({ queryKey: ['snapshots', s.name] })
-    void qc.invalidateQueries({ queryKey: ['server', s.name] })
-  })
-  const busy = check.phase === 'running' || apply.phase === 'running'
-  const info = result ? STATUS_INFO[result.status] : null
+const CONTROL: Record<ControlAction, { label: string; Icon: typeof Play }> = {
+  start: { label: 'Start', Icon: Play },
+  stop: { label: 'Stop', Icon: Square },
+  restart: { label: 'Restart', Icon: RotateCw },
+}
 
-  const doCheck = async () => {
-    setErr(null)
-    setApplyJob(null)
-    setChecked(false)
-    try { setCheckJob((await api.update.preview(s.name, { resources: [id] })).job) } catch (e) { setErr(e) }
-  }
-  const doApply = async () => {
-    if (!result || result.status !== 'clean') return
-    setErr(null)
-    setResult(null)
-    try {
-      // The version shown here, and nothing else. Restarts only when nobody is playing, as the default in the update list.
-      setApplyJob((await api.update.apply(s.name, { scope: { resources: [id] }, restart: 'when_quiet', skip: [], targets: { [id]: result.to } })).job)
-    } catch (e) { setErr(e) }
-  }
+/** The resource Kora sends commands through. Stopping it would cut the panel off from the server. */
+const CONSOLE_RESOURCE = 'kora_console'
 
+/** One installed resource: its name, what the last check found, and the buttons to check, start, stop and restart it. */
+function InstalledResource({ id, updates: u, noCheck, noControl, pending, said, onControl }: {
+  id: string
+  updates: Updates
+  /** Why checking is off (null = allowed). */
+  noCheck: string | null
+  /** Why start, stop and restart are off (null = allowed). */
+  noControl: string | null
+  /** The action being sent for this resource right now. */
+  pending?: ControlAction
+  /** What the last action on this resource answered. */
+  said?: { ok: boolean; text: string }
+  onControl: (action: ControlAction) => void
+}) {
+  const row = u.byId.get(id)
+  const info = row ? STATUS_INFO[row.status] : null
+  const checking = u.checkingRow === id
   return (
-    <li className="space-y-2 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="ghost" className="font-mono" disabled={busy} onClick={() => void doCheck()} aria-busy={check.phase === 'running'} title="Check only this resource for updates">
-          {check.phase === 'running' && <Loader2 className="animate-spin" aria-hidden />}
-          {id}
-        </Button>
-      </div>
-      <ErrorNotice error={err ?? (check.phase === 'failed' ? check.error : null)} />
-      {checked && result?.status === 'up_to_date' && <p className="text-sm text-muted-foreground">Up to date.</p>}
-      {checked && !result && check.phase === 'done' && <p className="text-sm text-muted-foreground">Kora did not find this resource to check.</p>}
-      {result && result.status !== 'up_to_date' && info && (
-        <div className="space-y-2 rounded-md border border-border p-3 text-sm">
-          <Badge tone={info.tone}>{info.text}</Badge>
-          <div className="text-muted-foreground"><code className="font-mono text-xs">{shortSha(result.from)}</code> to <code className="font-mono text-xs">{shortSha(result.to)}</code>{result.behind ? `, ${result.behind} new change${result.behind === 1 ? '' : 's'}` : ''}</div>
-          {info.why && <p className="text-xs text-orange">{info.why}</p>}
-          {result.status === 'clean' && (
-            <>
-              <p className="text-xs text-muted-foreground">Restarts the server only when nobody is playing.</p>
-              <Button size="sm" variant="default" disabled={busy} onClick={() => void doApply()}>Update this resource</Button>
-            </>
-          )}
+    <li className="py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="min-w-0 flex-1 break-all font-mono text-sm">{id}</span>
+        {checking ? <span className="text-xs text-muted-foreground" role="status">Checking...</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
+        <div className="flex items-center gap-1">
+          <Button size="icon" variant="ghost" className="size-8" disabled={u.busy || noCheck !== null} aria-busy={checking} aria-label={`Check ${id} for updates`} title={noCheck ?? 'Check for updates'} onClick={() => void u.checkOne(id)}>
+            {checking ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
+          </Button>
+          {(Object.keys(CONTROL) as ControlAction[]).map((a) => {
+            const { label, Icon } = CONTROL[a]
+            const why = noControl ?? (a === 'stop' && id === CONSOLE_RESOURCE ? 'Kora uses this resource to send commands to the server, so it cannot be stopped from here.' : null)
+            return (
+              <Button key={a} size="icon" variant="ghost" className="size-8" disabled={why !== null || pending !== undefined} aria-label={`${label} ${id}`} title={why ?? label} onClick={() => onControl(a)}>
+                {pending === a ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />}
+              </Button>
+            )
+          })}
         </div>
-      )}
-      {apply.phase !== 'idle' && <ResourceProgress events={apply.events} />}
-      {apply.phase === 'failed' && <ErrorNotice error={apply.error} title="The update did not finish" />}
-      {apply.phase === 'done' && apply.result && (
-        <>
-          {reportHasProblems(apply.result)
-            ? <Alert tone="warning" title="Update finished, but some things need a look">See the details below.</Alert>
-            : <Alert tone="success" title="Update finished" />}
-          <ReportView r={apply.result} />
-        </>
-      )}
+      </div>
+      {said && <p className={`mt-1 text-xs ${said.ok ? 'text-muted-foreground' : 'text-red'}`} role="status">{said.text}</p>}
     </li>
+  )
+}
+
+function InstalledList({ server: s, installed, updates: u }: { server: ServerDetail; installed: string[]; updates: Updates }) {
+  const role = useRole()
+  const noOperator = whyNot(role, 'operator')
+  const noControl = noOperator
+    ?? (!s.running ? 'The server is not running. Start the server first; its resources start with it.' : null)
+    ?? (!s.console_enabled ? 'Turn on the live console in the Console tab first. Kora sends these commands through it.' : null)
+  const [filter, setFilter] = useState('')
+  const [ask, setAsk] = useState<{ id: string; action: ControlAction } | null>(null)
+  const [said, setSaid] = useKept<Record<string, { ok: boolean; text: string }>>(`control:${s.name}:said`, {})
+  const control = useMutation({
+    mutationFn: (v: { id: string; action: ControlAction }) => api.resources.control(s.name, v.id, v.action),
+    onSuccess: (r, v) => setSaid((x) => ({ ...x, [v.id]: { ok: true, text: r.message } })),
+    onError: (e, v) => setSaid((x) => ({ ...x, [v.id]: { ok: false, text: (e as { message?: string } | null)?.message ?? `Could not ${v.action} ${v.id}.` } })),
+  })
+  const shown = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    return q ? installed.filter((r) => r.toLowerCase().includes(q)) : installed
+  }, [installed, filter])
+  return (
+    <div className="space-y-3">
+      {installed.length > 8 && (
+        <Input type="search" aria-label="Filter installed resources" placeholder="Filter by name" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      )}
+      {noControl && installed.length > 0 && <p className="text-xs text-muted-foreground">Start, stop and restart are off: {noControl}</p>}
+      {shown.length === 0 && installed.length > 0 && <p className="text-sm text-muted-foreground">No resource matches "{filter.trim()}".</p>}
+      <ul className="divide-y divide-border">
+        {shown.map((r) => (
+          <InstalledResource
+            key={r}
+            id={r}
+            updates={u}
+            noCheck={noOperator}
+            noControl={noControl}
+            pending={control.isPending && control.variables?.id === r ? control.variables.action : undefined}
+            said={said[r]}
+            // Starting harms nothing. Stopping or restarting can interrupt players, so it is asked first.
+            onControl={(action) => (action === 'start' ? control.mutate({ id: r, action }) : setAsk({ id: r, action }))}
+          />
+        ))}
+      </ul>
+      <ConfirmDialog
+        open={!!ask}
+        onOpenChange={(o) => { if (!o) setAsk(null) }}
+        title={ask?.action === 'stop' ? `Stop ${ask.id}?` : `Restart ${ask?.id ?? ''}?`}
+        description={ask?.action === 'stop'
+          ? 'The resource stops for everyone on the server until it is started again. Other resources that need it may stop working. The server itself keeps running.'
+          : 'The resource stops and starts again. Players may notice a short interruption in what it does. The server itself keeps running.'}
+        confirmLabel={ask?.action === 'stop' ? 'Stop resource' : 'Restart resource'}
+        destructive={ask?.action === 'stop'}
+        onConfirm={() => {
+          if (ask) control.mutate(ask)
+          setAsk(null)
+        }}
+      />
+    </div>
   )
 }
 
 export function ResourcesTab({ server: s }: { server: ServerDetail }) {
   const list = useQuery({ queryKey: ['resources', s.name], queryFn: () => api.resources.list(s.name) })
   const installed = list.data ?? []
+  const updates = useUpdates(s.name)
   return (
     <div className="space-y-5">
-      <UpdatesPanel server={s} />
+      <UpdatesPanel server={s} updates={updates} />
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="space-y-5">
           <Card>
             <CardHeader><CardTitle>Installed resources ({installed.length})</CardTitle></CardHeader>
             <CardContent>
-              <p className="mb-2 text-xs text-muted-foreground">Click a name to check that resource for updates.</p>
               <ErrorNotice error={list.error} />
-              <ul className="divide-y divide-border">{installed.map((r) => <InstalledResource key={r} server={s} id={r} />)}</ul>
+              {list.isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
+              {list.data?.length === 0 && <p className="text-sm text-muted-foreground">No resources are installed yet. Add some from the catalogue.</p>}
+              <InstalledList server={s} installed={installed} updates={updates} />
             </CardContent>
           </Card>
           <Card>

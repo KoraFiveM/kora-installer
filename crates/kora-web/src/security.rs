@@ -624,7 +624,7 @@ fn authorise(st: &AppState, method: &Method, path: &str, id: &Identity) -> Resul
     }
     if roles::destructive(op) && !st.remote.config().allow_remote_destructive {
         return Err(ApiError::forbidden(
-            "This action is turned off for remote access. An administrator can turn it on in Settings, on the computer that runs Kora.",
+            "This action is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora: `kora panel remote-actions on`",
         ));
     }
     Ok(())
