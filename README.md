@@ -40,10 +40,11 @@ cannot start (for example under `sudo` without a user session), the install stil
 Windows: `$env:KORA_NO_LAUNCH=1` before `irm ... | iex`, or `-NoLaunch`). Prefer the terminal? `kora install` is the
 terminal wizard.
 
-The scripts check the download's SHA-256, install `kora` for your user (no administrator rights
-needed for this step) and keep the previous version as `kora.previous`. Use the newest version number from the
-[Releases page](https://github.com/KoraFiveM/kora-installer/releases) (`/releases/latest` ignores pre-releases, so use an
-explicit version). `KORA_VERSION=vX.Y.Z` (or `-Version` on Windows) picks a release, `KORA_RELEASE_BASE` changes the download address.
+The scripts download over https only, check the download's SHA-256, install `kora` for your user (no administrator rights
+needed for this step) and keep the previous version as `kora.previous`. They install the newest stable release (never a
+pre-release or a draft); see the [Releases page](https://github.com/KoraFiveM/kora-installer/releases).
+`KORA_VERSION=vX.Y.Z` (or `-Version` on Windows) picks a release, pre-releases included; `KORA_PRERELEASE=1`
+(or `-Prerelease`) takes the newest release even if it is a pre-release; `KORA_RELEASE_BASE` changes the download address.
 
 ## What the wizard does
 
@@ -133,7 +134,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and the [Code
 
 ## Code signing and privacy
 
-The Windows `.exe` is **not code-signed**; SmartScreen may warn. The install scripts verify the SHA-256 of every download, and you can check it by hand against the `.sha256` file (see above). Details: [CODE_SIGNING.md](CODE_SIGNING.md).
+The Windows `.exe` is **not code-signed**; SmartScreen may warn. The install scripts verify the SHA-256 of every download, and you can check it by hand against the `.sha256` file (see above). Every release file also has a signed build provenance attestation, which proves it was built by this repository's release workflow; check it with the [GitHub CLI](https://cli.github.com/):
+
+```sh
+gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer
+```
+
+Details: [CODE_SIGNING.md](CODE_SIGNING.md).
 
 - **Privacy:** Kora contacts nothing unless you ask it to: GitHub releases (self-update), the public resource catalog, runtime.fivem.net (FXServer downloads) and GitHub through `gh` (development mode forks).
 
