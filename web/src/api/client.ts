@@ -178,6 +178,9 @@ export const api = {
     login: () => post<T.GithubLoginStart>('/github/login'),
     owners: () => get<{ owners: T.GithubOwner[] }>('/github/owners').then((r) => r.owners),
   },
+  checks: {
+    cfx: (username: string) => post<T.CfxCheck>('/checks/cfx', { username }),
+  },
   catalog: () => get<T.Catalog>('/catalog'),
   artifacts: () => get<T.ArtifactList>('/artifacts'),
   installs: {
