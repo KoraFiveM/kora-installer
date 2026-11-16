@@ -1,17 +1,20 @@
-## Kora Installer v0.4.1
+## Kora Installer v0.4.2
 
-Install and manage a Kora FiveM server from your browser: run `kora panel`. 0.4.1 adds your Cfx.re account as txAdmin admin and much faster update checks.
+Install and manage a Kora FiveM server from your browser: run `kora panel`.
 
 ### Install
 Linux:
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.1/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.2/install.sh | sh
 ```
 Windows (PowerShell):
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.1/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.2/install.ps1 | iex
 ```
 Already have Kora? Run `kora self-update`.
+
+### New in 0.4.2
+- **`kora panel` keeps running on a server.** On a computer with no screen (for example over SSH), `kora panel` now offers to run in the background, so it survives closing your terminal. Press Enter, then open the link it prints through the `ssh -L` tunnel. Run `kora panel` again to see the link. `kora panel --foreground` runs it in the current window only.
 
 ### New in 0.4.1
 - **Sign in to txAdmin with your Cfx.re account.** The install wizards (terminal and panel) now ask for your Cfx.re username, look the account up on forum.cfx.re (only the name is sent) and make it the txAdmin admin, with admin rights in `permissions.cfg`. Leave it empty to keep the generated local admin. From the command line: `kora install --cfx-user <NAME>`.
