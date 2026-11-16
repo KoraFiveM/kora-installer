@@ -799,9 +799,15 @@ async fn destructive_actions_pass_the_guard_when_enabled_and_keep_their_own_conf
     assert_eq!(r.status, 400);
     assert!(r.msg().contains("does not match"), "{}", r.msg());
     for (m, uri) in DESTRUCTIVE {
-        let s = status(&w, &adam, m, uri, Some(json!({}))).await;
-        assert_ne!(s, 403, "{m} {uri} should reach the handler");
-        assert_ne!(s, 401, "{m} {uri}");
+        let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
+        // A handler may still answer 403 itself (needs_elevation when this process is not root,
+        // as on a CI runner): what matters is that the remote guard did not refuse it.
+        assert!(
+            !r.msg().contains("turned off for remote access"),
+            "{m} {uri} should reach the handler: {}",
+            r.msg()
+        );
+        assert_ne!(r.status, 401, "{m} {uri}");
     }
     // The switch does not lift the role: an operator is still not an admin.
     assert_eq!(
