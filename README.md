@@ -7,6 +7,15 @@ Documentation: <https://docs.koraframe.work/guides/installer/overview>
 
 > **Status: pre-release.** It works, but expect rough edges, especially on Windows. See [Status and limits](#status-and-limits).
 
+## Kora Panel
+
+New in 0.4.0: run `kora panel` and manage your servers in the browser. It installs servers (the same wizard as
+`kora install`), starts, stops and updates them, shows the console and logs, and handles resources, schedules and
+notifications. It listens on `127.0.0.1` only (port 47120; `--port` changes it) and signs you in with a one-time link.
+On a server without a screen, `kora panel --no-open` prints the link and an `ssh -L` tunnel command.
+
+Guide: [docs/panel.md](docs/panel.md). The terminal wizard (`kora install`) and manager (`kora manager`) are unchanged.
+
 ## Install
 
 Linux (Debian 12+ / Ubuntu 22.04+):
@@ -54,13 +63,13 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 ## Everyday commands
 
 `kora status`, `kora start|stop|restart`, `kora schedule show|set|off <server>`, `kora delete <server>`,
-`kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise).
+`kora panel` (web panel), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise).
 
 ## Status and limits
 
 - Linux is tested end to end. Windows is covered by CI smoke tests; real-machine runs have started, so please report problems.
-- Not released yet (see [RELEASE_NOTES.md](RELEASE_NOTES.md) and [CHANGELOG.md](CHANGELOG.md)): the `kora manager`
-  screen, the Start Menu / app install, and automatic updates for production servers. Check the changelog for what is newer than the version you run.
+- Not released yet: automatic updates for production servers. See [RELEASE_NOTES.md](RELEASE_NOTES.md) and
+  [CHANGELOG.md](CHANGELOG.md); check the changelog for what is newer than the version you run.
 - **The Windows `.exe` is unsigned**, so SmartScreen may warn ("More info", "Run anyway").
   The install scripts verify the SHA-256 checksum for you. To check by hand, compare with the `.sha256` file next to each download:
 
@@ -71,13 +80,17 @@ sha256sum -c kora-linux-x86_64.sha256
 (Get-FileHash kora-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()
 ```
 
-## Build from source
+## Building from source
 
-Needs a stable Rust toolchain (1.75+).
+Needs Rust 1.93 or newer (the minimum supported version) and, to include the panel's web UI, Node.js (see `web/.nvmrc`).
 
 ```sh
-cargo build --release -p kora-cli     # target/release/kora
+cd web && npm ci --ignore-scripts && npm run build && cd ..   # builds web/dist, embedded into the binary
+cargo build --release -p kora-cli                              # target/release/kora
 ```
+
+Without the UI step `cargo build` still works, but `kora panel` then shows a "UI not built" page. Release binaries are
+built with the UI. See [web/README.md](web/README.md) for UI development (a mock backend is included).
 
 ## Development
 
@@ -85,15 +98,19 @@ cargo build --release -p kora-cli     # target/release/kora
 |---|---|
 | `crates/kora-core` | the engine: step runner, installer, catalog, git, database, artifacts, txAdmin, services, firewall, updates |
 | `crates/kora-tui` | the ratatui wizard and screens |
+| `crates/kora-web` | the Kora Panel web server (axum) and the embedded UI |
 | `crates/kora-cli` | the `kora` binary (command line) |
+| `web/` | the panel's browser UI (Vite, React, TypeScript, Tailwind); built in CI and embedded |
+
+The CLI, the terminal screens and the panel all reach the engine through one shared interface (`kora_core::api`), so they cannot drift apart.
 
 ```sh
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-- CI (`ci.yml`) builds and tests on Linux and Windows. `windows-smoke.yml` runs real Windows checks (`scripts/smoke/`),
-  also on demand through *Run workflow*. `supply-chain.yml` runs `cargo deny` (advisories, licenses, sources).
+- CI (`ci.yml`) builds and tests on Linux and Windows, and lints, tests and builds the panel UI. `windows-smoke.yml` runs real Windows checks (`scripts/smoke/`),
+  also on demand through *Run workflow*. `supply-chain.yml` runs `cargo deny` (advisories, licenses, sources) and `npm audit` for the panel UI.
 - **Releases:** `scripts/bump-version.sh X.Y.Z` sets the version, commit it, tag `vX.Y.Z` and push the tag; the Release
   workflow builds the binaries from source, checks them and creates a draft release with the `.sha256` files and install scripts.
 
