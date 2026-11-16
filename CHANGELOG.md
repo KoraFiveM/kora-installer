@@ -5,6 +5,12 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Fixed
+- **A resource with changes of your own is no longer flagged "Needs attention" when there is nothing to update** (`0c7d64c to 0c7d64c`). It shows as up to date.
+- **A folder Kora does not track no longer blocks a resource's updates.** A resource installed inside another one's folder (like `kora_phoneshop` inside `[default-maps]`) made the outer one look changed forever. Edits to files git tracks still keep Kora's hands off the resource, as before.
+
 ## [0.6.3] - 2026-11-16
 
 ### Changed

@@ -259,7 +259,8 @@ fn classify_fetched(git: &dyn GitOps, t: &UpdateTarget) -> GitResult<PlanItem> {
     let upstream = git.head_commit(&t.path, &t.upstream_ref)?;
     let behind = git.behind_count(&t.path, &t.upstream_ref)?;
     let ahead = git.is_diverged(&t.path, &t.upstream_ref)?;
-    let action = if git.is_dirty(&t.path)? {
+    // Changes of the user's own only matter when there is something to pull; an up-to-date resource is just up to date.
+    let action = if behind > 0 && git.is_dirty(&t.path)? {
         Action::Skipped(SkipReason::Dirty)
     } else if ahead && behind > 0 {
         Action::Skipped(SkipReason::Diverged)
@@ -994,6 +995,15 @@ mod tests {
         assert_eq!(Snapshot::load(&snap).unwrap().entries[0].commit, "aaa");
         assert!(r.summary().contains("1 updated"));
         assert_eq!(r.discord_payload()["embeds"][0]["color"], 0x2ecc71);
+    }
+
+    #[test]
+    fn dirty_but_nothing_to_pull_is_up_to_date() {
+        let mut y = repo("c", "c", 0);
+        y.dirty = true;
+        let git = FakeGit::new(vec![("/y", y)]);
+        let p = plan(&git, &[target("y", "/y")]);
+        assert_eq!(p.items[0].action, Action::UpToDate);
     }
 
     #[test]

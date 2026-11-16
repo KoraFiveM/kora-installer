@@ -93,7 +93,9 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
         git::reset_to_commit(&self.0, repo, commit).map_err(gerr)
     }
     fn is_dirty(&self, repo: &Path) -> GitResult<bool> {
-        Ok(!self.git(repo, &["status", "--porcelain"])?.stdout.trim().is_empty())
+        // Untracked files are not the user's edits to this resource (a nested resource folder shows up that way), and
+        // `git merge --ff-only` itself refuses, changing nothing, if an update would overwrite one.
+        Ok(!self.git(repo, &["status", "--porcelain", "--untracked-files=no"])?.stdout.trim().is_empty())
     }
     fn is_diverged(&self, repo: &Path, upstream: &str) -> GitResult<bool> {
         Ok(self.count(repo, &format!("{upstream}..HEAD"))? > 0)
