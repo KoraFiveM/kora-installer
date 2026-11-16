@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { GithubLoginStart } from '@/api/types'
+import { useRole, whyNot } from '@/hooks/useRole'
 import { useJob } from '@/hooks/useJob'
 import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
@@ -16,6 +17,7 @@ export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   const status = useQuery({ queryKey: ['github'], queryFn: api.github.status })
   const [start, setStart] = useState<GithubLoginStart | null>(null)
   const [error, setError] = useState<unknown>(null)
+  const blocked = whyNot(useRole(), 'admin')
   const job = useJob(start?.job ?? null, (j) => {
     if (j.state === 'done') {
       void qc.invalidateQueries({ queryKey: ['github'] })
@@ -36,7 +38,8 @@ export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-sm"><Badge tone="neutral" dot>Not signed in</Badge></div>
-      {!start && <Button onClick={begin}>Sign in to GitHub</Button>}
+      {!start && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>Sign in to GitHub</Button>}
+      {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
       {start && job.phase === 'running' && (
         <Alert tone="info" title="Finish signing in on GitHub">
           <ol className="list-decimal space-y-1 pl-5">
@@ -47,7 +50,7 @@ export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
         </Alert>
       )}
       {job.phase === 'failed' && <ErrorNotice error={job.error} title="Sign-in did not finish" />}
-      {job.phase === 'failed' && <Button onClick={begin}>Try again</Button>}
+      {job.phase === 'failed' && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>Try again</Button>}
       <ErrorNotice error={error} />
     </div>
   )

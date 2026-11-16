@@ -15,6 +15,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { StepProgress } from '@/components/JobProgress'
 import { Skeleton } from '@/components/Skeleton'
 import { formatBytes } from '@/lib/utils'
+import { REMOTE_ACTIONS_COMMAND, useInstallBlock } from './install/access'
 import { applySaved, buildRequest, initialForm, STEP_LABEL, stepProblem, stepsFor, type StepId, type WizardForm } from './install/form'
 import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
 import { cn } from '@/lib/utils'
@@ -32,7 +33,7 @@ function ReviewStep({ f, req, onDisk }: { f: WizardForm; req: InstallRequest; on
     ['Ports', `Game ${req.ports.game}, txAdmin ${req.ports.txadmin}`],
     ['FiveM server build', f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? `Build ${f.artifactBuild}` : 'Custom download'],
     ['Resources', f.resourcesAll ? 'Everything' : `${f.resourceIds.length} picked, plus what they need`],
-    ['Database', f.db === 'use_existing' ? 'Use the existing database' : f.db === 'install_if_missing' ? 'Install if missing' : 'Skip'],
+    ['Database', f.db === 'use_existing' ? 'Use the existing database' : f.db === 'install_if_missing' ? 'Set up for me' : 'Skip'],
     ['Database login', f.db === 'skip' ? 'Not needed' : f.dbCustom ? `Typed (user ${f.dbUser}, password hidden)` : 'Automatic'],
     ['Firewall', req.firewall ? (req.txadmin_public ? 'Open the game and txAdmin ports' : 'Open the game port') : 'Leave closed'],
     ['Background service', req.service ? 'Yes' : 'No'],
@@ -90,7 +91,37 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
   )
 }
 
+/**
+ * Installing is admin-only and, for remote sign-ins, off unless switched on. Say so before step 1
+ * instead of after the last one. The steps (and their admin-only page-load requests) only mount
+ * once the sign-in is known and allowed.
+ */
 export default function InstallWizard() {
+  // Same answer the app shell keeps fresh; asked here too so a direct visit waits for it.
+  const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, staleTime: 15000 })
+  const block = useInstallBlock()
+  if (meta.isPending) return <Skeleton className="h-64" />
+  if (block) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-5">
+        <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
+        <Alert tone="warning" title="You cannot install a server from here">
+          {block.kind === 'remote' ? (
+            <>
+              <p>Installing a server is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora (over SSH is fine):</p>
+              <p className="my-2"><code className="rounded bg-ink px-2 py-1 font-mono text-xs">{REMOTE_ACTIONS_COMMAND}</code></p>
+              <p>Then reload this page.</p>
+            </>
+          ) : block.reason}
+        </Alert>
+        <Button asChild><Link to="/">Back to your servers</Link></Button>
+      </div>
+    )
+  }
+  return <Wizard />
+}
+
+function Wizard() {
   const qc = useQueryClient()
   const defaults = useQuery({ queryKey: ['install-defaults'], queryFn: api.installs.defaults, staleTime: Infinity })
   const appQ = useQuery({ queryKey: ['app'], queryFn: api.app.status })

@@ -71,7 +71,8 @@ export function initialForm(d: InstallDefaults): WizardForm {
     game: String(d.ports.game), tx: String(d.ports.txadmin),
     artifact: 'recommended', artifactBuild: null, artifactUrl: '', gameBuild: '',
     resourcesAll: true, resourceIds: [],
-    db: 'use_existing', dbCustom: false, dbUser: '', dbPass: '', dbPass2: '', dbHost: '127.0.0.1', dbPort: '3306',
+    // Works on a clean machine: uses a database server that is already there, installs MariaDB only when none is found.
+    db: 'install_if_missing', dbCustom: false, dbUser: '', dbPass: '', dbPass2: '', dbHost: '127.0.0.1', dbPort: '3306',
     firewall: true, txPublic: false, service: true, app: true, desktopShortcut: true,
     license: '', githubOwner: '', cfxUsername: '', cfxFound: null,
   }

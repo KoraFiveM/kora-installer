@@ -442,7 +442,7 @@ pub fn evaluate(
     cond(AlertKind::RamHigh, set.rules.ram, ram);
 
     let upd = (s.badge == Some(UpdateBadge::NeedsAttention)).then(|| {
-        "Some resources have changes Kora cannot update on its own. Open the Updates tab."
+        "Some resources have changes Kora cannot update on its own. Open the server's Resources tab."
             .to_string()
     });
     cond(AlertKind::UpdateAttention, set.rules.updates, upd);

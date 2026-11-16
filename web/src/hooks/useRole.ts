@@ -29,9 +29,12 @@ export function useRole() {
   }
 }
 
+/** The command that switches the destructive actions on for remote sign-ins. Change the name here only. */
+export const ALLOW_REMOTE_COMMAND = 'kora panel remote-actions on'
+
 /** Plain-words reason a button is off, for a tooltip or a note. */
 export function whyNot(r: ReturnType<typeof useRole>, min: Role, destructive = false): string | null {
   if (!r.can(min)) return `Your account (${r.role}) cannot do this. Ask an administrator for ${min} access.`
-  if (destructive && !r.destructiveAllowed) return 'This is turned off for remote access. An administrator can turn it on in Settings on the computer that runs Kora.'
+  if (destructive && !r.destructiveAllowed) return `This is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora: ${ALLOW_REMOTE_COMMAND}`
   return null
 }

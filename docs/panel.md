@@ -135,8 +135,7 @@ If a server's folder has gone missing, the list says so rather than hiding it.
 | Overview | State, ports, the update badge, start / stop / restart, open the server folder (only when you are on that computer). |
 | Console | Live server output and a box to send commands. The first time, Kora offers to add a small resource called `kora_console`; it loads on the next server start. |
 | Logs | Pick a log file and read its latest lines. |
-| Updates | Preview what would change, take a snapshot, apply the update, choose what happens about restarts, and roll back to an earlier snapshot. Same as `kora update`. |
-| Resources | The installed resources and the catalogue of ones you can add (compatibility, bridges, creators). Dependencies are added for you. Same as `kora add-resources`. |
+| Resources | **Updates** at the top: check for newer versions, pick what to update, choose what happens about restarts, and roll back to an earlier snapshot (same as `kora update`). Below it the installed resources, each with buttons to check it for updates and to start, stop or restart it on a running server (needs the live console from the Console tab), and the catalogue of resources you can add (same as `kora add-resources`). What the tab shows stays when you open another tab and come back. |
 | Schedule | Development servers only: when the server updates itself. Changing it needs administrator rights. Same as `kora schedule`. |
 | Notifications | The Discord webhook for update reports: set, test, remove. The address is never shown back to you. Same as `kora webhook`. |
 | Ports | Change the game and txAdmin ports. The server must be stopped. Kora checks the ports are free. Firewall rules are not changed: open the new ports and close the old ones yourself. |
@@ -214,7 +213,7 @@ UI. Release downloads include it. To build it yourself, see "Building from sourc
 other computer can reach, so the operating system has nothing to ask about. If you do get a firewall prompt, the panel is
 not listening where it should; stop it and report it.
 
-**The page loads but looks blank or shows errors after an update.** Restart `kora panel` and do a hard refresh (Ctrl+F5).
+**The page loads but looks blank or shows errors after an update.** Restart the panel (`kora panel restart` for the background panel; in a window, Ctrl+C and `kora panel` again) and do a hard refresh (Ctrl+F5).
 The page files are part of the program and are replaced with it.
 
 **An action says it needs administrator rights.** See [section 7](#7-actions-that-need-administrator-rights).
@@ -242,7 +241,8 @@ they are lost when the panel restarts (the charts keep their history). Email ale
 runs. On a server with no screen `kora panel` offers to run it in the background for you; anywhere else, run `kora panel --install-service`. It starts when you sign in and needs no
 administrator rights (Linux: a systemd user service; Windows: an entry in your Startup folder). `kora panel
 --remove-service` removes it, and `kora panel --print-link` prints the sign-in link of the running background panel (the
-link stays the same each time). On a computer with a desktop it stays off unless you ask for it.
+link stays the same each time). `kora panel restart` restarts the background panel (open pages sign in again); a panel
+running in a window is stopped there (Ctrl+C) and started again with `kora panel`. On a computer with a desktop it stays off unless you ask for it.
 
 ## 10. Optional: remote access
 
@@ -304,16 +304,23 @@ account or user has a role:
 - **admin:** an operator, plus settings (ports, webhooks, resources, snapshots, GitHub).
 
 Managing remote access and users from the panel is only possible from a local session, never remotely; the
-`kora panel tailscale` and `kora panel user` commands work on the server at any time. Remote sessions end after 12
+`kora panel tailscale`, `kora panel user` and `kora panel remote-actions` commands work on the server at any time. Remote sessions end after 12
 hours idle or 7 days in total, and at once when the account is removed or its role changes. The sign-in link from
 `kora panel` only works on the computer itself (or through an SSH tunnel), never remotely.
 
-**Destructive actions are off for remote sessions by default.** Deleting a server, uninstalling and sending console input
-only work from a local session unless an admin switches them on for that machine. Even then you must type the server's
-name to confirm.
+**Destructive actions are off for remote sessions by default.** These only work from a local session, even for a
+remote admin: deleting a server, unregistering it (removing it from Kora's list), uninstalling Kora, removing the Kora
+app, sending console commands, installing a server, updating Kora, and setting or removing restart schedules. To allow
+them for remote admins, run this on the computer that runs Kora:
 
-**When you sign in to the server as root** (common on rented servers), the panel runs as root too, so a panel admin
-can change anything on that computer. Kora says so when you set up remote access. Only make people you fully trust
+```sh
+kora panel remote-actions on       # off turns them off again; status shows the setting
+```
+
+or use the switch in Settings > Remote access from a local session. A running panel uses the new setting right away;
+no restart is needed. Even when it is on you must type the server's name to delete it.
+
+**A panel admin can do a lot on that computer**: install and delete servers, send console commands, update Kora. The panel itself does not run as root (since 0.6.1), but only make people you fully trust
 admin; give others the operator or viewer role.
 
 ## 11. Optional: the hub (several machines)

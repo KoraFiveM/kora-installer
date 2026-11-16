@@ -157,8 +157,10 @@ Open the Kora Panel: install, manage and monitor servers in your web browser (th
 Usage: kora panel [OPTIONS] [COMMAND]
 
 Commands:
-  user       Manage the people who may sign in to the panel remotely (each has a token and a role)
-  tailscale  Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
+  user            Manage the people who may sign in to the panel remotely (each has a token and a role)
+  tailscale       Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
+  restart         Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
+  remote-actions  Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default
 
 Options:
       --port <PORT>
@@ -346,6 +348,71 @@ Options:
 Turn Tailscale access off: the panel listens on this computer only again
 
 Usage: kora panel tailscale off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel restart =====
+Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
+
+Usage: kora panel restart [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote-actions =====
+Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default
+
+Usage: kora panel remote-actions [OPTIONS] <COMMAND>
+
+Commands:
+  on      Allow these actions for remote administrators
+  off     Refuse these actions for everyone who signs in remotely (the default)
+  status  Show whether they are on or off
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote-actions on =====
+Allow these actions for remote administrators
+
+Usage: kora panel remote-actions on [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote-actions off =====
+Refuse these actions for everyone who signs in remotely (the default)
+
+Usage: kora panel remote-actions off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote-actions status =====
+Show whether they are on or off
+
+Usage: kora panel remote-actions status [OPTIONS]
 
 Options:
       --no-elevate

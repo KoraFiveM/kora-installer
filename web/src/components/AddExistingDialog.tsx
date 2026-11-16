@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { ScanCandidate } from '@/api/types'
 import { useAlerts } from '@/lib/app'
+import { useRole, whyNot } from '@/hooks/useRole'
 import { useJob } from '@/hooks/useJob'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -18,6 +19,9 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
   const [dir, setDir] = useState('')
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
+  const role = useRole()
+  const noScan = whyNot(role, 'operator')
+  const noAdd = whyNot(role, 'admin')
   const scan = useJob<{ candidates: ScanCandidate[] }>(job)
 
   const adopt = async (d: string) => {
@@ -50,7 +54,7 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
         <div className="space-y-5">
           <section className="space-y-2">
             <h3 className="text-sm font-semibold">Look for servers on this computer</h3>
-            <Button onClick={start} disabled={scan.phase === 'running'}>{scan.phase === 'running' ? 'Looking...' : 'Scan for servers'}</Button>
+            <Button onClick={start} disabled={scan.phase === 'running' || !!noScan} title={noScan ?? undefined}>{scan.phase === 'running' ? 'Looking...' : 'Scan for servers'}</Button>
             {scan.phase === 'done' && candidates.length === 0 && <p className="text-sm text-muted-foreground">No new servers were found. You can type the folder below.</p>}
             {scan.phase === 'failed' && <ErrorNotice error={scan.error} />}
             <ul className="space-y-2">
@@ -60,7 +64,7 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
                     <div className="flex items-center gap-2 font-medium">{c.name} <ModeChip mode={c.mode} /></div>
                     <div className="truncate font-mono text-xs text-muted-foreground">{c.dir}</div>
                   </div>
-                  <Button size="sm" disabled={busy} onClick={() => adopt(c.dir)} aria-label={`Add ${c.name}`}>Add</Button>
+                  <Button size="sm" disabled={busy || !!noAdd} title={noAdd ?? undefined} onClick={() => adopt(c.dir)} aria-label={`Add ${c.name}`}>Add</Button>
                 </li>
               ))}
             </ul>
@@ -69,14 +73,15 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
             className="space-y-2"
             onSubmit={(e) => {
               e.preventDefault()
-              if (dir.trim()) void adopt(dir.trim())
+              if (dir.trim() && !noAdd) void adopt(dir.trim())
             }}
           >
             <h3 className="text-sm font-semibold">Or type the folder</h3>
             <Field label="Server folder" hint="The folder that contains server.cfg and resources, for example /srv/fivem/my-server.">
-              <Input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="/srv/fivem/my-server" />
+              <Input value={dir} disabled={!!noAdd} onChange={(e) => setDir(e.target.value)} placeholder="/srv/fivem/my-server" />
             </Field>
-            <Button type="submit" variant="default" disabled={busy || !dir.trim()}>Add this folder</Button>
+            <Button type="submit" variant="default" disabled={busy || !dir.trim() || !!noAdd} title={noAdd ?? undefined}>Add this folder</Button>
+            {noAdd && <p className="text-xs text-muted-foreground">{noAdd}</p>}
           </form>
           <ErrorNotice error={error} />
         </div>

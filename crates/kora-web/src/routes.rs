@@ -43,6 +43,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::ConsoleEnable => on_op(op, handlers::console::console_enable),
         Op::ResourcesList => on_op(op, handlers::resources::resources_list),
         Op::ResourceEnsure => on_op(op, handlers::resources::resource_ensure),
+        Op::ResourceControl => on_op(op, handlers::resources::resource_control),
         Op::UpdatePreview => on_op(op, handlers::updates::update_preview),
         Op::UpdateApply => on_op(op, handlers::updates::update_apply),
         Op::UpdateAuto => on_op(op, handlers::updates::update_auto),

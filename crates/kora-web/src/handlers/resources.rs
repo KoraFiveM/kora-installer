@@ -10,9 +10,11 @@ use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::Json;
 use kora_core::api::panel_updates::catalog_json;
-use kora_core::api::{valid_resource_name, Op};
+use kora_core::api::{valid_resource_name, Op, Status};
+use kora_core::console;
 use kora_core::catalog::Catalog;
 use kora_core::installer::Mode;
+use kora_core::update::lock;
 use serde_json::{json, Value};
 
 use crate::{blocking, ApiError, AppState};
@@ -94,11 +96,74 @@ pub async fn resource_ensure(
         .unwrap_or(false);
     blocking(move || {
         let e = st.entry(&s)?;
+        // A restart in the middle of an update would start the server on half-swapped files.
+        if restart && lock::is_busy(&e.dir) {
+            return Err(ApiError::conflict(format!("{}.", lock::BUSY)));
+        }
         let message = st
             .backend()
             .ensure(&e, &name, restart)
             .map_err(ApiError::core)?;
         Ok(Json(json!({"message": message})))
+    })
+    .await
+}
+
+/// Start, stop or restart one installed resource on a running server. The command goes through the
+/// console helper like a typed one, but the caller only picks the resource and the action: the text
+/// is built here from a checked name, so this needs no more than server control does.
+pub async fn resource_control(
+    State(st): State<AppState>,
+    Path((s, name)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    // `ensure` restarts a running resource and starts a stopped one, so "restart" never fails
+    // just because the resource was not running.
+    let (verb, said) = match body.get("action").and_then(Value::as_str) {
+        Some("start") => ("start", "start"),
+        Some("stop") => ("stop", "stop"),
+        Some("restart") => ("ensure", "restart"),
+        _ => {
+            return Err(ApiError::bad_request(
+                "The action must be start, stop or restart.",
+            ))
+        }
+    };
+    if !valid_resource_name(&name) {
+        return Err(ApiError::bad_request(format!(
+            "'{name}' is not a resource name."
+        )));
+    }
+    if verb == "stop" && name == console::RESOURCE {
+        return Err(ApiError::bad_request(
+            "Kora uses this resource to send commands to the server, so it cannot be stopped from here.",
+        ));
+    }
+    blocking(move || {
+        let e = st.entry(&s)?;
+        if !st.backend().resources(&e).contains(&name) {
+            return Err(ApiError::not_found(format!(
+                "'{name}' is not installed on this server."
+            )));
+        }
+        // An update is swapping files: loading a resource now could load half of it.
+        if verb != "stop" && lock::is_busy(&e.dir) {
+            return Err(ApiError::conflict(format!("{}.", lock::BUSY)));
+        }
+        if st.backend().status(&e) != Status::Running {
+            return Err(ApiError::conflict(
+                "The server is not running. Start the server first; its resources start with it.",
+            ));
+        }
+        if !console::is_installed(&e.dir) {
+            return Err(ApiError::conflict(
+                "The live console is not switched on for this server yet. Turn it on in the Console tab first (it needs a restart).",
+            ));
+        }
+        console::send(&e.dir, &format!("{verb} {name}")).map_err(ApiError::internal)?;
+        Ok(Json(json!({
+            "message": format!("Asked the server to {said} {name}. The Console tab shows what happened.")
+        })))
     })
     .await
 }

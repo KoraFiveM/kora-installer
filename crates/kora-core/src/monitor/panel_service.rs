@@ -146,6 +146,40 @@ pub fn restart_command(platform: Platform, exe: &Path, port: u16, tailscale: boo
     }
 }
 
+/// Everything `kora panel restart` does to the installed background panel, from outside it. Linux: the
+/// same systemd restart as [`restart_command`]. Windows: stop the running panel (`stop_pid`, only set
+/// when that process is known to be our panel), then run the start-up script again.
+pub fn restart_plan(platform: Platform, stop_pid: Option<u32>) -> Plan {
+    match platform {
+        Platform::Linux => {
+            let (program, args) = restart_command(platform, Path::new(""), 0, false);
+            Plan::new(vec![SystemStep::run_owned("Restart the panel", &program, args).user_level()])
+        }
+        Platform::Windows => {
+            let script = startup_script_path().display().to_string();
+            let mut steps = Vec::new();
+            if let Some(pid) = stop_pid {
+                steps.push(
+                    SystemStep::run_owned(
+                        "Stop the running panel",
+                        "taskkill.exe",
+                        vec!["/PID".into(), pid.to_string(), "/F".into()],
+                    )
+                    .user_level()
+                    .tolerant(),
+                );
+            }
+            steps.push(SystemStep::run("Start the panel again", "wscript.exe", &["//nologo", &script]).user_level());
+            Plan::new(steps)
+        }
+    }
+}
+
+/// Restart the installed background panel. Changes nothing on disk: same token, port and settings.
+pub fn restart(runner: &dyn CommandRunner, platform: Platform, stop_pid: Option<u32>) -> ServiceResult<()> {
+    apply_plan(&restart_plan(platform, stop_pid), runner)
+}
+
 /// The saved sign-in token, when a service has been installed.
 pub fn load_token(home: &Path) -> Option<String> {
     let t = std::fs::read_to_string(token_path(home)).ok()?;
@@ -480,6 +514,32 @@ mod tests {
         let (p, a) = restart_command(Platform::Windows, Path::new(r"C:\k\kora.exe"), 47130, true);
         assert_eq!(p, r"C:\k\kora.exe");
         assert_eq!(a.join(" "), "panel --no-open --foreground --port 47130 --listen-tailscale");
+    }
+
+    #[test]
+    fn restarting_from_outside_changes_no_files_and_needs_no_administrator_rights() {
+        let lines = |p: &Plan| -> Vec<String> { p.steps.iter().filter_map(SystemStep::command_line).collect() };
+        let linux = restart_plan(Platform::Linux, Some(42));
+        assert_eq!(lines(&linux), ["systemctl --user restart kora-panel.service"]);
+        let win = restart_plan(Platform::Windows, Some(42));
+        let l = lines(&win);
+        assert_eq!(l.len(), 2, "{l:?}");
+        assert!(
+            l[0].contains("taskkill.exe /PID 42 /F")
+                && l[1].contains("wscript.exe //nologo")
+                && l[1].contains("Kora Panel.vbs"),
+            "{l:?}"
+        );
+        // Nothing known to be running: only start it.
+        let idle = restart_plan(Platform::Windows, None);
+        assert_eq!(lines(&idle).len(), 1);
+        for p in [&linux, &win, &idle] {
+            assert!(!p.needs_admin());
+            assert_eq!(lines(p).len(), p.steps.len(), "only commands, no files");
+        }
+        let rn = FakeRunner::default();
+        restart(&rn, Platform::Linux, None).unwrap();
+        assert_eq!(rn.calls().len(), 1, "{:?}", rn.calls());
     }
 
     #[test]

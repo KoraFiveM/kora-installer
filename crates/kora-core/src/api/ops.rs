@@ -41,6 +41,8 @@ pub enum Op {
     ConsoleEnable,
     ResourcesList,
     ResourceEnsure,
+    /// Start, stop or restart one resource on a running server (through the console helper).
+    ResourceControl,
     UpdatePreview,
     UpdateApply,
     UpdateAuto,
@@ -131,6 +133,7 @@ impl Op {
         Op::ConsoleEnable,
         Op::ResourcesList,
         Op::ResourceEnsure,
+        Op::ResourceControl,
         Op::UpdatePreview,
         Op::UpdateApply,
         Op::UpdateAuto,
@@ -221,6 +224,7 @@ impl Op {
             Op::ConsoleEnable => "console_enable",
             Op::ResourcesList => "resources_list",
             Op::ResourceEnsure => "resource_ensure",
+            Op::ResourceControl => "resource_control",
             Op::UpdatePreview => "update_preview",
             Op::UpdateApply => "update_apply",
             Op::UpdateAuto => "update_auto",
@@ -312,6 +316,7 @@ impl Op {
             Op::ConsoleEnable => (Method::Put, "/servers/{s}/console/enabled"),
             Op::ResourcesList => (Method::Get, "/servers/{s}/resources"),
             Op::ResourceEnsure => (Method::Post, "/servers/{s}/ensure"),
+            Op::ResourceControl => (Method::Post, "/servers/{s}/resources/{name}/control"),
             Op::UpdatePreview => (Method::Post, "/servers/{s}/update/preview"),
             Op::UpdateApply => (Method::Post, "/servers/{s}/update/apply"),
             Op::UpdateAuto => (Method::Post, "/servers/{s}/update/auto"),
@@ -427,6 +432,7 @@ impl Op {
                 | Op::ConsoleEnable
                 | Op::ResourcesList
                 | Op::ResourceEnsure
+                | Op::ResourceControl
                 | Op::UpdatePreview
                 | Op::UpdateApply
                 | Op::SnapshotsList
@@ -487,6 +493,7 @@ mod tests {
             | Op::ConsoleEnable
             | Op::ResourcesList
             | Op::ResourceEnsure
+            | Op::ResourceControl
             | Op::UpdatePreview
             | Op::UpdateApply
             | Op::UpdateAuto
@@ -559,7 +566,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 85);
+        assert_eq!(Op::ALL.len(), 86);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

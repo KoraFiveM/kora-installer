@@ -5,6 +5,31 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-16
+
+### Added
+- `kora panel restart` restarts the background panel and prints the sign-in link. A panel running in a terminal window is not touched: it says to stop it there and run `kora panel` again.
+- `kora panel remote-actions on|off|status` lets remote administrators install, delete and uninstall servers, send console commands, change schedules and update Kora (off by default). Until now this switch was only in Settings on the computer itself, out of reach on a server with no screen. A running panel uses the new setting right away.
+- **Start, stop and restart one resource from the panel.** Each installed resource on a server's Resources tab has Start, Stop and Restart buttons (Stop and Restart ask first). They need the server running and the live console switched on, and work for operators, also over remote access. `POST /servers/{s}/resources/{name}/control`.
+- The installed-resources list has a filter and shows what the last update check found beside each name.
+
+### Changed
+- **The Resources tab remembers what it was doing.** A running check, what it found, what you ticked, an update or an install in progress all stay when you open another tab and come back (until the page is reloaded). The Updates card and the installed list share one state, so they no longer disagree or run into "Another update is running for this server".
+- The Updates card lists only resources that need a decision and counts the rest; "Everything is up to date" is said only after every resource was checked.
+- **Buttons you may not use are switched off with the reason**, instead of failing after the click: installing a server, schedules, ports, webhooks, GitHub, alert settings, rollback and adding resources follow your role and the remote-access switch.
+- The install wizard sets up the database for you by default (uses MariaDB or MySQL if present, installs MariaDB if not), and the licence key step links to the Cfx.re portal with numbered steps.
+- Removing a webhook, a remote user or a Tailscale account asks first.
+- When an action is turned off for remote sign-ins, the message now gives the command that turns it on (`kora panel remote-actions on`).
+- On Linux, `install.sh` and `kora panel` run as root now print the commands to create a user for Kora and continue, for servers that only have the root account.
+- The install commands in the README use `releases/latest/download`, so they no longer name an old version.
+
+### Fixed
+- **Server status in the panel updates by itself again.** The panel listened for the wrong live event, so a server that stopped or started kept its old status until the page was reloaded.
+- One lost request no longer turns a running job into "failed" in the panel; it asks again a few times first.
+- A double click can no longer start two update checks.
+- Starting or restarting a resource, and "ensure" with a restart, are refused while an update is swapping files.
+- The "needs attention" alert pointed to an Updates tab that no longer exists; it now opens the server's Resources tab.
+
 ## [0.6.1] - 2026-11-16
 
 ### Security

@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/alert'
 import { AlertsBanner } from '@/components/AlertsBanner'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { KoraLogo } from '@/components/KoraLogo'
+import { useInstallBlock } from '@/pages/install/access'
 import { cn } from '@/lib/utils'
 
 const nav = [
@@ -22,6 +23,7 @@ export function AppShell() {
   const { alerts, dismiss } = useAlerts()
   const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, refetchInterval: 15000 })
   useServerEvents()
+  const installBlock = useInstallBlock()
   const unreachable = meta.isError
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
@@ -29,19 +31,30 @@ export function AppShell() {
         <div className="px-5 py-4"><KoraLogo className="h-7 w-auto text-foreground" /></div>
         <nav aria-label="Main" className="flex gap-1 px-3 pb-3 md:flex-col md:pb-0">
           {/* The fleet uses the tokens of other panels stored here, so it is only offered on this computer. */}
-          {nav.filter((n) => !(n.to === '/fleet' && meta.data?.remote)).map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground', isActive && 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground')
-              }
-            >
-              <Icon className="size-4" aria-hidden />
-              {label}
-            </NavLink>
-          ))}
+          {nav.filter((n) => !(n.to === '/fleet' && meta.data?.remote)).map(({ to, label, icon: Icon, end }) => {
+            // Installing would be refused for this sign-in: say why here instead of after the whole wizard.
+            if (to === '/install' && installBlock) {
+              return (
+                <span key={to} aria-disabled="true" title={installBlock.reason} className="flex cursor-not-allowed items-start gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground/60">
+                  <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <span>{label}<span className="block text-xs font-normal">{installBlock.short}</span></span>
+                </span>
+              )
+            }
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground', isActive && 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground')
+                }
+              >
+                <Icon className="size-4" aria-hidden />
+                {label}
+              </NavLink>
+            )
+          })}
         </nav>
       </aside>
       <div className="min-w-0 flex-1">

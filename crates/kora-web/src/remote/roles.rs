@@ -83,6 +83,8 @@ pub fn min_role(op: Op) -> Role {
         | Op::LogsTail
         | Op::ConsoleStream
         | Op::ResourceEnsure
+        // A fixed command for one installed resource (not free console text), like server control.
+        | Op::ResourceControl
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto
@@ -177,6 +179,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::ConsoleEnable
         | Op::ResourcesList
         | Op::ResourceEnsure
+        | Op::ResourceControl
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto
@@ -284,6 +287,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::ConsoleEnable
         | Op::ResourcesList
         | Op::ResourceEnsure
+        | Op::ResourceControl
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input, Select } from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
@@ -35,12 +36,13 @@ function Users() {
   const [name, setName] = useState('')
   const [role, setRole] = useState<Role>('operator')
   const [fresh, setFresh] = useState<{ name: string; token: string } | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
   const refresh = () => qc.invalidateQueries({ queryKey: ['panel-users'] })
   const add = useMutation({
     mutationFn: () => api.users.add(name.trim(), role),
     onSuccess: (u) => { setFresh({ name: u.name, token: u.token }); setName(''); void refresh() },
   })
-  const remove = useMutation({ mutationFn: (n: string) => api.users.remove(n), onSuccess: () => void refresh() })
+  const remove = useMutation({ mutationFn: (n: string) => api.users.remove(n), onSuccess: () => void refresh(), onSettled: () => setRemoving(null) })
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-semibold">People with a token</h3>
@@ -49,7 +51,7 @@ function Users() {
         {(q.data ?? []).map((u) => (
           <li key={u.name} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
             <span><strong>{u.name}</strong> <Badge tone="plain">{u.role}</Badge></span>
-            <Button size="sm" variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate(u.name)} aria-label={`Remove ${u.name}`}>Remove</Button>
+            <Button size="sm" variant="destructive" disabled={remove.isPending} onClick={() => setRemoving(u.name)} aria-label={`Remove ${u.name}`}>Remove</Button>
           </li>
         ))}
       </ul>
@@ -66,6 +68,16 @@ function Users() {
         </Alert>
       )}
       <ErrorNotice error={add.error ?? remove.error ?? q.error} />
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(o) => { if (!o) setRemoving(null) }}
+        title={`Remove ${removing ?? ''}?`}
+        description="They are signed out and cannot sign in again until you add them back."
+        confirmLabel="Remove"
+        destructive
+        busy={remove.isPending}
+        onConfirm={() => { if (removing) remove.mutate(removing) }}
+      />
     </div>
   )
 }
@@ -78,6 +90,7 @@ export function RemoteAccessCard() {
   const [host, setHost] = useState('')
   const [login, setLogin] = useState('')
   const [loginRole, setLoginRole] = useState<Role>('viewer')
+  const [removing, setRemoving] = useState<string | null>(null)
   const s = q.data
   const loopback = s ? s.bind === '127.0.0.1' || s.bind === '::1' : true
   return (
@@ -105,7 +118,7 @@ export function RemoteAccessCard() {
                     {Object.entries(s.tailscale_users).map(([l, r]) => (
                       <li key={l} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                         <span><strong>{l}</strong> <Badge tone="plain">{r}</Badge></span>
-                        <Button size="sm" variant="destructive" onClick={() => { const next = { ...s.tailscale_users }; delete next[l]; save.mutate({ tailscale_users: next }) }} aria-label={`Remove ${l}`}>Remove</Button>
+                        <Button size="sm" variant="destructive" onClick={() => setRemoving(l)} aria-label={`Remove ${l}`}>Remove</Button>
                       </li>
                     ))}
                   </ul>
@@ -144,6 +157,21 @@ export function RemoteAccessCard() {
           </>
         )}
         <ErrorNotice error={save.error ?? q.error} />
+        <ConfirmDialog
+          open={removing !== null}
+          onOpenChange={(o) => { if (!o) setRemoving(null) }}
+          title={`Remove ${removing ?? ''}?`}
+          description="They are signed out and cannot sign in again until you add them back."
+          confirmLabel="Remove"
+          destructive
+          busy={save.isPending}
+          onConfirm={() => {
+            if (!s || !removing) return
+            const next = { ...s.tailscale_users }
+            delete next[removing]
+            save.mutate({ tailscale_users: next }, { onSettled: () => setRemoving(null) })
+          }}
+        />
       </CardContent>
     </Card>
   )
@@ -160,7 +188,7 @@ export function SignedInCard() {
       <CardContent className="space-y-3 text-sm">
         <p>Signed in as <strong>{r.identity.name}</strong> (<Badge tone="plain">{r.role}</Badge>){r.remote ? ', from another computer' : ''}.</p>
         <p className="text-muted-foreground">{ROLE_TEXT[r.role]}.</p>
-        {r.remote && !r.destructiveAllowed && <p className="text-muted-foreground">Deleting, uninstalling and similar actions are turned off for remote access.</p>}
+        {r.remote && !r.destructiveAllowed && <p className="text-muted-foreground">Installing, deleting, uninstalling, console commands, schedules and updating Kora are turned off for remote sign-ins.</p>}
         <Button onClick={() => out.mutate()} disabled={out.isPending}>Sign out</Button>
         <ErrorNotice error={out.error} />
       </CardContent>

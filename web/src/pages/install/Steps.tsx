@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { DbChoice, PortsCheck } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
@@ -154,8 +154,8 @@ export function ResourcesStep({ f, set }: StepProps) {
 }
 
 const DB_OPTIONS: { v: DbChoice; label: string; hint: string }[] = [
-  { v: 'use_existing', label: 'Use the database already on this computer', hint: 'Kora creates a new database and user for this server. Your other databases are not touched.' },
-  { v: 'install_if_missing', label: 'Install a database if there is none', hint: 'Installs MariaDB first when needed. This needs administrator rights.' },
+  { v: 'install_if_missing', label: 'Set up the database for me (recommended)', hint: 'Uses MariaDB or MySQL if it is already here, installs MariaDB if not (installing it needs administrator rights). Your other databases are not touched.' },
+  { v: 'use_existing', label: 'Use the database already on this computer', hint: 'Kora creates a new database and user for this server. Your other databases are not touched. The install stops if no database is found.' },
   { v: 'skip', label: 'Skip the database', hint: 'You will connect a database yourself later.' },
 ]
 
@@ -223,11 +223,20 @@ export function OptionsStep({ f, set, advanced, appSupported }: StepProps & { ap
   )
 }
 
+/** Where server licence keys are registered. */
+export const CFX_KEYS_URL = 'https://portal.cfx.re/servers/registration-keys'
+
 export function LicenceStep({ f, set }: StepProps) {
   const [show, setShow] = useState(false)
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Every FiveM server needs its own licence key. You get one for free from the Cfx.re portal: sign in with your Cfx.re account, choose "Server keys", register a key for this server, and copy it here.</p>
+      <p className="text-sm text-muted-foreground">Every FiveM server needs its own licence key. It is free. To get one:</p>
+      <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+        <li>Open the Cfx.re portal and sign in.</li>
+        <li>Choose &quot;Server keys&quot;, then register a new key.</li>
+        <li>Copy the key and paste it below.</li>
+      </ol>
+      <Button asChild><a href={CFX_KEYS_URL} target="_blank" rel="noreferrer">Open the Cfx.re portal <ExternalLink /></a></Button>
       <div className="space-y-1.5">
         <Label htmlFor="licence-key">Licence key</Label>
         <div className="flex gap-2">
