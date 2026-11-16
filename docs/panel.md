@@ -42,7 +42,8 @@ Options:
 
 | Option | What it does |
 |---|---|
-| `--port <PORT>` | The port to listen on (default 47120). Use this if something else already uses 47120. |
+| `--port <PORT>` | The port to listen on. Without it Kora uses 47120, or the next free port up to 47140 when something else uses 47120. |
+| `--setup` | Never asks anything: makes sure the background panel is set up and running, opens it in your browser (where there is a screen) and prints the sign-in link. The install scripts run this. |
 | `--no-open` | Do not open a browser; print the address and sign-in link instead. This is automatic over SSH or when the computer has no desktop. |
 | `--no-elevate` | Do not ask Windows or `sudo` for administrator permission (for developers and CI). |
 
@@ -64,7 +65,7 @@ prints the sign-in link and the tunnel line:
 ```
 The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.
 Sign in with: http://127.0.0.1:47120/#token=...
-On a server with no screen, open a tunnel from your own computer first:  ssh -L 47120:127.0.0.1:47120 user@host
+On a server with no screen, open a tunnel from your own computer first:  ssh -L 47120:127.0.0.1:47120 you@203.0.113.7
 ```
 
 Run `kora panel` again at any time to see the link again (it never starts a second panel while the background one is
@@ -169,8 +170,9 @@ The Settings page says when the helper is installed. On Windows the panel always
 
 ## 8. Troubleshooting
 
-**"cannot listen on 127.0.0.1:47120 ... is another panel running?"** The port is taken, usually by a panel you
-left running. Stop that one (Ctrl+C in its terminal) or choose another port: `kora panel --port 47121`.
+**"cannot listen on 127.0.0.1:47120 ... is another panel running?"** You chose that port with `--port` and something
+else uses it. Without `--port` Kora picks the next free port by itself, and if one of your own panels is already
+running, `kora panel` shows its link instead of starting a second one.
 
 **The browser did not open.** Kora prints the link; copy it into your browser. On a server without a desktop this is
 expected (see [SSH](#starting-it-on-a-server-with-no-screen-ssh)). Use `--no-open` to stop Kora trying.

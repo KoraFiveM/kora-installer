@@ -7,11 +7,16 @@
   %LOCALAPPDATA%\Kora\bin and adds that folder to your user PATH. An existing kora.exe is only
   replaced when it really is an earlier kora (the old one is kept as kora.exe.previous).
 
+  Then it starts Kora Panel in the background (it also starts at every sign-in) with
+  `kora panel --setup`, opens it in your browser and prints the sign-in link. If that step fails
+  the install still counts as done and the manual next step is printed.
+
   Settings (parameters or environment variables, all optional):
     -Base / KORA_RELEASE_BASE   Where the release files live. https:// only (http:// for localhost).
     -InstallDir / KORA_INSTALL_DIR   Target folder. Default: %LOCALAPPDATA%\Kora\bin
     -Version / KORA_VERSION     Release to install, e.g. v0.2.0. Default: newest published release (pre-releases included).
     -Force                      Replace an existing kora.exe even if it is not a kora program.
+    -NoLaunch / KORA_NO_LAUNCH=1   Only install the program: do not start Kora Panel or open a browser.
 
 .EXAMPLE
   irm <release-base>/install.ps1 | iex
@@ -21,7 +26,8 @@ param(
     [string]$Base = $(if ($env:KORA_RELEASE_BASE) { $env:KORA_RELEASE_BASE } else { 'https://github.com/KoraFiveM/kora-installer/releases/latest/download' }),
     [string]$InstallDir = $(if ($env:KORA_INSTALL_DIR) { $env:KORA_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Kora\bin' }),
     [string]$Version = $env:KORA_VERSION,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$NoLaunch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,5 +121,27 @@ finally {
 }
 
 Write-Host ''
-Write-Host 'Next step: run   kora panel   (opens Kora Panel in your browser)'
+if ($NoLaunch -or $env:KORA_NO_LAUNCH -eq '1') {
+    Write-Host 'Next step: run   kora panel   (opens Kora Panel in your browser)'
+}
+else {
+    Write-Host 'Starting Kora Panel ...'
+    # The panel runs in the background, so this returns within a few seconds. A failure here does not
+    # undo the install. 'Continue' so a message on stderr is shown, not turned into a stopping error.
+    $launched = $false
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $dest panel --setup
+        $launched = ($LASTEXITCODE -eq 0)
+    }
+    catch { Write-Host "Could not run kora: $($_.Exception.Message)" }
+    finally { $ErrorActionPreference = $previousPreference }
+    Write-Host ''
+    if (-not $launched) {
+        Write-Host 'Kora Panel did not start by itself. kora is installed; start the panel with:'
+        Write-Host "    & '$dest' panel"
+        $global:LASTEXITCODE = 0  # the install itself worked
+    }
+}
 Write-Host 'Prefer the terminal? Run   kora install   instead.'

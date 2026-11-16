@@ -26,6 +26,7 @@ try {
 
     # Windows PowerShell 5.1 (what users have), the real `irm | iex` shape: script text through Invoke-Expression.
     $env:KORA_RELEASE_BASE = 'http://127.0.0.1:38081'
+    $env:KORA_NO_LAUNCH = '1'
     $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "iex (Get-Content -Raw '$PWD/scripts/install.ps1')" 2>&1 | Out-String
     $code = $LASTEXITCODE
     Write-Host $out
@@ -39,11 +40,25 @@ try {
     Assert-That (@(($userPath -split ";") | Where-Object { $_ -eq $default }).Count -eq 1) 'and exactly once'
     $v = Invoke-Native "$default\kora.exe" @('--version')
     Assert-That ($v.Code -eq 0) 'the installed kora.exe runs'
+    Assert-That ($out -notmatch 'Starting Kora Panel' -and $out -match 'Next step: run   kora panel') 'KORA_NO_LAUNCH=1: the panel is not started, the next step is printed'
+    Remove-Item Env:KORA_NO_LAUNCH
 
-    # Second run: up to date, PATH not duplicated.
+    # Second run: up to date, PATH not duplicated, and Kora Panel starts in the background. SSH_CONNECTION
+    # makes kora treat this as a computer with no screen, so no browser opens on the runner.
+    $env:SSH_CONNECTION = '203.0.113.1 50000 198.51.100.2 22'
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PWD/scripts/install.ps1" 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    $sw.Stop()
+    Remove-Item Env:SSH_CONNECTION
     Write-Host $out
-    Assert-That ($LASTEXITCODE -eq 0 -and $out -match 'already up to date') 'second run reports up to date'
+    Assert-That ($code -eq 0 -and $out -match 'already up to date') 'second run reports up to date'
+    Assert-That ($out -match 'Starting Kora Panel') 'the panel is started after installing'
+    Assert-That ($out -match 'Sign in to Kora Panel' -and $out -match 'http://127\.0\.0\.1:\d+/#token=[0-9a-f]+') 'the background panel answers and the sign-in link is printed'
+    Assert-That ($out -match 'ssh -L \d+:127\.0\.0\.1:\d+ \S+@198\.51\.100\.2') 'with no screen the SSH tunnel command is printed'
+    Assert-That ($sw.Elapsed.TotalSeconds -lt 60) 'the launch returns instead of keeping the shell busy'
+    $link = Invoke-Native "$default\kora.exe" @('panel', '--print-link')
+    Assert-That ($link.Code -eq 0) 'kora panel --print-link works after the install'
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     Assert-That (@(($userPath -split ";") | Where-Object { $_ -eq $default }).Count -eq 1) 'PATH entry is not duplicated by a second run'
 
@@ -73,8 +88,11 @@ try {
     Assert-That ((Get-Content (Join-Path $foreign 'kora.exe') -Raw).Trim() -eq 'not a kora program') 'and untouched'
 }
 finally {
+    if (Test-Path "$env:LOCALAPPDATA\Kora\bin\kora.exe") {
+        & "$env:LOCALAPPDATA\Kora\bin\kora.exe" panel --remove-service 2>&1 | Out-Host
+    }
     $p1, $p2 | ForEach-Object { if ($_ -and -not $_.HasExited) { Stop-Process -Id $_.Id -Force } }
-    Remove-Item Env:KORA_RELEASE_BASE, Env:KORA_INSTALL_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:KORA_RELEASE_BASE, Env:KORA_INSTALL_DIR, Env:KORA_NO_LAUNCH, Env:SSH_CONNECTION -ErrorAction SilentlyContinue
 }
 
 exit 0

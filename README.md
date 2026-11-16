@@ -11,7 +11,7 @@ Documentation: <https://docs.koraframe.work/guides/installer/overview>
 
 New in 0.4.0: run `kora panel` and manage your servers in the browser. It installs servers (the same wizard as
 `kora install`), starts, stops and updates them, shows the console and logs, and handles resources, schedules and
-notifications. It listens on `127.0.0.1` only (port 47120; `--port` changes it) and signs you in with a one-time link.
+notifications. It listens on `127.0.0.1` only (port 47120, or the next free one up to 47140 when something else uses it; `--port` changes it) and signs you in with a one-time link.
 On a server without a screen, `kora panel --no-open` prints the link and an `ssh -L` tunnel command.
 
 Guide: [docs/panel.md](docs/panel.md). The terminal wizard (`kora install`) and manager (`kora manager`) are unchanged.
@@ -30,7 +30,17 @@ Windows 10/11 or Server 2019+ (PowerShell):
 irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.3/install.ps1 | iex
 ```
 
-Then run `kora panel` (the web panel; `kora install` is the terminal wizard). The scripts check the download's SHA-256, install `kora` for your user (no administrator rights
+When the script finishes, Kora Panel starts by itself and opens in your browser. It runs in the background
+(a systemd user service on Linux, a sign-in entry on Windows), so it keeps watching your servers and comes back after
+a restart. The sign-in link is always printed too. On a server with no screen (over SSH) nothing opens: the script
+prints the link and an `ssh -L` command to run on your own computer first. Show the link again with
+`kora panel --print-link`; stop and remove the background panel with `kora panel --remove-service`. If the panel
+cannot start (for example under `sudo` without a user session), the install still finishes and tells you to run
+`kora panel` yourself. To only install the program, set `KORA_NO_LAUNCH=1` (Linux: `curl ... | KORA_NO_LAUNCH=1 sh`;
+Windows: `$env:KORA_NO_LAUNCH=1` before `irm ... | iex`, or `-NoLaunch`). Prefer the terminal? `kora install` is the
+terminal wizard.
+
+The scripts check the download's SHA-256, install `kora` for your user (no administrator rights
 needed for this step) and keep the previous version as `kora.previous`. Use the newest version number from the
 [Releases page](https://github.com/KoraFiveM/kora-installer/releases) (`/releases/latest` ignores pre-releases, so use an
 explicit version). `KORA_VERSION=vX.Y.Z` (or `-Version` on Windows) picks a release, `KORA_RELEASE_BASE` changes the download address.
