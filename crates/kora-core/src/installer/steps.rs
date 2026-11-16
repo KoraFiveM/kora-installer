@@ -1334,6 +1334,24 @@ impl InstallStep {
     fn undo(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let created = ctx.load_created();
+        if !ctx.system_trusted {
+            let services = " (`systemctl list-units 'kora-*'` lists Kora's services)";
+            let what = match self.id {
+                "system.firewall" if created.firewall => Some(("firewall rules", "")),
+                "system.service" if created.service_unit.is_some() || created.service_account_created || created.binary.is_some() => {
+                    Some(("background service, its system account and the program copy", services))
+                }
+                "system.schedule" if created.update_timer => Some(("automatic-update schedule", services)),
+                _ => None,
+            };
+            if let Some((what, hint)) = what {
+                ctx.note(format!(
+                    "Kora left this server's {what} alone: {} is not in Kora's server list, so Kora cannot be sure which system-wide changes belong to it (the folder's own records can be changed by the server's account). Remove them by hand if needed{hint}.",
+                    ctx.req.dir.display()
+                ));
+                return Ok("Left alone (not in the server list; see notes)".into());
+            }
+        }
         match self.id {
             "build.forks" => {
                 ctx.note("GitHub forks were left in place; delete them on GitHub if you no longer want them.");
@@ -1459,8 +1477,11 @@ impl InstallStep {
                 Ok(if done.is_empty() { "Skipped (needs admin)".into() } else { done.join("; ") })
             }
             "finalize" => {
+                // By folder, not by the (possibly forged) recorded name: only this server's entry goes.
                 if let Ok(mut reg) = Registry::load() {
-                    if reg.remove(&ctx.req.name) {
+                    let n = reg.servers.len();
+                    reg.servers.retain(|s| !registry::same_path(&s.dir, &ctx.req.dir));
+                    if reg.servers.len() != n {
                         let _ = reg.save();
                     }
                 }
