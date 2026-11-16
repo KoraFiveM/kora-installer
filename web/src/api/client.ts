@@ -123,7 +123,7 @@ export const api = {
     list: () => get<{ servers: T.ServerSummary[] }>('/servers').then((r) => r.servers),
     get: (name: string) => get<T.ServerDetail>(s(name)),
     control: (name: string, action: T.ControlAction) => post<T.JobStarted>(`${s(name)}/control`, { action }),
-    delete: (name: string, body: { confirm_name: string; keep_files: boolean; keep_db: boolean }) => del<T.JobStarted>(s(name), body),
+    delete: (name: string, body: { confirm_name: string; keep_files: boolean; keep_db: boolean; db_admin_password?: string }) => del<T.JobStarted>(s(name), body),
     unregister: (name: string) => del<void>(`${s(name)}/registration`),
     scan: () => post<T.JobStarted>('/servers/scan'),
     adopt: (dir: string) => post<T.ServerSummary>('/servers/adopt', { dir }),
@@ -177,6 +177,9 @@ export const api = {
     status: () => get<T.GithubStatus>('/github/status'),
     login: () => post<T.GithubLoginStart>('/github/login'),
     owners: () => get<{ owners: T.GithubOwner[] }>('/github/owners').then((r) => r.owners),
+  },
+  checks: {
+    cfx: (username: string) => post<T.CfxCheck>('/checks/cfx', { username }),
   },
   catalog: () => get<T.Catalog>('/catalog'),
   artifacts: () => get<T.ArtifactList>('/artifacts'),

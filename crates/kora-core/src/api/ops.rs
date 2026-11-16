@@ -100,6 +100,7 @@ pub enum Op {
     UserAdd,
     UserRemove,
     SessionLogout,
+    CheckCfx,
 }
 
 impl Op {
@@ -181,6 +182,7 @@ impl Op {
         Op::UserAdd,
         Op::UserRemove,
         Op::SessionLogout,
+        Op::CheckCfx,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -263,6 +265,7 @@ impl Op {
             Op::UserAdd => "user_add",
             Op::UserRemove => "user_remove",
             Op::SessionLogout => "session_logout",
+            Op::CheckCfx => "check_cfx",
         }
     }
 
@@ -346,6 +349,7 @@ impl Op {
             Op::UserAdd => (Method::Post, "/users"),
             Op::UserRemove => (Method::Delete, "/users/{name}"),
             Op::SessionLogout => (Method::Post, "/session/logout"),
+            Op::CheckCfx => (Method::Post, "/checks/cfx"),
         }
     }
 
@@ -504,13 +508,14 @@ mod tests {
             | Op::UsersList
             | Op::UserAdd
             | Op::UserRemove
-            | Op::SessionLogout => Op::ALL.contains(&op),
+            | Op::SessionLogout
+            | Op::CheckCfx => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 77);
+        assert_eq!(Op::ALL.len(), 78);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

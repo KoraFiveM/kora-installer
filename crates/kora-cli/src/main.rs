@@ -63,6 +63,9 @@ struct InstallArgs {
     /// Cfx.re account that becomes the txAdmin master, e.g. fivem:123456 (default: a generated local admin).
     #[arg(long)]
     cfx_identifier: Option<String>,
+    /// Your Cfx.re username (the name on forum.cfx.re). Kora looks up your account id and makes you the txAdmin admin.
+    #[arg(long, value_name = "NAME", conflicts_with = "cfx_identifier")]
+    cfx_user: Option<String>,
     /// Official runtime.fivem.net artifact URL (default: the recommended build).
     #[arg(long)]
     artifact_url: Option<String>,
@@ -134,6 +137,7 @@ impl InstallArgs {
             || self.txadmin_port.is_some()
             || self.txadmin_public
             || self.cfx_identifier.is_some()
+            || self.cfx_user.is_some()
             || self.artifact_url.is_some()
             || self.resources.is_some()
             || self.db.is_some()
@@ -1104,6 +1108,18 @@ fn install(args: InstallArgs) -> i32 {
         }
         let catalog = args.catalog.or_else(|| std::env::var("KORA_CATALOG").ok().filter(|c| !c.is_empty()));
         return interactive_flow(catalog, args.no_app, args.no_desktop_shortcut);
+    }
+    if let Some(name) = args.cfx_user.take() {
+        match kora_core::cfx::lookup(&name) {
+            Ok(a) => {
+                println!("Cfx.re account {} is {}: it will be the txAdmin admin.", a.username, a.identifier());
+                args.cfx_identifier = Some(a.identifier());
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 2;
+            }
+        }
     }
     let args_auto_ports = args.auto_ports;
     let dev_mode = matches!(args.mode, Some(ModeArg::Dev));
@@ -2188,6 +2204,9 @@ mod tests {
     #[test]
     fn hostname_and_game_build_flags() {
         assert!(InstallArgs { hostname: Some("x".into()), ..Default::default() }.any_given());
+        assert!(InstallArgs { cfx_user: Some("JSixty".into()), ..Default::default() }.any_given());
+        assert!(Cli::try_parse_from(["kora", "install", "--cfx-user", "JSixty", "--cfx-identifier", "fivem:1"]).is_err(), "the two ways to name the admin cannot be mixed");
+        assert!(Cli::try_parse_from(["kora", "install", "--cfx-user", "JSixty"]).is_ok());
         assert!(InstallArgs { game_build: Some(3258), ..Default::default() }.any_given());
         let r = InstallArgs { name: Some("Alpha".into()), ..Default::default() }.into_request().unwrap();
         assert_eq!((r.hostname.as_str(), r.game_build), ("Alpha", None), "hostname defaults to the name");

@@ -16,7 +16,7 @@ import { StepProgress } from '@/components/JobProgress'
 import { Skeleton } from '@/components/Skeleton'
 import { formatBytes } from '@/lib/utils'
 import { applySaved, buildRequest, initialForm, STEP_LABEL, stepProblem, stepsFor, type StepId, type WizardForm } from './install/form'
-import { BuildStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
+import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
 import { cn } from '@/lib/utils'
 
 function ReviewStep({ f, req, onDisk }: { f: WizardForm; req: InstallRequest; onDisk: (ok: boolean) => void }) {
@@ -37,6 +37,7 @@ function ReviewStep({ f, req, onDisk }: { f: WizardForm; req: InstallRequest; on
     ['Firewall', req.firewall ? (req.txadmin_public ? 'Open the game and txAdmin ports' : 'Open the game port') : 'Leave closed'],
     ['Background service', req.service ? 'Yes' : 'No'],
     ['Licence key', 'Provided (hidden)'],
+    ['txAdmin admin', f.cfxFound ? (f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier) : 'A generated local account'],
     ...(f.mode === 'development' ? ([['GitHub forks go to', f.githubOwner]] as [string, string][]) : []),
   ]
   return (
@@ -61,7 +62,7 @@ function ReviewStep({ f, req, onDisk }: { f: WizardForm; req: InstallRequest; on
   )
 }
 
-export function Outcome({ o, ports }: { o: InstallOutcome; ports: { txadmin: number } }) {
+export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin: number }; cfx?: string | null }) {
   const ctl = useServerControl(o.name)
   const tx = `http://${window.location.hostname}:${ports.txadmin}`
   return (
@@ -72,6 +73,9 @@ export function Outcome({ o, ports }: { o: InstallOutcome; ports: { txadmin: num
       {!o.running && o.log_tail.length > 0 && <pre className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{o.log_tail.join('\n')}</pre>}
       <div className="space-y-1.5"><div className="text-sm text-muted-foreground">Connect address</div><CopyField value={o.connect} label="Connect address" /></div>
       <div className="space-y-1.5"><div className="text-sm text-muted-foreground">txAdmin</div><CopyField value={tx} label="txAdmin address" /></div>
+      {!o.admin_user && cfx && (
+        <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
+      )}
       {o.admin_user && (
         <p className="text-sm">txAdmin administrator: <strong>{o.admin_user}</strong>. Its password was saved in <code className="font-mono text-xs">{o.admin_password_file}</code>. Open that file on this computer to read it, and change the password after you sign in.</p>
       )}
@@ -145,7 +149,7 @@ export default function InstallWizard() {
           <CardContent className="space-y-5 p-6">
             {run.phase === 'running' && <p className="text-sm text-muted-foreground">This takes a few minutes. You can leave this page open; it keeps going.</p>}
             <StepProgress events={run.events as ProgressEvent[]} />
-            {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} />}
+            {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
             {run.phase === 'failed' && (
               <div className="space-y-4">
                 <ErrorNotice error={run.error} title="The install could not finish" />
@@ -197,6 +201,7 @@ export default function InstallWizard() {
           {id === 'database' && <DatabaseStep {...common} />}
           {id === 'options' && <OptionsStep {...common} appSupported={appSupported} />}
           {id === 'licence' && <LicenceStep {...common} />}
+          {id === 'cfx' && <CfxStep {...common} />}
           {id === 'github' && <GithubStep {...common} signedIn={!!gh.data?.signed_in} onSignedIn={() => void gh.refetch()} />}
           {id === 'review' && <ReviewStep f={f} req={req} onDisk={setDiskOk} />}
           <ErrorNotice error={startErr} />

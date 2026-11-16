@@ -45,9 +45,14 @@ describe('Install wizard', () => {
     expect(key).toHaveAttribute('type', 'text')
     await next()
 
+    // Cfx.re account: empty means skip
+    expect(await screen.findByRole('heading', { name: 'Your Cfx.re account' })).toBeInTheDocument()
+    await next()
+
     // Review
     expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument()
     expect(screen.getByText('friday-night-rp')).toBeInTheDocument()
+    expect(screen.getByText('A generated local account')).toBeInTheDocument()
     expect(screen.getByText('Provided (hidden)')).toBeInTheDocument()
     expect(screen.queryByText(/cfxk_abcdefghij/)).not.toBeInTheDocument()
     expect(await screen.findByText(/Disk space/)).toBeInTheDocument()

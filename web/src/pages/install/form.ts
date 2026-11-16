@@ -31,9 +31,13 @@ export interface WizardForm {
   desktopShortcut: boolean
   license: string
   githubOwner: string
+  /** What the person typed in the Cfx.re step. */
+  cfxUsername: string
+  /** The account the last successful check found for `cfxUsername` (null = not checked / skipped). `username` is null when restored from saved answers. */
+  cfxFound: { username: string | null; identifier: string } | null
 }
 
-export type StepId = 'mode' | 'name' | 'ports' | 'build' | 'resources' | 'database' | 'options' | 'licence' | 'github' | 'review'
+export type StepId = 'mode' | 'name' | 'ports' | 'build' | 'resources' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
 
 export const STEP_LABEL: Record<StepId, string> = {
   mode: 'Mode',
@@ -44,12 +48,13 @@ export const STEP_LABEL: Record<StepId, string> = {
   database: 'Database',
   options: 'Options',
   licence: 'Licence key',
+  cfx: 'Your Cfx.re account',
   github: 'GitHub',
   review: 'Review',
 }
 
 export function stepsFor(mode: Mode): StepId[] {
-  const s: StepId[] = ['mode', 'name', 'ports', 'build', 'resources', 'database', 'options', 'licence']
+  const s: StepId[] = ['mode', 'name', 'ports', 'build', 'resources', 'database', 'options', 'licence', 'cfx']
   if (mode === 'development') s.push('github')
   s.push('review')
   return s
@@ -68,7 +73,7 @@ export function initialForm(d: InstallDefaults): WizardForm {
     resourcesAll: true, resourceIds: [],
     db: 'use_existing', dbCustom: false, dbUser: '', dbPass: '', dbPass2: '', dbHost: '127.0.0.1', dbPort: '3306',
     firewall: true, txPublic: false, service: true, app: true, desktopShortcut: true,
-    license: '', githubOwner: '',
+    license: '', githubOwner: '', cfxUsername: '', cfxFound: null,
   }
 }
 
@@ -90,6 +95,7 @@ export function applySaved(f: WizardForm, s: SavedInstall): WizardForm {
     firewall: s.firewall ?? f.firewall,
     txPublic: s.txadmin_public ?? f.txPublic,
     githubOwner: s.github_owner ?? f.githubOwner,
+    cfxFound: s.cfx_identifier ? { username: null, identifier: s.cfx_identifier } : f.cfxFound,
   }
 }
 
@@ -117,6 +123,7 @@ export function buildRequest(f: WizardForm, opts: { appSupported?: boolean; arti
     dry_run: false,
     db_admin: f.db !== 'skip' && f.dbCustom ? { host: f.dbHost.trim(), port: Number(f.dbPort), user: f.dbUser.trim(), password: f.dbPass } : null,
     start: true,
+    cfx_identifier: f.cfxFound?.identifier ?? null,
     app: opts.appSupported && f.app ? { desktop_shortcut: f.desktopShortcut } : null,
   }
 }
@@ -152,6 +159,8 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: { portsOk: boolean
       return dbLoginProblem(f)
     case 'licence':
       return f.license.trim().length < 8 ? 'Paste your licence key. It is a long string of letters and numbers.' : null
+    case 'cfx':
+      return f.cfxFound || !f.cfxUsername.trim() ? null : 'Check the Cfx.re username, or clear the box to skip this step.'
     case 'github':
       if (!ctx.githubSignedIn) return 'Sign in to GitHub to continue.'
       return f.githubOwner ? null : 'Choose where your forks go.'

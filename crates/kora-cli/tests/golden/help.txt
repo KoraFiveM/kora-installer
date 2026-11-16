@@ -70,6 +70,9 @@ Options:
       --cfx-identifier <CFX_IDENTIFIER>
           Cfx.re account that becomes the txAdmin master, e.g. fivem:123456 (default: a generated local admin)
 
+      --cfx-user <NAME>
+          Your Cfx.re username (the name on forum.cfx.re). Kora looks up your account id and makes you the txAdmin admin
+
       --artifact-url <ARTIFACT_URL>
           Official runtime.fivem.net artifact URL (default: the recommended build)
 
@@ -96,11 +99,11 @@ Options:
       --db-admin-host <DB_ADMIN_HOST>
           Database server address for the admin login (default 127.0.0.1)
 
-      --db-admin-port <DB_ADMIN_PORT>
-          Database server port for the admin login (default 3306)
-
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+      --db-admin-port <DB_ADMIN_PORT>
+          Database server port for the admin login (default 3306)
 
       --start
           Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)

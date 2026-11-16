@@ -94,6 +94,11 @@ pub trait Backend {
     fn ensure(&mut self, e: &ServerEntry, name: &str, restart: bool) -> Res<String>;
     /// Delete what Kora created (like `kora delete`). Returns notes to show.
     fn delete(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool) -> Res<Vec<String>>;
+    /// [`Backend::delete`] with the database administrator password, for when dropping the database needs a
+    /// login the install did not keep. Front ends without a password prompt keep the default (no password).
+    fn delete_with_db_password(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, _db_admin_password: Option<&str>) -> Res<Vec<String>> {
+        self.delete(e, keep_files, keep_db)
+    }
     /// Take the server off the manager's list without touching anything else.
     fn unregister(&mut self, e: &ServerEntry) -> Res<()>;
     fn register(&mut self, e: ServerEntry) -> Res<()>;

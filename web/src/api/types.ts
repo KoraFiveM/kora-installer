@@ -171,6 +171,8 @@ export interface InstallRequest {
   db_admin: DbAdmin | null
   start: boolean
   app: { desktop_shortcut: boolean } | null
+  /** Cfx.re account that becomes the txAdmin admin, e.g. `fivem:4465268`. Null = a generated local admin. */
+  cfx_identifier: string | null
 }
 
 export interface InstallOutcome {
@@ -217,6 +219,14 @@ export interface DiskCheck {
 }
 export interface DbLoginCheck {
   ok: boolean
+  message: string
+}
+/** Answer of `POST /checks/cfx` (HTTP 200 whether or not the account was found). */
+export interface CfxCheck {
+  ok: boolean
+  id: number | null
+  username: string | null
+  identifier: string | null
   message: string
 }
 export interface InstallPlan {

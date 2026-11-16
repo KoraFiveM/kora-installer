@@ -251,7 +251,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void): Pr
     await sleep(step === 'build.fxserver' ? 1800 : 900)
     if (fail && step === 'build.db') {
       emit({ step, title, status: 'failed', detail: 'Could not log in to the database', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall }
+      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier }
       throw new Fail(500, 'internal', 'The database refused the administrator login, so the install stopped before creating the server database.', undefined, {
         kept: [`The FiveM server files in ${req.dir}`, 'Your answers (use "Try again" to continue)'],
         log_path: `${req.dir}/.kora/install.log`,
@@ -274,8 +274,8 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void): Pr
     game_listening: req.start,
     launch_problem: null,
     log_tail: [],
-    admin_user: 'admin',
-    admin_password_file: `${req.dir}/.kora/admin-password.txt`,
+    admin_user: req.cfx_identifier ? null : 'admin',
+    admin_password_file: req.cfx_identifier ? null : `${req.dir}/.kora/admin-password.txt`,
   }
 }
 
@@ -372,6 +372,10 @@ route('DELETE', '/servers/{s}', (m, b) => {
       emit({ type: 'status', message: t })
       await sleep(500)
     }
+    // Dropping the database needs the admin password when the install did not keep a login (scenario `trouble`).
+    if (!b.keep_db && beh.trouble && b.db_admin_password !== 'right-password') {
+      throw new Fail(500, 'needs_db_password', b.db_admin_password ? "The database administrator password was not accepted. Check it and try again, or keep the database and delete the server without it." : "Everything else was removed, but the database 'kora_7e870e0e' / user 'kora_7e870e0e' could not be deleted: Kora needs the database administrator password. Enter it and try again, or keep the database and delete the server without it.")
+    }
     servers.splice(servers.indexOf(s), 1)
     return { notes: b.keep_files ? [`Your files are still in ${s.dir}`] : [] }
   })
@@ -412,8 +416,19 @@ route('POST', '/servers/{s}/ensure', (m, b) => {
   if (!installed[s.name].includes(name)) throw new Fail(404, 'not_found', `"${name}" is not installed on this server.`)
   return { message: b.restart ? `Added "ensure ${name}" and restarted ${s.name}.` : `Added "ensure ${name}" to server.cfg. It loads the next time the server restarts.` }
 })
-route('POST', '/servers/{s}/update/preview', (m) => {
+route('POST', '/servers/{s}/update/preview', (m, b) => {
   const s = find(dec(m[1]))
+  const only = (b.scope as { resources?: string[] } | undefined)?.resources
+  if (only?.length) {
+    // One resource: answers quickly and returns just those rows (the other rows are not touched).
+    return startJob('update_preview', s.name, async () => {
+      await sleep(400)
+      const known = (dirtyPreviewed[s.name] ?? makePreview(s)).resources
+      const rows = known.filter((r) => only.includes(r.id))
+      if (!rows.length) throw new Fail(400, 'bad_request', `This server has no resource named "${only[0]}".`)
+      return { new_release: null, resources: rows } satisfies T.UpdatePreview
+    })
+  }
   return startJob('update_preview', s.name, async () => {
     await sleep(1500)
     const p = makePreview(s)
@@ -647,6 +662,15 @@ route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
   if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.' }
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
+})
+route('POST', '/checks/cfx', (_m, b) => {
+  const name = String(b.username ?? '').trim()
+  if (!name) throw new Fail(400, 'bad_request', 'Type a Cfx.re username.')
+  const none = (message: string) => ({ ok: false, id: null, username: null, identifier: null, message }) satisfies T.CfxCheck
+  if (beh.trouble) return none('forum.cfx.re did not answer. Check the internet connection and try again, or skip this step.')
+  if (name.toLowerCase().includes('offline')) return none('Could not reach forum.cfx.re. Check the internet connection and try again, or skip this step.')
+  if (name.toLowerCase() === 'jsixty') return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck
+  return none(`No Cfx.re account called "${name}" was found. Check the spelling: it is the name on forum.cfx.re.`)
 })
 route('POST', '/installs/plan', (_m, b) => {
   const r = b as unknown as T.InstallRequest

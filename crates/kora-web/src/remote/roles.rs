@@ -116,6 +116,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::InstallDefaults
         | Op::InstallSavedClear
         | Op::CheckDbLogin
+        | Op::CheckCfx
         | Op::InstallPlan
         | Op::InstallStart
         | Op::SelfUpdateApply
@@ -192,6 +193,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::CheckPorts
         | Op::CheckDisk
         | Op::CheckDbLogin
+        | Op::CheckCfx
         | Op::InstallPlan
         | Op::InstallLog
         | Op::SelfUpdateCheck
@@ -281,6 +283,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::CheckPorts
         | Op::CheckDisk
         | Op::CheckDbLogin
+        | Op::CheckCfx
         | Op::InstallPlan
         | Op::InstallStart
         | Op::InstallLog

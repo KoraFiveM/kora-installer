@@ -675,11 +675,26 @@ pub fn rollback(dir: &Path, opts: &RollbackOptions, sink: &mut dyn ProgressSink)
     rollback_with(dir, opts, sink, &Hooks::from_env())
 }
 
+/// [`rollback`] with the database administrator password given by the caller (the panel asks for it when
+/// dropping the database needs a login the install did not keep). Host, port and user are the ones the install
+/// remembered, else `127.0.0.1:3306` as `root`. The password is used for this call only.
+pub fn rollback_with_db_password(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<&str>, sink: &mut dyn ProgressSink) -> Result<Vec<String>> {
+    rollback_inner(dir, opts, db_admin_password, sink, &Hooks::from_env())
+}
+
 pub fn rollback_with(dir: &Path, opts: &RollbackOptions, sink: &mut dyn ProgressSink, hooks: &Hooks) -> Result<Vec<String>> {
+    rollback_inner(dir, opts, None, sink, hooks)
+}
+
+fn rollback_inner(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<&str>, sink: &mut dyn ProgressSink, hooks: &Hooks) -> Result<Vec<String>> {
     let bytes = std::fs::read(meta_dir(dir).join("request.json"))
         .map_err(|_| InstallError(format!("{} has no Kora install record (.kora/request.json): nothing to roll back", dir.display())))?;
     let mut req: InstallRequest = serde_json::from_slice(&bytes).map_err(|e| InstallError(format!("corrupt install record: {e}")))?;
     req.dir = dir.to_path_buf();
+    if let Some(pw) = db_admin_password.filter(|p| !p.is_empty()) {
+        let a = req.db_admin.get_or_insert_with(|| DbAdmin { host: "127.0.0.1".into(), port: 3306, user: "root".into(), password: None });
+        a.password = Some(pw.to_string());
+    }
     let admin = hooks.assume_admin.unwrap_or_else(is_admin);
     // A server Kora started in the background must not keep running (or hold files open) while it is deleted.
     let spec = crate::launch::Spec { name: req.name.clone(), dir: dir.to_path_buf(), game_port: req.ports.game, txadmin_port: req.ports.txadmin };

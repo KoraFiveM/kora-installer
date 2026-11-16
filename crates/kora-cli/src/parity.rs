@@ -38,6 +38,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --txadmin-port", Route(Op::InstallStart)),
     ("install --txadmin-public", Route(Op::InstallStart)),
     ("install --cfx-identifier", Route(Op::InstallStart)),
+    ("install --cfx-user", Route(Op::CheckCfx)),
     ("install --artifact-url", Route(Op::InstallStart)),
     ("install --resources", Route(Op::InstallStart)),
     ("install --db", Route(Op::InstallStart)),

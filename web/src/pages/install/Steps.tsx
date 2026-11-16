@@ -240,6 +240,53 @@ export function LicenceStep({ f, set }: StepProps) {
   )
 }
 
+export function CfxStep({ f, set }: StepProps) {
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const [err, setErr] = useState<unknown>(null)
+  const name = f.cfxUsername.trim()
+  const edit = (v: string) => {
+    set({ cfxUsername: v, cfxFound: null })
+    setFailure(null)
+    setErr(null)
+  }
+  const check = async () => {
+    setBusy(true)
+    setErr(null)
+    setFailure(null)
+    try {
+      const r = await api.checks.cfx(name)
+      if (r.ok && r.identifier) set({ cfxFound: { username: r.username ?? name, identifier: r.identifier } })
+      else { set({ cfxFound: null }); setFailure(r.message) }
+    } catch (e) {
+      setErr(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const found = f.cfxFound
+  return (
+    <div className="space-y-4">
+      <p className="text-sm font-semibold">Sign in to txAdmin with your Cfx.re account</p>
+      <p className="text-sm text-muted-foreground">txAdmin is the web page where you manage the server. Give your Cfx.re username and you can sign in there with your Cfx.re account. Only the username is sent, to forum.cfx.re, to look up which account it belongs to.</p>
+      <div className="space-y-1.5">
+        <Label htmlFor="cfx-username">Cfx.re username</Label>
+        <div className="flex gap-2">
+          <Input id="cfx-username" value={f.cfxUsername} onChange={(e) => edit(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && name && !busy) void check() }} autoComplete="off" spellCheck={false} />
+          <Button disabled={busy || !name} onClick={check}>Check</Button>
+        </div>
+      </div>
+      <div aria-live="polite" className="space-y-2">
+        {found && <Alert tone="success">{found.username ? `Found ${found.username} (${found.identifier}). This account will be the txAdmin admin.` : `Kept from your earlier answers: ${found.identifier}. This account will be the txAdmin admin.`}</Alert>}
+        {failure && <Alert tone="danger">{failure}</Alert>}
+        {!found && !failure && !name && <p className="text-sm text-muted-foreground">Without it, Kora creates a local admin with a generated password.</p>}
+      </div>
+      <ErrorNotice error={err} />
+      <Button disabled={!f.cfxUsername && !found} onClick={() => edit('')}>Skip: use a generated local admin instead (password saved in the server folder)</Button>
+    </div>
+  )
+}
+
 export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signedIn: boolean; onSignedIn: () => void }) {
   const owners = useQuery({ queryKey: ['github-owners'], queryFn: api.github.owners, enabled: signedIn })
   return (
