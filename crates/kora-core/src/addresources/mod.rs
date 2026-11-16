@@ -18,7 +18,7 @@ use crate::installer::registry::{ResourceRecord, ServerFile};
 use crate::installer::{layout, pinned};
 use crate::installer::{repo_slug, InstallError, Mode, Result};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PlanItem {
     pub id: String,
     /// Relative to `<server>/resources/`.
@@ -38,7 +38,7 @@ pub struct PlanItem {
     pub repository: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct AddPlan {
     pub items: Vec<PlanItem>,
     /// Ids that were asked for and are already installed.
@@ -191,7 +191,7 @@ impl Cloner for GitCloner<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct AddOutcome {
     pub installed: Vec<String>,
     pub failed: Vec<(String, String)>,

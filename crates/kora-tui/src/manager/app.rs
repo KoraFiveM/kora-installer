@@ -170,7 +170,6 @@ pub enum Action {
     OpenPr,
     Toggle,
     Browse,
-    UseCode,
     NextField,
     Install,
 }
@@ -461,7 +460,6 @@ pub enum Job {
     CheckUpdates,
     Snapshots,
     AddLoad,
-    AddRedeem,
     AddInstall,
     IssueSend,
     PrPlan,
@@ -508,7 +506,6 @@ impl Job {
             Job::CheckUpdates => "Checking for updates...".into(),
             Job::Snapshots => "Reading the saved snapshots...".into(),
             Job::AddLoad => "Loading the resource catalog...".into(),
-            Job::AddRedeem => "Checking your code...".into(),
             Job::AddInstall => "Adding the resources... (each one is downloaded; this can take a few minutes)".into(),
             Job::IssueSend => "Sending the report to GitHub...".into(),
             Job::PrPlan => "Checking your fork...".into(),
@@ -643,7 +640,6 @@ impl App {
             Screen::Schedule(s) if s.focus == 1 => Some(s.time.paste(text)),
             Screen::Ports(s) => Some(s.paste(text)),
             Screen::Add(s) if s.stage == AddStage::Path => Some(s.input.paste(text)),
-            Screen::AddRes(s) if s.stage == AddResStage::Code => Some(s.code.paste(text)),
             Screen::Feedback(s) if s.stage == FbStage::Compose => Some(if s.focus == 0 { s.title.paste(text) } else { s.body.paste(text) }),
             _ => None,
         };
@@ -1233,17 +1229,6 @@ impl App {
                         self.screen = Screen::Main;
                         self.say(Level::Bad, format!("Couldn't load the resource catalog: {err}"));
                     }
-                }
-            }
-            Job::AddRedeem => {
-                let Screen::AddRes(s) = &mut self.screen else { return };
-                let code = s.code.text();
-                match self.svc.backend.add_redeem(&code) {
-                    Ok(ids) => {
-                        let fx = s.use_code_ids(&ids);
-                        self.effect(fx);
-                    }
-                    Err(err) => self.say(Level::Bad, err),
                 }
             }
             Job::AddInstall => {

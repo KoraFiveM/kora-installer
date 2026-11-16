@@ -201,8 +201,7 @@ fn help_for(app: &App) -> Hints {
         Screen::Ports(_) => &[("type", "a port number"), ("Tab", "switch field"), ("Enter", "save"), ("Esc", "back")],
         Screen::Add(_) => &[("↑↓", "pick"), ("Enter", "add"), ("p", "type a folder"), ("Esc", "back")],
         Screen::AddRes(s) => match s.stage {
-            AddResStage::Menu => &[("c", "website code"), ("b", "browse the catalog"), ("Esc", "back")],
-            AddResStage::Code => &[("Enter", "check the code"), ("Esc", "back")],
+            AddResStage::Menu => &[("b", "browse the catalog"), ("Esc", "back")],
             AddResStage::Sections => &[("↑↓", "pick"), ("Enter", "open"), ("i", "review and install"), ("Esc", "back")],
             AddResStage::Items => &[("↑↓", "move"), ("Space", "tick"), ("a", "select all / none"), ("Enter", "open"), ("i", "review and install"), ("Esc", "back")],
             AddResStage::Review => &[("Enter / y", "install"), ("n / Esc", "back")],
@@ -564,15 +563,7 @@ fn add_resources(p: &mut Page, s: &AddResState) {
         AddResStage::Menu => {
             p.text("Add more resources to this server: compatibility layers, bridges to other frameworks, and resources from creators. They are downloaded at the version the catalog pins, put in their own folders and loaded with one `ensure` line per folder. Nothing you already have is moved.", dim());
             p.blank();
-            p.buttons(&[btn(Action::UseCode, "I have a website code (c)", s.cat.is_some()), btn(Action::Browse, "Browse the catalog (b)", s.cat.is_some()), back()]);
-        }
-        AddResStage::Code => {
-            p.text("Make your choice on the Kora website, then paste the code it gives you. A code works once and lasts 30 minutes.", dim());
-            p.blank();
-            let w = p.w();
-            p.line(field("Code:", &s.code, w, true));
-            p.blank();
-            p.buttons(&[btn(Action::Confirm, "Check code (Enter)", true), back()]);
+            p.buttons(&[btn(Action::Browse, "Browse the catalog (b)", s.cat.is_some()), back()]);
         }
         AddResStage::Sections => {
             p.text("Pick a section. Nothing is chosen for you; whatever a choice needs is added automatically.", dim());
