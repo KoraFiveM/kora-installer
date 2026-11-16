@@ -15,6 +15,7 @@ pub mod firewall;
 pub mod feedback;
 pub mod fsutil;
 pub mod git;
+pub mod hub;
 pub mod service;
 pub mod space;
 pub mod steps;

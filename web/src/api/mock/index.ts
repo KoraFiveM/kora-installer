@@ -1,6 +1,7 @@
 // In-app mock backend: replaces window.fetch (for /api/v1) and window.EventSource.
 // Only loaded when VITE_MOCK=1 (or `npm run dev`), see src/main.tsx.
 import type * as T from '../types'
+import { installHubMock } from './hub'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 
 const BASE = '/api/v1'
@@ -229,6 +230,7 @@ const route = (method: string, pattern: string, h: Handler) => {
   routes.push([method, new RegExp('^' + pattern.replace(/\{(\w+)\}/g, '([^/]+)') + '$'), h])
 }
 const dec = (s: string) => decodeURIComponent(s)
+installHubMock(route, startJob, Fail, () => servers)
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)' }) satisfies T.Meta)
 route('GET', '/system', () => ({ admin: false, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true }) satisfies T.SystemInfo)

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, Server, Settings, X } from 'lucide-react'
+import { Network, Plus, Server, Settings, X } from 'lucide-react'
 import { api } from '@/api/client'
 import { useAlerts } from '@/lib/app'
 import { useServerEvents } from '@/hooks/useServerEvents'
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 
 const nav = [
   { to: '/', label: 'Servers', icon: Server, end: true },
+  { to: '/fleet', label: 'Fleet', icon: Network, end: false },
   { to: '/install', label: 'Install new server', icon: Plus, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ]

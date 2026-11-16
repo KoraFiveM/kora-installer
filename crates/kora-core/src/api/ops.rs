@@ -83,6 +83,12 @@ pub enum Op {
     JobsGet,
     JobEvents,
     Events,
+    NodesList,
+    NodeAdd,
+    NodeRemove,
+    NodeServers,
+    NodeServerControl,
+    Fleet,
 }
 
 impl Op {
@@ -147,6 +153,12 @@ impl Op {
         Op::JobsGet,
         Op::JobEvents,
         Op::Events,
+        Op::NodesList,
+        Op::NodeAdd,
+        Op::NodeRemove,
+        Op::NodeServers,
+        Op::NodeServerControl,
+        Op::Fleet,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -212,6 +224,12 @@ impl Op {
             Op::JobsGet => "jobs_get",
             Op::JobEvents => "job_events",
             Op::Events => "events",
+            Op::NodesList => "nodes_list",
+            Op::NodeAdd => "node_add",
+            Op::NodeRemove => "node_remove",
+            Op::NodeServers => "node_servers",
+            Op::NodeServerControl => "node_server_control",
+            Op::Fleet => "fleet",
         }
     }
 
@@ -278,6 +296,12 @@ impl Op {
             Op::JobsGet => (Method::Get, "/jobs/{id}"),
             Op::JobEvents => (Method::Get, "/jobs/{id}/events"),
             Op::Events => (Method::Get, "/events"),
+            Op::NodesList => (Method::Get, "/nodes"),
+            Op::NodeAdd => (Method::Post, "/nodes"),
+            Op::NodeRemove => (Method::Delete, "/nodes/{id}"),
+            Op::NodeServers => (Method::Get, "/nodes/{id}/servers"),
+            Op::NodeServerControl => (Method::Post, "/nodes/{id}/servers/{s}/control"),
+            Op::Fleet => (Method::Get, "/fleet"),
         }
     }
 
@@ -297,6 +321,7 @@ impl Op {
                 | Op::InstallStart
                 | Op::SelfUpdateApply
                 | Op::UninstallRun
+                | Op::NodeServerControl
         )
     }
 
@@ -341,6 +366,12 @@ impl Op {
                 | Op::PrPlan
                 | Op::PrOpen
                 | Op::GithubStatus
+                | Op::NodesList
+                | Op::NodeAdd
+                | Op::NodeRemove
+                | Op::NodeServers
+                | Op::NodeServerControl
+                | Op::Fleet
         )
     }
 }
@@ -412,13 +443,19 @@ mod tests {
             | Op::UninstallRun
             | Op::JobsGet
             | Op::JobEvents
-            | Op::Events => Op::ALL.contains(&op),
+            | Op::Events
+            | Op::NodesList
+            | Op::NodeAdd
+            | Op::NodeRemove
+            | Op::NodeServers
+            | Op::NodeServerControl
+            | Op::Fleet => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 60);
+        assert_eq!(Op::ALL.len(), 66);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

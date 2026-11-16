@@ -106,6 +106,12 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | jobs_get | GET /jobs/{id} | |
 | job_events | GET /jobs/{id}/events | SSE |
 | events | GET /events | SSE: server status / badge changes |
+| nodes_list | GET /nodes | hub: nodes with reachability, version, api, server count, last error; `token_set` only, never the token. **Admin, local only.** |
+| node_add | POST /nodes | hub: `{name, url, token}`; checks `/meta` and the token (server list) before saving; `insecure` flag for plain http to a non-private, non-Tailscale address. **Admin, local only.** |
+| node_remove | DELETE /nodes/{id} | hub. **Admin, local only.** |
+| node_servers | GET /nodes/{id}/servers | hub: a node's servers with the `actions` it supports. Operator or above (read: viewer). |
+| node_server_control | POST /nodes/{id}/servers/{s}/control | hub: `{action}`; job proxied to the node's own job (events relayed, result as local); refused with `node_unsupported` when the node's `/meta` lacks `server_control`. Operator or above. |
+| fleet | GET /fleet | hub: this panel's servers plus every node's, fetched in parallel; partial when a node is down (`partial`, per-node `last_error`). Viewer or above. |
 
 ### 2.2 Conventions
 

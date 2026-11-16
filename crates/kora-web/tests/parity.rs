@@ -144,7 +144,7 @@ mod offline {
     use kora_core::firewall::ports::PortProber;
     use kora_core::installer::{DbAdmin, InstallOutcome, InstallRequest, ProgressSink};
     use kora_core::space::DiskInfo;
-    use kora_web::handlers::{github, install, resources, servers, system, updates};
+    use kora_web::handlers::{github, hub, install, resources, servers, system, updates};
 
     struct Env;
     impl PortProber for Env {
@@ -215,6 +215,9 @@ mod offline {
         updates::set_auto_runner(Some(Arc::new(|_| Err("offline".into()))));
         servers::set_opener(Some(Box::new(|_| Ok(()))));
         system::seam::set_headless(Some(true));
+        // Hub: an empty nodes file that does not exist, and a transport that never reaches the network.
+        hub::set_store_path(Some(std::env::temp_dir().join(format!("kora-parity-hub-{}.json", std::process::id()))));
+        hub::set_transport(Some(Arc::new(NoNet)));
     }
 
     pub fn remove() {
@@ -224,5 +227,14 @@ mod offline {
         updates::set_auto_runner(None);
         servers::set_opener(None);
         system::seam::set_headless(None);
+        hub::set_store_path(None);
+        hub::set_transport(None);
+    }
+
+    struct NoNet;
+    impl kora_core::hub::Transport for NoNet {
+        fn send(&self, _: &kora_core::hub::HttpRequest) -> Result<kora_core::hub::HttpResponse, String> {
+            Err("offline".into())
+        }
     }
 }

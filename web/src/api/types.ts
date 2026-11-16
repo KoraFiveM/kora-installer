@@ -398,3 +398,39 @@ export interface ServerEvent {
   status: ServerStatus
   badge: Badge | null
 }
+
+// ---- hub (fleet) ----------------------------------------------------------------------------
+
+export interface HubNode {
+  id: string
+  name: string
+  url: string
+  /** The token is never returned. */
+  token_set: boolean
+  /** Plain http:// to a non-private, non-Tailscale address. */
+  insecure: boolean
+  warning: string | null
+  reachable: boolean
+  version: string | null
+  api: number | null
+  platform: string | null
+  ops: string[]
+  server_count: number | null
+  can_control: boolean
+  last_error: string | null
+}
+
+/** A server in the combined list: `node_id` is null for this panel's own servers. */
+export interface FleetServer extends ServerSummary {
+  node_id: string | null
+  node_name: string
+  /** Only what the node supports; empty when it is too old to be controlled from here. */
+  actions: ControlAction[]
+}
+
+export interface Fleet {
+  servers: FleetServer[]
+  nodes: HubNode[]
+  /** True when some node could not be reached. */
+  partial: boolean
+}

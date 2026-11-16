@@ -196,6 +196,14 @@ export const api = {
     eventsUrl: (id: string) => `${BASE}/jobs/${enc(id)}/events`,
   },
   eventsUrl: () => `${BASE}/events`,
+  hub: {
+    nodes: () => get<{ nodes: T.HubNode[] }>('/nodes').then((r) => r.nodes),
+    addNode: (body: { name: string; url: string; token: string }) => post<{ node: T.HubNode }>('/nodes', body).then((r) => r.node),
+    removeNode: (id: string) => del<void>(`/nodes/${enc(id)}`),
+    nodeServers: (id: string) => get<{ servers: T.FleetServer[] }>(`/nodes/${enc(id)}/servers`).then((r) => r.servers),
+    nodeControl: (id: string, server: string, action: T.ControlAction) => post<T.JobStarted>(`/nodes/${enc(id)}/servers/${enc(server)}/control`, { action }),
+    fleet: () => get<T.Fleet>('/fleet'),
+  },
 }
 
 export type Api = typeof api
