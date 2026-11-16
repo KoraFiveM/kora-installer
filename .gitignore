@@ -10,3 +10,7 @@ database.json
 
 # golden test fixtures are not real secrets
 !crates/kora-core/src/txadmin/golden/*
+
+# Kora Panel web UI
+web/node_modules
+web/dist
