@@ -1241,6 +1241,7 @@ dependencies = [
  "kora-core",
  "kora-tui",
  "kora-web",
+ "tempfile",
  "winresource",
 ]
 
