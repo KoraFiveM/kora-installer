@@ -111,6 +111,12 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | alerts_ack | POST /alerts/{id}/ack | 204; the alert stays listed |
 | alert_settings_get | GET /servers/{s}/alerts | `{enabled, rules{stopped,recovered,disk,ram,updates}, disk_min_gb, disk_min_percent, ram_max_percent, discord, webhook{configured, redacted}, email{supported:false}}`; the webhook address is never returned |
 | alert_settings_set | PUT /servers/{s}/alerts | partial update of the same fields plus `webhook_url` (`""`/null removes it) |
+| nodes_list | GET /nodes | hub: nodes with reachability, version, api, server count, last error; `token_set` only, never the token. **Admin, local only.** |
+| node_add | POST /nodes | hub: `{name, url, token}`; checks `/meta` and the token (server list) before saving; `insecure` flag for plain http to a non-private, non-Tailscale address. **Admin, local only.** |
+| node_remove | DELETE /nodes/{id} | hub. **Admin, local only.** |
+| node_servers | GET /nodes/{id}/servers | hub: a node's servers with the `actions` it supports. Operator or above (read: viewer). |
+| node_server_control | POST /nodes/{id}/servers/{s}/control | hub: `{action}`; job proxied to the node's own job (events relayed, result as local); refused with `node_unsupported` when the node's `/meta` lacks `server_control`. Operator or above. |
+| fleet | GET /fleet | hub: this panel's servers plus every node's, fetched in parallel; partial when a node is down (`partial`, per-node `last_error`). Viewer or above. |
 
 ### 2.2 Conventions
 

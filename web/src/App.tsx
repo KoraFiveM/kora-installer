@@ -9,6 +9,7 @@ import { SignedOut } from '@/components/SignedOut'
 import ServersPage from '@/pages/ServersPage'
 import ServerDetailPage from '@/pages/ServerDetailPage'
 import InstallWizard from '@/pages/InstallWizard'
+import FleetPage from '@/pages/FleetPage'
 import SettingsPage from '@/pages/SettingsPage'
 import NotFound from '@/pages/NotFound'
 
@@ -59,6 +60,7 @@ export function App({ boot }: { boot: BootResult }) {
               <Route index element={<ServersPage />} />
               <Route path="servers/:name" element={<ServerDetailPage />} />
               <Route path="install" element={<InstallWizard />} />
+              <Route path="fleet" element={<FleetPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>

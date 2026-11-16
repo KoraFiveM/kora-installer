@@ -88,6 +88,12 @@ pub enum Op {
     AlertsAck,
     AlertSettingsGet,
     AlertSettingsSet,
+    NodesList,
+    NodeAdd,
+    NodeRemove,
+    NodeServers,
+    NodeServerControl,
+    Fleet,
 }
 
 impl Op {
@@ -157,6 +163,12 @@ impl Op {
         Op::AlertsAck,
         Op::AlertSettingsGet,
         Op::AlertSettingsSet,
+        Op::NodesList,
+        Op::NodeAdd,
+        Op::NodeRemove,
+        Op::NodeServers,
+        Op::NodeServerControl,
+        Op::Fleet,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -227,6 +239,12 @@ impl Op {
             Op::AlertsAck => "alerts_ack",
             Op::AlertSettingsGet => "alert_settings_get",
             Op::AlertSettingsSet => "alert_settings_set",
+            Op::NodesList => "nodes_list",
+            Op::NodeAdd => "node_add",
+            Op::NodeRemove => "node_remove",
+            Op::NodeServers => "node_servers",
+            Op::NodeServerControl => "node_server_control",
+            Op::Fleet => "fleet",
         }
     }
 
@@ -298,6 +316,12 @@ impl Op {
             Op::AlertsAck => (Method::Post, "/alerts/{id}/ack"),
             Op::AlertSettingsGet => (Method::Get, "/servers/{s}/alerts"),
             Op::AlertSettingsSet => (Method::Put, "/servers/{s}/alerts"),
+            Op::NodesList => (Method::Get, "/nodes"),
+            Op::NodeAdd => (Method::Post, "/nodes"),
+            Op::NodeRemove => (Method::Delete, "/nodes/{id}"),
+            Op::NodeServers => (Method::Get, "/nodes/{id}/servers"),
+            Op::NodeServerControl => (Method::Post, "/nodes/{id}/servers/{s}/control"),
+            Op::Fleet => (Method::Get, "/fleet"),
         }
     }
 
@@ -317,6 +341,7 @@ impl Op {
                 | Op::InstallStart
                 | Op::SelfUpdateApply
                 | Op::UninstallRun
+                | Op::NodeServerControl
         )
     }
 
@@ -361,6 +386,12 @@ impl Op {
                 | Op::PrPlan
                 | Op::PrOpen
                 | Op::GithubStatus
+                | Op::NodesList
+                | Op::NodeAdd
+                | Op::NodeRemove
+                | Op::NodeServers
+                | Op::NodeServerControl
+                | Op::Fleet
         )
     }
 }
@@ -437,13 +468,19 @@ mod tests {
             | Op::AlertsList
             | Op::AlertsAck
             | Op::AlertSettingsGet
-            | Op::AlertSettingsSet => Op::ALL.contains(&op),
+            | Op::AlertSettingsSet
+            | Op::NodesList
+            | Op::NodeAdd
+            | Op::NodeRemove
+            | Op::NodeServers
+            | Op::NodeServerControl
+            | Op::Fleet => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 65);
+        assert_eq!(Op::ALL.len(), 71);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

@@ -89,6 +89,12 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::AlertsAck => on_op(op, handlers::monitor::alerts_ack),
         Op::AlertSettingsGet => on_op(op, handlers::monitor::alert_settings_get),
         Op::AlertSettingsSet => on_op(op, handlers::monitor::alert_settings_set),
+        Op::NodesList => on_op(op, handlers::hub::nodes_list),
+        Op::NodeAdd => on_op(op, handlers::hub::node_add),
+        Op::NodeRemove => on_op(op, handlers::hub::node_remove),
+        Op::NodeServers => on_op(op, handlers::hub::node_servers),
+        Op::NodeServerControl => on_op(op, handlers::hub::node_server_control),
+        Op::Fleet => on_op(op, handlers::hub::fleet),
     }
 }
 

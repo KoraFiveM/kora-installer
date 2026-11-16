@@ -10,3 +10,4 @@ pub mod github;
 pub mod install;
 pub mod maintenance;
 pub mod monitor;
+pub mod hub;
