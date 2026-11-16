@@ -67,7 +67,9 @@ assert_contains "the chat resource was updated" "$OUT" "updated kora-chat"
 assert_eq "chat fork now equals upstream" "$(up_head kora-chat)" "$(head_of kora-chat)"
 assert "chat fork moved" test "$before" != "$(head_of kora-chat)"
 assert_eq "the unchanged hud fork was left alone" "$hud_before" "$(head_of kora-hud)"
-assert "an update snapshot was recorded for rollback" test -s "$D/snapshots/last-update.json"
+# Automatic updates save their snapshot with the manual ones, so `kora update --rollback` can use it.
+assert "an update snapshot was recorded for rollback" sh -c "ls '$D/.kora/snapshots/'*.json"
+assert "no old-style snapshot file" test ! -e "$D/snapshots/last-update.json"
 
 step "3. diverged and dirty forks are skipped, exit 3 (needs attention)"
 # map: local commit on the fork AND a new upstream commit = diverged
