@@ -56,6 +56,11 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 
 - Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+ (x86-64).
 - Administrator rights: Kora asks for them itself (a UAC prompt, or `sudo`).
+- Server folder (suggested by default): Windows `C:\Kora\<name>`; Linux `~/kora/<name>` in your own home folder, also
+  when Kora runs with `sudo`. Logged in as root (common on rented servers), it is `/home/kora/<name>`: Kora creates a
+  normal `kora` user account that owns it. On Linux the background service runs as its own account, which cannot enter
+  a private home folder; the wizard then offers to let it pass through (`chmod o+x` on exactly those folders) or to use
+  `/home/kora/<name>`. Without the wizard use `kora install ... --fix-permissions` or `--dir`.
 - A few GiB of free disk (the installer checks before it starts) and internet access.
 - Free ports: game port 30120 and txAdmin 40120 by default (the wizard suggests others if they are taken), database 3306.
 - A Cfx.re licence key.
