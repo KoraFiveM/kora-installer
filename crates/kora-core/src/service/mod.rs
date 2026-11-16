@@ -12,7 +12,7 @@ pub mod binary;
 mod schedule;
 
 pub use schedule::{
-    describe, describe_for, get, get_with, schedule_install_plan, installing_user, managed_for, parse_task_xml, parse_time, parse_timer, remove, save_schedule,
+    describe, describe_for, exec_program, get, get_with, repair_plan, repair_root_update_units, repaired_update_unit, schedule_install_plan, installing_user, managed_for, parse_task_xml, parse_time, parse_timer, remove, save_schedule,
     scheduler_install_plan, scheduler_install_plan_as, scheduler_uninstall_plan, set, set_args, systemd_timer_unit, systemd_update_unit,
     systemd_update_unit_as, task_xml, Preset, RunAs, Schedule, ScheduleConfig, ServerRecord, TimeOfDay, Weekday, RUN_AS_HELP,
 };
