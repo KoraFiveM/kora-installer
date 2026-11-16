@@ -44,7 +44,8 @@ main() {
     _url="$1"; _hops=0
     while [ "$_hops" -le 5 ]; do
       _hdr="$(wget -q -S --max-redirect=0 -O "$2" "$_url" 2>&1)" && return 0
-      _loc="$(printf '%s\n' "$_hdr" | sed -n 's/^ *[Ll]ocation: *//p' | tail -n 1 | tr -d '\r')"
+      # (a wget that still prints "Location: <url> [following]" gets that note taken off)
+      _loc="$(printf '%s\n' "$_hdr" | sed -n 's/^ *[Ll]ocation: *//p' | tail -n 1 | tr -d '\r' | sed 's/ \[following\]$//')"
       case "$_loc" in
         https://*) _url="$_loc" ;;
         /*) _url="$(printf '%s\n' "$_url" | sed 's#^\(https://[^/]*\).*#\1#')$_loc" ;;
@@ -90,11 +91,20 @@ main() {
         *) curl -fsSL --proto '=http' --proto-redir '=http' --retry 2 -o "$2" "$1" ;;
       esac
     }
-  elif command -v wget >/dev/null 2>&1; then
+  elif command -v wget >/dev/null 2>&1 && wget --help 2>&1 | grep -q -- 'max-redirect'; then
     fetch() {
       case "$1" in
         https://*) wget_https "$1" "$2" ;;
         *) wget -q --max-redirect=0 -O "$2" "$1" ;;
+      esac
+    }
+  elif command -v wget >/dev/null 2>&1; then
+    # A wget without --max-redirect (BusyBox) follows redirects by itself and cannot be told to
+    # refuse plain http, so it is only given https addresses (the SHA-256 check still applies).
+    fetch() {
+      case "$1" in
+        https://*) wget -q -O "$2" "$1" ;;
+        *) printf 'kora install: this wget cannot refuse redirects, so it is only used for https addresses (not %s). Install curl to use a local address.\n' "$1" >&2; return 1 ;;
       esac
     }
   else

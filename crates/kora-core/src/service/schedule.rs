@@ -316,6 +316,12 @@ pub fn managed_for(rec: &ServerRecord) -> ManagedServer {
     managed_with_exe(rec, exe)
 }
 
+/// For reading or removing the job: only its name matters, so the kora program is not looked at
+/// (finding the root program can mean hashing it, too slow for every status refresh).
+fn managed_for_lookup(rec: &ServerRecord) -> ManagedServer {
+    managed_with_exe(rec, "kora".into())
+}
+
 fn managed_with_exe(rec: &ServerRecord, exe: String) -> ManagedServer {
     let dir = rec.dir.to_string_lossy().into_owned();
     ManagedServer {
@@ -333,7 +339,7 @@ fn managed_with_exe(rec: &ServerRecord, exe: String) -> ManagedServer {
 /// `enabled: false` when it is switched off or its OS job has gone missing. A schedule made by an
 /// older Kora (no stored file) is read back from the OS job; those ran as SYSTEM.
 pub fn get(server: &ServerRecord) -> Option<ScheduleConfig> {
-    get_with(&managed_for(server), &server.dir, &SystemRunner, Platform::current())
+    get_with(&managed_for_lookup(server), &server.dir, &SystemRunner, Platform::current())
 }
 
 pub fn get_with(s: &ManagedServer, dir: &Path, rn: &dyn CommandRunner, platform: Platform) -> Option<ScheduleConfig> {
@@ -434,7 +440,7 @@ pub fn set(server: &ServerRecord, cfg: &ScheduleConfig) -> ServiceResult<()> {
 
 /// Remove the job Kora created (nothing else) and the stored setting.
 pub fn remove(server: &ServerRecord) -> ServiceResult<()> {
-    let s = managed_for(server);
+    let s = managed_for_lookup(server);
     if os_job(&s, &SystemRunner, Platform::current()).is_none() && load_stored(&server.dir).is_none() {
         return Ok(()); // nothing of ours
     }
@@ -676,4 +682,203 @@ pub fn scheduler_uninstall_plan(s: &ManagedServer, platform: Platform) -> Servic
             &["/Delete", "/TN", &task_name(s), "/F"],
         )]),
     })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Repairing update jobs made by older versions
+// ---------------------------------------------------------------------------------------------
+
+/// The program an `ExecStart=` line runs: its first word, systemd's quoting undone (`-`, `@`, `+`,
+/// `!`, `:` prefixes skipped). `None` when the unit has no `ExecStart=`.
+pub fn exec_program(unit: &str) -> Option<String> {
+    let line = unit.lines().find_map(|l| l.trim().strip_prefix("ExecStart="))?;
+    let line = line.trim_start().trim_start_matches(['-', '@', '+', '!', ':']);
+    let mut out = String::new();
+    let mut chars = line.chars().peekable();
+    let quoted = chars.peek() == Some(&'"');
+    if quoted {
+        chars.next();
+    }
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if quoted => break,
+            c if !quoted && c.is_whitespace() => break,
+            '\\' if quoted => out.extend(chars.next()),
+            '%' | '$' if chars.peek() == Some(&c) => {
+                chars.next();
+                out.push(c);
+            }
+            c => out.push(c),
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// An update unit whose `ExecStart=` program root must not run (`is_safe` says no: another account
+/// can change the file or a folder above it, like `~/.local/bin/kora` that older versions wrote
+/// in): `(old program, the unit with the program replaced by exe)`. `None`: nothing to repair.
+pub fn repaired_update_unit(unit: &str, exe: &str, is_safe: &dyn Fn(&Path) -> bool) -> Option<(String, String)> {
+    let old = exec_program(unit)?;
+    if is_safe(Path::new(&old)) {
+        return None;
+    }
+    let mut text = String::with_capacity(unit.len());
+    for l in unit.lines() {
+        match l.trim().strip_prefix("ExecStart=") {
+            Some(rest) if rest.contains(" update --auto ") => {
+                let args = rest.split_once(" update --auto ").map(|(_, a)| a).unwrap_or_default();
+                text.push_str(&format!("ExecStart={} update --auto {args}", super::systemd_quote(exe)));
+            }
+            // Not the line Kora writes: leave the unit alone rather than guess.
+            Some(_) => return None,
+            None => text.push_str(l),
+        }
+        text.push('\n');
+    }
+    Some((old, text))
+}
+
+/// Plan that rewrites every unsafe update unit in `units` (`(path, text)`) to run the program
+/// `choose` gives (made first when it is a copy), and the lines to tell the operator. `choose` is
+/// only asked when something needs repairing (it may hash this program).
+pub fn repair_plan(
+    units: &[(String, String)],
+    is_safe: &dyn Fn(&Path) -> bool,
+    choose: &dyn Fn() -> Result<super::binary::RootExe, String>,
+) -> Result<(Plan, Vec<String>, Option<PathBuf>), String> {
+    let mut plan = Plan::default();
+    let mut lines = Vec::new();
+    let mut exe = None;
+    for (path, text) in units {
+        let Some(old) = exec_program(text).filter(|p| !is_safe(Path::new(p))) else { continue };
+        let chosen = match &exe {
+            Some(e) => e,
+            None => {
+                let e = choose()?;
+                if let super::binary::RootExe::Copy { src, dest } = &e {
+                    plan.extend(super::binary::install_plan(&src.to_string_lossy(), dest));
+                }
+                exe.insert(e)
+            }
+        };
+        let new = chosen.path().to_string_lossy().into_owned();
+        let Some((_, repaired)) = repaired_update_unit(text, &new, is_safe) else { continue };
+        let name = Path::new(path).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        plan.steps.push(SystemStep::write(format!("Make {name} run {new}"), path, repaired, 0o644));
+        lines.push(format!(
+            "Repaired the automatic-update job {name}: it ran {old} as root, a file other accounts can change; it now runs {new}."
+        ));
+    }
+    if lines.is_empty() {
+        return Ok((Plan::default(), lines, None));
+    }
+    plan.steps.push(SystemStep::run("Tell systemd the update jobs changed", "systemctl", &["daemon-reload"]));
+    let copy = exe.and_then(|e| match e {
+        super::binary::RootExe::Copy { dest, .. } => Some(dest),
+        super::binary::RootExe::Ready(_) => None,
+    });
+    Ok((plan, lines, copy))
+}
+
+/// When running as root on Linux: rewrite Kora's update units (`kora-update-*.service`) that run a
+/// program other accounts can change (written by older versions), and say so in one line each.
+/// Errors are reported the same way; they never stop the command that is running.
+pub fn repair_root_update_units(say: &mut dyn FnMut(&str)) {
+    if Platform::current() != Platform::Linux || !crate::elevate::is_elevated() {
+        return;
+    }
+    let units: Vec<(String, String)> = std::fs::read_dir("/etc/systemd/system")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            (n.starts_with("kora-update-") && n.ends_with(".service") && !crate::fsutil::is_symlink(&e.path()))
+                .then(|| Some((e.path().to_string_lossy().into_owned(), std::fs::read_to_string(e.path()).ok()?)))
+                .flatten()
+        })
+        .collect();
+    let result = repair_plan(&units, &super::binary::exe_is_service_safe, &|| super::binary::root_exe(None)).and_then(|(plan, lines, copy)| {
+        if lines.is_empty() {
+            return Ok(lines);
+        }
+        apply_plan(&plan, &SystemRunner).map_err(|e| e.to_string())?;
+        // Record a new program copy with its server, so deleting the server removes it again.
+        if let Some(copy) = copy {
+            let was_unsafe = |t: &str| exec_program(t).is_some_and(|p| !super::binary::exe_is_service_safe(Path::new(&p)));
+            for (_, text) in units.iter().filter(|(_, t)| was_unsafe(t)) {
+                if let Some(dir) = text.lines().find_map(|l| l.trim().strip_prefix("WorkingDirectory=")) {
+                    mark_created(Path::new(dir.trim()), true, Some(&copy));
+                }
+            }
+        }
+        Ok(lines)
+    });
+    match result {
+        Ok(lines) => lines.iter().for_each(|l| say(l)),
+        Err(e) => say(&format!("Could not repair an older automatic-update job that runs an unsafe program as root: {e}. Run `kora schedule set <server> ...` as root to rewrite it.")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `schedule get` (the panel's status refresh) and `off` only need the job's name: the root
+    /// program, which may mean hashing this one, is not worked out for them.
+    #[test]
+    fn reading_the_schedule_does_not_look_for_the_root_program() {
+        let rec = ServerEntry {
+            name: "My Server".into(),
+            dir: "/srv/my".into(),
+            mode: crate::installer::Mode::Production,
+            ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
+            created_unix: 0,
+        };
+        let s = managed_for_lookup(&rec);
+        assert_eq!((s.name.as_str(), s.kora_exe.as_str()), ("my-server", "kora"));
+        assert_eq!(unit_path(&s, "timer"), unit_path(&managed_for(&rec), "timer"));
+        let rn = super::super::testing::FakeRunner::default();
+        rn.respond("cat /etc/systemd/system/kora-update-my-server.timer", 0, "[Timer]\nOnCalendar=*-*-* 05:30:00\n");
+        let cfg = get_with(&s, Path::new("/nonexistent"), &rn, Platform::Linux).unwrap();
+        assert_eq!(cfg.time, "05:30");
+    }
+
+    const OLD: &str = "[Unit]\nDescription=Kora auto-update for main\n\n[Service]\nType=oneshot\nWorkingDirectory=/home/kora/main\nEnvironment=KORA_UPDATE_AS=sam\nExecStart=/home/sam/.local/bin/kora update --auto /home/kora/main\nNoNewPrivileges=true\n";
+
+    #[test]
+    fn the_program_of_an_exec_line_is_read_back_with_systemd_quoting_undone() {
+        assert_eq!(exec_program(OLD).as_deref(), Some("/home/sam/.local/bin/kora"));
+        assert_eq!(exec_program("ExecStart=\"/opt/my kora/kora\" update --auto /x").as_deref(), Some("/opt/my kora/kora"));
+        assert_eq!(exec_program("ExecStart=-/usr/bin/a%%b update").as_deref(), Some("/usr/bin/a%b"));
+        assert_eq!(exec_program("ExecStart=\"/a\\\"b\" x").as_deref(), Some("/a\"b"));
+        assert_eq!(exec_program("[Service]\nType=oneshot\n"), None);
+    }
+
+    #[test]
+    fn an_unsafe_program_in_a_root_update_unit_is_replaced_and_said() {
+        use super::super::binary::RootExe;
+        let safe = |p: &Path| p.starts_with("/usr/local/bin") || p.starts_with("/opt/kora");
+        // Already safe: nothing to do, and the program is not even looked for.
+        let good = OLD.replace("/home/sam/.local/bin/kora", "/usr/local/bin/kora");
+        let units = vec![("/etc/systemd/system/kora-update-main.service".to_string(), good.clone())];
+        let (plan, lines, _) = repair_plan(&units, &safe, &|| panic!("not needed")).unwrap();
+        assert!(plan.steps.is_empty() && lines.is_empty());
+        // Unsafe: rewritten in place, everything else kept, one line said.
+        let units = vec![("/etc/systemd/system/kora-update-main.service".to_string(), OLD.to_string()), ("/etc/systemd/system/kora-update-b.service".to_string(), good)];
+        let (plan, lines, copy) = repair_plan(&units, &safe, &|| Ok(RootExe::Ready("/usr/local/bin/kora".into()))).unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("kora-update-main") && lines[0].contains("/home/sam/.local/bin/kora") && lines[0].contains("now runs /usr/local/bin/kora"), "{}", lines[0]);
+        assert!(copy.is_none());
+        let written: Vec<&str> = plan.steps.iter().filter_map(|s| match &s.action { super::super::Action::WriteFile { contents, .. } => Some(contents.as_str()), _ => None }).collect();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0], OLD.replace("/home/sam/.local/bin/kora update", "/usr/local/bin/kora update"));
+        assert!(plan.steps.last().and_then(|s| s.command_line()).is_some_and(|l| l == "systemctl daemon-reload"));
+        // No safe program yet: the pinned copy is made first and reported back.
+        let (plan, _, copy) = repair_plan(&units[..1], &safe, &|| Ok(RootExe::Copy { src: "/home/sam/.local/bin/kora".into(), dest: "/opt/kora/1.0.0-abc/kora".into() })).unwrap();
+        assert_eq!(copy.as_deref(), Some(Path::new("/opt/kora/1.0.0-abc/kora")));
+        assert!(plan.steps.iter().position(|s| matches!(&s.action, super::super::Action::CopyFile { .. })) < plan.steps.iter().position(|s| matches!(&s.action, super::super::Action::WriteFile { .. })));
+        // An ExecStart Kora did not write is left alone.
+        assert!(repaired_update_unit("ExecStart=/home/x/evil --flag\n", "/usr/local/bin/kora", &safe).is_none());
+    }
 }

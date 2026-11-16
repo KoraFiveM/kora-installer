@@ -2525,6 +2525,16 @@ fn main() {
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::Update(UpdateArgs { auto: true, .. })));
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
+    // Already running as root for these: repair update jobs an older Kora pointed at a program other
+    // accounts can change (`~/.local/bin/kora`). Does nothing when not root or nothing is wrong.
+    let repairs = match &command {
+        Some(Command::Install(a)) => !a.dry_run,
+        Some(Command::Update(_) | Command::Schedule { .. }) | None => true,
+        _ => false,
+    };
+    if repairs {
+        kora_core::service::repair_root_update_units(&mut |line| println!("{line}"));
+    }
     let code = match command {
         None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),

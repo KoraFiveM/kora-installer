@@ -333,6 +333,10 @@ pub(crate) struct Ctx {
     pub plan: Vec<PlannedStep>,
     pub keep_db: bool,
     pub keep_files: bool,
+    /// `false` when deleting a folder that is not in the server list: its name and ports then come
+    /// only from its own records, which the server's account can change, so the root-only system
+    /// items (service, schedule, account, firewall) are left alone.
+    pub system_trusted: bool,
     tx: Mutex<Sender<ProgressEvent>>,
     pub shared: Mutex<Shared>,
     manifest_lock: Mutex<()>,
@@ -416,6 +420,10 @@ pub(crate) fn save_created_to(dir: &Path, c: &Created) -> Result<()> {
 }
 
 fn new_ctx(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<ProgressEvent>, keep_db: bool, keep_files: bool) -> Arc<Ctx> {
+    new_ctx_trusted(req, hooks, admin, tx, keep_db, keep_files, true)
+}
+
+fn new_ctx_trusted(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<ProgressEvent>, keep_db: bool, keep_files: bool, system_trusted: bool) -> Arc<Ctx> {
     Arc::new(Ctx {
         req: req.clone(),
         hooks: hooks.clone(),
@@ -423,6 +431,7 @@ fn new_ctx(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<Progress
         plan: plan_steps(req, admin),
         keep_db,
         keep_files,
+        system_trusted,
         tx: Mutex::new(tx),
         shared: Mutex::new(Shared::default()),
         manifest_lock: Mutex::new(()),
@@ -464,6 +473,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     if req.license_key.as_deref().map(str::trim).unwrap_or("").is_empty() {
         return err("a Cfx.re license key is required (get one at https://portal.cfx.re/servers/registration-keys)");
     }
+    check_dir_links(&req.dir)?;
     preflight(req, hooks, admin)?;
     // Re-check right before starting: a port can be taken since the questions were answered.
     if !req.dir.join("kora-server.json").is_file() {
@@ -485,9 +495,11 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
         }
         // The state dir must exist before the first persist; remember if the folder is ours.
         if std::fs::metadata(&ctx.req.dir).is_err() {
-            std::fs::create_dir_all(&ctx.req.dir).map_err(|e| InstallError(format!("cannot create {}: {e}", ctx.req.dir.display())))?;
+            crate::fsutil::create_dir_no_follow(&ctx.req.dir).map_err(|e| InstallError(format!("cannot create {}: {e}", ctx.req.dir.display())))?;
             ctx.update_created(|c| c.created_dir = true)?;
         }
+        // Again now that it exists: a part could have been swapped for a link meanwhile.
+        check_dir_links(&ctx.req.dir)?;
         if kora_user {
             // Folders made just now belong to `kora` (and so does the folder a deleted service gives back).
             let plan = crate::userhome::chown_to_kora_plan(&crate::userhome::kora_owned_paths(&ctx.req.dir), false);
@@ -570,6 +582,20 @@ pub fn preflight(req: &InstallRequest, hooks: &Hooks, admin: bool) -> Result<()>
         }
     }
     Ok(())
+}
+
+/// Root installs by path, so a symbolic link on the way to the server folder that another account
+/// could have planted (the panel's user owns the folder above it when installing through the
+/// helper; the server's account owns the folder itself on a re-run) would send root's writes, and
+/// the final `chown -R`, somewhere else. Refused before anything is done, again once the folder
+/// exists, and before the folder is handed to an account. Links root alone controls (`/home` ->
+/// `/var/home`) are fine.
+pub(crate) fn check_dir_links(dir: &Path) -> Result<()> {
+    check_dir_links_with(dir, &crate::fsutil::check_links_default_trust)
+}
+
+fn check_dir_links_with(dir: &Path, trust: &dyn Fn(u32, u32) -> bool) -> Result<()> {
+    crate::fsutil::check_links_with(dir, trust).map_err(|e| InstallError(format!("Kora will not work in {}: {e}. Nothing more was changed.", dir.display())))
 }
 
 /// Folders the service account cannot pass through on the way to the server folder `dir`.
@@ -724,11 +750,30 @@ pub fn rollback_with(dir: &Path, opts: &RollbackOptions, sink: &mut dyn Progress
     rollback_inner(dir, opts, None, sink, hooks)
 }
 
+/// The server-list entry for `dir`: its name and ports, which `request.json` must not decide.
+fn registered(dir: &Path) -> Option<(String, registry::PortsRecord)> {
+    let reg = Registry::load().ok()?;
+    reg.servers.iter().find(|s| registry::same_path(&s.dir, dir)).map(|s| (s.name.clone(), s.ports))
+}
+
 fn rollback_inner(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<&str>, sink: &mut dyn ProgressSink, hooks: &Hooks) -> Result<Vec<String>> {
+    rollback_known(dir, registered(dir), opts, db_admin_password, sink, hooks)
+}
+
+/// `known`: the name and ports from the operator's server list (`None`: the folder is not in it).
+fn rollback_known(dir: &Path, known: Option<(String, registry::PortsRecord)>, opts: &RollbackOptions, db_admin_password: Option<&str>, sink: &mut dyn ProgressSink, hooks: &Hooks) -> Result<Vec<String>> {
     let bytes = std::fs::read(meta_dir(dir).join("request.json"))
         .map_err(|_| InstallError(format!("{} has no Kora install record (.kora/request.json): nothing to roll back", dir.display())))?;
     let mut req: InstallRequest = serde_json::from_slice(&bytes).map_err(|e| InstallError(format!("corrupt install record: {e}")))?;
     req.dir = dir.to_path_buf();
+    // `request.json` is in the server folder, which the server's own account can change: a forged
+    // name would make root remove ANOTHER server's service, account and firewall rules. The
+    // server list (only the operator can change it) decides instead.
+    let system_trusted = known.is_some();
+    if let Some((name, ports)) = known {
+        req.name = name;
+        (req.ports.game, req.ports.txadmin) = (ports.game, ports.txadmin);
+    }
     if let Some(pw) = db_admin_password.filter(|p| !p.is_empty()) {
         let a = req.db_admin.get_or_insert_with(|| DbAdmin { host: "127.0.0.1".into(), port: 3306, user: "root".into(), password: None });
         a.password = Some(pw.to_string());
@@ -740,7 +785,7 @@ fn rollback_inner(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<
         sink.event(ProgressEvent { step: "launch".into(), title: "Stop the running server".into(), status: StepStatus::Done, detail: "Stopped the background server".into(), percent: 0 });
     }
     let (tx, rx) = mpsc::channel();
-    let ctx = new_ctx(&req, hooks, admin, tx, opts.keep_db, opts.keep_files);
+    let ctx = new_ctx_trusted(&req, hooks, admin, tx, opts.keep_db, opts.keep_files, system_trusted);
     let handle = std::thread::spawn(move || -> Result<Vec<String>> {
         let mut list = steps::build(&ctx);
         let state_path = ctx.meta_dir().join("plan-state.json");
@@ -826,6 +871,59 @@ mod tests {
         assert_eq!(std::fs::read_to_string(victim.join("file")).unwrap(), "precious");
         assert!(!dir.join("server.cfg").exists() && !dir.join("own").exists(), "what really is inside is removed");
         assert!(notes.iter().any(|n| n.contains("Kept")), "{notes:?}");
+    }
+
+    /// Through the helper the panel's user owns the folder above the server folder and could swap a
+    /// part of the path for a link to a system folder: root refuses to work there.
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_link_on_the_way_to_the_server_folder_is_refused() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(t.path().join("real/servers")).unwrap();
+        std::os::unix::fs::symlink(t.path().join("real/servers"), t.path().join("servers")).unwrap();
+        let roots_view = |uid: u32, mode: u32| uid == 0 && mode & 0o022 == 0;
+        let me = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(t.path()).unwrap());
+        if me != 0 {
+            let e = check_dir_links_with(&t.path().join("servers/new"), &roots_view).unwrap_err().to_string();
+            assert!(e.contains("symbolic link") && e.contains("real path"), "{e}");
+        }
+        // The real path is fine, so is a link the account itself owns, and a missing folder.
+        assert!(check_dir_links_with(&t.path().join("real/servers/new"), &roots_view).is_ok());
+        assert!(check_dir_links(&t.path().join("servers/new")).is_ok());
+    }
+
+    /// Server A's account rewrites A's `request.json` to name server B. `kora delete A` must then
+    /// act on A (the server list's name and ports), never on B's service, account or ports; and a
+    /// folder that is not in the list gets no system-wide changes at all.
+    #[test]
+    fn delete_takes_the_name_from_the_server_list_not_the_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("a");
+        std::fs::create_dir_all(dir.join(".kora")).unwrap();
+        let mut r = req(&dir);
+        (r.dry_run, r.db, r.name) = (false, DbChoice::Skip, "B".into());
+        r.ports = Ports { game: 30999, txadmin: 40999 };
+        std::fs::write(dir.join(".kora/request.json"), serde_json::to_vec(&r).unwrap()).unwrap();
+        let c = Created { service_unit: Some("/etc/systemd/system/kora-b.service".into()), update_timer: true, firewall: true, ..Created::default() };
+        let write_state = || {
+            std::fs::write(dir.join(".kora/created.json"), serde_json::to_vec(&c).unwrap()).unwrap();
+            let mut st = crate::steps::PlanState::default();
+            for id in ["system.firewall", "system.service", "system.schedule"] {
+                st.set(id, crate::steps::StepStatus::Done, None);
+            }
+            st.save(&dir.join(".kora/plan-state.json")).unwrap();
+        };
+        let hooks = Hooks { assume_admin: Some(false), ..Hooks::default() };
+        let keep = RollbackOptions { keep_files: true, keep_db: true };
+        write_state();
+        let known = Some(("A".to_string(), registry::PortsRecord { game: 30120, txadmin: 40120 }));
+        let notes = rollback_known(&dir, known, &keep, None, &mut Collect(vec![]), &hooks).unwrap().join("\n");
+        assert!(notes.contains("'a'") && !notes.contains("'b'") && !notes.contains("kora-b"), "{notes}");
+        // Not in the server list: nothing system-wide, said plainly.
+        write_state();
+        let notes = rollback_known(&dir, None, &keep, None, &mut Collect(vec![]), &hooks).unwrap().join("\n");
+        assert!(notes.contains("not in Kora's server list") && notes.contains("background service") && notes.contains("firewall rules"), "{notes}");
+        assert!(!notes.contains("NOT removed"), "no system plan is even prepared: {notes}");
     }
 
     #[test]

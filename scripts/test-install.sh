@@ -226,6 +226,7 @@ for dir in /usr/local/bin /usr/bin /bin; do
 done
 cat > "$WORK/fakewget/wget" <<'FAKE'
 #!/bin/sh
+[ "$1" = "--help" ] && { echo "  --max-redirect=NUMBER  maximum redirections allowed"; exit 0; }
 for a in "$@"; do url="$a"; done
 printf '%s\n' "$url" >> "$KORA_TEST_LOG"
 case "$url" in
@@ -239,6 +240,47 @@ check "wget: a redirect from https to http fails the install" run_fail PATH="$WO
 check "  ... with a clear message" out_has "refusing a redirect to http://example.invalid/evil"
 check "  ... and the http address is never requested" eval '! grep -q "^http:" "$LOG"'
 check "  ... nothing installed" test ! -e "$WORK/t11w/kora"
+# The success path: an https download that GitHub redirects (to another https host) is followed
+# hop by hop and installs. The fake serves the local fake release from a file:// copy.
+mkdir -p "$WORK/redirwget" "$WORK/busywget"
+cat > "$WORK/redirwget/wget" <<FAKE
+#!/bin/sh
+[ "\$1" = "--help" ] && { echo "  --max-redirect=NUMBER  maximum redirections allowed"; exit 0; }
+out=""; prev=""
+for a in "\$@"; do [ "\$prev" = "-O" ] && out="\$a"; prev="\$a"; url="\$a"; done
+printf '%s\n' "\$*" >> "\$KORA_TEST_LOG"
+case "\$url" in
+  https://example.invalid/rel/*) printf '  HTTP/1.1 302 Found\r\n  Location: https://cdn.example.invalid/%s\r\n' "\${url##*/}" >&2; exit 8 ;;
+  https://cdn.example.invalid/*) cp "$WORK/rel/\${url##*/}" "\$out" && printf '  HTTP/1.1 200 OK\r\n' >&2; exit 0 ;;
+esac
+exit 8
+FAKE
+chmod +x "$WORK/redirwget/wget"
+LOG="$WORK/t11r.log"
+check "wget: an https redirect to another https host installs" run PATH="$WORK/redirwget:$WORK/nocurl" KORA_TEST_LOG="$LOG" KORA_RELEASE_BASE="https://example.invalid/rel" KORA_INSTALL_DIR="$WORK/t11r/bin" KORA_NO_LAUNCH=1
+check "  ... binary installed and verified" test "$(sha256sum "$WORK/t11r/bin/kora" 2>/dev/null | cut -d ' ' -f 1)" = "$GOOD"
+check "  ... one hop at a time (redirects never left to wget)" eval 'grep -q -- "--max-redirect=0 .*https://cdn.example.invalid/kora-linux-x86_64$" "$LOG"'
+# A wget without --max-redirect (BusyBox): https is used as it is, plain http is refused outright.
+cat > "$WORK/busywget/wget" <<FAKE
+#!/bin/sh
+[ "\$1" = "--help" ] && { echo "Usage: wget [-cqS] [-O FILE] URL..."; exit 0; }
+out=""; prev=""
+for a in "\$@"; do [ "\$prev" = "-O" ] && out="\$a"; prev="\$a"; url="\$a"; done
+printf '%s\n' "\$*" >> "\$KORA_TEST_LOG"
+case "\$url" in
+  *--max-redirect*) exit 1 ;;
+  https://example.invalid/rel/*) cp "$WORK/rel/\${url##*/}" "\$out"; exit 0 ;;
+esac
+exit 1
+FAKE
+chmod +x "$WORK/busywget/wget"
+LOG="$WORK/t11b.log"
+check "BusyBox-style wget: https installs" run PATH="$WORK/busywget:$WORK/nocurl" KORA_TEST_LOG="$LOG" KORA_RELEASE_BASE="https://example.invalid/rel" KORA_INSTALL_DIR="$WORK/t11b/bin" KORA_NO_LAUNCH=1
+check "  ... binary installed" test -x "$WORK/t11b/bin/kora"
+check "  ... without the option it does not know" eval '! grep -q -- "--max-redirect" "$LOG"'
+check "BusyBox-style wget: a plain http address is refused" run_fail PATH="$WORK/busywget:$WORK/nocurl" KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$WORK/t11c/bin" KORA_NO_LAUNCH=1
+check "  ... with a clear message" out_has "only used for https addresses"
+check "  ... nothing installed" test ! -e "$WORK/t11c/bin/kora"
 if command -v wget >/dev/null 2>&1; then
   ln -s "$(command -v wget)" "$WORK/realwget/wget"
   check "wget (no curl) still installs from the localhost test address" run PATH="$WORK/realwget:$WORK/nocurl" KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$WORK/t11x/bin" KORA_NO_LAUNCH=1

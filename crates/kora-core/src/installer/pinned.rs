@@ -98,9 +98,10 @@ pub fn place(
     crate::fsutil::rename_retrying(&src, &staging)
         .map_err(|e| format!("cannot take the '{sub}' folder out of the clone: {e}"))?;
     let _ = std::fs::remove_dir_all(partial);
-    std::fs::write(
-        staging.join(MARKER),
-        marker_text(repo, commit.unwrap_or(""), sub),
+    crate::fsutil::write_no_follow(
+        &staging.join(MARKER),
+        marker_text(repo, commit.unwrap_or(""), sub).as_bytes(),
+        0o644,
     )
     .map_err(|e| format!("cannot write the source marker: {e}"))?;
     crate::fsutil::rename_retrying(&staging, dest)
