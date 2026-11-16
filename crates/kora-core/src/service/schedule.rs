@@ -276,37 +276,48 @@ pub fn save_schedule(dir: &Path, cfg: &ScheduleConfig, user: &str) -> ServiceRes
     save_stored(dir, &Stored { config: cfg.clone(), user: user.to_string() })
 }
 
+/// Written as root into a folder the service account can change: never through a planted link.
 fn save_stored(dir: &Path, st: &Stored) -> ServiceResult<()> {
-    let p = stored_path(dir);
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::write(p, serde_json::to_vec_pretty(st).map_err(std::io::Error::other)?)?;
+    crate::fsutil::write_no_follow(&stored_path(dir), &serde_json::to_vec_pretty(st).map_err(std::io::Error::other)?, 0o644)?;
     Ok(())
 }
 
-/// Record in `created.json` that Kora made the job (so delete/uninstall remove it), if that file exists.
-fn mark_created(dir: &Path, on: bool) {
+/// Record in `created.json` that Kora made the job (so delete/uninstall remove it), if that file
+/// exists; `copy` = the program copy made for it (removed again with the server).
+fn mark_created(dir: &Path, on: bool, copy: Option<&Path>) {
     let p = crate::installer::meta_dir(dir).join("created.json");
     if let Ok(b) = std::fs::read(&p) {
         if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&b) {
             v["update_timer"] = serde_json::Value::Bool(on);
+            if let Some(c) = copy {
+                v["binary"] = serde_json::Value::String(c.to_string_lossy().into_owned());
+            }
             if let Ok(out) = serde_json::to_vec_pretty(&v) {
-                let _ = std::fs::write(p, out);
+                let _ = crate::fsutil::write_no_follow(&p, &out, 0o644);
             }
         }
     }
 }
 
-/// The ManagedServer the scheduler needs, from a registry entry. The kora program is the root-owned
-/// copy when the installer made one, else this program.
+/// The program named in the server's `created.json`, if any. Only a hint (see `binary::choose_root_exe`).
+fn recorded_binary(dir: &Path) -> Option<String> {
+    crate::installer::load_created_from(dir).and_then(|c| c.binary)
+}
+
+/// The ManagedServer the scheduler needs, from a registry entry. The kora program is the one a
+/// root job may run ([`super::binary::root_exe`]): never simply the path a server folder's records
+/// name (anyone who can write that folder could otherwise choose what root runs). When a copy would
+/// have to be made first, this program is named here; [`set`] makes the copy before using it.
 pub fn managed_for(rec: &ServerRecord) -> ManagedServer {
+    let exe = super::binary::root_exe(recorded_binary(&rec.dir).as_deref())
+        .map(|r| r.path().to_string_lossy().into_owned())
+        .or_else(|_| std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).map_err(|_| ()))
+        .unwrap_or_else(|_| "kora".into());
+    managed_with_exe(rec, exe)
+}
+
+fn managed_with_exe(rec: &ServerRecord, exe: String) -> ManagedServer {
     let dir = rec.dir.to_string_lossy().into_owned();
-    let binary = std::fs::read(crate::installer::meta_dir(&rec.dir).join("created.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-        .and_then(|v| v.get("binary").and_then(|b| b.as_str()).map(str::to_string));
-    let exe = binary.or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned())).unwrap_or_else(|| "kora".into());
     ManagedServer {
         name: crate::installer::slug(&rec.name),
         dir,
@@ -407,12 +418,17 @@ pub fn set(server: &ServerRecord, cfg: &ScheduleConfig) -> ServiceResult<()> {
     if !crate::elevate::is_elevated() {
         return relaunch(&set_args(server, cfg));
     }
-    let s = managed_for(server);
+    let exe = super::binary::root_exe(recorded_binary(&server.dir).as_deref()).map_err(ServiceError::Other)?;
+    let s = managed_with_exe(server, exe.path().to_string_lossy().into_owned());
     let user = installing_user();
-    let plan = schedule_install_plan(&s, cfg, &user, Platform::current())?;
+    let mut plan = Plan::default();
+    if let super::binary::RootExe::Copy { src, dest } = &exe {
+        plan.extend(super::binary::install_plan(&src.to_string_lossy(), dest));
+    }
+    plan.extend(schedule_install_plan(&s, cfg, &user, Platform::current())?);
     apply_plan(&plan, &SystemRunner)?;
     save_stored(&server.dir, &Stored { config: cfg.clone(), user })?;
-    mark_created(&server.dir, true);
+    mark_created(&server.dir, true, matches!(exe, super::binary::RootExe::Copy { .. }).then(|| exe.path()));
     Ok(())
 }
 
@@ -429,7 +445,7 @@ pub fn remove(server: &ServerRecord) -> ServiceResult<()> {
         apply_plan(&scheduler_uninstall_plan(&s, Platform::current())?, &SystemRunner)?;
     }
     let _ = std::fs::remove_file(stored_path(&server.dir));
-    mark_created(&server.dir, false);
+    mark_created(&server.dir, false, None);
     Ok(())
 }
 
@@ -579,8 +595,12 @@ pub fn task_xml(s: &ManagedServer, schedule: &Schedule, run_as: RunAs, user: &st
     ))
 }
 
+/// Where the task definition is written for `schtasks /XML` to read. NOT the server folder: other
+/// accounts can change files there, and could swap the definition (and so what runs as SYSTEM)
+/// between the write and the read. `%ProgramFiles%\Kora\tasks` only administrators can change.
 fn task_xml_path(s: &ManagedServer) -> String {
-    format!("{}/.kora/update-task.xml", s.dir.trim_end_matches(['\\', '/']))
+    let pf = std::env::var("ProgramFiles").ok().filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "C:\\Program Files".into());
+    format!("{}\\Kora\\tasks\\update-{}.xml", pf.trim_end_matches(['\\', '/']), s.name)
 }
 
 /// Plan to (re)register the job for `cfg` (installing user named `user`).

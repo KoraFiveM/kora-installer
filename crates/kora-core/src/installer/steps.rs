@@ -501,13 +501,11 @@ fn service_user_override() -> Option<String> {
     std::env::var("KORA_SERVICE_USER").ok().filter(|u| !u.is_empty() && u != "root")
 }
 
-/// The kora program a service runs: the root-owned copy when one was made, else this program.
-fn kora_exe_for(created: &Created) -> String {
-    created
-        .binary
-        .clone()
-        .or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| "kora".into())
+/// The kora program a root-run job may execute (see `binary::choose_root_exe`): the recorded copy only
+/// when it really is Kora's root-owned pinned copy, else this program when it is safe, else a copy
+/// of it that has to be made first.
+fn root_exe_for(created: &Created) -> Result<service::binary::RootExe> {
+    service::binary::root_exe(created.binary.as_deref()).map_err(InstallError)
 }
 
 fn managed_server(ctx: &Ctx, user: &str, kora_exe: &str) -> Result<ManagedServer> {
@@ -1132,18 +1130,15 @@ impl InstallStep {
             }
         };
 
-        // Which program does the service run? Not one in a folder ordinary users can write to.
+        // Which program does the service run? Not one in a folder ordinary users can write to, and
+        // not simply the one `created.json` names (that file is in the server folder; see root_exe_for).
         let exe = std::env::current_exe().map_err(|e| InstallError(format!("cannot find the kora program: {e}")))?;
-        let own_copy = match (created.binary.clone(), service::binary::exe_is_service_safe(&exe)) {
-            (Some(b), _) => Some(PathBuf::from(b)),
-            (None, true) => None,
-            (None, false) => {
-                let root = service::binary::default_root(platform).ok_or_else(|| InstallError("cannot find a program folder for the service copy of kora (ProgramFiles is not set)".into()))?;
-                let sha = service::binary::file_sha256(&exe).map_err(|e| InstallError(format!("cannot read the kora program: {e}")))?;
-                Some(service::binary::versioned_path(&root, env!("CARGO_PKG_VERSION"), &sha, platform))
-            }
+        let choice = root_exe_for(&created)?;
+        let own_copy = match &choice {
+            service::binary::RootExe::Ready(p) if *p == exe => None,
+            other => Some(other.path().to_path_buf()),
         };
-        let kora_exe = own_copy.as_ref().map_or_else(|| exe.to_string_lossy().into_owned(), |p| p.to_string_lossy().into_owned());
+        let kora_exe = choice.path().to_string_lossy().into_owned();
 
         let server = managed_server(ctx, &account, &kora_exe)?;
         let mut head = Vec::new(); // folder access + account + program copy
@@ -1161,10 +1156,8 @@ impl InstallStep {
         if create_account {
             head.extend(service::account::create_plan(&account).map_err(|e| InstallError(e.to_string()))?.steps);
         }
-        if let Some(dest) = &own_copy {
-            if !dest.is_file() {
-                head.extend(service::binary::install_plan(&exe.to_string_lossy(), dest).steps);
-            }
+        if let service::binary::RootExe::Copy { src, dest } = &choice {
+            head.extend(service::binary::install_plan(&src.to_string_lossy(), dest).steps);
         }
         let mut tail = Vec::new();
         if platform == SvcPlatform::Linux {
@@ -1211,15 +1204,25 @@ impl InstallStep {
         let ctx = &*self.ctx;
         let created = ctx.load_created();
         let user = created.service_account.clone().unwrap_or_else(|| format!("kora-{}", slug(&ctx.req.name)));
-        let server = managed_server(ctx, &user, &kora_exe_for(&created))?;
+        let exe = root_exe_for(&created)?;
+        let server = managed_server(ctx, &user, &exe.path().to_string_lossy())?;
         let cfg = service::ScheduleConfig::default_for_install();
         let who = service::installing_user();
-        let plan = service::schedule_install_plan(&server, &cfg, &who, svc_platform()).map_err(|e| InstallError(e.to_string()))?;
+        let mut plan = service::Plan::default();
+        if let service::binary::RootExe::Copy { src, dest } = &exe {
+            plan.extend(service::binary::install_plan(&src.to_string_lossy(), dest));
+        }
+        plan.extend(service::schedule_install_plan(&server, &cfg, &who, svc_platform()).map_err(|e| InstallError(e.to_string()))?);
         if !ctx.admin {
             ctx.note(format!("Auto-update schedule NOT created (needs administrator rights). Re-run as root/Administrator to: {}", plan.descriptions().join("; ")));
             return Ok("Skipped (needs admin); see notes".into());
         }
-        ctx.update_created(|c| c.update_timer = true)?;
+        ctx.update_created(|c| {
+            c.update_timer = true;
+            if let service::binary::RootExe::Copy { dest, .. } = &exe {
+                c.binary = Some(dest.to_string_lossy().into_owned());
+            }
+        })?;
         service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         service::save_schedule(&ctx.req.dir, &cfg, &who).map_err(|e| InstallError(e.to_string()))?;
         Ok(format!("Auto-update scheduled: {} (change it with `kora schedule set {}`)", service::describe_for(&cfg, &who), server.name))
