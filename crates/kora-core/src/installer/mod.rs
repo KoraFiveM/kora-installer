@@ -595,7 +595,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
             "prepare.catalog" => format!("{} resources selected", selected.len()),
             "prepare.tools" => format!("Needs git{}; ports {} (game) and {} (txAdmin) must be free", if req.mode == Mode::Development { " and a logged-in `gh`" } else { "" }, req.ports.game, req.ports.txadmin),
             "build.forks" => format!(
-                "Fork {} repositories into {} (needs `gh auth login`; paced in batches)",
+                "Fork {} repositories into {}, reusing any forks already there (needs `gh auth login`; paced in batches)",
                 selected.len(),
                 req.github_owner.as_deref().unwrap_or("your GitHub account")
             ),
