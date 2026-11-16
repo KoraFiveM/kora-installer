@@ -38,6 +38,26 @@ describe('session secret', () => {
     expect(api.eventsUrl()).toBe('/api/v1/events')
   })
 
+  it('keeps the secret when a sign-in fails (a stale link in a new tab must not sign the other tabs out)', async () => {
+    window.localStorage.setItem('kora_session_secret', 'theirs')
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'That sign-in link has expired or was already used.' } }))
+    await expect(api.session.createByCode('used')).rejects.toBeInstanceOf(ApiError)
+    expect(sessionSecret()).toBe('theirs')
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'invalid token' } }))
+    await api.session.create('wrong').catch(() => undefined)
+    expect(sessionSecret()).toBe('theirs')
+  })
+
+  it('keeps a secret another tab stored while the failing request was on its way', async () => {
+    window.localStorage.setItem('kora_session_secret', 'old')
+    fetchMock.mockImplementationOnce(async () => {
+      window.localStorage.setItem('kora_session_secret', 'new')
+      return jsonResponse(401, { error: { code: 'unauthorized', message: 'missing or invalid session' } })
+    })
+    await api.servers.list().catch(() => undefined)
+    expect(sessionSecret()).toBe('new')
+  })
+
   it('forgets the secret when the session ends or the user signs out', async () => {
     window.localStorage.setItem('kora_session_secret', 'old')
     fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'missing or invalid session' } }))

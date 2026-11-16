@@ -126,7 +126,10 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   }
   if (!res.ok) {
     const err = await readError(res)
-    if (res.status === 401) setSessionSecret(null)
+    // The session ended: forget its secret (in every tab, it is shared). Not for a failed sign-in (a stale
+    // link opened in a new tab must not sign the other tabs out), nor when another tab has signed in
+    // since this request left.
+    if (res.status === 401 && path !== '/session' && sessionSecret() === secret) setSessionSecret(null)
     if (err.unauthorized && !opts.quiet401) onUnauthorized?.()
     throw err
   }
