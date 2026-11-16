@@ -1,4 +1,5 @@
-import { ApiError } from '@/api/client'
+import { useQuery } from '@tanstack/react-query'
+import { ApiError, api } from '@/api/client'
 import type { JobError } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { CopyField } from '@/components/CopyButton'
@@ -29,22 +30,27 @@ export function toNotice(e: unknown): Notice | null {
 export function ErrorNotice({ error, title }: { error: unknown; title?: string }) {
   const n = toNotice(error)
   if (!n) return null
-  if (n.code === 'needs_elevation') {
-    return (
-      <Alert tone="warning" title={title ?? 'This needs administrator rights'}>
-        <p>{n.message}</p>
-        <p className="mt-2">Kora is running without administrator rights, so it cannot do this itself. Open a terminal as administrator (on Windows, right-click it and choose "Run as administrator"; on Linux, use sudo), then paste this command:</p>
-        {n.command && (
-          <div className="mt-2">
-            <CopyField value={commandLine(n.command)} label="Command to run" />
-          </div>
-        )}
-      </Alert>
-    )
-  }
+  if (n.code === 'needs_elevation') return <ElevationNotice n={n} title={title} />
   return (
     <Alert tone="danger" title={title}>
       {n.message}
+    </Alert>
+  )
+}
+
+/** The backend sends `["kora", ...]` without `sudo`; on Linux the command is shown with `sudo ` in front. */
+function ElevationNotice({ n, title }: { n: Notice; title?: string }) {
+  const sys = useQuery({ queryKey: ['system'], queryFn: api.system, staleTime: 60_000 })
+  const prefix = sys.data?.platform === 'linux' ? 'sudo ' : ''
+  return (
+    <Alert tone="warning" title={title ?? 'This needs administrator rights'}>
+      <p>{n.message}</p>
+      <p className="mt-2">Kora is running without administrator rights, so it cannot do this itself. Run the command below as administrator (on Windows, open a terminal with "Run as administrator"; on Linux, run it as root, for example with sudo), then come back here.</p>
+      {n.command && (
+        <div className="mt-2">
+          <CopyField value={prefix + commandLine(n.command)} label="Command to run" />
+        </div>
+      )}
     </Alert>
   )
 }

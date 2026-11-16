@@ -2,22 +2,52 @@
 // Only loaded when VITE_MOCK=1 (or `npm run dev`), see src/main.tsx.
 import type * as T from '../types'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
+import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 
 const BASE = '/api/v1'
-const SPEED = 1 // lower = faster jobs (tests of the mock itself are not needed)
 
-// ---- state ----------------------------------------------------------------------------------
+// ---- state (rebuilt by `init`, so a scenario starts from a clean world) ------------------------
 
-const catalog = seedCatalog()
-const servers: T.ServerSummary[] = seedServers()
-const installed: Record<string, string[]> = JSON.parse(JSON.stringify(INSTALLED))
-const snapshots = seedSnapshots()
-const consoleEnabled: Record<string, boolean> = { 'kora-live': true }
-const webhooks: Record<string, string> = {}
-const schedules: Record<string, T.ScheduleConfig> = {}
-const prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
-const dirtyPreviewed: Record<string, T.UpdatePreview> = {}
+let scenario: ScenarioName = 'default'
+let beh: Behaviour = behaviourOf('default')
+let speed = 1 // multiplier for every wait; 0 in tests of the mock
+let rand = seeded(1)
+let catalog = seedCatalog()
+let servers: T.ServerSummary[] = []
+let installed: Record<string, string[]> = {}
+let snapshots: Record<string, T.SnapshotInfo[]> = {}
+let consoleEnabled: Record<string, boolean> = {}
+let webhooks: Record<string, string> = {}
+let schedules: Record<string, T.ScheduleConfig> = {}
+let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
+let dirtyPreviewed: Record<string, T.UpdatePreview> = {}
 let nextId = 1
+let consoleTick = 0
+
+function init(name: ScenarioName) {
+  scenario = name
+  beh = behaviourOf(name)
+  speed = beh.jobSlow
+  rand = seeded(7)
+  catalog = seedCatalog()
+  servers = seedServers(name)
+  installed = {}
+  snapshots = seedSnapshots()
+  consoleEnabled = {}
+  for (const s of servers) {
+    installed[s.name] = [...(INSTALLED[s.name] ?? ['oxmysql', 'ox_lib', 'kora_core', 'chat'])]
+    snapshots[s.name] ??= []
+    consoleEnabled[s.name] = beh.trouble ? false : name === 'fleet' ? s.status === 'running' : s.name === 'kora-live'
+  }
+  webhooks = beh.trouble && servers[0] ? { [servers[0].name]: 'https://discord.com/api/webhooks/123456789012345678/TOKEN-that-no-longer-exists' } : {}
+  schedules = {}
+  prefs = { github: false, savedInstall: null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
+  dirtyPreviewed = {}
+  jobs.clear()
+  busy.clear()
+  nextId = 1
+  consoleTick = 0
+}
 
 class Fail extends Error {
   constructor(
@@ -36,7 +66,8 @@ const find = (name: string): T.ServerSummary => {
   if (!s) throw new Fail(404, 'not_found', `There is no server called "${name}".`)
   return s
 }
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms * SPEED))
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms * speed))
+const elevate = (what: string, cmd: string[]) => new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd])
 
 // ---- buses ----------------------------------------------------------------------------------
 
@@ -50,9 +81,14 @@ function pushServer(s: T.ServerSummary) {
 function pushConsole(name: string, text: string) {
   consoleBus.get(name)?.forEach((f) => f('line', { line: text }))
 }
-setInterval(() => {
-  for (const s of servers) if (s.status === 'running') pushConsole(s.name, `[${new Date().toISOString().slice(11, 19)}] ${CONSOLE_LINES[Math.floor(Math.random() * CONSOLE_LINES.length)]}`)
-}, 2500)
+let ticker: ReturnType<typeof setInterval> | null = null
+function startTicker() {
+  if (ticker) return
+  ticker = setInterval(() => {
+    consoleTick++
+    for (const s of servers) if (s.status === 'running') pushConsole(s.name, `[12:${String(Math.floor(consoleTick / 60) % 60).padStart(2, '0')}:${String(consoleTick % 60).padStart(2, '0')}] ${CONSOLE_LINES[(consoleTick + s.name.length) % CONSOLE_LINES.length]}`)
+  }, 2500)
+}
 
 // ---- jobs -----------------------------------------------------------------------------------
 
@@ -136,6 +172,26 @@ function badgeFrom(p: T.UpdatePreview): T.Badge {
 }
 
 function makePreview(s: T.ServerSummary): T.UpdatePreview {
+  const r = (id: string, behind: number, status: T.ChangeStatus, changelog: string[] = [], needs_restart = false): T.ResourceChange => ({
+    id,
+    from: status === 'up_to_date' ? 'c4c4c4c' : `${id.length}a1b2c3`.slice(0, 7),
+    to: status === 'up_to_date' ? 'c4c4c4c' : '9b7e0d4',
+    behind,
+    changelog,
+    needs_restart,
+    status,
+  })
+  if (beh.trouble) {
+    return {
+      new_release: null,
+      resources: [
+        r('kora_core', 4, 'clean', ['Fix payroll rounding', 'Faster character loading'], true),
+        r('kora_inventory', 1, 'clean', ['Stack limits are now per item']),
+        r('kora_phone', 2, 'dirty', ['New contacts screen', 'Fix call audio'], true),
+        r('kora_jobs', 3, 'diverged', ['Duty roster rewrite']),
+      ],
+    }
+  }
   if (s.name === 'kora-dev') {
     return {
       new_release: null,
@@ -147,10 +203,11 @@ function makePreview(s: T.ServerSummary): T.UpdatePreview {
       ],
     }
   }
-  if (s.name === 'kora-live') {
-    return { new_release: s.badge?.kind === 'new_release' ? '1.5.0' : null, resources: [{ id: 'kora_core', from: 'v1.4.0', to: 'v1.4.0', behind: 0, changelog: [], needs_restart: false, status: 'up_to_date' }] }
-  }
-  return { new_release: null, resources: [] }
+  const k = s.badge?.kind
+  if (k === 'updates') return { new_release: null, resources: Array.from({ length: Math.min(s.badge?.count ?? 1, 6) }, (_, i) => r(['kora_core', 'kora_inventory', 'kora_jobs', 'kora_phone', 'chat', 'mapmanager'][i], 1 + i, 'clean', ['A small fix'])) }
+  if (k === 'needs_attention') return { new_release: null, resources: [r('kora_core', 2, 'dirty', ['A fix']), r('kora_jobs', 0, 'up_to_date')] }
+  if (k === 'new_release') return { new_release: '1.5.0', resources: [r('kora_core', 0, 'up_to_date')] }
+  return { new_release: null, resources: s.status === 'missing' ? [] : [r('kora_core', 0, 'up_to_date')] }
 }
 
 function checkPort(n: unknown): number {
@@ -231,13 +288,13 @@ const route = (method: string, pattern: string, h: Handler) => {
 const dec = (s: string) => decodeURIComponent(s)
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)' }) satisfies T.Meta)
-route('GET', '/system', () => ({ admin: false, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true }) satisfies T.SystemInfo)
+route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora' }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
     await sleep(1200)
     const have = servers.map((s) => s.dir)
-    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development' }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production' }].filter((c) => !have.includes(c.dir)) }
+    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development', kind: 'txadmin', ports: { game: 30130, txadmin: 40130 } }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production', kind: 'plain', ports: { game: 30131, txadmin: 40131 } }].filter((c) => !have.includes(c.dir)) }
   }),
 )
 route('POST', '/servers/adopt', (_m, b) => {
@@ -259,15 +316,16 @@ route('POST', '/servers/{s}/control', (m, b) => {
   if (s.status === 'missing') throw new Fail(409, 'conflict', 'The folder for this server is missing, so it cannot be started.')
   return startJob('server_control', s.name, async (emit) => {
     emit({ type: 'status', message: action === 'stop' ? 'Stopping' : action === 'start' ? 'Starting' : 'Restarting' })
-    if (action === 'start' && s.status === 'running') return {}
+    if (action === 'start' && s.status === 'running') return { status: s.status }
     await sleep(1200)
+    if ((action === 'start' || action === 'restart') && beh.trouble) throw new Fail(409, 'conflict', `Port ${s.ports.game} is already in use by another program on this computer. Change the port on the Ports tab, or close the other program.`)
     if (action === 'start' || action === 'restart') {
       const clash = servers.find((o) => o.name !== s.name && o.status === 'running' && o.ports.game === s.ports.game)
       if (clash) throw new Fail(409, 'conflict', `Port ${s.ports.game} is already in use by "${clash.name}". Change the port on the Ports tab first.`)
     }
     s.status = action === 'stop' ? 'stopped' : 'running'
     pushServer(s)
-    return {}
+    return { status: s.status }
   })
 })
 route('DELETE', '/servers/{s}/registration', (m) => {
@@ -295,11 +353,11 @@ route('POST', '/servers/{s}/open-folder', (m) => {
 })
 route('GET', '/servers/{s}/logs', (m) => {
   find(dec(m[1]))
-  return { files: LOG_FILES }
+  return { files: beh.trouble ? [] : LOG_FILES }
 })
 route('GET', '/servers/{s}/logs/{f}', (m, _b, q) => {
   find(dec(m[1]))
-  if (!LOG_FILES.some((f) => f.name === dec(m[2]))) throw new Fail(404, 'not_found', 'That log file does not exist.')
+  if (beh.trouble || !LOG_FILES.some((f) => f.name === dec(m[2]))) throw new Fail(404, 'not_found', 'That log file does not exist.')
   return { file: dec(m[2]), lines: fakeLogLines(dec(m[1]), dec(m[2]), Math.min(Number(q.get('lines') ?? 300), 300)) }
 })
 route('POST', '/servers/{s}/console', (m, b) => {
@@ -346,9 +404,13 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
     const snap = `snap-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)}`
     emit({ type: 'snapshot', id: snap })
     await sleep(600)
-    for (const r of chosen) {
+    for (const [i, r] of chosen.entries()) {
       emit({ type: 'resource', id: r.id, state: 'updating' })
       await sleep(900)
+      if (beh.trouble && i === 1) {
+        emit({ type: 'resource', id: chosen[0].id, state: 'rolled back' })
+        throw new Fail(500, 'failed', `${r.id} could not be updated: its files changed on disk while the update ran. Everything was put back from the safety copy (${snap}).`, undefined, { log_path: `${s.dir}/.kora/update.log` })
+      }
       emit({ type: 'resource', id: r.id, state: 'updated' })
     }
     const restart = b.restart as T.RestartPolicy
@@ -443,14 +505,14 @@ route('POST', '/servers/{s}/resources', (m, b) => {
 })
 route('GET', '/servers/{s}/webhook', (m) => {
   const u = webhooks[find(dec(m[1])).name]
-  return { configured: !!u, redacted: u ? u.replace(/(\/api\/webhooks\/\d+\/).+/, '$1\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022') : null } satisfies T.WebhookState
+  return { configured: !!u, set: !!u, redacted: u ? u.replace(/(\/api\/webhooks\/\d+\/).+/, '$1\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022') : null } satisfies T.WebhookState
 })
 route('PUT', '/servers/{s}/webhook', (m, b) => {
   const s = find(dec(m[1]))
   const url = String(b.url ?? '').trim()
   if (!/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d+\/.+/.test(url)) throw new Fail(400, 'bad_request', 'That does not look like a Discord webhook address. It starts with https://discord.com/api/webhooks/.')
   webhooks[s.name] = url
-  return { configured: true, redacted: url.replace(/(\/api\/webhooks\/\d+\/).+/, '$1\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022') }
+  return { configured: true, set: true, redacted: url.replace(/(\/api\/webhooks\/\d+\/).+/, '$1\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022') }
 })
 route('DELETE', '/servers/{s}/webhook', (m) => {
   delete webhooks[find(dec(m[1])).name]
@@ -458,6 +520,7 @@ route('DELETE', '/servers/{s}/webhook', (m) => {
 })
 route('POST', '/servers/{s}/webhook/test', (m) => {
   if (!webhooks[find(dec(m[1])).name]) throw new Fail(400, 'bad_request', 'Add a webhook first.')
+  if (beh.trouble) throw new Fail(502, 'failed', 'Discord did not accept the test message (404 Unknown Webhook). Check that the webhook still exists.')
   return undefined
 })
 const RUN_AS_HELP = 'As you: updates run with your own GitHub sign-in, so private forks can be fetched, but they only run while your account can run background tasks.\nSystem account: runs even when nobody is signed in, but has no GitHub sign-in, so private forks cannot be fetched.'
@@ -473,11 +536,12 @@ route('PUT', '/servers/{s}/schedule', (m, b) => {
   if (s.mode !== 'development') throw new Fail(400, 'bad_request', 'Scheduled updates are only for development servers.')
   const c = b as unknown as T.ScheduleConfig
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(c.time)) throw new Fail(400, 'bad_request', 'The time must be written as HH:MM, for example 04:00.')
-  if (c.run_as === 'system') throw new Fail(403, 'needs_elevation', 'Running updates as the system account needs administrator rights.', ['sudo', 'kora', 'schedule', 'set', s.name, c.preset, '--at', c.time, '--run-as', 'system'])
+  if (c.run_as === 'system' || beh.trouble) throw new Fail(403, 'needs_elevation', 'Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.', ['kora', 'schedule', 'set', s.dir, c.preset, '--at', c.time, '--run-as', c.run_as])
   schedules[s.name] = c
   return { schedule: c, description: describeSchedule(c), run_as_help: RUN_AS_HELP }
 })
 route('DELETE', '/servers/{s}/schedule', (m) => {
+  if (beh.trouble) throw new Fail(403, 'needs_elevation', 'Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.', ['kora', 'schedule', 'off', find(dec(m[1])).dir])
   delete schedules[find(dec(m[1])).name]
   return undefined
 })
@@ -516,7 +580,8 @@ route('POST', '/servers/{s}/pr', (m, b) => {
 route('GET', '/github/status', () => ({ signed_in: prefs.github, user: prefs.github ? 'sam-rp' : null }) satisfies T.GithubStatus)
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
-    await sleep(6000)
+    await sleep(beh.trouble ? 3000 : 6000)
+    if (beh.trouble) throw new Fail(400, 'failed', 'GitHub did not confirm the code in time. Start the sign-in again.')
     prefs.github = true
     return { user: 'sam-rp' }
   })
@@ -524,7 +589,7 @@ route('POST', '/github/login', () => {
 })
 route('GET', '/github/owners', () => {
   if (!prefs.github) throw new Fail(403, 'forbidden', 'Sign in to GitHub first.')
-  return { owners: [{ login: 'sam-rp', kind: 'user' }, { login: 'sunset-roleplay', kind: 'org' }] satisfies T.GithubOwner[] }
+  return { owners: [{ login: 'sam-rp', kind: 'user', can_fork: true, reason: null }, { login: 'sunset-roleplay', kind: 'org', can_fork: false, reason: 'You cannot create repositories in this organisation.' }] satisfies T.GithubOwner[] }
 })
 route('GET', '/catalog', () => catalog)
 route('GET', '/artifacts', () => ({ recommended: 17000, items: [17200, 17100, 17000, 16900, 16800].map((b) => ({ build: b, url: `https://runtime.fivem.net/artifacts/fivem/build_server_windows/master/${b}-abc/server.zip`, date: '2026-02-20' })) }) satisfies T.ArtifactList)
@@ -546,12 +611,12 @@ route('POST', '/checks/ports', (_m, b) => {
 })
 route('POST', '/checks/disk', (_m, b) => {
   const dir = String(b.dir ?? '')
-  const low = dir.includes('small')
+  const low = beh.trouble || dir.includes('small')
   return { ok: !low, free_bytes: low ? 2.1e9 : 148e9, needed_bytes: 6e9, message: low ? 'Only 2.1 GB is free here and about 6 GB is needed. Pick another folder or free some space.' : '148 GB free, about 6 GB needed.' } satisfies T.DiskCheck
 })
 route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
-  if (a && a.password === 'wrong') return { ok: false, message: 'The database refused that login. Check the user name and password.' }
+  if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.' }
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
 })
 route('POST', '/installs/plan', (_m, b) => {
@@ -572,46 +637,60 @@ route('POST', '/installs', (_m, b) => {
   return startJob('install', null, (emit) => runInstall(r, emit))
 })
 route('GET', '/installs/{j}/log', () => ({ lines: ['[install] started', '[install] see the steps above for details'] }))
-route('GET', '/self-update', () => ({ current: prefs.version, latest: '0.4.1', available: prefs.version !== '0.4.1', versions: ['0.4.1', '0.4.0', '0.3.4'] }) satisfies T.SelfUpdateInfo)
-route('POST', '/self-update', (_m, b) =>
-  startJob('self_update', null, async (emit) => {
+route('GET', '/self-update', () => ({ current: prefs.version, latest: '0.4.1', available: prefs.version !== '0.4.1', update_available: prefs.version !== '0.4.1', versions: ['0.4.1', '0.4.0', '0.3.4'] }) satisfies T.SelfUpdateInfo)
+route('POST', '/self-update', (_m, b) => {
+  if (beh.trouble) throw elevate('Updating Kora', ['self-update', '--yes', ...(b.version ? ['--version', String(b.version)] : [])])
+  return startJob('self_update', null, async (emit) => {
     emit({ type: 'status', message: 'Downloading' })
     await sleep(1500)
     emit({ type: 'status', message: 'Checking the download' })
     await sleep(800)
     prefs.version = String(b.version ?? '0.4.1')
     return { version: prefs.version }
-  }),
-)
+  })
+})
 route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.version : null, path: prefs.app ? 'C:\\Users\\sam\\AppData\\Local\\Kora\\kora.exe' : null, desktop_shortcut: prefs.desktopShortcut, supported: true }) satisfies T.AppStatus)
 route('PUT', '/app', (_m, b) => {
+  if (beh.trouble) throw elevate('Installing the Kora app', ['app', 'install', '--yes', ...(b.desktop_shortcut ? [] : ['--no-desktop-shortcut'])])
   prefs.app = true
   prefs.desktopShortcut = !!b.desktop_shortcut
   return { message: 'The Kora app is installed.' }
 })
 route('DELETE', '/app', () => {
+  if (beh.trouble) throw elevate('Removing the Kora app', ['uninstall', '--app', '--yes'])
   prefs.app = false
   return { message: 'The Kora app was removed.' }
 })
-route('POST', '/uninstall/plan', () => ({
-  items: [
-    { item: 'services', description: 'Background services for your servers', kind: 'system', remove: true },
-    { item: 'firewall', description: 'Firewall rules Kora added', kind: 'system', remove: true },
-    { item: 'schedules', description: 'Scheduled update tasks', kind: 'system', remove: true },
-    { item: 'app', description: 'The Kora app and shortcuts', kind: 'app', remove: true },
-    { item: 'folders', description: 'Server folders and their files', kind: 'folder', remove: false },
-    { item: 'databases', description: 'Server databases', kind: 'database', remove: false },
-  ],
-}) satisfies T.UninstallPlan)
-route('POST', '/uninstall', () =>
-  startJob('uninstall', null, async (emit) => {
-    for (const t of ['Removing services', 'Removing firewall rules', 'Removing scheduled tasks', 'Removing the Kora app']) {
-      emit({ type: 'status', message: t })
-      await sleep(700)
+route('POST', '/uninstall/plan', (_m, b) => {
+  const only = b.server ? find(String(b.server)) : null
+  const items: T.UninstallItem[] = []
+  for (const s of only ? [only] : servers.filter((x) => x.managed)) {
+    items.push(
+      { item: `${s.name}/service`, description: `Delete Kora's service definition /etc/systemd/system/kora-${s.name}.service`, kind: 'system', remove: true },
+      { item: `${s.name}/firewall`, description: `Close the firewall ports ${s.ports.game} and ${s.ports.txadmin} that Kora opened`, kind: 'system', remove: true },
+      { item: `${s.name}/registry`, description: `Forget '${s.name}' in the Kora server list (its folder and database stay)`, kind: 'system', remove: true },
+      { item: `${s.name}/folder`, description: `Delete the server folder ${s.dir} and what Kora put in it`, kind: 'folder', remove: false },
+      { item: `${s.name}/database`, description: `Drop the database and database user Kora created for '${s.name}'`, kind: 'database', remove: false },
+    )
+  }
+  if (!only && prefs.app) items.push({ item: 'app', description: 'The Kora app (the `kora` command, shortcuts and the installed program)', kind: 'app', remove: false })
+  return { items } satisfies T.UninstallPlan
+})
+route('POST', '/uninstall', (_m, b) => {
+  const only = (b.only as string[] | undefined) ?? []
+  if (beh.trouble) throw elevate('Removing services, firewall rules and accounts', ['uninstall', '--yes', ...(b.delete_files ? ['--delete-files'] : []), ...(b.delete_databases ? ['--delete-databases'] : []), ...(only.length === 1 ? only : [])])
+  const answers = (b.answers as { item: string; remove: boolean }[] | undefined) ?? []
+  return startJob('uninstall', only.length === 1 ? only[0] : null, async (emit) => {
+    const removed: string[] = []
+    for (const a of answers.filter((x) => x.remove)) {
+      emit({ type: 'status', message: `Removing ${a.item}` })
+      removed.push(a.item)
+      await sleep(500)
     }
-    return { notes: ['Your server folders and databases were kept.'] }
-  }),
-)
+    const kept = answers.filter((x) => !x.remove).map((x) => x.item)
+    return { removed, kept, notes: ['Your server folders and databases were kept unless you chose to delete them.', ...kept.map((k) => `Kept ${k}`)] }
+  })
+})
 route('GET', '/jobs/{id}', (m) => {
   const j = jobs.get(dec(m[1]))
   if (!j) throw new Fail(404, 'not_found', 'That job is not known (it may be from before Kora restarted).')
@@ -627,8 +706,12 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.origin)
   const method = (init?.method ?? 'GET').toUpperCase()
   const path = url.pathname.slice(BASE.length)
-  await sleep(120)
+  const [lo, hi] = beh.latency
+  const wait = lo + (hi - lo) * rand()
+  await new Promise<void>((r) => setTimeout(r, wait * (speed === 0 ? 0 : 1)))
+  if (beh.auth === 'down') throw new TypeError('Failed to fetch')
   try {
+    if (beh.auth === 'expired') throw new Fail(401, 'unauthorized', 'You are not signed in.')
     if (path === '/session' && method === 'POST') {
       const token = (JSON.parse(String(init?.body ?? '{}')) as { token?: string }).token
       if (!token || token === 'bad') {
@@ -638,7 +721,7 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
       prefs.signedIn = true
       return json(204, undefined)
     }
-    if (path !== '/meta' && !prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
+    if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
     if (method !== 'GET' && !headers.has('X-Kora')) throw new Fail(403, 'forbidden', 'Missing the X-Kora header.')
     const body = init?.body ? (JSON.parse(String(init.body)) as Body) : {}
@@ -690,6 +773,7 @@ class MockEventSource {
   }
   private connect() {
     if (this.readyState === 2) return
+    if (beh.auth !== 'ok') return void this.onerror?.(new Event('error'))
     this.readyState = 1
     this.onopen?.(new Event('open'))
     const path = new URL(this.url, location.origin).pathname.slice(BASE.length)
@@ -715,12 +799,36 @@ class MockEventSource {
   }
 }
 
-export function installMock(): void {
-  const real = window.fetch.bind(window)
+export interface MockOptions {
+  scenario?: ScenarioName
+  /** Time multiplier for waits (1 = normal, 0 = no waiting; used by tests). */
+  speed?: number
+}
+
+export function activeScenario(): ScenarioName {
+  return scenario
+}
+
+export function installMock(opts: MockOptions = {}): ScenarioName {
+  const name = opts.scenario ?? resolveScenario(window.location.search, safeStorage())
+  init(name)
+  if (opts.speed !== undefined) speed = opts.speed
+  startTicker()
+  const real = realFetch ?? (realFetch = window.fetch.bind(window))
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const u = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url
     return u.startsWith(BASE) ? handle(input, init) : real(input, init)
   }) as typeof window.fetch
   window.EventSource = MockEventSource as unknown as typeof EventSource
-  console.info('[kora] Using the built-in mock backend. All data is fake.')
+  console.info(`[kora] Using the built-in mock backend (scenario "${name}"). All data is fake.`)
+  return name
+}
+
+let realFetch: typeof window.fetch | null = null
+function safeStorage(): Storage | null {
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
 }

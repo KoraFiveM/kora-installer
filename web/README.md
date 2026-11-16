@@ -39,6 +39,47 @@ The mock is switched on by a compile-time constant (`__KORA_MOCK__`, set in `vit
 (unless `VITE_MOCK=0`) and for `VITE_MOCK=1` builds. `src/main.tsx` imports it dynamically behind that constant, so a
 normal build drops it entirely (check: `grep -rl "kora-live" dist` finds nothing).
 
+## Mock scenarios
+
+Pick a scenario with `?scenario=<name>` (for example `http://localhost:5173/?scenario=fleet`). It is kept in
+`sessionStorage`, so navigating keeps it; a new `?scenario=` replaces it. In mock builds a small amber "Mock: <name>"
+button sits bottom-right: it opens a panel to change scenario, "Reset state" (reloads, dropping everything done in the
+page) and a link to the styleguide. Waits and "random" values are seeded, so a scenario looks the same every time.
+
+| Scenario | What it shows |
+|---|---|
+| `default` | The 3 servers above; everything works. |
+| `empty` | No servers and no saved install answers: the first-run screens. |
+| `fleet` | 31 servers: every mode x status x badge (30), 32-character names, ports above 60000, one added from an existing folder. For table density and overflow. |
+| `trouble` | Everything fails realistically: start fails with a port conflict, the update preview finds dirty/diverged resources, apply fails after the first resource and rolls back, `needs_elevation` on schedule / Kora app / uninstall / self-update, the webhook test fails, console not enabled, no log files, GitHub signed out (and sign-in fails), disk check fails, database login wrong. |
+| `slow` | Like `default`, but every request takes 1.5 to 3 s and jobs run 3x slower (loading states). |
+| `offline` | The API answers 401: the "session expired" screen. |
+| `down` | Every request fails with a network error: the "Kora is not answering" states. |
+
+Code: `src/api/mock/scenarios.ts` (names, selection, behaviour), `data.ts` (seeds), `index.ts` (the backend),
+`Switcher.tsx` / `boot.tsx` (the floating control). The mock follows the real backend's response shapes
+(`crates/kora-web/src/handlers/*.rs`): `needs_elevation` commands are `["kora", ...]` without `sudo` (the UI shows
+`sudo ` in front on Linux), uninstall plan ids are `<server>/service|firewall|registry|folder|database` and `app`.
+
+## Styleguide
+
+`/styleguide` (mock builds only, not linked in the sidebar; the floating Mock panel links to it) shows the brand colours
+with hex and CSS variable, the semantic variables, the type scale in the three fonts, every primitive in
+`src/components/ui/` (buttons in all variants with default / forced hover / forced focus / disabled / loading, inputs,
+checkbox, radio, badges, alerts, card, dialog, tabs, progress), status and update chips, job progress in each state
+(pending, running 40%, done, failed with kept files and log path, needs administrator rights), error notices, an empty
+state, a table with long content, the console view and skeletons. The page is `src/pages/Styleguide.tsx`.
+
+## Styling workflow
+
+1. `npm run dev` (mock backend on) and open `http://localhost:5173/styleguide`.
+2. Change colours and fonts in `src/index.css` (the `--kora-*` variables, the shadcn variables and `@theme inline`);
+   change component looks in `src/components/ui/*.tsx` and `src/components/Status.tsx`. Hot reload updates the page.
+3. Check real screens with `?scenario=fleet` (density, overflow), `?scenario=trouble` (error states), `?scenario=slow`
+   (skeletons) and `?scenario=empty` (first run).
+4. `npm run lint && npm test && npm run build` before committing. A normal build must stay free of mock code:
+   `grep -rlE "kora-live|styleguide|scenario" dist` finds nothing (`VITE_MOCK=1 npm run build` includes it all).
+
 ## How auth works
 
 1. `kora panel` opens `/#token=<token>`. `src/main.tsx` calls `bootstrapSession()` (`src/lib/session.ts`) **before** React
