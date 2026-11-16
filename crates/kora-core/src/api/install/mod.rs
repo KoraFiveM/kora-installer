@@ -928,7 +928,8 @@ mod tests {
     fn wire(name: &str) -> WireInstall {
         WireInstall {
             name: name.into(),
-            dir: "/tmp/kora-x".into(),
+            // Absolute on every platform ("/tmp/..." is not absolute on Windows).
+            dir: std::env::temp_dir().join("kora-x").to_string_lossy().into_owned(),
             ..Default::default()
         }
     }

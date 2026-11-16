@@ -195,6 +195,11 @@ impl Rig {
     }
 }
 
+/// An absolute folder on every platform ("/tmp/..." is not absolute on Windows).
+fn abs(name: &str) -> String {
+    std::env::temp_dir().join(name).to_string_lossy().into_owned()
+}
+
 fn install_body(dir: &str) -> Value {
     json!({
         "mode": "production", "name": "Alpha Town", "dir": dir, "hostname": "Alpha RP",
@@ -232,7 +237,7 @@ async fn without_a_helper_everything_still_answers_needs_elevation() {
     assert_eq!(j["error"]["command"], json!(["kora", "schedule", "off", "dev"]));
     assert!(j["error"]["message"].as_str().unwrap().contains("automatic updates"));
 
-    let (s, j) = r.call("POST", "/installs", Some(install_body("/tmp/kora-helper-test-a"))).await;
+    let (s, j) = r.call("POST", "/installs", Some(install_body(&abs("kora-helper-test-a")))).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
     assert!(!j.to_string().contains("SECRETLICENCE") && !j.to_string().contains(DBPASS));
     assert_eq!(*r.env.runs.lock().unwrap(), 0);
@@ -338,7 +343,7 @@ async fn a_helper_that_vanishes_falls_back_to_the_command() {
 async fn an_install_runs_in_the_helper_with_secrets_in_the_environment_only() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h.clone())).await;
-    let a = r.call("POST", "/installs", Some(install_body("/tmp/kora-helper-test-b"))).await;
+    let a = r.call("POST", "/installs", Some(install_body(&abs("kora-helper-test-b")))).await;
     let j = r.job(a).await;
     assert_eq!(j["state"], "done", "{j}");
     assert_eq!(j["result"]["name"], "Alpha Town");
@@ -360,7 +365,7 @@ async fn an_install_runs_in_the_helper_with_secrets_in_the_environment_only() {
 async fn a_failed_install_in_the_helper_is_a_failed_job_without_secrets() {
     let h = FakeHelper::new(1);
     let r = rig(Some(h)).await;
-    let a = r.call("POST", "/installs", Some(install_body("/tmp/kora-helper-test-c"))).await;
+    let a = r.call("POST", "/installs", Some(install_body(&abs("kora-helper-test-c")))).await;
     let j = r.job(a).await;
     assert_eq!(j["state"], "failed", "{j}");
     assert!(j["error"]["message"].as_str().unwrap().contains("code 1"));

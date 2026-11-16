@@ -313,10 +313,26 @@ mod os {
                 .or_else(|_| std::fs::copy("/usr/bin/sleep", &sleep))
                 .unwrap();
             let mut child = std::process::Command::new(&sleep).arg("5").spawn().unwrap();
-            let found = process_tree(dir.path());
+            // A loaded machine can take a moment to show a new process in /proc: look for up to 3 s.
+            let pid = child.id();
+            let mut found = None;
+            for _ in 0..30 {
+                found = process_tree(dir.path());
+                if found.is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let why = format!(
+                "pid {pid}: exe {:?}, stat {:?}, cmdline {:?}, dir {:?}",
+                std::fs::read_link(format!("/proc/{pid}/exe")),
+                std::fs::read_to_string(format!("/proc/{pid}/stat")).map(|t| t.len()),
+                std::fs::read(format!("/proc/{pid}/cmdline")).map(|b| String::from_utf8_lossy(&b).into_owned()),
+                dir.path()
+            );
             let _ = child.kill();
             let _ = child.wait();
-            let (cpu, rss) = found.expect("the stand-in belongs to the folder");
+            let (cpu, rss) = found.unwrap_or_else(|| panic!("the stand-in belongs to the folder ({why})"));
             assert!(cpu >= 0.0 && rss > 0);
             assert!(
                 process_tree(dir.path()).is_none(),
