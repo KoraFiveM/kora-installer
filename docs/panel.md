@@ -50,15 +50,26 @@ Run `kora panel --help` to see the options your version supports.
 
 ### Starting it on a server with no screen (SSH)
 
-On a headless Linux server there is no browser to open. The panel notices this (an SSH session, or no display) and prints
-the link and a tunnel hint:
+On a headless Linux server there is no browser to open, and a panel running in your SSH window would stop when the
+window closes. So when you run `kora panel` there, Kora asks:
 
 ```
-Kora Panel: http://127.0.0.1:47120/#token=...
-No local desktop session detected; open the URL on your machine with:
-  ssh -L 47120:127.0.0.1:47120 user@host
-Press Ctrl+C to stop.
+This computer has no screen, so Kora Panel would stop when you close this window.
+Keep it running in the background instead? [Y/n]
 ```
+
+Press Enter to keep it running in the background (a service that starts at sign-in and keeps watching your servers). Kora
+prints the sign-in link and the tunnel line:
+
+```
+The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.
+Sign in with: http://127.0.0.1:47120/#token=...
+On a server with no screen, open a tunnel from your own computer first:  ssh -L 47120:127.0.0.1:47120 user@host
+```
+
+Run `kora panel` again at any time to see the link again (it never starts a second panel while the background one is
+running). Answer `n`, or use `kora panel --foreground`, to run it in this window only; `kora panel --no-open` does the
+same without asking.
 
 On your own computer, open a second terminal and run the `ssh -L` line it printed (replace `user@host` with your login).
 Leave it open, then paste the full link, including the `#token=...` part, into your browser. The tunnel carries the page
@@ -199,11 +210,11 @@ clears: a server stopping unexpectedly (a stop from Kora, the CLI or the TUI doe
 space, high memory, and updates that need attention. The banner checks every 10 seconds. Alerts are kept in memory, so
 they are lost when the panel restarts (the charts keep their history). Email alerts are not available yet.
 
-**Keeping the panel running.** `kora panel` stops when you close its terminal, so monitoring and alerts only work while it
-runs. To keep it running in the background, run `kora panel --install-service`. It starts when you sign in and needs no
+**Keeping the panel running.** A panel run in a window stops when the window closes, so monitoring and alerts only work while it
+runs. On a server with no screen `kora panel` offers to run it in the background for you; anywhere else, run `kora panel --install-service`. It starts when you sign in and needs no
 administrator rights (Linux: a systemd user service; Windows: an entry in your Startup folder). `kora panel
 --remove-service` removes it, and `kora panel --print-link` prints the sign-in link of the running background panel (the
-link stays the same each time). It is off unless you ask for it.
+link stays the same each time). On a computer with a desktop it stays off unless you ask for it.
 
 ## 10. Optional: remote access
 

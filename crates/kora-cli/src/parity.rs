@@ -70,6 +70,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("panel", CliOnly("starts the panel itself")),
     ("panel --port", CliOnly("starts the panel itself")),
     ("panel --no-open", CliOnly("starts the panel itself")),
+    ("panel --foreground", CliOnly("starts the panel itself")),
     ("panel --install-service", CliOnly("sets up how the panel itself is started, so it cannot be done from inside it")),
     ("panel --remove-service", CliOnly("sets up how the panel itself is started, so it cannot be done from inside it")),
     ("panel --print-link", CliOnly("prints the link used to open the panel")),

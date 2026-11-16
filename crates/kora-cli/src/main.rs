@@ -294,6 +294,9 @@ struct PanelArgs {
     /// Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop).
     #[arg(long)]
     no_open: bool,
+    /// Run the panel in this window and stop it when the window closes: do not offer or use the background panel.
+    #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link"])]
+    foreground: bool,
     /// Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed).
     #[arg(long, conflicts_with_all = ["remove_service", "print_link"])]
     install_service: bool,
@@ -1708,6 +1711,30 @@ fn panel(a: &PanelArgs) -> i32 {
             }
         };
     }
+    if !a.install_service && !a.remove_service && !a.foreground {
+        let running = background_panel_running(&home);
+        let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+        match panel_start_mode(headless_session(), tty, running) {
+            PanelStart::ShowRunning => {
+                if let Ok(link) = svc::link(&home) {
+                    println!("Kora Panel is already running in the background.");
+                    println!("Sign in with: {link}");
+                    if headless_session() {
+                        let p = svc::saved_port(&home).unwrap_or(a.port);
+                        println!("On a server with no screen, open a tunnel from your own computer first:  ssh -L {p}:127.0.0.1:{p} user@host");
+                    }
+                    println!("(`kora panel --remove-service` stops and removes it; `kora panel --foreground` runs a separate one in this window.)");
+                    return 0;
+                }
+            }
+            PanelStart::OfferBackground => {
+                if ask_yes_no("This computer has no screen, so Kora Panel would stop when you close this window.\nKeep it running in the background instead? [Y/n] ") {
+                    return install_background_panel(a, &home);
+                }
+            }
+            PanelStart::Foreground => {}
+        }
+    }
     if a.install_service || a.remove_service {
         let runner = kora_core::service::SystemRunner;
         let platform = kora_core::service::Platform::current();
@@ -1723,28 +1750,7 @@ fn panel(a: &PanelArgs) -> i32 {
                 }
             };
         }
-        let exe = match std::env::current_exe() {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("error: cannot find the kora program to run in the background: {e}");
-                return 1;
-            }
-        };
-        let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
-        let spec = svc::InstallSpec { exe: &exe, port: a.port, kora_home_env: home_env.as_deref() };
-        return match svc::install(&home, &spec, &runner, platform) {
-            Ok(link) => {
-                println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
-                println!("Sign in with: {link}");
-                println!("Show the link again any time with `kora panel --print-link`; remove it with `kora panel --remove-service`.");
-                println!("The link contains your sign-in token: keep it private.");
-                0
-            }
-            Err(e) => {
-                eprintln!("error: could not set up the background panel: {e}");
-                1
-            }
-        };
+        return install_background_panel(a, &home);
     }
     // A saved token (made by --install-service) keeps the sign-in link the same every time.
     let opts = kora_web::PanelOptions { bind: a.bind, port: a.port, open_browser: !a.no_open, remote: a.remote, token: svc::load_token(&home), ..Default::default() };
@@ -1757,6 +1763,84 @@ fn panel(a: &PanelArgs) -> i32 {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+/// What `kora panel` does when started without options.
+#[derive(Debug, PartialEq, Eq)]
+enum PanelStart {
+    /// A background panel is already up: show its link instead of starting a second one.
+    ShowRunning,
+    /// A server with no screen and nobody to keep the window open: offer the background panel.
+    OfferBackground,
+    /// Run in this window.
+    Foreground,
+}
+
+fn panel_start_mode(headless: bool, interactive: bool, background_running: bool) -> PanelStart {
+    if background_running {
+        PanelStart::ShowRunning
+    } else if headless && interactive {
+        PanelStart::OfferBackground
+    } else {
+        PanelStart::Foreground
+    }
+}
+
+/// No desktop to open a browser on: an SSH session, or no display on Linux.
+fn headless_session() -> bool {
+    std::env::var_os("SSH_CONNECTION").is_some() || (cfg!(unix) && std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none())
+}
+
+/// Is the background panel (`--install-service`) installed and answering on its saved port?
+fn background_panel_running(home: &std::path::Path) -> bool {
+    use kora_core::monitor::panel_service as svc;
+    let (Some(_), Some(port)) = (svc::load_token(home), svc::saved_port(home)) else { return false };
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_ok()
+}
+
+/// Ask a yes/no question on the terminal; an empty answer means yes.
+fn ask_yes_no(question: &str) -> bool {
+    use std::io::Write;
+    print!("{question}");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).is_err() {
+        return false;
+    }
+    !matches!(line.trim().to_lowercase().as_str(), "n" | "no")
+}
+
+/// Install and start the background panel (systemd user service on Linux, a Startup entry on Windows).
+fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {
+    use kora_core::monitor::panel_service as svc;
+    let runner = kora_core::service::SystemRunner;
+    let platform = kora_core::service::Platform::current();
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot find the kora program to run in the background: {e}");
+            return 1;
+        }
+    };
+    let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
+    let spec = svc::InstallSpec { exe: &exe, port: a.port, kora_home_env: home_env.as_deref() };
+    match svc::install(home, &spec, &runner, platform) {
+        Ok(link) => {
+            println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
+            println!("Sign in with: {link}");
+            if headless_session() {
+                println!("On a server with no screen, open a tunnel from your own computer first:  ssh -L {0}:127.0.0.1:{0} user@host", a.port);
+            }
+            println!("Show the link again any time with `kora panel`; remove it with `kora panel --remove-service`.");
+            println!("The link contains your sign-in token: keep it private.");
+            0
+        }
+        Err(e) => {
+            eprintln!("error: could not set up the background panel: {e}");
             1
         }
     }
@@ -2349,6 +2433,18 @@ mod tests {
         let mut r = req_with_ports(30120, 40120);
         settle_ports_avoiding(&mut r, true, &Busy(vec![30120]), &[]).unwrap();
         assert!(request_summary(&r).contains("game 30121, txAdmin 40120"));
+    }
+
+    #[test]
+    fn the_panel_offers_the_background_service_only_where_nobody_keeps_a_window_open() {
+        // (headless, interactive, background panel already running)
+        assert_eq!(panel_start_mode(true, true, true), PanelStart::ShowRunning, "never start a second one");
+        assert_eq!(panel_start_mode(false, true, true), PanelStart::ShowRunning);
+        assert_eq!(panel_start_mode(true, true, false), PanelStart::OfferBackground, "a server with no screen");
+        assert_eq!(panel_start_mode(true, false, false), PanelStart::Foreground, "scripts and pipes are never asked");
+        assert_eq!(panel_start_mode(false, true, false), PanelStart::Foreground, "a desktop opens the browser and runs here");
+        assert!(Cli::try_parse_from(["kora", "panel", "--foreground"]).is_ok());
+        assert!(Cli::try_parse_from(["kora", "panel", "--foreground", "--install-service"]).is_err());
     }
 
     #[test]

@@ -5,6 +5,11 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-16
+
+### Changed
+- **`kora panel` on a server with no screen now offers to run in the background.** A panel started in an SSH window stopped as soon as the window closed. Now `kora panel` asks "Keep it running in the background instead? [Y/n]" (Enter = yes), sets up the background service and prints the sign-in link and the `ssh -L` tunnel line. Running `kora panel` again shows the link of the running background panel instead of starting a second one. Scripts and pipes are never asked. New `--foreground` runs it in the current window only.
+
 ## [0.4.1] - 2026-11-16
 
 ### Added
