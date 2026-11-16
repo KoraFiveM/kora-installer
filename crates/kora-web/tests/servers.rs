@@ -228,6 +228,32 @@ async fn delete_checks_name_managed_and_running() {
 }
 
 #[tokio::test]
+async fn a_failed_database_drop_asks_for_the_admin_password_and_a_retry_with_it_works() {
+    let d = tempfile::tempdir().unwrap();
+    let f = FakeBackend::sample();
+    managed_server(&f, "mine", Mode::Production, &d.path().join("mine"));
+    let a = app(&f);
+    f.state().delete_error = Some("could not remove database 'kora_1' / user 'kora_1': command failed: database client exited with status 1. Everything else was already removed. Kora needs the database admin login again to drop them: set KORA_DB_ADMIN_PASSWORD to the admin password then run `kora delete /x` again.".into());
+    let first = json!({"confirm_name": "mine", "keep_files": false, "keep_db": false});
+    let r = call(&a, "DELETE", "/servers/mine", Some(first)).await;
+    let j = job(&a, r).await;
+    assert_eq!(j["state"], "failed");
+    assert_eq!(j["error"]["code"], "needs_db_password", "{j}");
+    let msg = j["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("database 'kora_1'") && msg.contains("administrator password"), "{msg}");
+    assert!(!msg.contains("KORA_DB_ADMIN_PASSWORD") && !msg.contains("kora delete"), "panel wording, not command-line wording: {msg}");
+    // Retry with the password: it is used, and never echoed back or recorded.
+    let retry = json!({"confirm_name": "mine", "keep_files": false, "keep_db": false, "db_admin_password": "s3cret-pw"});
+    let r = call(&a, "DELETE", "/servers/mine", Some(retry)).await;
+    let j = job(&a, r).await;
+    assert_eq!(j["state"], "done", "{j}");
+    assert!(!j.to_string().contains("s3cret-pw"));
+    let calls = f.calls();
+    assert!(calls.contains(&"delete mine keep_files=false keep_db=false db_password=set".to_string()), "{calls:?}");
+    assert!(!calls.iter().any(|c| c.contains("s3cret-pw")));
+}
+
+#[tokio::test]
 async fn unregister_only_for_adopted_servers() {
     let d = tempfile::tempdir().unwrap();
     let f = FakeBackend::sample();

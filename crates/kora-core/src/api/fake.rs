@@ -134,6 +134,21 @@ impl Backend for FakeBackend {
         s.servers.retain(|x| x.name != e.name);
         Ok(vec!["Deleted.".into()])
     }
+    fn delete_with_db_password(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>) -> Res<Vec<String>> {
+        let Some(pw) = db_admin_password.filter(|p| !p.is_empty()) else {
+            return self.delete(e, keep_files, keep_db);
+        };
+        let mut s = self.state();
+        // Records that a password was given, never the password itself.
+        s.calls.push(format!("delete {} keep_files={keep_files} keep_db={keep_db} db_password=set", e.name));
+        if let Some(x) = &s.delete_error {
+            if !x.contains("KORA_DB_ADMIN_PASSWORD") || pw == "wrong" {
+                return Err(x.clone());
+            }
+        }
+        s.servers.retain(|x| x.name != e.name);
+        Ok(vec!["Deleted.".into()])
+    }
     fn unregister(&mut self, e: &ServerEntry) -> Res<()> {
         let mut s = self.state();
         s.calls.push(format!("unregister {}", e.name));

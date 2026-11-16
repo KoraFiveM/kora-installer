@@ -372,6 +372,10 @@ route('DELETE', '/servers/{s}', (m, b) => {
       emit({ type: 'status', message: t })
       await sleep(500)
     }
+    // Dropping the database needs the admin password when the install did not keep a login (scenario `trouble`).
+    if (!b.keep_db && beh.trouble && b.db_admin_password !== 'right-password') {
+      throw new Fail(500, 'needs_db_password', b.db_admin_password ? "The database administrator password was not accepted. Check it and try again, or keep the database and delete the server without it." : "Everything else was removed, but the database 'kora_7e870e0e' / user 'kora_7e870e0e' could not be deleted: Kora needs the database administrator password. Enter it and try again, or keep the database and delete the server without it.")
+    }
     servers.splice(servers.indexOf(s), 1)
     return { notes: b.keep_files ? [`Your files are still in ${s.dir}`] : [] }
   })

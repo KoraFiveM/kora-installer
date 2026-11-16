@@ -19,6 +19,7 @@ versions follow [SemVer](https://semver.org/).
 
 ### Fixed
 - The panel's website and install scripts now point to `kora panel` as the next step after installing.
+- **Deleting a server in the panel when the database needs its admin password.** The delete used to fail with a message about an environment variable and `kora delete`. The panel now says what happened in plain words, asks for the database administrator password (used once, never stored), and offers to keep the database and finish.
 
 ## [0.4.0] - 2026-11-16
 

@@ -30,6 +30,7 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
   const [typed, setTyped] = useState('')
   const [job, setJob] = useState<string | null>(null)
   const [err, setErr] = useState<unknown>(null)
+  const [dbPassword, setDbPassword] = useState('')
   const view = useJob(job, (j) => {
     if (j.state === 'done') {
       void qc.invalidateQueries({ queryKey: ['servers'] })
@@ -57,13 +58,14 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
     )
   }
 
-  const start = async () => {
+  const start = async (opts: { keepDb?: boolean; password?: string } = {}) => {
     setErr(null)
     try {
-      setJob((await api.servers.delete(s.name, { confirm_name: typed, keep_files: keepFiles, keep_db: keepDb })).job)
+      setJob((await api.servers.delete(s.name, { confirm_name: typed, keep_files: keepFiles, keep_db: opts.keepDb ?? keepDb, ...(opts.password ? { db_admin_password: opts.password } : {}) })).job)
       setOpen(false)
     } catch (e) { setErr(e) }
   }
+  const needsPassword = view.phase === 'failed' && (view.error as { code?: string } | null)?.code === 'needs_db_password'
 
   return (
     <Card className="max-w-2xl border-destructive/50">
@@ -74,6 +76,17 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
         {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
         {view.phase !== 'idle' && <ResourceProgress events={view.events} />}
         {view.phase === 'failed' && <ErrorNotice error={view.error} title="The server could not be deleted" />}
+        {needsPassword && (
+          <div className="space-y-3 border border-border p-4" role="group" aria-label="Database login needed">
+            <Field label="Database administrator password" hint="Used once to delete the database. Kora does not store it.">
+              <Input type="password" value={dbPassword} onChange={(e) => setDbPassword(e.target.value)} autoComplete="off" />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="destructive" disabled={dbPassword === '' || view.phase !== 'failed'} onClick={() => { const p = dbPassword; setDbPassword(''); void start({ password: p }) }}>Try again with this password</Button>
+              <Button variant="outline" onClick={() => { setKeepDb(true); setDbPassword(''); void start({ keepDb: true }) }}>Keep the database and finish</Button>
+            </div>
+          </div>
+        )}
         <ErrorNotice error={err} />
         <ConfirmDialog open={open} onOpenChange={close}
           title={stage === 'files' ? 'Keep the server files?' : stage === 'db' ? 'Keep the database?' : `Delete ${s.name}`}
