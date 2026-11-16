@@ -105,7 +105,13 @@ assert_matches "summary says rolled back" "$OUT" "1 rolled back"
 assert_contains "names the resource" "$OUT" "rolled back kora-core"
 assert_eq "kora-core is back on the commit it had before" "$core_before" "$(head_of kora-core)"
 assert "the update log recorded it" grep -q "rolled back" "$D/update.log"
-# and without the fault the same update goes through
+# the version that was rolled back is held: the next automatic run leaves it alone
+kora update --auto $NAME
+assert_eq "held retry: exit 0" 0 "$CODE"
+assert_contains "the rolled-back version is held" "$OUT" "held kora-core"
+assert_eq "kora-core still on the commit it had before" "$core_before" "$(head_of kora-core)"
+# a newer upstream version (the fix) goes through
+upstream_commit kora-core
 kora update --auto $NAME
 assert_eq "healthy retry: exit 0" 0 "$CODE"
 assert_eq "status: nothing left" 0 "$(python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["attention"]+s["updates"])' "$D/.kora/update-status.json")"
