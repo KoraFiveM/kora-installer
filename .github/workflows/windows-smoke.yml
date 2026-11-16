@@ -20,6 +20,10 @@ jobs:
     name: "basics: --version, install.ps1, dev dry run"
     runs-on: windows-latest
     timeout-minutes: 45
+    # The GitHub Windows runner is an elevated administrator account; kora panel refuses to start
+    # elevated unless this is set. Real installs run as a normal account.
+    env:
+      KORA_ALLOW_ROOT_PANEL: "1"
     defaults:
       run:
         shell: pwsh
