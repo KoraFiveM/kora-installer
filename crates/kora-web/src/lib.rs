@@ -543,11 +543,12 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
             }
         }
         if opts.tailscale {
-            if state.remote.enabled() {
-                tokio::spawn(serve_tailnet(state.clone(), addr.port()));
-            } else {
-                println!("Remote access is turned off in the settings, so the panel only listens on this computer. Turn it on with `kora panel --tailscale`.");
+            // Always listen: while remote access is off the guard refuses every remote caller, and turning
+            // it on in the settings then works at once, without a restart.
+            if !state.remote.enabled() {
+                println!("Remote access is turned off in the settings: Tailscale devices are refused until it is on (`kora panel --tailscale`).");
             }
+            tokio::spawn(serve_tailnet(state.clone(), addr.port()));
         }
         println!("Press Ctrl+C to stop.");
         // Sample the servers and raise alerts for as long as the panel runs.

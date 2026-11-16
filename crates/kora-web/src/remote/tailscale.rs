@@ -19,18 +19,25 @@ pub struct TsSelf {
     pub dns_name: Option<String>,
     /// The short machine name (`box`).
     pub host_name: Option<String>,
+    /// `Some(false)` when Tailscale runs in userspace networking mode (no TUN device): its addresses are
+    /// not on any network interface, so the panel cannot listen on them.
+    pub tun: Option<bool>,
     /// The login of the account that added this machine to the tailnet. `None` for tagged machines
     /// (added with an auth key and tags), which belong to no person.
     pub owner: Option<String>,
 }
 
 impl TsSelf {
-    /// Names and addresses a browser on the tailnet may use for this machine (for the `Host` check).
+    /// Names and addresses a browser on the tailnet may use for this machine (for the `Host` check):
+    /// the MagicDNS name and its short form, and the Tailscale addresses. Not the computer's own host
+    /// name: without MagicDNS that name is answered by the local network (LLMNR/mDNS), which would let
+    /// a page there reach the panel by DNS rebinding.
     pub fn host_names(&self) -> Vec<String> {
         let mut v: Vec<String> = Vec::new();
-        for n in self.dns_name.iter().chain(self.host_name.iter()) {
-            if !v.iter().any(|x| x.eq_ignore_ascii_case(n)) {
-                v.push(n.clone());
+        if let Some(d) = &self.dns_name {
+            v.push(d.clone());
+            if let Some(short) = d.split('.').next().filter(|s| !s.is_empty()) {
+                v.push(short.to_string());
             }
         }
         v.extend(self.ips.iter().map(IpAddr::to_string));
@@ -138,6 +145,7 @@ pub fn parse_status(json: &str) -> Option<TsSelf> {
     };
     Some(TsSelf {
         running: v["BackendState"].as_str() == Some("Running"),
+        tun: v["TUN"].as_bool(),
         ips,
         dns_name,
         host_name,
@@ -156,27 +164,6 @@ pub fn parse_whois(json: &str) -> Result<String, String> {
         );
     }
     Ok(login.to_string())
-}
-
-/// `Self.DNSName` (without the trailing dot) and `Self.HostName` from `status --json`.
-pub fn parse_self_names(json: &str) -> Vec<String> {
-    let Ok(v) = serde_json::from_str::<Value>(json) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    if let Some(d) = v["Self"]["DNSName"].as_str() {
-        let d = d.trim().trim_end_matches('.');
-        if !d.is_empty() {
-            out.push(d.to_string());
-        }
-    }
-    if let Some(h) = v["Self"]["HostName"].as_str() {
-        let h = h.trim();
-        if !h.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(h)) {
-            out.push(h.to_string());
-        }
-    }
-    out
 }
 
 /// `None` when there is no localapi socket (try the command); `Some(Err)` when it is there but failed.
@@ -283,22 +270,13 @@ mod tests {
     }
 
     #[test]
-    fn self_names_json() {
-        let j = r#"{"Self":{"DNSName":"box.tail1234.ts.net.","HostName":"box"}}"#;
-        assert_eq!(
-            parse_self_names(j),
-            vec!["box.tail1234.ts.net".to_string(), "box".to_string()]
-        );
-        assert!(parse_self_names("{}").is_empty());
-    }
-
-    #[test]
     fn status_json() {
-        let j = r#"{"BackendState":"Running","Self":{"DNSName":"box.tail1234.ts.net.","HostName":"box",
+        let j = r#"{"BackendState":"Running","TUN":true,"Self":{"DNSName":"box.tail1234.ts.net.","HostName":"Box-Desktop",
             "TailscaleIPs":["100.101.102.103","fd7a:115c:a1e0::1"],"UserID":42},
             "User":{"42":{"LoginName":"Alice@Example.com"}}}"#;
         let s = parse_status(j).unwrap();
         assert!(s.running);
+        assert_eq!(s.tun, Some(true));
         assert_eq!(s.owner.as_deref(), Some("Alice@Example.com"));
         assert_eq!(s.ips.len(), 2);
         assert_eq!(s.url(47120).unwrap(), "http://box.tail1234.ts.net:47120");
@@ -306,12 +284,16 @@ mod tests {
             s.host_names(),
             vec!["box.tail1234.ts.net", "box", "100.101.102.103", "fd7a:115c:a1e0::1"]
         );
+        assert!(!s.host_names().iter().any(|n| n == "Box-Desktop"), "the OS host name is never trusted");
         // Tagged machine (auth key + tags): nobody owns it.
         let j = r#"{"BackendState":"Running","Self":{"HostName":"srv","TailscaleIPs":["100.64.0.9"],
             "UserID":7,"Tags":["tag:server"]},"User":{"7":{"LoginName":"tagged-devices"}}}"#;
         let s = parse_status(j).unwrap();
         assert_eq!(s.owner, None);
         assert_eq!(s.dns_name, None, "a bare host name is not a MagicDNS name");
+        assert_eq!(s.host_names(), vec!["100.64.0.9"], "without MagicDNS only the address");
+        let s = parse_status(r#"{"BackendState":"Running","TUN":false,"Self":{"TailscaleIPs":["100.64.0.9"]}}"#).unwrap();
+        assert_eq!(s.tun, Some(false), "userspace networking");
         assert_eq!(s.url(1).unwrap(), "http://100.64.0.9:1");
         // Installed but signed out.
         let s = parse_status(r#"{"BackendState":"NeedsLogin","Self":{"TailscaleIPs":[]}}"#).unwrap();

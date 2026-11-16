@@ -2163,6 +2163,11 @@ fn ask_yes_no(question: &str) -> bool {
 fn background_port(a: &PanelArgs, home: &std::path::Path, ports: &dyn kora_web::launch::PortCheck) -> Result<u16, String> {
     use kora_core::monitor::panel_service as svc;
     let preferred = a.port.or_else(|| svc::saved_port(home)).unwrap_or(kora_web::DEFAULT_PORT);
+    // Our own background panel on its saved port is about to be restarted, not "another program":
+    // keep the port, so links, bookmarks, tunnels and firewall rules stay right.
+    if svc::saved_port(home) == Some(preferred) && ports.is_kora_panel(preferred) {
+        return Ok(preferred);
+    }
     match kora_web::launch::pick_port(preferred, a.port.is_some(), ports) {
         Some(p) => {
             if p != preferred {
@@ -2220,7 +2225,15 @@ fn start_background_service(home: &std::path::Path, port: u16, tailscale: bool) 
     let platform = kora_core::service::Platform::current();
     let exe = std::env::current_exe().map_err(|e| format!("cannot find the kora program to run in the background: {e}"))?;
     let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
-    let spec = svc::InstallSpec { exe: &exe, port, tailscale, kora_home_env: home_env.as_deref() };
+    // Windows has no service manager to restart the panel: stop the running one (only when it really is
+    // our panel answering on its saved port), else the new one cannot take the port.
+    let stop_pid = (platform == kora_core::service::Platform::Windows)
+        .then(|| svc::saved_port(home))
+        .flatten()
+        .filter(|p| kora_web::launch::PortCheck::is_kora_panel(&kora_web::launch::SystemPorts, *p))
+        .and_then(|_| std::fs::read_to_string(svc::pid_path(home)).ok())
+        .and_then(|t| t.trim().parse().ok());
+    let spec = svc::InstallSpec { exe: &exe, port, tailscale, stop_pid, kora_home_env: home_env.as_deref() };
     svc::install(home, &spec, &runner, platform).map_err(|e| e.to_string())
 }
 
@@ -3067,7 +3080,14 @@ mod tests {
         assert!(background_port(&args(Some(47120)), home.path(), &Ports(vec![47120])).unwrap_err().contains("47120 is already in use"));
         std::fs::write(kora_core::monitor::panel_service::info_path(home.path()), r#"{"port":47130}"#).unwrap();
         assert_eq!(background_port(&args(None), home.path(), &Ports(vec![])), Ok(47130), "the saved port is kept");
-        assert_eq!(background_port(&args(None), home.path(), &Ports(vec![47130])), Ok(47120));
+        // `Ports` says 47130 is busy AND a Kora panel: our own panel, restarted on the same port.
+        assert_eq!(background_port(&args(None), home.path(), &Ports(vec![47130])), Ok(47130), "our own running panel keeps its port");
+        struct Other;
+        impl kora_web::launch::PortCheck for Other {
+            fn is_free(&self, p: u16) -> bool { p != 47130 }
+            fn is_kora_panel(&self, _: u16) -> bool { false }
+        }
+        assert_eq!(background_port(&args(None), home.path(), &Other), Ok(47120), "someone else's program on the saved port");
     }
 
     #[test]

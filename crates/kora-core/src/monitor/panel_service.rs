@@ -212,6 +212,10 @@ pub struct InstallSpec<'a> {
     pub port: u16,
     /// Also listen on the Tailscale addresses (`kora panel --tailscale`).
     pub tailscale: bool,
+    /// Windows: the running background panel to stop first. There is no service manager to restart it,
+    /// and a new panel cannot take the port while the old one holds it (so a new token or setting
+    /// would silently not apply). Only set when that process is known to be our panel.
+    pub stop_pid: Option<u32>,
     /// Set when `KORA_HOME` is customised, so the service sees the same home.
     pub kora_home_env: Option<&'a Path>,
 }
@@ -260,7 +264,19 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
         }
         Platform::Windows => {
             let script = startup_script_path().display().to_string();
-            Plan::new(vec![
+            let mut steps = Vec::new();
+            if let Some(pid) = spec.stop_pid {
+                steps.push(
+                    SystemStep::run_owned(
+                        "Stop the running panel",
+                        "taskkill.exe",
+                        vec!["/PID".into(), pid.to_string(), "/F".into()],
+                    )
+                    .user_level()
+                    .tolerant(),
+                );
+            }
+            steps.extend([
                 SystemStep::write(
                     "Write the Kora Panel start-up script",
                     &script,
@@ -270,7 +286,8 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
                 .user_level(),
                 SystemStep::run("Start the panel now", "wscript.exe", &["//nologo", &script])
                     .user_level(),
-            ])
+            ]);
+            Plan::new(steps)
         }
     }
 }
@@ -405,6 +422,7 @@ mod tests {
             exe: Path::new("/k/kora"),
             port: 47120,
             tailscale: false,
+            stop_pid: None,
             kora_home_env: None,
         };
         for p in [Platform::Linux, Platform::Windows] {
@@ -426,6 +444,10 @@ mod tests {
             .steps
             .iter()
             .any(|s| s.command_line().is_some_and(|l| l.contains("/PID 7"))));
+        // Windows: a running panel is stopped first, so the new token or settings take effect.
+        let restart = InstallSpec { exe: Path::new("k.exe"), port: 1, tailscale: false, stop_pid: Some(42), kora_home_env: None };
+        let lines: Vec<String> = install_plan(&restart, Platform::Windows).steps.iter().filter_map(SystemStep::command_line).collect();
+        assert!(lines[0].contains("taskkill.exe /PID 42 /F") && lines[1].contains("wscript.exe"), "{lines:?}");
         assert!(!remove_plan(Platform::Windows, None)
             .steps
             .iter()
@@ -472,6 +494,7 @@ mod tests {
             exe: Path::new("/k/kora"),
             port: 47123,
             tailscale: true,
+            stop_pid: None,
             kora_home_env: None,
         };
         let link = install(home.path(), &spec, &rn, Platform::Linux).unwrap();
