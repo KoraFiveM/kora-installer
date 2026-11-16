@@ -215,6 +215,12 @@ fn select(server: &ServerRecord, scope: &Scope, skip: &[String], catalog: Option
         if let Some(bad) = w.iter().find(|id| !server.resources.iter().any(|r| &normalize_id(&r.id) == *id)) {
             return err(format!("this server has no resource named '{bad}'"));
         }
+        if let Some(paid) = server.resources.iter().find(|r| r.is_portal() && w.contains(&normalize_id(&r.id))) {
+            return err(format!(
+                "'{}' is a paid asset from the Cfx.re Portal; to update it, download the newer zip and import it again",
+                paid.id
+            ));
+        }
     }
     let skip: Vec<String> = skip.iter().map(|s| normalize_id(s)).collect();
     let prod = server.mode == Mode::Production;
@@ -227,6 +233,10 @@ fn select(server: &ServerRecord, scope: &Scope, skip: &[String], catalog: Option
     for r in &server.resources {
         let n = normalize_id(&r.id);
         if wanted.as_ref().is_some_and(|w| !w.contains(&n)) || skip.contains(&n) {
+            continue;
+        }
+        // Paid (Cfx.re Portal) assets are zip imports, not git clones: replaced by importing a newer zip.
+        if r.is_portal() {
             continue;
         }
         // Development tracks forks; third-party (bridge / creator) clones are pinned and have no upstream.

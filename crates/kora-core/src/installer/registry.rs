@@ -135,7 +135,7 @@ impl Registry {
 }
 
 /// One installed resource, as recorded in `kora-server.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceRecord {
     pub id: String,
     /// Relative to `<dir>/resources/`.
@@ -149,6 +149,23 @@ pub struct ResourceRecord {
     /// Never a fork, in any mode, so the development updater leaves it alone.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub third_party: bool,
+    /// Where it came from when it is not a git clone: `"portal"` for a paid (Cfx.re escrowed) asset
+    /// imported from a zip ([`crate::paidassets`]). Updaters and catalog tools leave those alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Version from the asset's `fxmanifest.lua`, when it has one (paid assets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// When it was imported (paid assets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_unix: Option<u64>,
+}
+
+impl ResourceRecord {
+    /// A paid asset imported from a Cfx.re Portal zip: not a git clone, never updated or forked.
+    pub fn is_portal(&self) -> bool {
+        self.source.as_deref() == Some(crate::paidassets::SOURCE)
+    }
 }
 
 /// `<dir>/kora-server.json`: config and install result. Secret-free.

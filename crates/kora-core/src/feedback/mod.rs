@@ -26,11 +26,17 @@ pub fn require_sign_in(r: &dyn CommandRunner) -> Result<()> {
 
 fn find<'a>(server: &'a ServerFile, id: &str) -> Result<&'a ResourceRecord> {
     let n = catalog::normalize_id(id);
-    server
+    let r = server
         .resources
         .iter()
         .find(|r| catalog::normalize_id(&r.id) == n)
-        .ok_or_else(|| InstallError(format!("this server has no resource named '{id}'")))
+        .ok_or_else(|| InstallError(format!("this server has no resource named '{id}'")))?;
+    if r.is_portal() {
+        return Err(InstallError(format!(
+            "'{id}' is a paid asset from the Cfx.re Portal; report problems with it to the creator who sold it."
+        )));
+    }
+    Ok(r)
 }
 
 fn gh_err(e: git::GitError) -> InstallError {

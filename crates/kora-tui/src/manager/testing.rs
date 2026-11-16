@@ -192,7 +192,7 @@ impl Backend for FakeBackend {
             kora_version: "0".into(),
             resources: inst
                 .into_iter()
-                .map(|id| kora_core::installer::registry::ResourceRecord { id, path: "x".into(), repository: "https://github.com/o/x.git".into(), branch: "dev".into(), commit: None, third_party: false })
+                .map(|id| kora_core::installer::registry::ResourceRecord { id, path: "x".into(), repository: "https://github.com/o/x.git".into(), branch: "dev".into(), commit: None, third_party: false, ..Default::default() })
                 .collect(),
         };
         kora_core::addresources::plan(&c, &sf, ids).map_err(|e| e.to_string())

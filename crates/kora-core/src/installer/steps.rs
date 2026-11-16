@@ -1218,6 +1218,7 @@ impl InstallStep {
                     _ => None,
                 },
                 third_party: r.is_pinned_copy(),
+                ..Default::default()
             })
             .collect();
         let database = ProvisionState::load(&db_state_path(ctx)).ok().map(|s| s.database);
