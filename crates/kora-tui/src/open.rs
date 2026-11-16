@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OsKind {
     Windows,
+    // TODO(panel merge): remove with manager/adapter.rs (never constructed any more).
     Mac,
     Other,
 }
@@ -15,8 +16,6 @@ impl OsKind {
     pub fn current() -> Self {
         if cfg!(windows) {
             OsKind::Windows
-        } else if cfg!(target_os = "macos") {
-            OsKind::Mac
         } else {
             OsKind::Other
         }
@@ -56,7 +55,7 @@ pub fn open_command(os: OsKind, target: &Path, root: &Path) -> Result<OpenComman
         // explorer is not a shell, so `&`, spaces and `%` in the path stay literal. (It exits
         // with code 1 even on success, so callers must not treat its exit status as failure.)
         OsKind::Windows => ("explorer.exe", vec![target.as_os_str().to_owned()]),
-        OsKind::Mac => ("open", vec![target.as_os_str().to_owned()]),
+        OsKind::Mac => ("xdg-open", vec![target.as_os_str().to_owned()]), // TODO(panel merge): remove
         OsKind::Other => ("xdg-open", vec![target.as_os_str().to_owned()]),
     };
     Ok(OpenCommand { program: program.into(), args })
@@ -70,7 +69,7 @@ pub fn open_url_command(os: OsKind, url: &str) -> Result<OpenCommand, String> {
     }
     let program = match os {
         OsKind::Windows => "explorer.exe",
-        OsKind::Mac => "open",
+        OsKind::Mac => "xdg-open", // TODO(panel merge): remove
         OsKind::Other => "xdg-open",
     };
     Ok(OpenCommand { program: program.into(), args: vec![OsString::from(url)] })
@@ -210,7 +209,7 @@ mod tests {
     #[test]
     fn command_keeps_path_as_one_literal_argument() {
         let log = root().join(".kora").join("install.log");
-        for (os, prog) in [(OsKind::Windows, "explorer.exe"), (OsKind::Mac, "open"), (OsKind::Other, "xdg-open")] {
+        for (os, prog) in [(OsKind::Windows, "explorer.exe"), (OsKind::Other, "xdg-open")] {
             let c = open_command(os, &log, &root()).unwrap();
             assert_eq!(c.program, prog);
             assert_eq!(c.args, vec![log.as_os_str().to_owned()], "spaces and & stay in one argument");

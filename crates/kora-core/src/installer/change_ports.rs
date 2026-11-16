@@ -4,6 +4,7 @@
 //! * `server.cfg`: the `endpoint_add_tcp` / `endpoint_add_udp` lines get the new game port;
 //! * `secrets.env` (Linux service environment): the `TXHOST_TXA_PORT` line, only when it exists there;
 //! * `kora-server.json` and the server registry.
+//!
 //! Firewall rules are NOT changed: whoever opened the old ports has to open the new ones.
 
 use std::path::Path;
