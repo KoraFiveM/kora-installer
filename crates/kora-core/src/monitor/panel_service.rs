@@ -21,6 +21,7 @@ pub const UNIT_NAME: &str = "kora-panel.service";
 const TOKEN_FILE: &str = "panel-token";
 const INFO_FILE: &str = "panel-service.json";
 const PID_FILE: &str = "panel.pid";
+const RUNNING_FILE: &str = "panel-running.json";
 
 pub fn token_path(home: &Path) -> PathBuf {
     home.join(TOKEN_FILE)
@@ -30,6 +31,58 @@ pub fn info_path(home: &Path) -> PathBuf {
 }
 pub fn pid_path(home: &Path) -> PathBuf {
     home.join(PID_FILE)
+}
+pub fn running_path(home: &Path) -> PathBuf {
+    home.join(RUNNING_FILE)
+}
+
+/// A panel started with `kora panel` (in a window or by the background service), so a second
+/// `kora panel` can show its link instead of failing to listen on the same port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningPanel {
+    pub port: u16,
+    pub pid: u32,
+    pub token: String,
+}
+
+impl RunningPanel {
+    pub fn link(&self) -> String {
+        format!("http://127.0.0.1:{}/#token={}", self.port, self.token)
+    }
+}
+
+/// Remember a running panel (owner-only: the record holds its sign-in token).
+pub fn record_running(home: &Path, p: &RunningPanel) -> Result<(), String> {
+    let text = serde_json::json!({"port": p.port, "pid": p.pid, "token": p.token}).to_string();
+    super::write_private(&running_path(home), &text)
+}
+
+/// The recorded running panel, if any (it may have stopped since: check it answers).
+pub fn load_running(home: &Path) -> Option<RunningPanel> {
+    let v: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(running_path(home)).ok()?).ok()?;
+    let token = v["token"].as_str()?.to_string();
+    (!token.is_empty() && token.bytes().all(|b| b.is_ascii_hexdigit())).then_some(())?;
+    Some(RunningPanel {
+        port: u16::try_from(v["port"].as_u64()?).ok()?,
+        pid: u32::try_from(v["pid"].as_u64()?).ok()?,
+        token,
+    })
+}
+
+/// Forget the running panel, but only if the record is still ours (`pid`).
+pub fn clear_running(home: &Path, pid: u32) {
+    if load_running(home).is_none_or(|r| r.pid == pid) {
+        let _ = std::fs::remove_file(running_path(home));
+    }
+}
+
+/// Is the background service set up here (unit file or start-up script present)?
+pub fn service_installed(platform: Platform) -> bool {
+    match platform {
+        Platform::Linux => unit_path().exists(),
+        Platform::Windows => startup_script_path().exists(),
+    }
 }
 
 /// The saved sign-in token, when a service has been installed.
@@ -159,9 +212,16 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
                 )
                 .user_level(),
                 SystemStep::run(
-                    "Start the panel now and at every sign-in",
+                    "Start the panel at every sign-in",
                     "systemctl",
-                    &["--user", "enable", "--now", UNIT_NAME],
+                    &["--user", "enable", UNIT_NAME],
+                )
+                .user_level(),
+                // Restart (not just start) so a changed port takes effect when it was already running.
+                SystemStep::run(
+                    "Start the panel now",
+                    "systemctl",
+                    &["--user", "restart", UNIT_NAME],
                 )
                 .user_level(),
                 // So it also runs while nobody is signed in. Not every system allows it: that is fine.
@@ -261,7 +321,12 @@ pub fn remove(home: &Path, runner: &dyn CommandRunner, platform: Platform) -> Se
         .ok()
         .and_then(|t| t.trim().parse().ok());
     apply_plan(&remove_plan(platform, pid), runner)?;
-    for f in [token_path(home), info_path(home), pid_path(home)] {
+    for f in [
+        token_path(home),
+        info_path(home),
+        pid_path(home),
+        running_path(home),
+    ] {
         let _ = std::fs::remove_file(f);
     }
     Ok(())
@@ -326,7 +391,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|l| l.contains("systemctl --user enable --now kora-panel.service")),
+                .any(|l| l.contains("systemctl --user enable kora-panel.service")),
             "{lines:?}"
         );
         assert!(remove_plan(Platform::Windows, Some(7))
@@ -385,11 +450,50 @@ mod tests {
         assert!(
             rn.calls()
                 .iter()
-                .any(|c| c.contains("enable --now kora-panel.service")),
+                .any(|c| c.contains("restart kora-panel.service")),
             "{:?}",
             rn.calls()
         );
         remove(home.path(), &rn, Platform::Linux).unwrap();
         assert!(load_token(home.path()).is_none() && saved_port(home.path()).is_none());
+    }
+
+    #[test]
+    fn a_running_panel_is_recorded_privately_and_cleared_only_by_itself() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(load_running(home.path()).is_none());
+        let p = RunningPanel {
+            port: 47121,
+            pid: 42,
+            token: "ab".repeat(32),
+        };
+        record_running(home.path(), &p).unwrap();
+        assert_eq!(load_running(home.path()), Some(p.clone()));
+        assert_eq!(
+            p.link(),
+            format!("http://127.0.0.1:47121/#token={}", "ab".repeat(32))
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(running_path(home.path()))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o077, 0);
+        }
+        clear_running(home.path(), 7);
+        assert!(
+            load_running(home.path()).is_some(),
+            "another panel's record is kept"
+        );
+        clear_running(home.path(), 42);
+        assert!(load_running(home.path()).is_none());
+        std::fs::write(
+            running_path(home.path()),
+            r#"{"port":1,"pid":2,"token":"not hex!"}"#,
+        )
+        .unwrap();
+        assert!(load_running(home.path()).is_none());
     }
 }
