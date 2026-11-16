@@ -31,7 +31,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
             <dt className="text-muted-foreground">Server</dt><dd><Check ok={s.running} yes="Running" no={s.status === 'missing' ? 'Folder missing' : 'Stopped'} /></dd>
             <dt className="text-muted-foreground">Game port {s.ports.game}</dt><dd><Check ok={s.game_listening} yes="Listening" no="Not listening" /></dd>
             <dt className="text-muted-foreground">txAdmin port {s.ports.txadmin}</dt><dd><Check ok={s.txadmin_up} yes="Answering" no="Not answering" /></dd>
-            <dt className="text-muted-foreground">Updates</dt><dd><UpdateChip badge={s.badge} /></dd>
+            <dt className="text-muted-foreground">Updates</dt><dd><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></dd>
           </dl>
           <ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} size="default" />
           {s.status === 'missing' && <p className="text-sm text-amber">The server folder cannot be found. It may have been moved or deleted. You can remove this entry on the Danger zone tab.</p>}
