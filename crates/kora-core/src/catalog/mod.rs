@@ -9,8 +9,10 @@ use std::collections::HashSet;
 pub mod pick;
 pub use pick::{PickError, Picker, Section};
 
-/// Public catalog location.
-pub const CATALOG_URL: &str = "https://docs.koraframe.work/resources.json";
+/// Public catalog location: the catalog file itself in the docs repository (read straight from
+/// GitHub, so a change is live as soon as it is merged, without waiting for the docs site to deploy).
+pub const CATALOG_URL: &str =
+    "https://raw.githubusercontent.com/KoraFiveM/kora_docs_next/main/catalog/resources.json";
 
 /// Snapshot of the catalog embedded in the binary (refreshed by CI).
 pub const EMBEDDED_SNAPSHOT: &str = include_str!("../../assets/resources.json");
