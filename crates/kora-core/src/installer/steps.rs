@@ -589,7 +589,7 @@ impl InstallStep {
         let ctx = &*self.ctx;
         match self.id {
             "prepare.dir" => {
-                io(std::fs::create_dir_all(ctx.meta_dir()), "cannot create the server folder")?;
+                io(crate::fsutil::create_dir_no_follow(&ctx.meta_dir()), "cannot create the server folder")?;
                 Ok(format!("Using {}", ctx.req.dir.display()))
             }
             "prepare.catalog" => {
@@ -1193,7 +1193,8 @@ impl InstallStep {
                 c.binary = own_copy.as_ref().map(|p| p.to_string_lossy().into_owned());
             }
         })?;
-        // Stage 2: ownership + unit.
+        // Stage 2: ownership + unit. `chown -R` by path: never once a part of it became a planted link.
+        super::check_dir_links(&ctx.req.dir)?;
         let unit = server.unit_path();
         ctx.update_created(|c| c.service_unit = Some(unit))?;
         service::apply_plan(&service::Plan::new(tail), &rn).map_err(|e| InstallError(e.to_string()))?;
@@ -1343,6 +1344,7 @@ impl InstallStep {
         // A server in the `kora` account's home without a service belongs to `kora` (with a service the
         // service step already handed it to the service's own account).
         if ctx.admin && !req.service && ctx.plan.iter().any(|p| p.id == "prepare.account") {
+            super::check_dir_links(&req.dir)?;
             let plan = crate::userhome::chown_to_kora_plan(std::slice::from_ref(&req.dir), true);
             service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         }

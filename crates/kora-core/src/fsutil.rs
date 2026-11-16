@@ -538,7 +538,17 @@ pub fn create_dir_no_follow(path: &Path) -> io::Result<()> {
 /// `Err` when a part of `path` is a symbolic link another account could have planted (or a part
 /// is not a folder); missing parts are fine. Root checks a folder with this before working in it.
 pub fn check_links(path: &Path) -> io::Result<()> {
-    nofollow::walk_dir(path, None, &nofollow::default_trust).map(|_| ())
+    check_links_with(path, &nofollow::default_trust)
+}
+
+/// The rule [`check_links`] uses: may a link inside a folder with this owner and mode be followed?
+pub(crate) fn check_links_default_trust(uid: u32, mode: u32) -> bool {
+    nofollow::default_trust(uid, mode)
+}
+
+/// [`check_links`] with the rule for which links may be followed given (tests: root's view).
+pub(crate) fn check_links_with(path: &Path, trust: &dyn Fn(u32, u32) -> bool) -> io::Result<()> {
+    nofollow::walk_dir(path, None, trust).map(|_| ())
 }
 
 /// Delete `base/rel` (a file, link or whole folder) without ever leaving `base`: `rel` must pass
