@@ -143,5 +143,5 @@ case ":$PATH:" in
   *) say "Note: $DEST_DIR is not on your PATH yet. Add it:  export PATH=\"$DEST_DIR:\$PATH\"" ;;
 esac
 say ""
-say "Next step: run   kora install"
-say "(Add --service later if the server should start automatically; that part needs sudo.)"
+say "Next step: run   kora panel   (opens Kora Panel in your browser)"
+say "Prefer the terminal? Run   kora install   instead. (On a server with no screen: kora panel --no-open)"
