@@ -2262,7 +2262,11 @@ mod tests {
             _ => None,
         };
         assert_eq!(home_dir(true, &env), Some(PathBuf::from("C:\\Users\\Real")));
-        assert_eq!(home_dir(false, &env), Some(PathBuf::from("/c/Users/Git Bash Home")));
+        // `/c/...` is only an absolute path on Unix (on Windows it has no drive), so the non-Windows
+        // branch is checked where its paths mean something.
+        if cfg!(unix) {
+            assert_eq!(home_dir(false, &env), Some(PathBuf::from("/c/Users/Git Bash Home")));
+        }
         let only_home = |k: &str| (k == "HOME").then(|| "/home/me".into());
         assert_eq!(home_dir(true, &only_home), Some(PathBuf::from("/home/me")), "falls back");
         let empty = |k: &str| (k == "USERPROFILE").then(|| "".into());
