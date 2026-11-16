@@ -370,3 +370,213 @@ fn ensure_applies_files_and_says_plainly_that_nothing_was_restarted() {
     assert!(!h.checks.borrow()[0].full_restart);
     assert!(ev.iter().any(|e| matches!(e, UpdateEvent::Health(m) if m == ENSURE_NOTE)), "{ev:?}");
 }
+
+// ---------------------------------------------------------------- speed: parallel fetch, org hints
+
+use crate::update::orgcache::{OrgReply, OrgSource};
+use crate::update::{FetchMode, UpdateTarget};
+
+/// Real git, but remotes look like `KoraFiveM/<folder>` and every `fetch_many` is recorded.
+struct Spy {
+    inner: GitCli,
+    fetched: RefCell<Vec<Vec<String>>>,
+}
+impl Spy {
+    fn new() -> Spy {
+        Spy {
+            inner: GitCli::default(),
+            fetched: RefCell::new(vec![]),
+        }
+    }
+    fn last(&self) -> Vec<String> {
+        self.fetched.borrow().last().cloned().unwrap_or_default()
+    }
+}
+impl GitOps for Spy {
+    fn fetch(&self, r: &Path) -> GitResult<()> {
+        self.inner.fetch(r)
+    }
+    fn fetch_many(&self, t: &[&UpdateTarget], m: FetchMode) -> Vec<GitResult<()>> {
+        self.fetched
+            .borrow_mut()
+            .push(t.iter().map(|t| t.id.clone()).collect());
+        self.inner.fetch_many(t, m)
+    }
+    fn has_ref(&self, r: &Path, rev: &str) -> bool {
+        self.inner.has_ref(r, rev)
+    }
+    fn remote_slug(&self, r: &Path, _: &str) -> Option<String> {
+        Some(format!("KoraFiveM/{}", r.file_name()?.to_str()?))
+    }
+    fn head_commit(&self, r: &Path, rev: &str) -> GitResult<String> {
+        self.inner.head_commit(r, rev)
+    }
+    fn fast_forward(&self, r: &Path, u: &str) -> GitResult<()> {
+        self.inner.fast_forward(r, u)
+    }
+    fn reset_to(&self, r: &Path, c: &str) -> GitResult<()> {
+        self.inner.reset_to(r, c)
+    }
+    fn is_dirty(&self, r: &Path) -> GitResult<bool> {
+        self.inner.is_dirty(r)
+    }
+    fn is_diverged(&self, r: &Path, u: &str) -> GitResult<bool> {
+        self.inner.is_diverged(r, u)
+    }
+    fn behind_count(&self, r: &Path, u: &str) -> GitResult<u32> {
+        self.inner.behind_count(r, u)
+    }
+    fn log_subjects(&self, r: &Path, f: &str, t: &str, m: usize) -> Vec<String> {
+        self.inner.log_subjects(r, f, t, m)
+    }
+}
+
+struct Org(OrgReply);
+impl OrgSource for Org {
+    fn get(&self, _: Option<&str>) -> OrgReply {
+        self.0.clone()
+    }
+}
+fn org_with(pushed: &str) -> Org {
+    let body = format!(
+        r#"[{{"full_name":"KoraFiveM/kora_chat","pushed_at":"{pushed}"}},{{"full_name":"KoraFiveM/kora_hud","pushed_at":"{pushed}"}},{{"full_name":"KoraFiveM/kora_core","pushed_at":"{pushed}"}}]"#
+    );
+    Org(OrgReply::Fresh { etag: None, body })
+}
+fn hints(o: &Org, file: &Path) -> OrgHints {
+    OrgHints::load(o, Some(file), 1)
+}
+
+#[test]
+fn org_hint_skips_fetches_of_unmoved_repositories_and_never_hides_a_change() {
+    let env = dev_env();
+    let file = env.sf.dir.parent().unwrap().join("org-cache.json");
+    let spy = Spy::new();
+    // First check: nothing is known about these clones, so all three are fetched.
+    let mut h = hints(&org_with("t1"), &file);
+    let p = preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+    assert_eq!(spy.last().len(), 3);
+    assert!(p.resources.iter().all(|c| c.status == ChangeStatus::Clean));
+    // Second check, the organisation reports the same push times: no fetch at all, same answer.
+    let mut h = hints(&org_with("t1"), &file);
+    let p2 = preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+    assert!(spy.last().is_empty(), "fetched {:?}", spy.last());
+    assert_eq!(p2.resources, p.resources);
+    // A push moves one repository: only that one is fetched and its new commit shows.
+    let new = commit(&env.up(1), "3", "hud three");
+    let body = match org_with("t1").0 {
+        OrgReply::Fresh { body, .. } => body.replace(r#"kora_hud","pushed_at":"t1""#, r#"kora_hud","pushed_at":"t2""#),
+        _ => unreachable!(),
+    };
+    let mut h = hints(&Org(OrgReply::Fresh { etag: None, body }), &file);
+    let p3 = preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+    assert_eq!(spy.last(), vec!["kora-hud"]);
+    assert_eq!(p3.resources[1].to, new);
+    assert_eq!(p3.resources[1].behind, 2);
+}
+
+#[test]
+fn org_hint_unavailable_falls_back_to_fetching_everything() {
+    let env = dev_env();
+    let file = env.sf.dir.parent().unwrap().join("org-cache.json");
+    let spy = Spy::new();
+    let mut h = hints(&org_with("t1"), &file);
+    preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+    for (n, bad) in [
+        OrgReply::RateLimited,
+        OrgReply::Failed("offline".into()),
+        OrgReply::Fresh { etag: None, body: "<html>".into() },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let up = commit(&env.up(0), &format!("x{n}"), "more");
+        let mut h = hints(&Org(bad), &file);
+        let p = preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+        assert_eq!(
+            spy.last().len(),
+            3,
+            "a failed pre-check must run the full check"
+        );
+        assert_eq!(p.resources[0].to, up);
+    }
+}
+
+#[test]
+fn one_resource_preview_fetches_only_that_resource() {
+    let env = dev_env();
+    let spy = Spy::new();
+    let p = preview_with(
+        &env.sf,
+        Scope::Resources(vec!["kora_hud".into()]),
+        &spy,
+        None,
+    )
+    .unwrap();
+    assert_eq!(spy.last(), vec!["kora-hud"]);
+    assert_eq!(p.resources.len(), 1);
+}
+
+#[test]
+fn failed_fetch_is_never_reported_up_to_date_and_is_fetched_again_next_time() {
+    let env = dev_env();
+    let file = env.sf.dir.parent().unwrap().join("org-cache.json");
+    let spy = Spy::new();
+    let mut h = hints(&org_with("t1"), &file);
+    preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+    // The remote of kora-chat disappears and the organisation says it moved: the fetch fails.
+    std::fs::remove_dir_all(env.up(0)).unwrap();
+    let mut h = hints(&org_with("t2"), &file);
+    let p = preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+    assert_eq!(p.resources[0].status, ChangeStatus::Diverged);
+    assert!(p.resources[0].changelog[0].starts_with("could not check"));
+    // Still "t2" next time, yet the failed clone is fetched again (its record was dropped).
+    let mut h = hints(&org_with("t2"), &file);
+    preview_with_hints(&env.sf, Scope::All, &spy, None, Some(&mut h)).unwrap();
+    assert!(spy.last().contains(&"kora-chat".to_string()));
+}
+
+#[test]
+fn apply_right_after_a_preview_does_not_fetch_again() {
+    let env = dev_env();
+    let git = GitCli::default();
+    preview_with(&env.sf, Scope::All, &git, None).unwrap();
+    // Remotes are gone: a second fetch would fail and the apply would skip everything.
+    for i in 0..3 {
+        std::fs::remove_dir_all(env.up(i)).unwrap();
+    }
+    let (r, _) = run(
+        &env,
+        Scope::All,
+        opts(RestartPolicy::None, &[]),
+        &Health::ok(),
+        Some(0),
+        11,
+    );
+    assert_eq!(r.updated.len(), 3, "skipped: {:?}", r.skipped);
+}
+
+#[test]
+fn production_with_the_pinned_commit_already_present_needs_no_network() {
+    let env = dev_env();
+    let git = GitCli::default();
+    let path = env.path(0);
+    sh(
+        &path,
+        &["remote", "set-url", "origin", "/nonexistent/nowhere"],
+    );
+    let present = head(&path);
+    let t = |c: &str| UpdateTarget {
+        id: "kora-chat".into(),
+        path: path.clone(),
+        upstream_ref: c.into(),
+        class: crate::update::ResourceClass::from_id("kora-chat"),
+    };
+    let r = git.fetch_many(&[&t(&present)], FetchMode::Fresh);
+    assert!(r[0].is_ok(), "the commit is here: no fetch");
+    let r = git.fetch_many(
+        &[&t("0123456789abcdef0123456789abcdef01234567")],
+        FetchMode::Fresh,
+    );
+    assert!(r[0].is_err(), "a missing commit does ask the remote");
+}

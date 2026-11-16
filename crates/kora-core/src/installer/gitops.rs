@@ -11,7 +11,7 @@ use crate::firewall;
 use crate::git::{self, CommandRunner, SystemRunner};
 use crate::service::{self, ManagedServer, ServiceManager};
 use crate::update::{
-    self, GitOps, GitResult, HealthCheck, HealthOutcome, HealthRequest, NoMigrations, QuietConfig, RestartDecision, ResourceClass,
+    self, FetchMode, GitOps, GitResult, HealthCheck, HealthOutcome, HealthRequest, NoMigrations, QuietConfig, RestartDecision, ResourceClass,
     RunOptions, UpdateError, UpdateReport, UpdateTarget,
 };
 
@@ -43,6 +43,39 @@ impl<R: CommandRunner> GitCli<R> {
     }
 }
 
+/// One fetch. A connection that goes quiet for 30 s is abandoned, so one dead remote cannot hold the whole check.
+fn fetch_with(r: &dyn CommandRunner, repo: &Path, remote: &str) -> GitResult<()> {
+    let args = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30", "fetch", remote];
+    let o = r.run("git", &args, Some(repo)).map_err(gerr)?;
+    if o.ok() {
+        Ok(())
+    } else {
+        Err(UpdateError::Git(format!("git fetch {remote} failed: {}", o.stderr.trim())))
+    }
+}
+
+/// Fetches made by this process, so an apply right after a preview does not fetch the same repositories again.
+const RECENT_FETCH: Duration = Duration::from_secs(120);
+type RecentMap = std::sync::Mutex<std::collections::HashMap<PathBuf, std::time::Instant>>;
+fn recent_map() -> &'static RecentMap {
+    static M: std::sync::OnceLock<RecentMap> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+fn recently_fetched(p: &Path) -> bool {
+    recent_map().lock().unwrap_or_else(|e| e.into_inner()).get(p).is_some_and(|t| t.elapsed() < RECENT_FETCH)
+}
+fn note_fetched(p: &Path, r: &GitResult<()>) {
+    let mut m = recent_map().lock().unwrap_or_else(|e| e.into_inner());
+    match r {
+        Ok(()) => {
+            m.insert(p.to_path_buf(), std::time::Instant::now());
+        }
+        Err(_) => {
+            m.remove(p);
+        }
+    }
+}
+
 impl<R: CommandRunner> GitOps for GitCli<R> {
     fn fetch(&self, repo: &Path) -> GitResult<()> {
         self.git(repo, &["fetch", "upstream"]).map(|_| ())
@@ -70,6 +103,50 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     }
     fn fetch_origin(&self, repo: &Path) -> GitResult<()> {
         self.git(repo, &["fetch", "origin"]).map(|_| ())
+    }
+    fn has_ref(&self, repo: &Path, rev: &str) -> bool {
+        self.git(repo, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")]).is_ok()
+    }
+    fn remote_slug(&self, repo: &Path, remote: &str) -> Option<String> {
+        self.git(repo, &["remote", "get-url", remote]).ok().and_then(|o| git::slug_of_url(o.stdout.trim()))
+    }
+    fn fetch_many(&self, targets: &[&UpdateTarget], mode: FetchMode) -> Vec<GitResult<()>> {
+        // Development: `fetch upstream`. Production: the target is a pinned commit; a checkout that already has it needs no network.
+        let is_commit = |r: &str| r.len() >= 7 && r.chars().all(|c| c.is_ascii_hexdigit());
+        let recent = |p: &Path| mode == FetchMode::AllowRecent && recently_fetched(p);
+        let mut out: Vec<Option<GitResult<()>>> = targets.iter().map(|_| None).collect();
+        let mut jobs: Vec<(usize, &'static str, Box<dyn CommandRunner + Send>)> = Vec::new();
+        for (i, t) in targets.iter().enumerate() {
+            let remote = if is_commit(&t.upstream_ref) {
+                if self.has_ref(&t.path, &t.upstream_ref) {
+                    out[i] = Some(Ok(()));
+                    continue;
+                }
+                "origin"
+            } else {
+                "upstream"
+            };
+            if recent(&t.path) {
+                out[i] = Some(Ok(()));
+                continue;
+            }
+            match self.0.fork() {
+                Some(r) => jobs.push((i, remote, r)),
+                // A runner that cannot be copied runs on this thread.
+                None => {
+                    let r = self.git(&t.path, &["fetch", remote]).map(|_| ());
+                    note_fetched(&t.path, &r);
+                    out[i] = Some(r);
+                }
+            }
+        }
+        let paths: Vec<&Path> = targets.iter().map(|t| t.path.as_path()).collect();
+        let done = update::par_map(jobs, update::FETCH_PARALLEL, |(i, remote, r)| (i, fetch_with(&r, paths[i], remote)));
+        for (i, r) in done {
+            note_fetched(paths[i], &r);
+            out[i] = Some(r);
+        }
+        out.into_iter().map(|r| r.unwrap_or(Ok(()))).collect()
     }
     fn move_pinned(&self, repo: &Path, commit: &str) -> GitResult<()> {
         git::move_pinned(&self.0, repo, commit).map(|_| ()).map_err(gerr)
@@ -104,6 +181,7 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
 /// Runs every command as `user` (via `runuser`) with `HOME` set to a folder that user owns.
 /// Used when the update runs as root (systemd timer) so git never creates root-owned files in
 /// a server folder owned by the service account, and never trips git's "dubious ownership" check.
+#[derive(Clone)]
 pub struct AsUser {
     pub user: String,
     pub home: PathBuf,
@@ -118,6 +196,9 @@ impl CommandRunner for AsUser {
     }
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
+    }
+    fn fork(&self) -> Option<Box<dyn CommandRunner + Send>> {
+        Some(Box::new(self.clone()))
     }
 }
 
@@ -136,6 +217,9 @@ impl<R: CommandRunner> CommandRunner for SafeDirectory<R> {
     }
     fn sleep(&self, d: Duration) {
         self.0.sleep(d)
+    }
+    fn fork(&self) -> Option<Box<dyn CommandRunner + Send>> {
+        self.0.fork().map(|r| Box::new(SafeDirectory(r)) as Box<dyn CommandRunner + Send>)
     }
 }
 

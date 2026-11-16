@@ -412,8 +412,19 @@ route('POST', '/servers/{s}/ensure', (m, b) => {
   if (!installed[s.name].includes(name)) throw new Fail(404, 'not_found', `"${name}" is not installed on this server.`)
   return { message: b.restart ? `Added "ensure ${name}" and restarted ${s.name}.` : `Added "ensure ${name}" to server.cfg. It loads the next time the server restarts.` }
 })
-route('POST', '/servers/{s}/update/preview', (m) => {
+route('POST', '/servers/{s}/update/preview', (m, b) => {
   const s = find(dec(m[1]))
+  const only = (b.scope as { resources?: string[] } | undefined)?.resources
+  if (only?.length) {
+    // One resource: answers quickly and returns just those rows (the other rows are not touched).
+    return startJob('update_preview', s.name, async () => {
+      await sleep(400)
+      const known = (dirtyPreviewed[s.name] ?? makePreview(s)).resources
+      const rows = known.filter((r) => only.includes(r.id))
+      if (!rows.length) throw new Fail(400, 'bad_request', `This server has no resource named "${only[0]}".`)
+      return { new_release: null, resources: rows } satisfies T.UpdatePreview
+    })
+  }
   return startJob('update_preview', s.name, async () => {
     await sleep(1500)
     const p = makePreview(s)
