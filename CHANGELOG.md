@@ -8,6 +8,7 @@ versions follow [SemVer](https://semver.org/).
 ## [0.6.0] - 2026-11-16
 
 ### Added
+- **Restart now after an update.** When the background panel updates Kora, Settings offers "Restart now": the panel restarts on the new version and the page reloads (sign in again afterwards). A panel running in a terminal window says to stop it and run `kora panel` again.
 - **Open Kora Panel from your own devices with Tailscale, in one step.** Run `kora panel --tailscale` on the server: Kora makes the Tailscale account you are connected from (or the account that added the computer to Tailscale, or `--admin you@example.com`) the panel's admin, keeps the background panel listening on this computer and on its Tailscale addresses (never the public one), lets the port through `ufw` on the Tailscale interface only (as root; otherwise it prints the command), and prints the address to open, for example `http://myserver.tail1234.ts.net:47120`. Open it on any device signed in to Tailscale and you are signed in with your Tailscale account: no link, token or SSH tunnel. The install script offers it on a server with no screen when Tailscale is running (`KORA_TAILSCALE=1` says yes in advance, `KORA_TAILSCALE=0` never asks).
 - `kora panel tailscale allow|remove|list|off` lets other Tailscale accounts in (each with a role), removes them, or turns it off, without opening the panel.
 - `kora panel --new-token` makes a new sign-in token for the background panel.

@@ -17,6 +17,7 @@ Already have Kora? Run `kora self-update`.
 - **Open Kora Panel from your own devices with Tailscale, in one step.** On the server run `kora panel --tailscale` (the install line offers it when Tailscale is running). Open the address it prints, for example `http://myserver.tail1234.ts.net:47120`, on any device signed in to Tailscale: you are signed in with your Tailscale account, with no link, token or SSH tunnel. Let others in with `kora panel tailscale allow name@example.com --role operator`.
 - **Sign-in links work once.** The link `kora panel` prints holds a one-time code, so the panel's token never lands in your browser history.
 - **A large security update.** Root no longer trusts files in a server folder (update jobs, delete, uninstall), the panel's session can no longer be taken over through other services on the same machine, proxies and public addresses are refused, and downloads stay on https. Release files now have build provenance: `gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer`.
+- **Restart now** after updating Kora from the panel: no need to SSH in and restart it yourself.
 - The install line installs the newest **stable** release (`KORA_PRERELEASE=1` for pre-releases).
 
 ### New in 0.5.1
