@@ -9,3 +9,4 @@ pub mod settings;
 pub mod github;
 pub mod install;
 pub mod maintenance;
+pub mod remote;

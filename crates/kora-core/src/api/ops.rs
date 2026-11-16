@@ -83,6 +83,12 @@ pub enum Op {
     JobsGet,
     JobEvents,
     Events,
+    RemoteGet,
+    RemoteSet,
+    UsersList,
+    UserAdd,
+    UserRemove,
+    SessionLogout,
 }
 
 impl Op {
@@ -147,6 +153,12 @@ impl Op {
         Op::JobsGet,
         Op::JobEvents,
         Op::Events,
+        Op::RemoteGet,
+        Op::RemoteSet,
+        Op::UsersList,
+        Op::UserAdd,
+        Op::UserRemove,
+        Op::SessionLogout,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -212,6 +224,12 @@ impl Op {
             Op::JobsGet => "jobs_get",
             Op::JobEvents => "job_events",
             Op::Events => "events",
+            Op::RemoteGet => "remote_get",
+            Op::RemoteSet => "remote_set",
+            Op::UsersList => "users_list",
+            Op::UserAdd => "user_add",
+            Op::UserRemove => "user_remove",
+            Op::SessionLogout => "session_logout",
         }
     }
 
@@ -278,6 +296,12 @@ impl Op {
             Op::JobsGet => (Method::Get, "/jobs/{id}"),
             Op::JobEvents => (Method::Get, "/jobs/{id}/events"),
             Op::Events => (Method::Get, "/events"),
+            Op::RemoteGet => (Method::Get, "/remote"),
+            Op::RemoteSet => (Method::Put, "/remote"),
+            Op::UsersList => (Method::Get, "/users"),
+            Op::UserAdd => (Method::Post, "/users"),
+            Op::UserRemove => (Method::Delete, "/users/{name}"),
+            Op::SessionLogout => (Method::Post, "/session/logout"),
         }
     }
 
@@ -412,13 +436,19 @@ mod tests {
             | Op::UninstallRun
             | Op::JobsGet
             | Op::JobEvents
-            | Op::Events => Op::ALL.contains(&op),
+            | Op::Events
+            | Op::RemoteGet
+            | Op::RemoteSet
+            | Op::UsersList
+            | Op::UserAdd
+            | Op::UserRemove
+            | Op::SessionLogout => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 60);
+        assert_eq!(Op::ALL.len(), 66);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

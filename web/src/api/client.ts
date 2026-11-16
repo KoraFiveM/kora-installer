@@ -105,6 +105,18 @@ export const api = {
   meta: () => get<T.Meta>('/meta'),
   session: {
     create: (token: string) => request<void>('/session', { method: 'POST', body: { token }, quiet401: true }),
+    /** Sign in with no token: a Tailscale identity, when the panel is set up for it. */
+    createByIdentity: () => request<void>('/session', { method: 'POST', body: {}, quiet401: true }),
+    logout: () => post<void>('/session/logout'),
+  },
+  remote: {
+    get: () => get<T.RemoteSettings>('/remote'),
+    set: (body: T.RemoteSettingsUpdate) => put<T.RemoteSettings>('/remote', body),
+  },
+  users: {
+    list: () => get<{ users: T.PanelUser[] }>('/users').then((r) => r.users),
+    add: (name: string, role: T.Role) => post<T.NewUser>('/users', { name, role }),
+    remove: (name: string) => del<void>(`/users/${enc(name)}`),
   },
   system: () => get<T.SystemInfo>('/system'),
   servers: {

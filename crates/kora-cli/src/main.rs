@@ -278,12 +278,48 @@ struct AddResourcesArgs {
 
 #[derive(Args, Debug)]
 struct PanelArgs {
-    /// Port to listen on (127.0.0.1 only).
+    /// Port to listen on.
     #[arg(long, default_value_t = kora_web::DEFAULT_PORT)]
     port: u16,
+    /// Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard.
+    #[arg(long, default_value = "127.0.0.1")]
+    bind: std::net::IpAddr,
+    /// Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings).
+    #[arg(long)]
+    remote: bool,
     /// Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop).
     #[arg(long)]
     no_open: bool,
+    #[command(subcommand)]
+    cmd: Option<PanelCmd>,
+}
+
+#[derive(Subcommand, Debug)]
+enum PanelCmd {
+    /// Manage the people who may sign in to the panel remotely (each has a token and a role).
+    User {
+        #[command(subcommand)]
+        cmd: PanelUserCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PanelUserCmd {
+    /// Add a user and print their token once (it cannot be shown again).
+    Add {
+        /// A name for this person (letters, numbers, dots, dashes, underscores).
+        name: String,
+        /// What they may do: viewer (look only), operator (run servers, updates, logs) or admin (everything).
+        #[arg(long, value_parser = ["viewer", "operator", "admin"])]
+        role: String,
+    },
+    /// List the users and their roles.
+    List,
+    /// Remove a user; their sessions stop working at once.
+    Remove {
+        /// The user to remove.
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -292,7 +328,7 @@ enum Command {
     Install(Box<InstallArgs>),
     /// Open the multi-server manager.
     Manager,
-    /// Open the Kora Panel: install, manage and monitor servers in your web browser (local only).
+    /// Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up).
     Panel(PanelArgs),
     /// Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers).
     Update(UpdateArgs),
@@ -1523,8 +1559,65 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
 }
 
 fn panel(a: &PanelArgs) -> i32 {
-    let opts = kora_web::PanelOptions { port: a.port, open_browser: !a.no_open, ..Default::default() };
+    if let Some(PanelCmd::User { cmd }) = &a.cmd {
+        return panel_user(cmd);
+    }
+    let opts = kora_web::PanelOptions {
+        bind: a.bind,
+        port: a.port,
+        open_browser: !a.no_open,
+        remote: a.remote,
+        ..Default::default()
+    };
     match kora_web::run(opts) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+/// `kora panel user ...`: edits `<kora home>/panel.json`. A running panel notices the change by itself.
+fn panel_user(cmd: &PanelUserCmd) -> i32 {
+    use kora_web::remote::{config, RemoteConfig, Role};
+    let path = config::default_path();
+    let mut cfg = match RemoteConfig::load(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    let result: Result<(), String> = match cmd {
+        PanelUserCmd::Add { name, role } => role.parse::<Role>().and_then(|role| {
+            let token = cfg.add_user(name, role)?;
+            cfg.save(&path)?;
+            println!("Added {} ({role}).", name.trim());
+            println!("Token (shown once, keep it safe): {token}");
+            if !cfg.enabled {
+                println!("Remote access is still off. Start the panel with `kora panel --bind <address> --remote`, or turn it on in the panel's Settings.");
+            }
+            Ok(())
+        }),
+        PanelUserCmd::List => {
+            if cfg.users.is_empty() {
+                println!("No users yet. Add one with: kora panel user add <name> --role admin");
+            }
+            for u in &cfg.users {
+                println!("{:<24} {}", u.name, u.role);
+            }
+            Ok(())
+        }
+        PanelUserCmd::Remove { name } => {
+            if cfg.remove_user(name) {
+                cfg.save(&path).map(|()| println!("Removed {name}."))
+            } else {
+                Err(format!("There is no user named '{name}'."))
+            }
+        }
+    };
+    match result {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {e}");

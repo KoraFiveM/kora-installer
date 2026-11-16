@@ -4,12 +4,56 @@
 export type Mode = 'production' | 'development'
 export type ServerStatus = 'running' | 'stopped' | 'missing'
 
+export type Role = 'viewer' | 'operator' | 'admin'
+
+/** Who is signed in. `provider` is how they proved it: the launch link (`local`), Tailscale, or a user token. */
+export interface Identity {
+  name: string
+  provider: 'local' | 'tailscale' | 'token'
+  role: Role
+}
+
 export interface Meta {
   version: string
   api: number
   platform: 'windows' | 'linux'
   ops: string[]
   node: string
+  /** null when not signed in; absent on older servers (treated as a local admin). */
+  identity?: Identity | null
+  /** The request came from another computer. */
+  remote?: boolean
+  /** Remote sessions may use the destructive actions (delete, uninstall, console input, install, ...). */
+  allow_remote_destructive?: boolean
+}
+
+export interface PanelUser {
+  name: string
+  role: Role
+  created: number
+}
+
+/** `GET /remote` (local sessions only). Token hashes are never sent. */
+export interface RemoteSettings {
+  enabled: boolean
+  enabled_by_flag: boolean
+  bind: string
+  port: number
+  tailscale: boolean
+  tailscale_users: Record<string, Role>
+  allowed_hosts: string[]
+  allow_remote_destructive: boolean
+  users: PanelUser[]
+  saved_to: string | null
+}
+
+export type RemoteSettingsUpdate = Partial<Pick<RemoteSettings, 'enabled' | 'tailscale' | 'tailscale_users' | 'allowed_hosts' | 'allow_remote_destructive'>>
+
+/** `POST /users` answer: the token is shown this once. */
+export interface NewUser {
+  name: string
+  role: Role
+  token: string
 }
 
 export interface SystemInfo {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowDown } from 'lucide-react'
 import { api } from '@/api/client'
+import { useRole, whyNot } from '@/hooks/useRole'
 import type { ServerDetail } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -32,15 +33,17 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
   const hpos = useRef(-1)
   const box = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const role = useRole()
+  const readOk = role.can('operator')
 
   useEffect(() => {
-    if (!s.console_enabled || typeof EventSource === 'undefined') return
+    if (!s.console_enabled || !readOk || typeof EventSource === 'undefined') return
     const es = new EventSource(api.console.streamUrl(s.name))
     const add = (m: Event) => setLines((l) => [...l, lineOf((m as MessageEvent<string>).data)].slice(-MAX_LINES))
     es.addEventListener('line', add)
     es.onmessage = add
     return () => es.close()
-  }, [s.name, s.console_enabled])
+  }, [s.name, s.console_enabled, readOk])
 
   useEffect(() => {
     const el = box.current
@@ -61,11 +64,13 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
     setPaused(false)
   }
 
+  if (!readOk) return <Alert tone="info" title="The console is not available to you">{whyNot(role, 'operator')}</Alert>
+
   if (!s.console_enabled) {
     return (
       <div className="max-w-xl space-y-4">
         <Alert tone="info" title="The console is not switched on">To show live server output and send commands, Kora adds a small helper resource called kora_console to this server. It loads the next time the server starts.</Alert>
-        <Button variant="default" disabled={enabling} onClick={async () => { setEnabling(true); setErr(null); try { await api.console.enable(s.name); await qc.invalidateQueries({ queryKey: ['server', s.name] }) } catch (e) { setErr(e) } finally { setEnabling(false) } }}>Enable console</Button>
+        <Button variant="default" disabled={enabling || !role.can('admin')} title={whyNot(role, 'admin') ?? undefined} onClick={async () => { setEnabling(true); setErr(null); try { await api.console.enable(s.name); await qc.invalidateQueries({ queryKey: ['server', s.name] }) } catch (e) { setErr(e) } finally { setEnabling(false) } }}>Enable console</Button>
         <ErrorNotice error={err} />
       </div>
     )
@@ -102,6 +107,7 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
           value={cmd}
           placeholder="Type a command, for example status"
           autoComplete="off"
+          disabled={!role.canDestroy}
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => {
             const h = history.current
@@ -116,8 +122,9 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
             }
           }}
         />
-        <Button type="submit" variant="default" disabled={!cmd.trim()}>Send</Button>
+        <Button type="submit" variant="default" disabled={!cmd.trim() || !role.canDestroy}>Send</Button>
       </form>
+      {!role.canDestroy && <p className="text-xs text-muted-foreground">{whyNot(role, 'admin', true)}</p>}
       <ErrorNotice error={err} />
     </div>
   )

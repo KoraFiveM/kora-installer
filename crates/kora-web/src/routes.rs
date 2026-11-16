@@ -84,6 +84,12 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::JobsGet => on_op(op, crate::jobs::job_get),
         Op::JobEvents => on_op(op, crate::jobs::job_events),
         Op::Events => on_op(op, handlers::system::events),
+        Op::RemoteGet => on_op(op, handlers::remote::remote_get),
+        Op::RemoteSet => on_op(op, handlers::remote::remote_set),
+        Op::UsersList => on_op(op, handlers::remote::users_list),
+        Op::UserAdd => on_op(op, handlers::remote::user_add),
+        Op::UserRemove => on_op(op, handlers::remote::user_remove),
+        Op::SessionLogout => on_op(op, crate::session_logout),
     }
 }
 

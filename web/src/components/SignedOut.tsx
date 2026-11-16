@@ -7,7 +7,7 @@ import { Field } from '@/components/Field'
 import { Alert } from '@/components/ui/alert'
 
 /** Shown when the API answers 401: not signed in, or the session ran out. */
-export function SignedOut({ error, onToken }: { error: ApiError | null; onToken: (token: string) => Promise<ApiError | null> }) {
+export function SignedOut({ error, onToken, onIdentity }: { error: ApiError | null; onToken: (token: string) => Promise<ApiError | null>; onIdentity?: () => Promise<ApiError | null> }) {
   const [token, setToken] = useState('')
   const [err, setErr] = useState<ApiError | null>(error)
   const [busy, setBusy] = useState(false)
@@ -40,6 +40,12 @@ export function SignedOut({ error, onToken }: { error: ApiError | null; onToken:
               Sign in
             </Button>
           </form>
+          {onIdentity && (
+            <div className="space-y-2 border-t border-border pt-4">
+              <p className="text-sm text-muted-foreground">On a private network with Tailscale? If an administrator has added your account, you can sign in without a code.</p>
+              <Button variant="secondary" disabled={busy} onClick={async () => { setBusy(true); setErr(await onIdentity()); setBusy(false) }}>Sign in with Tailscale</Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </main>
