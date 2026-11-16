@@ -152,6 +152,27 @@ pub async fn check_db_login(Json(body): Json<Value>) -> Result<Json<Value>, ApiE
     Ok(Json(v))
 }
 
+/// `POST /checks/cfx` `{username}` → `{ok, id, username, identifier, message}`. Asks forum.cfx.re which
+/// account the name belongs to, so the install can make that account the txAdmin admin. Only the name is sent.
+pub async fn check_cfx(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let name = body.get("username").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("Type your Cfx.re username."));
+    }
+    let e = env();
+    let v = blocking(move || {
+        Ok(match e.cfx_lookup(&name) {
+            Ok(a) => json!({
+                "ok": true, "id": a.id, "username": a.username, "identifier": a.identifier(),
+                "message": format!("Found {} (fivem:{}). This account will be the txAdmin admin.", a.username, a.id),
+            }),
+            Err(m) => json!({"ok": false, "id": null, "username": null, "identifier": null, "message": m}),
+        })
+    })
+    .await?;
+    Ok(Json(v))
+}
+
 /// `POST /installs/plan`: the same checks as starting, nothing changed, no secrets in the answer.
 /// → `{summary, steps, needs_admin, elevated, disk, warnings, notes}`.
 pub async fn install_plan(

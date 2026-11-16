@@ -8,6 +8,7 @@ pub mod api;
 pub mod app_install;
 pub mod artifacts;
 pub mod catalog;
+pub mod cfx;
 pub mod console;
 pub mod db;
 pub mod elevate;

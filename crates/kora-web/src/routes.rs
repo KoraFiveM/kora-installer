@@ -101,6 +101,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::UserAdd => on_op(op, handlers::remote::user_add),
         Op::UserRemove => on_op(op, handlers::remote::user_remove),
         Op::SessionLogout => on_op(op, crate::session_logout),
+        Op::CheckCfx => on_op(op, handlers::install::check_cfx),
     }
 }
 

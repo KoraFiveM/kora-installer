@@ -33,6 +33,10 @@ pub trait InstallEnv: Send + Sync {
     fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), String>;
     /// The FiveM server builds that can be installed.
     fn artifacts(&self) -> Result<artifacts::ArtifactList, String>;
+    /// Look a Cfx.re username up on forum.cfx.re (the real lookup unless a test replaces it).
+    fn cfx_lookup(&self, name: &str) -> Result<crate::cfx::CfxAccount, String> {
+        crate::cfx::lookup(name)
+    }
     /// Does this process have administrator / root rights?
     fn is_elevated(&self) -> bool;
     /// Plain reasons the request needs administrator rights (empty = none).
