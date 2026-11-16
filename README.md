@@ -30,7 +30,7 @@ Windows 10/11 or Server 2019+ (PowerShell):
 irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.0/install.ps1 | iex
 ```
 
-Then run `kora install`. The scripts check the download's SHA-256, install `kora` for your user (no administrator rights
+Then run `kora panel` (the web panel; `kora install` is the terminal wizard). The scripts check the download's SHA-256, install `kora` for your user (no administrator rights
 needed for this step) and keep the previous version as `kora.previous`. Use the newest version number from the
 [Releases page](https://github.com/KoraFiveM/kora-installer/releases) (`/releases/latest` ignores pre-releases, so use an
 explicit version). `KORA_VERSION=vX.Y.Z` (or `-Version` on Windows) picks a release, `KORA_RELEASE_BASE` changes the download address.
