@@ -5,6 +5,8 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-16
+
 ### Added
 - `kora panel restart` restarts the background panel and prints the sign-in link. A panel running in a terminal window is not touched: it says to stop it there and run `kora panel` again.
 - `kora panel remote-actions on|off|status` lets remote administrators install, delete and uninstall servers, send console commands, change schedules and update Kora (off by default). Until now this switch was only in Settings on the computer itself, out of reach on a server with no screen. A running panel uses the new setting right away.
