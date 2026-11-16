@@ -1,0 +1,183 @@
+# Kora Panel plan (0.4.0)
+
+Turn the installer into a local web panel that installs, manages and monitors FiveM servers on
+Windows and Linux. The CLI and the TUI stay. Hard requirement: **parity** — nothing the CLI, the
+wizard or the manager does today may be lost, with one recorded exception (setup codes, below).
+
+## 1. Decisions (settled)
+
+| Topic | Decision |
+|---|---|
+| Privileges | The panel runs as the installing user. Privileged actions go through a small root helper (installed once, Unix socket / named pipe, peer-credential check, accepts only the existing privileged verbs). Without the helper the panel shows the exact `kora ...` command to run. |
+| Lifetime | `kora panel` runs in the foreground; an opt-in service keeps it running for monitoring, alerts and remote access. |
+| Server | axum + tokio, confined to `crates/kora-web`. `kora-core` stays sync; every core call runs in `spawn_blocking`. |
+| Frontend | Vite + React + TypeScript + Tailwind + shadcn/ui in `web/`, built to static files and embedded in the binary. No Next.js. Built in CI (`npm ci --ignore-scripts`, committed lockfile); built assets are not committed. `cargo build` without Node still works and serves a "UI not built" page. |
+| Remote destructive actions | Delete, uninstall and console input are local-only by default, enabled per node; always require typing the server name. Roles: viewer / operator / admin. |
+| Remote identity | tailscaled whois on the peer address; identity headers are never trusted. Loopback requests always need the token. A token/password provider covers Headscale, WireGuard and tunnels. |
+| Setup codes | Removed in 0.4.0 (the one parity exception). `--code` stays parseable and fails with a clear message. `--hostname` and `--game-build` are added so headless installs lose nothing. The website's code flow is removed after 0.4.0 is on GitHub. |
+| Hub | Any panel can act as a hub. Nodes advertise version and supported operations; no central service. |
+| Monitoring | In-memory ring plus a capped file per server under `.kora/`, about 24 hours. Alerts: in-panel banner, Discord webhook, generic webhook, email (email last). |
+| Headless | `kora panel --no-open`, auto-detected when there is no display or in an SSH session; prints the URL, the token and an `ssh -L` hint. |
+| macOS | Not supported. Mac-specific code and wording are removed. |
+| Signing | The Windows exe stays unsigned. No SignPath. Docs say so and explain `.sha256` verification. |
+
+## 2. Architecture
+
+```
+kora-cli ──┬── kora-tui ──┐
+           └── kora-web ──┼── kora_core::api  (Backend trait, Op enum, DTOs, jobs)
+web/ (React) ── HTTP ─────┘        └── the rest of kora-core (unchanged engine)
+```
+
+- `kora_core::api` is the only way front ends reach the engine. The TUI, the CLI and the web
+  server use the same trait, so they cannot drift.
+- `RemoteBackend` (later) implements the same trait over HTTP for the hub.
+- Logic that lives in `kora-tui` today and is not about drawing moves to core: `manager/backend.rs`,
+  `manager/adapter.rs` (`SystemBackend`, `with_ensure`, `valid_resource_name`, `read_badge`),
+  `manager/adopt.rs`, the file parts of `manager/logs.rs` and `manager/console.rs`.
+
+### 2.1 Operations
+
+One list defines every operation: `kora_core::api::Op` with `Op::ALL`, a stable `name()`
+(snake_case, used in `/meta` capabilities) and a `route()` (method + path). The web router is an
+exhaustive `match` over `Op` (no wildcard arm), so an operation without a handler does not compile.
+
+All routes are under `/api/v1`. `{s}` is the server's registry name, percent-encoded.
+
+| Op | Route | Notes |
+|---|---|---|
+| meta | GET /meta | `{version, api: 1, platform, ops: [names], node}`; no auth needed |
+| session_create | POST /session | body `{token}` → sets the session cookie |
+| system_info | GET /system | admin?, platform, helper installed?, headless?, kora version |
+| servers_list | GET /servers | entries + status + badge + managed |
+| server_get | GET /servers/{s} | entry, status detail (running, game_listening, txadmin_up), badge |
+| server_control | POST /servers/{s}/control | `{action: start|stop|restart}`; job. Falls back to detached launch when there is no service (same as the CLI). |
+| server_delete | DELETE /servers/{s} | `{confirm_name, keep_files, keep_db}`; job |
+| server_unregister | DELETE /servers/{s}/registration | adopted servers |
+| servers_scan | POST /servers/scan | adopt candidates; job |
+| servers_adopt | POST /servers/adopt | `{dir}` |
+| server_open_folder | POST /servers/{s}/open-folder | local sessions only |
+| logs_list | GET /servers/{s}/logs | log sources |
+| logs_tail | GET /servers/{s}/logs/{file} | `?lines=` |
+| console_stream | GET /servers/{s}/console/stream | SSE |
+| console_send | POST /servers/{s}/console | `{command}` |
+| console_enable | PUT /servers/{s}/console/enabled | installs `kora_console` |
+| resources_list | GET /servers/{s}/resources | |
+| resource_ensure | POST /servers/{s}/ensure | `{name, restart}` |
+| update_preview | POST /servers/{s}/update/preview | `{scope}`; job |
+| update_apply | POST /servers/{s}/update/apply | `{scope, restart, skip}`; job with events |
+| update_auto | POST /servers/{s}/update/auto | job |
+| snapshots_list | GET /servers/{s}/snapshots | |
+| snapshot_rollback | POST /servers/{s}/snapshots/{id}/rollback | job |
+| catalog_for_server | GET /servers/{s}/catalog | catalog, installed ids, note |
+| resources_plan | POST /servers/{s}/resources/plan | `{ids}` |
+| resources_add | POST /servers/{s}/resources | `{ids}`; job |
+| webhook_get | GET /servers/{s}/webhook | redacted |
+| webhook_set | PUT /servers/{s}/webhook | `{url}` |
+| webhook_remove | DELETE /servers/{s}/webhook | |
+| webhook_test | POST /servers/{s}/webhook/test | |
+| schedule_get | GET /servers/{s}/schedule | |
+| schedule_set | PUT /servers/{s}/schedule | privileged |
+| schedule_remove | DELETE /servers/{s}/schedule | privileged |
+| ports_set | PUT /servers/{s}/ports | stopped servers only |
+| issue_report | POST /servers/{s}/issues | `{resource, title, text}` |
+| pr_plan | POST /servers/{s}/pr/plan | `{resource}` |
+| pr_open | POST /servers/{s}/pr | `{plan, title, text}` |
+| github_status | GET /github/status | |
+| github_login | POST /github/login | device flow: `{code, url}`; job completes on approval |
+| github_owners | GET /github/owners | |
+| catalog_get | GET /catalog | live catalog, bundled fallback |
+| artifacts_list | GET /artifacts | |
+| install_defaults | GET /installs/defaults | suggested name/dir/ports, saved answers |
+| install_saved_clear | DELETE /installs/saved | |
+| check_ports | POST /checks/ports | with next-free suggestions |
+| check_disk | POST /checks/disk | |
+| check_db_login | POST /checks/db-login | |
+| install_plan | POST /installs/plan | dry run |
+| install_start | POST /installs | body = `InstallRequest`; job with `ProgressEvent`s |
+| install_log | GET /installs/{job}/log | |
+| self_update_check | GET /self-update | |
+| self_update_apply | POST /self-update | `{version?}`; job |
+| app_status | GET /app | |
+| app_install | PUT /app | `{desktop_shortcut, force, dry_run}`; privileged |
+| app_uninstall | DELETE /app | `{dry_run}`; privileged |
+| uninstall_plan | POST /uninstall/plan | items that would be removed |
+| uninstall_run | POST /uninstall | `{answers: [{item, remove}], delete_files, delete_databases, only}`; job |
+| jobs_get | GET /jobs/{id} | |
+| job_events | GET /jobs/{id}/events | SSE |
+| events | GET /events | SSE: server status / badge changes |
+
+### 2.2 Conventions
+
+- JSON, snake_case. Errors: `{"error": {"code": "not_found", "message": "..."}}` with a matching
+  HTTP status. Codes: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
+  `needs_elevation` (carries `command: ["kora", ...]`), `internal`.
+- Secrets (licence key, database passwords, webhook URL) are accepted but never returned.
+- Jobs: a slow operation answers `202 {"job": "<id>"}`. `GET /jobs/{id}` returns
+  `{id, op, server, state: "running"|"done"|"failed", events: [...], result, error}`.
+  `GET /jobs/{id}/events` is SSE with `event: progress|done|failed`; it replays past events first.
+  One mutating job per server at a time (`conflict` otherwise).
+- `JobRegistry` lives in `kora_core::api::jobs` and uses std threads and channels (no tokio).
+
+### 2.3 Local security (phase 3)
+
+- Bind `127.0.0.1` by default (`--bind`, `--port`, default port 47120).
+- `kora panel` creates a random token, opens `http://127.0.0.1:<port>/#token=<token>`; the page
+  posts it to `/session` and gets an `HttpOnly; SameSite=Strict` cookie. `Authorization: Bearer`
+  is also accepted (hub, scripts).
+- Every request: the `Host` header must be the bound address (DNS rebinding). Non-GET requests:
+  `Origin` must match and an `X-Kora` header must be present (CSRF).
+- Response headers: strict CSP (`default-src 'self'`, no inline script, no external origins),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `frame-ancestors 'none'`.
+
+## 3. Phases
+
+1. **Baseline.** Golden test of the whole `kora --help` tree; `--hostname`, `--game-build`;
+   setup codes removed (`--code` fails with a message); Mac code removed; docs (no SignPath, no
+   setup codes); the start/stop drift between CLI and manager fixed.
+2. **Shared API in core.** `kora_core::api` (Backend, Op, DTOs with serde, jobs); TUI and CLI on it.
+3. **`kora-web`, local only.** axum server, token auth, embedded UI, all section 2.1 routes;
+   `kora panel`.
+4. **Wizard in the panel + root helper.**
+5. **Monitoring.** Sampler (status, players from `/players.json`, CPU/RAM of the process tree,
+   disk, ports, badge), 24 h history, alerts, opt-in panel service.
+6. **Remote access.** Bind + identity providers (tailscaled whois, token), roles.
+7. **Hub.** `RemoteBackend`, fleet view, capability-based version skew (`/meta`; v1 is additive only).
+
+## 4. Parity tests
+
+- `Op` → handler: exhaustive `match` in the router (compile time).
+- CLI → Op: a test walks clap's `Cli::command()`; every subcommand and flag must be in a table as
+  `Route(op, field)`, `CliOnly(reason)` or `Removed(reason)`.
+- TUI → Op: `manager::Action`, wizard `Screen` and result `Action` each get a `parity()` function
+  with no wildcard arm.
+- Behaviour: the `FakeBackend` tests run directly and through HTTP.
+- `kora --help` golden file: an existing flag cannot disappear silently.
+
+## 5. Brand (web/)
+
+| Token | Hex | Use |
+|---|---|---|
+| Kora Lime | #A8FF00 | primary action, active state (sparingly: one lime element per view) |
+| Charcoal | #1D1E24 | cards, surfaces |
+| Ink | #111315 | page background |
+| Mist | #BCBDC0 | secondary text |
+| White | #FFFFFF | primary text |
+| Signal Blue | #4AA8FF | info |
+| Success | #2ECC71 | online, done |
+| Amber | #F5A623 | restarting, pending |
+| Orange | #E67E22 | notices |
+| Danger | #E74C3C | offline, errors, destructive |
+| Steel | #95A5A6 | neutral |
+
+Fonts, bundled (no CDN): Inter Tight (headings), Inter (body), JetBrains Mono (console, code).
+Dark theme only.
+
+## 6. Wave 1 work split (parallel, one branch each, merged into `feat/panel`)
+
+| Branch | Owns | Must not touch |
+|---|---|---|
+| `panel/w1-baseline` | `crates/kora-cli`, `crates/kora-tui` except `manager/`, docs, CHANGELOG | `crates/kora-tui/src/manager/`, `crates/kora-core/src/api/`, deleting `kora-core/src/site` (done at merge) |
+| `panel/w1-api` | `crates/kora-core/src/api/`, `crates/kora-tui/src/manager/`, serde derives in core | `crates/kora-cli`, the wizard |
+| `panel/w1-web` | `crates/kora-web` (new), workspace `Cargo.toml` member line, `deny.toml` | everything else |
+| `panel/w1-ui` | `web/` (new) | everything else |
