@@ -42,6 +42,7 @@ impl Jobs for kora_core::api::JobRegistry {
 /// `Err(String)`: plain text becomes `{code: "failed", message}`; a JSON object (for structured
 /// failures such as installs or `needs_elevation`) is passed through, with `code` defaulting to `failed`.
 pub fn job_error(e: &str) -> Value {
+    let e = &crate::error::friendly(e.to_string());
     match serde_json::from_str::<Value>(e) {
         Ok(mut v @ Value::Object(_)) if v.get("message").is_some_and(Value::is_string) => {
             if v.get("code").is_none() {
