@@ -1,17 +1,23 @@
-## Kora Installer v0.5.1
+## Kora Installer v0.6.0
 
 Install and manage a Kora FiveM server from your browser: run `kora panel`.
 
 ### Install
 Linux:
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.1/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.6.0/install.sh | sh
 ```
 Windows (PowerShell):
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.1/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.6.0/install.ps1 | iex
 ```
 Already have Kora? Run `kora self-update`.
+
+### New in 0.6.0
+- **Open Kora Panel from your own devices with Tailscale, in one step.** On the server run `kora panel --tailscale` (the install line offers it when Tailscale is running). Open the address it prints, for example `http://myserver.tail1234.ts.net:47120`, on any device signed in to Tailscale: you are signed in with your Tailscale account, with no link, token or SSH tunnel. Let others in with `kora panel tailscale allow name@example.com --role operator`.
+- **Sign-in links work once.** The link `kora panel` prints holds a one-time code, so the panel's token never lands in your browser history.
+- **A large security update.** Root no longer trusts files in a server folder (update jobs, delete, uninstall), the panel's session can no longer be taken over through other services on the same machine, proxies and public addresses are refused, and downloads stay on https. Release files now have build provenance: `gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer`.
+- The install line installs the newest **stable** release (`KORA_PRERELEASE=1` for pre-releases).
 
 ### New in 0.5.1
 - **The resource list comes straight from GitHub** (the catalog file in the docs repository), so changes to it reach the installer as soon as they are merged. `sd-lib` is no longer offered.
