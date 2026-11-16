@@ -524,6 +524,8 @@ export interface AlertSettingsUpdate {
   discord?: boolean
   /** Omit to keep the address; '' removes it. */
   webhook_url?: string
+}
+
 // ---- hub (fleet) ----------------------------------------------------------------------------
 
 export interface HubNode {
