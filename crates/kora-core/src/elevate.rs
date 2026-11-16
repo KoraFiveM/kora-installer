@@ -207,12 +207,27 @@ fn relaunch_exe(exe: &std::path::Path, args: &[OsString]) -> Result<(), ElevateE
     interpret_powershell_exit(out.status.code(), &String::from_utf8_lossy(&out.stderr))
 }
 
+/// What the `sudo` relaunch carries over: the variables to keep, and the `KORA_HOME` to set first.
+/// `sudo` makes `HOME` root's, so the Kora folder (server list, saved answers) is decided here,
+/// before elevating, and handed over as `KORA_HOME`; an explicit `KORA_HOME` is simply kept.
+pub fn sudo_env(present: &dyn Fn(&str) -> bool, user_kora_home: std::path::PathBuf) -> (Vec<String>, Option<std::path::PathBuf>) {
+    let set = crate::userhome::kora_home_for_relaunch(present("KORA_HOME"), user_kora_home);
+    let keep = SUDO_KEEP_ENV.iter().filter(|k| present(k) || (**k == "KORA_HOME" && set.is_some())).map(|k| k.to_string()).collect();
+    (keep, set)
+}
+
 #[cfg(unix)]
 fn relaunch_exe(exe: &std::path::Path, args: &[OsString]) -> Result<(), ElevateError> {
     use std::os::unix::process::CommandExt;
     let Some(sudo) = crate::sysexe::unix_sudo() else { return Err(ElevateError::Unsupported) };
-    let keep: Vec<String> = SUDO_KEEP_ENV.iter().filter(|k| std::env::var_os(k).is_some()).map(|k| k.to_string()).collect();
-    let err = std::process::Command::new(sudo).args(sudo_args(exe.as_os_str(), args, &keep)).env(RELAUNCHED_ENV, "1").exec();
+    let (keep, set) = sudo_env(&|k| std::env::var_os(k).is_some(), crate::installer::registry::kora_home());
+    let mut cmd = std::process::Command::new(sudo);
+    if let Some(h) = &set {
+        // Made by this user now, so files root writes there later can still be replaced by them.
+        let _ = std::fs::create_dir_all(h);
+        cmd.env("KORA_HOME", h);
+    }
+    let err = cmd.args(sudo_args(exe.as_os_str(), args, &keep)).env(RELAUNCHED_ENV, "1").exec();
     Err(ElevateError::Failed(err.to_string()))
 }
 
@@ -533,6 +548,24 @@ mod tests {
         assert_eq!(a, ["--preserve-env=CFX_LICENSE_KEY", "--", "/bin/kora", "install", "--name", "x y"]);
         let b = sudo_args(OsStr::new("k"), &[], &[]);
         assert_eq!(b.len(), 2);
+    }
+
+    // Linux paths and sudo: only meaningful on Unix (on Windows `/home/..` is not absolute).
+    #[cfg(unix)]
+    #[test]
+    fn the_sudo_relaunch_pins_the_users_kora_home() {
+        let home = std::path::PathBuf::from("/home/sam/.kora");
+        let (keep, set) = sudo_env(&|k| k == "NO_COLOR", home.clone());
+        assert_eq!(keep, ["KORA_HOME", "NO_COLOR"]);
+        assert_eq!(set, Some(home.clone()));
+        let a = sudo_args(OsStr::new("/bin/kora"), &["install".into()], &keep);
+        assert_eq!(a[0], OsString::from("--preserve-env=KORA_HOME,NO_COLOR"));
+        // already set: kept as it is, not replaced
+        let (keep, set) = sudo_env(&|k| k == "KORA_HOME", home);
+        assert_eq!((keep, set), (vec!["KORA_HOME".to_string()], None));
+        // nothing usable: nothing pinned
+        let (keep, set) = sudo_env(&|_| false, ".kora".into());
+        assert!(keep.is_empty() && set.is_none());
     }
 
     #[test]

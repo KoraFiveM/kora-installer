@@ -62,6 +62,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --auto-ports", Route(Op::CheckPorts)),
     ("install --hostname", Route(Op::InstallStart)),
     ("install --game-build", Route(Op::InstallStart)),
+    ("install --fix-permissions", CliOnly("changes folder permissions as administrator; the panel runs as the signed-in user and reports the problem with the command to run")),
     ("install --yes", CliOnly("the panel confirms in the UI")),
     (
         "manager",

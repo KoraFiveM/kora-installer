@@ -30,6 +30,9 @@ pub fn screen(s: Screen) -> Parity {
         | Screen::GameBuild
         | Screen::TxAdminPublic => Route(Op::InstallStart),
         Screen::Folder => Route(Op::CheckDisk),
+        Screen::FolderAccess => UiOnly(
+            "offers to fix the folder permissions as administrator; the panel's install reports the same problem with the command to run",
+        ),
         Screen::Ports => Route(Op::CheckPorts),
         Screen::Artifact => Route(Op::ArtifactsList),
         Screen::Resources | Screen::ResourceList => Route(Op::CatalogGet),
@@ -89,6 +92,7 @@ mod tests {
         Screen::DbAdminLogin,
         Screen::Firewall,
         Screen::Service,
+        Screen::FolderAccess,
         Screen::Shortcut,
         Screen::License,
         Screen::Cfx,

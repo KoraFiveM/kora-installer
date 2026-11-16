@@ -138,27 +138,78 @@ pub fn exe_is_service_safe(_exe: &Path) -> bool {
     false // program folders are copied under Program Files
 }
 
-/// A plain-language problem if another account cannot reach `dir` (private home folder etc.).
-/// For a folder that does not exist yet its nearest existing parent is examined.
+/// Every folder in `chain` that a different unprivileged account cannot pass through (root first).
 #[cfg(unix)]
-pub fn unreachable_reason(dir: &Path) -> Option<String> {
+pub fn all_blocking_dirs(chain: &[(PathBuf, Entry)]) -> Vec<PathBuf> {
+    chain.iter().filter(|(_, e)| e.mode & 0o001 == 0).map(|(p, _)| p.clone()).collect()
+}
+
+/// The folders on the way to `dir` that another account (the server's service account) cannot
+/// pass through, root first. For a folder that does not exist yet its nearest existing parent is
+/// examined. Empty = reachable.
+#[cfg(unix)]
+pub fn blocking_dirs(dir: &Path) -> Vec<PathBuf> {
     let mut p = dir.to_path_buf();
     while !p.exists() {
-        p = p.parent()?.to_path_buf();
+        match p.parent() {
+            Some(q) => p = q.to_path_buf(),
+            None => return vec![],
+        }
     }
-    let chain = entries_down_to(&std::fs::canonicalize(&p).unwrap_or(p));
-    first_blocking_dir(&chain).map(|b| {
-        format!(
-            "the background service runs as its own account, which cannot enter {} (it is private to its owner). Choose a server folder outside private folders, for example /srv/kora/<name>, or run `chmod o+x {}`.",
-            b.display(),
-            b.display()
-        )
-    })
+    all_blocking_dirs(&entries_down_to(&std::fs::canonicalize(&p).unwrap_or(p)))
 }
 
 #[cfg(not(unix))]
-pub fn unreachable_reason(_dir: &Path) -> Option<String> {
-    None
+pub fn blocking_dirs(_dir: &Path) -> Vec<PathBuf> {
+    vec![]
+}
+
+/// `chmod o+x` on exactly these folders: other accounts may then pass through them (to reach the
+/// server folder) but still cannot list what is in them.
+pub fn traverse_plan(dirs: &[PathBuf]) -> Plan {
+    Plan::new(
+        dirs.iter()
+            .map(|d| {
+                let d = d.to_string_lossy();
+                SystemStep::run(format!("Let the server's own account pass through {d} (it still cannot list what is in it)"), "chmod", &["o+x", "--", &d])
+            })
+            .collect(),
+    )
+}
+
+/// "a", "a and b", "a, b and c" for folders.
+fn folder_list(dirs: &[PathBuf]) -> String {
+    let v: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+    match v.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+/// Plain-language problem plus both ways out, when the service account cannot reach the server
+/// folder because of `blocked` folders. `alternative` = a folder that works.
+pub fn unreachable_message(blocked: &[PathBuf], alternative: &Path) -> String {
+    let list = folder_list(blocked);
+    let cmd = blocked.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(" ");
+    format!(
+        "the background service runs as its own account, which cannot get into {list} ({}). Either let it pass through: run the install again with --fix-permissions (Kora then runs `chmod o+x {cmd}`; other accounts can pass through but still cannot list what is in {}), or choose a folder the service can reach, such as {} (--dir {}).",
+        if blocked.len() == 1 { "it is private to its owner" } else { "they are private to their owners" },
+        if blocked.len() == 1 { "it" } else { "them" },
+        alternative.display(),
+        alternative.display()
+    )
+}
+
+/// A plain-language problem if another account cannot reach `dir` (private home folder etc.).
+/// For a folder that does not exist yet its nearest existing parent is examined.
+pub fn unreachable_reason(dir: &Path) -> Option<String> {
+    let blocked = blocking_dirs(dir);
+    if blocked.is_empty() {
+        return None;
+    }
+    let slug = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "my-server".into());
+    Some(unreachable_message(&blocked, &Path::new(crate::userhome::KORA_USER_HOME).join(slug)))
 }
 
 #[cfg(test)]
@@ -232,6 +283,20 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn every_private_folder_is_listed_and_the_fix_touches_only_those() {
+        let e = |m| Entry { uid: 1000, mode: m };
+        let chain = vec![(PathBuf::from("/"), e(0o040755)), (PathBuf::from("/home"), e(0o040750)), (PathBuf::from("/home/me"), e(0o040700)), (PathBuf::from("/home/me/kora"), e(0o040755))];
+        let blocked = all_blocking_dirs(&chain);
+        assert_eq!(blocked, [PathBuf::from("/home"), PathBuf::from("/home/me")]);
+        let p = traverse_plan(&blocked);
+        let lines: Vec<String> = p.steps.iter().filter_map(|s| s.command_line()).collect();
+        assert_eq!(lines, ["chmod o+x -- /home", "chmod o+x -- /home/me"]);
+        let m = unreachable_message(&blocked, Path::new("/home/kora/srv"));
+        assert!(m.contains("/home and /home/me") && m.contains("chmod o+x /home /home/me") && m.contains("--fix-permissions") && m.contains("--dir /home/kora/srv"), "{m}");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn real_tempdir_is_reachable_and_a_user_owned_exe_is_not_service_safe() {
         use std::os::unix::fs::PermissionsExt;
         let t = tempfile::tempdir().unwrap();
@@ -241,7 +306,7 @@ mod tests {
         assert!(unreachable_reason(&dir.join("not/yet")).is_none());
         std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         let why = unreachable_reason(&dir).unwrap();
-        assert!(why.contains("cannot enter") && why.contains(&*t.path().to_string_lossy()), "{why}");
+        assert!(why.contains("cannot get into") && why.contains("--fix-permissions") && why.contains(&*t.path().to_string_lossy()), "{why}");
         std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         let exe = dir.join("kora");
         std::fs::write(&exe, b"x").unwrap();
