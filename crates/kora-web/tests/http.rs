@@ -87,7 +87,7 @@ async fn meta_without_auth() {
     let j = json_of(r).await;
     assert_eq!(j["api"], 1);
     assert_eq!(j["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(j["platform"], "linux");
+    assert_eq!(j["platform"], if cfg!(windows) { "windows" } else { "linux" });
     assert!(j["ops"].as_array().unwrap().len() > 10);
     assert!(j["node"].is_string());
 }

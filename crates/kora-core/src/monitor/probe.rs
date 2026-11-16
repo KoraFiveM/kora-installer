@@ -308,7 +308,8 @@ mod os {
         #[test]
         fn a_process_started_from_the_folder_is_found_with_its_children() {
             let dir = tempfile::tempdir().unwrap();
-            let sleep = dir.path().join("fxserver-stand-in");
+            // Named `sleep`: a multi-call coreutils binary decides what to do from its own file name.
+            let sleep = dir.path().join("sleep");
             std::fs::copy("/bin/sleep", &sleep)
                 .or_else(|_| std::fs::copy("/usr/bin/sleep", &sleep))
                 .unwrap();
