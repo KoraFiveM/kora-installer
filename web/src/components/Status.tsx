@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { Badge as BadgeT, Mode, ServerStatus } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 
@@ -8,7 +9,7 @@ export function StatusChip({ status, pending }: { status: ServerStatus; pending?
   return <Badge tone="neutral" dot>Folder missing</Badge>
 }
 
-export function UpdateChip({ badge }: { badge: BadgeT | null }) {
+function updateBadge(badge: BadgeT | null) {
   if (!badge) return <Badge tone="plain">Not checked</Badge>
   switch (badge.kind) {
     case 'up_to_date':
@@ -20,6 +21,12 @@ export function UpdateChip({ badge }: { badge: BadgeT | null }) {
     case 'new_release':
       return <Badge tone="info">New release</Badge>
   }
+}
+
+/** `to`: when there is something to look at, the badge links there (the server's Resources tab). */
+export function UpdateChip({ badge, to }: { badge: BadgeT | null; to?: string }) {
+  const chip = updateBadge(badge)
+  return to && badge && badge.kind !== 'up_to_date' ? <Link to={to} className="hover:underline">{chip}</Link> : chip
 }
 
 export function ModeChip({ mode }: { mode: Mode }) {
