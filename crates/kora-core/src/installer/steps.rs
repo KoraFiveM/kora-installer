@@ -317,8 +317,7 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
     } else {
         None
     };
-    Ok(sh
-        .selected
+    sh.selected
         .iter()
         .map(|r| {
             let repo = repo_slug(&r.repository);
@@ -328,9 +327,11 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
                 _ => None,
             };
             let rel = r.install_rel();
-            CloneItem {
+            // The catalog is checked when loaded; this keeps a bad path from ever leaving `resources/`.
+            let dest = crate::fsutil::join_inside(&root, &rel).ok_or_else(|| InstallError(format!("{}: unsafe path {rel}", r.id)))?;
+            Ok(CloneItem {
                 id: r.id.clone(),
-                dest: root.join(&rel),
+                dest,
                 rel,
                 // The real fork (its name may differ from the upstream's).
                 fork: if r.is_pinned_copy() { None } else { fork_state.as_ref().map(|s| s.fork_of(&repo)) },
@@ -338,9 +339,9 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
                 repo,
                 commit,
                 branch: r.branch.clone(),
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]

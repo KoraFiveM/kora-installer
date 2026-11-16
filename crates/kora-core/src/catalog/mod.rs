@@ -238,12 +238,15 @@ fn is_sha(s: &str) -> bool {
     s.len() == 40 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+/// A plain relative path. `:` is refused because on Windows `C:/x` (or `C:x`) makes
+/// `root.join(path)` ignore `root`; only normal components are allowed (no root, drive or `..`).
 fn is_safe_path(p: &str) -> bool {
     !p.is_empty()
         && !p.starts_with('/')
-        && !p.contains('\\')
+        && !p.contains(['\\', ':'])
         && !p.chars().any(char::is_whitespace)
         && !p.split('/').any(|s| s == "..")
+        && std::path::Path::new(p).components().all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
 fn is_safe_segment(s: &str) -> bool {
@@ -528,6 +531,21 @@ mod tests {
         assert!(e.iter().any(|m| m.contains("duplicate id")));
         assert!(e.iter().any(|m| m.contains("duplicate path")));
         assert!(e.iter().any(|m| m.contains("bad repository")));
+    }
+
+    #[test]
+    fn drive_letters_and_roots_are_unsafe_paths() {
+        for ok in ["x", "[kora]/kora_lib", "[creators]/[acme]/a.b-c"] {
+            assert!(is_safe_path(ok), "{ok}");
+        }
+        for evil in ["C:/x", "C:x", "[kora]/c:", "/x", "a/../b", "./x", "a\\b", ""] {
+            assert!(!is_safe_path(evil), "{evil}");
+        }
+        let mut c = Catalog::embedded().unwrap();
+        c.resources[0].path = "C:/Windows".into();
+        c.resources[0].subpath = Some("D:x".into());
+        let CatalogError::Invalid(e) = c.validate().unwrap_err() else { panic!() };
+        assert!(e.iter().any(|m| m.contains("unsafe path")) && e.iter().any(|m| m.contains("unsafe subpath")), "{e:?}");
     }
 
     #[test]
