@@ -4,30 +4,164 @@
 //! method and path come from `Op::route`, so only the handler's extractors live here.
 #![allow(clippy::unused_async)]
 
-use kora_core::api::Op;
+use std::sync::{Arc, RwLock};
 
-use crate::ApiError;
+use axum::extract::{Path, State};
+use axum::response::Response;
+use axum::Json;
+use kora_core::api::panel_updates::catalog_json;
+use kora_core::api::{valid_resource_name, Op};
+use kora_core::catalog::Catalog;
+use kora_core::installer::Mode;
+use serde_json::{json, Value};
 
-pub async fn resources_list() -> ApiError {
-    ApiError::not_implemented(Op::ResourcesList)
+use crate::{blocking, ApiError, AppState};
+
+/// Loads the catalog and says when the bundled copy was used. Tests replace it so nothing
+/// touches the network.
+pub type CatalogLoader = Arc<dyn Fn() -> Result<(Catalog, Option<String>), String> + Send + Sync>;
+
+static CATALOG_LOADER: RwLock<Option<CatalogLoader>> = RwLock::new(None);
+
+/// Replace the catalog loader (`None` puts the real one back). For tests.
+pub fn set_catalog_loader(l: Option<CatalogLoader>) {
+    *CATALOG_LOADER.write().unwrap_or_else(|e| e.into_inner()) = l;
 }
 
-pub async fn resource_ensure() -> ApiError {
-    ApiError::not_implemented(Op::ResourceEnsure)
+fn load_catalog() -> Result<(Catalog, Option<String>), String> {
+    let custom = CATALOG_LOADER
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    match custom {
+        Some(f) => f(),
+        None => kora_core::addresources::load_catalog().map_err(|e| e.to_string()),
+    }
 }
 
-pub async fn catalog_for_server() -> ApiError {
-    ApiError::not_implemented(Op::CatalogForServer)
+const MAX_IDS: usize = 300;
+
+fn ids_of(body: &Value) -> Result<Vec<String>, ApiError> {
+    let list: Vec<String> = body
+        .get("ids")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or_else(|| ApiError::bad_request("Send the resources to add as {\"ids\": [names]}."))?;
+    if list.is_empty() {
+        return Err(ApiError::bad_request("Pick at least one resource."));
+    }
+    if list.len() > MAX_IDS {
+        return Err(ApiError::bad_request("That is too many resources at once."));
+    }
+    match list.iter().find(|n| !valid_resource_name(n)) {
+        Some(bad) => Err(ApiError::bad_request(format!(
+            "'{bad}' is not a resource name."
+        ))),
+        None => Ok(list),
+    }
 }
 
-pub async fn resources_plan() -> ApiError {
-    ApiError::not_implemented(Op::ResourcesPlan)
+pub async fn resources_list(
+    State(st): State<AppState>,
+    Path(s): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    blocking(move || {
+        let e = st.entry(&s)?;
+        let list = st.backend().resources(&e);
+        Ok(Json(json!({"resources": list})))
+    })
+    .await
 }
 
-pub async fn resources_add() -> ApiError {
-    ApiError::not_implemented(Op::ResourcesAdd)
+pub async fn resource_ensure(
+    State(st): State<AppState>,
+    Path(s): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !valid_resource_name(&name) {
+        return Err(ApiError::bad_request(
+            "Give a resource name: letters, digits, _ . and - only.",
+        ));
+    }
+    let restart = body
+        .get("restart")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    blocking(move || {
+        let e = st.entry(&s)?;
+        let message = st
+            .backend()
+            .ensure(&e, &name, restart)
+            .map_err(ApiError::core)?;
+        Ok(Json(json!({"message": message})))
+    })
+    .await
 }
 
-pub async fn catalog_get() -> ApiError {
-    ApiError::not_implemented(Op::CatalogGet)
+pub async fn catalog_for_server(
+    State(st): State<AppState>,
+    Path(s): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    blocking(move || {
+        let e = st.entry(&s)?;
+        let dev = e.mode == Mode::Development;
+        let (cat, installed, note) = st.backend().add_catalog(&e).map_err(ApiError::core)?;
+        let note = note.or_else(|| {
+            dev.then(|| {
+                "Resources are forked into your GitHub account, so you can change them.".to_string()
+            })
+        });
+        Ok(Json(
+            json!({"catalog": catalog_json(&cat, Some(dev)), "installed": installed, "note": note}),
+        ))
+    })
+    .await
+}
+
+pub async fn resources_plan(
+    State(st): State<AppState>,
+    Path(s): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let ids = ids_of(&body)?;
+    blocking(move || {
+        let e = st.entry(&s)?;
+        let plan = st.backend().add_plan(&e, &ids).map_err(ApiError::core)?;
+        Ok(Json(
+            serde_json::to_value(plan).map_err(|x| ApiError::internal(x.to_string()))?,
+        ))
+    })
+    .await
+}
+
+pub async fn resources_add(
+    State(st): State<AppState>,
+    Path(s): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Response, ApiError> {
+    let ids = ids_of(&body)?;
+    let st2 = st.clone();
+    let e = blocking(move || st2.entry(&s)).await?;
+    let make = st.backend.clone();
+    let name = e.name.clone();
+    st.spawn_job(Op::ResourcesAdd, Some(name), move |h| {
+        for id in &ids {
+            h.event(json!({"type": "resource", "id": id, "state": "queued"}));
+        }
+        let out = make().add_install(&e, &ids)?;
+        for id in &out.installed {
+            h.event(json!({"type": "resource", "id": id, "state": "installed"}));
+        }
+        serde_json::to_value(&out).map_err(|x| x.to_string())
+    })
+}
+
+pub async fn catalog_get() -> Result<Json<Value>, ApiError> {
+    let (cat, _note) = blocking(|| load_catalog().map_err(ApiError::core)).await?;
+    Ok(Json(catalog_json(&cat, None)))
 }
