@@ -45,6 +45,22 @@ impl Output {
 pub trait CommandRunner {
     fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<Output>;
     fn sleep(&self, d: Duration);
+    /// An independent copy that can run on another thread (None: this runner is single-threaded, so callers stay sequential).
+    fn fork(&self) -> Option<Box<dyn CommandRunner + Send>> {
+        None
+    }
+}
+
+impl CommandRunner for Box<dyn CommandRunner + Send> {
+    fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<Output> {
+        (**self).run(program, args, cwd)
+    }
+    fn sleep(&self, d: Duration) {
+        (**self).sleep(d)
+    }
+    fn fork(&self) -> Option<Box<dyn CommandRunner + Send>> {
+        (**self).fork()
+    }
 }
 
 /// Real runner using `std::process::Command`.
@@ -72,6 +88,9 @@ impl CommandRunner for SystemRunner {
     }
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
+    }
+    fn fork(&self) -> Option<Box<dyn CommandRunner + Send>> {
+        Some(Box::new(SystemRunner))
     }
 }
 

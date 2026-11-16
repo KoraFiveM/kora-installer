@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { ChangeStatus, RestartPolicy, ResourceChange, ServerDetail, UpdatePreview, UpdateReport } from '@/api/types'
@@ -12,6 +13,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { normaliseUpdateEvent, ResourceProgress } from '@/components/JobProgress'
 import { formatDate } from '@/lib/utils'
+import { timeAgo } from '@/lib/ago'
 
 export const RESTART_OPTIONS: { value: RestartPolicy; label: string; hint: string }[] = [
   { value: 'none', label: 'Do not restart', hint: 'Update the files only. The changes load the next time the server restarts.' },
@@ -27,7 +29,14 @@ const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'orange'; tex
   diverged: { tone: 'orange', text: 'Needs attention', why: 'This resource has commits of your own and the original has new ones too (or Kora could not compare them). Kora will not merge them for you. Merge by hand, then check again.' },
 }
 
-function ChangeRow({ r, selected, onToggle }: { r: ResourceChange; selected: boolean; onToggle: () => void }) {
+/** Put the freshly checked rows into the list; every other row stays exactly as it was. A row that is not in the list yet is added. */
+export function mergeRows(view: UpdatePreview, fresh: ResourceChange[]): UpdatePreview {
+  const byId = new Map(fresh.map((r) => [r.id, r]))
+  const known = new Set(view.resources.map((r) => r.id))
+  return { ...view, resources: [...view.resources.map((r) => byId.get(r.id) ?? r), ...fresh.filter((r) => !known.has(r.id))] }
+}
+
+function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, checkedAt, now }: { r: ResourceChange; selected: boolean; onToggle: () => void; onCheck: () => void; checking: boolean; disabled: boolean; checkedAt?: number; now: number }) {
   const info = STATUS_INFO[r.status]
   const selectable = r.status === 'clean'
   return (
@@ -39,6 +48,7 @@ function ChangeRow({ r, selected, onToggle }: { r: ResourceChange; selected: boo
             <span className="font-mono text-sm">{r.id}</span>
             <Badge tone={info.tone}>{info.text}</Badge>
             {r.needs_restart && selectable && <Badge tone="amber">Needs a restart</Badge>}
+            {checkedAt !== undefined && <span className="text-xs text-muted-foreground">Last checked {timeAgo(checkedAt, now)}</span>}
           </div>
           {r.status !== 'up_to_date' && <div className="mt-1 text-xs text-muted-foreground">{r.from} to {r.to}{r.behind ? `, ${r.behind} new change${r.behind === 1 ? '' : 's'}` : ''}</div>}
           {info.why && <p className="mt-1 text-xs text-orange">{info.why}</p>}
@@ -49,6 +59,10 @@ function ChangeRow({ r, selected, onToggle }: { r: ResourceChange; selected: boo
             </details>
           )}
         </div>
+        <Button size="sm" variant="ghost" disabled={disabled} onClick={onCheck} aria-label={`Check ${r.id}`} aria-busy={checking} title="Check only this resource for updates">
+          {checking ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
+          Check
+        </Button>
       </div>
     </li>
   )
@@ -80,9 +94,38 @@ export function UpdatesTab({ server: s }: { server: ServerDetail }) {
   const [err, setErr] = useState<unknown>(null)
   const [rollbackId, setRollbackId] = useState<string | null>(null)
 
+  const [view, setView] = useState<UpdatePreview | null>(null)
+  const [rowJob, setRowJob] = useState<{ id: string; job: string } | null>(null)
+  const [checkedAt, setCheckedAt] = useState<Record<string, number>>({})
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
   const check = useJob<UpdatePreview>(checkJob, (j) => {
-    if (j.state === 'done' && j.result) setSelected(new Set(j.result.resources.filter((r) => r.status === 'clean').map((r) => r.id)))
+    if (j.state === 'done' && j.result) {
+      const res = j.result
+      setView(res)
+      setSelected(new Set(res.resources.filter((r) => r.status === 'clean').map((r) => r.id)))
+      setCheckedAt(Object.fromEntries(res.resources.map((r) => [r.id, Date.now()])))
+      setNow(Date.now())
+    }
     void qc.invalidateQueries({ queryKey: ['servers'] })
+    void qc.invalidateQueries({ queryKey: ['server', s.name] })
+  })
+  // One resource: only that row changes; the selection of the other rows is kept.
+  const rowCheck = useJob<UpdatePreview>(rowJob?.job ?? null, (j) => {
+    if (j.state !== 'done' || !j.result) return
+    const res = j.result
+    setView((v) => (v ? mergeRows(v, res.resources) : v))
+    setSelected((x) => {
+      const n = new Set(x)
+      for (const r of res.resources) if (r.status !== 'clean') n.delete(r.id)
+      return n
+    })
+    setCheckedAt((c) => ({ ...c, ...Object.fromEntries(res.resources.map((r) => [r.id, Date.now()])) }))
+    setNow(Date.now())
     void qc.invalidateQueries({ queryKey: ['server', s.name] })
   })
   const apply = useJob<UpdateReport>(applyJob, () => {
@@ -93,9 +136,10 @@ export function UpdatesTab({ server: s }: { server: ServerDetail }) {
   const roll = useJob(rollJob, () => void qc.invalidateQueries({ queryKey: ['server', s.name] }))
   const snaps = useQuery({ queryKey: ['snapshots', s.name], queryFn: () => api.snapshots.list(s.name) })
 
-  const preview = check.result
+  const preview = view
   const clean = useMemo(() => (preview?.resources ?? []).filter((r) => r.status === 'clean'), [preview])
-  const busy = check.phase === 'running' || apply.phase === 'running' || roll.phase === 'running'
+  const checkingRow = rowCheck.phase === 'running' ? rowJob?.id : undefined
+  const busy = check.phase === 'running' || rowCheck.phase === 'running' || apply.phase === 'running' || roll.phase === 'running'
   const report = apply.result
   const applyEvents = apply.events.map(normaliseUpdateEvent)
   const snapshotId = applyEvents.find((e) => e.type === 'snapshot')?.id
@@ -107,6 +151,10 @@ export function UpdatesTab({ server: s }: { server: ServerDetail }) {
     setErr(null)
     setApplyJob(null)
     try { setCheckJob((await api.update.preview(s.name)).job) } catch (e) { setErr(e) }
+  }
+  const doCheckRow = async (id: string) => {
+    setErr(null)
+    try { setRowJob({ id, job: (await api.update.preview(s.name, { resources: [id] })).job }) } catch (e) { setErr(e) }
   }
   const doApply = async () => {
     setErr(null)
@@ -129,14 +177,14 @@ export function UpdatesTab({ server: s }: { server: ServerDetail }) {
             <Button variant={preview ? 'secondary' : 'default'} disabled={busy} onClick={doCheck}>{check.phase === 'running' ? 'Checking...' : 'Check for updates'}</Button>
             <span className="text-sm text-muted-foreground">Looks for newer versions. Nothing is changed yet.</span>
           </div>
-          <ErrorNotice error={err ?? (check.phase === 'failed' ? check.error : null)} />
+          <ErrorNotice error={err ?? (check.phase === 'failed' ? check.error : rowCheck.phase === 'failed' ? rowCheck.error : null)} />
           {preview && (
             <>
               {preview.new_release && <Alert tone="info">A new Kora release is available: {preview.new_release}.</Alert>}
               {preview.resources.length === 0 && <p className="text-sm text-muted-foreground">No resources were found to check.</p>}
               {preview.resources.length > 0 && clean.length === 0 && !preview.resources.some((r) => r.status === 'dirty' || r.status === 'diverged') && <Alert tone="success">Everything is up to date.</Alert>}
               <ul className="divide-y divide-border">
-                {preview.resources.map((r) => <ChangeRow key={r.id} r={r} selected={selected.has(r.id)} onToggle={() => toggle(r.id)} />)}
+                {preview.resources.map((r) => <ChangeRow key={r.id} r={r} selected={selected.has(r.id)} onToggle={() => toggle(r.id)} onCheck={() => void doCheckRow(r.id)} checking={checkingRow === r.id} disabled={busy} checkedAt={checkedAt[r.id]} now={now} />)}
               </ul>
               {clean.length > 0 && (
                 <div className="space-y-4 border-t border-border pt-4">
