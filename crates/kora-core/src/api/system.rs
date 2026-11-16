@@ -54,14 +54,16 @@ pub fn with_ensure(cfg: &str, name: &str) -> Option<String> {
     Some(out)
 }
 
-/// `<dir>/.kora/update-status.json`, written by the core updater (auto runs, full previews, full applies):
-/// `{"checked_at": 1700000000, "updates": 3, "attention": false, "new_release": false}`.
+/// `<dir>/.kora/update-status.json`, written by the core updater (`update::status`: auto runs, previews, applies):
+/// `{"checked_at": "<RFC3339>", "updates": 3, "attention": 1, "new_release": "1.4.0"|null}`.
+/// Older files used booleans for `attention` / `new_release`; both shapes read.
 /// A missing, unreadable or older-shaped file means "not known" (`None`) or whatever fields it has.
 pub fn read_badge(dir: &Path) -> Option<UpdateBadge> {
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join(".kora").join("update-status.json")).ok()?).ok()?;
     let flag = |k: &str| match v.get(k) {
         Some(serde_json::Value::Bool(b)) => *b,
         Some(serde_json::Value::String(s)) => !s.is_empty(),
+        Some(serde_json::Value::Number(n)) => n.as_f64().is_some_and(|x| x > 0.0),
         _ => false,
     };
     if flag("attention") || flag("needs_attention") {
@@ -258,15 +260,19 @@ impl Backend for SystemBackend {
         manual::preview(&record(e)?, scope).map_err(err)
     }
 
-    fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
-        let rec = record(e)?;
-        let report = manual::apply(&rec, scope, o, on).map_err(err)?;
-        notify::after_update(e, &report);
-        Ok(report)
+    fn apply(
+        &mut self,
+        e: &ServerEntry,
+        scope: Scope,
+        o: ApplyOpts,
+        on: &mut dyn FnMut(UpdateEvent),
+    ) -> Res<UpdateReport> {
+        // `manual::apply` sends the Discord notification itself: not a second time here.
+        manual::apply(&record(e)?, scope, o, on).map_err(err)
     }
 
-    fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()> {
-        manual::rollback(&record(e)?, snapshot).map_err(err)
+    fn rollback(&mut self, e: &ServerEntry, snapshot: &str, force: bool) -> Res<()> {
+        manual::rollback(&record(e)?, snapshot, force).map_err(err)
     }
 
     fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo> {
@@ -414,6 +420,32 @@ mod tests {
         w(r#"{"new_release":true}"#);
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::NewRelease));
         w(r#"{}"#);
+        assert_eq!(read_badge(d.path()), Some(UpdateBadge::UpToDate));
+    }
+
+    #[test]
+    fn badge_reads_what_the_status_writer_writes() {
+        use crate::update::status::{write, UpdateStatus};
+        let d = tempfile::tempdir().unwrap();
+        write(d.path(), &UpdateStatus::new(1_700_000_000, 0, 2, None)).unwrap();
+        assert_eq!(
+            read_badge(d.path()),
+            Some(UpdateBadge::NeedsAttention),
+            "attention is a count"
+        );
+        write(
+            d.path(),
+            &UpdateStatus::new(1_700_000_000, 3, 0, Some("1.4.0".into())),
+        )
+        .unwrap();
+        assert_eq!(read_badge(d.path()), Some(UpdateBadge::Updates(3)));
+        write(
+            d.path(),
+            &UpdateStatus::new(1_700_000_000, 0, 0, Some("1.4.0".into())),
+        )
+        .unwrap();
+        assert_eq!(read_badge(d.path()), Some(UpdateBadge::NewRelease));
+        write(d.path(), &UpdateStatus::new(1_700_000_000, 0, 0, None)).unwrap();
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::UpToDate));
     }
 

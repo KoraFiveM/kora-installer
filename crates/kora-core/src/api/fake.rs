@@ -175,22 +175,51 @@ impl Backend for FakeBackend {
     fn preview(&mut self, e: &ServerEntry, scope: Scope) -> Res<UpdatePreview> {
         let mut s = self.state();
         s.calls.push(format!("preview {} {scope:?}", e.name));
-        s.preview.clone().unwrap_or_else(|| Ok(UpdatePreview { resources: vec![], new_release: None }))
+        s.preview.clone().unwrap_or_else(|| {
+            Ok(UpdatePreview {
+                resources: vec![],
+                new_release: None,
+                notes: vec![],
+            })
+        })
     }
-    fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
+    fn apply(
+        &mut self,
+        e: &ServerEntry,
+        scope: Scope,
+        o: ApplyOpts,
+        on: &mut dyn FnMut(UpdateEvent),
+    ) -> Res<UpdateReport> {
         let (events, result) = {
             let mut s = self.state();
-            s.calls.push(format!("apply {} {scope:?} restart={:?}", e.name, o.restart));
-            (s.apply_events.clone(), s.apply.clone().unwrap_or_else(|| Ok(UpdateReport::default())))
+            let targets = o
+                .targets
+                .as_ref()
+                .map(|t| format!(" targets={t:?}"))
+                .unwrap_or_default();
+            s.calls.push(format!(
+                "apply {} {scope:?} restart={:?}{targets}",
+                e.name, o.restart
+            ));
+            (
+                s.apply_events.clone(),
+                s.apply
+                    .clone()
+                    .unwrap_or_else(|| Ok(UpdateReport::default())),
+            )
         };
         for ev in events {
             on(ev);
         }
         result
     }
-    fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()> {
+    fn rollback(&mut self, e: &ServerEntry, snapshot: &str, force: bool) -> Res<()> {
         let mut s = self.state();
-        s.calls.push(format!("rollback {} {snapshot}", e.name));
+        s.calls.push(format!(
+            "rollback {} {snapshot}{}",
+            e.name,
+            if force { " force" } else { "" }
+        ));
         err_or(&s.rollback_error, || ())
     }
     fn snapshots(&mut self, _e: &ServerEntry) -> Vec<SnapshotInfo> {

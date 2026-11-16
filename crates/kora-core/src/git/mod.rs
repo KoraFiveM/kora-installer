@@ -4,6 +4,7 @@
 //! talks to the real GitHub. Bootstrap installation is only *planned* ([`plan_bootstrap`]); the
 //! caller decides when (and with which privileges) to run the described steps.
 
+pub mod forkfind;
 pub mod owners;
 
 use std::path::{Path, PathBuf};
@@ -69,11 +70,7 @@ pub struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<Output> {
-        let mut c = crate::sysexe::command(program);
-        c.args(args);
-        if let Some(d) = cwd {
-            c.current_dir(d);
-        }
+        let mut c = system_command(program, args, cwd);
         // Never block on interactive prompts from git.
         c.env("GIT_TERMINAL_PROMPT", "0");
         for (k, v) in windows_git_env(cfg!(windows), std::env::var("GIT_CONFIG_COUNT").ok().as_deref()) {
@@ -92,6 +89,122 @@ impl CommandRunner for SystemRunner {
     fn fork(&self) -> Option<Box<dyn CommandRunner + Send>> {
         Some(Box::new(SystemRunner))
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Under sudo: GitHub as the person who ran sudo
+// ---------------------------------------------------------------------------------------------
+
+/// What actually runs for one `git` / `gh` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invocation {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
+}
+
+/// `runuser` from root-owned folders only.
+pub fn unix_runuser() -> Option<PathBuf> {
+    ["/usr/sbin/runuser", "/sbin/runuser", "/usr/bin/runuser", "/bin/runuser"].iter().map(PathBuf::from).find(|p| p.is_file())
+}
+
+/// Under `sudo` the GitHub sign-in that counts is the user's own (root usually has none, and a
+/// sign-in made as root would be stored in root's folder). With `user` = the account behind sudo
+/// and `runuser` available:
+/// * `gh ...` runs as that user (`runuser -u <user> -- gh ...`, in their home folder when no folder
+///   is given), so it uses and stores their GitHub sign-in;
+/// * `gh repo clone <repo> <dest>` becomes `git clone` as root (the server folder belongs to root
+///   during the install), with git asking the user's `gh` for the credentials, like
+///   `gh auth setup-git` does;
+/// * `git ...` asks the user's `gh` for GitHub credentials the same way (private forks).
+///
+/// Anything else, or no sudo user / no runuser: unchanged. `git_config_count` = the caller's own
+/// `GIT_CONFIG_COUNT` (then git is left alone). `bus` = the user's session bus socket, if any
+/// (gh may keep the sign-in in the desktop keyring).
+pub fn sudo_invocation(
+    program: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+    user: Option<&crate::userhome::Account>,
+    runuser: Option<&Path>,
+    git_config_count: Option<&str>,
+    bus: Option<&Path>,
+) -> Invocation {
+    let plain = Invocation { program: program.into(), args: args.iter().map(|s| s.to_string()).collect(), cwd: cwd.map(Path::to_path_buf), env: vec![] };
+    let (Some(u), Some(ru)) = (user, runuser) else { return plain };
+    if u.uid == 0 || !crate::userhome::valid_user_name(&u.name) {
+        return plain;
+    }
+    let ru = ru.to_string_lossy().into_owned();
+    let helper = |env: &mut Vec<(String, String)>| {
+        if git_config_count.is_none() {
+            let key = "credential.https://github.com.helper".to_string();
+            env.extend([
+                ("GIT_CONFIG_COUNT".to_string(), "2".to_string()),
+                ("GIT_CONFIG_KEY_0".to_string(), key.clone()),
+                ("GIT_CONFIG_VALUE_0".to_string(), String::new()),
+                ("GIT_CONFIG_KEY_1".to_string(), key),
+                ("GIT_CONFIG_VALUE_1".to_string(), format!("!{ru} -u {} -- gh auth git-credential", u.name)),
+            ]);
+        }
+    };
+    match program {
+        "gh" if args.len() == 4 && args[0] == "repo" && args[1] == "clone" && valid_repo(args[2]) => {
+            let mut env = Vec::new();
+            helper(&mut env);
+            Invocation {
+                program: "git".into(),
+                args: vec!["clone".into(), "--".into(), format!("https://github.com/{}.git", args[2]), args[3].to_string()],
+                cwd: cwd.map(Path::to_path_buf),
+                env,
+            }
+        }
+        "gh" => {
+            let mut a = vec!["-u".to_string(), u.name.clone(), "--".to_string(), "gh".to_string()];
+            a.extend(args.iter().map(|s| s.to_string()));
+            let mut env = Vec::new();
+            if let Some(b) = bus {
+                env.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), format!("unix:path={}", b.display())));
+                if let Some(dir) = b.parent() {
+                    env.push(("XDG_RUNTIME_DIR".to_string(), dir.display().to_string()));
+                }
+            }
+            Invocation { program: ru, args: a, cwd: Some(cwd.map(Path::to_path_buf).unwrap_or_else(|| u.home.clone())), env }
+        }
+        "git" => {
+            let mut inv = plain;
+            helper(&mut inv.env);
+            inv
+        }
+        _ => plain,
+    }
+}
+
+/// The account behind `sudo`, `runuser` and the account's session bus (all `None` when not under sudo).
+fn sudo_context() -> (Option<crate::userhome::Account>, Option<PathBuf>, Option<PathBuf>) {
+    if !cfg!(unix) {
+        return (None, None, None);
+    }
+    let Some(u) = crate::userhome::sudo_account() else { return (None, None, None) };
+    let bus = PathBuf::from(format!("/run/user/{}/bus", u.uid));
+    let bus = (std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() && bus.exists()).then_some(bus);
+    (Some(u), unix_runuser(), bus)
+}
+
+/// `std::process::Command` for one git / gh call, run as the real user where that matters (see [`sudo_invocation`]).
+pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::process::Command {
+    let (user, runuser, bus) = sudo_context();
+    let inv = sudo_invocation(program, args, cwd, user.as_ref(), runuser.as_deref(), std::env::var("GIT_CONFIG_COUNT").ok().as_deref(), bus.as_deref());
+    let mut c = crate::sysexe::command(&inv.program);
+    c.args(&inv.args);
+    if let Some(d) = &inv.cwd {
+        c.current_dir(d);
+    }
+    for (k, v) in inv.env {
+        c.env(k, v);
+    }
+    c
 }
 
 /// Windows: allow paths over 260 characters (node_modules inside resources routinely exceed it, and
@@ -459,8 +572,8 @@ pub fn is_signed_in(r: &dyn CommandRunner) -> bool {
 /// stays in gh's own store; Kora never sees it.
 pub fn auth_login_interactive() -> Result<()> {
     let args = login_args(false);
-    let st = crate::sysexe::command("gh")
-        .args(&args)
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let st = system_command("gh", &args, None)
         .status()
         .map_err(|e| GitError::Spawn("gh auth login".into(), e.to_string()))?;
     if !st.success() {
@@ -594,20 +707,20 @@ impl SyncSummary {
     }
 }
 
-/// Plain-language line for a fork that was not touched. `path` is the resource folder on disk.
-pub fn left_alone_line(rec: &SyncRecord, fork_owner: &str, path: &str) -> Option<String> {
-    let name = repo_name(&rec.repo);
+/// Plain-language line for a fork that was not touched. `fork` is the fork's `owner/name`,
+/// `path` the resource folder on disk.
+pub fn left_alone_line(rec: &SyncRecord, fork: &str, path: &str) -> Option<String> {
     let b = &rec.branch;
     let fix = format!("Safe fix: cd {path} && git fetch upstream && git merge upstream/{b} (or git rebase upstream/{b}, which needs a force-push you decide on yourself), then git push. Nothing was changed on this fork.");
     match &rec.outcome {
         SyncOutcome::Ahead { ahead } => Some(format!(
-            "{fork_owner}/{name} ({b}): your fork has {ahead} commit(s) of its own and upstream has nothing new, so it was left as it is. Nothing was changed on this fork."
+            "{fork} ({b}): your fork has {ahead} commit(s) of its own and upstream has nothing new, so it was left as it is. Nothing was changed on this fork."
         )),
         SyncOutcome::Diverged { ahead, behind } => {
             let own = if *ahead == 0 { "commits of its own".to_string() } else { format!("{ahead} commit(s) of its own") };
-            Some(format!("{fork_owner}/{name} ({b}): your fork has {own} and upstream has {behind} new commit(s), so GitHub cannot fast-forward it. It was not touched. {fix}"))
+            Some(format!("{fork} ({b}): your fork has {own} and upstream has {behind} new commit(s), so GitHub cannot fast-forward it. It was not touched. {fix}"))
         }
-        SyncOutcome::Unknown(why) => Some(format!("{fork_owner}/{name} ({b}): could not check it against upstream ({why}); left untouched.")),
+        SyncOutcome::Unknown(why) => Some(format!("{fork} ({b}): could not check it against upstream ({why}); left untouched.")),
         _ => None,
     }
 }
@@ -631,6 +744,21 @@ pub struct ForkState {
     /// GitHub API calls made through `gh` so far (for pacing and diagnostics).
     #[serde(default)]
     pub api_calls: u32,
+    /// The real `owner/name` of the fork of each upstream (it need not have the upstream's name:
+    /// GitHub may have added `-1`, or the user renamed it). Missing in files written before this
+    /// was recorded: see [`ForkState::fork_of`].
+    #[serde(default)]
+    pub forks: std::collections::BTreeMap<String, String>,
+    /// Upstreams whose fork Kora created (the rest of `done` were already there and reused).
+    #[serde(default)]
+    pub created: Vec<String>,
+    /// What happened to the last repository handled, for progress text (not saved).
+    #[serde(skip)]
+    pub last_event: Option<String>,
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 impl ForkState {
@@ -644,6 +772,32 @@ impl ForkState {
             branches: Default::default(),
             sync: vec![],
             api_calls: 0,
+            forks: Default::default(),
+            created: vec![],
+            last_event: None,
+        }
+    }
+
+    /// `owner/name` of the fork of `upstream`. Older state files did not record it; they only ever
+    /// accepted a fork carrying the upstream's own name, so that name is right for them.
+    pub fn fork_of(&self, upstream: &str) -> String {
+        self.forks.get(upstream).cloned().unwrap_or_else(|| format!("{}/{}", self.target_owner, repo_name(upstream)))
+    }
+
+    /// (forks created by Kora, existing forks reused) among the finished repos.
+    pub fn counts(&self) -> (usize, usize) {
+        let created = self.done.iter().filter(|d| self.created.contains(d)).count();
+        (created, self.done.len() - created)
+    }
+
+    /// `"created 2 forks, reused 14 you already had"`.
+    pub fn counts_text(&self) -> String {
+        let (c, u) = self.counts();
+        match (c, u) {
+            (0, 0) => "no forks needed".into(),
+            (c, 0) => format!("created {}", plural(c, "fork", "forks")),
+            (0, u) => format!("reused {} you already had", plural(u, "fork", "forks")),
+            (c, u) => format!("created {}, reused {u} you already had", plural(c, "fork", "forks")),
         }
     }
 
@@ -661,7 +815,7 @@ impl ForkState {
                 SyncOutcome::UpToDate => s.up_to_date += 1,
                 _ => {
                     s.left_alone += 1;
-                    if let Some(l) = left_alone_line(rec, &self.target_owner, &path_of(&rec.repo)) {
+                    if let Some(l) = left_alone_line(rec, &self.fork_of(&rec.repo), &path_of(&rec.repo)) {
                         s.lines.push(l);
                     }
                 }
@@ -700,11 +854,14 @@ pub struct ForkConfig {
     /// With `sync_existing`, pacing counts GitHub API calls (a repo costs 1-3) instead of repos:
     /// pause after this many calls.
     pub batch_calls: usize,
+    /// Shared upstream -> fork cache ([`forkfind::default_cache_path`]); `None` = no cache.
+    pub cache_path: Option<PathBuf>,
 }
 
 impl Default for ForkConfig {
     fn default() -> Self {
         ForkConfig {
+            cache_path: None,
             sync_existing: false,
             batch_calls: 15,
             batch_size: 5,
@@ -737,52 +894,13 @@ fn repo_name(repo: &str) -> &str {
     repo.rsplit('/').next().unwrap_or(repo)
 }
 
-/// What is at `<target>/<name>` before we fork.
-enum ForkProbe {
-    Missing,
-    /// A fork of the expected upstream (or an answer we cannot inspect); carries its default branch.
-    Present(Option<String>),
-    /// A repository with that name exists but is not a fork of the upstream: never reuse it.
-    Foreign(String),
-}
-
-/// Does `<target>/<name>` already exist, and is it really a fork of `upstream`? (prevents
-/// duplicate forks after a crash/resume and refuses to adopt an unrelated repository.)
-fn probe_fork(r: &dyn CommandRunner, target: &str, name: &str, upstream: &str) -> Result<ForkProbe> {
-    let path = format!("repos/{target}/{name}");
-    let o = run(r, "gh", &["api", &path], None)?;
-    if o.ok() {
-        let mut default_branch = None;
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&o.stdout) {
-            default_branch = v.get("default_branch").and_then(|b| b.as_str()).map(str::to_string);
-            if let Some(is_fork) = v.get("fork").and_then(|f| f.as_bool()) {
-                let parent = v.pointer("/parent/full_name").and_then(|p| p.as_str()).unwrap_or("");
-                if !is_fork {
-                    return Ok(ForkProbe::Foreign(format!("{target}/{name} exists but is not a fork of {upstream}")));
-                }
-                if !parent.is_empty() && !parent.eq_ignore_ascii_case(upstream) {
-                    return Ok(ForkProbe::Foreign(format!("{target}/{name} is a fork of {parent}, not {upstream}")));
-                }
-            }
-        }
-        return Ok(ForkProbe::Present(default_branch));
-    }
-    // Only a definite "not found" means the fork is missing. Anything else (rate limit, network
-    // error, expired token, server error) must NOT be read as "missing": that would send a fork
-    // request for a repo that may already exist.
-    let not_found = o.stderr.contains("HTTP 404") || o.stderr.contains("Not Found");
-    if !not_found {
-        return Err(GitError::Command { cmd: format!("gh api {path}"), code: o.code, stderr: o.stderr });
-    }
-    Ok(ForkProbe::Missing)
-}
-
-/// Wait until the (asynchronously created) fork has its commits, so a clone right after succeeds.
-fn wait_fork_ready(r: &dyn CommandRunner, target: &str, name: &str, cfg: &ForkConfig) -> std::result::Result<(), String> {
+/// Wait until the (asynchronously created) fork `fork` (`owner/name`) has its commits, so a clone
+/// right after succeeds.
+fn wait_fork_ready(r: &dyn CommandRunner, fork: &str, cfg: &ForkConfig) -> std::result::Result<(), String> {
     if cfg.ready_timeout.is_zero() {
         return Ok(());
     }
-    let path = format!("repos/{target}/{name}/commits?per_page=1");
+    let path = format!("repos/{fork}/commits?per_page=1");
     let mut waited = Duration::ZERO;
     loop {
         if let Ok(o) = r.run("gh", &["api", &path, "--jq", "length"], None) {
@@ -791,7 +909,7 @@ fn wait_fork_ready(r: &dyn CommandRunner, target: &str, name: &str, cfg: &ForkCo
             }
         }
         if waited >= cfg.ready_timeout {
-            return Err(format!("fork {target}/{name} was created but is still not ready after {}s", cfg.ready_timeout.as_secs()));
+            return Err(format!("fork {fork} was created but is still not ready after {}s", cfg.ready_timeout.as_secs()));
         }
         r.sleep(cfg.ready_poll);
         waited += cfg.ready_poll.max(Duration::from_millis(1));
@@ -916,14 +1034,24 @@ pub struct SyncJob {
 
 /// Paced sync of many forks (same batches and pauses as forking). Stops at a persistent rate limit:
 /// the remaining jobs are reported as `Unknown("rate limited ...")` and left untouched.
-pub fn sync_forks_paced(r: &dyn CommandRunner, jobs: &[SyncJob], cfg: &ForkConfig) -> Vec<(String, SyncOutcome)> {
+/// `progress(done, total)` is called after each fork.
+pub fn sync_forks_paced(
+    r: &dyn CommandRunner,
+    jobs: &[SyncJob],
+    cfg: &ForkConfig,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Vec<(String, SyncOutcome)> {
     let counter = CountingRunner::new(r);
     let mut out = Vec::new();
     let mut in_batch = 0usize;
     let mut limited = false;
     for (i, j) in jobs.iter().enumerate() {
         if limited {
-            out.push((j.id.clone(), SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into())));
+            out.push((
+                j.id.clone(),
+                SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into()),
+            ));
+            progress(i + 1, jobs.len());
             continue;
         }
         let before = counter.calls();
@@ -936,6 +1064,7 @@ pub fn sync_forks_paced(r: &dyn CommandRunner, jobs: &[SyncJob], cfg: &ForkConfi
             Err(e) => SyncOutcome::Unknown(e.to_string()),
         };
         out.push((j.id.clone(), res));
+        progress(i + 1, jobs.len());
         in_batch += (counter.calls() - before).max(1) as usize;
         if in_batch >= cfg.batch_calls && i + 1 < jobs.len() {
             in_batch = 0;
@@ -946,7 +1075,9 @@ pub fn sync_forks_paced(r: &dyn CommandRunner, jobs: &[SyncJob], cfg: &ForkConfi
 }
 
 /// Run (or resume) forking. `on_progress` is called after every state change so the caller can
-/// persist `state`. Never forks a repo already in `done` or already present at the target.
+/// persist `state`. Never forks a repo already in `done` or one the owner already has a fork of,
+/// whatever that fork is called: existing forks are found by their upstream (see [`forkfind`]),
+/// and the real fork of every repo is recorded in `state.forks`.
 pub fn run_forks(
     r: &dyn CommandRunner,
     state: &mut ForkState,
@@ -954,6 +1085,20 @@ pub fn run_forks(
     on_progress: &mut dyn FnMut(&ForkState),
 ) -> Result<ForkOutcome> {
     check("target owner", valid_name(&state.target_owner), &state.target_owner)?;
+    let mut finder = forkfind::ForkFinder::new(&state.target_owner, cfg.cache_path.as_deref());
+    let out = run_forks_with(r, state, cfg, &mut finder, on_progress);
+    finder.save();
+    out
+}
+
+fn run_forks_with(
+    r: &dyn CommandRunner,
+    state: &mut ForkState,
+    cfg: &ForkConfig,
+    finder: &mut forkfind::ForkFinder,
+    on_progress: &mut dyn FnMut(&ForkState),
+) -> Result<ForkOutcome> {
+    use forkfind::Found;
     let counter = CountingRunner::new(r);
     let r: &dyn CommandRunner = &counter;
     let mut in_batch = 0usize;
@@ -961,6 +1106,8 @@ pub fn run_forks(
         let calls_before = counter.calls();
         // Some(default branch) when an already existing fork was adopted for this repo.
         let mut adopted: Option<Option<String>> = None;
+        // The fork found or made for this repo.
+        let mut fork: Option<String> = None;
         if state.done.contains(&repo) {
             state.pending.remove(0);
             on_progress(state);
@@ -974,14 +1121,16 @@ pub fn run_forks(
         }
         let mut attempt = 0u32;
         let result: std::result::Result<(), String> = loop {
-            let o = match probe_fork(r, &state.target_owner, repo_name(&repo), &repo) {
+            let o = match finder.find(r, &repo) {
                 // already there: no new fork, but it may still be filling up after a crash
-                Ok(ForkProbe::Present(db)) => {
-                    adopted = Some(db);
-                    break wait_fork_ready(r, &state.target_owner, repo_name(&repo), cfg);
+                Ok(Found::Present { slug, default_branch }) => {
+                    adopted = Some(default_branch);
+                    let ready = wait_fork_ready(r, &slug, cfg);
+                    fork = Some(slug);
+                    break ready;
                 }
-                Ok(ForkProbe::Foreign(why)) => break Err(why),
-                Ok(ForkProbe::Missing) => {
+                Ok(Found::Foreign(why)) => break Err(why),
+                Ok(Found::Missing) => {
                     let mut args = vec!["repo", "fork", repo.as_str(), "--clone=false"];
                     if state.target_is_org {
                         args.push("--org");
@@ -993,7 +1142,20 @@ pub fn run_forks(
                 Err(e) => return Err(e),
             };
             if o.ok() || o.stderr.contains("already exists") {
-                break wait_fork_ready(r, &state.target_owner, repo_name(&repo), cfg);
+                // GitHub hands back the owner's existing fork (under whatever name it has) instead
+                // of making a second one; gh then says "<owner>/<name> already exists".
+                let existed = o.stderr.contains("already exists");
+                let Some(slug) = finder.after_fork(r, &repo, &o) else {
+                    break Err(format!("GitHub accepted the fork request for {repo} but Kora could not find the fork in {}", state.target_owner));
+                };
+                let ready = if existed {
+                    adopted = Some(None);
+                    Ok(())
+                } else {
+                    wait_fork_ready(r, &slug, cfg)
+                };
+                fork = Some(slug);
+                break ready;
             }
             if is_rate_limited(&o.stderr) {
                 if attempt >= cfg.max_retries {
@@ -1006,29 +1168,43 @@ pub fn run_forks(
             }
             break Err(owners::friendly_fork_error(&o.stderr, &state.target_owner));
         };
-        if let (true, true, Some(default_branch)) = (cfg.sync_existing, result.is_ok(), adopted) {
+        if let Some(f) = &fork {
+            state.forks.insert(repo.clone(), f.clone());
+        }
+        if let (true, true, Some(default_branch), Some(f)) = (cfg.sync_existing, result.is_ok(), adopted.clone(), &fork) {
             match state.branches.get(&repo).cloned().or(default_branch) {
-                Some(branch) => {
-                    let fork = format!("{}/{}", state.target_owner, repo_name(&repo));
-                    match sync_fork_retrying(r, &fork, &repo, &branch, cfg) {
-                        Ok(Some(o)) => state.record_sync(&repo, &branch, o),
-                        Ok(None) => {
-                            state.api_calls += counter.calls() - calls_before;
-                            on_progress(state);
-                            return Ok(ForkOutcome::Paused);
-                        }
-                        Err(e) => state.record_sync(&repo, &branch, SyncOutcome::Unknown(e.to_string())),
+                Some(branch) => match sync_fork_retrying(r, f, &repo, &branch, cfg) {
+                    Ok(Some(o)) => state.record_sync(&repo, &branch, o),
+                    Ok(None) => {
+                        state.api_calls += counter.calls() - calls_before;
+                        on_progress(state);
+                        return Ok(ForkOutcome::Paused);
                     }
-                }
+                    Err(e) => state.record_sync(&repo, &branch, SyncOutcome::Unknown(e.to_string())),
+                },
                 None => state.record_sync(&repo, "?", SyncOutcome::Unknown("could not tell which branch to compare".into())),
             }
         }
         let used = counter.calls() - calls_before;
         state.api_calls += used;
         state.pending.remove(0);
+        let shown = fork.clone().unwrap_or_else(|| repo.clone());
         match result {
-            Ok(()) => state.done.push(repo),
-            Err(error) => state.failed.push(FailedFork { repo, error }),
+            Ok(()) => {
+                if adopted.is_some() {
+                    state.last_event = Some(format!("Using your existing fork {shown}"));
+                } else {
+                    if !state.created.contains(&repo) {
+                        state.created.push(repo.clone());
+                    }
+                    state.last_event = Some(format!("Created fork {shown}"));
+                }
+                state.done.push(repo)
+            }
+            Err(error) => {
+                state.last_event = Some(format!("Could not fork {repo}"));
+                state.failed.push(FailedFork { repo, error })
+            }
         }
         on_progress(state);
         // Without syncing a repo counts as 1 (as before); with it pacing counts real API calls.
@@ -1265,11 +1441,21 @@ pub fn clone_default_head(r: &dyn CommandRunner, repo: &str, dest: &Path) -> Res
     Ok(())
 }
 
-/// Prod update: move an existing pinned clone to a newer pinned commit.
+/// Prod update: move an existing pinned clone to a newer pinned commit. No network when the
+/// commit is already in the clone (the preview usually fetched it).
 pub fn move_pinned(r: &dyn CommandRunner, repo: &Path, commit: &str) -> Result<String> {
     check("commit", valid_commit(commit), commit)?;
     let previous = head_commit(r, repo)?;
-    run_ok(r, "git", &["fetch", "origin"], Some(repo))?;
+    let present = run(
+        r,
+        "git",
+        &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+        Some(repo),
+    )?
+    .ok();
+    if !present {
+        run_ok(r, "git", &["fetch", "origin"], Some(repo))?;
+    }
     checkout_pinned(r, repo, commit)?;
     Ok(previous)
 }
@@ -1322,6 +1508,7 @@ mod tests {
             ready_poll: Duration::from_secs(1),
             sync_existing: false,
             batch_calls: 6,
+            cache_path: None,
         }
     }
     fn sync_cfg() -> ForkConfig {
@@ -1382,6 +1569,9 @@ mod tests {
                 n.set(n.get() + 1);
                 return if n.get() < 3 { fail("HTTP 409: Git Repository is empty") } else { ok("1\n") };
             }
+            if c.starts_with("gh repo fork") {
+                return ok("https://github.com/me/new\n");
+            }
             if c.starts_with("gh api repos/me/") { fail("HTTP 404") } else { ok("") }
         });
         let mut c = cfg();
@@ -1435,7 +1625,7 @@ mod tests {
                 if tries.get() <= 3 {
                     fail("HTTP 403: You have exceeded a secondary rate limit")
                 } else {
-                    ok("")
+                    ok("https://github.com/kora-org/one\n")
                 }
             } else {
                 ok("")
@@ -1464,8 +1654,8 @@ mod tests {
                     return fail("HTTP 429");
                 }
                 let name = c.split_whitespace().nth(3).unwrap().rsplit('/').next().unwrap().to_string();
-                c2.borrow_mut().push(name);
-                return ok("");
+                c2.borrow_mut().push(name.clone());
+                return ok(&format!("https://github.com/kora-org/{name}\n"));
             }
             ok("")
         });
@@ -1498,6 +1688,8 @@ mod tests {
                 fail("HTTP 404")
             } else if c.contains("a/bad") {
                 fail("HTTP 403: Resource not accessible")
+            } else if c.starts_with("gh repo fork a/good") {
+                ok("https://github.com/me/good\n")
             } else {
                 ok("")
             }
@@ -1514,6 +1706,261 @@ mod tests {
         assert_eq!(*f.sleeps.borrow(), vec![Duration::from_secs(10)]);
         st.requeue_failed();
         assert_eq!(st.pending, repos(&["a/bad"]));
+    }
+
+    /// One page of the GraphQL fork listing: (fork slug, parent, grandparent).
+    fn listing(nodes: &[(&str, &str, Option<&str>)]) -> String {
+        let n: Vec<String> = nodes
+            .iter()
+            .map(|(slug, parent, gp)| {
+                let gp = gp.map(|g| format!(r#","parent":{{"nameWithOwner":"{g}"}}"#)).unwrap_or_default();
+                format!(r#"{{"nameWithOwner":"{slug}","defaultBranchRef":{{"name":"main"}},"parent":{{"nameWithOwner":"{parent}"{gp}}}}}"#)
+            })
+            .collect();
+        format!(r#"{{"data":{{"repositoryOwner":{{"repositories":{{"nodes":[{}],"pageInfo":{{"hasNextPage":false,"endCursor":null}}}}}}}}}}"#, n.join(","))
+    }
+
+    fn ready_cfg() -> ForkConfig {
+        ForkConfig { ready_timeout: Duration::from_secs(300), ..cfg() }
+    }
+
+    #[test]
+    fn a_fork_with_a_suffix_is_found_by_listing_and_not_forked_again() {
+        // `me/kora_core` is an unrelated repository; the fork GitHub made is `me/kora_core-1`.
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                ok(&listing(&[("me/kora_core-1", "KoraFiveM/kora_core", None), ("me/other", "zzz/other", None)]))
+            } else if c.starts_with("gh api repos/me/kora_core-1/commits") {
+                ok("1\n")
+            } else if c.starts_with("gh api repos/me/kora_core") {
+                ok(r#"{"fork":false}"#)
+            } else {
+                fail("unexpected")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["KoraFiveM/kora_core"]));
+        let out = run_forks(&f, &mut st, &ready_cfg(), &mut |_| {}).unwrap();
+        assert_eq!(out, ForkOutcome::Finished);
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(f.count("gh repo fork"), 0);
+        assert_eq!(f.count("gh api graphql"), 1);
+        assert_eq!(st.fork_of("KoraFiveM/kora_core"), "me/kora_core-1");
+        assert_eq!(st.counts(), (0, 1));
+        assert_eq!(st.counts_text(), "reused 1 fork you already had");
+        assert_eq!(st.last_event.as_deref(), Some("Using your existing fork me/kora_core-1"));
+        assert!(f.sleeps.borrow().is_empty(), "no waiting on a fork that is ready");
+    }
+
+    #[test]
+    fn a_renamed_fork_is_reused_and_synced_under_its_real_name() {
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                ok(&listing(&[("me/my-custom-name", "up/res", None)]))
+            } else if c.contains("/compare/") {
+                ok(r#"{"ahead_by":0,"behind_by":3}"#)
+            } else {
+                ok("")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/res"]));
+        st.branches.insert("up/res".into(), "dev".into());
+        run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap();
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(f.count("gh repo fork"), 0);
+        assert_eq!(f.count("gh api repos/me/my-custom-name/compare/up:dev...me:dev"), 1);
+        assert_eq!(f.count("gh repo sync me/my-custom-name --branch dev"), 1);
+        assert_eq!(st.sync[0].outcome, SyncOutcome::Synced { commits: 3 });
+        assert_eq!(f.count("repos/me/res"), 0, "never looks at the upstream's name");
+    }
+
+    #[test]
+    fn gh_reporting_an_existing_fork_under_another_name_uses_that_name() {
+        // The listing does not show it (e.g. it could not see it), so gh is asked to fork and GitHub
+        // hands back the existing fork `me/thing-1`.
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                ok(&listing(&[]))
+            } else if c.starts_with("gh repo fork up/thing") {
+                Output { code: 0, stdout: String::new(), stderr: "me/thing-1 already exists\n".into() }
+            } else if c.starts_with("gh repo fork up/fresh") {
+                ok("https://github.com/me/fresh-2\n")
+            } else if c.starts_with("gh api repos/me/fresh-2/commits") {
+                ok("1\n")
+            } else {
+                fail("HTTP 404")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/thing", "up/fresh"]));
+        let mut c = ready_cfg();
+        c.batch_size = 10;
+        run_forks(&f, &mut st, &c, &mut |_| {}).unwrap();
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(st.fork_of("up/thing"), "me/thing-1");
+        assert_eq!(st.fork_of("up/fresh"), "me/fresh-2");
+        assert_eq!(f.count("repos/me/thing/commits"), 0, "never waits on the upstream's name");
+        assert!(f.sleeps.borrow().is_empty(), "no 300 s wait: {:?}", f.sleeps.borrow());
+        assert_eq!(st.counts(), (1, 1));
+        assert_eq!(st.counts_text(), "created 1 fork, reused 1 you already had");
+        assert_eq!(f.count("gh api graphql"), 1, "one listing per run");
+    }
+
+    #[test]
+    fn a_fork_of_a_fork_of_the_upstream_is_accepted() {
+        // listing: parent is a friend's fork whose parent is the upstream
+        let f = Fake::new(|c| if c.starts_with("gh api graphql") { ok(&listing(&[("me/x", "friend/x", Some("up/x"))])) } else { ok("") });
+        let mut st = ForkState::new("me", false, &repos(&["up/x"]));
+        run_forks(&f, &mut st, &cfg(), &mut |_| {}).unwrap();
+        assert!(st.is_complete() && f.count("gh repo fork") == 0, "{st:?}");
+        assert_eq!(st.fork_of("up/x"), "me/x");
+
+        // same-name lookup (listing unavailable): parent is the friend's fork, source the upstream
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                fail("HTTP 502")
+            } else if c.starts_with("gh api repos/me/x") {
+                ok(r#"{"full_name":"me/x","fork":true,"parent":{"full_name":"friend/x"},"source":{"full_name":"up/x"}}"#)
+            } else {
+                ok("")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/x"]));
+        run_forks(&f, &mut st, &cfg(), &mut |_| {}).unwrap();
+        assert!(st.is_complete() && f.count("gh repo fork") == 0, "{st:?}");
+    }
+
+    #[test]
+    fn a_failed_listing_falls_back_to_the_same_name_lookup() {
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                fail("error connecting to api.github.com")
+            } else if c.starts_with("gh api repos/me/") {
+                // GitHub follows a rename: the old name answers with the renamed fork
+                ok(r#"{"full_name":"me/renamed","fork":true,"default_branch":"dev","parent":{"full_name":"up/res"}}"#)
+            } else {
+                ok("")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/res"]));
+        run_forks(&f, &mut st, &cfg(), &mut |_| {}).unwrap();
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(f.count("gh api repos/me/res"), 1);
+        assert_eq!(f.count("gh repo fork"), 0, "a failed listing is not 'no forks'");
+        assert_eq!(st.fork_of("up/res"), "me/renamed");
+    }
+
+    #[test]
+    fn an_old_fork_state_file_still_loads() {
+        let old = r#"{"target_owner":"me","target_is_org":false,"pending":[],"done":["up/a"],"failed":[{"repo":"up/b","error":"x"}],"branches":{},"sync":[],"api_calls":3}"#;
+        let st: ForkState = serde_json::from_str(old).unwrap();
+        assert!(st.forks.is_empty() && st.created.is_empty());
+        assert_eq!(st.fork_of("up/a"), "me/a", "older files only ever accepted the same name");
+        assert_eq!(st.counts(), (0, 1));
+        let older = r#"{"target_owner":"me","target_is_org":false,"pending":["up/a"],"done":[],"failed":[]}"#;
+        assert!(serde_json::from_str::<ForkState>(older).is_ok());
+    }
+
+    fn cache_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("kora-forkcache-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.join("forks-cache.json")
+    }
+
+    #[test]
+    fn the_cache_is_verified_before_use_and_stale_entries_are_dropped() {
+        let p = cache_dir("verify");
+        std::fs::write(&p, r#"{"owners":{"me":{"up/x":"me/x-renamed","up/y":"me/gone"},"other":{"up/x":"other/x"}}}"#).unwrap();
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                fail("HTTP 502")
+            } else if c.starts_with("gh api repos/me/x-renamed") {
+                ok(r#"{"full_name":"me/x-renamed","fork":true,"parent":{"full_name":"up/x"}}"#)
+            } else if c.starts_with("gh api repos/me/gone") {
+                fail("gh: Not Found (HTTP 404)")
+            } else if c.starts_with("gh api repos/me/y") {
+                ok(r#"{"full_name":"me/y","fork":true,"parent":{"full_name":"up/y"}}"#)
+            } else {
+                fail("unexpected")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/x", "up/y"]));
+        let c = ForkConfig { cache_path: Some(p.clone()), batch_size: 10, ..cfg() };
+        run_forks(&f, &mut st, &c, &mut |_| {}).unwrap();
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(st.fork_of("up/x"), "me/x-renamed");
+        assert_eq!(f.count("gh api repos/me/x "), 0, "the verified cache hit needs no same-name lookup");
+        assert_eq!(st.fork_of("up/y"), "me/y");
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(saved.pointer("/owners/me/up~1y").and_then(|v| v.as_str()), Some("me/y"), "{saved}");
+        assert_eq!(saved.pointer("/owners/me/up~1x").and_then(|v| v.as_str()), Some("me/x-renamed"));
+        assert_eq!(saved.pointer("/owners/other/up~1x").and_then(|v| v.as_str()), Some("other/x"), "other owners are kept");
+        let leftovers: Vec<_> = std::fs::read_dir(p.parent().unwrap()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).collect();
+        assert!(leftovers.is_empty());
+
+        // A cached fork that is no longer a fork of the upstream is dropped, then looked up by name.
+        std::fs::write(&p, r#"{"owners":{"me":{"up/z":"me/not-a-fork"}}}"#).unwrap();
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                fail("HTTP 502")
+            } else if c.starts_with("gh api repos/me/not-a-fork") {
+                ok(r#"{"full_name":"me/not-a-fork","fork":false}"#)
+            } else if c.starts_with("gh api repos/me/z") {
+                fail("HTTP 404")
+            } else if c.starts_with("gh repo fork up/z") {
+                ok("https://github.com/me/z\n")
+            } else {
+                fail("unexpected")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/z"]));
+        run_forks(&f, &mut st, &c, &mut |_| {}).unwrap();
+        assert!(st.is_complete(), "{st:?}");
+        assert_eq!(st.fork_of("up/z"), "me/z");
+        assert_eq!(st.counts(), (1, 0));
+        let saved = std::fs::read_to_string(&p).unwrap();
+        assert!(!saved.contains("not-a-fork") && saved.contains("\"me/z\""), "{saved}");
+    }
+
+    #[test]
+    fn a_successful_listing_replaces_stale_cache_entries() {
+        let p = cache_dir("listing");
+        std::fs::write(&p, r#"{"owners":{"me":{"up/a":"me/old-a","up/b":"me/b"}}}"#).unwrap();
+        let f = Fake::new(|c| {
+            if c.starts_with("gh api graphql") {
+                ok(&listing(&[("me/a-1", "up/a", None)]))
+            } else if c.starts_with("gh repo fork up/b") {
+                ok("https://github.com/me/b\n")
+            } else {
+                ok("")
+            }
+        });
+        let mut st = ForkState::new("me", false, &repos(&["up/a", "up/b"]));
+        run_forks(&f, &mut st, &ForkConfig { cache_path: Some(p.clone()), ..cfg() }, &mut |_| {}).unwrap();
+        assert_eq!(st.fork_of("up/a"), "me/a-1");
+        assert_eq!(f.count("gh repo fork up/a"), 0);
+        // up/b's cached fork was not in the listing: forked again (GitHub returns it if it exists)
+        assert_eq!(f.count("gh repo fork up/b"), 1);
+        let saved = std::fs::read_to_string(&p).unwrap();
+        assert!(saved.contains("me/a-1") && !saved.contains("me/old-a"), "{saved}");
+    }
+
+    #[test]
+    fn fork_output_and_listing_parsing() {
+        let o = |out: &str, err: &str| Output { code: 0, stdout: out.into(), stderr: err.into() };
+        assert_eq!(forkfind::parse_fork_output(&o("https://github.com/Me/res-1\n", ""), "me").as_deref(), Some("Me/res-1"));
+        assert_eq!(forkfind::parse_fork_output(&o("", "me/res-1 already exists\n"), "me").as_deref(), Some("me/res-1"));
+        assert_eq!(forkfind::parse_fork_output(&o("", "✓ Created fork \u{1b}[1mme/res\u{1b}[0m\n"), "me").as_deref(), Some("me/res"));
+        assert_eq!(forkfind::parse_fork_output(&o("", "! org/res already exists"), "me"), None, "another owner's repo is not ours");
+        assert_eq!(forkfind::parse_fork_output(&o("", ""), "me"), None);
+        // two pages, a collaborator repository that is not the owner's, a page with errors
+        let two = format!("{}\n{}", listing(&[("me/a", "up/a", None), ("someone/b", "up/b", None)]), listing(&[("ME/c", "Up/C", None)]));
+        let idx = forkfind::parse_listing(&two, "me").unwrap();
+        assert_eq!(idx.len(), 2);
+        assert_eq!(idx.find("up/c").unwrap().slug, "ME/c");
+        assert!(idx.find("up/b").is_none());
+        assert!(forkfind::parse_listing(r#"{"errors":[{"message":"x"}],"data":null}"#, "me").is_none());
+        assert!(forkfind::parse_listing("", "me").is_none());
+        assert!(forkfind::parse_listing(r#"{"data":{"repositoryOwner":null}}"#, "me").is_none());
     }
 
     #[test]
@@ -1603,10 +2050,12 @@ mod tests {
         let f = github(&[("a", 0, 1), ("b", 0, 1), ("c", 0, 0)]);
         let mut st = ForkState::new("me", false, &repos(&["up/a", "up/b", "up/c"]));
         run_forks(&f, &mut st, &sync_cfg(), &mut |_| {}).unwrap();
-        // a: 3 calls, b: 3 calls -> 6 reached -> one pause before c (2 calls)
+        // the one fork listing per run (unreadable here, so each repo is looked up by name) + a: 3
+        // calls, b: 3 calls -> 6 reached -> one pause before c (2 calls)
         assert_eq!(*f.sleeps.borrow(), vec![Duration::from_secs(10)]);
-        assert_eq!(st.api_calls, 8);
-        assert_eq!(f.count("gh "), 8);
+        assert_eq!(st.api_calls, 9);
+        assert_eq!(f.count("gh "), 9);
+        assert_eq!(f.count("gh api graphql"), 1);
 
         // persistent rate limit on compare pauses; state stays resumable and nothing is lost
         let limited = std::rc::Rc::new(std::cell::Cell::new(true));
@@ -1636,10 +2085,27 @@ mod tests {
 
     #[test]
     fn paced_job_sync_stops_at_a_persistent_rate_limit() {
-        let f = Fake::new(|c| if c.contains("/compare/") { fail("HTTP 429") } else { ok("") });
-        let job = |i: &str| SyncJob { id: i.into(), fork: format!("me/{i}"), upstream: format!("up/{i}"), branch: "dev".into() };
-        let out = sync_forks_paced(&f, &[job("a"), job("b")], &sync_cfg());
-        assert!(out.iter().all(|(_, o)| matches!(o, SyncOutcome::Unknown(w) if w.contains("rate limit"))));
+        let f = Fake::new(|c| {
+            if c.contains("/compare/") {
+                fail("HTTP 429")
+            } else {
+                ok("")
+            }
+        });
+        let job = |i: &str| SyncJob {
+            id: i.into(),
+            fork: format!("me/{i}"),
+            upstream: format!("up/{i}"),
+            branch: "dev".into(),
+        };
+        let mut seen = vec![];
+        let out = sync_forks_paced(&f, &[job("a"), job("b")], &sync_cfg(), &mut |d, t| {
+            seen.push((d, t))
+        });
+        assert_eq!(seen, vec![(1, 2), (2, 2)], "progress after each fork");
+        assert!(out
+            .iter()
+            .all(|(_, o)| matches!(o, SyncOutcome::Unknown(w) if w.contains("rate limit"))));
         assert_eq!(f.count("/compare/"), 5); // 1 + 4 retries, then b is not even tried
     }
 
@@ -1820,5 +2286,71 @@ mod tests {
         assert!(a.contains(&"--web".to_string()) && a.contains(&"repo,read:org".to_string()));
         assert!(!a.iter().any(|x| x.contains("admin:org")));
         assert!(login_args(true).iter().any(|x| x.contains("admin:org")));
+    }
+
+    fn sam() -> crate::userhome::Account {
+        crate::userhome::Account { name: "sam".into(), uid: 1000, gid: 1000, home: "/home/sam".into() }
+    }
+
+    #[test]
+    fn under_sudo_gh_runs_as_the_user_and_git_asks_their_gh() {
+        let u = sam();
+        let ru = Path::new("/usr/sbin/runuser");
+        let bus = Path::new("/run/user/1000/bus");
+        let i = sudo_invocation("gh", &["auth", "status"], None, Some(&u), Some(ru), None, Some(bus));
+        assert_eq!(i.program, "/usr/sbin/runuser");
+        assert_eq!(i.args, ["-u", "sam", "--", "gh", "auth", "status"]);
+        assert_eq!(i.cwd.as_deref(), Some(Path::new("/home/sam")), "never root's private folder");
+        assert!(i.env.contains(&("DBUS_SESSION_BUS_ADDRESS".into(), "unix:path=/run/user/1000/bus".into())));
+        // clone: git as root, credentials from the user's gh
+        let i = sudo_invocation("gh", &["repo", "clone", "sam/kora_core", "/srv/x/resources/kora_core"], None, Some(&u), Some(ru), None, None);
+        assert_eq!(i.program, "git");
+        assert_eq!(i.args, ["clone", "--", "https://github.com/sam/kora_core.git", "/srv/x/resources/kora_core"]);
+        assert!(i.env.contains(&("GIT_CONFIG_VALUE_1".into(), "!/usr/sbin/runuser -u sam -- gh auth git-credential".into())), "{:?}", i.env);
+        assert!(i.env.contains(&("GIT_CONFIG_VALUE_0".into(), String::new())), "other helpers are reset for github.com only");
+        let i = sudo_invocation("git", &["fetch", "origin"], Some(Path::new("/srv/x")), Some(&u), Some(ru), None, None);
+        assert_eq!((i.program.as_str(), i.cwd.as_deref()), ("git", Some(Path::new("/srv/x"))));
+        assert_eq!(i.env.len(), 5);
+        // the caller's own git config list is left alone
+        assert!(sudo_invocation("git", &["fetch"], None, Some(&u), Some(ru), Some("1"), None).env.is_empty());
+    }
+
+    #[test]
+    fn without_sudo_or_runuser_nothing_changes() {
+        let u = sam();
+        let ru = Some(Path::new("/usr/sbin/runuser"));
+        let plain = |i: Invocation, p: &str| assert!(i.program == p && i.env.is_empty() && i.cwd.is_none(), "{i:?}");
+        plain(sudo_invocation("gh", &["auth", "status"], None, None, ru, None, None), "gh");
+        plain(sudo_invocation("gh", &["auth", "status"], None, Some(&u), None, None, None), "gh");
+        let root = crate::userhome::Account { name: "root".into(), uid: 0, gid: 0, home: "/root".into() };
+        plain(sudo_invocation("gh", &["auth", "status"], None, Some(&root), ru, None, None), "gh");
+        plain(sudo_invocation("apt-get", &["install", "gh"], None, Some(&u), ru, None, None), "apt-get");
+        // an unexpected clone shape is not rewritten into git, it just runs as the user
+        let i = sudo_invocation("gh", &["repo", "clone", "-x", "d"], None, Some(&u), ru, None, None);
+        assert_eq!(i.args[..4], ["-u", "sam", "--", "gh"]);
+    }
+
+    #[test]
+    fn move_pinned_fetches_only_when_the_commit_is_missing() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let here = Fake::new(|l| {
+            if l.starts_with("git rev-parse HEAD") {
+                ok("aaa\n")
+            } else {
+                ok("")
+            }
+        });
+        assert_eq!(move_pinned(&here, Path::new("/r"), sha).unwrap(), "aaa");
+        assert_eq!(here.count("fetch"), 0, "{:?}", here.calls.borrow());
+        assert_eq!(here.count("checkout --detach"), 1);
+        let missing = Fake::new(|l| {
+            if l.starts_with("git cat-file") {
+                fail("fatal: Not a valid object name")
+            } else {
+                ok("")
+            }
+        });
+        move_pinned(&missing, Path::new("/r"), sha).unwrap();
+        assert_eq!(missing.count("git fetch origin"), 1);
     }
 }

@@ -24,6 +24,7 @@ pub mod steps;
 pub mod sysexe;
 pub mod txadmin;
 pub mod update;
+pub mod userhome;
 pub mod installer;
 pub mod launch;
 pub mod monitor;

@@ -39,6 +39,9 @@ pub enum Screen {
     DbAdminLogin,
     Firewall,
     Service,
+    /// Linux, with the background service: the server folder is inside a private folder the
+    /// service's own account cannot enter. Let it pass through, or use `/home/kora/<name>`.
+    FolderAccess,
     /// Windows: put a Kora shortcut on the desktop (the Start Menu entry is always added).
     Shortcut,
     License,
@@ -89,6 +92,16 @@ pub struct PortLine {
 
 /// Real database login check (fake-able in tests). `None` = automatic (environment / root socket).
 pub type DbTester = fn(Option<&DbAdmin>) -> Result<(), String>;
+
+/// The private folders on the way to a server folder that the service account cannot pass through.
+pub type ReachCheck = fn(&Path) -> Vec<PathBuf>;
+/// `chmod o+x` on exactly these folders (fake-able in tests).
+pub type PermFixer = fn(&[PathBuf]) -> Result<(), String>;
+
+fn system_perm_fixer(dirs: &[PathBuf]) -> Result<(), String> {
+    let plan = kora_core::service::binary::traverse_plan(dirs);
+    kora_core::service::apply_plan(&plan, &kora_core::service::SystemRunner).map_err(|e| e.to_string())
+}
 
 pub struct Wizard {
     pub screen: Screen,
@@ -155,6 +168,10 @@ pub struct Wizard {
     /// After a re-check sent the user back to Ports, return straight to Review.
     jump_review: bool,
     db_tester: DbTester,
+    /// Private folders found on the way to the server folder (non-empty = the FolderAccess screen is shown).
+    pub access_dirs: Vec<PathBuf>,
+    reach: ReachCheck,
+    perm_fixer: PermFixer,
     /// false = automatic (root socket / no password), true = enter an admin login.
     pub dba_custom: bool,
     pub dba_user: String,
@@ -196,18 +213,11 @@ pub fn slug(name: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-/// Default install folder per OS.
+/// Suggested install folder (`kora_core::userhome::default_server_dir`: the home folder of the
+/// person installing, also under sudo; `/home/kora/<name>` when logged in as root). Empty when no
+/// home folder can be found, so the user picks one.
 pub fn default_dir(name: &str) -> String {
-    let s = match slug(name) {
-        s if s.is_empty() => "my-server".to_string(),
-        s => s,
-    };
-    if cfg!(windows) {
-        format!("C:\\Kora\\{s}")
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/opt".into());
-        format!("{}/kora/{s}", home.trim_end_matches('/'))
-    }
+    kora_core::userhome::default_server_dir(&slug(name)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 pub fn validate_name(name: &str) -> Result<(), String> {
@@ -268,6 +278,7 @@ impl Wizard {
     pub fn new() -> Self {
         let elevated = elev::is_elevated();
         Self::with_ports(PortEnv::system())
+            .with_folder_access(kora_core::installer::service_blocking_dirs, system_perm_fixer)
             .with_platform(cfg!(windows), elevated)
             .with_elevation(!elevated && elev::can_offer(), elev::original_args(), elev::system_elevator())
     }
@@ -345,6 +356,10 @@ impl Wizard {
             ports_note: None,
             jump_review: false,
             db_tester,
+            access_dirs: Vec::new(),
+            // The real checks are switched on in `new`; tests never look at this computer's folders.
+            reach: |_| Vec::new(),
+            perm_fixer: |_| Err("not available here".into()),
             dba_custom: false,
             dba_user: "root".into(),
             dba_pass: String::new(),
@@ -358,6 +373,47 @@ impl Wizard {
 
     pub fn state(&self) -> WizardState {
         self.state
+    }
+
+    /// Replace the folder-access check and the permission fix (tests).
+    pub fn with_folder_access(mut self, reach: ReachCheck, fixer: PermFixer) -> Self {
+        self.reach = reach;
+        self.perm_fixer = fixer;
+        self
+    }
+
+    /// `/home/kora/<name>`: a folder the service account can always reach (Kora creates the `kora` account for it).
+    pub fn kora_home_dir(&self) -> String {
+        let s = match slug(&self.name) {
+            s if s.is_empty() => "my-server".to_string(),
+            s => s,
+        };
+        format!("{}/{s}", kora_core::userhome::KORA_USER_HOME)
+    }
+
+    /// The private folders as text: "/home and /home/sam".
+    pub fn access_dirs_text(&self) -> String {
+        let v: Vec<String> = self.access_dirs.iter().map(|d| d.display().to_string()).collect();
+        match v.as_slice() {
+            [] => String::new(),
+            [one] => one.clone(),
+            [init @ .., last] => format!("{} and {last}", init.join(", ")),
+        }
+    }
+
+    /// Leaving the FolderAccess screen: carry out the choice.
+    fn apply_folder_access(&mut self) -> Result<(), String> {
+        if self.selected == 0 {
+            (self.perm_fixer)(&self.access_dirs)
+                .map_err(|e| format!("Kora could not change the folder permissions ({e}). Choose the second option instead, or go back and pick another folder."))?;
+            self.status = Some(format!("Done: the server's own account can now pass through {}.", self.access_dirs_text()));
+        } else {
+            self.dir = self.kora_home_dir();
+            self.dir_touched = true;
+            self.access_dirs.clear();
+            self.status = Some(format!("The server will be installed in {}.", self.dir));
+        }
+        Ok(())
     }
 
     /// Screens in the current order (depends on earlier answers).
@@ -390,6 +446,9 @@ impl Wizard {
             }
         }
         v.extend([Firewall, Service]);
+        if !self.access_dirs.is_empty() {
+            v.push(FolderAccess);
+        }
         if self.windows {
             v.push(Shortcut);
         }
@@ -451,7 +510,7 @@ impl Wizard {
         match self.screen {
             Screen::Permission | Screen::Welcome | Screen::Mode | Screen::Artifact | Screen::Resources | Screen::DbAdmin => 2,
             Screen::Database => 3,
-            Screen::Firewall | Screen::Service | Screen::Shortcut | Screen::TxAdminPublic => 2,
+            Screen::Firewall | Screen::Service | Screen::Shortcut | Screen::TxAdminPublic | Screen::FolderAccess => 2,
             _ => 0,
         }
     }
@@ -1131,6 +1190,28 @@ impl Wizard {
             self.error = Some(e);
             return;
         }
+        if self.screen == Screen::Service {
+            // Linux service accounts cannot enter private home folders: look now, so the choice comes next.
+            self.access_dirs = if self.admin && self.service && !self.windows { (self.reach)(Path::new(self.dir.trim())) } else { Vec::new() };
+        }
+        if self.screen == Screen::FolderAccess {
+            // `apply_folder_access` may clear `access_dirs` (and so this screen): find the next one first.
+            let flow = self.flow();
+            let idx = flow.iter().position(|s| *s == self.screen).unwrap_or(0);
+            if let Err(e) = self.apply_folder_access() {
+                self.error = Some(e);
+                return;
+            }
+            match flow.get(idx + 1) {
+                Some(Screen::Review) if self.recheck_ports_or_redirect() => {}
+                Some(next) => {
+                    self.screen = *next;
+                    self.load_selection();
+                }
+                None => self.state = WizardState::Done,
+            }
+            return;
+        }
         if self.screen == Screen::Ports && std::mem::take(&mut self.jump_review) {
             self.screen = Screen::Review;
             self.load_selection();
@@ -1158,6 +1239,8 @@ impl Wizard {
             Screen::Folder => {
                 if self.dir.trim().is_empty() {
                     Err("Please choose a folder for your server.".into())
+                } else if !self.windows && !Path::new(self.dir.trim()).is_absolute() {
+                    Err("Please give the full path of the folder, starting with /, for example /home/you/kora/my-server.".into())
                 } else {
                     Ok(())
                 }
@@ -1434,6 +1517,78 @@ mod tests {
         for c in s.chars() {
             w.handle_key(key(KeyCode::Char(c)));
         }
+    }
+
+    static FIXED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+    fn at_service(w: &mut Wizard) {
+        w.dir = "/home/sam/kora/my-kora-server".into();
+        w.service = true;
+        w.screen = Screen::Service;
+        w.load_selection();
+    }
+
+    #[test]
+    fn a_private_home_folder_offers_to_let_the_service_through() {
+        let mut w = wiz().with_platform(false, true).with_folder_access(
+            |_| vec![PathBuf::from("/home/sam")],
+            |d| {
+                FIXED.lock().unwrap().extend(d.iter().cloned());
+                Ok(())
+            },
+        );
+        at_service(&mut w);
+        w.go_next();
+        assert_eq!(w.screen, Screen::FolderAccess);
+        assert_eq!(w.access_dirs_text(), "/home/sam");
+        let v = wizard_view::view(&w);
+        assert!(v.options[0].1.contains("chmod o+x /home/sam") && v.options[1].0.contains("/home/kora/my-kora-server"), "{:?}", v.options);
+        w.go_next(); // first option: let it through
+        assert!(FIXED.lock().unwrap().contains(&PathBuf::from("/home/sam")));
+        assert_eq!(w.dir, "/home/sam/kora/my-kora-server", "folder kept");
+        assert_eq!(w.screen, Screen::License);
+        assert!(w.error.is_none());
+    }
+
+    #[test]
+    fn or_the_server_moves_to_the_kora_home_and_a_failed_fix_says_so() {
+        let mut w = wiz().with_platform(false, true).with_folder_access(|_| vec![PathBuf::from("/home"), PathBuf::from("/home/sam")], |_| Err("chmod failed".into()));
+        at_service(&mut w);
+        w.go_next();
+        assert_eq!(w.screen, Screen::FolderAccess);
+        assert_eq!(w.access_dirs_text(), "/home and /home/sam");
+        w.go_next();
+        assert_eq!(w.screen, Screen::FolderAccess, "a failed fix stays here");
+        assert!(w.error.as_deref().unwrap().contains("chmod failed"));
+        w.select(1);
+        w.go_next();
+        assert_eq!(w.dir, "/home/kora/my-kora-server");
+        assert_eq!(w.screen, Screen::License);
+        assert!(!w.flow().contains(&Screen::FolderAccess), "nothing left to fix");
+        w.go_back();
+        assert_eq!(w.screen, Screen::Service);
+    }
+
+    #[test]
+    fn the_folder_check_only_happens_with_the_service_as_administrator_on_linux() {
+        for (windows, admin, service) in [(false, false, true), (false, true, false), (true, true, true)] {
+            let mut w = wiz().with_platform(windows, admin).with_folder_access(|_| vec![PathBuf::from("/home/sam")], |_| Ok(()));
+            at_service(&mut w);
+            w.service = service;
+            w.load_selection();
+            w.go_next();
+            assert_ne!(w.screen, Screen::FolderAccess, "{windows} {admin} {service}");
+        }
+    }
+
+    #[test]
+    fn a_relative_folder_is_refused_on_linux() {
+        let mut w = wiz();
+        w.screen = Screen::Folder;
+        w.dir = "kora/my-server".into();
+        w.go_next();
+        assert_eq!(w.screen, Screen::Folder);
+        assert!(w.error.as_deref().unwrap().contains("full path"));
     }
 
     #[test]

@@ -536,7 +536,11 @@ fn hit_rectangles_stay_inside_the_screen_for_any_size() {
 fn every_screen_draws_on_a_tiny_terminal_without_panicking() {
     let d = tempfile::tempdir().unwrap();
     let (mut a, s) = with_logs(d.path());
-    s.borrow_mut().preview = Some(Ok(UpdatePreview { resources: vec![change("r1", ChangeStatus::Clean)], new_release: None }));
+    s.borrow_mut().preview = Some(Ok(UpdatePreview {
+        resources: vec![change("r1", ChangeStatus::Clean)],
+        new_release: None,
+        notes: vec![],
+    }));
     for k in ['l', 'w', 'e', 'd', 'u', 'n', 'c', 'a'] {
         chr(&mut a, k);
         for (w, h) in [(10u16, 4u16), (30, 8), (100, 40)] {
@@ -589,7 +593,11 @@ fn change(id: &str, st: ChangeStatus) -> ResourceChange {
 }
 
 fn preview(resources: Vec<ResourceChange>) -> UpdatePreview {
-    UpdatePreview { resources, new_release: None }
+    UpdatePreview {
+        resources,
+        new_release: None,
+        notes: vec![],
+    }
 }
 
 fn updates(d: &std::path::Path) -> (App, Shared) {
@@ -838,9 +846,25 @@ fn check_for_updates_refreshes_the_badge() {
 fn badges_come_from_the_preview() {
     use super::backend::badge_of;
     assert_eq!(badge_of(&preview(vec![])), UpdateBadge::UpToDate);
-    assert_eq!(badge_of(&preview(vec![change("a", ChangeStatus::Clean)])), UpdateBadge::Updates(1));
-    assert_eq!(badge_of(&preview(vec![change("a", ChangeStatus::Clean), change("b", ChangeStatus::Diverged)])), UpdateBadge::NeedsAttention);
-    assert_eq!(badge_of(&UpdatePreview { resources: vec![], new_release: Some("2".into()) }), UpdateBadge::NewRelease);
+    assert_eq!(
+        badge_of(&preview(vec![change("a", ChangeStatus::Clean)])),
+        UpdateBadge::Updates(1)
+    );
+    assert_eq!(
+        badge_of(&preview(vec![
+            change("a", ChangeStatus::Clean),
+            change("b", ChangeStatus::Diverged)
+        ])),
+        UpdateBadge::NeedsAttention
+    );
+    assert_eq!(
+        badge_of(&UpdatePreview {
+            resources: vec![],
+            new_release: Some("2".into()),
+            notes: vec![]
+        }),
+        UpdateBadge::NewRelease
+    );
 }
 
 // ------------------------------------------------------------ notifications

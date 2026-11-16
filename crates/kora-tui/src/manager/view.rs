@@ -778,7 +778,7 @@ fn progress_lines(p: &mut Page, rows: &[(String, String)], snapshot: &Option<Str
 fn update(p: &mut Page, s: &UpdateState) {
     if let Some(id) = &s.confirm_rollback {
         p.text(&format!("Roll back to snapshot {id}?"), bold());
-        p.text("Resources go back to how they were before that update. The server is not restarted for you.", dim());
+        p.text("Resources go back to how they were before that update, and a running server restarts. Resources with changes of your own stop the rollback (nothing is changed).", dim());
         p.blank();
         p.buttons(&[btn(Action::Yes, "Yes, roll back (y)", true), btn(Action::No, "No (n)", true)]);
         return;

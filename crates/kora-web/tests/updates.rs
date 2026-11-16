@@ -116,6 +116,7 @@ async fn preview_returns_the_changes_and_a_badge() {
     fake.state().preview = Some(Ok(UpdatePreview {
         resources: vec![change("kora_core", ChangeStatus::Clean)],
         new_release: None,
+        notes: vec![],
     }));
     let app = app(&fake);
     let j = run_job(
@@ -639,4 +640,100 @@ async fn ports_only_when_stopped_and_valid() {
     .await;
     assert_eq!(s, 422);
     assert_eq!(v["error"]["message"], "Port 30600 is in use.");
+}
+
+#[tokio::test]
+async fn apply_defaults_to_when_quiet_and_passes_the_previewed_targets() {
+    let fake = FakeBackend::sample();
+    let app = app(&fake);
+    let body = json!({"scope": "all", "targets": {"kora_core": "0123456789abcdef"}});
+    let j = run_job(&app, "POST", "/servers/dev/update/apply", Some(body)).await;
+    assert_eq!(j["state"], "done", "{j}");
+    let calls = fake.calls();
+    assert!(
+        calls.iter().any(|c| c.contains("restart=WhenQuiet")
+            && c.contains(r#"targets={"kora_core": "0123456789abcdef"}"#)),
+        "{calls:?}"
+    );
+    for bad in [
+        json!({"kora_core": "not-a-commit"}),
+        json!({"a b": "0123456789abcdef"}),
+        json!(["x"]),
+    ] {
+        let (s, _) = call(
+            &app,
+            "POST",
+            "/servers/dev/update/apply",
+            Some(json!({"targets": bad})),
+        )
+        .await;
+        assert_eq!(s, 400);
+    }
+}
+
+#[tokio::test]
+async fn rollback_can_be_forced() {
+    let fake = FakeBackend::sample();
+    fake.state().snapshots = vec![SnapshotInfo {
+        id: "snap1".into(),
+        created_unix: 1,
+        resources: vec![],
+    }];
+    let app = app(&fake);
+    let j = run_job(
+        &app,
+        "POST",
+        "/servers/dev/snapshots/snap1/rollback",
+        Some(json!({"force": true})),
+    )
+    .await;
+    assert_eq!(j["state"], "done", "{j}");
+    assert!(fake
+        .calls()
+        .contains(&"rollback dev snap1 force".to_string()));
+    let (s, _) = call(
+        &app,
+        "POST",
+        "/servers/dev/snapshots/snap1/rollback",
+        Some(json!({"force": "yes"})),
+    )
+    .await;
+    assert_eq!(s, 400);
+}
+
+#[tokio::test]
+async fn every_update_entry_point_is_refused_while_another_update_runs() {
+    let fake = FakeBackend::sample();
+    let t = tempfile::tempdir().unwrap();
+    fake.state().servers[1].dir = t.path().to_path_buf();
+    fake.state().snapshots = vec![SnapshotInfo {
+        id: "snap1".into(),
+        created_unix: 1,
+        resources: vec![],
+    }];
+    let app = app(&fake);
+    let held = kora_core::update::lock::acquire(t.path()).unwrap();
+    for (uri, body) in [
+        ("/servers/dev/update/preview", None),
+        ("/servers/dev/update/apply", Some(json!({"scope": "all"}))),
+        ("/servers/dev/update/auto", None),
+        ("/servers/dev/snapshots/snap1/rollback", None),
+    ] {
+        let (s, v) = call(&app, "POST", uri, body).await;
+        assert_eq!(s, 409, "{uri}: {v}");
+        assert!(
+            v["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Another update is running for this server"),
+            "{v}"
+        );
+    }
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("apply") || c.starts_with("rollback") || c.starts_with("preview")));
+    drop(held);
+    let j = run_job(&app, "POST", "/servers/dev/update/preview", None).await;
+    assert_eq!(j["state"], "done", "{j}");
 }

@@ -4,6 +4,7 @@
 //! method and path come from `Op::route`, so only the handler's extractors live here.
 #![allow(clippy::unused_async)]
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use axum::extract::{Path, State};
@@ -11,6 +12,8 @@ use axum::response::Response;
 use axum::Json;
 use kora_core::api::panel_updates::{badge_json, report_json, update_event_json};
 use kora_core::api::{badge_of, valid_resource_name, Op};
+use kora_core::installer::registry::ServerEntry;
+use kora_core::update::lock;
 use kora_core::update::manual::{ApplyOpts, RestartPolicy, Scope, SnapshotInfo};
 use kora_core::update::UpdateReport;
 use serde_json::{json, Value};
@@ -78,10 +81,33 @@ fn body_of(b: Option<Json<Value>>) -> Value {
     b.map(|Json(v)| v).unwrap_or(Value::Null)
 }
 
-async fn known(
-    st: &AppState,
-    name: String,
-) -> Result<kora_core::installer::registry::ServerEntry, ApiError> {
+/// `{"<resource>": "<commit>"}`: the preview's planned targets (optional).
+fn targets(v: Option<&Value>) -> Result<Option<BTreeMap<String, String>>, ApiError> {
+    let Some(v) = v.filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let bad = || ApiError::bad_request("'targets' must map resource names to commit ids.");
+    let map: BTreeMap<String, String> = serde_json::from_value(v.clone()).map_err(|_| bad())?;
+    let commit = |c: &str| (7..=64).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_hexdigit());
+    if map
+        .iter()
+        .any(|(k, c)| !valid_resource_name(k) || !commit(c))
+    {
+        return Err(bad());
+    }
+    Ok(Some(map))
+}
+
+/// 409 while another update (another tab, the CLI, the nightly run) holds this server's update lock.
+async fn not_busy(e: &ServerEntry) -> Result<(), ApiError> {
+    let dir = e.dir.clone();
+    if blocking(move || Ok(lock::is_busy(&dir))).await? {
+        return Err(ApiError::conflict(format!("{}.", lock::BUSY)));
+    }
+    Ok(())
+}
+
+async fn known(st: &AppState, name: String) -> Result<ServerEntry, ApiError> {
     let st = st.clone();
     blocking(move || st.entry(&name)).await
 }
@@ -94,6 +120,7 @@ pub async fn update_preview(
     let body = body_of(body);
     let scope = parse_scope(body.get("scope"))?;
     let e = known(&st, s.clone()).await?;
+    not_busy(&e).await?;
     let make = st.backend.clone();
     st.spawn_job(Op::UpdatePreview, Some(s), move |_h| {
         let p = make().preview(&e, scope)?;
@@ -111,7 +138,8 @@ pub async fn update_apply(
     let body = body_of(body);
     let scope = parse_scope(body.get("scope"))?;
     let restart = match body.get("restart").filter(|v| !v.is_null()) {
-        None => RestartPolicy::None,
+        // Same default as the CLI and the panel: never kick players without being asked.
+        None => RestartPolicy::WhenQuiet,
         Some(v) => serde_json::from_value(v.clone()).map_err(|_| {
             ApiError::bad_request(
                 "The restart choice must be none, ensure, full_restart or when_quiet.",
@@ -119,12 +147,21 @@ pub async fn update_apply(
         })?,
     };
     let skip = names(body.get("skip"), "skip")?;
+    let targets = targets(body.get("targets"))?;
     let e = known(&st, s.clone()).await?;
+    not_busy(&e).await?;
     let make = st.backend.clone();
     st.spawn_job(Op::UpdateApply, Some(s), move |h| {
-        let report = make().apply(&e, scope, ApplyOpts { restart, skip }, &mut |ev| {
-            h.event(update_event_json(&ev))
-        })?;
+        let report = make().apply(
+            &e,
+            scope,
+            ApplyOpts {
+                restart,
+                skip,
+                targets,
+            },
+            &mut |ev| h.event(update_event_json(&ev)),
+        )?;
         Ok(report_json(&report))
     })
 }
@@ -134,6 +171,7 @@ pub async fn update_auto(
     Path(s): Path<String>,
 ) -> Result<Response, ApiError> {
     let e = known(&st, s.clone()).await?;
+    not_busy(&e).await?;
     st.spawn_job(Op::UpdateAuto, Some(s), move |_h| {
         run_auto(&e.name).map(|r| report_json(&r))
     })
@@ -160,7 +198,13 @@ pub async fn snapshots_list(
 pub async fn snapshot_rollback(
     State(st): State<AppState>,
     Path((s, id)): Path<(String, String)>,
+    body: Option<Json<Value>>,
 ) -> Result<Response, ApiError> {
+    let force = match body_of(body).get("force") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(ApiError::bad_request("'force' must be true or false.")),
+    };
     let (e, listed) = {
         let st = st.clone();
         let id = id.clone();
@@ -174,11 +218,12 @@ pub async fn snapshot_rollback(
     if !listed {
         return Err(ApiError::not_found("That snapshot no longer exists."));
     }
+    not_busy(&e).await?;
     let make = st.backend.clone();
     let name = e.name.clone();
     st.spawn_job(Op::SnapshotRollback, Some(name), move |h| {
         h.event(json!({"type": "snapshot", "id": id}));
-        make().rollback(&e, &id)?;
+        make().rollback(&e, &id, force)?;
         Ok(json!({}))
     })
 }

@@ -337,6 +337,8 @@ export interface ResourceChange {
 export interface UpdatePreview {
   resources: ResourceChange[]
   new_release: string | null
+  /** Warnings about the check as a whole (built-in release list used, resources no longer in the catalog). */
+  notes?: string[]
 }
 export type RestartPolicy = 'none' | 'ensure' | 'full_restart' | 'when_quiet'
 export type Scope = 'all' | { resources: string[] }
@@ -351,11 +353,17 @@ export interface UpdateReport {
   needs_attention: [string, string][]
   forks_synced: string[]
   forks_left_alone: [string, string][]
+  /** Resources the run never got to because an earlier one failed (nothing changed in them). */
+  not_attempted?: string[]
+  /** Automatic updates: versions held back because they were rolled back before. */
+  held?: [string, string][]
+  notes?: string[]
 }
 export type UpdateEvent =
   | { type: 'resource'; id: string; state: string }
   | { type: 'snapshot'; id: string }
   | { type: 'health'; message: string }
+  | { type: 'progress'; message: string }
   | { type: 'done' }
 
 export interface SnapshotInfo {

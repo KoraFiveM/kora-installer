@@ -1,8 +1,8 @@
 //! One cheap request that says which repositories of the Kora organisation changed.
 //!
 //! `GET /orgs/KoraFiveM/repos?per_page=100&sort=pushed` lists every repository with its `pushed_at` in a single call
-//! (unauthenticated: 60 requests/hour per IP, so it is used at most once per check; a conditional request that answers
-//! 304 does not count). The answer is only ever a HINT to skip a `git fetch`: a clone is skipped when the organisation
+//! (unauthenticated: 60 requests/hour per IP, so it is used at most once per check). The ETag makes a repeat check cheap
+//! (a 304 has no body), but for unauthenticated calls GitHub still counts a 304 against the limit. The answer is only ever a HINT to skip a `git fetch`: a clone is skipped when the organisation
 //! still reports the `pushed_at` that was current the last time that very clone was really fetched. Any failure
 //! (offline, rate limited, odd answer) yields no hint, so every resource is then fetched as usual.
 //! The cache file (`<kora home>/org-cache.json`) holds only public data: the ETag, repository names and push times.
@@ -174,7 +174,8 @@ impl OrgHints {
         if let Some(d) = path.parent() {
             let _ = std::fs::create_dir_all(d);
         }
-        let tmp = path.with_extension("json.tmp");
+        // Per process: two Kora processes saving at once never write into the same temp file.
+        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
         if std::fs::write(&tmp, serde_json::to_string(&self.cache).unwrap_or_default()).is_ok()
             && std::fs::rename(&tmp, path).is_err()
         {

@@ -5,6 +5,8 @@
 //! Git and the server health check are behind traits so everything is testable offline.
 //! SQL migrations are flagged and never rolled back automatically.
 
+pub mod lock;
+
 pub mod manual;
 pub mod orgcache;
 pub mod status;
@@ -69,6 +71,10 @@ pub trait GitOps {
     fn is_diverged(&self, repo: &Path, upstream: &str) -> GitResult<bool>;
     /// Commits in `upstream` that are not in HEAD.
     fn behind_count(&self, repo: &Path, upstream: &str) -> GitResult<u32>;
+    /// Is `ancestor` contained in `descendant` (equal counts)? Default: unknown (an error).
+    fn is_ancestor(&self, _repo: &Path, _ancestor: &str, _descendant: &str) -> GitResult<bool> {
+        Err(UpdateError::Git("cannot compare commits here".into()))
+    }
     /// Fetch what each target needs, possibly in parallel; one result per target, in order. Default: one by one.
     fn fetch_many(&self, targets: &[&UpdateTarget], _mode: FetchMode) -> Vec<GitResult<()>> {
         targets.iter().map(|t| self.fetch(&t.path)).collect()
@@ -95,8 +101,13 @@ pub trait GitOps {
     }
     /// Development: bring the user's forks on GitHub up to date with upstream, fast-forward only
     /// (never forced), when the user is signed in to gh. Returns one outcome per fork that was
-    /// looked at; empty when not possible. Default: nothing.
-    fn sync_forks(&self, _targets: &[UpdateTarget]) -> Vec<(String, crate::git::SyncOutcome)> {
+    /// looked at; empty when not possible. `progress(done, total)` is called as forks are looked at.
+    /// Default: nothing.
+    fn sync_forks(
+        &self,
+        _targets: &[UpdateTarget],
+        _progress: &mut dyn FnMut(usize, usize),
+    ) -> Vec<(String, crate::git::SyncOutcome)> {
         Vec::new()
     }
 }
@@ -319,15 +330,168 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Written atomically (temp file in the same folder, then rename): a reader never sees half a snapshot.
     pub fn save(&self, file: &Path) -> Result<(), UpdateError> {
-        if let Some(dir) = file.parent() {
-            std::fs::create_dir_all(dir)?;
+        let dir = file
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        std::fs::create_dir_all(dir)?;
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "snapshot".into());
+        let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        if let Err(e) = std::fs::rename(&tmp, file) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
         }
-        std::fs::write(file, serde_json::to_vec_pretty(self)?)?;
         Ok(())
     }
     pub fn load(file: &Path) -> Result<Snapshot, UpdateError> {
         Ok(serde_json::from_slice(&std::fs::read(file)?)?)
+    }
+}
+
+/// Snapshots kept per server; older ones are removed after each update.
+pub const KEEP_SNAPSHOTS: usize = 20;
+
+/// Where every snapshot of a server lives (manual and automatic runs alike): `<server>/.kora/snapshots/<id>.json`.
+pub fn snapshot_dir(server_dir: &Path) -> PathBuf {
+    server_dir.join(".kora").join("snapshots")
+}
+
+/// A snapshot id not used yet in `dir`: the time, with `-2`, `-3`... when two runs share a second.
+pub fn new_snapshot_id(dir: &Path, now: u64) -> String {
+    let mut id = now.to_string();
+    let mut n = 1;
+    while dir.join(format!("{id}.json")).exists() {
+        n += 1;
+        id = format!("{now}-{n}");
+    }
+    id
+}
+
+/// Saved snapshots of a server as `(id, snapshot)`, newest first.
+pub fn list_snapshots(server_dir: &Path) -> Vec<(String, Snapshot)> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(snapshot_dir(server_dir)) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let (Some(id), Ok(s)) = (p.file_stem().and_then(|x| x.to_str()), Snapshot::load(&p)) else {
+            continue;
+        };
+        out.push((id.to_string(), s));
+    }
+    // Same second: `1700-10` is newer than `1700-9`, so compare the counter as a number.
+    let order = |id: &str| {
+        id.rsplit_once('-')
+            .and_then(|(_, n)| n.parse::<u64>().ok())
+            .unwrap_or(1)
+    };
+    out.sort_by(|(ia, a), (ib, b)| {
+        b.created_unix
+            .cmp(&a.created_unix)
+            .then_with(|| order(ib).cmp(&order(ia)))
+            .then_with(|| ib.cmp(ia))
+    });
+    out
+}
+
+/// Keep the newest `keep` snapshots; best effort.
+pub fn prune_snapshots(server_dir: &Path, keep: usize) {
+    for (id, _) in list_snapshots(server_dir).into_iter().skip(keep) {
+        let _ = std::fs::remove_file(snapshot_dir(server_dir).join(format!("{id}.json")));
+    }
+}
+
+// ------------------------------------------------------------------ holds
+
+/// `<server>/.kora/held.json`: per resource, the target commit a rollback undid (automatic, or by hand).
+/// Automatic updates do not try that commit again (it would fail every night); a newer target lifts the hold.
+pub fn holds_path(server_dir: &Path) -> PathBuf {
+    server_dir.join(".kora").join("held.json")
+}
+
+pub fn load_holds(server_dir: &Path) -> std::collections::BTreeMap<String, String> {
+    std::fs::read(holds_path(server_dir))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn save_holds(server_dir: &Path, h: &std::collections::BTreeMap<String, String>) {
+    let p = holds_path(server_dir);
+    if h.is_empty() {
+        let _ = std::fs::remove_file(&p);
+        return;
+    }
+    let Some(dir) = p.parent() else { return };
+    let _ = std::fs::create_dir_all(dir);
+    let tmp = dir.join(format!("held.json.{}.tmp", std::process::id()));
+    if serde_json::to_vec_pretty(h)
+        .ok()
+        .and_then(|b| std::fs::write(&tmp, b).ok())
+        .is_some()
+        && std::fs::rename(&tmp, &p).is_err()
+    {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// Text for a held resource.
+pub fn held_text(commit: &str) -> String {
+    format!("the update to {} was rolled back before; automatic updates wait for a newer version (update it by hand to try again)", short(commit))
+}
+
+/// Automatic updates: take out of the plan every pending item whose target is held, and lift holds
+/// whose resource now has a different (newer) target. Returns the held `(id, commit)` pairs.
+pub fn apply_holds(server_dir: &Path, plan: &mut UpdatePlan) -> Vec<(String, String)> {
+    let mut holds = load_holds(server_dir);
+    let before = holds.clone();
+    let mut held = Vec::new();
+    for item in &mut plan.items {
+        let Some(c) = holds.get(&item.target.id).cloned() else {
+            continue;
+        };
+        if item.upstream.is_empty() {
+            continue; // could not check: keep the hold as it is
+        }
+        if item.upstream == c {
+            if matches!(item.action, Action::FastForward | Action::NeedsRestart) {
+                item.action = Action::UpToDate;
+                held.push((item.target.id.clone(), c));
+            }
+        } else {
+            holds.remove(&item.target.id);
+        }
+    }
+    if holds != before {
+        save_holds(server_dir, &holds);
+    }
+    held
+}
+
+/// After a run: hold the targets that were rolled back automatically, release the ones that updated.
+pub fn record_holds(server_dir: &Path, plan: &UpdatePlan, report: &UpdateReport) {
+    let mut holds = load_holds(server_dir);
+    let before = holds.clone();
+    for (id, _) in &report.rolled_back {
+        if let Some(i) = plan.items.iter().find(|i| &i.target.id == id) {
+            holds.insert(id.clone(), i.upstream.clone());
+        }
+    }
+    for u in &report.updated {
+        holds.remove(&u.id);
+    }
+    if holds != before {
+        save_holds(server_dir, &holds);
     }
 }
 
@@ -412,6 +576,15 @@ pub struct UpdateReport {
     /// Forks that were not touched (own commits / diverged / unknown) with the reason.
     #[serde(default)]
     pub forks_left_alone: Vec<(String, String)>,
+    /// Resources the run never got to because an earlier one failed (nothing was changed in them).
+    #[serde(default)]
+    pub not_attempted: Vec<String>,
+    /// Automatic updates only: resources whose new version was rolled back before, with the reason.
+    #[serde(default)]
+    pub held: Vec<(String, String)>,
+    /// Warnings about the run as a whole (e.g. the built-in release list was used).
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 fn short(c: &str) -> &str {
@@ -420,7 +593,9 @@ fn short(c: &str) -> &str {
 
 impl UpdateReport {
     pub fn has_problems(&self) -> bool {
-        !self.needs_attention.is_empty() || !self.rolled_back.is_empty()
+        !self.needs_attention.is_empty()
+            || !self.rolled_back.is_empty()
+            || !self.not_attempted.is_empty()
     }
 
     pub fn summary(&self) -> String {
@@ -448,6 +623,15 @@ impl UpdateReport {
         for (id, m) in &self.needs_attention {
             s += &format!("  ATTENTION {id}: {m}\n");
         }
+        for id in &self.not_attempted {
+            s += &format!("  not attempted {id}: the update stopped before it got here; nothing was changed\n");
+        }
+        for (id, m) in &self.held {
+            s += &format!("  held {id}: {m}\n");
+        }
+        for n in &self.notes {
+            s += &format!("  note: {n}\n");
+        }
         if !self.forks_synced.is_empty() {
             s += &format!("  forks brought up to date on GitHub: {}\n", self.forks_synced.join(", "));
         }
@@ -461,7 +645,10 @@ impl UpdateReport {
     pub fn discord_payload(&self) -> serde_json::Value {
         let color = if !self.rolled_back.is_empty() {
             0xe74c3c
-        } else if !self.needs_attention.is_empty() {
+        } else if !self.needs_attention.is_empty()
+            || !self.not_attempted.is_empty()
+            || !self.held.is_empty()
+        {
             0xf39c12
         } else {
             0x2ecc71
@@ -481,6 +668,19 @@ impl UpdateReport {
             {"name": "Rolled back", "value": list(self.rolled_back.iter().map(|(i, r)| format!("{i}: {r}")).collect())},
             {"name": "Needs attention", "value": list(self.needs_attention.iter().map(|(i, m)| format!("{i}: {m}")).collect())},
         ]);
+        let mut fields = fields;
+        if !self.not_attempted.is_empty() {
+            fields.as_array_mut().expect("array").push(serde_json::json!({"name": "Not attempted", "value": list(self.not_attempted.clone())}));
+        }
+        if !self.held.is_empty() {
+            fields.as_array_mut().expect("array").push(serde_json::json!({"name": "Held back", "value": list(self.held.iter().map(|(i, m)| format!("{i}: {m}")).collect())}));
+        }
+        if !self.notes.is_empty() {
+            fields
+                .as_array_mut()
+                .expect("array")
+                .push(serde_json::json!({"name": "Notes", "value": list(self.notes.clone())}));
+        }
         serde_json::json!({
             "username": "Kora Updater",
             "embeds": [{
@@ -576,6 +776,7 @@ pub fn run_update_with(
 
     let mut applied: Vec<usize> = Vec::new();
     let mut failure: Option<(String, String)> = None;
+    let mut stopped_at: Option<usize> = None;
     for (n, item) in apply.iter().enumerate() {
         events(RunEvent::Applying(item.target.id.clone()));
         match git.fast_forward(&item.target.path, &item.target.upstream_ref) {
@@ -593,14 +794,23 @@ pub fn run_update_with(
                 let msg = format!("fast-forward failed: {e}");
                 events(RunEvent::ApplyFailed(item.target.id.clone(), msg.clone()));
                 failure = Some((item.target.id.clone(), msg));
+                stopped_at = Some(n);
                 break;
             }
         }
+    }
+    // Everything after the failed one was never tried: say so, item by item.
+    if let Some(n) = stopped_at {
+        report
+            .not_attempted
+            .extend(apply[n + 1..].iter().map(|i| i.target.id.clone()));
     }
 
     let full_restart = applied.iter().any(|&n| apply[n].action == Action::NeedsRestart);
     let mut to_roll: Vec<usize> = Vec::new();
     let mut reason = String::new();
+    // Set only when the health check ran (and so may have restarted the server).
+    let mut checked: Option<HealthRequest> = None;
     if let Some((id, msg)) = &failure {
         reason = msg.clone();
         report.needs_attention.push((id.clone(), msg.clone()));
@@ -615,6 +825,7 @@ pub fn run_update_with(
             reason = if failed.is_empty() { r } else { format!("{r} (failed: {})", failed.join(", ")) };
             to_roll = applied.clone();
         }
+        checked = Some(req);
     }
 
     let mut kept: Vec<usize> = applied.clone();
@@ -638,8 +849,13 @@ pub fn run_update_with(
             Err(e) => report.needs_attention.push((id, format!("rollback failed: {e}"))),
         }
     }
-    if !rolled_ids.is_empty() {
-        health.recover(&HealthRequest { full_restart, updated: rolled_ids });
+    // Restart again only if the health check ran: a run that stopped before it never restarted the
+    // server, which still runs the old code. The same restart rules as the check apply.
+    if let (false, Some(req)) = (rolled_ids.is_empty(), checked) {
+        health.recover(&HealthRequest {
+            full_restart: req.full_restart,
+            updated: rolled_ids,
+        });
     }
 
     for &n in &kept {
@@ -676,6 +892,8 @@ mod tests {
         behind: u32,
         /// Fast-forward fails (the checkout turned out to have its own commits).
         ff_fails: bool,
+        /// Fast-forward fails for another reason (disk full, lock file...).
+        ff_breaks: bool,
     }
 
     struct FakeGit(RefCell<HashMap<PathBuf, Repo>>);
@@ -698,6 +916,11 @@ mod tests {
         fn fast_forward(&self, p: &Path, _: &str) -> GitResult<()> {
             let mut m = self.0.borrow_mut();
             let r = m.get_mut(p).unwrap();
+            if r.ff_breaks {
+                return Err(UpdateError::Git(
+                    "fatal: Unable to create index.lock".into(),
+                ));
+            }
             if r.ff_fails {
                 r.ahead = true;
                 return Err(UpdateError::Git("fatal: Not possible to fast-forward, aborting.".into()));
@@ -747,7 +970,15 @@ mod tests {
     }
 
     fn repo(head: &str, up: &str, behind: u32) -> Repo {
-        Repo { head: head.into(), upstream: up.into(), dirty: false, ahead: false, behind, ff_fails: false }
+        Repo {
+            head: head.into(),
+            upstream: up.into(),
+            dirty: false,
+            ahead: false,
+            behind,
+            ff_fails: false,
+            ff_breaks: false,
+        }
     }
     fn target(id: &str, path: &str) -> UpdateTarget {
         UpdateTarget {
@@ -922,5 +1153,161 @@ mod tests {
         assert!((2..=4).contains(&p), "peak {p}");
         assert_eq!(par_map(Vec::<u8>::new(), 6, |x| x), Vec::<u8>::new());
         assert_eq!(par_map(vec![1, 2, 3], 0, |x| x + 1), vec![2, 3, 4], "a zero limit still runs everything");
+    }
+
+    #[test]
+    fn a_mid_run_failure_lists_the_rest_as_not_attempted_and_restarts_nothing() {
+        let mut bad = repo("b1", "b2", 1);
+        bad.ff_breaks = true;
+        let git = FakeGit::new(vec![
+            ("/a", repo("a1", "a2", 1)),
+            ("/b", bad),
+            ("/c", repo("c1", "c2", 1)),
+            ("/d", repo("d1", "d2", 1)),
+        ]);
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("s.json");
+        let p = plan(
+            &git,
+            &[
+                target("kora-a", "/a"),
+                target("kora-b", "/b"),
+                target("kora-c", "/c"),
+                target("kora-core", "/d"),
+            ],
+        );
+        let h = FakeHealth::new(HealthOutcome::Healthy);
+        let r = run_update(
+            &git,
+            &h,
+            &NoMigrations,
+            &p,
+            &opts(tmp.path(), RestartDecision::Proceed, &snap),
+        )
+        .unwrap();
+        assert_eq!(
+            r.not_attempted,
+            vec!["kora-c".to_string(), "kora-core".to_string()]
+        );
+        assert_eq!(r.rolled_back.len(), 1, "the one that moved goes back");
+        assert_eq!(
+            (git.head("/a"), git.head("/c"), git.head("/d")),
+            ("a1".into(), "c1".into(), "d1".into())
+        );
+        assert!(
+            h.recovered.borrow().is_empty(),
+            "the server was never restarted, so it is not restarted now"
+        );
+        assert!(r.has_problems());
+        assert!(
+            r.summary().contains("not attempted kora-c"),
+            "{}",
+            r.summary()
+        );
+    }
+
+    #[test]
+    fn recovery_after_a_failed_check_uses_the_same_restart_choice_as_the_check() {
+        let git = FakeGit::new(vec![("/o", repo("o1", "o2", 1))]);
+        let tmp = tempfile::tempdir().unwrap();
+        let snap = tmp.path().join("s.json");
+        let p = plan(&git, &[target("kora-x", "/o")]);
+        let h = FakeHealth::new(HealthOutcome::Unhealthy {
+            reason: "x".into(),
+            failed: vec![],
+        });
+        let r = run_update(
+            &git,
+            &h,
+            &NoMigrations,
+            &p,
+            &opts(tmp.path(), RestartDecision::Proceed, &snap),
+        )
+        .unwrap();
+        assert_eq!(r.rolled_back.len(), 1);
+        let rec = h.recovered.borrow();
+        assert_eq!(rec.len(), 1);
+        assert!(
+            !rec[0].full_restart,
+            "only a live resource changed: no full restart to recover with"
+        );
+    }
+
+    #[test]
+    fn snapshots_are_saved_atomically_listed_newest_first_and_pruned() {
+        let t = tempfile::tempdir().unwrap();
+        let d = snapshot_dir(t.path());
+        for (i, now) in [5u64, 5, 7, 6].into_iter().enumerate() {
+            let id = new_snapshot_id(&d, now);
+            Snapshot {
+                created_unix: now,
+                entries: vec![SnapshotEntry {
+                    id: format!("r{i}"),
+                    path: "/x".into(),
+                    commit: "c".into(),
+                }],
+            }
+            .save(&d.join(format!("{id}.json")))
+            .unwrap();
+        }
+        let ids: Vec<String> = list_snapshots(t.path())
+            .into_iter()
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(ids, vec!["7", "6", "5-2", "5"]);
+        assert!(std::fs::read_dir(&d)
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")));
+        prune_snapshots(t.path(), 2);
+        let ids: Vec<String> = list_snapshots(t.path())
+            .into_iter()
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(ids, vec!["7", "6"]);
+    }
+
+    #[test]
+    fn a_rolled_back_target_is_held_until_a_newer_one_appears() {
+        let t = tempfile::tempdir().unwrap();
+        let git = FakeGit::new(vec![("/o", repo("o1", "o2", 1))]);
+        let snap = t.path().join("s.json");
+        let p = plan(&git, &[target("kora-x", "/o")]);
+        let h = FakeHealth::new(HealthOutcome::Unhealthy {
+            reason: "x".into(),
+            failed: vec![],
+        });
+        let r = run_update(
+            &git,
+            &h,
+            &NoMigrations,
+            &p,
+            &opts(t.path(), RestartDecision::Proceed, &snap),
+        )
+        .unwrap();
+        record_holds(t.path(), &p, &r);
+        assert_eq!(
+            load_holds(t.path()).get("kora-x").map(String::as_str),
+            Some("o2")
+        );
+        git.0.borrow_mut().get_mut(Path::new("/o")).unwrap().behind = 1;
+        // Next night: same target, held, nothing moves.
+        let mut p = plan(&git, &[target("kora-x", "/o")]);
+        assert_eq!(
+            apply_holds(t.path(), &mut p),
+            vec![("kora-x".to_string(), "o2".to_string())]
+        );
+        assert!(p.pending().next().is_none());
+        // Upstream moves on: the hold is lifted and the new target is tried.
+        git.0
+            .borrow_mut()
+            .get_mut(Path::new("/o"))
+            .unwrap()
+            .upstream = "o3".into();
+        let mut p = plan(&git, &[target("kora-x", "/o")]);
+        assert!(apply_holds(t.path(), &mut p).is_empty());
+        assert_eq!(p.pending().count(), 1);
+        assert!(load_holds(t.path()).is_empty());
+        assert!(!holds_path(t.path()).exists());
     }
 }

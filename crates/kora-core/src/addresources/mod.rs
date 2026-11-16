@@ -128,28 +128,37 @@ pub fn plan_from_picker(
 
 /// The git side of an install, so tests can run without a network.
 pub trait Cloner {
-    /// Make sure forks of `repos` (`owner/name`) exist under `owner` (development servers).
-    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<(), String>;
-    /// Clone `item` into `partial` (a fresh path that does not exist yet).
+    /// Make sure forks of `repos` (`owner/name`) exist under `owner` (development servers),
+    /// reusing the forks already there whatever they are called. The returned state has the real
+    /// fork of every repo ([`git::ForkState::fork_of`]) and how many were created or reused.
+    fn prepare_forks(
+        &self,
+        owner: &str,
+        repos: &[String],
+    ) -> std::result::Result<git::ForkState, String>;
+    /// Clone `item` into `partial` (a fresh path that does not exist yet). `fork` is the
+    /// `owner/name` of the user's fork for items that come from a fork.
     fn clone_item(
         &self,
         item: &PlanItem,
-        fork_owner: Option<&str>,
+        fork: Option<&str>,
         partial: &Path,
     ) -> std::result::Result<(), String>;
 }
 
 pub struct GitCloner<'a>(pub &'a dyn CommandRunner);
 
-impl Cloner for GitCloner<'_> {
-    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<(), String> {
-        if repos.is_empty() {
-            return Ok(());
-        }
+impl GitCloner<'_> {
+    fn forks_with(
+        &self,
+        owner: &str,
+        repos: &[String],
+        cfg: &git::ForkConfig,
+    ) -> std::result::Result<git::ForkState, String> {
         let is_org = git::org_exists(self.0, owner).map_err(|e| e.to_string())?;
         let mut state = git::ForkState::new(owner, is_org, repos);
-        let out = git::run_forks(self.0, &mut state, &git::ForkConfig::default(), &mut |_| {})
-            .map_err(|e| e.to_string())?;
+        let out =
+            git::run_forks(self.0, &mut state, cfg, &mut |_| {}).map_err(|e| e.to_string())?;
         match out {
             git::ForkOutcome::Paused => {
                 Err("GitHub rate limit reached while forking. Try again later.".into())
@@ -158,30 +167,40 @@ impl Cloner for GitCloner<'_> {
                 "could not fork {} ({})",
                 state.failed[0].repo, state.failed[0].error
             )),
-            git::ForkOutcome::Finished => Ok(()),
+            git::ForkOutcome::Finished => Ok(state),
         }
+    }
+}
+
+impl Cloner for GitCloner<'_> {
+    fn prepare_forks(
+        &self,
+        owner: &str,
+        repos: &[String],
+    ) -> std::result::Result<git::ForkState, String> {
+        if repos.is_empty() {
+            return Ok(git::ForkState::new(owner, false, &[]));
+        }
+        let cfg = git::ForkConfig {
+            cache_path: Some(git::forkfind::default_cache_path()),
+            ..git::ForkConfig::default()
+        };
+        self.forks_with(owner, repos, &cfg)
     }
 
     fn clone_item(
         &self,
         item: &PlanItem,
-        fork_owner: Option<&str>,
+        fork: Option<&str>,
         partial: &Path,
     ) -> std::result::Result<(), String> {
-        let res = match (item.fork, fork_owner, &item.commit) {
-            (true, Some(owner), _) => {
-                let name = item.repo.rsplit('/').next().unwrap_or("");
-                git::clone_from_fork(
-                    self.0,
-                    &format!("{owner}/{name}"),
-                    &item.repo,
-                    partial,
-                    Some(&item.branch),
-                )
+        let res = match (item.fork, fork, &item.commit) {
+            (true, Some(fork), _) => {
+                git::clone_from_fork(self.0, fork, &item.repo, partial, Some(&item.branch))
             }
             (true, None, _) => {
                 return Err(
-                    "this development server has no GitHub account recorded for its forks".into(),
+                    "this development server has no GitHub fork recorded for this resource".into(),
                 )
             }
             (false, _, Some(c)) => git::clone_pinned(self.0, &item.repo, c, partial),
@@ -240,12 +259,19 @@ pub fn execute(
         .filter(|i| i.fork)
         .map(|i| i.repo.clone())
         .collect();
+    let mut forks: Option<git::ForkState> = None;
     if !fork_repos.is_empty() {
         let Some(o) = &owner else {
             return Err(InstallError("this development server has no GitHub account recorded, so its resources cannot be forked".into()));
         };
-        say("Forking on GitHub (this can take a while)");
-        cloner.prepare_forks(o, &fork_repos).map_err(InstallError)?;
+        say(&format!(
+            "Looking for your forks in {o} and forking what is missing (this can take a while)"
+        ));
+        let st = cloner.prepare_forks(o, &fork_repos).map_err(InstallError)?;
+        let text = st.counts_text();
+        say(&format!("Forks in {o}: {text}"));
+        out.notes.push(format!("GitHub forks in {o}: {text}."));
+        forks = Some(st);
     }
     let mut done_rels: Vec<String> = Vec::new();
     for item in &plan.items {
@@ -290,7 +316,11 @@ pub fn execute(
             if dest.exists() {
                 let _ = std::fs::remove_dir(&dest); // an empty leftover
             }
-            if let Err(e) = cloner.clone_item(item, owner.as_deref(), &partial) {
+            let fork = item
+                .fork
+                .then(|| forks.as_ref().map(|s| s.fork_of(&item.repo)))
+                .flatten();
+            if let Err(e) = cloner.clone_item(item, fork.as_deref(), &partial) {
                 let _ = std::fs::remove_dir_all(&partial);
                 return Err(e);
             }

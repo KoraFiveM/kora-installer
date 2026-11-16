@@ -107,8 +107,15 @@ pub trait Backend {
     fn scan_roots(&self) -> Vec<PathBuf>;
 
     fn preview(&mut self, e: &ServerEntry, scope: Scope) -> Res<UpdatePreview>;
-    fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport>;
-    fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()>;
+    fn apply(
+        &mut self,
+        e: &ServerEntry,
+        scope: Scope,
+        o: ApplyOpts,
+        on: &mut dyn FnMut(UpdateEvent),
+    ) -> Res<UpdateReport>;
+    /// `force`: roll back even resources with uncommitted changes (they are thrown away).
+    fn rollback(&mut self, e: &ServerEntry, snapshot: &str, force: bool) -> Res<()>;
     /// Saved snapshots, newest first.
     fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo>;
     /// `[ Check for updates ]`: a full preview (the core writes `update-status.json` for it), then the badge.

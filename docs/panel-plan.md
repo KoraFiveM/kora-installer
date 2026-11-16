@@ -65,10 +65,10 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | resources_list | GET /servers/{s}/resources | |
 | resource_ensure | POST /servers/{s}/ensure | `{name, restart}` |
 | update_preview | POST /servers/{s}/update/preview | `{scope}`; job |
-| update_apply | POST /servers/{s}/update/apply | `{scope, restart, skip}`; job with events |
+| update_apply | POST /servers/{s}/update/apply | `{scope, restart, skip, targets?}` (restart defaults to `when_quiet`; `targets` = the preview's `{id: commit}` to apply exactly); job with events; 409 while another update runs for the server |
 | update_auto | POST /servers/{s}/update/auto | job |
 | snapshots_list | GET /servers/{s}/snapshots | |
-| snapshot_rollback | POST /servers/{s}/snapshots/{id}/rollback | job |
+| snapshot_rollback | POST /servers/{s}/snapshots/{id}/rollback | `{force?}` (roll back even resources with uncommitted changes); job; 409 while another update runs |
 | catalog_for_server | GET /servers/{s}/catalog | catalog, installed ids, note |
 | resources_plan | POST /servers/{s}/resources/plan | `{ids}` |
 | resources_add | POST /servers/{s}/resources | `{ids}`; job |

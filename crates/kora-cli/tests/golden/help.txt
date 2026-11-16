@@ -47,7 +47,7 @@ Options:
           Server name (display + registry name)
 
       --dir <DIR>
-          Server folder
+          Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: %USERPROFILE%\kora\<name>)
 
       --mode <MODE>
           prod = pinned release clones, dev = forks on your GitHub account
@@ -130,6 +130,9 @@ Options:
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
 
+      --fix-permissions
+          Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
+
   -y, --yes
           Do not ask anything (implied by any other option)
 
@@ -158,9 +161,7 @@ Commands:
 
 Options:
       --port <PORT>
-          Port to listen on
-          
-          [default: 47120]
+          Port to listen on. Default: 47120, or the next free one (up to 47140) when something else uses it
 
       --bind <BIND>
           Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard
@@ -175,6 +176,9 @@ Options:
 
       --foreground
           Run the panel in this window and stop it when the window closes: do not offer or use the background panel
+
+      --setup
+          Make sure the background panel is set up and running, then open it in your browser and print the sign-in link. Never asks questions (the install scripts run this)
 
       --install-service
           Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed)
@@ -296,6 +300,9 @@ Options:
 
       --list-snapshots
           List saved snapshots
+
+      --force
+          With --rollback: roll back even resources with uncommitted changes of your own (they are thrown away)
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

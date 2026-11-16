@@ -56,6 +56,7 @@ impl Live {
             },
             UpdateEvent::Snapshot(id) => self.snapshot = Some(id.clone()),
             UpdateEvent::Health(h) => self.health = Some(h.clone()),
+            UpdateEvent::Progress(m) => self.health = Some(m.clone()),
             UpdateEvent::Done => self.done = true,
         }
     }
@@ -1341,10 +1342,24 @@ impl App {
                 live.rows = ids.iter().map(|i| (i.clone(), "waiting".to_string())).collect();
                 let hook = &mut self.svc.live;
                 hook(&live);
-                let res = self.svc.backend.apply(&s.entry, Scope::Resources(ids), ApplyOpts { restart: s.restart, skip: vec![] }, &mut |ev| {
-                    live.on_event(&ev);
-                    hook(&live);
-                });
+                // Exactly the versions on screen, even if something newer appeared since the check.
+                let targets = s
+                    .items
+                    .iter()
+                    .filter(|i| ids.contains(&i.change.id))
+                    .map(|i| (i.change.id.clone(), i.change.to.clone()))
+                    .collect();
+                let opts = ApplyOpts {
+                    targets: Some(targets),
+                    ..ApplyOpts::new(s.restart)
+                };
+                let res =
+                    self.svc
+                        .backend
+                        .apply(&s.entry, Scope::Resources(ids), opts, &mut |ev| {
+                            live.on_event(&ev);
+                            hook(&live);
+                        });
                 s.progress = live.rows;
                 s.snapshot = live.snapshot;
                 s.health = live.health;
@@ -1368,12 +1383,14 @@ impl App {
                 s.stage = UpStage::Snapshots;
             }
             Job::Rollback(id) => {
-                let Screen::Update(s) = &mut self.screen else { return };
-                match self.svc.backend.rollback(&s.entry, &id) {
+                let Screen::Update(s) = &mut self.screen else {
+                    return;
+                };
+                match self.svc.backend.rollback(&s.entry, &id, false) {
                     Ok(()) => {
                         s.progress.push(("rollback".into(), format!("put back to snapshot {id}")));
                         s.error = None;
-                        self.say(Level::Good, format!("Rolled back to snapshot {id}. Restart the server if it is running."));
+                        self.say(Level::Good, format!("Rolled back to snapshot {id}. A running server was restarted to load it."));
                     }
                     Err(e) => self.say(Level::Bad, format!("Rollback failed: {e}")),
                 }

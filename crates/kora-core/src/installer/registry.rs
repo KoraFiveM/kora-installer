@@ -18,8 +18,15 @@ pub fn kora_home() -> PathBuf {
             return PathBuf::from(l).join("Kora");
         }
     }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).unwrap_or_default();
-    PathBuf::from(home).join(".kora")
+    // HOME as before (under a plain `sudo` that is root's: the relaunch pins KORA_HOME first, see
+    // `elevate`), then the account's passwd entry; never a relative `.kora`.
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(crate::userhome::real_user_home)
+        .unwrap_or_else(std::env::temp_dir);
+    home.join(".kora")
 }
 
 /// Same folder? Windows paths ignore case, accept `/` for `\\` and a trailing separator

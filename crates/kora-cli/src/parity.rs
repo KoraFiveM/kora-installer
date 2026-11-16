@@ -62,6 +62,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --auto-ports", Route(Op::CheckPorts)),
     ("install --hostname", Route(Op::InstallStart)),
     ("install --game-build", Route(Op::InstallStart)),
+    ("install --fix-permissions", CliOnly("changes folder permissions as administrator; the panel runs as the signed-in user and reports the problem with the command to run")),
     ("install --yes", CliOnly("the panel confirms in the UI")),
     (
         "manager",
@@ -71,6 +72,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("panel --port", CliOnly("starts the panel itself")),
     ("panel --no-open", CliOnly("starts the panel itself")),
     ("panel --foreground", CliOnly("starts the panel itself")),
+    ("panel --setup", CliOnly("sets up and opens the panel itself (run by the install scripts)")),
     ("panel --install-service", CliOnly("sets up how the panel itself is started, so it cannot be done from inside it")),
     ("panel --remove-service", CliOnly("sets up how the panel itself is started, so it cannot be done from inside it")),
     ("panel --print-link", CliOnly("prints the link used to open the panel")),
@@ -93,6 +95,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("update --restart", Route(Op::UpdateApply)),
     ("update --rollback", Route(Op::SnapshotRollback)),
     ("update --list-snapshots", Route(Op::SnapshotsList)),
+    ("update --force", Route(Op::SnapshotRollback)),
     ("add-resources", Route(Op::ResourcesAdd)),
     ("add-resources <server>", Route(Op::ResourcesAdd)),
     (

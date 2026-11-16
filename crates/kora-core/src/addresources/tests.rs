@@ -56,18 +56,25 @@ struct Fake {
 }
 
 impl Cloner for Fake {
-    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<(), String> {
+    fn prepare_forks(
+        &self,
+        owner: &str,
+        repos: &[String],
+    ) -> std::result::Result<git::ForkState, String> {
         self.forked
             .borrow_mut()
             .extend(repos.iter().map(|r| format!("{owner}<-{r}")));
-        Ok(())
+        let mut st = git::ForkState::new(owner, false, &[]);
+        st.done = repos.to_vec();
+        Ok(st)
     }
     fn clone_item(
         &self,
         item: &PlanItem,
-        fork_owner: Option<&str>,
+        fork: Option<&str>,
         partial: &Path,
     ) -> std::result::Result<(), String> {
+        let fork_owner = fork.map(|f| f.split('/').next().unwrap());
         if self.fail == Some(item.id.as_str()) {
             std::fs::create_dir_all(partial).unwrap(); // a half-made clone must be cleaned up
             return Err("network down".into());
@@ -243,6 +250,118 @@ fn development_forks_kora_resources_but_never_third_party() {
             .commit,
         None
     );
+}
+
+/// Fake `gh`/`git`: records every command and answers like GitHub would for a user `me` whose
+/// fork of `KoraFiveM/kora_new` is called `kora_new-1`.
+struct Gh(RefCell<Vec<String>>);
+
+impl CommandRunner for Gh {
+    fn run(&self, p: &str, a: &[&str], _cwd: Option<&Path>) -> std::io::Result<git::Output> {
+        let line = format!("{p} {}", a.join(" "));
+        self.0.borrow_mut().push(line.clone());
+        let ok = |s: &str| git::Output {
+            code: 0,
+            stdout: s.into(),
+            stderr: String::new(),
+        };
+        Ok(if line.starts_with("gh api orgs/") {
+            git::Output {
+                code: 1,
+                stdout: String::new(),
+                stderr: "HTTP 404".into(),
+            }
+        } else if line.starts_with("gh api graphql") {
+            ok(
+                r#"{"data":{"repositoryOwner":{"repositories":{"nodes":[{"nameWithOwner":"me/kora_new-1","defaultBranchRef":{"name":"dev"},"parent":{"nameWithOwner":"KoraFiveM/kora_new"}}],"pageInfo":{"hasNextPage":false}}}}}"#,
+            )
+        } else if line.starts_with("gh repo fork o/ca") {
+            ok("https://github.com/me/ca\n")
+        } else if line.starts_with("gh api repos/") {
+            ok("1\n")
+        } else if line.starts_with("gh repo clone") {
+            std::fs::create_dir_all(Path::new(a[3]).join(".git")).unwrap();
+            ok("")
+        } else if line.contains("get-url") {
+            git::Output {
+                code: 2,
+                stdout: String::new(),
+                stderr: "no such remote".into(),
+            }
+        } else {
+            ok("")
+        })
+    }
+    fn sleep(&self, _d: std::time::Duration) {}
+}
+
+#[test]
+fn development_add_reuses_an_existing_fork_and_clones_it_under_its_real_name() {
+    let d = setup("");
+    let mut sf = server(d.path(), Mode::Development, Some("me"));
+    let p = plan(&catalog(), &sf, &["kora-new".into()]).unwrap();
+    let gh = Gh(RefCell::new(vec![]));
+    let cloner = GitCloner(&gh);
+    let st = cloner
+        .forks_with(
+            "me",
+            &["KoraFiveM/kora_new".into(), "o/ca".into()],
+            &git::ForkConfig {
+                ready_timeout: std::time::Duration::ZERO,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(st.fork_of("KoraFiveM/kora_new"), "me/kora_new-1");
+    assert_eq!(st.counts_text(), "created 1 fork, reused 1 you already had");
+    // execute() with a cloner that hands back this state and clones through the fake gh
+    struct Prepared<'a>(GitCloner<'a>, git::ForkState);
+    impl Cloner for Prepared<'_> {
+        fn prepare_forks(
+            &self,
+            _o: &str,
+            _r: &[String],
+        ) -> std::result::Result<git::ForkState, String> {
+            Ok(self.1.clone())
+        }
+        fn clone_item(
+            &self,
+            item: &PlanItem,
+            fork: Option<&str>,
+            partial: &Path,
+        ) -> std::result::Result<(), String> {
+            self.0.clone_item(item, fork, partial)
+        }
+    }
+    let mut said = vec![];
+    let out = execute(&Prepared(GitCloner(&gh), st), &mut sf, &p, &mut |m| {
+        said.push(m.to_string())
+    })
+    .unwrap();
+    assert!(out.ok(), "{out:?}");
+    let calls = gh.0.borrow();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|c| c.starts_with("gh repo fork"))
+            .count(),
+        1,
+        "{calls:?}"
+    );
+    assert!(!calls
+        .iter()
+        .any(|c| c.starts_with("gh repo fork KoraFiveM/kora_new")));
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("gh repo clone me/kora_new-1 ")),
+        "{calls:?}"
+    );
+    assert!(
+        said.iter().any(|m| m.contains("reused 1 you already had")),
+        "{said:?}"
+    );
+    assert!(!said.iter().any(|m| m.starts_with("Forking")));
 }
 
 #[test]

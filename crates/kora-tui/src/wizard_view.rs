@@ -279,6 +279,30 @@ pub fn view(w: &Wizard) -> View {
                 opt("No, I'll start it myself", "You can add this later."),
             ];
         }
+        Screen::FolderAccess => {
+            v.title = l("The background service can't reach this folder");
+            v.lines = vec![
+                format!(
+                    "The server runs as its own account, which can't get into {} ({}), so it couldn't reach {}.",
+                    w.access_dirs_text(),
+                    if w.access_dirs.len() == 1 { "it is private to its owner" } else { "they are private to their owners" },
+                    w.dir.trim()
+                ),
+                String::new(),
+                l("Choose how to fix it:"),
+            ];
+            v.options = vec![
+                opt(
+                    "Let it pass through these folders",
+                    &format!(
+                        "Kora runs: chmod o+x {}. Other accounts can then pass through, but can't list what is in them.",
+                        w.access_dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(" ")
+                    ),
+                ),
+                opt(&format!("Use {} instead", w.kora_home_dir()), "A folder made for Kora servers. Kora creates a normal 'kora' user account that owns it."),
+            ];
+            v.help = l("'Pass through' lets other accounts open something inside only when they know its exact name and it is readable by everyone. If you keep private files in your home folder, choose the second option.");
+        }
         Screen::Shortcut => {
             v.title = l("Put a Kora shortcut on my desktop");
             v.lines = vec![l("Kora is also added to the Start Menu so you can open it later to manage your servers.")];
