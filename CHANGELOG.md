@@ -5,6 +5,8 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-16
+
 ### Security
 - **Kora Panel no longer starts as root/administrator.** `kora panel` refuses to run elevated (the install script also skips starting it from a root shell and prints the command to run as your normal user), matching what SECURITY.md already promised. `KORA_ALLOW_ROOT_PANEL=1` overrides it for containers where root is the only account.
 - **`git` run as root (the helper, `sudo kora ...`) ignores more of a repository's own settings.** Besides hooks and fsmonitor, `core.sshCommand`, `core.gitProxy`, `core.askPass`, `core.pager`, `core.editor`, `diff.external`, `credential.helper`, `protocol.ext.allow`, `uploadpack.packObjectsHook` and the matching `GIT_*` variables are pinned, so someone who owns a server folder cannot make root run their program through `.git/config`.
