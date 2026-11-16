@@ -69,11 +69,7 @@ pub struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn run(&self, program: &str, args: &[&str], cwd: Option<&Path>) -> std::io::Result<Output> {
-        let mut c = crate::sysexe::command(program);
-        c.args(args);
-        if let Some(d) = cwd {
-            c.current_dir(d);
-        }
+        let mut c = system_command(program, args, cwd);
         // Never block on interactive prompts from git.
         c.env("GIT_TERMINAL_PROMPT", "0");
         for (k, v) in windows_git_env(cfg!(windows), std::env::var("GIT_CONFIG_COUNT").ok().as_deref()) {
@@ -92,6 +88,122 @@ impl CommandRunner for SystemRunner {
     fn fork(&self) -> Option<Box<dyn CommandRunner + Send>> {
         Some(Box::new(SystemRunner))
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Under sudo: GitHub as the person who ran sudo
+// ---------------------------------------------------------------------------------------------
+
+/// What actually runs for one `git` / `gh` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invocation {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
+}
+
+/// `runuser` from root-owned folders only.
+pub fn unix_runuser() -> Option<PathBuf> {
+    ["/usr/sbin/runuser", "/sbin/runuser", "/usr/bin/runuser", "/bin/runuser"].iter().map(PathBuf::from).find(|p| p.is_file())
+}
+
+/// Under `sudo` the GitHub sign-in that counts is the user's own (root usually has none, and a
+/// sign-in made as root would be stored in root's folder). With `user` = the account behind sudo
+/// and `runuser` available:
+/// * `gh ...` runs as that user (`runuser -u <user> -- gh ...`, in their home folder when no folder
+///   is given), so it uses and stores their GitHub sign-in;
+/// * `gh repo clone <repo> <dest>` becomes `git clone` as root (the server folder belongs to root
+///   during the install), with git asking the user's `gh` for the credentials, like
+///   `gh auth setup-git` does;
+/// * `git ...` asks the user's `gh` for GitHub credentials the same way (private forks).
+///
+/// Anything else, or no sudo user / no runuser: unchanged. `git_config_count` = the caller's own
+/// `GIT_CONFIG_COUNT` (then git is left alone). `bus` = the user's session bus socket, if any
+/// (gh may keep the sign-in in the desktop keyring).
+pub fn sudo_invocation(
+    program: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+    user: Option<&crate::userhome::Account>,
+    runuser: Option<&Path>,
+    git_config_count: Option<&str>,
+    bus: Option<&Path>,
+) -> Invocation {
+    let plain = Invocation { program: program.into(), args: args.iter().map(|s| s.to_string()).collect(), cwd: cwd.map(Path::to_path_buf), env: vec![] };
+    let (Some(u), Some(ru)) = (user, runuser) else { return plain };
+    if u.uid == 0 || !crate::userhome::valid_user_name(&u.name) {
+        return plain;
+    }
+    let ru = ru.to_string_lossy().into_owned();
+    let helper = |env: &mut Vec<(String, String)>| {
+        if git_config_count.is_none() {
+            let key = "credential.https://github.com.helper".to_string();
+            env.extend([
+                ("GIT_CONFIG_COUNT".to_string(), "2".to_string()),
+                ("GIT_CONFIG_KEY_0".to_string(), key.clone()),
+                ("GIT_CONFIG_VALUE_0".to_string(), String::new()),
+                ("GIT_CONFIG_KEY_1".to_string(), key),
+                ("GIT_CONFIG_VALUE_1".to_string(), format!("!{ru} -u {} -- gh auth git-credential", u.name)),
+            ]);
+        }
+    };
+    match program {
+        "gh" if args.len() == 4 && args[0] == "repo" && args[1] == "clone" && valid_repo(args[2]) => {
+            let mut env = Vec::new();
+            helper(&mut env);
+            Invocation {
+                program: "git".into(),
+                args: vec!["clone".into(), "--".into(), format!("https://github.com/{}.git", args[2]), args[3].to_string()],
+                cwd: cwd.map(Path::to_path_buf),
+                env,
+            }
+        }
+        "gh" => {
+            let mut a = vec!["-u".to_string(), u.name.clone(), "--".to_string(), "gh".to_string()];
+            a.extend(args.iter().map(|s| s.to_string()));
+            let mut env = Vec::new();
+            if let Some(b) = bus {
+                env.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), format!("unix:path={}", b.display())));
+                if let Some(dir) = b.parent() {
+                    env.push(("XDG_RUNTIME_DIR".to_string(), dir.display().to_string()));
+                }
+            }
+            Invocation { program: ru, args: a, cwd: Some(cwd.map(Path::to_path_buf).unwrap_or_else(|| u.home.clone())), env }
+        }
+        "git" => {
+            let mut inv = plain;
+            helper(&mut inv.env);
+            inv
+        }
+        _ => plain,
+    }
+}
+
+/// The account behind `sudo`, `runuser` and the account's session bus (all `None` when not under sudo).
+fn sudo_context() -> (Option<crate::userhome::Account>, Option<PathBuf>, Option<PathBuf>) {
+    if !cfg!(unix) {
+        return (None, None, None);
+    }
+    let Some(u) = crate::userhome::sudo_account() else { return (None, None, None) };
+    let bus = PathBuf::from(format!("/run/user/{}/bus", u.uid));
+    let bus = (std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() && bus.exists()).then_some(bus);
+    (Some(u), unix_runuser(), bus)
+}
+
+/// `std::process::Command` for one git / gh call, run as the real user where that matters (see [`sudo_invocation`]).
+pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::process::Command {
+    let (user, runuser, bus) = sudo_context();
+    let inv = sudo_invocation(program, args, cwd, user.as_ref(), runuser.as_deref(), std::env::var("GIT_CONFIG_COUNT").ok().as_deref(), bus.as_deref());
+    let mut c = crate::sysexe::command(&inv.program);
+    c.args(&inv.args);
+    if let Some(d) = &inv.cwd {
+        c.current_dir(d);
+    }
+    for (k, v) in inv.env {
+        c.env(k, v);
+    }
+    c
 }
 
 /// Windows: allow paths over 260 characters (node_modules inside resources routinely exceed it, and
@@ -459,8 +571,8 @@ pub fn is_signed_in(r: &dyn CommandRunner) -> bool {
 /// stays in gh's own store; Kora never sees it.
 pub fn auth_login_interactive() -> Result<()> {
     let args = login_args(false);
-    let st = crate::sysexe::command("gh")
-        .args(&args)
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let st = system_command("gh", &args, None)
         .status()
         .map_err(|e| GitError::Spawn("gh auth login".into(), e.to_string()))?;
     if !st.success() {
@@ -1820,5 +1932,47 @@ mod tests {
         assert!(a.contains(&"--web".to_string()) && a.contains(&"repo,read:org".to_string()));
         assert!(!a.iter().any(|x| x.contains("admin:org")));
         assert!(login_args(true).iter().any(|x| x.contains("admin:org")));
+    }
+
+    fn sam() -> crate::userhome::Account {
+        crate::userhome::Account { name: "sam".into(), uid: 1000, gid: 1000, home: "/home/sam".into() }
+    }
+
+    #[test]
+    fn under_sudo_gh_runs_as_the_user_and_git_asks_their_gh() {
+        let u = sam();
+        let ru = Path::new("/usr/sbin/runuser");
+        let bus = Path::new("/run/user/1000/bus");
+        let i = sudo_invocation("gh", &["auth", "status"], None, Some(&u), Some(ru), None, Some(bus));
+        assert_eq!(i.program, "/usr/sbin/runuser");
+        assert_eq!(i.args, ["-u", "sam", "--", "gh", "auth", "status"]);
+        assert_eq!(i.cwd.as_deref(), Some(Path::new("/home/sam")), "never root's private folder");
+        assert!(i.env.contains(&("DBUS_SESSION_BUS_ADDRESS".into(), "unix:path=/run/user/1000/bus".into())));
+        // clone: git as root, credentials from the user's gh
+        let i = sudo_invocation("gh", &["repo", "clone", "sam/kora_core", "/srv/x/resources/kora_core"], None, Some(&u), Some(ru), None, None);
+        assert_eq!(i.program, "git");
+        assert_eq!(i.args, ["clone", "--", "https://github.com/sam/kora_core.git", "/srv/x/resources/kora_core"]);
+        assert!(i.env.contains(&("GIT_CONFIG_VALUE_1".into(), "!/usr/sbin/runuser -u sam -- gh auth git-credential".into())), "{:?}", i.env);
+        assert!(i.env.contains(&("GIT_CONFIG_VALUE_0".into(), String::new())), "other helpers are reset for github.com only");
+        let i = sudo_invocation("git", &["fetch", "origin"], Some(Path::new("/srv/x")), Some(&u), Some(ru), None, None);
+        assert_eq!((i.program.as_str(), i.cwd.as_deref()), ("git", Some(Path::new("/srv/x"))));
+        assert_eq!(i.env.len(), 5);
+        // the caller's own git config list is left alone
+        assert!(sudo_invocation("git", &["fetch"], None, Some(&u), Some(ru), Some("1"), None).env.is_empty());
+    }
+
+    #[test]
+    fn without_sudo_or_runuser_nothing_changes() {
+        let u = sam();
+        let ru = Some(Path::new("/usr/sbin/runuser"));
+        let plain = |i: Invocation, p: &str| assert!(i.program == p && i.env.is_empty() && i.cwd.is_none(), "{i:?}");
+        plain(sudo_invocation("gh", &["auth", "status"], None, None, ru, None, None), "gh");
+        plain(sudo_invocation("gh", &["auth", "status"], None, Some(&u), None, None, None), "gh");
+        let root = crate::userhome::Account { name: "root".into(), uid: 0, gid: 0, home: "/root".into() };
+        plain(sudo_invocation("gh", &["auth", "status"], None, Some(&root), ru, None, None), "gh");
+        plain(sudo_invocation("apt-get", &["install", "gh"], None, Some(&u), ru, None, None), "apt-get");
+        // an unexpected clone shape is not rewritten into git, it just runs as the user
+        let i = sudo_invocation("gh", &["repo", "clone", "-x", "d"], None, Some(&u), ru, None, None);
+        assert_eq!(i.args[..4], ["-u", "sam", "--", "gh"]);
     }
 }
