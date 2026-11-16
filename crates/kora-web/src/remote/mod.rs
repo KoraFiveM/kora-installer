@@ -17,7 +17,7 @@ use serde::Serialize;
 
 pub use config::{RemoteConfig, TokenUser};
 pub use roles::Role;
-pub use tailscale::{NoWhois, SystemWhois, Whois};
+pub use tailscale::{is_tailnet_ip, NoWhois, SystemWhois, TsSelf, Whois};
 
 use crate::security::Limiter;
 
@@ -95,6 +95,8 @@ pub struct Remote {
     /// Failed remote sign-ins. Separate from the local limiter, so strangers cannot lock the owner out.
     pub limiter: Limiter,
     dynamic_hosts: Mutex<Vec<String>>,
+    /// Where tailnet devices open the panel, once it listens on Tailscale (`--tailscale`).
+    tailnet_url: Mutex<Option<String>>,
 }
 
 impl Remote {
@@ -112,6 +114,7 @@ impl Remote {
             whois: Arc::new(NoWhois),
             limiter: Limiter::new(10, Duration::from_secs(60)),
             dynamic_hosts: Mutex::new(Vec::new()),
+            tailnet_url: Mutex::new(None),
         }
     }
 
@@ -192,6 +195,11 @@ impl Remote {
         self.whois.whois(peer)
     }
 
+    /// This machine's Tailscale state (blocking).
+    pub fn tailscale_status(&self) -> Option<TsSelf> {
+        self.whois.status()
+    }
+
     /// Ask tailscaled for this machine's MagicDNS names and allow them as `Host` values.
     pub fn learn_self_names(&self) {
         let names = self.whois.self_names();
@@ -199,6 +207,15 @@ impl Remote {
             .dynamic_hosts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = names;
+    }
+
+    /// The panel now listens on Tailscale; `url` is what to open there.
+    pub fn set_tailnet_url(&self, url: Option<String>) {
+        *self.tailnet_url.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = url;
+    }
+
+    pub fn tailnet_url(&self) -> Option<String> {
+        self.tailnet_url.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     pub fn set_dynamic_hosts(&self, names: Vec<String>) {
@@ -304,13 +321,26 @@ pub const PLAIN_HTTP_WARNING: &str =
     "Warning: remote access is on. Traffic to this panel is plain HTTP (not encrypted). \
 Only use it over a private network such as Tailscale or WireGuard, or through an SSH tunnel.";
 
+/// An address only a private network can reach: a private LAN range (`10/8`, `172.16/12`,
+/// `192.168/16`), Tailscale (`100.64/10`) or an IPv6 unique local address (`fc00::/7`, which includes
+/// Tailscale's `fd7a:115c:a1e0::/48`). Loopback counts too.
+pub fn is_private_address(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || is_tailnet_ip(IpAddr::V4(v4)),
+        IpAddr::V6(v6) => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00,
+    }
+}
+
 /// Decide whether the panel may listen on `bind`, and what to tell the person who started it.
-/// Loopback is always fine and says nothing. Anything else needs remote access switched on, and
-/// "all interfaces" (`0.0.0.0` / `::`) also needs the names people will use, because the `Host` check
-/// cannot guess them.
+/// Loopback is always fine and says nothing. Anything else needs remote access switched on.
+/// A public address, or "all interfaces" (`0.0.0.0` / `::`, which includes the public ones), is
+/// refused unless `allow_public` (`--allow-public`): the panel is plain HTTP, so on the internet the
+/// sign-in tokens could be read on the way. "All interfaces" also needs the names people will use,
+/// because the `Host` check cannot guess them.
 pub fn bind_plan(
     bind: IpAddr,
     remote_enabled: bool,
+    allow_public: bool,
     cfg: &RemoteConfig,
     learned_names: &[String],
 ) -> Result<Vec<String>, String> {
@@ -320,7 +350,15 @@ pub fn bind_plan(
     if !remote_enabled {
         return Err(format!(
             "To listen on {bind} you must turn remote access on: run `kora panel --bind {bind} --remote`, \
-or turn it on in Settings on this computer first. Without it the panel only listens on 127.0.0.1."
+or turn it on in Settings on this computer first. Without it the panel only listens on 127.0.0.1. \
+Using Tailscale? `kora panel --tailscale` sets everything up for you."
+        ));
+    }
+    if !allow_public && (bind.is_unspecified() || !is_private_address(bind)) {
+        return Err(format!(
+            "Kora will not listen on {bind}: other people on the internet could reach it, and the panel is plain HTTP, \
+so sign-in tokens could be read on the way. Use `kora panel --tailscale` (recommended), a private address \
+(Tailscale, WireGuard, your home network) or an SSH tunnel. If you really mean it, add --allow-public."
         ));
     }
     let mut warnings = vec![PLAIN_HTTP_WARNING.to_string()];
@@ -352,10 +390,10 @@ mod tests {
     #[test]
     fn loopback_binds_need_nothing() {
         let c = RemoteConfig::default();
-        assert!(bind_plan("127.0.0.1".parse().unwrap(), false, &c, &[])
+        assert!(bind_plan("127.0.0.1".parse().unwrap(), false, false, &c, &[])
             .unwrap()
             .is_empty());
-        assert!(bind_plan("::1".parse().unwrap(), false, &c, &[])
+        assert!(bind_plan("::1".parse().unwrap(), false, false, &c, &[])
             .unwrap()
             .is_empty());
     }
@@ -363,9 +401,9 @@ mod tests {
     #[test]
     fn a_non_loopback_bind_needs_remote_access() {
         let c = cfg_with_user();
-        let e = bind_plan("100.64.0.5".parse().unwrap(), false, &c, &[]).unwrap_err();
+        let e = bind_plan("100.64.0.5".parse().unwrap(), false, false, &c, &[]).unwrap_err();
         assert!(e.contains("--remote"), "{e}");
-        let w = bind_plan("100.64.0.5".parse().unwrap(), true, &c, &[]).unwrap();
+        let w = bind_plan("100.64.0.5".parse().unwrap(), true, false, &c, &[]).unwrap();
         assert!(w[0].contains("plain HTTP") && w[0].contains("Tailscale"));
         assert_eq!(
             w.len(),
@@ -376,9 +414,7 @@ mod tests {
 
     #[test]
     fn warns_when_nobody_can_sign_in() {
-        let w = bind_plan(
-            "100.64.0.5".parse().unwrap(),
-            true,
+        let w = bind_plan("100.64.0.5".parse().unwrap(), true, false,
             &RemoteConfig::default(),
             &[],
         )
@@ -389,20 +425,33 @@ mod tests {
     #[test]
     fn all_interfaces_needs_names_and_a_loud_warning() {
         let any: IpAddr = "0.0.0.0".parse().unwrap();
-        assert!(bind_plan(any, true, &cfg_with_user(), &[]).is_err());
-        assert!(bind_plan(any, false, &cfg_with_user(), &["box.ts.net".into()]).is_err());
+        assert!(bind_plan(any, true, true, &cfg_with_user(), &[]).is_err());
+        assert!(bind_plan(any, false, true, &cfg_with_user(), &["box.ts.net".into()]).is_err());
         let mut c = cfg_with_user();
         c.allowed_hosts.push("box.example.com".into());
-        let w = bind_plan(any, true, &c, &[]).unwrap();
+        // Every interface includes the public ones: refused without --allow-public, even with names.
+        let e = bind_plan(any, true, false, &c, &[]).unwrap_err();
+        assert!(e.contains("--allow-public") && e.contains("--tailscale"), "{e}");
+        let w = bind_plan(any, true, true, &c, &[]).unwrap();
         assert!(w.iter().any(|m| m.contains("EVERY network interface")));
-        let w = bind_plan(
-            "::".parse().unwrap(),
-            true,
-            &cfg_with_user(),
-            &["box.ts.net".into()],
-        )
-        .unwrap();
+        let w = bind_plan("::".parse().unwrap(), true, true, &cfg_with_user(), &["box.ts.net".into()]).unwrap();
         assert!(w.iter().any(|m| m.contains("EVERY")));
+    }
+
+    #[test]
+    fn public_addresses_need_allow_public() {
+        let c = cfg_with_user();
+        for public in ["203.0.113.7", "8.8.8.8", "2001:db8::1", "169.254.1.1"] {
+            let ip: IpAddr = public.parse().unwrap();
+            assert!(!is_private_address(ip), "{public}");
+            assert!(bind_plan(ip, true, false, &c, &[]).is_err(), "{public}");
+            assert!(bind_plan(ip, true, true, &c, &[]).is_ok(), "{public}");
+        }
+        for private in ["10.1.2.3", "172.16.0.1", "192.168.1.20", "100.100.1.1", "fd7a:115c:a1e0::9", "fd12::1"] {
+            let ip: IpAddr = private.parse().unwrap();
+            assert!(is_private_address(ip), "{private}");
+            assert!(bind_plan(ip, true, false, &c, &[]).is_ok(), "{private}");
+        }
     }
 
     #[test]

@@ -326,13 +326,28 @@ struct PanelArgs {
     /// Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings).
     #[arg(long)]
     remote: bool,
+    /// Open the panel to your own devices over Tailscale: it keeps running in the background, also listens on this computer's Tailscale address, and you sign in with your Tailscale account (no link, no tunnel). Run it once; with --foreground it runs in this window instead.
+    #[arg(long, conflicts_with_all = ["remove_service", "print_link", "setup", "new_token"])]
+    tailscale: bool,
+    /// With --tailscale: the Tailscale account (name@example.com) that becomes the panel's admin. Without it Kora uses the account you are connected from, else the one that added this computer to Tailscale.
+    #[arg(long, value_name = "LOGIN", requires = "tailscale")]
+    admin: Option<String>,
+    /// Also listen on this computer's Tailscale addresses, with the saved settings (the background service uses this; `--tailscale` sets it up).
+    #[arg(long, hide = true, conflicts_with = "tailscale")]
+    listen_tailscale: bool,
+    /// Let --bind be a public address or every interface (0.0.0.0). The panel is plain HTTP, so on the internet sign-in tokens could be read on the way: use --tailscale or an SSH tunnel instead.
+    #[arg(long)]
+    allow_public: bool,
+    /// Make a new sign-in token, so links shown before stop working (restarts the background panel).
+    #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link", "setup", "foreground"])]
+    new_token: bool,
     /// Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop).
     #[arg(long)]
     no_open: bool,
     /// Run the panel in this window and stop it when the window closes: do not offer or use the background panel.
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link", "setup"])]
     foreground: bool,
-    /// Make sure the background panel is set up and running, then open it in your browser and print the sign-in link. Never asks questions (the install scripts run this).
+    /// Make sure the background panel is set up and running, then open it in your browser and print the sign-in link (the install scripts run this). Never reads standard input; on a server with Tailscale it asks once on the terminal whether to use it (KORA_TAILSCALE=1 or 0 answers in advance).
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link"])]
     setup: bool,
     /// Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed).
@@ -354,6 +369,11 @@ enum PanelCmd {
     User {
         #[command(subcommand)]
         cmd: PanelUserCmd,
+    },
+    /// Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`).
+    Tailscale {
+        #[command(subcommand)]
+        cmd: panel_tailscale::TailscaleCmd,
     },
 }
 
@@ -1844,11 +1864,29 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
 }
 
 fn panel(a: &PanelArgs) -> i32 {
-    if let Some(PanelCmd::User { cmd }) = &a.cmd {
-        return panel_user(cmd);
-    }
     use kora_core::monitor::panel_service as svc;
     let home = svc::home();
+    match &a.cmd {
+        Some(PanelCmd::User { cmd }) => return panel_user(cmd),
+        Some(PanelCmd::Tailscale { cmd }) => return panel_tailscale::command(cmd, &home),
+        None => {}
+    }
+    if a.new_token {
+        return panel_tailscale::new_token(&home);
+    }
+    if a.tailscale {
+        // Set up who may sign in, then keep it running in the background (or here with --foreground).
+        let ts = match panel_tailscale::configure(a.admin.as_deref()) {
+            Ok(ts) => ts,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        };
+        if !a.foreground {
+            return panel_tailscale::start_background(a, &home, &ts);
+        }
+    }
     if a.print_link {
         return match svc::link(&home) {
             Ok(link) => {
@@ -1872,7 +1910,7 @@ fn panel(a: &PanelArgs) -> i32 {
     }
     let ports = kora_web::launch::SystemPorts;
     let platform = kora_core::service::Platform::current();
-    if !a.install_service && !a.remove_service && !a.foreground {
+    if !a.install_service && !a.remove_service && !a.foreground && may_reuse_running(a) {
         let running = running_panel(&home, &ports, platform);
         let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
         match panel_start_mode(headless_session(), tty, running.is_some()) {
@@ -1925,7 +1963,19 @@ fn panel(a: &PanelArgs) -> i32 {
     };
     // A saved token (made by --install-service) keeps the sign-in link the same every time.
     let token = svc::load_token(&home).unwrap_or_else(kora_web::security::random_hex);
-    let opts = kora_web::PanelOptions { bind: a.bind, port, open_browser: !a.no_open, remote: a.remote, token: Some(token.clone()), ..Default::default() };
+    if !a.bind.is_loopback() {
+        println!("This panel runs in this window only and stops when you close it.{}", if a.tailscale { "" } else { " With Tailscale, `kora panel --tailscale` keeps one running in the background instead." });
+    }
+    let opts = kora_web::PanelOptions {
+        bind: a.bind,
+        port,
+        open_browser: !a.no_open,
+        remote: a.remote,
+        token: Some(token.clone()),
+        tailscale: a.tailscale || a.listen_tailscale,
+        allow_public: a.allow_public,
+        ..Default::default()
+    };
     let pid = std::process::id();
     let pid_file = svc::pid_path(&home);
     let _ = std::fs::create_dir_all(&home);
@@ -1944,6 +1994,13 @@ fn panel(a: &PanelArgs) -> i32 {
             1
         }
     }
+}
+
+/// May `kora panel` answer with the link of a panel that already runs? Not when it was asked for a
+/// different address (`--bind`, `--remote`, Tailscale): that is a different panel, and answering with the
+/// 127.0.0.1 link silently ignored those options.
+fn may_reuse_running(a: &PanelArgs) -> bool {
+    a.bind.is_loopback() && !a.remote && !a.tailscale && !a.listen_tailscale
 }
 
 /// What `kora panel` does when started without options.
@@ -1965,6 +2022,11 @@ fn panel_start_mode(headless: bool, interactive: bool, already_running: bool) ->
     } else {
         PanelStart::Foreground
     }
+}
+
+/// Running as root (Linux)?
+fn launch_uid_is_root() -> bool {
+    kora_web::launch::current_uid() == Some(0)
 }
 
 /// No desktop to open a browser on: an SSH session, or no display on Linux.
@@ -2034,6 +2096,9 @@ fn print_running(r: &Running) {
     if headless_session() {
         println!("On a server with no screen, open a tunnel from your own computer first:  {}", kora_web::launch::ssh_hint(port, &kora_web::launch::real_env));
     }
+    if matches!(r, Running::Background { .. }) {
+        panel_tailscale::print_tailnet_address(&kora_core::monitor::panel_service::home(), port);
+    }
     match r {
         Running::Background { .. } => println!("(`kora panel --remove-service` stops and removes it; `kora panel --foreground` runs a separate one in this window.)"),
         Running::Window { .. } => println!("(It stops when that window closes. `kora panel --install-service` keeps one running in the background instead.)"),
@@ -2078,7 +2143,7 @@ fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {
             return 1;
         }
     };
-    match start_background_service(home, port) {
+    match start_background_service(home, port, svc_tailscale(home)) {
         Ok(link) => {
             println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
             println!("Sign in with: {link}");
@@ -2096,14 +2161,19 @@ fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {
     }
 }
 
+/// Does the installed background panel also listen on Tailscale? Kept when it is set up again.
+fn svc_tailscale(home: &std::path::Path) -> bool {
+    kora_core::monitor::panel_service::saved_tailscale(home)
+}
+
 /// Write and start the background service on `port`. Returns the sign-in link.
-fn start_background_service(home: &std::path::Path, port: u16) -> Result<String, String> {
+fn start_background_service(home: &std::path::Path, port: u16, tailscale: bool) -> Result<String, String> {
     use kora_core::monitor::panel_service as svc;
     let runner = kora_core::service::SystemRunner;
     let platform = kora_core::service::Platform::current();
     let exe = std::env::current_exe().map_err(|e| format!("cannot find the kora program to run in the background: {e}"))?;
     let home_env = std::env::var_os("KORA_HOME").map(std::path::PathBuf::from);
-    let spec = svc::InstallSpec { exe: &exe, port, kora_home_env: home_env.as_deref() };
+    let spec = svc::InstallSpec { exe: &exe, port, tailscale, kora_home_env: home_env.as_deref() };
     svc::install(home, &spec, &runner, platform).map_err(|e| e.to_string())
 }
 
@@ -2156,7 +2226,7 @@ fn panel_setup(a: &PanelArgs, home: &std::path::Path) -> i32 {
                 }
             };
             println!("Starting Kora Panel in the background (it also starts by itself after a restart) ...");
-            let link = match start_background_service(home, port) {
+            let link = match start_background_service(home, port, svc_tailscale(home)) {
                 Ok(l) => l,
                 Err(e) => {
                     print_setup_fallback(&format!("the background panel could not be set up: {e}"));
@@ -2178,6 +2248,7 @@ fn panel_setup(a: &PanelArgs, home: &std::path::Path) -> i32 {
     for line in launch::ready_message(&link, port, headless, opened.as_ref(), &launch::real_env) {
         println!("{line}");
     }
+    panel_tailscale::after_setup(a, home, headless);
     0
 }
 
@@ -2431,6 +2502,8 @@ fn main() {
     }
     finish(code);
 }
+
+mod panel_tailscale;
 
 #[cfg(test)]
 mod parity;
@@ -2856,6 +2929,17 @@ mod tests {
         assert!(p.setup && p.port.is_none(), "no --port means: pick a free one");
         assert_eq!(panel(&["--setup", "--port", "47200"]).unwrap().port, Some(47200));
         assert!(panel(&["--setup", "--no-open"]).is_ok());
+        // A panel for another address is never answered with the link of the one on 127.0.0.1.
+        assert!(may_reuse_running(&panel(&[]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--bind", "100.64.0.5", "--remote"]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--remote"]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--tailscale"]).unwrap()));
+        assert!(!may_reuse_running(&panel(&["--listen-tailscale"]).unwrap()));
+        assert!(panel(&["--admin", "a@b"]).is_err(), "--admin goes with --tailscale");
+        assert!(panel(&["--tailscale", "--admin", "a@b"]).is_ok());
+        assert!(panel(&["--tailscale", "--foreground"]).is_ok());
+        assert!(panel(&["--tailscale", "--listen-tailscale"]).is_err());
+        assert!(panel(&["--tailscale", "--setup"]).is_err());
         for clash in ["--foreground", "--install-service", "--remove-service", "--print-link"] {
             assert!(panel(&["--setup", clash]).is_err(), "{clash}");
         }
@@ -2897,6 +2981,11 @@ mod tests {
             port,
             bind: "127.0.0.1".parse().unwrap(),
             remote: false,
+            tailscale: false,
+            admin: None,
+            listen_tailscale: false,
+            allow_public: false,
+            new_token: false,
             no_open: true,
             foreground: false,
             setup: true,

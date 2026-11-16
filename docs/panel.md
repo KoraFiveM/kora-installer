@@ -45,11 +45,28 @@ Options:
 | `--port <PORT>` | The port to listen on. Without it Kora uses 47120, or the next free port up to 47140 when something else uses 47120. |
 | `--setup` | Never asks anything: makes sure the background panel is set up and running, opens it in your browser (where there is a screen) and prints the sign-in link. The install scripts run this. |
 | `--no-open` | Do not open a browser; print the address and sign-in link instead. This is automatic over SSH or when the computer has no desktop. |
+| `--tailscale` | Open the panel to your own devices over Tailscale (see below). Run once; it keeps running in the background. |
+| `--new-token` | Make a new sign-in token: links shown before stop working. |
 | `--no-elevate` | Do not ask Windows or `sudo` for administrator permission (for developers and CI). |
 
 Run `kora panel --help` to see the options your version supports.
 
 ### Starting it on a server with no screen (SSH)
+
+**Using Tailscale? This is the easy way.** Install [Tailscale](https://tailscale.com/download) on the server and
+on your own computer or phone (signed in to the same account), then run this once on the server:
+
+```sh
+kora panel --tailscale
+```
+
+Kora prints an address such as `http://myserver.tail1234.ts.net:47120`. Open it on any of your devices that are
+signed in to Tailscale: you are signed in with your Tailscale account straight away, with no link, password or
+tunnel. The panel keeps running in the background and comes back after a restart. When the install script finds
+Tailscale running on a server, it offers to do this for you. See [Remote access](#10-optional-remote-access)
+for who gets in and how to let others in.
+
+**Without Tailscale**, use an SSH tunnel, as below.
 
 On a headless Linux server there is no browser to open, and a panel running in your SSH window would stop when the
 window closes. So when you run `kora panel` there, Kora asks:
@@ -84,7 +101,8 @@ The link that `kora panel` prints contains a one-time secret (the token). When y
 2. The token is removed from the address bar straight away. The page never stores it.
 3. From then on the cookie keeps you signed in.
 
-**Do not share the link** while the panel is running; it is the password. It changes every time you start the panel.
+**Do not share the link** while the panel is running; it is the password. A panel started in a window gets a new
+one every time; the background panel keeps its token until you run `kora panel --new-token`.
 
 ### When the session expires
 
@@ -220,37 +238,75 @@ link stays the same each time). On a computer with a desktop it stays off unless
 
 ## 10. Optional: remote access
 
-By default the panel is local only. You can reach it from another computer, but do it safely.
+By default the panel is local only. You can reach it from your other computers and phones, safely.
 
-**Safest options first:**
+### With Tailscale (recommended)
+
+```sh
+kora panel --tailscale
+```
+
+That one command:
+
+- checks that Tailscale is running and connected here;
+- makes **you** the panel's admin: the Tailscale account you are connected from (when your SSH session goes over
+  Tailscale), otherwise the account that added this computer to Tailscale. Name someone else with
+  `--admin you@example.com` (needed for a server added with an auth key and tags, which belongs to no person);
+- keeps the background panel running and listening on `127.0.0.1` **and** on this computer's Tailscale addresses
+  (never on its public address). It finds the addresses itself each time it starts and waits for Tailscale after a
+  restart;
+- with `ufw` on, lets Tailscale devices reach the panel's port on the Tailscale interface only (when run as root;
+  otherwise it prints the `sudo ufw ...` command);
+- prints the address to open, for example `http://myserver.tail1234.ts.net:47120`.
+
+On any device signed in to Tailscale as an allowed account, open that address: you are signed in with your
+Tailscale identity. The panel asks the Tailscale service on the server who is connecting; it never trusts anything
+the browser sends about itself. Accounts that are not on the list are refused, even inside your tailnet.
+
+Let other people in, each with a role (see below):
+
+```sh
+kora panel tailscale allow sam@example.com --role operator
+kora panel tailscale list
+kora panel tailscale remove sam@example.com     # their sessions end at once
+kora panel tailscale off                          # back to this computer only (the list is kept)
+```
+
+The traffic is plain HTTP inside Tailscale's encrypted connection, so it cannot be read on the way. Use your
+Tailscale ACLs if you want to limit which devices can reach the server at all.
+
+Do not put the panel behind a reverse proxy or `tailscale serve`: every visitor would then look like the computer
+itself. The panel refuses requests that came through a proxy.
+
+### Other options
 
 1. **SSH tunnel** (`ssh -L`, as in [section 1](#starting-it-on-a-server-with-no-screen-ssh)). Nothing is exposed.
-2. **Tailscale or WireGuard.** The panel listens on the private address only and the private network does the
-   encryption. Never bind it to a public address.
+2. **WireGuard or another private network:** start the panel with `kora panel --bind <private address> --remote` and
+   sign in with a user token (below). Kora refuses public addresses and `0.0.0.0` unless you add `--allow-public`,
+   because the page is plain HTTP: without an encrypted network around it, anyone on the way could read and change
+   what you send, including sign-in tokens.
 
-To listen on a specific address, start the panel with `kora panel --bind <ip> --remote`. For example, with Tailscale,
-use the machine's Tailscale address.
+**Users and roles.** Besides Tailscale accounts, remote sign-in can use named users with a token each:
+`kora panel user add <name> --role <role>`, `kora panel user list`, `kora panel user remove <name>`. Each Tailscale
+account or user has a role:
 
-**The page is plain HTTP.** Without Tailscale, WireGuard or an SSH tunnel around it, anyone on the network path can read
-and change what you send, including the sign-in token. Do not use plain HTTP over the internet or on a shared network.
-
-**Users and roles.** Remote sign-in uses named users: `kora panel user add`, `kora panel user list`,
-`kora panel user remove`. Each has a role:
-
-- **viewer:** can look at server status and lists, the fleet and charts; cannot change anything, and cannot read logs or
+- **viewer:** can look at server status and lists and charts; cannot change anything, and cannot read logs or
   the console (they can contain player names and addresses).
 - **operator:** a viewer, plus logs and console output, start/stop/restart, update preview and apply, ensuring resources.
 - **admin:** an operator, plus settings (ports, webhooks, resources, snapshots, GitHub).
 
-Managing remote access and users is only possible from a local session, never remotely. Remote sessions end after 12
-hours idle or 7 days in total, and at once when the user is removed or their role changes.
-
-With Tailscale, the panel can recognise you by your Tailscale identity (it asks the local Tailscale service who is
-connecting; it never trusts identity headers sent by the browser). Requests from the machine itself always need the token.
+Managing remote access and users from the panel is only possible from a local session, never remotely; the
+`kora panel tailscale` and `kora panel user` commands work on the server at any time. Remote sessions end after 12
+hours idle or 7 days in total, and at once when the account is removed or its role changes. The sign-in link from
+`kora panel` only works on the computer itself (or through an SSH tunnel), never remotely.
 
 **Destructive actions are off for remote sessions by default.** Deleting a server, uninstalling and sending console input
 only work from a local session unless an admin switches them on for that machine. Even then you must type the server's
 name to confirm.
+
+**When you sign in to the server as root** (common on rented servers), the panel runs as root too, so a panel admin
+can change anything on that computer. Kora says so when you set up remote access. Only make people you fully trust
+admin; give others the operator or viewer role.
 
 ## 11. Optional: the hub (several machines)
 
@@ -268,7 +324,10 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
 
 ## 12. Security model in short
 
-- **Local only by default.** The panel binds to `127.0.0.1`. Other computers cannot connect.
+- **Local only by default.** The panel binds to `127.0.0.1`. Other computers cannot connect. Remote access listens
+  only on private addresses (Tailscale with `--tailscale`); public addresses need `--allow-public`.
+- **Identity from Tailscale, not the browser.** Tailscale sign-in asks the Tailscale service on the computer who is
+  connecting, and only listed accounts get in, each with a role.
 - **A secret link.** A random token is generated at every start and given to you in the link. It is exchanged for a
   session cookie (`HttpOnly`, `SameSite=Strict`). Wrong tokens are rate limited.
 - **Protection against other websites.** Every request must come with the panel's own address in the `Host` header

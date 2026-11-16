@@ -1075,6 +1075,20 @@ async fn the_remote_flag_turns_it_on_for_one_run_without_saving() {
     );
 }
 
+#[tokio::test]
+async fn settings_say_where_tailnet_devices_open_the_panel() {
+    let w = world_with(Remote::new(None, enabled_cfg()));
+    let c = local_cookie(&w).await;
+    let get = || req("GET", "/api/v1/remote").peer(LOOPBACK_PEER).cookie(&c).send(&w.app);
+    assert_eq!(get().await.json["tailnet_url"], Value::Null, "not listening on Tailscale");
+    w.remote.set_tailnet_url(Some("http://box.tail1.ts.net:47120".into()));
+    // Once it listens there, the MagicDNS name passes the Host check too.
+    w.remote.set_dynamic_hosts(vec!["box.tail1.ts.net".into()]);
+    assert_eq!(get().await.json["tailnet_url"], json!("http://box.tail1.ts.net:47120"));
+    let r = req("GET", "/api/v1/meta").peer(REMOTE_PEER).host("box.tail1.ts.net:47120").send(&w.app).await;
+    assert_eq!(r.status, 200);
+}
+
 // ---------- the config file ----------
 
 #[cfg(unix)]
