@@ -66,11 +66,19 @@ pub fn check_install_dir(dir: &Path, user_uid: u32, kora: &KoraAccount) -> Resul
     }
     if let Some((home, uid)) = kora {
         let home_is_real = std::fs::symlink_metadata(home).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink());
-        if home.as_path() == kora_home && home_is_real && real.starts_with(home) && owner == *uid && *uid != 0 {
+        if home.as_path() == kora_home && home_is_real && inside_home(&real, home) && owner == *uid && *uid != 0 {
             return Ok(());
         }
     }
     Err(refuse(dir, &format!("{} does not belong to you", real.display())))
+}
+
+/// Is the resolved path `real` inside `home`? `home` is resolved too: `/home` is a link to
+/// `/var/home` on Fedora Silverblue and similar systems, so `/home/kora` itself never prefixes a
+/// resolved path there.
+#[cfg(unix)]
+fn inside_home(real: &Path, home: &Path) -> bool {
+    std::fs::canonicalize(home).is_ok_and(|h| real.starts_with(h))
 }
 
 #[cfg(not(unix))]
@@ -134,6 +142,17 @@ mod tests {
         assert!(check_install_dir(&t.path().join("new"), me.wrapping_add(1), &None).is_err());
         // Root itself is never "the user".
         assert!(check_install_dir(Path::new("/etc/x"), 0, &None).is_err());
+    }
+
+    #[test]
+    fn a_home_reached_through_a_link_still_counts() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(t.path().join("var/home/kora/srv")).unwrap();
+        std::os::unix::fs::symlink(t.path().join("var/home"), t.path().join("home")).unwrap();
+        let real = std::fs::canonicalize(t.path().join("home/kora/srv")).unwrap();
+        assert!(inside_home(&real, &t.path().join("home/kora")));
+        assert!(!inside_home(&real, &t.path().join("home/other")));
+        assert!(!inside_home(&std::fs::canonicalize(t.path()).unwrap(), &t.path().join("home/kora")));
     }
 
     #[test]
