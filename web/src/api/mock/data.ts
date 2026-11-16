@@ -1,10 +1,52 @@
 // Seed data for the mock backend. Only bundled when VITE_MOCK=1 (or in `npm run dev`).
-import type { Catalog, CatalogResource, Group, Kind, LogFile, ServerSummary, SnapshotInfo } from '../types'
+import type { Badge, Catalog, CatalogResource, Group, Kind, LogFile, Mode, ServerStatus, ServerSummary, SnapshotInfo } from '../types'
+import type { ScenarioName } from './scenarios'
 
 const now = Math.floor(Date.now() / 1000)
 const DAY = 86400
 
-export function seedServers(): ServerSummary[] {
+const FIXED_NOW = 1_780_000_000 // fleet servers use a fixed clock so screenshots repeat
+
+/** ~30 servers: every mode x status x badge, long names, high ports, one adopted (not managed) server. */
+export function seedFleet(): ServerSummary[] {
+  const modes: Mode[] = ['production', 'development']
+  const statuses: ServerStatus[] = ['running', 'stopped', 'missing']
+  const badges: [string, Badge | null][] = [
+    ['ok', { kind: 'up_to_date' }],
+    ['upd', { kind: 'updates', count: 1 }],
+    ['attn', { kind: 'needs_attention' }],
+    ['new', { kind: 'new_release' }],
+    ['none', null],
+  ]
+  const out: ServerSummary[] = []
+  let i = 0
+  for (const mode of modes)
+    for (const status of statuses)
+      for (const [slug, badge] of badges) {
+        const long = i % 5 === 0
+        const base = `${mode === 'production' ? 'prod' : 'dev'}-${status}-${slug}`
+        const name = long ? `${String(i).padStart(2, '0')}-${base}-the-very-long-community-roleplay-server`.slice(0, 32).replace(/-$/, 'x') : base
+        const high = i % 7 === 3
+        const b = badge?.kind === 'updates' ? { kind: 'updates' as const, count: 1 + ((i * 7) % 23) } : badge
+        out.push({
+          name,
+          dir: `/srv/fivem/${name}`,
+          mode,
+          ports: high ? { game: 64000 + i, txadmin: 65000 + i } : { game: 30120 + i, txadmin: 40120 + i },
+          created_unix: FIXED_NOW - (i + 1) * 3 * DAY,
+          status,
+          badge: b,
+          managed: true,
+        })
+        i++
+      }
+  out.push({ name: 'adopted-existing-server', dir: '/home/sam/games/adopted-existing-server', mode: 'production', ports: { game: 30190, txadmin: 40190 }, created_unix: FIXED_NOW - 400 * DAY, status: 'stopped', badge: null, managed: false })
+  return out
+}
+
+export function seedServers(scenario: ScenarioName = 'default'): ServerSummary[] {
+  if (scenario === 'empty') return []
+  if (scenario === 'fleet') return seedFleet()
   return [
     { name: 'kora-live', dir: '/srv/fivem/kora-live', mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: now - 40 * DAY, status: 'running', badge: { kind: 'up_to_date' }, managed: true },
     { name: 'kora-dev', dir: '/srv/fivem/kora-dev', mode: 'development', ports: { game: 30121, txadmin: 40121 }, created_unix: now - 12 * DAY, status: 'stopped', badge: { kind: 'updates', count: 2 }, managed: true },

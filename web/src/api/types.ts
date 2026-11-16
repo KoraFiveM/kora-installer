@@ -20,6 +20,9 @@ export interface SystemInfo {
   version: string
   /** True when the browser is on the same machine as Kora (enables "Open folder"). */
   local?: boolean
+  /** Same as `admin` (the backend sends both). */
+  elevated?: boolean
+  kora_home?: string
 }
 
 export interface Ports {
@@ -327,6 +330,8 @@ export interface ScheduleState {
 
 export interface WebhookState {
   configured: boolean
+  /** Same as `configured` (the backend sends both). */
+  set?: boolean
   redacted: string | null
 }
 
@@ -337,6 +342,8 @@ export interface GithubStatus {
 export interface GithubOwner {
   login: string
   kind: 'user' | 'org'
+  can_fork?: boolean
+  reason?: string | null
 }
 export interface GithubLoginStart {
   job: string
@@ -365,12 +372,16 @@ export interface ScanCandidate {
   name: string
   dir: string
   mode: Mode
+  kind?: string
+  ports?: Ports
 }
 
 export interface SelfUpdateInfo {
   current: string
   latest: string | null
   available: boolean
+  /** Same as `available` (the backend sends both). */
+  update_available?: boolean
   versions: string[]
 }
 export interface AppStatus {
@@ -384,6 +395,7 @@ export interface AppStatus {
 
 export type UninstallItemKind = 'system' | 'folder' | 'database' | 'app'
 export interface UninstallItem {
+  /** `<server>/service|firewall|timer|account|program|registry|folder|database`, or `app`. */
   item: string
   description: string
   kind: UninstallItemKind

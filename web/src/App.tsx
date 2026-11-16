@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ApiError, setUnauthorizedHandler } from '@/api/client'
@@ -11,6 +11,9 @@ import ServerDetailPage from '@/pages/ServerDetailPage'
 import InstallWizard from '@/pages/InstallWizard'
 import SettingsPage from '@/pages/SettingsPage'
 import NotFound from '@/pages/NotFound'
+
+// The styleguide only exists in mock builds: the constant is false in production, so this branch (and the page) is dropped.
+const Styleguide = __KORA_MOCK__ ? lazy(() => import('@/pages/Styleguide')) : null
 
 export function App({ boot }: { boot: BootResult }) {
   const client = useMemo(
@@ -51,6 +54,7 @@ export function App({ boot }: { boot: BootResult }) {
       <AlertsProvider>
         <BrowserRouter>
           <Routes>
+            {Styleguide && <Route path="styleguide" element={<Suspense fallback={null}><Styleguide /></Suspense>} />}
             <Route element={<AppShell />}>
               <Route index element={<ServersPage />} />
               <Route path="servers/:name" element={<ServerDetailPage />} />
