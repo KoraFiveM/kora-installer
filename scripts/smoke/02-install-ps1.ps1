@@ -73,7 +73,7 @@ try {
         Get-Content $o, $e -ErrorAction SilentlyContinue | Out-Host
         if (-not $dp.HasExited) { Stop-Process -Id $dp.Id -Force }
     }
-    Assert-That ($out -match 'Sign in to Kora Panel' -and $out -match 'http://127\.0\.0\.1:\d+/#token=[0-9a-f]+') 'the background panel answers and the sign-in link is printed'
+    Assert-That ($out -match 'Sign in to Kora Panel' -and $out -match 'http://127\.0\.0\.1:\d+/#(code|token)=[0-9a-f]+') 'the background panel answers and the sign-in link is printed'
     Assert-That ($out -match 'ssh -L \d+:127\.0\.0\.1:\d+ \S+@198\.51\.100\.2') 'with no screen the SSH tunnel command is printed'
     Assert-That ($sw.Elapsed.TotalSeconds -lt 60) 'the launch returns instead of keeping the shell busy'
     $link = Invoke-Native "$default\kora.exe" @('panel', '--print-link')
