@@ -26,8 +26,8 @@ export const RESTART_OPTIONS: { value: RestartPolicy; label: string; hint: strin
 export const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'orange'; text: string; why?: string }> = {
   up_to_date: { tone: 'plain', text: 'Up to date' },
   clean: { tone: 'info', text: 'Ready to update' },
-  dirty: { tone: 'orange', text: 'Needs attention', why: 'You have changed files here. Kora leaves this resource alone so your changes are not lost. To update it, put your changes aside first (for example with "git stash" in the resource folder; "git stash pop" brings them back), then check again. Committing them does not help: Kora never mixes your own commits with new ones.' },
-  diverged: { tone: 'orange', text: 'Needs attention', why: 'This resource has commits of your own that the new version does not include (or Kora could not check it). Kora will not merge or drop them for you. Move your commits elsewhere or merge by hand, then check again.' },
+  dirty: { tone: 'orange', text: 'Needs attention', why: 'You changed files in this resource, so Kora left it alone and did not update it. Your changes are untouched. What to do: open the resource folder in a terminal and run "git stash" to set your changes aside, then check again. After the update, "git stash pop" brings them back. Saving them as a commit does not help: Kora never mixes your own commits with new ones.' },
+  diverged: { tone: 'orange', text: 'Needs attention', why: 'This resource has saved changes of your own (commits) that the new version does not include, or Kora could not check it. Kora did not update it. It will not merge your commits or drop them for you. What to do: move your commits somewhere else or merge the new version by hand with git, then check again.' },
 }
 
 /** Commit ids are long: the first 7 characters are enough to tell them apart. */

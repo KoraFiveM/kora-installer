@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown, Play } from 'lucide-react'
 import { api } from '@/api/client'
 import { useRole, whyNot } from '@/hooks/useRole'
+import { useServerControl } from '@/hooks/useServerControl'
 import type { ServerDetail } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,8 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
   const stick = useRef(true)
   const role = useRole()
   const readOk = role.can('operator')
+  const ctl = useServerControl(s.name)
+  const startOff = whyNot(role, 'operator')
 
   useEffect(() => {
     if (!s.console_enabled || !readOk || typeof EventSource === 'undefined') return
@@ -93,7 +96,16 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
 
   return (
     <div className="space-y-3">
-      {s.status !== 'running' && <Alert tone="warning">The server is not running, so there is no live output. Start it from the Overview tab.</Alert>}
+      {s.status !== 'running' && (
+        <Alert tone="warning">
+          <p>The server is not running, so there is no live output.</p>
+          {s.status === 'stopped' && (
+            <Button size="sm" className="mt-2" disabled={ctl.busy || startOff !== null} title={startOff ?? undefined} onClick={() => void ctl.run('start')}>
+              <Play /> {ctl.pending ?? 'Start server'}
+            </Button>
+          )}
+        </Alert>
+      )}
       <div className="relative">
         <div ref={box} onScroll={onScroll} role="log" aria-label="Server console output" tabIndex={0} className="h-96 overflow-y-auto rounded-lg border border-border bg-ink p-3 font-mono text-xs leading-relaxed">
           {lines.length === 0 ? <span className="text-muted-foreground">Waiting for output...</span> : lines.map((l, i) => <div key={i} className="whitespace-pre-wrap break-words">{parseAnsi(l)}</div>)}

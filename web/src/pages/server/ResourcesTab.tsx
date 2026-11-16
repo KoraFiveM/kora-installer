@@ -27,12 +27,12 @@ export function EnsureForm({ server: s, installed }: { server: ServerDetail; ins
   const no = whyNot(useRole(), 'operator')
   return (
     <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (name.trim()) m.mutate() }}>
-      <Field label="Resource name" hint="Adds an ensure line for an installed resource to server.cfg, so it starts with the server.">
+      <Field label="Resource name" hint="Adds the resource to server.cfg, so it starts every time the server starts.">
         <Input list="installed-resources" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
       </Field>
       <datalist id="installed-resources">{installed.map((r) => <option key={r} value={r} />)}</datalist>
       <Checkbox label="Restart the server now" hint="Otherwise the resource loads the next time the server restarts." checked={restart} onChange={(e) => setRestart(e.target.checked)} />
-      <Button type="submit" variant="default" disabled={!name.trim() || m.isPending || no !== null} title={no ?? undefined}>Ensure resource</Button>
+      <Button type="submit" variant="default" disabled={!name.trim() || m.isPending || no !== null} title={no ?? undefined}>Add to server.cfg</Button>
       {no && <p className="text-xs text-muted-foreground">{no}</p>}
       {m.isSuccess && <Alert tone="success">{m.data.message}</Alert>}
       <ErrorNotice error={m.error} />
@@ -248,7 +248,7 @@ export function ResourcesTab({ server: s }: { server: ServerDetail }) {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>Ensure a resource</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Start a resource with the server</CardTitle></CardHeader>
             <CardContent><EnsureForm server={s} installed={installed} /></CardContent>
           </Card>
         </div>

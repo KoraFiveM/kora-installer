@@ -17,7 +17,6 @@ Commands:
   schedule       Show or change when a development server updates itself
   app            The Kora app: the `kora` command / Start Menu shortcut that reopens the manager
   github         GitHub helpers for development mode
-  service-host   Run a server's FXServer (used by the Windows service and supervisors)
   start          Start a server's background service
   stop           Stop a server's background service
   restart        Restart a server's background service
@@ -40,9 +39,6 @@ Install a new Kora server (interactive TUI, or headless with options)
 Usage: kora install [OPTIONS]
 
 Options:
-      --code <CODE>
-          REMOVED in 0.4.0 (setup codes no longer exist): use the flags below or `kora panel`
-
       --name <NAME>
           Server name (display + registry name)
 
@@ -480,9 +476,6 @@ Arguments:
           Server name or folder
 
 Options:
-      --code <CODE>
-          REMOVED in 0.4.0 (setup codes no longer exist): use --resource or `kora panel`
-
       --resource <ID>
           Catalog resource id to add (repeatable). Dependencies are added automatically
 
@@ -953,7 +946,6 @@ The optional privileged helper: lets the panel do the few things that need admin
 Usage: kora helper [OPTIONS] <COMMAND>
 
 Commands:
-  serve      Run the helper (started by its system service; not for people)
   install    Install the helper service for your user account (needs administrator rights; run with sudo)
   uninstall  Remove the helper service (needs administrator rights)
   status     Say whether the helper is installed and running

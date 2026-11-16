@@ -153,6 +153,9 @@ pub async fn console_send(
                 "The live console is not switched on for this server yet. Turn it on first (it needs a restart).",
             ));
         }
+        if console::waiting_for_restart(&e.dir) {
+            return Err(ApiError::conflict(console::NEEDS_RESTART));
+        }
         console::send(&e.dir, &cmd).map_err(ApiError::internal)?;
         Ok(StatusCode::NO_CONTENT.into_response())
     })

@@ -548,6 +548,65 @@ async fn resource_control_queues_a_fixed_command() {
 }
 
 #[tokio::test]
+async fn resource_control_sends_the_folder_name_fxserver_knows() {
+    let d = tempfile::tempdir().unwrap();
+    let f = FakeBackend::sample();
+    managed_server(&f, "mine", Mode::Production, d.path());
+    // The list shows the id `kora-lib`; FXServer only knows the folder `kora_lib`.
+    f.state().resources = vec!["kora-lib".into(), "helper".into()];
+    f.state().resource_folders.insert("kora-lib".into(), "kora_lib".into());
+    f.state().resource_folders.insert("helper".into(), "kora_console".into());
+    f.state().status.insert("mine".into(), Status::Running);
+    let a = app(&f);
+    assert_eq!(call(&a, "PUT", "/servers/mine/console/enabled", Some(json!({"enabled": true}))).await.status(), 204);
+    let ctl = |n: &str, action: &str| {
+        let path = format!("/servers/mine/resources/{n}/control");
+        let body = json!({"action": action});
+        let a = &a;
+        async move { call(a, "POST", &path, Some(body)).await }
+    };
+    let r = ctl("kora-lib", "restart").await;
+    assert_eq!(r.status(), 200);
+    assert_eq!(json_of(r).await["message"], "Asked the server to restart kora_lib. The Console tab shows what happened.");
+    assert_eq!(ctl("kora_lib", "start").await.status(), 404, "resources are picked by the id the list shows");
+    assert_eq!(ctl("helper", "stop").await.status(), 400, "the console helper is protected under any id");
+    assert_eq!(std::fs::read_to_string(d.path().join(".kora/console.in")).unwrap(), "ensure kora_lib\n");
+}
+
+#[tokio::test]
+async fn commands_are_refused_until_the_new_console_helper_is_loaded() {
+    let d = tempfile::tempdir().unwrap();
+    let f = FakeBackend::sample();
+    managed_server(&f, "mine", Mode::Production, d.path());
+    f.state().resources = vec!["kora_core".into()];
+    f.state().status.insert("mine".into(), Status::Running);
+    let a = app(&f);
+    // Enabled while the server runs: the server keeps writing its log and never loads the helper.
+    assert_eq!(call(&a, "PUT", "/servers/mine/console/enabled", Some(json!({"enabled": true}))).await.status(), 204);
+    let token = std::fs::read_to_string(d.path().join(".kora/console.in.pending")).unwrap().trim().to_string();
+    std::thread::sleep(Duration::from_millis(30));
+    let log = d.path().join(".kora/console.log");
+    std::fs::write(&log, "still the old process\n").unwrap();
+    for (path, body) in [
+        ("/servers/mine/console", json!({"command": "status"})),
+        ("/servers/mine/resources/kora_core/control", json!({"action": "restart"})),
+    ] {
+        let r = call(&a, "POST", path, Some(body)).await;
+        assert_eq!(r.status(), 409, "{path}");
+        assert_eq!(
+            json_of(r).await["error"]["message"],
+            "The live console starts working after the server's next restart. Restart the server, then try again."
+        );
+    }
+    assert!(!d.path().join(".kora/console.in").exists(), "nothing was queued");
+    // After the restart the helper says it is there.
+    std::fs::write(&log, format!("[script:kora_console] Kora live console ready {token}\n")).unwrap();
+    assert_eq!(call(&a, "POST", "/servers/mine/console", Some(json!({"command": "status"}))).await.status(), 204);
+    assert_eq!(call(&a, "POST", "/servers/mine/resources/kora_core/control", Some(json!({"action": "restart"}))).await.status(), 200);
+    assert_eq!(std::fs::read_to_string(d.path().join(".kora/console.in")).unwrap(), "status\nensure kora_core\n");
+}
+
+#[tokio::test]
 async fn console_stream_replays_then_follows() {
     let d = tempfile::tempdir().unwrap();
     let f = FakeBackend::sample();

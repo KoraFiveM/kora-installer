@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
+import type { InstallDefaults, InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
 import { useServerControl } from '@/hooks/useServerControl'
 import { Alert } from '@/components/ui/alert'
@@ -14,37 +14,83 @@ import { CopyButton, CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { StepProgress } from '@/components/JobProgress'
 import { Skeleton } from '@/components/Skeleton'
-import { formatBytes } from '@/lib/utils'
+import { formatBytes, validatePorts } from '@/lib/utils'
 import { REMOTE_ACTIONS_COMMAND, useInstallBlock } from './install/access'
-import { applySaved, buildRequest, initialForm, STEP_LABEL, stepProblem, stepsFor, type StepId, type WizardForm } from './install/form'
+import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, STEP_LABEL, stepProblem, stepsFor, type StepId, type WizardForm } from './install/form'
+import { usePortsCheck } from './install/ports'
 import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
 import { cn } from '@/lib/utils'
 
-function ReviewStep({ f, req, onDisk }: { f: WizardForm; req: InstallRequest; onDisk: (ok: boolean) => void }) {
+interface ReviewRow {
+  label: string
+  value: string
+  /** The step that "Change" opens. */
+  step: StepId
+  /** The answer only shows in that step with the advanced options on. */
+  advanced?: boolean
+}
+
+function reviewRows(f: WizardForm, req: InstallRequest, appSupported: boolean): ReviewRow[] {
+  const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
+  const rows: ReviewRow[] = [
+    { label: 'Licence key', value: f.license.trim() ? 'Provided (hidden)' : 'Not given yet', step: 'licence' },
+    { label: 'Kind of server', value: f.mode === 'production' ? 'Production (a server for players)' : 'Development (for building and changing resources)', step: 'mode' },
+    { label: 'Name', value: req.name || 'Not given yet', step: 'name' },
+    { label: 'Folder', value: req.dir || 'Not given yet', step: 'name' },
+    { label: 'Server name for players', value: req.hostname || '(default)', step: 'name', advanced: true },
+    { label: 'Ports', value: `Game ${f.game.trim() || '?'}, txAdmin ${f.tx.trim() || '?'}`, step: 'ports' },
+    { label: 'FiveM server build', value: f.gameBuild.trim() ? `${build}, game build ${f.gameBuild.trim()}` : build, step: 'build' },
+    { label: 'Resources', value: f.resourcesAll ? 'Everything' : `${f.resourceIds.length} picked, plus what they need`, step: 'resources' },
+    { label: 'Database', value: f.db === 'use_existing' ? 'Use the existing database' : f.db === 'install_if_missing' ? 'Set up for me' : 'Skip', step: 'database' },
+    { label: 'Database login', value: f.db === 'skip' ? 'Not needed' : f.dbCustom ? `Typed (user ${f.dbUser}, password hidden)` : 'Automatic', step: 'database' },
+    { label: 'Firewall', value: req.firewall ? (req.txadmin_public ? 'Open the game and txAdmin ports' : 'Open the game port') : 'Leave closed', step: 'options' },
+    { label: 'Background service', value: req.service ? 'Yes' : 'No', step: 'options' },
+  ]
+  if (appSupported) rows.push({ label: 'Kora app', value: req.app ? (req.app.desktop_shortcut ? 'Install, with a desktop shortcut' : 'Install') : 'Do not install', step: 'options' })
+  rows.push({
+    label: 'Sign in to txAdmin with your Cfx.re account',
+    value: f.cfxFound ? (f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier) : 'Not set. Kora makes a local admin with a generated password.',
+    step: 'cfx',
+  })
+  if (f.mode === 'development') rows.push({ label: 'GitHub forks go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
+  return rows
+}
+
+function ReviewStep({ rows, req, problems, waiting, onChange, onDisk }: {
+  rows: ReviewRow[]
+  req: InstallRequest
+  /** What still has to be fixed, by step. Shown beside the first line of that step. */
+  problems: Partial<Record<StepId, string>>
+  /** Steps whose "problem" is only a check that has not answered yet. */
+  waiting: StepId[]
+  onChange: (row: ReviewRow) => void
+  onDisk: (ok: boolean) => void
+}) {
   const safeKey = JSON.stringify([req.dir, req.mode, req.firewall, req.service, req.db, req.txadmin_public])
   const disk = useQuery({ queryKey: ['disk', req.dir], queryFn: () => api.installs.checkDisk(req.dir) })
   useEffect(() => onDisk(disk.data ? disk.data.ok : true), [disk.data, onDisk])
   const plan = useQuery({ queryKey: ['plan', safeKey], queryFn: () => api.installs.plan({ ...req, dry_run: true }) })
-  const rows: [string, string][] = [
-    ['Mode', f.mode === 'production' ? 'Production' : 'Development'],
-    ['Name', req.name],
-    ['Folder', req.dir],
-    ['Server name for players', req.hostname || '(default)'],
-    ['Ports', `Game ${req.ports.game}, txAdmin ${req.ports.txadmin}`],
-    ['FiveM server build', f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? `Build ${f.artifactBuild}` : 'Custom download'],
-    ['Resources', f.resourcesAll ? 'Everything' : `${f.resourceIds.length} picked, plus what they need`],
-    ['Database', f.db === 'use_existing' ? 'Use the existing database' : f.db === 'install_if_missing' ? 'Set up for me' : 'Skip'],
-    ['Database login', f.db === 'skip' ? 'Not needed' : f.dbCustom ? `Typed (user ${f.dbUser}, password hidden)` : 'Automatic'],
-    ['Firewall', req.firewall ? (req.txadmin_public ? 'Open the game and txAdmin ports' : 'Open the game port') : 'Leave closed'],
-    ['Background service', req.service ? 'Yes' : 'No'],
-    ['Licence key', 'Provided (hidden)'],
-    ['txAdmin admin', f.cfxFound ? (f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier) : 'A generated local account'],
-    ...(f.mode === 'development' ? ([['GitHub forks go to', f.githubOwner]] as [string, string][]) : []),
-  ]
+  const said = new Set<StepId>()
   return (
     <div className="space-y-4">
-      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
-        {rows.map(([k, v]) => (<div key={k} className="contents"><dt className="text-muted-foreground">{k}</dt><dd className="break-all">{v}</dd></div>))}
+      <p className="text-sm text-muted-foreground">This is what Kora will do. The suggested answers work for most people. Use Change on any line to pick something else.</p>
+      <dl className="divide-y divide-border text-sm">
+        {rows.map((r) => {
+          const problem = said.has(r.step) ? undefined : problems[r.step]
+          said.add(r.step)
+          return (
+            <div key={r.label} className="grid grid-cols-[1fr_auto] items-start gap-x-4 gap-y-1 py-2 sm:grid-cols-[11rem_1fr_auto]">
+              <dt className="col-span-2 text-muted-foreground sm:col-span-1">{r.label}</dt>
+              <dd className="min-w-0 space-y-1">
+                <div className="break-words">{r.value}</div>
+                {problem && (waiting.includes(r.step)
+                  ? <p role="status" className="text-muted-foreground">{problem}</p>
+                  : <p role="alert" className="font-medium text-destructive">{problem}</p>)}
+              </dd>
+              <dd><Button variant="link" size="sm" className="h-auto p-0 text-sm" aria-label={`Change ${r.label}`} onClick={() => onChange(r)}>Change</Button></dd>
+            </div>
+          )
+        })}
       </dl>
       {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!disk.data.message.includes('GB') && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
       <ErrorNotice error={disk.error ?? plan.error} />
@@ -125,39 +171,54 @@ function Wizard() {
   const qc = useQueryClient()
   const defaults = useQuery({ queryKey: ['install-defaults'], queryFn: api.installs.defaults, staleTime: Infinity })
   const appQ = useQuery({ queryKey: ['app'], queryFn: api.app.status })
-  const gh = useQuery({ queryKey: ['github'], queryFn: api.github.status })
+  const gh = useQuery({ queryKey: ['github-status'], queryFn: api.github.status })
   const [f, setF] = useState<WizardForm | null>(null)
+  if (defaults.data && !f) setF(initialForm(defaults.data))
+  if (defaults.isError) return <ErrorNotice error={defaults.error} />
+  if (!f || !defaults.data) return <Skeleton className="h-64" />
+  const set = (p: Partial<WizardForm>) => setF((x) => (x ? { ...x, ...p } : x))
+  return <WizardSteps f={f} setF={setF} set={set} defaults={defaults.data} appSupported={!!appQ.data?.supported} githubSignedIn={!!gh.data?.signed_in} onGithubSignedIn={() => void gh.refetch()} onServersChanged={() => {
+    void qc.invalidateQueries({ queryKey: ['servers'] })
+    void qc.invalidateQueries({ queryKey: ['install-defaults'] })
+  }} />
+}
+
+function WizardSteps({ f, setF, set, defaults, appSupported, githubSignedIn, onGithubSignedIn, onServersChanged }: {
+  f: WizardForm
+  setF: (f: WizardForm) => void
+  set: (p: Partial<WizardForm>) => void
+  defaults: InstallDefaults
+  appSupported: boolean
+  githubSignedIn: boolean
+  onGithubSignedIn: () => void
+  onServersChanged: () => void
+}) {
+  const qc = useQueryClient()
   const [step, setStep] = useState(0)
+  /** false = the short path (licence key, name, check and install). true = every step, one by one. */
+  const [everyStep, setEveryStep] = useState(false)
+  /** A step opened with "Change" on the last screen. Closing it goes back to that screen. */
+  const [editing, setEditing] = useState<StepId | null>(null)
   const [advanced, setAdvanced] = useState(false)
-  const [portsOk, setPortsOk] = useState(false)
   const [job, setJob] = useState<string | null>(null)
   const [startErr, setStartErr] = useState<unknown>(null)
   const [resumeOffered, setResumeOffered] = useState(true)
   const [starting, setStarting] = useState(false)
   const [diskOk, setDiskOk] = useState(true)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
+  const ports = usePortsCheck(f.game, f.tx)
+  const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
 
-  useEffect(() => {
-    if (defaults.data && !f) setF(initialForm(defaults.data))
-  }, [defaults.data, f])
-
-  const run = useJob<InstallOutcome, ProgressEvent>(job, () => {
-    void qc.invalidateQueries({ queryKey: ['servers'] })
-    void qc.invalidateQueries({ queryKey: ['install-defaults'] })
-  })
-  const setPortsOkStable = useCallback((ok: boolean) => setPortsOk(ok), [])
-
-  if (defaults.isError) return <ErrorNotice error={defaults.error} />
-  if (!f || !defaults.data) return <Skeleton className="h-64" />
-  const set = (p: Partial<WizardForm>) => setF((x) => (x ? { ...x, ...p } : x))
-  const appSupported = !!appQ.data?.supported
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
   const req = buildRequest(f, { appSupported, artifactUrl: artUrl })
-  const steps = stepsFor(f.mode)
-  const id: StepId = steps[Math.min(step, steps.length - 1)]
-  const problem = stepProblem(id, f, { portsOk, githubSignedIn: !!gh.data?.signed_in })
-  const saved = defaults.data.saved
-  const common = { f, set, advanced, defaultsDir: defaults.data.dir }
+  const stepsOf = (mode: WizardForm['mode']) => (everyStep ? stepsFor(mode) : quickStepsFor(mode))
+  const steps = stepsOf(f.mode)
+  const at = Math.min(step, steps.length - 1)
+  const id: StepId = steps[at]
+  const ctx = { ports: ports.state, githubSignedIn }
+  const problems = allProblems(f, ctx)
+  const saved = defaults.saved
+  const common = { f, set, advanced, defaultsDir: defaults.dir }
 
   const start = async () => {
     setStartErr(null)
@@ -196,7 +257,7 @@ function Wizard() {
                 {run.error?.log_path && <p className="text-sm">Details are in <code className="font-mono text-xs">{run.error.log_path}</code></p>}
                 <div className="flex gap-2">
                   <Button variant="default" onClick={() => { setJob(null); void start() }}>Try again</Button>
-                  <Button onClick={() => { setJob(null); setStep(steps.length - 1) }}>Change my answers</Button>
+                  <Button onClick={() => { setJob(null); setEditing(null); setStep(steps.length - 1) }}>Change my answers</Button>
                 </div>
               </div>
             )}
@@ -206,60 +267,104 @@ function Wizard() {
     )
   }
 
-  const last = step === steps.length - 1
+  const last = at === steps.length - 1
+  /** The step on screen: one opened with "Change", or the current one. */
+  const showing: StepId = editing ?? id
+  const problem = stepProblem(showing, f, ctx)
+  // A port check that has not answered yet is a short wait, not something the person must fix.
+  const waiting: StepId[] = ports.state === 'checking' && !validatePorts(f.game, f.tx) ? ['ports'] : []
+  const toFix = (Object.keys(problems) as StepId[]).filter((s) => !waiting.includes(s))
+  const installBlocked = toFix.length > 0
+    ? (toFix.length === 1 ? 'The server cannot be installed yet. Fix the problem marked in red above.' : `The server cannot be installed yet. Fix the ${toFix.length} problems marked in red above.`)
+    : !diskOk ? 'The server cannot be installed yet. There is not enough free disk space in the server folder. Change the folder above, or free some space.' : null
+  const switchFlow = (all: boolean) => { setEveryStep(all); setEditing(null); setStep(0) }
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
         <Checkbox label="Show advanced options" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
       </div>
-      {saved && resumeOffered && step === 0 && (
+      {saved && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
           <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers (not your licence key).</p>
           <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsFor(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
+            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
             <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>
           </div>
         </Alert>
       )}
       <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Steps">
         {steps.map((s, i) => (
-          <li key={s} aria-current={i === step ? 'step' : undefined} className={cn(i === step ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{i + 1}. {STEP_LABEL[s]}</li>
+          <li key={s} aria-current={i === at ? 'step' : undefined} className={cn(i === at ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{i + 1}. {STEP_LABEL[s]}</li>
         ))}
       </ol>
       <Card>
-        <CardHeader><CardTitle className="text-lg">{STEP_LABEL[id]}</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-lg">{STEP_LABEL[showing]}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {id === 'mode' && <ModeStep {...common} />}
-          {id === 'name' && <NameStep {...common} />}
-          {id === 'ports' && <PortsStep {...common} onOk={setPortsOkStable} />}
-          {id === 'build' && <BuildStep {...common} />}
-          {id === 'resources' && <ResourcesStep {...common} />}
-          {id === 'database' && <DatabaseStep {...common} />}
-          {id === 'options' && <OptionsStep {...common} appSupported={appSupported} />}
-          {id === 'licence' && <LicenceStep {...common} />}
-          {id === 'cfx' && <CfxStep {...common} />}
-          {id === 'github' && <GithubStep {...common} signedIn={!!gh.data?.signed_in} onSignedIn={() => void gh.refetch()} />}
-          {id === 'review' && <ReviewStep f={f} req={req} onDisk={setDiskOk} />}
+          {showing === 'mode' && <ModeStep {...common} />}
+          {showing === 'name' && <NameStep {...common} quick={!everyStep && !editing} />}
+          {showing === 'ports' && <PortsStep {...common} ports={ports} />}
+          {showing === 'build' && <BuildStep {...common} />}
+          {showing === 'resources' && <ResourcesStep {...common} />}
+          {showing === 'database' && <DatabaseStep {...common} />}
+          {showing === 'options' && <OptionsStep {...common} appSupported={appSupported} />}
+          {showing === 'licence' && <LicenceStep {...common} />}
+          {showing === 'cfx' && <CfxStep {...common} />}
+          {showing === 'github' && <GithubStep {...common} signedIn={githubSignedIn} onSignedIn={onGithubSignedIn} />}
+          {showing === 'review' && (
+            <ReviewStep
+              rows={reviewRows(f, req, appSupported)}
+              req={req}
+              problems={problems}
+              waiting={waiting}
+              onChange={(r) => { if (r.advanced) setAdvanced(true); setEditing(r.step) }}
+              onDisk={setDiskOk}
+            />
+          )}
           <ErrorNotice error={startErr} />
           {starting && (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your answers (ports, GitHub, permissions) and starting the install. This can take a few seconds.
             </p>
           )}
-          {problem && !last && <p className="text-sm text-muted-foreground">{problem}</p>}
-          <div className="flex justify-between pt-2">
-            <Button disabled={step === 0} onClick={() => setStep((s) => s - 1)}>Back</Button>
-            {last ? (
-              <Button variant="default" disabled={starting || !diskOk} aria-busy={starting} onClick={start}>
-                {starting ? <><Loader2 className="animate-spin" aria-hidden /> Starting...</> : 'Install the server'}
-              </Button>
-            ) : (
-              <Button variant="default" disabled={!!problem} onClick={() => setStep((s) => s + 1)}>Next</Button>
-            )}
-          </div>
+          {editing ? (
+            <>
+              {problem && <p className="text-sm">{problem}</p>}
+              <div className="flex justify-end pt-2">
+                {/* Never disabled: anything still wrong is spelled out on the last screen, beside its line. */}
+                <Button variant="default" onClick={() => { setEditing(null); setStep(steps.length - 1) }}>Back to the summary</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              {problem && !last && <p className="text-sm">{problem}</p>}
+              {last && installBlocked && <p role="alert" className="text-sm font-medium text-destructive">{installBlocked}</p>}
+              {last && !installBlocked && waiting.length > 0 && <p role="status" className="text-sm">Checking that the ports are free. One moment.</p>}
+              <div className="flex justify-between pt-2">
+                <Button disabled={at === 0} onClick={() => setStep(at - 1)}>Back</Button>
+                {last ? (
+                  <Button variant="default" disabled={starting || !!installBlocked || waiting.length > 0} aria-busy={starting} onClick={start}>
+                    {starting ? <><Loader2 className="animate-spin" aria-hidden /> Starting...</> : 'Install the server'}
+                  </Button>
+                ) : (
+                  <Button variant="default" disabled={!!problem} onClick={() => setStep(at + 1)}>Next</Button>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
+      {!editing && (everyStep ? (
+        <p className="text-sm text-muted-foreground">
+          Going through every step. Your answers are kept if you switch.{' '}
+          <Button variant="link" className="h-auto p-0" onClick={() => switchFlow(false)}>Use the short setup</Button>
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Kora picks the ports, the database and the rest for you, and shows them before anything is installed.{' '}
+          <Button variant="link" className="h-auto p-0" onClick={() => switchFlow(true)}>Choose everything myself</Button>
+        </p>
+      ))}
     </div>
   )
 }

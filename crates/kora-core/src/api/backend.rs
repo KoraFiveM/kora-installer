@@ -91,6 +91,12 @@ pub trait Backend {
     fn control(&mut self, e: &ServerEntry, a: ControlAction) -> Res<()>;
     /// Resource names known for this server (for picking in the Ensure screen).
     fn resources(&mut self, e: &ServerEntry) -> Vec<String>;
+    /// The folder of an installed resource: the name FXServer knows it by (`start <folder>`). It can
+    /// differ from the id [`resources`](Self::resources) lists (`kora-lib` lives in `kora_lib`).
+    /// `None` = not installed.
+    fn resource_folder(&mut self, e: &ServerEntry, id: &str) -> Option<String> {
+        self.resources(e).iter().any(|r| r == id).then(|| id.to_string())
+    }
     /// Make the server load `name`; optionally restart it so it takes effect. Returns what happened.
     fn ensure(&mut self, e: &ServerEntry, name: &str, restart: bool) -> Res<String>;
     /// Delete what Kora created (like `kora delete`). Returns notes to show.
