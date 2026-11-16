@@ -19,7 +19,7 @@ Already have Kora? Run `kora self-update`.
 - **On a server with no screen** (SSH): `kora panel --no-open` prints the link and an `ssh -L` command to open it from your own computer.
 - **Administrator actions:** the panel runs as you. When something needs administrator rights it shows the exact command to run.
 - **Scripted installs** gain `--hostname` and `--game-build`.
-- <!-- VERIFY: wave-3 features --> Also in this release: a privileged helper (`kora helper`), a Monitoring tab with alerts and an optional background panel service, remote access with users and roles, and a hub for several machines. See the guide.
+- Also in this release: a privileged helper (`kora helper`), a Monitoring tab with alerts and an optional background panel service, remote access with users and roles, and a hub for several machines. See the guide.
 
 How to try it: `kora panel`, then follow the link. Guide: [docs/panel.md](https://github.com/KoraFiveM/kora-installer/blob/main/docs/panel.md).
 

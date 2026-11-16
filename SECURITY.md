@@ -22,12 +22,12 @@ reasonable time to release a fix before you disclose publicly.
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
   `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - Licence keys, database passwords and webhook addresses are accepted but never returned.
-- The panel runs as the installing user, never as administrator. Privileged actions are a command shown to you, or <!-- VERIFY: privileged helper --> a
-  helper (`kora helper`) that accepts only Kora's fixed list of privileged actions and checks the calling user.
-- <!-- VERIFY: remote access --> Remote access (`--bind <ip> --remote`) is off by default and uses plain HTTP: use Tailscale, WireGuard or an SSH tunnel, never
-  the open internet. Roles are viewer / operator / admin. <!-- VERIFY: remote destructive actions --> Delete, uninstall and console input are disabled for remote sessions unless
-  enabled, and need the server name typed. <!-- VERIFY: Tailscale identity --> Tailscale identity is checked with the local Tailscale service, never from request headers.
-- <!-- VERIFY: hub --> Hub nodes authenticate with bearer tokens; treat them like passwords.
+- The panel runs as the installing user, never as administrator. Privileged actions are a command shown to you, or a
+  helper (`kora helper`, Linux) that accepts only Kora's fixed list of privileged actions and checks the calling user.
+- Remote access (`--bind <ip> --remote`) is off by default and uses plain HTTP: use Tailscale, WireGuard or an SSH tunnel, never
+  the open internet. Roles are viewer / operator / admin. Delete, uninstall and console input are disabled for remote sessions unless
+  enabled, and need the server name typed. Tailscale identity is checked with the local Tailscale service, never from request headers.
+- Hub nodes authenticate with bearer tokens; treat them like passwords.
 
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
 as any other (see above). Include the version, your platform, and whether the panel was local or remote.
@@ -49,4 +49,4 @@ Kora Installer is pre-release software. Only the newest release receives securit
 - Problems in third-party software that Kora installs (FXServer, txAdmin, MariaDB, git); report those upstream.
 - The unsigned Windows executable triggering SmartScreen (known; see the README and CODE_SIGNING.md).
 - Issues that need an attacker who already has administrator/root rights on the machine.
-- <!-- VERIFY: remote access --> Exposing the panel to an untrusted network with `--bind` over plain HTTP against the documented advice.
+- Exposing the panel to an untrusted network with `--bind` over plain HTTP against the documented advice.

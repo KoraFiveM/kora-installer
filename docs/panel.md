@@ -148,10 +148,10 @@ When you ask for one of these, the panel does one of two things:
 - **Shows the exact command to run.** A message appears with a command such as `sudo kora ...` (Linux) or an elevated
   `kora ...` (Windows). Copy it into a terminal; the command asks for administrator permission itself. When it
   finishes, return to the panel and refresh.
-- **Uses the helper, if it is installed.** <!-- VERIFY: privileged helper --> The helper is a small program, installed once with `kora helper install`, that runs those same
-  actions for the panel without a prompt each time. <!-- VERIFY: privileged helper --> It accepts only the fixed list of privileged actions Kora already has and checks which user is asking. <!-- VERIFY: privileged helper --> Check it with `kora helper status`, remove it with `kora helper uninstall`. <!-- VERIFY: privileged helper -->
+- **Uses the helper, if it is installed (Linux only for now).** The helper is a small system service, installed once with
+  `sudo kora helper install`, that runs those same actions for the panel without a prompt each time. It accepts only the fixed list of privileged actions Kora already has and checks which user is asking. Check it with `kora helper status`, remove it with `kora helper uninstall`.
 
-The Settings page says whether the helper is installed. <!-- VERIFY: privileged helper -->
+The Settings page says when the helper is installed. On Windows the panel always shows the command to run.
 
 ## 8. Troubleshooting
 
@@ -185,69 +185,65 @@ The page files are part of the program and are replaced with it.
 
 ## 9. Optional: monitoring and alerts
 
-<!-- VERIFY: monitoring and alerts -->
-These features are added after the base panel; check `kora panel --help` for the options your version has.
-
-<!-- VERIFY: monitoring and alerts -->
 The **Monitoring** tab shows, for each server: whether it is up, players online, CPU and memory of the server's processes,
-disk space, port checks and the update badge. About 24 hours of history is kept in memory and in a small capped file
-under the server's `.kora/` folder.
+disk space, port checks and the update badge, as charts you can view over 1, 6 or 24 hours. About 24 hours of history is
+kept in memory and in a small capped file under the server's `.kora/` folder. CPU and memory per server are shown on
+Linux; on Windows they show a dash for now.
 
-<!-- VERIFY: monitoring and alerts -->
 **Alerts** tell you when something goes wrong: a banner in the panel, a Discord webhook, or a generic webhook (a URL that
-receives a JSON message). Webhook addresses are stored but never shown back.
+receives a JSON message). Webhook addresses are stored but never shown back. Alerts are raised once per problem until it
+clears: a server stopping unexpectedly (a stop from Kora, the CLI or the TUI does not count), coming back up, low disk
+space, high memory, and updates that need attention. The banner checks every 10 seconds. Alerts are kept in memory, so
+they are lost when the panel restarts (the charts keep their history). Email alerts are not available yet.
 
-<!-- VERIFY: opt-in panel service -->
 **Keeping the panel running.** `kora panel` stops when you close its terminal, so monitoring and alerts only work while it
-runs. To keep it running in the background, install it as a service: `kora panel --install-service` (needs administrator
-rights), `kora panel --remove-service` to remove it, and `kora panel --print-link` to print a fresh sign-in link for the
-running service. The service is off unless you ask for it.
+runs. To keep it running in the background, run `kora panel --install-service`. It starts when you sign in and needs no
+administrator rights (Linux: a systemd user service; Windows: an entry in your Startup folder). `kora panel
+--remove-service` removes it, and `kora panel --print-link` prints the sign-in link of the running background panel (the
+link stays the same each time). It is off unless you ask for it.
 
 ## 10. Optional: remote access
 
-<!-- VERIFY: remote access -->
 By default the panel is local only. You can reach it from another computer, but do it safely.
 
-<!-- VERIFY: remote access -->
 **Safest options first:**
 
 1. **SSH tunnel** (`ssh -L`, as in [section 1](#starting-it-on-a-server-with-no-screen-ssh)). Nothing is exposed.
 2. **Tailscale or WireGuard.** The panel listens on the private address only and the private network does the
    encryption. Never bind it to a public address.
 
-<!-- VERIFY: remote access -->
 To listen on a specific address, start the panel with `kora panel --bind <ip> --remote`. For example, with Tailscale,
 use the machine's Tailscale address.
 
-<!-- VERIFY: remote access -->
 **The page is plain HTTP.** Without Tailscale, WireGuard or an SSH tunnel around it, anyone on the network path can read
 and change what you send, including the sign-in token. Do not use plain HTTP over the internet or on a shared network.
 
-<!-- VERIFY: remote access -->
 **Users and roles.** Remote sign-in uses named users: `kora panel user add`, `kora panel user list`,
 `kora panel user remove`. Each has a role:
 
-- **viewer:** can look, cannot change anything.
-- **operator:** can start, stop and restart servers, run updates and manage resources.
-- **admin:** everything an operator can do, plus settings and user management.
+- **viewer:** can look at server status and lists, the fleet and charts; cannot change anything, and cannot read logs or
+  the console (they can contain player names and addresses).
+- **operator:** a viewer, plus logs and console output, start/stop/restart, update preview and apply, ensuring resources.
+- **admin:** an operator, plus settings (ports, webhooks, resources, snapshots, GitHub).
 
-<!-- VERIFY: Tailscale identity -->
+Managing remote access and users is only possible from a local session, never remotely. Remote sessions end after 12
+hours idle or 7 days in total, and at once when the user is removed or their role changes.
+
 With Tailscale, the panel can recognise you by your Tailscale identity (it asks the local Tailscale service who is
 connecting; it never trusts identity headers sent by the browser). Requests from the machine itself always need the token.
 
-<!-- VERIFY: remote destructive actions -->
 **Destructive actions are off for remote sessions by default.** Deleting a server, uninstalling and sending console input
 only work from a local session unless an admin switches them on for that machine. Even then you must type the server's
 name to confirm.
 
 ## 11. Optional: the hub (several machines)
 
-<!-- VERIFY: hub -->
 Any panel can act as a hub: a single page that lists the servers of several machines (nodes). There is no central
 service and nothing leaves your own machines.
 
-<!-- VERIFY: hub -->
-Each node is added with its address and a bearer token (a long secret the node gives you). Nodes tell the hub which
+Open **Fleet** in the sidebar to add a node: its address and a token. The token is one made on that node with
+`kora panel user add <name> --role operator`, which is shown once. Adding nodes is only possible from a local admin
+session. Nodes tell the hub which
 version they run and which operations they support, so a hub on a newer version still works with an older node and
 simply hides what the node cannot do. Treat node tokens like passwords, and reach nodes over Tailscale, WireGuard or an
 SSH tunnel as described in [section 10](#10-optional-remote-access).
