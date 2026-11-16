@@ -54,6 +54,13 @@ pub struct PanelOptions {
     pub remote: bool,
     /// Where the remote access settings live; `None` is `<kora home>/panel.json`.
     pub remote_config: Option<PathBuf>,
+    /// `--tailscale`: besides `bind` (loopback), also listen on this machine's Tailscale addresses.
+    /// They are looked up when the panel starts (and again until Tailscale is up), never stored, so
+    /// a changed address or a slow Tailscale at boot needs nothing from the user. Only while remote
+    /// access is on in the settings: the settings decide who gets in.
+    pub tailscale: bool,
+    /// `--allow-public`: let `bind` be a public address or every interface (plain HTTP on the internet).
+    pub allow_public: bool,
 }
 
 impl Default for PanelOptions {
@@ -65,6 +72,8 @@ impl Default for PanelOptions {
             token: None,
             remote: false,
             remote_config: None,
+            tailscale: false,
+            allow_public: false,
         }
     }
 }
@@ -326,6 +335,60 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Listen on this machine's Tailscale addresses as well (`--tailscale`), on the panel's port.
+///
+/// Tailscale may start after the panel (at boot) or change its addresses, so this asks it again:
+/// every few seconds until it answers, then every minute for new addresses. Every listener serves the
+/// same router: the guard sees the peer, so tailnet visitors are remote callers (Tailscale identity or a
+/// user token, their role, no destructive actions unless allowed), never local ones.
+async fn serve_tailnet(state: AppState, port: u16) {
+    let mut bound: Vec<IpAddr> = Vec::new();
+    let mut reported: Vec<IpAddr> = Vec::new();
+    let mut announced = false;
+    loop {
+        let rem = state.remote.clone();
+        let status = tokio::task::spawn_blocking(move || rem.tailscale_status())
+            .await
+            .ok()
+            .flatten()
+            .filter(|s| s.running);
+        if let Some(s) = status {
+            // The names a browser on the tailnet uses (MagicDNS name, short name, addresses).
+            state.remote.set_dynamic_hosts(s.host_names());
+            for ip in s.ips.iter().copied().filter(|ip| remote::is_tailnet_ip(*ip)) {
+                if bound.contains(&ip) {
+                    continue;
+                }
+                match tokio::net::TcpListener::bind(SocketAddr::new(ip, port)).await {
+                    Ok(l) => {
+                        bound.push(ip);
+                        let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+                        tokio::spawn(async move {
+                            let _ = axum::serve(l, app).await;
+                        });
+                    }
+                    Err(e) if !reported.contains(&ip) => {
+                        reported.push(ip);
+                        eprintln!("Could not listen on the Tailscale address {ip} port {port} ({e}). Kora keeps trying.");
+                    }
+                    Err(_) => {}
+                }
+            }
+            if !bound.is_empty() {
+                state.remote.set_tailnet_url(s.url(port));
+            }
+            if !announced && !bound.is_empty() {
+                announced = true;
+                if let Some(u) = s.url(port) {
+                    println!("Your Tailscale devices can open the panel at {u}");
+                }
+            }
+        }
+        let wait = if bound.is_empty() { 5 } else { 60 };
+        tokio::time::sleep(Duration::from_secs(wait)).await;
+    }
+}
+
 /// Run the panel until Ctrl+C. Blocking; builds its own tokio runtime.
 pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
     let path = opts.remote_config.clone().unwrap_or_else(remote::config::default_path);
@@ -334,10 +397,16 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         .forced(opts.remote)
         .with_whois(Arc::new(remote::SystemWhois));
     let non_loopback = !opts.bind.to_canonical().is_loopback();
+    if opts.tailscale && non_loopback {
+        return Err(PanelError::Remote(
+            "--tailscale already listens on this computer and on its Tailscale addresses: leave out --bind.".into(),
+        ));
+    }
     if non_loopback && rem.enabled() {
         rem.learn_self_names();
     }
-    let warnings = remote::bind_plan(opts.bind, rem.enabled(), &rem.config(), &rem.extra_hosts()).map_err(PanelError::Remote)?;
+    let warnings = remote::bind_plan(opts.bind, rem.enabled(), opts.allow_public, &rem.config(), &rem.extra_hosts())
+        .map_err(PanelError::Remote)?;
     let rem = Arc::new(rem);
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -372,6 +441,13 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
                         println!("Could not open a browser ({e}); open the link above yourself.");
                     }
                 });
+            }
+        }
+        if opts.tailscale {
+            if state.remote.enabled() {
+                tokio::spawn(serve_tailnet(state.clone(), addr.port()));
+            } else {
+                println!("Remote access is turned off in the settings, so the panel only listens on this computer. Turn it on with `kora panel --tailscale`.");
             }
         }
         println!("Press Ctrl+C to stop.");

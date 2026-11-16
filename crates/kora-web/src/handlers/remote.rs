@@ -31,6 +31,8 @@ fn view(st: &AppState) -> Value {
         "enabled_by_flag": st.remote.is_forced() && !c.enabled,
         "bind": st.addr.ip().to_string(),
         "port": st.addr.port(),
+        // Set while the panel also listens on Tailscale (`kora panel --tailscale`): where to open it there.
+        "tailnet_url": st.remote.tailnet_url(),
         "tailscale": c.tailscale,
         "tailscale_users": c.tailscale_users,
         "allowed_hosts": c.allowed_hosts,
@@ -40,7 +42,7 @@ fn view(st: &AppState) -> Value {
     })
 }
 
-/// `GET /remote`: `{enabled, enabled_by_flag, bind, port, tailscale, tailscale_users: {login: role},
+/// `GET /remote`: `{enabled, enabled_by_flag, bind, port, tailnet_url, tailscale, tailscale_users: {login: role},
 /// allowed_hosts, allow_remote_destructive, users: [{name, role, created}], saved_to}`.
 pub async fn remote_get(
     State(st): State<AppState>,
