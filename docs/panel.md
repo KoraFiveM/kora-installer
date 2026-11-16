@@ -123,8 +123,11 @@ If a server's folder has gone missing, the list says so rather than hiding it.
    password before anything starts.
 7. **Options:** start the server when finished, service, firewall rule, the Kora app and desktop shortcut.
 8. **Licence key:** your Cfx.re licence key. It is sent to Kora on this computer only and is never shown again.
-9. **GitHub** (development mode only): sign in with a short code and choose where the forks go.
-10. **Review and install.** Kora shows a dry-run plan first, then the install with live progress.
+9. **Your Cfx.re account:** type your Cfx.re username and press "Check". Kora asks forum.cfx.re (only the username is sent)
+   which account owns it, and that account becomes the txAdmin admin, so you sign in to txAdmin with Cfx.re. Leave it
+   empty to skip: Kora then creates a local txAdmin admin with a generated password saved in the server folder.
+10. **GitHub** (development mode only): sign in with a short code and choose where the forks go.
+11. **Review and install.** Kora shows a dry-run plan first, then the install with live progress.
 
 If an install fails, the panel keeps your answers (never the licence key or the database password) and offers "Continue
 where you left off" the next time. The wizard also checks free disk space before it begins.
