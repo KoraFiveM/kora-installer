@@ -509,6 +509,26 @@ fn managed_server(ctx: &Ctx, user: &str, kora_exe: &str) -> Result<ManagedServer
     })
 }
 
+/// The account a Linux service runs as (without `KORA_SERVICE_USER`): always this server's own
+/// `kora-<name>` system account. `recorded` (from `created.json`, which the server's account can
+/// change) is never taken on trust: a forged `"alice"` would make the server run as alice and
+/// root `chown -R` the folder to her. Returns (account, create it?, note).
+fn linux_service_account(recorded: Option<&str>, expected: &str, runner: &dyn service::CommandRunner, uid_min: u32) -> Result<(String, bool, Option<String>)> {
+    use service::account::{is_system_uid, user_status, UserStatus};
+    let note = recorded
+        .filter(|r| *r != expected)
+        .map(|r| format!("Kora's records named the account '{r}' for this server; that is not the account Kora makes for it, so '{expected}' is used instead."));
+    match user_status(runner, expected).map_err(|e| InstallError(e.to_string()))? {
+        UserStatus::Exists(0) => err(format!("'{expected}' is the root account: refusing to run a server as it. Remove it or choose another server name.")),
+        // A system account with this server's name: the one Kora made in an earlier attempt.
+        UserStatus::Exists(uid) if is_system_uid(uid, uid_min) => Ok((expected.to_string(), false, note)),
+        UserStatus::Exists(uid) => err(format!(
+            "'{expected}' already exists as an ordinary user account (uid {uid}), not a system account Kora made: Kora will not run the server as it or give it the server folder. Remove it or choose another server name."
+        )),
+        UserStatus::Missing => Ok((expected.to_string(), true, note)),
+    }
+}
+
 /// `uid:gid` of a folder (Unix); used to hand ownership back later.
 #[cfg(unix)]
 fn owner_of(p: &Path) -> Option<String> {
@@ -1109,13 +1129,12 @@ impl InstallStep {
             (Some(u), _) => (u, false),
             (None, SvcPlatform::Windows) => (svc_name.clone(), false), // NT SERVICE\<service>, made with the service
             (None, SvcPlatform::Linux) => {
-                let name = created.service_account.clone().unwrap_or_else(|| service::account::account_name(&slug(&ctx.req.name)));
-                match service::account::user_status(&rn, &name).map_err(|e| InstallError(e.to_string()))? {
-                    service::account::UserStatus::Exists(0) => return err(format!("'{name}' is the root account: refusing to run a server as it. Remove it or choose another server name.")),
-                    // An account Kora made in an earlier attempt of this same install is still ours.
-                    service::account::UserStatus::Exists(_) => (name.clone(), false),
-                    service::account::UserStatus::Missing => (name, true),
+                let expected = service::account::account_name(&slug(&ctx.req.name));
+                let (name, create, note) = linux_service_account(created.service_account.as_deref(), &expected, &rn, service::account::uid_min())?;
+                if let Some(n) = note {
+                    ctx.note(n);
                 }
+                (name, create)
             }
         };
 
@@ -1192,7 +1211,8 @@ impl InstallStep {
     fn schedule(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let created = ctx.load_created();
-        let user = created.service_account.clone().unwrap_or_else(|| format!("kora-{}", slug(&ctx.req.name)));
+        // Only a label in the unit (the update job itself runs as root); never the recorded name.
+        let user = service::account::account_name(&slug(&ctx.req.name));
         let exe = root_exe_for(&created)?;
         let server = managed_server(ctx, &user, &exe.path().to_string_lossy())?;
         let cfg = service::ScheduleConfig::default_for_install();
@@ -1599,6 +1619,31 @@ mod db_admin_tests {
         assert!(e.contains("Team") && e.contains("Nothing was forked") && e.contains("--github-owner"), "{e}");
         assert!(!g.calls.lock().unwrap().iter().any(|c| c.contains("repo fork")), "no fork may be attempted");
         assert!(verify_requested_owner(&g, Some("-bad")).is_err());
+    }
+
+    #[test]
+    fn a_rerun_install_never_takes_the_recorded_service_account_on_trust() {
+        use crate::service::testing::FakeRunner;
+        let r = FakeRunner::default();
+        r.respond("id -u kora-srv", 1, "");
+        // A forged "alice" (or root) in created.json: ignored, this server's own account is made.
+        for forged in ["alice", "root", "kora-other"] {
+            let (name, create, note) = linux_service_account(Some(forged), "kora-srv", &r, 1000).unwrap();
+            assert_eq!((name.as_str(), create), ("kora-srv", true), "{forged}");
+            assert!(note.unwrap().contains(forged));
+        }
+        // An earlier attempt made the account: reused, not created again, no note.
+        let r = FakeRunner::default();
+        r.respond("id -u kora-srv", 0, "998\n");
+        assert_eq!(linux_service_account(Some("kora-srv"), "kora-srv", &r, 1000).unwrap(), ("kora-srv".into(), false, None));
+        assert_eq!(linux_service_account(None, "kora-srv", &r, 1000).unwrap(), ("kora-srv".into(), false, None));
+        // A person's account (or root) with that name: refused.
+        let r = FakeRunner::default();
+        r.respond("id -u kora-srv", 0, "1001\n");
+        assert!(linux_service_account(None, "kora-srv", &r, 1000).unwrap_err().to_string().contains("ordinary user account"));
+        let r = FakeRunner::default();
+        r.respond("id -u kora-srv", 0, "0\n");
+        assert!(linux_service_account(None, "kora-srv", &r, 1000).unwrap_err().to_string().contains("root account"));
     }
 
     #[test]
