@@ -387,6 +387,101 @@ enum Command {
         #[arg(long)]
         app: bool,
     },
+    /// The optional privileged helper: lets the panel do the few things that need administrator rights.
+    Helper {
+        #[command(subcommand)]
+        cmd: HelperCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum HelperCmd {
+    /// Run the helper (started by its system service; not for people).
+    Serve,
+    /// Install the helper service for your user account (needs administrator rights; run with sudo).
+    Install,
+    /// Remove the helper service (needs administrator rights).
+    Uninstall,
+    /// Say whether the helper is installed and running.
+    Status,
+}
+
+/// The helper's allow-list, checked with this very command-line definition: the arguments must parse
+/// as one of the privileged commands the panel otherwise asks the user to run, and nothing else.
+fn helper_validate(verb: &str, args: &[String]) -> Result<(), String> {
+    let deny = || Err("That command is not one the helper runs.".to_string());
+    let argv = ["kora", "--no-elevate", verb].into_iter().map(String::from).chain(args.iter().cloned());
+    let Ok(cli) = Cli::try_parse_from(argv) else { return deny() };
+    match cli.command {
+        Some(Command::Install(a)) if a.code.is_none() && verb == "install" => Ok(()),
+        Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
+        Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
+        Some(Command::App { cmd: AppCmd::Install { .. } | AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
+        Some(Command::Uninstall { .. }) if verb == "uninstall" => Ok(()),
+        _ => deny(),
+    }
+}
+
+fn helper(cmd: HelperCmd) -> i32 {
+    use kora_core::helper as h;
+    let fail = |m: String| {
+        eprintln!("error: {m}");
+        1
+    };
+    if cfg!(windows) {
+        return fail("the Kora helper is not available on Windows yet; the panel shows the command to run as administrator instead".into());
+    }
+    let apply = |plan: kora_core::service::Plan| -> i32 {
+        for d in plan.descriptions() {
+            println!("- {d}");
+        }
+        match kora_core::service::apply_plan(&plan, &kora_core::service::SystemRunner) {
+            Ok(()) => 0,
+            Err(e) => fail(e.to_string()),
+        }
+    };
+    match cmd {
+        HelperCmd::Serve => match h::server::run(std::sync::Arc::new(helper_validate)) {
+            Ok(()) => 0,
+            Err(e) => fail(e),
+        },
+        HelperCmd::Install => {
+            let cfg = match h::install::resolve_user(std::env::var("SUDO_UID").ok().as_deref(), std::env::var("KORA_HOME").ok(), &h::install::lookup_account) {
+                Ok(c) => c,
+                Err(e) => return fail(e),
+            };
+            let exe = match std::env::current_exe() {
+                Ok(e) => e.to_string_lossy().into_owned(),
+                Err(e) => return fail(e.to_string()),
+            };
+            let code = apply(h::install::install_plan(&cfg, &exe));
+            if code == 0 {
+                println!("The Kora helper is installed for the user '{}'. The panel can now do these actions itself.", cfg.user);
+            }
+            code
+        }
+        HelperCmd::Uninstall => {
+            let code = apply(h::install::uninstall_plan());
+            if code == 0 {
+                println!("The Kora helper is removed. The panel will show commands to run as administrator again.");
+            }
+            code
+        }
+        HelperCmd::Status => {
+            let cfg = h::server::load_config(std::path::Path::new(h::CONFIG_PATH)).ok();
+            let client = h::client::SocketClient::default();
+            let running = h::client::Helper::available(&client);
+            println!("installed: {}", if std::path::Path::new(h::UNIT_PATH).exists() { "yes" } else { "no" });
+            println!("running: {}", if running { "yes" } else { "no" });
+            if let Some(c) = cfg {
+                println!("user: {}", c.user);
+            }
+            if let Some(v) = client.version() {
+                println!("version: {v}");
+            }
+            0
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -1545,6 +1640,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Delete { .. }) => K::Delete,
         // The panel runs as the user; privileged actions report the command to run instead.
         Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
+        Some(Command::Helper { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },
         Some(Command::Start { .. }) => K::Start,
@@ -1588,6 +1685,7 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
         Some(Command::App { cmd: AppCmd::Install { dry_run: false, .. } | AppCmd::Uninstall { dry_run: false, .. } }) => one("install or remove the Kora app (the command, shortcuts and the installed program)"),
+        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
         _ => vec![],
     }
 }
@@ -1682,7 +1780,7 @@ fn main() {
     elevate_if_needed(&cli, if bare.is_some() { &bare } else { &cli.command });
     let command = if bare.is_some() { bare } else { cli.command };
     // "New version available": background check, interactive runs only (never CI, pipes, services).
-    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Update(UpdateArgs { auto: true, .. })));
+    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::Update(UpdateArgs { auto: true, .. })));
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
     let code = match command {
         None => install(InstallArgs::default()),
@@ -1707,6 +1805,7 @@ fn main() {
         Some(Command::Start { server }) => control(&server, kora_core::service::ControlAction::Start),
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
+        Some(Command::Helper { cmd }) => helper(cmd),
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
@@ -1812,6 +1911,51 @@ mod tests {
         assert_eq!(app(InstallArgs { no_app: true, ..Default::default() }), None);
         assert_eq!(app(InstallArgs { dry_run: true, ..Default::default() }), None);
         assert!(!InstallArgs { no_app: true, ..Default::default() }.any_given(), "--no-app alone still opens the wizard");
+    }
+
+    #[test]
+    fn the_helper_runs_only_the_privileged_commands() {
+        let v = |verb: &str, a: &[&str]| helper_validate(verb, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        for (verb, a) in [
+            ("install", &["--name", "a", "--dir", "/srv/a", "--mode", "prod", "--service", "--firewall"][..]),
+            ("self-update", &["--yes"]),
+            ("self-update", &["--yes", "--version", "v0.3.4"]),
+            ("schedule", &["set", "dev", "--daily", "04:00", "--as-user"]),
+            ("schedule", &["off", "dev"]),
+            ("app", &["install", "--yes", "--force"]),
+            ("app", &["uninstall", "--yes"]),
+            ("uninstall", &["--yes", "--delete-files"]),
+            ("uninstall", &["--app", "--yes"]),
+        ] {
+            assert!(v(verb, a).is_ok(), "{verb} {a:?}");
+        }
+        for (verb, a) in [
+            ("delete", &["srv", "--yes"][..]),
+            ("service-host", &["srv"]),
+            ("start", &["srv"]),
+            ("panel", &[]),
+            ("helper", &["install"]),
+            ("webhook", &["show", "x"]),
+            ("install", &["--code", "KORA-7F3K-92QX"]),
+            ("install", &["--name", "a", "--bogus"]),
+            ("schedule", &["show", "dev"]),
+            ("app", &["status"]),
+            ("uninstall", &["--help"]),
+            ("self-update", &["--version"]),
+            ("--version", &[]),
+            ("install", &["--", "x"]),
+        ] {
+            assert!(v(verb, a).is_err(), "{verb} {a:?}");
+        }
+    }
+
+    #[test]
+    fn the_helper_command_is_classified() {
+        use elevate::CmdKind as K;
+        let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
+        assert_eq!(command_kind(&parse(&["helper", "install"])), K::Uninstall { dry_run: false });
+        assert_eq!(command_kind(&parse(&["helper", "status"])), K::Other);
+        assert_eq!(command_kind(&parse(&["helper", "serve"])), K::Other);
     }
 
     #[test]

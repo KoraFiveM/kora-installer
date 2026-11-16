@@ -79,10 +79,16 @@ pub async fn self_update_apply(
             c.push("--version".into());
             c.push(v.clone());
         }
-        return Err(ApiError::needs_elevation(
-            "Updating Kora needs administrator rights. Run this command as administrator:",
-            c,
-        ));
+        let msg = "Updating Kora needs administrator rights. Run this command as administrator:";
+        if !crate::elevated::helper_installed() {
+            return Err(ApiError::needs_elevation(msg, c));
+        }
+        // The helper does it: the same command, run as administrator, as a job.
+        return st.spawn_job(Op::SelfUpdateApply, None, move |h| {
+            let out = crate::elevated::privileged_msg(msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
+                .map_err(|e| e.message)?;
+            Ok(json!({"version": v2, "output": out["output"]}))
+        });
     }
     st.spawn_job(Op::SelfUpdateApply, None, move |h| {
         let new = maint::current().self_update_apply(version.as_deref(), &mut |m| {
@@ -132,7 +138,8 @@ pub async fn app_install(bytes: axum::body::Bytes) -> Result<Json<Value>, ApiErr
             if req.force {
                 c.push("--force".into());
             }
-            return Err(ApiError::needs_elevation("Installing the Kora app needs administrator rights. Run this command as administrator:", c));
+            crate::elevated::privileged_msg("Installing the Kora app needs administrator rights. Run this command as administrator:", c, vec![], &mut |_| {})?;
+            return Ok(Json(json!({"message": "The Kora app is installed."})));
         }
         let lines = m.app_install(&AppOptions { desktop_shortcut: req.desktop_shortcut, force: req.force, dry_run: req.dry_run }).map_err(ApiError::core)?;
         let head = if req.dry_run { "Nothing was changed. The Kora app install would" } else { "The Kora app is installed" };
@@ -157,7 +164,8 @@ pub async fn app_uninstall(
     blocking(move || {
         let m = maint::current();
         if maint::app_change_needs_admin(m.as_ref(), dry_run) {
-            return Err(ApiError::needs_elevation("Removing the Kora app needs administrator rights. Run this command as administrator:", cmd(&["uninstall", "--app", "--yes"])));
+            crate::elevated::privileged_msg("Removing the Kora app needs administrator rights. Run this command as administrator:", cmd(&["uninstall", "--app", "--yes"]), vec![], &mut |_| {})?;
+            return Ok(Json(json!({"message": "The Kora app was removed. Your servers and databases were not touched."})));
         }
         let lines = m.app_uninstall(dry_run).map_err(ApiError::core)?;
         let head = if dry_run { "Nothing was changed. Removing the Kora app would" } else { "The Kora app was removed" };
@@ -238,7 +246,16 @@ pub async fn uninstall_run(
         if let [one] = r.only.as_slice() {
             c.push(one.clone());
         }
-        return Err(ApiError::needs_elevation("Removing services, firewall rules and accounts needs administrator rights. Run this command as administrator:", c));
+        let msg = "Removing services, firewall rules and accounts needs administrator rights. Run this command as administrator:";
+        if !crate::elevated::helper_installed() {
+            return Err(ApiError::needs_elevation(msg, c));
+        }
+        let server = if let [one] = r.only.as_slice() { Some(one.clone()) } else { None };
+        return st.spawn_job(Op::UninstallRun, server, move |h| {
+            let out = crate::elevated::privileged_msg(msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
+                .map_err(|e| e.message)?;
+            Ok(json!({"notes": ["Your server folders and databases were kept unless you chose to delete them."], "output": out["output"]}))
+        });
     }
     let server = if let [one] = r.only.as_slice() {
         Some(one.clone())

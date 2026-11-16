@@ -1,5 +1,6 @@
 //! Kora Panel HTTP server: security middleware, sessions, jobs/SSE, embedded UI.
 mod error;
+pub mod elevated;
 pub mod handlers;
 mod jobs;
 pub mod routes;

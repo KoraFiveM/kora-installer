@@ -14,6 +14,7 @@ pub mod elevate;
 pub mod firewall;
 pub mod feedback;
 pub mod fsutil;
+pub mod helper;
 pub mod git;
 pub mod service;
 pub mod space;

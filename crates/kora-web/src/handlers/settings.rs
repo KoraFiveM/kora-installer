@@ -108,13 +108,18 @@ pub async fn schedule_get(
     .await
 }
 
-fn elevation_error(args: Vec<String>) -> ApiError {
+/// The schedule change needs administrator rights: the helper does it when it is installed,
+/// otherwise this is the `needs_elevation` answer with the command to run.
+fn run_elevated(args: Vec<String>) -> Result<(), ApiError> {
     let mut command = vec!["kora".to_string()];
     command.extend(args);
-    ApiError::needs_elevation(
+    crate::elevated::privileged_msg(
         "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.",
         command,
+        vec![],
+        &mut |_| {},
     )
+    .map(|_| ())
 }
 
 pub async fn schedule_set(
@@ -135,9 +140,10 @@ pub async fn schedule_set(
         }
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, Some(&cfg)) {
-            return Err(elevation_error(args));
+            run_elevated(args)?;
+        } else {
+            b.schedule_set(&e, &cfg).map_err(ApiError::core)?;
         }
-        b.schedule_set(&e, &cfg).map_err(ApiError::core)?;
         let now = b.schedule_get(&e).unwrap_or(cfg);
         Ok(Json(schedule_state_json(Some(&now))))
     })
@@ -152,9 +158,10 @@ pub async fn schedule_remove(
         let e = st.entry(&s)?;
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, None) {
-            return Err(elevation_error(args));
+            run_elevated(args)?;
+        } else {
+            b.schedule_remove(&e).map_err(ApiError::core)?;
         }
-        b.schedule_remove(&e).map_err(ApiError::core)?;
         Ok(StatusCode::NO_CONTENT.into_response())
     })
     .await

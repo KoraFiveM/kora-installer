@@ -142,6 +142,11 @@ const TABLE: &[(&str, Entry)] = &[
     ("app uninstall --dry-run", Route(Op::AppUninstall)),
     ("github", Route(Op::GithubOwners)),
     ("github owners", Route(Op::GithubOwners)),
+    ("helper", CliOnly("sets up the helper service on this machine; the panel only uses it")),
+    ("helper serve", CliOnly("run by the operating system service, never by a person")),
+    ("helper install", CliOnly("installs a system service on this machine; needs administrator rights")),
+    ("helper uninstall", CliOnly("removes a system service on this machine; needs administrator rights")),
+    ("helper status", CliOnly("reports on a system service on this machine; the panel shows helper_installed")),
     (
         "service-host",
         CliOnly("run by the operating system service, never by a person"),

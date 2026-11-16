@@ -66,7 +66,7 @@ pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiE
             "elevated": elevated,
             // The UI reads `admin`; `elevated` is the same answer under the plan's name.
             "admin": elevated,
-            "helper_installed": false,
+            "helper_installed": crate::elevated::helper_installed(),
             "headless": headless,
             "local": loopback && !headless,
             "kora_home": kora_core::installer::registry::kora_home(),
