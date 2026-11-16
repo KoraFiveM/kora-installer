@@ -316,6 +316,12 @@ pub fn managed_for(rec: &ServerRecord) -> ManagedServer {
     managed_with_exe(rec, exe)
 }
 
+/// For reading or removing the job: only its name matters, so the kora program is not looked at
+/// (finding the root program can mean hashing it, too slow for every status refresh).
+fn managed_for_lookup(rec: &ServerRecord) -> ManagedServer {
+    managed_with_exe(rec, "kora".into())
+}
+
 fn managed_with_exe(rec: &ServerRecord, exe: String) -> ManagedServer {
     let dir = rec.dir.to_string_lossy().into_owned();
     ManagedServer {
@@ -333,7 +339,7 @@ fn managed_with_exe(rec: &ServerRecord, exe: String) -> ManagedServer {
 /// `enabled: false` when it is switched off or its OS job has gone missing. A schedule made by an
 /// older Kora (no stored file) is read back from the OS job; those ran as SYSTEM.
 pub fn get(server: &ServerRecord) -> Option<ScheduleConfig> {
-    get_with(&managed_for(server), &server.dir, &SystemRunner, Platform::current())
+    get_with(&managed_for_lookup(server), &server.dir, &SystemRunner, Platform::current())
 }
 
 pub fn get_with(s: &ManagedServer, dir: &Path, rn: &dyn CommandRunner, platform: Platform) -> Option<ScheduleConfig> {
@@ -434,7 +440,7 @@ pub fn set(server: &ServerRecord, cfg: &ScheduleConfig) -> ServiceResult<()> {
 
 /// Remove the job Kora created (nothing else) and the stored setting.
 pub fn remove(server: &ServerRecord) -> ServiceResult<()> {
-    let s = managed_for(server);
+    let s = managed_for_lookup(server);
     if os_job(&s, &SystemRunner, Platform::current()).is_none() && load_stored(&server.dir).is_none() {
         return Ok(()); // nothing of ours
     }
@@ -676,4 +682,29 @@ pub fn scheduler_uninstall_plan(s: &ManagedServer, platform: Platform) -> Servic
             &["/Delete", "/TN", &task_name(s), "/F"],
         )]),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `schedule get` (the panel's status refresh) and `off` only need the job's name: the root
+    /// program, which may mean hashing this one, is not worked out for them.
+    #[test]
+    fn reading_the_schedule_does_not_look_for_the_root_program() {
+        let rec = ServerEntry {
+            name: "My Server".into(),
+            dir: "/srv/my".into(),
+            mode: crate::installer::Mode::Production,
+            ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
+            created_unix: 0,
+        };
+        let s = managed_for_lookup(&rec);
+        assert_eq!((s.name.as_str(), s.kora_exe.as_str()), ("my-server", "kora"));
+        assert_eq!(unit_path(&s, "timer"), unit_path(&managed_for(&rec), "timer"));
+        let rn = super::super::testing::FakeRunner::default();
+        rn.respond("cat /etc/systemd/system/kora-update-my-server.timer", 0, "[Timer]\nOnCalendar=*-*-* 05:30:00\n");
+        let cfg = get_with(&s, Path::new("/nonexistent"), &rn, Platform::Linux).unwrap();
+        assert_eq!(cfg.time, "05:30");
+    }
 }
