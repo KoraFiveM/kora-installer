@@ -70,6 +70,9 @@ pub struct Hooks {
     pub assume_admin: Option<bool>,
     /// Free-space provider (tests); `None` = the real disk.
     pub disk: Option<SharedDisk>,
+    /// `--fix-permissions`: when the service account cannot get into the server folder because a
+    /// parent folder is private, `chmod o+x` exactly those folders instead of stopping.
+    pub fix_permissions: bool,
 }
 
 /// A shareable [`crate::space::DiskInfo`] (printable so `Hooks` stays `Debug`).
@@ -90,6 +93,7 @@ impl Hooks {
             http: HttpClient { allow_http_localhost: mirror.is_some(), artifact_mirror: mirror },
             assume_admin: None,
             disk: None,
+            fix_permissions: false,
         }
     }
 
@@ -227,7 +231,16 @@ pub struct PlannedStep {
 
 /// Steps for a request (also the order of rollback, reversed).
 pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
-    let mut v = vec![
+    plan_steps_for(req, crate::userhome::kora_user_planned(&req.dir))
+}
+
+/// [`plan_steps`] with the "needs the `kora` account" decision given (tests).
+pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep> {
+    let mut v = Vec::new();
+    if kora_user {
+        v.push(PlannedStep { id: "prepare.account", title: "Create the 'kora' user account that owns the server folder", weight: 1, needs_admin: true });
+    }
+    v.extend([
         PlannedStep { id: "prepare.dir", title: "Create the server folder", weight: 2, needs_admin: false },
         PlannedStep { id: "prepare.catalog", title: "Load the resource catalog", weight: 3, needs_admin: false },
         PlannedStep {
@@ -236,7 +249,7 @@ pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
             weight: 5,
             needs_admin: false,
         },
-    ];
+    ]);
     if req.mode == Mode::Development {
         v.push(PlannedStep { id: "build.forks", title: "Fork the resources into your GitHub account", weight: 30, needs_admin: false });
     }
@@ -471,10 +484,20 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     let handle = std::thread::spawn(move || -> Result<(Vec<String>, Option<crate::launch::Report>)> {
         let mut list: Vec<Box<dyn Step>> = steps::build(&ctx);
         let state_path = ctx.meta_dir().join("plan-state.json");
+        // The `kora` account must exist before its home folder (which holds the server folder) is made.
+        let kora_user = ctx.plan.iter().any(|p| p.id == "prepare.account");
+        if kora_user {
+            steps::prepare_account(&ctx, &crate::service::SystemRunner)?;
+        }
         // The state dir must exist before the first persist; remember if the folder is ours.
         if std::fs::metadata(&ctx.req.dir).is_err() {
             std::fs::create_dir_all(&ctx.req.dir).map_err(|e| InstallError(format!("cannot create {}: {e}", ctx.req.dir.display())))?;
             ctx.update_created(|c| c.created_dir = true)?;
+        }
+        if kora_user {
+            // Folders made just now belong to `kora` (and so does the folder a deleted service gives back).
+            let plan = crate::userhome::chown_to_kora_plan(&crate::userhome::kora_owned_paths(&ctx.req.dir), false);
+            crate::service::apply_plan(&plan, &crate::service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         }
         save_request(&ctx)?;
         run_plan(&mut list, &state_path)?;
@@ -546,11 +569,23 @@ pub fn preflight(req: &InstallRequest, hooks: &Hooks, admin: bool) -> Result<()>
     }
     crate::space::check(hooks.disk(), &needs).map_err(InstallError)?;
     if req.service && admin {
-        if let Some(why) = crate::service::binary::unreachable_reason(&req.dir) {
+        let blocked = service_blocking_dirs(&req.dir);
+        if !blocked.is_empty() && !hooks.fix_permissions {
+            let why = crate::service::binary::unreachable_message(&blocked, &Path::new(crate::userhome::KORA_USER_HOME).join(slug(&req.name)));
             return err(format!("Cannot set up the background service: {why} Nothing was changed."));
         }
     }
     Ok(())
+}
+
+/// Folders the service account cannot pass through on the way to the server folder `dir`.
+/// `/home/kora` is left out when Kora makes it passable itself (the `prepare.account` step).
+pub fn service_blocking_dirs(dir: &Path) -> Vec<PathBuf> {
+    let kora_user = crate::userhome::kora_user_planned(dir);
+    crate::service::binary::blocking_dirs(dir)
+        .into_iter()
+        .filter(|d| !(kora_user && d == Path::new(crate::userhome::KORA_USER_HOME)))
+        .collect()
 }
 
 fn save_request(ctx: &Ctx) -> Result<()> {
@@ -583,6 +618,13 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
         Ok(()) => notes.push("Free disk space and service-account access look fine.".into()),
         Err(e) => notes.push(format!("WARNING, a real install would stop here: {e}")),
     }
+    if req.service && admin && hooks.fix_permissions {
+        let blocked = service_blocking_dirs(&req.dir);
+        if !blocked.is_empty() {
+            let cmds: Vec<String> = crate::service::binary::traverse_plan(&blocked).steps.iter().filter_map(|s| s.command_line()).collect();
+            notes.push(format!("--fix-permissions: before the service is set up Kora would run: {}", cmds.join("; ")));
+        }
+    }
     if !req.dir.join("kora-server.json").is_file() {
         for c in crate::firewall::ports::install_conflicts(&req.name, &req.dir, req.ports.game, req.ports.txadmin, &crate::firewall::ports::SystemProber) {
             notes.push(format!("WARNING, a real install would stop here: {c}"));
@@ -591,6 +633,12 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
     let mut base = 0u32;
     for p in &plan {
         let detail = match p.id {
+            "prepare.account" => format!(
+                "Create the user account '{user}' with the home folder {home} if it does not exist yet, let other accounts pass through {home} (chmod o+x), and make '{user}' the owner of {}",
+                req.dir.display(),
+                user = crate::userhome::KORA_USER,
+                home = crate::userhome::KORA_USER_HOME,
+            ),
             "prepare.dir" => format!("Create {}", req.dir.display()),
             "prepare.catalog" => format!("{} resources selected", selected.len()),
             "prepare.tools" => format!("Needs git{}; ports {} (game) and {} (txAdmin) must be free", if req.mode == Mode::Development { " and a logged-in `gh`" } else { "" }, req.ports.game, req.ports.txadmin),
@@ -963,6 +1011,59 @@ mod tests {
         assert!(!plan_steps(&r, true).iter().any(|p| p.id == "system.schedule"));
     }
 
+    #[test]
+    fn the_kora_account_step_comes_first_and_only_when_planned() {
+        let r = req(Path::new("/home/kora/my-server"));
+        let with = plan_steps_for(&r, true);
+        assert_eq!(with[0].id, "prepare.account");
+        assert!(with[0].needs_admin);
+        assert!(!plan_steps_for(&r, false).iter().any(|p| p.id == "prepare.account"));
+        // the real decision: root and a folder in /home/kora only (see the userhome tests); never for other folders
+        assert!(!plan_steps(&req(Path::new("/srv/x")), true).iter().any(|p| p.id == "prepare.account"));
+    }
+
+    #[test]
+    fn the_account_step_reports_progress_and_only_uses_the_runner() {
+        let r = req(Path::new("/home/kora/my-server"));
+        let (tx, rx) = mpsc::channel();
+        let ctx = new_ctx(&r, &Hooks::default(), true, tx, false, false);
+        let fake = crate::service::testing::FakeRunner::default();
+        fake.respond("id -u kora", 1, "");
+        steps::prepare_account(&ctx, &fake).unwrap();
+        drop(ctx);
+        let ev: Vec<ProgressEvent> = rx.iter().collect();
+        assert!(ev.iter().all(|e| e.step == "prepare.account"));
+        assert_eq!(ev.last().unwrap().status, StepStatus::Done);
+        assert!(fake.calls().iter().any(|c| c.starts_with("useradd --create-home --home-dir /home/kora")), "{:?}", fake.calls());
+        let refused = crate::service::testing::FakeRunner::default();
+        refused.respond("id -u kora", 0, "0\n");
+        let (tx, rx) = mpsc::channel();
+        let ctx = new_ctx(&r, &Hooks::default(), true, tx, false, false);
+        assert!(steps::prepare_account(&ctx, &refused).is_err());
+        drop(ctx);
+        assert_eq!(rx.iter().last().unwrap().status, StepStatus::Failed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_parent_folder_stops_the_service_install_unless_fix_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let home = t.path().join("home-sam");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o750)).unwrap();
+        let mut r = req(&home.join("kora").join("srv"));
+        r.service = true;
+        let disk = |fix| Hooks { assume_admin: Some(true), disk: Some(SharedDisk(Arc::new(TinyDisk(u64::MAX)))), fix_permissions: fix, ..Hooks::default() };
+        let e = preflight(&r, &disk(false), true).unwrap_err().to_string();
+        assert!(e.contains(&*home.to_string_lossy()) && e.contains("--fix-permissions") && e.contains("/home/kora/"), "{e}");
+        assert!(preflight(&r, &disk(true), true).is_ok(), "opted in: the service step fixes it");
+        assert!(preflight(&r, &disk(false), false).is_ok(), "not admin: no service account is made");
+        assert_eq!(service_blocking_dirs(&r.dir), std::slice::from_ref(&home));
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
     struct TinyDisk(u64);
     impl crate::space::DiskInfo for TinyDisk {
         fn free_bytes(&self, _: &Path) -> std::io::Result<u64> {
@@ -1029,7 +1130,7 @@ mod tests {
         r.license_key = Some("cfxk_x".into());
         let hooks = Hooks { assume_admin: Some(true), disk: Some(SharedDisk(Arc::new(TinyDisk(u64::MAX)))), ..Hooks::default() };
         let e = run_with(&r, &mut Collect(vec![]), &hooks).unwrap_err().to_string();
-        assert!(e.contains("cannot enter") && e.contains("Nothing was changed"), "{e}");
+        assert!(e.contains("cannot get into") && e.contains("Nothing was changed"), "{e}");
         assert!(!dir.exists());
     }
 

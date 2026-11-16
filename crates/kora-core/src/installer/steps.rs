@@ -24,6 +24,23 @@ pub(crate) fn build(ctx: &Arc<Ctx>) -> Vec<Box<dyn Step>> {
         .collect()
 }
 
+/// Runs before the step engine (the server folder lives in the `kora` account's home, so the account
+/// comes first). Reported as the `prepare.account` step. Idempotent.
+pub(crate) fn prepare_account(ctx: &Ctx, runner: &dyn service::CommandRunner) -> Result<()> {
+    let id = "prepare.account";
+    ctx.emit(id, StepStatus::Running, "Checking the 'kora' user account", 0.0);
+    match crate::userhome::ensure_kora_user(runner) {
+        Ok(detail) => {
+            ctx.emit(id, StepStatus::Done, detail, 1.0);
+            Ok(())
+        }
+        Err(e) => {
+            ctx.emit(id, StepStatus::Failed, e.clone(), 0.0);
+            err(e)
+        }
+    }
+}
+
 struct InstallStep {
     ctx: Arc<Ctx>,
     id: &'static str,
@@ -483,6 +500,8 @@ impl InstallStep {
     fn is_done(&self) -> bool {
         let ctx = &self.ctx;
         match self.id {
+            // Done before the engine starts (see `prepare_account`).
+            "prepare.account" => true,
             "prepare.dir" => ctx.req.dir.is_dir() && ctx.meta_dir().is_dir(),
             "build.forks" => std::fs::read(forks_path(ctx))
                 .ok()
@@ -532,6 +551,7 @@ impl InstallStep {
                 sh.catalog = Some(cat);
                 Ok(format!("{n} resources selected"))
             }
+            "prepare.account" => Ok("Already done".into()),
             "prepare.tools" => self.prepare_tools(),
             "build.forks" => self.forks(),
             "build.resources" => self.resources(),
@@ -1075,7 +1095,18 @@ impl InstallStep {
         let kora_exe = own_copy.as_ref().map_or_else(|| exe.to_string_lossy().into_owned(), |p| p.to_string_lossy().into_owned());
 
         let server = managed_server(ctx, &account, &kora_exe)?;
-        let mut head = Vec::new(); // account + program copy
+        let mut head = Vec::new(); // folder access + account + program copy
+        if platform == SvcPlatform::Linux && ctx.hooks.fix_permissions {
+            // --fix-permissions: exactly the private folders on the way to the server folder (see preflight).
+            let blocked = super::service_blocking_dirs(&ctx.req.dir);
+            if !blocked.is_empty() {
+                ctx.note(format!(
+                    "Let the server's own account pass through {} (chmod o+x) so it can reach the server folder.",
+                    blocked.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            head.extend(service::binary::traverse_plan(&blocked).steps);
+        }
         if create_account {
             head.extend(service::account::create_plan(&account).map_err(|e| InstallError(e.to_string()))?.steps);
         }
@@ -1245,6 +1276,12 @@ impl InstallStep {
         let mut reg = io(Registry::load(), "cannot read the server registry")?;
         reg.upsert(ServerEntry { name: req.name.clone(), dir: req.dir.clone(), mode: req.mode, ports: PortsRecord::from(&req.ports), created_unix: now });
         io(reg.save(), "cannot write the server registry")?;
+        // A server in the `kora` account's home without a service belongs to `kora` (with a service the
+        // service step already handed it to the service's own account).
+        if ctx.admin && !req.service && ctx.plan.iter().any(|p| p.id == "prepare.account") {
+            let plan = crate::userhome::chown_to_kora_plan(std::slice::from_ref(&req.dir), true);
+            service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+        }
         Ok(format!("Registered '{}' in {}", req.name, registry::registry_path().display()))
     }
 
