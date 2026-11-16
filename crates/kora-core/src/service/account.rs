@@ -51,6 +51,28 @@ pub fn delete_plan(name: &str) -> ServiceResult<Plan> {
     Ok(Plan::new(vec![SystemStep::run(format!("Delete the system account '{name}' that Kora created for the server"), "userdel", &[name])]))
 }
 
+/// First uid of ordinary (login) accounts: `UID_MIN` in `/etc/login.defs`, else 1000.
+pub fn uid_min() -> u32 {
+    parse_uid_min(&std::fs::read_to_string("/etc/login.defs").unwrap_or_default())
+}
+
+pub fn parse_uid_min(login_defs: &str) -> u32 {
+    login_defs
+        .lines()
+        .filter_map(|l| {
+            let mut w = l.split_whitespace();
+            (w.next() == Some("UID_MIN")).then(|| w.next()?.parse::<u32>().ok()).flatten()
+        })
+        .next_back()
+        .filter(|u| *u > 0)
+        .unwrap_or(1000)
+}
+
+/// A system account (what `useradd --system` makes): not root, below the ordinary range.
+pub fn is_system_uid(uid: u32, uid_min: u32) -> bool {
+    uid != 0 && uid < uid_min
+}
+
 fn check_name(name: &str) -> ServiceResult<()> {
     let ok = !name.is_empty()
         && name.len() <= MAX_USER_LEN
@@ -94,6 +116,18 @@ mod tests {
             assert!(create_plan(bad).is_err(), "{bad}");
             assert!(delete_plan(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn system_accounts_are_below_uid_min_and_never_root() {
+        assert_eq!(parse_uid_min("# x\nUID_MIN\t\t 1000\nUID_MAX 60000\n"), 1000);
+        assert_eq!(parse_uid_min("UID_MIN 500"), 500);
+        assert_eq!(parse_uid_min(""), 1000);
+        assert_eq!(parse_uid_min("UID_MIN nonsense"), 1000);
+        assert!(is_system_uid(998, 1000));
+        assert!(!is_system_uid(0, 1000), "root");
+        assert!(!is_system_uid(1000, 1000), "a person's account");
+        assert!(!is_system_uid(65534, 1000), "nobody");
     }
 
     #[test]

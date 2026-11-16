@@ -790,6 +790,44 @@ mod tests {
         }
     }
 
+    /// `kora delete` as root reads `created.json`, which the service account can rewrite: absolute
+    /// paths, `..` and a `resources` link must never make root delete anything outside the folder.
+    #[cfg(unix)]
+    #[test]
+    fn delete_obeys_forged_records_only_inside_the_server_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let victim = t.path().join("victim");
+        std::fs::create_dir_all(victim.join("etc")).unwrap();
+        std::fs::write(victim.join("etc/passwd"), "precious").unwrap();
+        std::fs::write(victim.join("file"), "precious").unwrap();
+        let dir = t.path().join("srv");
+        std::fs::create_dir_all(dir.join(".kora")).unwrap();
+        std::fs::create_dir_all(dir.join("own")).unwrap();
+        std::fs::write(dir.join("server.cfg"), "x").unwrap();
+        std::os::unix::fs::symlink(&victim, dir.join("resources")).unwrap();
+        let mut r = req(&dir);
+        (r.dry_run, r.db, r.service, r.firewall) = (false, DbChoice::Skip, false, false);
+        std::fs::write(dir.join(".kora/request.json"), serde_json::to_vec(&r).unwrap()).unwrap();
+        let abs = victim.join("file").to_string_lossy().into_owned();
+        let c = Created {
+            resources: vec!["etc".into(), "../../victim/etc".into(), abs.clone()],
+            files: vec![abs, "../victim/file".into(), "server.cfg".into(), "own".into()],
+            ..Created::default()
+        };
+        std::fs::write(dir.join(".kora/created.json"), serde_json::to_vec(&c).unwrap()).unwrap();
+        let mut st = crate::steps::PlanState::default();
+        for id in ["build.resources", "build.config"] {
+            st.set(id, crate::steps::StepStatus::Done, None);
+        }
+        st.save(&dir.join(".kora/plan-state.json")).unwrap();
+        let hooks = Hooks { assume_admin: Some(false), ..Hooks::default() };
+        let notes = rollback_with(&dir, &RollbackOptions { keep_files: false, keep_db: true }, &mut Collect(vec![]), &hooks).unwrap();
+        assert_eq!(std::fs::read_to_string(victim.join("etc/passwd")).unwrap(), "precious");
+        assert_eq!(std::fs::read_to_string(victim.join("file")).unwrap(), "precious");
+        assert!(!dir.join("server.cfg").exists() && !dir.join("own").exists(), "what really is inside is removed");
+        assert!(notes.iter().any(|n| n.contains("Kept")), "{notes:?}");
+    }
+
     #[test]
     fn saved_request_has_no_secrets_and_old_records_load() {
         let mut r = req(Path::new("/tmp/x"));
