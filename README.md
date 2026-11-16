@@ -21,13 +21,13 @@ Guide: [docs/panel.md](docs/panel.md). The terminal wizard (`kora install`) and 
 Linux (Debian 12+ / Ubuntu 22.04+):
 
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.3.3/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.0/install.sh | sh
 ```
 
 Windows 10/11 or Server 2019+ (PowerShell):
 
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.3.3/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.4.0/install.ps1 | iex
 ```
 
 Then run `kora install`. The scripts check the download's SHA-256, install `kora` for your user (no administrator rights

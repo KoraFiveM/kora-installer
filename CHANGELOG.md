@@ -5,6 +5,8 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-16
+
 ### Added
 - **Kora Panel:** `kora panel` opens a local web panel that installs, manages and updates servers in your browser (servers list, start/stop/restart, console, logs, updates with preview, snapshots and rollback, resources, schedule, Discord webhook, ports, GitHub (issues and pull requests), delete, the install wizard, and Settings with self-update, the Kora app and uninstall). `--port` (default 47120), `--no-open`. Guide: `docs/panel.md`.
 - Headless use: over SSH or without a desktop the panel prints the sign-in link and an `ssh -L` tunnel hint (also with `--no-open`).
