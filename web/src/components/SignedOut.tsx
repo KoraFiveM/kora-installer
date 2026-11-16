@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { Alert } from '@/components/ui/alert'
+import { KoraLogo } from '@/components/KoraLogo'
 
 /** Opened from another computer (not 127.0.0.1 / localhost)? Then the `kora panel` link cannot work here. */
 function openedRemotely(): boolean {
@@ -20,7 +21,7 @@ export function SignedOut({ error, onToken, onIdentity }: { error: ApiError | nu
   const remote = openedRemotely()
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 p-6">
-      <div className="font-heading text-2xl font-bold">Kora</div>
+      <KoraLogo className="h-9 w-auto text-foreground" />
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Session expired, or not signed in</CardTitle>
