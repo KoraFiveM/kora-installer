@@ -683,8 +683,9 @@ pub struct ProvisionState {
 }
 
 impl ProvisionState {
+    /// Root writes this into `<server>/.kora`: never through a planted link.
     pub fn save(&self, path: &Path) -> DbResult<()> {
-        std::fs::write(path, serde_json::to_vec_pretty(self)?)?;
+        crate::fsutil::write_no_follow(path, &serde_json::to_vec_pretty(self)?, 0o644)?;
         Ok(())
     }
     pub fn load(path: &Path) -> DbResult<Self> {
@@ -820,7 +821,6 @@ pub fn write_secret_file(
     contents: &str,
     windows_user: Option<&str>,
 ) -> DbResult<()> {
-    use std::io::Write;
     if os == Os::Windows {
         let user = windows_user.ok_or_else(|| DbError::InvalidValue("windows user required".into()))?;
         std::fs::File::create(path)?;
@@ -832,15 +832,12 @@ pub fn write_secret_file(
         std::fs::write(path, contents)?;
         return Ok(());
     }
+    // 0600 from the start, and never through a link planted in the server folder.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        f.write_all(contents.as_bytes())?;
-    }
+    crate::fsutil::write_no_follow(path, contents.as_bytes(), 0o600)?;
     #[cfg(not(unix))]
     {
+        use std::io::Write;
         let mut f = std::fs::File::create(path)?;
         f.write_all(contents.as_bytes())?;
     }

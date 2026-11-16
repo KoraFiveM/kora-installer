@@ -37,14 +37,10 @@ impl PlanState {
         }
     }
 
-    /// Atomic save (write temp file, then rename).
+    /// Atomic save (temp file, then rename), never through a planted link: root saves this in
+    /// `<server>/.kora`, which the server's own account can change.
     pub fn save(&self, path: &Path) -> StepResult<()> {
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
-        fs::rename(&tmp, path)?;
+        crate::fsutil::write_no_follow(path, &serde_json::to_vec_pretty(self)?, 0o644)?;
         Ok(())
     }
 
@@ -68,5 +64,29 @@ impl PlanState {
             r.status = status;
             r.error = error;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Root saves this in `<server>/.kora`: a link planted at the file or its temporary name is
+    /// replaced, never written through.
+    #[cfg(unix)]
+    #[test]
+    fn save_never_writes_through_a_planted_link() {
+        let t = tempfile::tempdir().unwrap();
+        let victim = t.path().join("victim");
+        std::fs::write(&victim, "precious").unwrap();
+        let p = t.path().join(".kora/plan-state.json");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&victim, p.with_extension("json.tmp")).unwrap();
+        std::os::unix::fs::symlink(&victim, &p).unwrap();
+        let mut st = PlanState::default();
+        st.set("a", StepStatus::Done, None);
+        st.save(&p).unwrap();
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "precious");
+        assert_eq!(PlanState::load_or_default(&p).unwrap(), st);
     }
 }

@@ -321,6 +321,12 @@ pub fn txadmin_env(data_dir: &Path, txadmin_port: u16) -> Vec<(String, String)> 
 /// Write `contents` atomically (temp + rename); `secret` files are created 0600 on unix and, on
 /// Windows, get their inherited permissions removed (only this user, Administrators and SYSTEM).
 pub fn write_file(path: &Path, contents: &str, secret: bool) -> Result<()> {
+    // Root writes these into a folder the server's account can change (a re-run install): never
+    // through a planted link.
+    if cfg!(unix) {
+        crate::fsutil::write_no_follow(path, contents.as_bytes(), if secret { 0o600 } else { 0o644 })?;
+        return Ok(());
+    }
     if let Some(p) = path.parent() {
         fs::create_dir_all(p)?;
     }
@@ -329,11 +335,6 @@ pub fn write_file(path: &Path, contents: &str, secret: bool) -> Result<()> {
     let _ = fs::remove_file(&tmp);
     let mut o = fs::OpenOptions::new();
     o.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        o.mode(if secret { 0o600 } else { 0o644 });
-    }
     let mut f = o.open(&tmp)?;
     // Windows: lock the (still empty) file down before the secret is written into it.
     if secret && cfg!(windows) {

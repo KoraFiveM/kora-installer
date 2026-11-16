@@ -7,7 +7,7 @@
 //! so there is never a stale lock to clean up. The file itself is left in place on purpose
 //! (deleting it would let two processes lock two different files).
 
-use std::fs::{File, OpenOptions, TryLockError};
+use std::fs::{File, TryLockError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -48,17 +48,15 @@ pub fn path(server_dir: &Path) -> PathBuf {
     server_dir.join(".kora").join("update.lock")
 }
 
+/// Root (the update timer) takes this lock in a folder the service account can change, so the file
+/// is never opened or created through a planted link (root would otherwise create, say,
+/// `/etc/nologin`); see `fsutil::open_no_follow`.
 fn open(p: &Path, create: bool) -> std::io::Result<File> {
-    match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(create)
-        .truncate(false)
-        .open(p)
-    {
+    use crate::fsutil::{open_no_follow, Access};
+    match open_no_follow(p, Access::ReadWrite, create.then_some(0o644)) {
         Ok(f) => Ok(f),
         // Created earlier by another account (the root timer): a read handle can still be locked.
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => File::open(p),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && !crate::fsutil::is_symlink(p) => open_no_follow(p, Access::Read, None),
         Err(e) => Err(e),
     }
 }
@@ -84,11 +82,7 @@ fn lock_with_grace(file: &File) -> Result<(), LockError> {
 
 /// Take the lock (no real waiting: only the short grace above).
 pub fn acquire(server_dir: &Path) -> Result<UpdateLock, LockError> {
-    let p = path(server_dir);
-    if let Some(dir) = p.parent() {
-        std::fs::create_dir_all(dir).map_err(LockError::Io)?;
-    }
-    let file = open(&p, true).map_err(LockError::Io)?;
+    let file = open(&path(server_dir), true).map_err(LockError::Io)?;
     lock_with_grace(&file)?;
     Ok(UpdateLock { _file: file })
 }
@@ -125,5 +119,19 @@ mod tests {
         drop(held);
         assert!(!is_busy(t.path()));
         let _again = acquire(t.path()).unwrap();
+    }
+
+    /// Root takes this lock in a folder the service account owns: a planted link is not followed
+    /// (it would make root create, say, `/etc/nologin`).
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_link_is_never_followed() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(t.path().join(".kora")).unwrap();
+        let victim = t.path().join("nologin");
+        std::os::unix::fs::symlink(&victim, path(t.path())).unwrap();
+        assert!(matches!(acquire(t.path()), Err(LockError::Io(_))));
+        assert!(!victim.exists());
+        assert!(!is_busy(t.path()));
     }
 }

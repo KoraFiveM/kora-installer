@@ -823,7 +823,7 @@ impl InstallStep {
         let total = repos.len().max(1);
         let save = |s: &git::ForkState| {
             if let Ok(b) = serde_json::to_vec_pretty(s) {
-                let _ = std::fs::write(&path, b);
+                let _ = crate::fsutil::write_no_follow(&path, &b, 0o644);
             }
         };
         save(&state);
@@ -1064,7 +1064,7 @@ impl InstallStep {
             if !gi.exists() {
                 ctx.update_created(|c| c.files.push(".gitignore".into()))?;
             }
-            io(std::fs::write(&gi, format!("{existing}{add}")), "cannot write .gitignore")?;
+            io(crate::fsutil::write_no_follow(&gi, format!("{existing}{add}").as_bytes(), 0o644), "cannot write .gitignore")?;
         }
         // The live console's helper (a failure here must never fail the install: the console is optional).
         if let Err(e) = crate::console::install(dir) {
