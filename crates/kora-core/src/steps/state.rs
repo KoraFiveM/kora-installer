@@ -67,13 +67,12 @@ impl PlanState {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     /// Root saves this in `<server>/.kora`: a link planted at the file or its temporary name is
     /// replaced, never written through.
-    #[cfg(unix)]
     #[test]
     fn save_never_writes_through_a_planted_link() {
         let t = tempfile::tempdir().unwrap();
