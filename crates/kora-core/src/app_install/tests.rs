@@ -461,3 +461,17 @@ fn real_unix_install_status_uninstall_in_a_temp_prefix() {
     assert!(!l.dir.exists(), "empty program folder removed");
     assert!(src.exists(), "the source program is untouched");
 }
+
+#[test]
+#[cfg(unix)]
+fn a_leftover_temp_file_gets_the_requested_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("app.json");
+    let tmp = p.with_extension("kora-tmp");
+    std::fs::write(&tmp, "old").unwrap();
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
+    RealSys::new().write(&p, b"{}", 0o600).unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), b"{}");
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+}

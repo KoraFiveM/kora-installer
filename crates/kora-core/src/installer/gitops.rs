@@ -487,9 +487,11 @@ pub(crate) fn with_git<T>(dir: &Path, f: impl FnOnce(&dyn GitOps) -> T) -> T {
     }
 }
 
+/// Root (the update timer) appends here, in a folder the service account can change: never through
+/// a planted link or hard link (see `fsutil::open_no_follow`).
 fn append_log(dir: &Path, text: &str) {
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("update.log")) {
+    if let Ok(mut f) = crate::fsutil::open_no_follow(&dir.join("update.log"), crate::fsutil::Access::Append, Some(0o644)) {
         let _ = writeln!(f, "=== unix {} ===\n{}", now_unix(), text.trim_end());
     }
 }
@@ -560,6 +562,24 @@ fn err_msg<T>(m: &str) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The update timer runs as root; `update.log` is in a folder the service account owns.
+    #[cfg(unix)]
+    #[test]
+    fn the_update_log_is_never_written_through_a_planted_link() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("srv");
+        std::fs::create_dir_all(&dir).unwrap();
+        append_log(&dir, "first");
+        append_log(&dir, "second");
+        let log = std::fs::read_to_string(dir.join("update.log")).unwrap();
+        assert!(log.contains("first") && log.contains("second"), "{log}");
+        std::fs::remove_file(dir.join("update.log")).unwrap();
+        let victim = t.path().join("nologin");
+        std::os::unix::fs::symlink(&victim, dir.join("update.log")).unwrap();
+        append_log(&dir, "x");
+        assert!(!victim.exists(), "root must not create the link's target");
+    }
     use std::process::Command;
 
     fn sh(dir: &Path, args: &[&str]) {

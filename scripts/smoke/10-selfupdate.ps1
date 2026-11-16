@@ -28,7 +28,7 @@ function Set-Releases([bool]$withAsset) {
             @{ name = $asset; browser_download_url = "$base/dl/$asset"; size = 1 },
             @{ name = "$asset.sha256"; browser_download_url = "$base/dl/$asset.sha256"; size = 1 })
     }
-    $json = ConvertTo-Json -Depth 5 -InputObject @(@{ tag_name = 'v99.0.0'; draft = $false; prerelease = $true; assets = $assets })
+    $json = ConvertTo-Json -Depth 5 -InputObject @(@{ tag_name = 'v99.0.0'; draft = $false; prerelease = $false; assets = $assets })
     Set-Content -Encoding ascii (Join-Path $api 'releases') $json
 }
 $envs = @{ KORA_SELF_UPDATE_API = $base; KORA_HOME = (Join-Path $root 'home'); KORA_NO_UPDATE_CHECK = '1' }
@@ -43,7 +43,7 @@ try {
     Assert-That $ready 'local fake release API answers'
 
     $r = Invoke-Native $a @('self-update', '--check') $envs; Show 'self-update --check' $r
-    Assert-That ($r.Code -eq 0 -and $r.Output -match 'v99\.0\.0 is available') '--check reports the newer pre-release'
+    Assert-That ($r.Code -eq 0 -and $r.Output -match 'v99\.0\.0 is available') '--check reports the newer release'
     Assert-That ((Get-FileHash -Algorithm SHA256 $a).Hash.ToLowerInvariant() -eq $hashA) '--check changes nothing'
 
     # checksum mismatch: nothing changes

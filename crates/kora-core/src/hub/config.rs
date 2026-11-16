@@ -243,13 +243,16 @@ fn new_id(existing: &[NodeConfig]) -> String {
     }
 }
 
+/// A fresh owner-only file. `mode` only applies when a file is created, so a temp file left behind
+/// (perhaps with looser permissions, or as a symlink) is removed first and `create_new` makes sure
+/// the file written is the one just created.
 #[cfg(unix)]
 fn open_private(p: &Path) -> std::io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
+    let _ = fs::remove_file(p);
     fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(p)
 }
@@ -325,5 +328,19 @@ mod tests {
         }
         assert!(s.remove(&n.id).unwrap());
         assert!(!s.remove(&n.id).unwrap());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_leftover_temp_file_does_not_loosen_the_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let s = NodeStore::at(d.path().join("hub.json"));
+        let tmp = d.path().join("hub.json.tmp");
+        fs::write(&tmp, "old").unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o666)).unwrap();
+        s.add("Home", "http://10.0.0.2:47120", "sekret").unwrap();
+        assert_eq!(fs::metadata(s.path()).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(!tmp.exists());
     }
 }

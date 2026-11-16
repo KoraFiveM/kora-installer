@@ -5,16 +5,18 @@
 //! on its own, as in most tests) the answers are simply empty.
 #![allow(clippy::unused_async)]
 
+use std::net::ToSocketAddrs;
 use std::sync::Mutex;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use kora_core::monitor::{self, alerts, Monitor, Range};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::remote::Caller;
 use crate::{blocking, ApiError, AppState, BackendFactory};
 
 static CURRENT: Mutex<Option<Monitor>> = Mutex::new(None);
@@ -96,13 +98,26 @@ pub async fn alert_settings_get(
 
 pub async fn alert_settings_set(
     State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Path(s): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
-        let next = alerts::apply_update(&alerts::load_settings(&e.dir), &body)
-            .map_err(ApiError::bad_request)?;
+        let cur = alerts::load_settings(&e.dir);
+        let mut next = alerts::apply_update(&cur, &body).map_err(ApiError::bad_request)?;
+        if next.webhook_url != cur.webhook_url {
+            // The panel sends this address requests from inside the network. Someone on another computer
+            // must not be able to aim it at this machine or the private network around it, now or later
+            // (the flag makes every send check the address again).
+            next.webhook_set_remotely = caller.remote && next.webhook_url.is_some();
+            if next.webhook_set_remotely {
+                alerts::public_webhook(next.webhook_url.as_deref().unwrap_or(""), &|h, p| {
+                    (h, p).to_socket_addrs().map(Iterator::collect)
+                })
+                .map_err(ApiError::bad_request)?;
+            }
+        }
         alerts::save_settings(&e.dir, &next).map_err(ApiError::internal)?;
         Ok(Json(alerts::settings_view(&next)))
     })

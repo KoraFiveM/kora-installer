@@ -5,6 +5,50 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-16
+
+### Added
+- **Restart now after an update.** When the background panel updates Kora, Settings offers "Restart now": the panel restarts on the new version and the page reloads (sign in again afterwards). A panel running in a terminal window says to stop it and run `kora panel` again.
+- **Open Kora Panel from your own devices with Tailscale, in one step.** Run `kora panel --tailscale` on the server: Kora makes the Tailscale account you are connected from (or the account that added the computer to Tailscale, or `--admin you@example.com`) the panel's admin, keeps the background panel listening on this computer and on its Tailscale addresses (never the public one), lets the port through `ufw` on the Tailscale interface only (as root; otherwise it prints the command), and prints the address to open, for example `http://myserver.tail1234.ts.net:47120`. Open it on any device signed in to Tailscale and you are signed in with your Tailscale account: no link, token or SSH tunnel. The install script offers it on a server with no screen when Tailscale is running (`KORA_TAILSCALE=1` says yes in advance, `KORA_TAILSCALE=0` never asks).
+- `kora panel tailscale allow|remove|list|off` lets other Tailscale accounts in (each with a role), removes them, or turns it off, without opening the panel.
+- `kora panel --new-token` makes a new sign-in token for the background panel.
+- **Release files can be checked against the build that made them.** Every release file has a signed build provenance attestation from GitHub Actions: `gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer`. See [CODE_SIGNING.md](CODE_SIGNING.md).
+- `KORA_PRERELEASE=1` (Windows: `-Prerelease`) lets the install scripts take a pre-release.
+
+### Changed
+- **Sign-in links work once.** The link printed by `kora panel` holds a one-time code (valid 10 minutes) instead of the long-lived token, so the token no longer ends up in your browser history. Run `kora panel` or `kora panel --print-link` for a new one. The background panel no longer writes a sign-in link to the system log.
+- Opened from another computer, the panel signs you in with your Tailscale account straight away when that account is allowed. Settings > Remote access shows the Tailscale address.
+- **The install scripts install the newest stable release**; pre-releases only when asked (`KORA_VERSION`, `KORA_PRERELEASE=1`). **`kora self-update` stays on stable releases** unless you run a pre-release or pass `--version`.
+- **Downloads stay on https**: the install scripts refuse a redirect to plain http, and `install.sh` runs nothing if a `curl | sh` download is cut short.
+- Every GitHub Action in the build and release workflows is pinned to a full commit SHA, and CI fails if one is not.
+
+### Fixed
+- Paste a sign-in code or a whole sign-in link into the sign-in box; signing in again ends the old session. A failed sign-in in a new tab no longer signs out your other tabs.
+- Installing into `/home/kora` through the helper works when `/home` is a symbolic link; `kora panel --install-service` works when `~/.config/systemd/user` is one.
+- `kora self-update` finds the latest stable release behind many pre-releases. `install.sh` works with BusyBox wget (https only).
+- `kora panel --bind <address> --remote` no longer prints the 127.0.0.1 link of the panel already running in the background and stops: it starts the panel on that address.
+
+### Security
+- **Root no longer trusts files in a server folder.** That folder belongs to the server's own account (which runs third-party resource code) or to you, so before acting as root or administrator Kora now checks everything it reads there:
+  - The automatic-update job (root / SYSTEM) only runs a kora program nobody else can change (Kora's root-owned copy in `/opt/kora`, Windows `%ProgramFiles%\Kora\bin`, or `kora` itself when installed in such a place), never a program named in the server's records. Before, anyone who could write the server folder could make root run a program of their choice. The Windows task definition is written to `%ProgramFiles%\Kora\tasks`.
+  - `kora delete` and `kora uninstall` only delete inside the server folder and never follow a symbolic link, only remove this server's own `kora-<name>` system account, only delete the program copy in Kora's program folder, hand a kept folder back only to a plain `uid:gid`, never close the SSH port, and with ufw only remove rules carrying Kora's label.
+  - Kora's records, the schedule setting and `secrets.env` are written without following planted symbolic links.
+- **The helper is limited to what the panel needs**: installs only into a new or empty folder in your home folder or `/home/kora`, no other catalogue, only newer Kora versions; git run as root no longer reads your git settings or runs hooks (your GitHub sign-in still works). The guide now says plainly that the helper gives your account the same power as passwordless `sudo` for Kora's actions.
+- **The panel's session cookie is useless on its own.** Browsers send cookies to every port of a host, so txAdmin or a FiveM resource listening on the game port could see the panel's cookie and use it. Every request must now also carry a per-session secret the page keeps for its own address and port. The cookie is named per port (`kora_session_<port>`).
+- The panel refuses requests that came through a proxy or `tailscale serve` (they make every visitor look like the computer itself).
+- The panel refuses to listen on a public address or on every interface (`0.0.0.0`, `::`) unless you add `--allow-public`: it is plain HTTP.
+- Remote sign-in failures are counted per address (IPv6 per /64), so someone guessing tokens only locks themselves out. Remote sessions are limited to 8 live views each and 64 together; server status is read once for every open page; the fleet list is reused for 5 seconds.
+- A remote session can only follow a job its role could have started, and "already running" answers no longer show the job's id. The fleet and other panels' servers (the hub) are local only, as documented. From another computer the alert webhook must be a public internet address.
+- **FXServer downloads can no longer write outside their folder through symlinks** in the Linux archive. Resources installed from a repository subfolder refuse symlinks, catalogue paths with a drive letter or `:` are refused and every clone or copy must land inside `resources`, and resource names `.`, `..` and names starting with `-` are refused.
+- Windows: Kora's folders in `%ProgramData%` must belong to administrators; a folder someone else created first is refused.
+- `kora self-update` no longer carries setuid/setgid bits over, and private files can no longer keep looser permissions from a file left behind by an earlier run.
+- `kora delete` takes the server's name and ports from your server list, not from files the server's account can change; a folder that is not in the list gets no system-wide changes. Delete only drops databases Kora created, never another server's or MariaDB's own.
+- Root never writes into a server folder through a planted symbolic link, hard link or FIFO (update log and lock, state files, configs, secrets), and an install refuses a symbolic link another account could have planted on the way to the server folder. A re-run install always runs the server as its own `kora-<name>` account.
+- Older root auto-update jobs that run a program other accounts can change are repaired automatically the next time Kora runs as root.
+- A program on the panel's own computer can no longer sign in through the computer's Tailscale address and be taken for its owner.
+- Alert webhook addresses set from another computer are read the way they are sent (a backslash can no longer hide the real host), more internal IPv6 forms are refused, and the address is checked again before every send.
+- A cookie planted by another service on the same host no longer locks you out; wrong user tokens on ordinary requests count towards that address's lockout; the session secret in a URL is only accepted on live streams.
+
 ## [0.5.1] - 2026-11-16
 
 ### Changed

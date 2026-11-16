@@ -26,7 +26,8 @@ export function App({ boot }: { boot: BootResult }) {
       }),
     [],
   )
-  const [signedOut, setSignedOut] = useState<ApiError | boolean>(boot.status === 'failed' ? boot.error : false)
+  // `signed_out`: the quiet Tailscale try did not work; show the sign-in screen without an error.
+  const [signedOut, setSignedOut] = useState<ApiError | boolean>(boot.status === 'failed' ? boot.error : boot.status === 'signed_out')
 
   useEffect(() => {
     setUnauthorizedHandler(() => setSignedOut((s) => s || true))

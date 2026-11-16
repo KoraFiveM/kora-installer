@@ -89,10 +89,7 @@ pub fn send(dir: &Path, text: &str) -> Result<(), String> {
         return Err("This server does not have the console helper yet. Turn on the live console first (it needs a restart).".into());
     }
     let p = input_path(dir);
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d).map_err(|e| format!("Can't write {}: {e}", d.display()))?;
-    }
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&p).map_err(|e| format!("Can't write {}: {e}", p.display()))?;
+    let mut f = crate::fsutil::open_no_follow(&p, crate::fsutil::Access::Append, Some(0o644)).map_err(|e| format!("Can't write {}: {e}", p.display()))?;
     writeln!(f, "{line}").map_err(|e| format!("Can't write {}: {e}", p.display()))
 }
 
@@ -118,10 +115,11 @@ pub fn install(dir: &Path) -> Result<bool, String> {
     if is_installed(dir) {
         return Ok(false);
     }
+    // Root runs this during an install: never through a link planted in the server folder.
     let r = resource_dir(dir);
-    std::fs::create_dir_all(&r).map_err(|e| format!("Can't create {}: {e}", r.display()))?;
-    std::fs::write(r.join("fxmanifest.lua"), FXMANIFEST).map_err(|e| format!("Can't write the console resource: {e}"))?;
-    std::fs::write(r.join("server.lua"), SERVER_LUA).map_err(|e| format!("Can't write the console resource: {e}"))?;
+    let put = |name: &str, text: &str| crate::fsutil::write_no_follow(&r.join(name), text.as_bytes(), 0o644).map_err(|e| format!("Can't write the console resource: {e}"));
+    put("fxmanifest.lua", FXMANIFEST)?;
+    put("server.lua", SERVER_LUA)?;
     let cfg_path = dir.join("server.cfg");
     let mut cfg = std::fs::read_to_string(&cfg_path).map_err(|e| format!("Can't read {}: {e}", cfg_path.display()))?;
     if !cfg.contains("set kora_console_file") {
@@ -129,7 +127,7 @@ pub fn install(dir: &Path) -> Result<bool, String> {
     } else if !cfg.lines().any(|l| l.trim() == format!("ensure {RESOURCE}")) {
         cfg.push_str(&format!("ensure {RESOURCE}\n"));
     }
-    std::fs::write(&cfg_path, cfg).map_err(|e| format!("Can't write {}: {e}", cfg_path.display()))?;
+    crate::fsutil::write_no_follow(&cfg_path, cfg.as_bytes(), 0o644).map_err(|e| format!("Can't write {}: {e}", cfg_path.display()))?;
     Ok(true)
 }
 

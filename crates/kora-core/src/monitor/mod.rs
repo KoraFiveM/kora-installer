@@ -134,7 +134,11 @@ impl AlertSink for RealSink {
                 }
             }
             if let Some(url) = &settings.webhook_url {
-                let _ = alerts::post_json(url, &alerts::webhook_payload(&alert));
+                let _ = alerts::post_json(
+                    url,
+                    &alerts::webhook_payload(&alert),
+                    settings.webhook_set_remotely,
+                );
             }
         });
     }

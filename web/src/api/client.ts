@@ -28,6 +28,40 @@ export class ApiError extends Error {
 
 const BASE = '/api/v1'
 
+// The session secret from sign-in. The cookie alone is not enough (browsers also send it to other
+// services on this host, such as txAdmin), so every request carries this too. localStorage is per
+// origin, so per port: reloads and new tabs keep working, and two panels never mix theirs up.
+const SECRET_KEY = 'kora_session_secret'
+// Only used when the browser refuses localStorage (some private modes): then it lasts for this page.
+let memorySecret: string | null = null
+let storageBroken = false
+
+export function sessionSecret(): string | null {
+  if (storageBroken) return memorySecret
+  try {
+    return window.localStorage.getItem(SECRET_KEY)
+  } catch {
+    return memorySecret
+  }
+}
+
+export function setSessionSecret(secret: string | null | undefined): void {
+  memorySecret = secret ?? null
+  try {
+    if (secret) window.localStorage.setItem(SECRET_KEY, secret)
+    else window.localStorage.removeItem(SECRET_KEY)
+    storageBroken = false
+  } catch {
+    storageBroken = true
+  }
+}
+
+/** A stream URL (EventSource cannot send headers): the secret goes in `?ks=`. */
+export function streamUrl(path: string): string {
+  const secret = sessionSecret()
+  return secret ? `${BASE}${path}?ks=${encodeURIComponent(secret)}` : `${BASE}${path}`
+}
+
 type UnauthorizedHandler = () => void
 let onUnauthorized: UnauthorizedHandler | null = null
 /** The app registers one handler that shows the "session expired" screen. */
@@ -65,6 +99,8 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   const method = opts.method ?? 'GET'
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (method !== 'GET') headers['X-Kora'] = '1'
+  const secret = sessionSecret()
+  if (secret) headers['X-Kora-Session'] = secret
   let body: BodyInit | undefined
   if (opts.raw) {
     headers['Content-Type'] = opts.raw.type
@@ -90,6 +126,10 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   }
   if (!res.ok) {
     const err = await readError(res)
+    // The session ended: forget its secret (in every tab, it is shared). Not for a failed sign-in (a stale
+    // link opened in a new tab must not sign the other tabs out), nor when another tab has signed in
+    // since this request left.
+    if (res.status === 401 && path !== '/session' && sessionSecret() === secret) setSessionSecret(null)
     if (err.unauthorized && !opts.quiet401) onUnauthorized?.()
     throw err
   }
@@ -106,14 +146,22 @@ const del = <R>(path: string, body?: unknown) => request<R>(path, { method: 'DEL
 
 const s = (name: string) => `/servers/${enc(name)}`
 
+async function signInWith(body: { token?: string; code?: string }): Promise<void> {
+  const r = await request<T.SessionCreated | undefined>('/session', { method: 'POST', body, quiet401: true })
+  setSessionSecret(r?.secret)
+}
+
 /** One function per row of the route table in docs/panel-plan.md section 2.1. */
 export const api = {
   meta: () => get<T.Meta>('/meta'),
   session: {
-    create: (token: string) => request<void>('/session', { method: 'POST', body: { token }, quiet401: true }),
+    /** Sign in with a pasted token (the launch token here, a user token from another computer). */
+    create: (token: string) => signInWith({ token }),
+    /** Sign in with the one-time code from a sign-in link (`/#code=...`). */
+    createByCode: (code: string) => signInWith({ code }),
     /** Sign in with no token: a Tailscale identity, when the panel is set up for it. */
-    createByIdentity: () => request<void>('/session', { method: 'POST', body: {}, quiet401: true }),
-    logout: () => post<void>('/session/logout'),
+    createByIdentity: () => signInWith({}),
+    logout: () => post<void>('/session/logout').finally(() => setSessionSecret(null)),
   },
   remote: {
     get: () => get<T.RemoteSettings>('/remote'),
@@ -125,6 +173,9 @@ export const api = {
     remove: (name: string) => del<void>(`/users/${enc(name)}`),
   },
   system: () => get<T.SystemInfo>('/system'),
+  panel: {
+    restart: () => post<{ restarting: boolean }>('/panel/restart'),
+  },
   servers: {
     list: () => get<{ servers: T.ServerSummary[] }>('/servers').then((r) => r.servers),
     get: (name: string) => get<T.ServerDetail>(s(name)),
@@ -140,7 +191,7 @@ export const api = {
     tail: (name: string, file: string, lines = 300) => get<{ file: string; lines: string[] }>(`${s(name)}/logs/${enc(file)}`, { lines }),
   },
   console: {
-    streamUrl: (name: string) => `${BASE}${s(name)}/console/stream`,
+    streamUrl: (name: string) => streamUrl(`${s(name)}/console/stream`),
     send: (name: string, command: string) => post<void>(`${s(name)}/console`, { command }),
     enable: (name: string) => put<void>(`${s(name)}/console/enabled`, { enabled: true }),
   },
@@ -227,9 +278,9 @@ export const api = {
   },
   jobs: {
     get: <R = unknown, E = unknown>(id: string) => get<T.Job<R, E>>(`/jobs/${enc(id)}`),
-    eventsUrl: (id: string) => `${BASE}/jobs/${enc(id)}/events`,
+    eventsUrl: (id: string) => streamUrl(`/jobs/${enc(id)}/events`),
   },
-  eventsUrl: () => `${BASE}/events`,
+  eventsUrl: () => streamUrl('/events'),
   metrics: {
     get: (name: string, range: T.MetricsRange) => get<T.Metrics>(`${s(name)}/metrics`, { range }),
   },

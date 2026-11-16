@@ -1,13 +1,15 @@
 //! The hub: other Kora panels ("nodes") and their servers, plus one combined fleet list.
 //!
-//! Node management (`nodes_list`, `node_add`, `node_remove`) and every `node_*` op are admin-only and
-//! local-only: a hub is run by the person at this panel, and a node's token is never shown again. A node
+//! Node management (`nodes_list`, `node_add`, `node_remove`), every `node_*` op and the fleet are
+//! admin-only and local-only (see `remote::roles`): a hub is run by the person at this panel, and a node's
+//! token is never shown again. A node
 //! is reached with a bearer token; its answers are read through [`RemoteBackend`], which only offers what
 //! the node's `/meta` says it can do.
 #![allow(clippy::unused_async)]
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -51,6 +53,46 @@ fn transport() -> Arc<dyn Transport> {
 }
 fn remote(n: &NodeConfig) -> RemoteBackend {
     RemoteBackend::new(&n.url, &n.token, transport())
+}
+
+// ---- the fleet cache ---------------------------------------------------------------------------------
+
+/// How long a fleet answer is reused. Each answer asks every node over the network.
+pub const FLEET_TTL: Duration = Duration::from_secs(5);
+
+/// The last fleet answer. Requests that arrive while one is being worked out wait for it instead of
+/// probing every node again. Dropped when a job starts or ends and when the node list changes.
+#[derive(Default)]
+pub struct FleetCache {
+    /// (generation, answer with its time). `clear` bumps the generation, so an answer that was being
+    /// worked out across a clear is not kept.
+    last: Mutex<(u64, Option<(Instant, Value)>)>,
+    busy: tokio::sync::Mutex<()>,
+}
+
+impl FleetCache {
+    fn lock(&self) -> std::sync::MutexGuard<'_, (u64, Option<(Instant, Value)>)> {
+        self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    pub fn clear(&self) {
+        let mut g = self.lock();
+        g.0 += 1;
+        g.1 = None;
+    }
+    /// A fresh answer, or the generation to store a new one under.
+    fn fresh(&self) -> Result<Value, u64> {
+        let g = self.lock();
+        match &g.1 {
+            Some((t, v)) if t.elapsed() < FLEET_TTL => Ok(v.clone()),
+            _ => Err(g.0),
+        }
+    }
+    fn store(&self, generation: u64, v: Value) {
+        let mut g = self.lock();
+        if g.0 == generation {
+            g.1 = Some((Instant::now(), v));
+        }
+    }
 }
 
 // ---- errors ------------------------------------------------------------------------------------------
@@ -207,8 +249,10 @@ pub struct NodeBody {
     token: String,
 }
 
-pub async fn node_add(Json(b): Json<NodeBody>) -> Result<Response, ApiError> {
-    blocking(move || {
+pub async fn node_add(State(st): State<AppState>, Json(b): Json<NodeBody>) -> Result<Response, ApiError> {
+    st.fleet_cache.clear();
+    let cache = st.fleet_cache.clone();
+    let r = blocking(move || {
         let name = b.name.trim().to_string();
         if name.is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
             return Err(ApiError::bad_request(
@@ -258,18 +302,22 @@ pub async fn node_add(Json(b): Json<NodeBody>) -> Result<Response, ApiError> {
         )
             .into_response())
     })
-    .await
+    .await;
+    cache.clear();
+    r
 }
 
-pub async fn node_remove(Path(id): Path<String>) -> Result<Response, ApiError> {
-    blocking(move || {
+pub async fn node_remove(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, ApiError> {
+    let r = blocking(move || {
         if store().remove(&id).map_err(ApiError::internal)? {
             Ok(StatusCode::NO_CONTENT.into_response())
         } else {
             Err(ApiError::not_found(format!("There is no node '{id}'.")))
         }
     })
-    .await
+    .await;
+    st.fleet_cache.clear();
+    r
 }
 
 pub async fn node_servers(Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
@@ -333,6 +381,22 @@ pub async fn node_server_control(
 }
 
 pub async fn fleet(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let cache = st.fleet_cache.clone();
+    if let Ok(v) = cache.fresh() {
+        return Ok(Json(v));
+    }
+    let _one_at_a_time = cache.busy.lock().await;
+    // Someone else may have just worked it out while we waited.
+    let generation = match cache.fresh() {
+        Ok(v) => return Ok(Json(v)),
+        Err(g) => g,
+    };
+    let v = fleet_now(st).await?;
+    cache.store(generation, v.clone());
+    Ok(Json(v))
+}
+
+async fn fleet_now(st: AppState) -> Result<Value, ApiError> {
     blocking(move || {
         let nodes = load_nodes()?;
         // Remote nodes are probed in parallel threads while the local list is read.
@@ -361,9 +425,7 @@ pub async fn fleet(State(st): State<AppState>) -> Result<Json<Value>, ApiError> 
             }
         }
         let partial = views.iter().any(|v| v["last_error"].is_string());
-        Ok(Json(
-            json!({ "servers": servers, "nodes": views, "partial": partial }),
-        ))
+        Ok(json!({ "servers": servers, "nodes": views, "partial": partial }))
     })
     .await
 }

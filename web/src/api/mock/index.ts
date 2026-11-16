@@ -298,7 +298,7 @@ installHubMock(route, startJob, Fail, () => servers)
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
-const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
+const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
 route('GET', '/remote', () => structuredClone(remoteState))
 route('PUT', '/remote', (_m, b) => {
   const u = b as T.RemoteSettingsUpdate
@@ -322,7 +322,14 @@ route('DELETE', '/users/{name}', (m) => {
   return undefined
 })
 route('POST', '/session/logout', () => undefined)
-route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora' }) satisfies T.SystemInfo)
+// One-time codes for sign-in links (the real panel keeps them ten minutes).
+const linkCodes = new Set<string>()
+route('POST', '/session/link', () => {
+  const code = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
+  linkCodes.add(code)
+  return { code, expires_in: 600 }
+})
+route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -780,6 +787,13 @@ route('POST', '/self-update', (_m, b) => {
     return { version: prefs.version }
   })
 })
+route('POST', '/panel/restart', () => {
+  if (beh.trouble) throw new Fail(409, 'conflict', 'This panel cannot restart itself. Run kora panel again.')
+  const p = prefs.version.split('.').map(Number)
+  p[2] = (p[2] ?? 0) + 1
+  prefs.version = p.join('.')
+  return { restarting: true }
+})
 route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.version : null, path: prefs.app ? 'C:\\Users\\sam\\AppData\\Local\\Kora\\kora.exe' : null, desktop_shortcut: prefs.desktopShortcut, supported: true }) satisfies T.AppStatus)
 route('PUT', '/app', (_m, b) => {
   if (beh.trouble) throw elevate('Installing the Kora app', ['app', 'install', '--yes', ...(b.desktop_shortcut ? [] : ['--no-desktop-shortcut'])])
@@ -846,13 +860,15 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   try {
     if (beh.auth === 'expired') throw new Fail(401, 'unauthorized', 'You are not signed in.')
     if (path === '/session' && method === 'POST') {
-      const token = (JSON.parse(String(init?.body ?? '{}')) as { token?: string }).token
-      if (!token || token === 'bad') {
+      // Like the real panel: a pasted token, or the one-time code from a sign-in link (`/#code=...`).
+      const b = JSON.parse(String(init?.body ?? '{}')) as { token?: string; code?: string }
+      const ok = b.code ? linkCodes.delete(b.code) : !!b.token && b.token !== 'bad'
+      if (!ok) {
         prefs.signedIn = false
         throw new Fail(401, 'unauthorized', 'That sign-in link is not valid or has expired.')
       }
       prefs.signedIn = true
-      return json(204, undefined)
+      return json(200, { ok: true, identity: { name: 'local', provider: 'local', role: 'admin' }, secret: 'mock-session-secret' } satisfies T.SessionCreated)
     }
     if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)

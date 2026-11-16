@@ -181,6 +181,71 @@ pub fn sudo_invocation(
     }
 }
 
+/// Environment for a `git` that runs as root. Git reads more than the repository from its config
+/// files: `core.hooksPath` and `core.fsmonitor` name programs it runs. Under `sudo` or the panel's
+/// helper `HOME` (and so `~/.gitconfig`) can be an ordinary user's, and a repository's own
+/// `.git/config` can be written by whoever owns the folder, so root git would run their programs.
+/// `isolate` (HOME may not be root's own): the system and global config files are not read at all.
+/// Always: hooks point at `/dev/null` and fsmonitor is off, overriding every config file. The
+/// user's `gh` sign-in still works for private forks: `credential` is the helper command that asks
+/// it (see [`sudo_invocation`]), passed the same way.
+pub fn root_git_env(isolate: bool, credential: Option<&str>) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if isolate {
+        env.push(("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()));
+        env.push(("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()));
+    }
+    let mut pairs = vec![("core.hooksPath".to_string(), "/dev/null".to_string()), ("core.fsmonitor".to_string(), "false".to_string())];
+    if let Some(c) = credential {
+        let key = "credential.https://github.com.helper".to_string();
+        pairs.push((key.clone(), String::new()));
+        pairs.push((key, c.to_string()));
+    }
+    env.push(("GIT_CONFIG_COUNT".to_string(), pairs.len().to_string()));
+    for (i, (k, v)) in pairs.into_iter().enumerate() {
+        env.push((format!("GIT_CONFIG_KEY_{i}"), k));
+        env.push((format!("GIT_CONFIG_VALUE_{i}"), v));
+    }
+    env
+}
+
+/// [`sudo_invocation`] for a process running as root (`root = Some(isolate)`, see [`root_git_env`]):
+/// every `git` it ends up running gets the root-safe configuration (replacing any `GIT_CONFIG_*`
+/// list, also the caller's own). `None` (not root): unchanged.
+pub fn harden_for_root(mut inv: Invocation, root: Option<bool>, user: Option<&crate::userhome::Account>, runuser: Option<&Path>) -> Invocation {
+    let Some(isolate) = root else { return inv };
+    if inv.program != "git" {
+        return inv;
+    }
+    inv.env.retain(|(k, _)| !k.starts_with("GIT_CONFIG_"));
+    let cred = match (user, runuser) {
+        (Some(u), Some(ru)) if u.uid != 0 && crate::userhome::valid_user_name(&u.name) => Some(format!("!{} -u {} -- gh auth git-credential", ru.to_string_lossy(), u.name)),
+        _ => None,
+    };
+    inv.env.extend(root_git_env(isolate, cred.as_deref()));
+    inv
+}
+
+/// Running as root? `Some(isolate)`: isolate the user-level git config when `HOME` may belong to
+/// someone else (under sudo / the helper, or a `HOME` root does not own). `None` otherwise.
+fn root_mode(sudo_user: bool) -> Option<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: geteuid has no preconditions.
+        if unsafe { libc::geteuid() } != 0 {
+            return None;
+        }
+        let home_is_roots = std::env::var_os("HOME").and_then(|h| std::fs::metadata(h).ok()).is_some_and(|m| m.uid() == 0);
+        Some(sudo_user || !home_is_roots)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = sudo_user;
+        None
+    }
+}
+
 /// The account behind `sudo`, `runuser` and the account's session bus (all `None` when not under sudo).
 fn sudo_context() -> (Option<crate::userhome::Account>, Option<PathBuf>, Option<PathBuf>) {
     if !cfg!(unix) {
@@ -196,6 +261,7 @@ fn sudo_context() -> (Option<crate::userhome::Account>, Option<PathBuf>, Option<
 pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::process::Command {
     let (user, runuser, bus) = sudo_context();
     let inv = sudo_invocation(program, args, cwd, user.as_ref(), runuser.as_deref(), std::env::var("GIT_CONFIG_COUNT").ok().as_deref(), bus.as_deref());
+    let inv = harden_for_root(inv, root_mode(user.is_some()), user.as_ref(), runuser.as_deref());
     let mut c = crate::sysexe::command(&inv.program);
     c.args(&inv.args);
     if let Some(d) = &inv.cwd {
@@ -2313,6 +2379,38 @@ mod tests {
         assert_eq!(i.env.len(), 5);
         // the caller's own git config list is left alone
         assert!(sudo_invocation("git", &["fetch"], None, Some(&u), Some(ru), Some("1"), None).env.is_empty());
+    }
+
+    fn env_of<'a>(i: &'a Invocation, k: &str) -> Option<&'a str> {
+        i.env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn git_as_root_never_reads_the_users_config_or_runs_hooks_but_keeps_their_gh_sign_in() {
+        let u = sam();
+        let ru = Path::new("/usr/sbin/runuser");
+        let fetch = sudo_invocation("git", &["fetch", "origin"], Some(Path::new("/srv/x")), Some(&u), Some(ru), None, None);
+        let i = harden_for_root(fetch, Some(true), Some(&u), Some(ru));
+        assert_eq!(env_of(&i, "GIT_CONFIG_GLOBAL"), Some("/dev/null"), "~/.gitconfig of the user is not read");
+        assert_eq!(env_of(&i, "GIT_CONFIG_NOSYSTEM"), Some("1"));
+        let pairs: Vec<(&str, &str)> = (0..env_of(&i, "GIT_CONFIG_COUNT").unwrap().parse::<usize>().unwrap())
+            .map(|n| (env_of(&i, &format!("GIT_CONFIG_KEY_{n}")).unwrap(), env_of(&i, &format!("GIT_CONFIG_VALUE_{n}")).unwrap()))
+            .collect();
+        assert!(pairs.contains(&("core.hooksPath", "/dev/null")) && pairs.contains(&("core.fsmonitor", "false")), "{pairs:?}");
+        assert!(pairs.contains(&("credential.https://github.com.helper", "!/usr/sbin/runuser -u sam -- gh auth git-credential")), "private forks still work: {pairs:?}");
+        assert_eq!(i.env.iter().filter(|(k, _)| k == "GIT_CONFIG_COUNT").count(), 1);
+        // The clone rewrite too, and even when the caller brought its own GIT_CONFIG_COUNT.
+        let clone = sudo_invocation("gh", &["repo", "clone", "sam/a", "/srv/x/a"], None, Some(&u), Some(ru), Some("3"), None);
+        let i = harden_for_root(clone, Some(true), Some(&u), Some(ru));
+        assert_eq!((i.program.as_str(), env_of(&i, "GIT_CONFIG_GLOBAL")), ("git", Some("/dev/null")));
+        // Root logged in directly (HOME is root's): its own config stays, hooks are still off.
+        let plain = harden_for_root(sudo_invocation("git", &["status"], None, None, None, None, None), Some(false), None, None);
+        assert!(env_of(&plain, "GIT_CONFIG_GLOBAL").is_none() && env_of(&plain, "GIT_CONFIG_KEY_0") == Some("core.hooksPath"));
+        // gh itself runs as the user (not root): untouched. Not root at all: untouched.
+        let gh = harden_for_root(sudo_invocation("gh", &["auth", "status"], None, Some(&u), Some(ru), None, None), Some(true), Some(&u), Some(ru));
+        assert!(env_of(&gh, "GIT_CONFIG_GLOBAL").is_none());
+        let me = harden_for_root(sudo_invocation("git", &["status"], None, None, None, None, None), None, None, None);
+        assert!(me.env.is_empty());
     }
 
     #[test]

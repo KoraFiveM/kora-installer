@@ -5,6 +5,7 @@
 //! webhook address is a secret and is never returned, only [`redact_url`]).
 
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -97,6 +98,9 @@ pub struct AlertSettings {
     pub discord: bool,
     /// A secret: POST JSON here. Never returned by the API.
     pub webhook_url: Option<String>,
+    /// The address was set over remote access. It was checked to be public then, and every send checks
+    /// again what the name points to now, so a name that later moves to an inside address is not used.
+    pub webhook_set_remotely: bool,
 }
 
 impl Default for AlertSettings {
@@ -109,6 +113,7 @@ impl Default for AlertSettings {
             ram_max_percent: 90.0,
             discord: true,
             webhook_url: None,
+            webhook_set_remotely: false,
         }
     }
 }
@@ -142,11 +147,15 @@ pub fn save_settings(dir: &Path, s: &AlertSettings) -> Result<(), String> {
         .map_err(|e| format!("Could not save the alert settings: {e}"))
 }
 
-/// Only `http(s)://host...`, no spaces or control characters.
+/// Only `http(s)://host...`, no spaces, control characters or backslashes.
 pub fn validate_url(url: &str) -> Result<(), String> {
     let bad = |m: &str| Err(format!("That is not a usable web address ({m})."));
     if url.len() > 2048 || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return bad("it has spaces or is too long");
+    }
+    // Web address rules read `\` as `/`, so `http://a\@b/` goes to `a`, while a simple reading sees `b`.
+    if url.contains('\\') {
+        return bad("it has a backslash");
     }
     let Some(rest) = url
         .strip_prefix("https://")
@@ -159,7 +168,101 @@ pub fn validate_url(url: &str) -> Result<(), String> {
     if host.is_empty() || host.starts_with(':') {
         return bad("the host is missing");
     }
+    match url::Url::parse(url) {
+        Ok(u) if u.host().is_some() => Ok(()),
+        _ => bad("it could not be read"),
+    }
+}
+
+/// Not reachable from the internet: this computer, private and shared (CGNAT, Tailscale) ranges,
+/// link-local, multicast, reserved and "any" addresses, and IPv6 forms that carry such an IPv4 address
+/// (mapped, compatible, NAT64, 6to4) or hide one (Teredo).
+pub fn internal_ip(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || o[0] == 0
+                || o[0] >= 240
+                || (o[0] == 100 && (o[1] & 0xc0) == 64)
+                || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+        }
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            let v4_at = |i: usize| {
+                IpAddr::V4(Ipv4Addr::new(
+                    (s[i] >> 8) as u8,
+                    s[i] as u8,
+                    (s[i + 1] >> 8) as u8,
+                    s[i + 1] as u8,
+                ))
+            };
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00
+                || (s[0] & 0xffc0) == 0xfe80
+                || (s[0] & 0xffc0) == 0xfec0
+                // ::a.b.c.d (IPv4-compatible)
+                || (s[..6].iter().all(|x| *x == 0) && internal_ip(v4_at(6)))
+                // 64:ff9b::/96 (NAT64) carries the IPv4 address at the end; 64:ff9b:1::/48 is local NAT64.
+                || (s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] && internal_ip(v4_at(6)))
+                || (s[0] == 0x64 && s[1] == 0xff9b && s[2] == 1)
+                // 2002::/16 (6to4) carries it right after the prefix.
+                || (s[0] == 0x2002 && internal_ip(v4_at(1)))
+                // 2001::/32 (Teredo) hides it, so none of it is trusted.
+                || (s[0] == 0x2001 && s[1] == 0)
+        }
+    }
+}
+
+/// Looks a host name up: `(host, port)` to addresses. Tests pass their own.
+pub type Lookup<'a> = &'a dyn Fn(&str, u16) -> std::io::Result<Vec<SocketAddr>>;
+
+const NOT_PUBLIC: &str = "From another computer, the alert address must be a public internet address, not this computer or \
+its private network. Set it on the computer that runs Kora if you need a local address.";
+
+/// Check a webhook address set over remote access: its host must only resolve to public addresses. The
+/// address is read by the same rules the sender uses (`url`), so the host checked is the host contacted.
+pub fn public_webhook(url: &str, lookup: Lookup<'_>) -> Result<(), String> {
+    validate_url(url)?;
+    let u = url::Url::parse(url).map_err(|_| "That is not a usable web address.".to_string())?;
+    if !matches!(u.scheme(), "http" | "https") {
+        return Err("That is not a usable web address.".into());
+    }
+    let port = u.port_or_known_default().ok_or("That is not a usable web address.")?;
+    let addrs = match u.host() {
+        Some(url::Host::Ipv4(v4)) => vec![SocketAddr::new(IpAddr::V4(v4), port)],
+        Some(url::Host::Ipv6(v6)) => vec![SocketAddr::new(IpAddr::V6(v6), port)],
+        Some(url::Host::Domain(d)) => {
+            let looked = lookup(d, port).map_err(|_| format!("Could not look up '{d}'. Check the address."))?;
+            if looked.is_empty() {
+                return Err(format!("Could not look up '{d}'. Check the address."));
+            }
+            looked
+        }
+        None => return Err("That is not a usable web address.".into()),
+    };
+    if addrs.iter().any(|a| internal_ip(a.ip())) {
+        return Err(NOT_PUBLIC.into());
+    }
     Ok(())
+}
+
+/// Resolve `netloc` (`host:port`) for a send to a remotely set address: every address must be public,
+/// and the connection is made to exactly these addresses (no second lookup an attacker could change).
+pub fn public_addrs(netloc: &str, lookup: &dyn Fn(&str) -> std::io::Result<Vec<SocketAddr>>) -> std::io::Result<Vec<SocketAddr>> {
+    let addrs = lookup(netloc)?;
+    if addrs.is_empty() || addrs.iter().any(|a| internal_ip(a.ip())) {
+        return Err(std::io::Error::other("the alert address now points inside the network"));
+    }
+    Ok(addrs)
 }
 
 /// `https://host/***`: safe to show and log (no credentials, path or query).
@@ -349,14 +452,33 @@ pub fn evaluate(
 // ------------------------------------------------------------------ generic webhook
 
 /// POST `body` as JSON to a user-chosen address. Bounded time, no redirects; the address is never
-/// part of an error message.
-pub fn post_json(url: &str, body: &Value) -> Result<(), String> {
+/// part of an error message. With `public_only` (the address was set over remote access) the name is
+/// looked up again now and the send is refused if any address it gives is internal.
+pub fn post_json(url: &str, body: &Value, public_only: bool) -> Result<(), String> {
+    if public_only {
+        post_via(url, body, |n: &str| {
+            public_addrs(n, &|n| n.to_socket_addrs().map(Iterator::collect))
+        })
+    } else {
+        post_via(url, body, |n: &str| n.to_socket_addrs().map(Iterator::collect))
+    }
+}
+
+/// [`post_json`] with the lookup the connection uses (tests point a name at a local listener).
+pub(crate) fn post_via(
+    url: &str,
+    body: &Value,
+    resolve: impl Fn(&str) -> std::io::Result<Vec<SocketAddr>> + Send + Sync + 'static,
+) -> Result<(), String> {
     validate_url(url)?;
     let t = Duration::from_secs(5);
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
         .timeout(t)
         .timeout_connect(t)
+        // A proxy would be looked up instead of the address, skipping the check above.
+        .try_proxy_from_env(false)
+        .resolver(resolve)
         .build();
     match agent
         .post(url)
@@ -598,5 +720,155 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o077, 0, "alerts.json must be owner-only");
         }
+    }
+
+    fn dns(host: &str, port: u16) -> std::io::Result<Vec<SocketAddr>> {
+        let ip: IpAddr = match host {
+            "hooks.example.com" => "93.184.216.34".parse().unwrap(),
+            "sneaky.example.com" => "192.168.1.10".parse().unwrap(),
+            "ts.example.com" => "100.101.102.103".parse().unwrap(),
+            "localhost" => "127.0.0.1".parse().unwrap(),
+            _ => return Err(std::io::Error::other("no such host")),
+        };
+        Ok(vec![SocketAddr::new(ip, port)])
+    }
+
+    #[test]
+    fn internal_ranges() {
+        for ip in [
+            "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.1", "169.254.169.254",
+            "100.64.0.1", "100.127.255.255", "0.0.0.0", "0.1.2.3", "255.255.255.255", "224.0.0.1",
+            "198.18.0.1", "198.19.255.255", "240.0.0.1", "192.0.0.8",
+            "::1", "::", "fd7a:115c:a1e0::1", "fc00::1", "fe80::1", "fec0::1", "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1", "ff02::1", "::127.0.0.1", "::10.0.0.1", "64:ff9b::7f00:1",
+            "64:ff9b::a9fe:a9fe", "64:ff9b:1::1", "2002:7f00:1::", "2002:c0a8:101::1", "2001:0:4136:e378::1",
+        ] {
+            assert!(internal_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "93.184.216.34", "1.1.1.1", "100.128.0.1", "172.32.0.1", "198.20.0.1", "2606:4700::1111",
+            "64:ff9b::101:101", "2002:101:101::1", "::1.1.1.1",
+        ] {
+            assert!(!internal_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn webhook_hosts_must_be_public() {
+        assert!(public_webhook("https://hooks.example.com/x?y=1", &dns).is_ok());
+        assert!(public_webhook("http://user:pw@hooks.example.com:8080/x", &dns).is_ok());
+        assert!(public_webhook("https://93.184.216.34/hook", &dns).is_ok());
+        for bad in [
+            "http://127.0.0.1:47120/api/v1/servers",
+            "http://localhost/",
+            "https://sneaky.example.com/hook",
+            "https://ts.example.com/hook",
+            "http://[::1]:8080/",
+            "http://[64:ff9b::7f00:1]/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://x@10.0.0.5/",
+            // Read the way the sender reads them: these are 127.0.0.1.
+            "http://0x7f000001/",
+            "http://127.1/",
+            "http://hooks.example.com@127.0.0.1/",
+        ] {
+            let e = public_webhook(bad, &dns).unwrap_err();
+            assert!(e.contains("public internet address"), "{bad}: {e}");
+        }
+        // `\` counts as `/` for the sender, so this would go to 127.0.0.1.
+        let e = public_webhook("http://127.0.0.1:8080\\@hooks.example.com/", &dns).unwrap_err();
+        assert!(e.contains("backslash"), "{e}");
+        assert!(public_webhook("https://nowhere.invalid/", &dns).unwrap_err().contains("Could not look up"));
+        assert!(public_webhook("https://hooks.example.com:x/", &dns).is_err());
+        assert!(public_webhook("ftp://hooks.example.com/", &dns).is_err());
+    }
+
+    #[test]
+    fn backslashes_are_refused_everywhere() {
+        assert!(validate_url("http://127.0.0.1:8080\\@hooks.example.com/").is_err());
+        assert!(apply_update(&AlertSettings::default(), &json!({"webhook_url": "http://a\\@b/"})).is_err());
+        assert!(validate_url("http://192.168.1.50/hook").is_ok(), "a local address is fine here");
+    }
+
+    #[test]
+    fn sends_to_remote_set_addresses_check_the_lookup_each_time() {
+        let to = |ips: &[&str]| -> Vec<SocketAddr> {
+            ips.iter().map(|i| SocketAddr::new(i.parse().unwrap(), 80)).collect()
+        };
+        let public = to(&["93.184.216.34"]);
+        assert_eq!(public_addrs("h:80", &|_| Ok(public.clone())).unwrap(), public);
+        // The name moved to an inside address since it was saved (DNS rebinding), or one of several is inside.
+        assert!(public_addrs("h:80", &|_| Ok(to(&["127.0.0.1"]))).is_err());
+        assert!(public_addrs("h:80", &|_| Ok(to(&["93.184.216.34", "10.0.0.1"]))).is_err());
+        assert!(public_addrs("h:80", &|_| Ok(vec![])).is_err());
+        // The real send: refused before any connection.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        let port = l.local_addr().unwrap().port();
+        let e = post_json(&format!("http://127.0.0.1:{port}/x"), &json!({}), true).unwrap_err();
+        assert!(e.contains("Could not reach"), "{e}");
+        assert!(l.accept().is_err(), "nothing connected");
+        // Set on this computer: the same address is used as before.
+        let t = std::thread::spawn(move || {
+            use std::io::Write;
+            l.set_nonblocking(false).unwrap();
+            let (mut c, _) = l.accept().unwrap();
+            let _ = read_request(&mut c);
+            let _ = c.write_all(b"HTTP/1.0 204 No Content\r\n\r\n");
+        });
+        post_json(&format!("http://127.0.0.1:{port}/x"), &json!({}), false).unwrap();
+        t.join().unwrap();
+    }
+
+    /// Read one whole HTTP request (headers and body) before the test server answers: closing with
+    /// unread data resets the connection, and on Windows the body often arrives in a second packet.
+    fn read_request(c: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        let _ = c.set_nonblocking(false);
+        let _ = c.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut data = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let text = String::from_utf8_lossy(&data).into_owned();
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let len = head
+                    .lines()
+                    .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                    .unwrap_or(0);
+                if body.len() >= len {
+                    return text;
+                }
+            }
+            match c.read(&mut buf) {
+                Ok(0) | Err(_) => return text,
+                Ok(n) => data.extend_from_slice(&buf[..n]),
+            }
+        }
+    }
+
+    #[test]
+    fn the_connection_goes_to_the_checked_addresses() {
+        use std::io::Write;
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let t = std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let req = read_request(&mut c);
+            let _ = c.write_all(b"HTTP/1.0 204 No Content\r\n\r\n");
+            req
+        });
+        // A name nobody can look up still reaches the listener: only the given lookup was used.
+        post_via("http://hook.invalid/p", &json!({}), move |n: &str| {
+            assert_eq!(n, "hook.invalid:80");
+            Ok(vec![addr])
+        })
+        .unwrap();
+        assert!(t.join().unwrap().starts_with("POST /p "));
+    }
+
+    #[test]
+    fn the_remote_flag_defaults_to_off_for_old_files() {
+        let s: AlertSettings = serde_json::from_str(r#"{"webhook_url": "http://10.0.0.1/"}"#).unwrap();
+        assert!(!s.webhook_set_remotely);
     }
 }

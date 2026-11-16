@@ -15,10 +15,32 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { ResourceProgress } from '@/components/JobProgress'
+import { restartPanel } from '@/lib/restart'
+
+function RestartNow({ version }: { version?: string }) {
+  const [state, setState] = useState<'idle' | 'restarting' | 'timeout'>('idle')
+  const [err, setErr] = useState<unknown>(null)
+  const go = async () => {
+    setErr(null); setState('restarting')
+    try {
+      if (await restartPanel()) window.location.reload()
+      else setState('timeout')
+    } catch (e) { setErr(e); setState('idle') }
+  }
+  return (
+    <div className="space-y-3">
+      <Alert tone="success">Updated{version ? ` to ${version}` : ''}.</Alert>
+      {state === 'restarting' ? <p className="text-sm">Restarting…</p> : <Button onClick={() => void go()}>Restart now</Button>}
+      {state === 'timeout' && <Alert tone="warning">The panel did not come back. Run <code>kora panel</code> on the server.</Alert>}
+      <ErrorNotice error={err} />
+    </div>
+  )
+}
 
 function SelfUpdate() {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['self-update'], queryFn: api.selfUpdate.check })
+  const sys = useQuery({ queryKey: ['system'], queryFn: api.system })
   const [version, setVersion] = useState('')
   const [job, setJob] = useState<string | null>(null)
   const [err, setErr] = useState<unknown>(null)
@@ -42,7 +64,9 @@ function SelfUpdate() {
         </div>
         {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
         {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
-        {run.phase === 'done' && <Alert tone="success">Updated. Restart the panel (run kora panel again) to use the new version.</Alert>}
+        {run.phase === 'done' && (sys.data?.can_restart
+          ? <RestartNow version={q.data?.current} />
+          : <Alert tone="success">Updated. This panel runs in a terminal window: stop it (Ctrl+C) and run <code>kora panel</code> again to use the new version.</Alert>)}
         {run.phase === 'failed' && <ErrorNotice error={run.error} />}
         <ErrorNotice error={err ?? q.error} />
       </CardContent>

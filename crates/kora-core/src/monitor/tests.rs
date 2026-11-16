@@ -401,6 +401,7 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
     alerts::post_json(
         &format!("http://127.0.0.1:{port}/secret-path"),
         &alerts::webhook_payload(&a),
+        false,
     )
     .unwrap();
     let req = t.join().unwrap();
@@ -411,18 +412,16 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
             && req.contains(r#""severity":"danger""#),
         "{req}"
     );
-    let closed = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    // Port 0 never answers. (A port freed by an earlier listener could be taken by another test
+    // running at the same time, and then answer.)
     let e = alerts::post_json(
-        &format!("http://127.0.0.1:{closed}/secret-path"),
+        "http://127.0.0.1:0/secret-path",
         &serde_json::json!({}),
+        false,
     )
     .unwrap_err();
     assert!(
-        !e.contains("secret-path") && !e.contains(&closed.to_string()),
+        e.contains("Could not reach") && !e.contains("secret-path") && !e.contains("127.0.0.1"),
         "{e}"
     );
 }

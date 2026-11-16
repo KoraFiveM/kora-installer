@@ -101,6 +101,19 @@ fn replaces_atomically_with_backup_on_both_flows() {
 }
 
 #[test]
+#[cfg(unix)]
+fn setuid_and_setgid_bits_are_not_carried_over() {
+    use std::os::unix::fs::PermissionsExt;
+    let m = Mock::start();
+    let rel = m.publish(b"NEW", b"NEW", "kora-linux-x86_64");
+    let (_d, t) = setup(b"OLD");
+    std::fs::set_permissions(&t, std::fs::Permissions::from_mode(0o6755)).unwrap();
+    assert_eq!(std::fs::metadata(&t).unwrap().permissions().mode() & 0o7777, 0o6755, "test setup");
+    apply(&m.src(), &rel, "kora-linux-x86_64", &t, &RealFs, Flow::Unix).unwrap();
+    assert_eq!(std::fs::metadata(&t).unwrap().permissions().mode() & 0o7777, 0o755, "plain rwx bits kept, setuid/setgid dropped");
+}
+
+#[test]
 fn a_second_update_replaces_the_old_backup() {
     let m = Mock::start();
     let rel = m.publish(b"V2", b"V2", "kora-linux-x86_64");
@@ -208,7 +221,10 @@ fn rels(tags: &[(&str, bool)]) -> Vec<Release> {
 #[test]
 fn decide_never_downgrades_without_version() {
     let r = rels(&[("v0.2.2-rc1", false), ("v0.2.1", false)]);
-    assert!(matches!(decide(&v("0.2.1"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.2-rc1"));
+    // a stable build is not moved onto a release candidate; a pre-release build is
+    assert!(matches!(decide(&v("0.2.1"), &r, None).unwrap(), Decision::UpToDate { latest } if latest == v("0.2.1")));
+    assert!(matches!(decide(&v("0.2.0"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.1"));
+    assert!(matches!(decide(&v("0.2.1-rc1"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.2-rc1"));
     assert!(matches!(decide(&v("0.2.2-rc1"), &r, None).unwrap(), Decision::UpToDate { .. }));
     assert!(matches!(decide(&v("0.3.0"), &r, None).unwrap(), Decision::UpToDate { .. }));
     // a stable build is newer than its own release candidate
@@ -225,17 +241,29 @@ fn explicit_version_may_go_either_way() {
     assert!(matches!(decide(&v("0.2.2"), &r, Some("v0.2.0")).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.0"));
     assert!(matches!(decide(&v("0.2.2"), &r, Some("0.2.2")).unwrap(), Decision::Update(_)));
     assert!(decide(&v("0.2.2"), &r, Some("v7.0.0")).is_err());
+    let pre = rels(&[("v0.3.0-rc1", false), ("v0.2.2", false)]);
+    assert!(matches!(decide(&v("0.2.2"), &pre, Some("v0.3.0-rc1")).unwrap(), Decision::Update(x) if x.tag_name == "v0.3.0-rc1"));
+}
+
+#[test]
+fn a_stable_release_behind_many_pre_releases_is_still_found() {
+    assert!(releases_url("https://api.github.com").ends_with("/releases?per_page=30"));
+    let mut list: Vec<(String, bool)> = (1..=12).map(|i| (format!("v0.4.0-rc{i}"), false)).collect();
+    list.push(("v0.3.5".into(), false));
+    let r = rels(&list.iter().map(|(t, p)| (t.as_str(), *p)).collect::<Vec<_>>());
+    assert!(matches!(decide(&v("0.3.0"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.3.5"));
 }
 
 #[test]
 fn fetches_and_picks_from_the_releases_endpoint() {
     let m = Mock::start();
     m.put(
-        "/repos/KoraFiveM/kora-installer/releases?per_page=10",
+        "/repos/KoraFiveM/kora-installer/releases?per_page=30",
         br#"[{"tag_name":"v0.2.2-rc1","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.2.1","assets":[]}]"#,
     );
     let r = fetch_releases(&m.src()).unwrap();
-    assert!(matches!(decide(&v("0.2.1"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.2-rc1"));
+    assert!(matches!(decide(&v("0.2.0"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.1"));
+    assert!(matches!(decide(&v("0.2.1-beta"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.2-rc1"));
 }
 
 #[test]
@@ -293,15 +321,19 @@ fn write_probe() {
 #[test]
 fn refresh_writes_the_cache_and_notice_follows() {
     let m = Mock::start();
-    m.put("/repos/KoraFiveM/kora-installer/releases?per_page=10", br#"[{"tag_name":"v7.0.0-rc1","assets":[]}]"#);
+    // This build is stable, so the release candidate listed first is not offered.
+    m.put(
+        "/repos/KoraFiveM/kora-installer/releases?per_page=30",
+        br#"[{"tag_name":"v7.0.0-rc1","prerelease":true,"assets":[]},{"tag_name":"v6.0.0","assets":[]}]"#,
+    );
     let d = tempfile::tempdir().unwrap();
     let cache = d.path().join("c").join("update-check.json");
     let src = m.src();
     let got = update_check::refresh(&src, &src.net, &cache, 123).unwrap();
-    assert_eq!(got.to_string(), "7.0.0-rc1");
+    assert_eq!(got.to_string(), "6.0.0");
     assert_eq!(update_check::cached_latest_at(&cache), Some(got.clone()));
     let line = update_check::newer(&running_version(), update_check::cached_latest_at(&cache)).map(|v| update_check::notice_text(&v));
-    assert_eq!(line.as_deref(), Some("Kora v7.0.0-rc1 is available - run: kora self-update"));
+    assert_eq!(line.as_deref(), Some("Kora v6.0.0 is available - run: kora self-update"));
 }
 
 #[test]

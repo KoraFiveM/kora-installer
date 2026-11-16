@@ -1,4 +1,6 @@
 #!/bin/bash
+# The checks pass shell code in single quotes to `eval` on purpose (expanded there, not here).
+# shellcheck disable=SC2016
 # Tests scripts/install.sh against a local HTTP server that serves a fake release layout.
 # Usage: scripts/test-install.sh   (needs python3; runs entirely in a temp dir, no root, no network)
 set -u
@@ -152,9 +154,12 @@ else
   printf 'skip - default-folder test (running as root or /usr/local/bin is writable)\n'
 fi
 
-# 10. default lookup: newest published release (pre-releases included), explicit KORA_VERSION
-mkdir -p "$WORK/api/repos/KoraFiveM/kora-installer" "$WORK/api/KoraFiveM/kora-installer/releases/download/v0.2.0-rc1"
-cp "$WORK/rel/"kora-linux-x86_64* "$WORK/api/KoraFiveM/kora-installer/releases/download/v0.2.0-rc1/"
+# 10. default lookup: newest stable release; KORA_PRERELEASE=1 allows pre-releases; explicit KORA_VERSION
+mkdir -p "$WORK/api/repos/KoraFiveM/kora-installer"
+for v in v0.2.0-rc1 v0.1.0; do
+  mkdir -p "$WORK/api/KoraFiveM/kora-installer/releases/download/$v"
+  cp "$WORK/rel/"kora-linux-x86_64* "$WORK/api/KoraFiveM/kora-installer/releases/download/$v/"
+done
 cat > "$WORK/api/repos/KoraFiveM/kora-installer/releases" <<'JSON'
 [
   {
@@ -178,8 +183,8 @@ cat > "$WORK/api/repos/KoraFiveM/kora-installer/releases" <<'JSON'
   {
     "id": 1,
     "tag_name": "v0.1.0",
-    "draft": false,
-    "prerelease": false
+    "prerelease": false,
+    "draft": false
   }
 ]
 JSON
@@ -187,9 +192,13 @@ JSON
 (cd "$WORK/api" && exec python3 -m http.server "$((PORT + 2))" --bind 127.0.0.1 >/dev/null 2>&1) &
 API_PID=$!
 sleep 0.5
+API="http://127.0.0.1:$((PORT + 2))"
 D="$WORK/t10/bin"
-check "default lookup installs the newest non-draft pre-release" run KORA_API_BASE="http://127.0.0.1:$((PORT + 2))" KORA_DOWNLOAD_BASE="http://127.0.0.1:$((PORT + 2))" KORA_INSTALL_DIR="$D"
-check "  ... from v0.2.0-rc1 (draft v0.3.0 skipped)" out_has "releases/download/v0.2.0-rc1"
+check "default lookup installs the newest stable release" run KORA_API_BASE="$API" KORA_DOWNLOAD_BASE="$API" KORA_INSTALL_DIR="$D"
+check "  ... v0.1.0 (draft v0.3.0 and pre-release v0.2.0-rc1 skipped; field order does not matter)" out_has "releases/download/v0.1.0"
+D="$WORK/t10p/bin"
+check "KORA_PRERELEASE=1 installs the newest non-draft release" run KORA_PRERELEASE=1 KORA_API_BASE="$API" KORA_DOWNLOAD_BASE="$API" KORA_INSTALL_DIR="$D"
+check "  ... v0.2.0-rc1 (draft v0.3.0 skipped)" out_has "releases/download/v0.2.0-rc1"
 D="$WORK/t10b/bin"
 check "KORA_VERSION without v is accepted" run KORA_VERSION=0.2.0-rc1 KORA_DOWNLOAD_BASE="http://127.0.0.1:$((PORT + 2))" KORA_INSTALL_DIR="$D"
 check "  ... uses that tag" out_has "releases/download/v0.2.0-rc1"
@@ -197,6 +206,95 @@ check "bad KORA_VERSION refused" run_fail KORA_VERSION='v1/../x' KORA_INSTALL_DI
 check "insecure KORA_API_BASE refused" run_fail KORA_API_BASE="http://evil.example" KORA_INSTALL_DIR="$WORK/t10d"
 check "insecure KORA_DOWNLOAD_BASE refused" run_fail KORA_DOWNLOAD_BASE="http://evil.example" KORA_INSTALL_DIR="$WORK/t10d"
 kill "$API_PID" 2>/dev/null
+
+# 11. https stays https. A fake curl records its arguments; a fake wget (curl hidden) answers an https
+# request with a redirect to plain http, which must be refused before anything is fetched from it.
+mkdir -p "$WORK/fakecurl" "$WORK/nocurl" "$WORK/fakewget" "$WORK/realwget"
+cat > "$WORK/fakecurl/curl" <<'FAKE'
+#!/bin/sh
+printf '%s\n' "$*" >> "$KORA_TEST_LOG"
+exit 22
+FAKE
+chmod +x "$WORK/fakecurl/curl"
+LOG="$WORK/t11.log"
+check "https base: curl fails cleanly" run_fail PATH="$WORK/fakecurl:$PATH" KORA_TEST_LOG="$LOG" KORA_RELEASE_BASE="https://example.invalid/rel" KORA_INSTALL_DIR="$WORK/t11"
+check "  ... curl is told to use and follow https only" grep -q -- "--proto =https --proto-redir =https" "$LOG"
+check "  ... and never allows http" eval '! grep -q "=http\b\|=https,http" "$LOG"'
+# A PATH with every usual tool except curl and wget; a fake or the real wget is put in front of it.
+for dir in /usr/local/bin /usr/bin /bin; do
+  for t in "$dir"/*; do
+    n="${t##*/}"; [ "$n" = curl ] || [ "$n" = wget ] || [ -e "$WORK/nocurl/$n" ] || ln -s "$t" "$WORK/nocurl/$n"
+  done
+done
+cat > "$WORK/fakewget/wget" <<'FAKE'
+#!/bin/sh
+[ "$1" = "--help" ] && { echo "  --max-redirect=NUMBER  maximum redirections allowed"; exit 0; }
+for a in "$@"; do url="$a"; done
+printf '%s\n' "$url" >> "$KORA_TEST_LOG"
+case "$url" in
+  https://example.invalid/*) printf '  HTTP/1.1 302 Found\r\n  Location: http://example.invalid/evil\r\n' >&2; exit 8 ;;
+esac
+exit 8
+FAKE
+chmod +x "$WORK/fakewget/wget"
+LOG="$WORK/t11w.log"
+check "wget: a redirect from https to http fails the install" run_fail PATH="$WORK/fakewget:$WORK/nocurl" KORA_TEST_LOG="$LOG" KORA_RELEASE_BASE="https://example.invalid/rel" KORA_INSTALL_DIR="$WORK/t11w"
+check "  ... with a clear message" out_has "refusing a redirect to http://example.invalid/evil"
+check "  ... and the http address is never requested" eval '! grep -q "^http:" "$LOG"'
+check "  ... nothing installed" test ! -e "$WORK/t11w/kora"
+# The success path: an https download that GitHub redirects (to another https host) is followed
+# hop by hop and installs. The fake serves the local fake release from a file:// copy.
+mkdir -p "$WORK/redirwget" "$WORK/busywget"
+cat > "$WORK/redirwget/wget" <<FAKE
+#!/bin/sh
+[ "\$1" = "--help" ] && { echo "  --max-redirect=NUMBER  maximum redirections allowed"; exit 0; }
+out=""; prev=""
+for a in "\$@"; do [ "\$prev" = "-O" ] && out="\$a"; prev="\$a"; url="\$a"; done
+printf '%s\n' "\$*" >> "\$KORA_TEST_LOG"
+case "\$url" in
+  https://example.invalid/rel/*) printf '  HTTP/1.1 302 Found\r\n  Location: https://cdn.example.invalid/%s\r\n' "\${url##*/}" >&2; exit 8 ;;
+  https://cdn.example.invalid/*) cp "$WORK/rel/\${url##*/}" "\$out" && printf '  HTTP/1.1 200 OK\r\n' >&2; exit 0 ;;
+esac
+exit 8
+FAKE
+chmod +x "$WORK/redirwget/wget"
+LOG="$WORK/t11r.log"
+check "wget: an https redirect to another https host installs" run PATH="$WORK/redirwget:$WORK/nocurl" KORA_TEST_LOG="$LOG" KORA_RELEASE_BASE="https://example.invalid/rel" KORA_INSTALL_DIR="$WORK/t11r/bin" KORA_NO_LAUNCH=1
+check "  ... binary installed and verified" test "$(sha256sum "$WORK/t11r/bin/kora" 2>/dev/null | cut -d ' ' -f 1)" = "$GOOD"
+check "  ... one hop at a time (redirects never left to wget)" eval 'grep -q -- "--max-redirect=0 .*https://cdn.example.invalid/kora-linux-x86_64$" "$LOG"'
+# A wget without --max-redirect (BusyBox): https is used as it is, plain http is refused outright.
+cat > "$WORK/busywget/wget" <<FAKE
+#!/bin/sh
+[ "\$1" = "--help" ] && { echo "Usage: wget [-cqS] [-O FILE] URL..."; exit 0; }
+out=""; prev=""
+for a in "\$@"; do [ "\$prev" = "-O" ] && out="\$a"; prev="\$a"; url="\$a"; done
+printf '%s\n' "\$*" >> "\$KORA_TEST_LOG"
+case "\$url" in
+  *--max-redirect*) exit 1 ;;
+  https://example.invalid/rel/*) cp "$WORK/rel/\${url##*/}" "\$out"; exit 0 ;;
+esac
+exit 1
+FAKE
+chmod +x "$WORK/busywget/wget"
+LOG="$WORK/t11b.log"
+check "BusyBox-style wget: https installs" run PATH="$WORK/busywget:$WORK/nocurl" KORA_TEST_LOG="$LOG" KORA_RELEASE_BASE="https://example.invalid/rel" KORA_INSTALL_DIR="$WORK/t11b/bin" KORA_NO_LAUNCH=1
+check "  ... binary installed" test -x "$WORK/t11b/bin/kora"
+check "  ... without the option it does not know" eval '! grep -q -- "--max-redirect" "$LOG"'
+check "BusyBox-style wget: a plain http address is refused" run_fail PATH="$WORK/busywget:$WORK/nocurl" KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$WORK/t11c/bin" KORA_NO_LAUNCH=1
+check "  ... with a clear message" out_has "only used for https addresses"
+check "  ... nothing installed" test ! -e "$WORK/t11c/bin/kora"
+if command -v wget >/dev/null 2>&1; then
+  ln -s "$(command -v wget)" "$WORK/realwget/wget"
+  check "wget (no curl) still installs from the localhost test address" run PATH="$WORK/realwget:$WORK/nocurl" KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$WORK/t11x/bin" KORA_NO_LAUNCH=1
+  check "  ... binary installed" test -x "$WORK/t11x/bin/kora"
+else
+  printf 'skip - real wget test (wget is not installed)\n'
+fi
+
+# 12. a download cut short runs nothing (the body is one function called on the last line)
+for cut in 2000 4000 $(( $(wc -c < "$SCRIPT") - 3 )); do
+  check "script cut at $cut bytes does nothing" eval "head -c $cut '$SCRIPT' | env HOME='$WORK/home' KORA_RELEASE_BASE='$BASE' KORA_INSTALL_DIR='$WORK/t12/bin' sh > '$WORK/out' 2>&1; ! out_has Downloading && test ! -e '$WORK/t12'"
+done
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all install.sh tests passed"; else echo "$fails install.sh test(s) FAILED"; exit 1; fi

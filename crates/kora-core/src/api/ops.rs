@@ -100,6 +100,9 @@ pub enum Op {
     UserAdd,
     UserRemove,
     SessionLogout,
+    SessionLink,
+    /// Restart the background panel (after a self-update). Local admin only.
+    PanelRestart,
     CheckCfx,
     AssetsList,
     AssetInspect,
@@ -187,6 +190,8 @@ impl Op {
         Op::UserAdd,
         Op::UserRemove,
         Op::SessionLogout,
+        Op::SessionLink,
+        Op::PanelRestart,
         Op::CheckCfx,
         Op::AssetsList,
         Op::AssetInspect,
@@ -275,6 +280,8 @@ impl Op {
             Op::UserAdd => "user_add",
             Op::UserRemove => "user_remove",
             Op::SessionLogout => "session_logout",
+            Op::SessionLink => "session_link",
+            Op::PanelRestart => "panel_restart",
             Op::CheckCfx => "check_cfx",
             Op::AssetsList => "assets_list",
             Op::AssetInspect => "asset_inspect",
@@ -364,6 +371,10 @@ impl Op {
             Op::UserAdd => (Method::Post, "/users"),
             Op::UserRemove => (Method::Delete, "/users/{name}"),
             Op::SessionLogout => (Method::Post, "/session/logout"),
+            // A one-time sign-in code for a link (local callers only; the CLI prints the link).
+            Op::SessionLink => (Method::Post, "/session/link"),
+            // Restart the background panel so a self-update takes effect (local callers only).
+            Op::PanelRestart => (Method::Post, "/panel/restart"),
             Op::CheckCfx => (Method::Post, "/checks/cfx"),
             Op::AssetsList => (Method::Get, "/servers/{s}/assets"),
             Op::AssetInspect => (Method::Post, "/servers/{s}/assets/inspect"),
@@ -535,6 +546,8 @@ mod tests {
             | Op::UserAdd
             | Op::UserRemove
             | Op::SessionLogout
+            | Op::SessionLink
+            | Op::PanelRestart
             | Op::CheckCfx
             | Op::AssetsList
             | Op::AssetInspect
@@ -546,7 +559,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 83);
+        assert_eq!(Op::ALL.len(), 85);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

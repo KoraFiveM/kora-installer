@@ -60,8 +60,7 @@ struct Rig {
     app: axum::Router,
     fake: FakeBackend,
     mon: Monitor,
-    // Keeps the temp dir alive; only read by the unix-only mode test.
-    #[cfg_attr(not(unix), allow(dead_code))]
+    // Keeps the temp dir alive; some tests read the saved settings.
     dir: tempfile::TempDir,
 }
 
@@ -361,4 +360,70 @@ async fn alert_settings_errors() {
     )
     .await;
     assert_eq!(st, 404);
+}
+
+/// A remote admin sets the alert address: it must not point into this machine or its network.
+#[tokio::test]
+async fn remote_admins_cannot_aim_alerts_at_the_private_network() {
+    use axum::extract::ConnectInfo;
+    use kora_web::remote::{Remote, RemoteConfig, Role};
+    let _t = TURN.lock().await;
+    let r = rig(false);
+    let mut cfg = RemoteConfig { enabled: true, ..Default::default() };
+    let admin = cfg.add_user("adam", Role::Admin).unwrap();
+    let f = r.fake.clone();
+    let make: kora_web::BackendFactory = Arc::new(move || Box::new(f.clone()));
+    let app = router(
+        AppState::system(TOKEN.into(), ADDR.parse().unwrap())
+            .with_backend(make)
+            .with_remote(Arc::new(Remote::new(None, cfg))),
+    );
+    let remote_put = |url: &str| {
+        let mut q = Request::builder()
+            .method("PUT")
+            .uri("/api/v1/servers/prod/alerts")
+            .header(header::HOST, ADDR)
+            .header(header::AUTHORIZATION, format!("Bearer {admin}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"webhook_url": url}).to_string()))
+            .unwrap();
+        q.extensions_mut().insert(ConnectInfo("100.64.0.20:5000".parse::<std::net::SocketAddr>().unwrap()));
+        let app = app.clone();
+        async move {
+            let r = app.oneshot(q).await.unwrap();
+            let st = r.status().as_u16();
+            let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            (st, String::from_utf8_lossy(&b).into_owned())
+        }
+    };
+    for bad in [
+        "http://127.0.0.1:47120/api/v1/servers",
+        "http://10.0.0.5/hook",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://100.100.100.100/",
+        "http://[::1]:8080/",
+        "http://0.0.0.0/",
+        // Web address rules read `\` as `/`: this one goes to 127.0.0.1, not to hooks.example.com.
+        "http://127.0.0.1:8080\\@hooks.example.com/",
+        "http://[64:ff9b::7f00:1]/",
+    ] {
+        let (st, body) = remote_put(bad).await;
+        assert_eq!(st, 400, "{bad}: {body}");
+        assert!(body.contains("public internet address") || body.contains("backslash"), "{body}");
+    }
+    let saved = || kora_core::monitor::alerts::load_settings(r.dir.path());
+    let (st, body) = remote_put("https://93.184.216.34/hook").await;
+    assert_eq!(st, 200, "{body}");
+    // Remembered, so every send looks the address up again and refuses inside addresses.
+    assert!(saved().webhook_set_remotely);
+    // On this computer a LAN address is the owner's choice.
+    let (st, body) = call(&app, "PUT", "/api/v1/servers/prod/alerts", Some(json!({"webhook_url": "http://192.168.1.50/hook"}))).await;
+    assert_eq!(st, 200, "{body}");
+    assert!(!saved().webhook_set_remotely, "set here: sent as before");
+    // Other remote changes still work while that address stays as it is.
+    let mut q = req("PUT", "/api/v1/servers/prod/alerts", Some(json!({"enabled": true})));
+    q.headers_mut().insert(header::AUTHORIZATION, format!("Bearer {admin}").parse().unwrap());
+    q.extensions_mut().insert(ConnectInfo("100.64.0.20:5000".parse::<std::net::SocketAddr>().unwrap()));
+    assert_eq!(app.clone().oneshot(q).await.unwrap().status(), 200);
+    assert!(!saved().webhook_set_remotely, "the address did not change");
 }

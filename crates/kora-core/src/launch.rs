@@ -517,7 +517,11 @@ impl LaunchEnv for SystemEnv {
         if log.is_file() {
             let _ = std::fs::rename(log, log.with_extension("log.old"));
         }
-        let out = std::fs::File::create(log).map_err(|e| format!("cannot write {}: {e}", log.display()))?;
+        // Never through a link planted in the server folder (this can run as root).
+        // Read-write, not append: Windows cannot empty (`set_len`) a file opened for appending only.
+        let out = crate::fsutil::open_no_follow(log, crate::fsutil::Access::ReadWrite, Some(0o644))
+            .and_then(|f| f.set_len(0).map(|_| f))
+            .map_err(|e| format!("cannot write {}: {e}", log.display()))?;
         let err = out.try_clone().map_err(|e| e.to_string())?;
         cmd.stdin(std::process::Stdio::null()).stdout(out).stderr(err);
         #[cfg(unix)]
@@ -586,7 +590,7 @@ impl LaunchEnv for SystemEnv {
     }
 
     fn write_pid_file(&self, spec: &Spec, pid: u32) {
-        let _ = std::fs::write(spec.pid_path(), format!("{pid}\n"));
+        let _ = crate::fsutil::write_no_follow(&spec.pid_path(), format!("{pid}\n").as_bytes(), 0o644);
     }
 
     fn remove_pid_file(&self, spec: &Spec) {
