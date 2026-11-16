@@ -57,14 +57,20 @@ export interface RequestOptions {
   signal?: AbortSignal
   /** Do not trigger the global 401 handler (used by the sign-in call itself). */
   quiet401?: boolean
+  /** Send this file as the body instead of JSON (streamed by the browser). */
+  raw?: { body: Blob; type: string; headers?: Record<string, string> }
 }
 
 export async function request<R>(path: string, opts: RequestOptions = {}): Promise<R> {
   const method = opts.method ?? 'GET'
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (method !== 'GET') headers['X-Kora'] = '1'
-  let body: string | undefined
-  if (opts.body !== undefined) {
+  let body: BodyInit | undefined
+  if (opts.raw) {
+    headers['Content-Type'] = opts.raw.type
+    Object.assign(headers, opts.raw.headers)
+    body = opts.raw.body
+  } else if (opts.body !== undefined) {
     headers['Content-Type'] = 'application/json'
     body = JSON.stringify(opts.body)
   }
@@ -144,6 +150,17 @@ export const api = {
     plan: (name: string, ids: string[]) => post<T.AddPlan>(`${s(name)}/resources/plan`, { ids }),
     add: (name: string, ids: string[]) => post<T.JobStarted>(`${s(name)}/resources`, { ids }),
     catalog: (name: string) => get<T.ServerCatalog>(`${s(name)}/catalog`),
+  },
+  assets: {
+    list: (name: string) => get<T.PaidAssets>(`${s(name)}/assets`),
+    /** Upload a zip (the file itself is the body) and get what importing it would do. */
+    inspectUpload: (name: string, file: Blob, fileName: string) =>
+      request<T.AssetInspectResult>(`${s(name)}/assets/inspect`, { method: 'POST', raw: { body: file, type: 'application/zip', headers: { 'X-File-Name': enc(fileName) } } }),
+    /** A recent zip from the Downloads folder of the computer that runs Kora (local sessions only). */
+    inspectDownload: (name: string, download: string) => post<T.AssetInspectResult>(`${s(name)}/assets/inspect`, { download }),
+    import: (name: string, source: T.AssetSource, replace = true) => post<T.JobStarted>(`${s(name)}/assets`, { ...source, replace }),
+    remove: (name: string, asset: string) => del<{ notes: string[] }>(`${s(name)}/assets/${enc(asset)}`),
+    downloads: () => get<T.RecentDownloads>('/assets/downloads'),
   },
   update: {
     preview: (name: string, scope: T.Scope = 'all') => post<T.JobStarted>(`${s(name)}/update/preview`, { scope }),

@@ -23,6 +23,8 @@ let webhooks: Record<string, string> = {}
 let schedules: Record<string, T.ScheduleConfig> = {}
 let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
 let dirtyPreviewed: Record<string, T.UpdatePreview> = {}
+let paidAssets: Record<string, T.PaidAsset[]> = {}
+let uploads = new Map<string, string>()
 let nextId = 1
 let consoleTick = 0
 
@@ -45,6 +47,9 @@ function init(name: ScenarioName) {
   schedules = {}
   prefs = { github: false, savedInstall: null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
   dirtyPreviewed = {}
+  paidAssets = {}
+  uploads = new Map()
+  for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
   jobs.clear()
   busy.clear()
   nextId = 1
@@ -602,6 +607,76 @@ route('PUT', '/servers/{s}/ports', (m, b) => {
   s.ports = { game, txadmin: tx }
   return { notes: ['server.cfg and the txAdmin settings were updated.', 'If you opened these ports in your firewall or router, open the new ones too.'] }
 })
+// Paid assets (demo data: nothing is unpacked).
+const mockPlan = (zip: string): T.AssetPlan => {
+  const name = zip.replace(/\.zip$/i, '').replace(/[^A-Za-z0-9_.-]/g, '') || 'asset'
+  const broken = /broken|bomb/i.test(zip)
+  return {
+    zip_name: zip,
+    resources: [{ name, zip_path: `${name}/${name}`, has_fxmanifest: true, has_fxap: !/nofxap/i.test(zip), escrowed: true, size: 18_400_000, files: 214, version: '1.0.4', replaces: Object.values(paidAssets).some((l) => l.some((a) => a.name === name)) }],
+    problems: broken
+      ? [{ kind: 'zip_bomb', resource: null, message: 'The zip would unpack to far more than its own size; this looks like a zip bomb, so it was refused.', blocking: true }]
+      : /nofxap/i.test(zip)
+        ? [{ kind: 'missing_fxap', resource: name, message: `${name} looks escrowed but has no hidden .fxap file, so it will not start. Download it again from the Cfx.re Portal and import the zip as it is (do not unpack and re-zip it).`, blocking: false }]
+        : [],
+    total_size: 18_400_000,
+    can_import: !broken,
+  }
+}
+route('GET', '/servers/{s}/assets', (m) => {
+  const s = find(dec(m[1]))
+  const hints: T.AssetHint[] = beh.trouble && paidAssets[s.name]?.length
+    ? [{ kind: 'entitlement', resource: 'qs-housing', line: '[ citizen-server-impl] You lack the required entitlement to use qs-housing', fix: "Your licence key belongs to a different Cfx.re account than the one that bought qs-housing. Open portal.cfx.re → Assets → Granted Assets and transfer it, or use a key from that account." }]
+    : []
+  return { assets: structuredClone(paidAssets[s.name] ?? []), hints, portal_url: 'https://portal.cfx.re/assets/granted-assets' } satisfies T.PaidAssets
+})
+route('GET', '/assets/downloads', () => ({ found: true, folder: '/home/demo/Downloads', zips: [{ name: 'jim-mechanic.zip', size: 9_800_000, modified_unix: Math.floor(Date.now() / 1000) - 600 }, { name: 'qs-housing.zip', size: 18_400_000, modified_unix: Math.floor(Date.now() / 1000) - 7200 }] }) satisfies T.RecentDownloads)
+route('POST', '/servers/{s}/assets/inspect', (m, b) => {
+  find(dec(m[1]))
+  if (b.file instanceof Blob) {
+    const zip = String(b.fileName ?? 'upload.zip')
+    const plan = mockPlan(zip)
+    const id = `up${nextId++}`
+    if (plan.can_import) uploads.set(id, zip)
+    return { plan, upload: plan.can_import ? id : null } satisfies T.AssetInspectResult
+  }
+  if (typeof b.download === 'string') return { plan: mockPlan(b.download), download: b.download } satisfies T.AssetInspectResult
+  throw new Fail(400, 'bad_request', 'Send a zip file, or pick one from your Downloads folder.')
+})
+route('POST', '/servers/{s}/assets', (m, b) => {
+  const s = find(dec(m[1]))
+  const zip = typeof b.upload === 'string' ? uploads.get(b.upload) : typeof b.download === 'string' ? b.download : undefined
+  if (!zip) throw new Fail(404, 'not_found', 'That upload is gone (uploads are kept for a day). Upload the zip again.')
+  const plan = mockPlan(zip)
+  return startJob('asset_import', s.name, async (emit) => {
+    const out: T.AssetImportReport = { zip_name: zip, imported: [], ensured: [], notes: ['Restart the server to load the new files.'] }
+    for (const r of plan.resources) {
+      emit({ type: 'status', message: `Unpacking ${r.name}` })
+      await sleep(600)
+      const list = (paidAssets[s.name] ??= [])
+      const old = list.findIndex((a) => a.name === r.name)
+      const rec: T.PaidAsset = { name: r.name, path: `[paid]/${r.name}`, version: r.version, imported_unix: Math.floor(Date.now() / 1000), present: true, has_fxap: r.has_fxap, backups: old >= 0 ? list[old].backups + 1 : 0 }
+      if (old >= 0) list[old] = rec
+      else {
+        list.push(rec)
+        out.ensured.push(r.name)
+        installed[s.name].push(r.name)
+      }
+      out.imported.push({ name: r.name, version: r.version, replaced: old >= 0, backup: old >= 0 ? `.kora/asset-backups/${r.name}-1` : null })
+      emit({ type: 'asset', name: r.name, state: 'imported' })
+    }
+    return out
+  })
+})
+route('DELETE', '/servers/{s}/assets/{a}', (m) => {
+  const s = find(dec(m[1]))
+  const name = dec(m[2])
+  const list = paidAssets[s.name] ?? []
+  if (!list.some((a) => a.name === name)) throw new Fail(404, 'not_found', `There is no paid asset called ${name} on this server.`)
+  paidAssets[s.name] = list.filter((a) => a.name !== name)
+  installed[s.name] = installed[s.name].filter((r) => r !== name)
+  return { notes: [`${name} was moved to .kora/asset-backups (kept as a backup).`, `Removed 'ensure ${name}' from server.cfg.`, 'Restart the server for this to take effect.'] }
+})
 route('POST', '/servers/{s}/issues', (m, b) => {
   find(dec(m[1]))
   if (!String(b.title ?? '').trim()) throw new Fail(400, 'bad_request', 'Give the issue a short title.')
@@ -779,7 +854,8 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
     if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
     if (method !== 'GET' && !headers.has('X-Kora')) throw new Fail(403, 'forbidden', 'Missing the X-Kora header.')
-    const body = init?.body ? (JSON.parse(String(init.body)) as Body) : {}
+    const raw = init?.body
+    const body: Body = raw instanceof Blob ? { file: raw, fileName: decodeURIComponent(headers.get('X-File-Name') ?? 'upload.zip') } : raw ? (JSON.parse(String(raw)) as Body) : {}
     for (const [mth, re, h] of routes) {
       const m = path.match(re)
       if (mth === method && m) {
