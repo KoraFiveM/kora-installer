@@ -113,15 +113,20 @@ impl CommandRunner for SystemRunner {
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(p, file_bytes(contents))?;
+        // With a mode, the permissions are set on the open (emptied) file before the contents go in:
+        // writing first would leave an owner-only file readable by others for a moment, and `mode`
+        // on open only applies to a new file, not to one that already exists.
         #[cfg(unix)]
         if let Some(m) = mode {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m))?;
+            use std::io::Write;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(m).open(p)?;
+            f.set_permissions(std::fs::Permissions::from_mode(m))?;
+            return f.write_all(&file_bytes(contents));
         }
         #[cfg(not(unix))]
         let _ = mode;
-        Ok(())
+        std::fs::write(p, file_bytes(contents))
     }
 
     fn remove_file(&self, path: &str) -> io::Result<()> {

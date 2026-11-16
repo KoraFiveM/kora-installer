@@ -524,3 +524,20 @@ fn a_quote_in_the_folder_cannot_add_arguments_to_the_windows_service_command() {
     s.dir = "C:\\srv\" --evil \"x".into();
     assert!(install_plan(&s, Platform::Windows).is_err());
 }
+
+#[test]
+#[cfg(unix)]
+fn an_existing_file_is_locked_down_before_the_contents_go_in() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("task.xml");
+    std::fs::write(&p, "old").unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o666)).unwrap();
+    SystemRunner.write_file(p.to_str().unwrap(), "secret", Some(0o600)).unwrap();
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), "secret");
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+    // Without a mode the file is just written (as before).
+    let q = d.path().join("plain.txt");
+    SystemRunner.write_file(q.to_str().unwrap(), "x", None).unwrap();
+    assert_eq!(std::fs::read_to_string(&q).unwrap(), "x");
+}
