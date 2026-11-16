@@ -163,10 +163,13 @@ async fn a_cookie_alone_is_useless() {
     assert_eq!(get_with(&app, "/api/v1/jobs/j1", &port, Some(&s.secret)).await.status(), 401);
     // The failed tries did not end the session.
     assert_eq!(get_with(&app, "/api/v1/jobs/j1", &s.cookie, Some(&s.secret)).await.status(), 200);
-    // A stream cannot set headers: `?ks=` works for reads...
-    let uri = format!("/api/v1/jobs/j1?ks={}", s.secret);
+    // A stream cannot set headers: `?ks=` works for the streams...
+    let uri = format!("/api/v1/jobs/j1/events?ks={}", s.secret);
     assert_eq!(get_with(&app, &uri, &s.cookie, None).await.status(), 200);
-    assert_eq!(get_with(&app, "/api/v1/jobs/j1?ks=nope", &s.cookie, None).await.status(), 401);
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1/events?ks=nope", &s.cookie, None).await.status(), 401);
+    // ...not for other reads, where the address may end up in a history or a log...
+    let uri = format!("/api/v1/jobs/j1?ks={}", s.secret);
+    assert_eq!(get_with(&app, &uri, &s.cookie, None).await.status(), 401);
     // ...but never for a change.
     let r = app
         .clone()
@@ -236,7 +239,7 @@ async fn sign_in_links_use_one_time_codes() {
     let r = sign_in_with(&app, json!({"code": code})).await;
     assert_eq!(r.status(), 401);
     assert!(json_of(r).await["error"]["message"].as_str().unwrap().contains("already used"));
-    // The code is not a token, and the token is not a code.
+    // A used code does not work pasted in the box either, and the token is not a code.
     assert_eq!(sign_in_with(&app, json!({"token": code})).await.status(), 401);
     assert_eq!(sign_in_with(&app, json!({"code": TOKEN})).await.status(), 401);
     // A local browser session can make one too (with its secret).
@@ -264,6 +267,176 @@ async fn bad_codes_count_towards_the_lockout() {
         assert_eq!(sign_in_with(&app, json!({"code": "guess"})).await.status(), 401);
     }
     assert_eq!(sign_in_with(&app, json!({"token": TOKEN})).await.status(), 429);
+}
+
+/// The sign-in box sends what was pasted as `token`: a code from a link must work there too, once.
+#[tokio::test]
+async fn a_code_pasted_in_the_box_signs_in_once() {
+    let (app, jobs) = setup();
+    jobs.create("j1");
+    let st = AppState::new(TOKEN.into(), ADDR.parse().unwrap(), Arc::new(MemoryJobs::new()))
+        .with_limiter(3, Duration::from_secs(60));
+    let codes = st.link_codes.clone();
+    let app2 = router(st);
+    let code = codes.mint();
+    let s = session_of(sign_in_with(&app2, json!({"token": code})).await).await;
+    assert!(!s.secret.is_empty());
+    // Used up: a second paste fails, and counts once like any wrong code.
+    assert_eq!(sign_in_with(&app2, json!({"token": code})).await.status(), 401);
+    assert_eq!(sign_in_with(&app2, json!({"token": "nope"})).await.status(), 401);
+    assert_eq!(sign_in_with(&app2, json!({"token": TOKEN})).await.status(), 200, "two failures, not locked");
+    // The launch token still works in the box.
+    login(&app).await;
+}
+
+/// `{}` from this computer is a "Sign in with Tailscale" click: it cannot work here, and must not use up
+/// the owner's failed attempts.
+#[tokio::test]
+async fn a_local_identity_try_is_explained_not_counted() {
+    let st = AppState::new(TOKEN.into(), ADDR.parse().unwrap(), Arc::new(MemoryJobs::new()))
+        .with_limiter(2, Duration::from_secs(60));
+    let app = router(st);
+    for _ in 0..5 {
+        let r = sign_in_with(&app, json!({})).await;
+        assert_eq!(r.status(), 400);
+        let m = json_of(r).await["error"]["message"].as_str().unwrap().to_string();
+        assert!(m.contains("Tailscale sign-in is for other devices") && m.contains("kora panel"), "{m}");
+    }
+    assert_eq!(sign_in_with(&app, json!({"token": TOKEN})).await.status(), 200);
+}
+
+/// Another service on this host (any port) can plant a cookie with the panel's name, sent first. The
+/// real cookie after it must still work, and only the real session is ended on sign-out.
+#[tokio::test]
+async fn a_planted_cookie_does_not_lock_the_owner_out() {
+    let (app, jobs) = setup();
+    jobs.create("j1");
+    let s = login(&app).await;
+    let both = format!("kora_session_47120=junk; {}", s.cookie);
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1", &both, Some(&s.secret)).await.status(), 200);
+    // A planted cookie alone, or with the wrong secret, is still nothing.
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1", "kora_session_47120=junk", Some(&s.secret)).await.status(), 401);
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1", &both, Some("wrong")).await.status(), 401);
+    // Two cookie headers work the same way.
+    let r = app
+        .clone()
+        .oneshot(
+            req("GET", "/api/v1/jobs/j1")
+                .header(header::COOKIE, "kora_session_47120=junk")
+                .header(header::COOKIE, &s.cookie)
+                .header("x-kora-session", &s.secret)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let r = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/v1/session/logout")
+                .header(header::COOKIE, &both)
+                .header("x-kora-session", &s.secret)
+                .header("x-kora", "1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204);
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1", &s.cookie, Some(&s.secret)).await.status(), 401, "signed out");
+}
+
+/// Signing in again from a page that already has a session ends the old one.
+#[tokio::test]
+async fn signing_in_again_replaces_the_old_session() {
+    let (app, jobs) = setup();
+    jobs.create("j1");
+    let old = login(&app).await;
+    let r = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/v1/session")
+                .header("x-kora", "1")
+                .header(header::COOKIE, &old.cookie)
+                .header("x-kora-session", &old.secret)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"token": TOKEN}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let new = session_of(r).await;
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1", &old.cookie, Some(&old.secret)).await.status(), 401);
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1", &new.cookie, Some(&new.secret)).await.status(), 200);
+    // A cookie without its secret ends nothing: another tab's session stays.
+    let other = login(&app).await;
+    let r = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/v1/session")
+                .header("x-kora", "1")
+                .header(header::COOKIE, &other.cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"token": TOKEN}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    session_of(r).await;
+    assert_eq!(get_with(&app, "/api/v1/jobs/j1", &other.cookie, Some(&other.secret)).await.status(), 200);
+}
+
+/// Every route, with a session cookie but no secret (what another service on this host could have): only
+/// `GET /meta` and `POST /session` answer; everything else is 401. Includes HEAD, the streams and the upload.
+#[tokio::test]
+async fn every_route_needs_the_secret_with_the_cookie() {
+    use kora_core::api::{Method as M, Op};
+    let (app, _) = setup();
+    let s = login(&app).await;
+    let mut tried = 0;
+    for op in Op::ALL {
+        let (m, path) = op.route();
+        let path: String = path
+            .split('/')
+            .map(|seg| if seg.starts_with('{') { "x" } else { seg })
+            .collect::<Vec<_>>()
+            .join("/");
+        let methods: &[&str] = match m {
+            M::Get => &["GET", "HEAD"],
+            M::Post => &["POST"],
+            M::Put => &["PUT"],
+            M::Delete => &["DELETE"],
+        };
+        for method in methods {
+            let mut b = req(method, &format!("/api/v1{path}")).header(header::COOKIE, &s.cookie);
+            let body = if *method == "GET" || *method == "HEAD" {
+                Body::empty()
+            } else if *op == Op::AssetInspect {
+                b = b.header("x-kora", "1").header(header::CONTENT_TYPE, "application/zip");
+                Body::from(vec![0u8; 4096])
+            } else {
+                b = b.header("x-kora", "1").header(header::CONTENT_TYPE, "application/json");
+                Body::from("{}")
+            };
+            let st = app.clone().oneshot(b.body(body).unwrap()).await.unwrap().status();
+            tried += 1;
+            match op {
+                Op::Meta if *method == "GET" => assert_eq!(st, 200, "{method} {path}"),
+                Op::SessionCreate => assert_ne!(st, 401, "{method} {path}"),
+                _ => assert_eq!(st, 401, "{method} {path} ({})", op.name()),
+            }
+        }
+    }
+    assert!(tried > Op::ALL.len(), "HEAD was tried too");
+    // `?ks=` with the secret makes a stream work, but not other reads.
+    let ok = app
+        .clone()
+        .oneshot(req("GET", &format!("/api/v1/events?ks={}", s.secret)).header(header::COOKIE, &s.cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(ok, 200);
 }
 
 #[tokio::test]

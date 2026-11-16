@@ -267,13 +267,15 @@ fn hostname() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-/// `POST /session`. Local: `{"token"}` (the launch token, as pasted) or `{"code"}` (from a sign-in link).
-/// Remote: `{"token"}` (a user token) or `{}` (Tailscale identity). Answers
+/// `POST /session`. Local: `{"token"}` (the launch token, or a sign-in code, as pasted) or `{"code"}` (from
+/// a sign-in link). Remote: `{"token"}` (a user token) or `{}` (Tailscale identity). Answers
 /// `{"ok": true, "identity", "secret"}` and sets the session cookie; the page must send `secret` back with
-/// every request (header `X-Kora-Session`, or `?ks=` on a stream).
+/// every request (header `X-Kora-Session`, or `?ks=` on a stream). A session the request was already
+/// signed in with is ended, so signing in again does not leave the old one behind.
 pub(crate) async fn session_create(
     State(st): State<AppState>,
     Extension(caller): Extension<remote::Caller>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<SessionReq>,
 ) -> Result<Response, ApiError> {
     let token = req.token.as_deref().map(str::trim).filter(|t| !t.is_empty());
@@ -286,26 +288,38 @@ pub(crate) async fn session_create(
         }
         remote_sign_in(&st, &caller, token).await?
     } else {
+        if token.is_none() && code.is_none() {
+            // A Tailscale sign-in try from this computer: it can never work here, so it is not counted
+            // as a failed attempt either.
+            return Err(ApiError::bad_request(
+                "Tailscale sign-in is for other devices; use the link from `kora panel` here.",
+            ));
+        }
         if st.limiter.locked() {
             return Err(ApiError::rate_limited(
                 "too many failed attempts, try again later",
             ));
         }
-        let ok = match code {
-            Some(c) => st.link_codes.consume(c),
-            None => token.is_some_and(|t| security::ct_eq(t, &st.token)),
+        let ok = match (code, token) {
+            (Some(c), _) => st.link_codes.consume(c),
+            // A pasted code from a link arrives as `token` (the box takes either); one attempt either way.
+            (None, Some(t)) => security::ct_eq(t, &st.token) || st.link_codes.consume(t),
+            (None, None) => false,
         };
         if !ok {
             st.limiter.failure();
             return Err(ApiError::unauthorized(if code.is_some() {
                 "That sign-in link has expired or was already used. Run `kora panel` again for a new one."
             } else {
-                "invalid token"
+                "That sign-in code is not right, has expired or was already used. Run `kora panel` again for a new link."
             }));
         }
         st.limiter.success();
         (st.sessions.create(), remote::Identity::local())
     };
+    if let Some(old) = security::current_session(&st, &headers, caller.remote) {
+        st.sessions.remove(&old);
+    }
     let cookie = format!(
         "{}={}; HttpOnly; SameSite=Strict; Path=/",
         security::cookie_name(st.addr.port()),
@@ -347,9 +361,14 @@ pub(crate) async fn session_link(
 }
 
 /// `POST /session/logout`: forget this session and clear the cookie. 204.
-pub(crate) async fn session_logout(State(st): State<AppState>, req_headers: axum::http::HeaderMap) -> Response {
+pub(crate) async fn session_logout(
+    State(st): State<AppState>,
+    Extension(caller): Extension<remote::Caller>,
+    req_headers: axum::http::HeaderMap,
+) -> Response {
     let name = security::cookie_name(st.addr.port());
-    if let Some(id) = security::cookie_value(&req_headers, &name) {
+    // Only the session this request proves (cookie and secret); a cookie on its own ends nothing.
+    if let Some(id) = security::current_session(&st, &req_headers, caller.remote) {
         st.sessions.remove(&id);
     }
     let mut r = StatusCode::NO_CONTENT.into_response();

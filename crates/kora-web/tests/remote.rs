@@ -1476,3 +1476,23 @@ async fn the_machines_own_tailscale_address_never_signs_in() {
     let r = req("GET", "/api/v1/servers").bearer(&admin).send(&w.app).await;
     assert_eq!(r.status, 200);
 }
+
+/// Guessing user tokens on ordinary requests (`Authorization: Bearer`) is counted per address, like at
+/// sign-in: after ten misses that address is refused, even with a right token; others are not affected.
+#[tokio::test]
+async fn bearer_guesses_lock_out_only_that_address() {
+    let (w, [_, _, admin]) = with_users(enabled_cfg());
+    let r = req("GET", "/api/v1/servers").bearer(&admin).send(&w.app).await;
+    assert_eq!(r.status, 200, "normal use");
+    for i in 0..10 {
+        let r = req("GET", "/api/v1/servers").bearer(&format!("guess{i}")).send(&w.app).await;
+        assert_eq!(r.status, 401, "try {i}");
+    }
+    let r = req("GET", "/api/v1/servers").bearer(&admin).send(&w.app).await;
+    assert_eq!(r.status, 429, "locked, even with the right token");
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": admin})).send(&w.app).await;
+    assert_eq!(r.status, 429, "sign-in shares the count");
+    let r = req("GET", "/api/v1/servers").peer("100.64.0.21:5000").bearer(&admin).send(&w.app).await;
+    assert_eq!(r.status, 200, "another address is fine");
+    assert!(w.remote.limiter.locked(REMOTE_PEER.parse::<SocketAddr>().unwrap().ip()));
+}

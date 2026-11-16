@@ -46,7 +46,8 @@ fn random_hex_bytes(n: usize) -> String {
 
 pub fn ct_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
-    let mut diff = (a.len() ^ b.len()) as u8;
+    // Any length difference counts (a cast would drop all but the low byte: 1 and 257 would match).
+    let mut diff = u8::from(a.len() != b.len());
     for i in 0..a.len().max(b.len()) {
         diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
     }
@@ -149,7 +150,9 @@ impl LinkCodes {
 }
 
 /// Failed sign-ins counted per source address (IPv6 per /64, one network), so a stranger who keeps
-/// guessing locks out only themselves. The table is bounded: expired entries go first, then the oldest.
+/// guessing locks out only themselves. The table is bounded: expired entries go first, then the oldest
+/// unlocked one. A locked address is never forgotten to make room: when every place holds one, addresses
+/// not seen before are refused until a lockout ends (otherwise many addresses could unlock one).
 pub struct IpLimiter {
     max: u32,
     window: Duration,
@@ -207,28 +210,44 @@ impl IpLimiter {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     pub fn locked(&self, ip: IpAddr) -> bool {
+        let key = limiter_key(ip);
         let now = (self.clock)();
-        self.lock()
-            .get(&limiter_key(ip))
-            .and_then(|e| e.locked_until)
-            .is_some_and(|t| now < t)
+        let mut m = self.lock();
+        match m.get(&key) {
+            Some(e) => e.locked_until.is_some_and(|t| now < t),
+            None => !self.make_room(&mut m, now),
+        }
+    }
+    /// Room for one more address: drop expired entries, then the oldest unlocked one. False when every
+    /// place holds a live lockout.
+    fn make_room(&self, m: &mut HashMap<IpAddr, IpEntry>, now: Instant) -> bool {
+        if m.len() < self.cap {
+            return true;
+        }
+        m.retain(|_, e| !e.stale(now, self.window));
+        if m.len() < self.cap {
+            return true;
+        }
+        let oldest_unlocked = m
+            .iter()
+            .filter(|(_, e)| e.locked_until.is_none())
+            .min_by_key(|(_, e)| e.since)
+            .map(|(k, _)| *k);
+        match oldest_unlocked {
+            Some(k) => {
+                m.remove(&k);
+                true
+            }
+            None => false,
+        }
     }
     pub fn failure(&self, ip: IpAddr) {
         let key = limiter_key(ip);
         let now = (self.clock)();
         let mut m = self.lock();
-        if !m.contains_key(&key) && m.len() >= self.cap {
-            m.retain(|_, e| !e.stale(now, self.window));
-            if m.len() >= self.cap {
-                // Still full: forget the oldest, unlocked addresses before locked ones.
-                if let Some(k) = m
-                    .iter()
-                    .min_by_key(|(_, e)| (e.locked_until.is_some(), e.since))
-                    .map(|(k, _)| *k)
-                {
-                    m.remove(&k);
-                }
-            }
+        if !m.contains_key(&key) && !self.make_room(&mut m, now) {
+            // Full of locked addresses: this one is refused anyway (see `locked`).
+            return;
         }
         let e = m.entry(key).or_insert(IpEntry {
             fails: 0,
@@ -473,31 +492,49 @@ impl Sessions {
     }
 }
 
-pub(crate) fn cookie_value(h: &HeaderMap, name: &str) -> Option<String> {
-    for v in h.get_all(header::COOKIE) {
-        for part in v.to_str().ok()?.split(';') {
-            if let Some((k, val)) = part.trim().split_once('=') {
-                if k == name {
-                    return Some(val.to_string());
-                }
-            }
-        }
-    }
-    None
+/// Every value of the cookie `name`. Another service on this host (any port) can set a cookie with the
+/// same name that the browser sends first, so the caller must try them all, not just the first.
+pub(crate) fn cookie_values(h: &HeaderMap, name: &str) -> Vec<String> {
+    h.get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|part| part.trim().split_once('='))
+        .filter(|(k, _)| *k == name)
+        .map(|(_, v)| v.to_string())
+        .collect()
 }
 
-/// The session secret of this request: the header, or for a read (an `EventSource`) the `ks` parameter.
-fn session_secret<'a>(h: &'a HeaderMap, method: &Method, query: Option<&'a str>) -> Option<&'a str> {
+/// The routes an `EventSource` opens. It cannot set headers, so only these take the secret as `?ks=`;
+/// everywhere else a secret in the address (history, logs) is not accepted.
+fn is_stream(path: &str) -> bool {
+    matches!(
+        roles::op_for("GET", path),
+        Some(kora_core::api::Op::Events | kora_core::api::Op::JobEvents | kora_core::api::Op::ConsoleStream)
+    )
+}
+
+/// The session secret of this request: the header, or for a stream (an `EventSource`) the `ks` parameter.
+fn session_secret<'a>(h: &'a HeaderMap, method: &Method, path: &str, query: Option<&'a str>) -> Option<&'a str> {
     if let Some(v) = h.get(SESSION_HEADER).and_then(|v| v.to_str().ok()) {
         return Some(v.trim());
     }
-    if method != Method::GET && method != Method::HEAD {
+    if method != Method::GET || !is_stream(path) {
         return None;
     }
     query?.split('&').find_map(|kv| {
         let (k, v) = kv.split_once('=')?;
         (k == SESSION_PARAM).then_some(v)
     })
+}
+
+/// The session this request is signed in with: one of its cookies, with the matching secret in the header,
+/// made for this kind of peer. A cookie alone (or a wrong secret) names no session.
+pub(crate) fn current_session(st: &AppState, h: &HeaderMap, remote: bool) -> Option<String> {
+    let secret = h.get(SESSION_HEADER)?.to_str().ok()?.trim();
+    cookie_values(h, &cookie_name(st.addr.port()))
+        .into_iter()
+        .find(|id| st.sessions.get_with_secret(id, Some(secret)).is_some_and(|i| i.remote == remote))
 }
 
 /// Headers a reverse proxy (or `tailscale serve`) adds. Behind one, every visitor reaches the panel from
@@ -618,7 +655,7 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
     // remote, and Tailscale names the machine's owner for it: any local account would become an admin.
     // Only the page's first question (`/meta`) is answered, so it can explain.
     let api = path == "/api" || path.starts_with("/api/");
-    let meta = (method == Method::GET || method == Method::HEAD) && path == "/api/v1/meta";
+    let meta = method == Method::GET && path == "/api/v1/meta";
     if remote && api && !meta && peer.is_some_and(|p| st.remote.is_self_ip(p.ip())) {
         return Err(ApiError::forbidden(SELF_ADDRESS_REFUSED));
     }
@@ -629,13 +666,22 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
     }
     let safe = method == Method::GET || method == Method::HEAD;
     // The launch token is for the computer itself. Remote callers present a per-user token.
-    let bearer_identity = bearer(h).and_then(|t| {
-        if remote {
-            st.remote.identity_for_token(t)
-        } else {
-            ct_eq(t, &st.token).then(Identity::local)
+    let bearer_identity = match (bearer(h), peer) {
+        (Some(t), Some(p)) if remote => {
+            // Guessing tokens on ordinary requests is counted like guessing them at sign-in.
+            let ip = p.ip();
+            if st.remote.limiter.locked(ip) {
+                return Err(ApiError::rate_limited("too many failed attempts, try again later"));
+            }
+            let found = st.remote.identity_for_token(t);
+            if found.is_none() {
+                st.remote.limiter.failure(ip);
+            }
+            found
         }
-    });
+        (Some(t), _) if !remote => ct_eq(t, &st.token).then(Identity::local),
+        _ => None,
+    };
     let bearer_ok = bearer_identity.is_some();
     if !safe {
         if let Some(o) = h.get(header::ORIGIN) {
@@ -659,20 +705,22 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
     };
     if path == "/api/v1" || path.starts_with("/api/v1/") {
         let session_identity = || {
-            let id = cookie_value(h, &cookie_name(st.addr.port()))?;
-            let secret = session_secret(h, method, req.uri().query());
-            let info = st.sessions.get_with_secret(&id, secret)?;
-            if info.remote != remote {
-                return None;
-            }
-            // A removed user, or a role that changed since sign-in, ends the session.
-            match st.remote.resolve(info.provider, &info.name) {
-                Some(i) if i.role == info.role => Some(i),
-                _ => {
-                    st.sessions.remove(&id);
-                    None
+            let secret = session_secret(h, method, path, req.uri().query());
+            // Every cookie of that name: a planted one sent first must not hide the real one.
+            cookie_values(h, &cookie_name(st.addr.port())).into_iter().find_map(|id| {
+                let info = st.sessions.get_with_secret(&id, secret)?;
+                if info.remote != remote {
+                    return None;
                 }
-            }
+                // A removed user, or a role that changed since sign-in, ends the session.
+                match st.remote.resolve(info.provider, &info.name) {
+                    Some(i) if i.role == info.role => Some(i),
+                    _ => {
+                        st.sessions.remove(&id);
+                        None
+                    }
+                }
+            })
         };
         caller.identity = bearer_identity.or_else(session_identity);
         if is_public(method, path) {
@@ -768,12 +816,14 @@ mod tests {
 
     #[test]
     fn ip_limiter_is_bounded() {
-        let l = IpLimiter::new(1, Duration::from_secs(60), Duration::from_secs(60), 16);
+        let l = IpLimiter::new(2, Duration::from_secs(60), Duration::from_secs(60), 16);
         for i in 0..200u32 {
             l.failure(IpAddr::from(i.to_be_bytes()));
             assert!(l.tracked() <= 16);
         }
-        assert!(l.locked(IpAddr::from(199u32.to_be_bytes())), "the newest is kept");
+        let newest = IpAddr::from(199u32.to_be_bytes());
+        l.failure(newest);
+        assert!(l.locked(newest), "the newest is kept");
     }
 
     #[test]
@@ -803,12 +853,77 @@ mod tests {
     }
 
     #[test]
-    fn secret_from_header_or_query_for_reads_only() {
+    fn secret_from_header_or_query_on_streams_only() {
         let mut h = HeaderMap::new();
-        assert_eq!(session_secret(&h, &Method::GET, Some("a=1&ks=abc")), Some("abc"));
-        assert_eq!(session_secret(&h, &Method::POST, Some("ks=abc")), None);
-        assert_eq!(session_secret(&h, &Method::GET, None), None);
+        let ev = "/api/v1/events";
+        assert_eq!(session_secret(&h, &Method::GET, ev, Some("a=1&ks=abc")), Some("abc"));
+        for p in ["/api/v1/jobs/7/events", "/api/v1/servers/prod/console/stream"] {
+            assert_eq!(session_secret(&h, &Method::GET, p, Some("ks=abc")), Some("abc"), "{p}");
+        }
+        // Not on other reads, not on HEAD, not on writes.
+        for p in ["/api/v1/servers", "/api/v1/servers/prod", "/api/v1/remote", "/api/v1/meta"] {
+            assert_eq!(session_secret(&h, &Method::GET, p, Some("ks=abc")), None, "{p}");
+        }
+        assert_eq!(session_secret(&h, &Method::HEAD, ev, Some("ks=abc")), None);
+        assert_eq!(session_secret(&h, &Method::POST, ev, Some("ks=abc")), None);
+        assert_eq!(session_secret(&h, &Method::GET, ev, None), None);
         h.insert(SESSION_HEADER, HeaderValue::from_static("hdr"));
-        assert_eq!(session_secret(&h, &Method::POST, Some("ks=abc")), Some("hdr"));
+        assert_eq!(session_secret(&h, &Method::POST, "/api/v1/servers", Some("ks=abc")), Some("hdr"));
+    }
+
+    #[test]
+    fn ct_eq_compares_whole_lengths() {
+        let long = format!("x{}", "\0".repeat(256));
+        assert!(!ct_eq("x", &long), "lengths 1 and 257 differ only above the low byte");
+        assert!(!ct_eq(&long, "x"));
+        assert!(!ct_eq("", &"\0".repeat(256)));
+        assert!(ct_eq("abc", "abc") && ct_eq("", ""));
+        assert!(!ct_eq("abc", "abd") && !ct_eq("abc", "ab"));
+    }
+
+    #[test]
+    fn every_cookie_with_the_name_is_read() {
+        let mut h = HeaderMap::new();
+        h.append(header::COOKIE, HeaderValue::from_static("kora_session_1=planted; other=1; kora_session_1=real"));
+        h.append(header::COOKIE, HeaderValue::from_static("kora_session_1=third"));
+        assert_eq!(cookie_values(&h, "kora_session_1"), ["planted", "real", "third"]);
+        assert!(cookie_values(&h, "kora_session_2").is_empty());
+    }
+
+    #[test]
+    fn a_full_limiter_never_unlocks_anyone() {
+        let (c, off) = clock();
+        let l = IpLimiter::with_clock(1, Duration::from_secs(60), Duration::from_secs(60), 4, c);
+        let ip = |i: u32| IpAddr::from(i.to_be_bytes());
+        for i in 0..4 {
+            l.failure(ip(i));
+        }
+        assert!((0..4).all(|i| l.locked(ip(i))));
+        // Every place holds a lockout: a new address neither pushes one out nor gets in.
+        for i in 10..20 {
+            assert!(l.locked(ip(i)), "unseen addresses wait");
+            l.failure(ip(i));
+        }
+        assert!((0..4).all(|i| l.locked(ip(i))), "nobody was unlocked to make room");
+        assert_eq!(l.tracked(), 4);
+        // Once the lockouts end, new addresses are fine again.
+        *off.lock().unwrap() += Duration::from_secs(60);
+        assert!(!l.locked(ip(10)));
+    }
+
+    #[test]
+    fn a_full_limiter_drops_unlocked_addresses_first() {
+        let l = IpLimiter::new(2, Duration::from_secs(60), Duration::from_secs(60), 3);
+        let ip = |i: u32| IpAddr::from(i.to_be_bytes());
+        l.failure(ip(1));
+        l.failure(ip(1)); // locked
+        l.failure(ip(2)); // one failure, unlocked
+        l.failure(ip(3));
+        l.failure(ip(3)); // locked
+        l.failure(ip(4)); // takes the place of 2
+        assert!(l.locked(ip(1)) && l.locked(ip(3)));
+        assert_eq!(l.tracked(), 3);
+        l.failure(ip(4));
+        assert!(l.locked(ip(4)), "the new address is counted");
     }
 }
