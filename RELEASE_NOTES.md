@@ -1,17 +1,20 @@
-## Kora Installer v0.5.0
+## Kora Installer v0.5.1
 
 Install and manage a Kora FiveM server from your browser: run `kora panel`.
 
 ### Install
 Linux:
 ```sh
-curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.0/install.sh | sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.1/install.sh | sh
 ```
 Windows (PowerShell):
 ```powershell
-irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.0/install.ps1 | iex
+irm https://github.com/KoraFiveM/kora-installer/releases/download/v0.5.1/install.ps1 | iex
 ```
 Already have Kora? Run `kora self-update`.
+
+### New in 0.5.1
+- **The resource list comes straight from GitHub** (the catalog file in the docs repository), so changes to it reach the installer as soon as they are merged. `sd-lib` is no longer offered.
 
 ### New in 0.5.0
 - **Installing opens Kora Panel for you.** The install line above now sets up Kora Panel in the background (it comes back after a restart) and opens it in your browser. On a server with no screen it prints the `ssh -L` command to run on your own computer. Set `KORA_NO_LAUNCH=1` (Windows: `-NoLaunch`) to only install the program.
