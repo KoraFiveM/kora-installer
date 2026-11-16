@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { DbChoice, PortsCheck } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
@@ -295,11 +295,16 @@ export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signe
       <GithubSignIn onSignedIn={onSignedIn} />
       {signedIn && (
         <Field label="Put the forks in" hint="Your own account, or an organisation you belong to.">
-          <Select value={f.githubOwner} onChange={(e) => set({ githubOwner: e.target.value })}>
-            <option value="">Choose...</option>
+          <Select value={f.githubOwner} onChange={(e) => set({ githubOwner: e.target.value })} disabled={owners.isLoading} aria-busy={owners.isLoading}>
+            <option value="">{owners.isLoading ? 'Loading your accounts...' : 'Choose...'}</option>
             {(owners.data ?? []).map((o) => <option key={o.login} value={o.login}>{o.login} ({o.kind === 'user' ? 'your account' : 'organisation'})</option>)}
           </Select>
         </Field>
+      )}
+      {signedIn && owners.isLoading && (
+        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" aria-hidden /> Loading your GitHub accounts and organisations. This can take a few seconds.
+        </p>
       )}
       <ErrorNotice error={owners.error} />
     </div>
