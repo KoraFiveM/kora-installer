@@ -779,6 +779,13 @@ pub fn provision(
 
 /// Drop only what `state` says this run created. Safe to call repeatedly.
 pub fn rollback(runner: &dyn CommandRunner, admin: &AdminConn, state: &mut ProvisionState) -> DbResult<()> {
+    // The state file lives in the server folder, which the server's own account can change: only
+    // names Kora makes (`kora_<random>`) are ever dropped, never `mysql` or `root`.
+    for (what, name, created) in [("database", &state.database, state.created_database), ("user", &state.user, state.created_user)] {
+        if created && !name.starts_with(NAME_PREFIX) {
+            return Err(DbError::InvalidValue(format!("the {what} '{name}' in Kora's records is not one Kora creates ({NAME_PREFIX}...), so it was not dropped")));
+        }
+    }
     if state.created_user {
         admin.exec(runner, &sql::drop_user(&state.user, &state.host)?)?;
         state.created_user = false;
@@ -989,6 +996,13 @@ mod tests {
     fn rollback_skips_objects_not_created() {
         let admin = AdminConn::socket_root("mariadb");
         // DB created, user creation never happened.
+        // Forged records naming the server's own system database or root: nothing is dropped.
+        for (database, user) in [("mysql", "kora_a1"), ("kora_a1", "root")] {
+            let f = db_fake();
+            let mut st = ProvisionState { database: database.into(), user: user.into(), host: "localhost".into(), created_database: true, created_user: true, ..Default::default() };
+            assert!(rollback(&f, &admin, &mut st).is_err());
+            assert!(f.sqls().is_empty(), "{database}/{user}");
+        }
         let mut st = ProvisionState { database: "kora_a1".into(), user: "kora_a1".into(), host: "127.0.0.1".into(), created_database: true, ..Default::default() };
         let f = db_fake();
         rollback(&f, &admin, &mut st).unwrap();

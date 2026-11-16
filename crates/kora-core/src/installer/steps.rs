@@ -108,6 +108,16 @@ fn db_state_path(ctx: &Ctx) -> PathBuf {
     ctx.meta_dir().join("db-provision.json")
 }
 
+/// The registered server (other than `dir`) whose records name the same database or database
+/// user as `st`. `st` comes from a folder the server's account can change: it must not be able to
+/// make `kora delete` drop another server's database.
+fn db_used_elsewhere(reg: &Registry, st: &ProvisionState, dir: &Path) -> Option<String> {
+    reg.servers.iter().filter(|s| !registry::same_path(&s.dir, dir)).find_map(|s| {
+        let other = ProvisionState::load(&super::meta_dir(&s.dir).join("db-provision.json")).ok()?;
+        (other.database == st.database || other.user == st.user).then(|| s.name.clone())
+    })
+}
+
 fn db_client() -> String {
     let ok = |c: &str| crate::sysexe::command(c).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
     if ok("mariadb") {
@@ -1414,6 +1424,10 @@ impl InstallStep {
                 let path = db_state_path(ctx);
                 let Ok(mut st) = ProvisionState::load(&path) else { return Ok("No database to remove".into()) };
                 let (dbn, usr) = (st.database.clone(), st.user.clone());
+                if let Some(other) = db_used_elsewhere(&Registry::load().unwrap_or_default(), &st, &ctx.req.dir) {
+                    ctx.note(format!("Database '{dbn}' / user '{usr}' were kept: the server '{other}' uses them too (this folder's records name them)."));
+                    return Ok("Database kept".into());
+                }
                 let admin = admin_conn(&ctx.req);
                 db::rollback(&db::SystemRunner, &admin, &mut st).map_err(|e| {
                     InstallError(format!(
@@ -1621,6 +1635,23 @@ mod db_admin_tests {
         assert!(e.contains("Team") && e.contains("Nothing was forked") && e.contains("--github-owner"), "{e}");
         assert!(!g.calls.lock().unwrap().iter().any(|c| c.contains("repo fork")), "no fork may be attempted");
         assert!(verify_requested_owner(&g, Some("-bad")).is_err());
+    }
+
+    #[test]
+    fn a_database_another_server_uses_is_never_dropped() {
+        let t = tempfile::tempdir().unwrap();
+        let (a, b) = (t.path().join("a"), t.path().join("b"));
+        let st = |db: &str| ProvisionState { database: db.into(), user: db.into(), host: "127.0.0.1".into(), created_database: true, created_user: true, granted: true };
+        for (d, db) in [(&a, "kora_aaaa"), (&b, "kora_bbbb")] {
+            std::fs::create_dir_all(d.join(".kora")).unwrap();
+            st(db).save(&d.join(".kora/db-provision.json")).unwrap();
+        }
+        let entry = |n: &str, d: &PathBuf| ServerEntry { name: n.into(), dir: d.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
+        let reg = Registry { servers: vec![entry("A", &a), entry("B", &b)] };
+        // A's account forged A's records to name B's database: refused.
+        assert_eq!(db_used_elsewhere(&reg, &st("kora_bbbb"), &a).as_deref(), Some("B"));
+        // A's own database: fine (A's own records are not "elsewhere").
+        assert_eq!(db_used_elsewhere(&reg, &st("kora_aaaa"), &a), None);
     }
 
     #[test]
