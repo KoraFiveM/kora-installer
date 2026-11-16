@@ -31,7 +31,7 @@ fn make_zip(dir: &Path, name: &str, entries: &[E]) -> PathBuf {
 const MANIFEST: &[u8] =
     b"fx_version 'cerulean'\ngame 'gta5'\nversion '1.4.2'\nescrow_ignore { 'config.lua' }\n";
 
-fn asset<'a>(prefix: &'a str) -> Vec<(String, &'a [u8])> {
+fn asset(prefix: &str) -> Vec<(String, &[u8])> {
     vec![
         (format!("{prefix}fxmanifest.lua"), MANIFEST),
         (format!("{prefix}.fxap"), b"\x01\x02secret"),

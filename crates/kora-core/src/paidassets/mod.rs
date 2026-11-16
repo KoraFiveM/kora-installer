@@ -821,7 +821,7 @@ fn backups_of(dir: &Path, name: &str) -> Vec<(u64, PathBuf)> {
             Some((ts, e.path()))
         })
         .collect();
-    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.sort_by_key(|a| std::cmp::Reverse(a.0));
     v
 }
 
@@ -869,7 +869,7 @@ pub fn list(dir: &Path) -> Res<Vec<PaidAsset>> {
             }
         })
         .collect();
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 
