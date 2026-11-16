@@ -27,10 +27,29 @@ pub trait Jobs: Send + Sync {
 /// The real source: kora-core's std-thread registry.
 impl Jobs for kora_core::api::JobRegistry {
     fn get(&self, id: &str) -> Option<Value> {
-        kora_core::api::JobRegistry::get(self, id).and_then(|s| serde_json::to_value(s).ok())
+        let mut v = serde_json::to_value(kora_core::api::JobRegistry::get(self, id)?).ok()?;
+        if let Some(e) = v.get("error").and_then(Value::as_str).map(job_error) {
+            v["error"] = e;
+        }
+        Some(v)
     }
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
         kora_core::api::JobRegistry::subscribe(self, id)
+    }
+}
+
+/// The UI reads a job error as `{code, message, command?, kept?, log_path?}`. A job body returns
+/// `Err(String)`: plain text becomes `{code: "failed", message}`; a JSON object (for structured
+/// failures such as installs or `needs_elevation`) is passed through, with `code` defaulting to `failed`.
+pub fn job_error(e: &str) -> Value {
+    match serde_json::from_str::<Value>(e) {
+        Ok(mut v @ Value::Object(_)) if v.get("message").is_some_and(Value::is_string) => {
+            if v.get("code").is_none() {
+                v["code"] = json!("failed");
+            }
+            v
+        }
+        _ => json!({"code": "failed", "message": e}),
     }
 }
 
@@ -192,4 +211,18 @@ pub async fn job_events(
 
 fn progress(v: &Value) -> Event {
     Event::default().event("progress").data(v.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::job_error;
+    use serde_json::json;
+
+    #[test]
+    fn job_errors_have_the_ui_shape() {
+        assert_eq!(job_error("disk full"), json!({"code": "failed", "message": "disk full"}));
+        assert_eq!(job_error(r#"{"message":"m","log_path":"/x"}"#), json!({"code": "failed", "message": "m", "log_path": "/x"}));
+        assert_eq!(job_error(r#"{"code":"needs_elevation","message":"m","command":["kora"]}"#)["code"], "needs_elevation");
+        assert_eq!(job_error("[1]"), json!({"code": "failed", "message": "[1]"}));
+    }
 }
