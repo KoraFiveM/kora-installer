@@ -18,4 +18,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 tokio-stream = { version = "0.1", default-features = false }
 
 [dev-dependencies]
+kora-core = { workspace = true, features = ["fake"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }

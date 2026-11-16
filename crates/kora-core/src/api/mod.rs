@@ -8,6 +8,8 @@
 pub mod adopt;
 pub mod backend;
 pub mod dto;
+#[cfg(any(test, feature = "fake"))]
+pub mod fake;
 pub mod jobs;
 pub mod logs;
 pub mod ops;

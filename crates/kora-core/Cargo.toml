@@ -20,6 +20,10 @@ ureq = "2"
 xz2 = "0.1.7"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
 
+[features]
+# `kora_core::api::fake::FakeBackend` for other crates' tests.
+fake = []
+
 [dev-dependencies]
 tempfile.workspace = true
 
