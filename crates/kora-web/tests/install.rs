@@ -620,7 +620,9 @@ async fn a_failed_install_reports_what_was_kept_and_saves_the_answers_without_se
     let job = r.job(&id).await;
     assert_eq!(job["state"], "failed");
     // this branch's registry keeps the raw string; the integrator's passes a JSON object through
-    let err: Value = serde_json::from_str(job["error"].as_str().unwrap()).unwrap();
+    // The jobs route returns the error in the UI's shape: `{code, message, kept, log_path}`.
+    let err: Value = job["error"].clone();
+    assert_eq!(err["code"], "failed");
     assert!(err["message"]
         .as_str()
         .unwrap()
@@ -809,7 +811,7 @@ async fn github_login_answers_with_the_code_and_completes_when_approved() {
         .unwrap();
     let job = r.job(v["job"].as_str().unwrap()).await;
     assert_eq!(job["state"], "failed");
-    assert!(job["error"].as_str().unwrap().contains("did not confirm"));
+    assert!(job["error"]["message"].as_str().unwrap().contains("did not confirm"));
 }
 
 #[tokio::test]
