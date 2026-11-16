@@ -401,6 +401,7 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
     alerts::post_json(
         &format!("http://127.0.0.1:{port}/secret-path"),
         &alerts::webhook_payload(&a),
+        false,
     )
     .unwrap();
     let req = t.join().unwrap();
@@ -419,6 +420,7 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
     let e = alerts::post_json(
         &format!("http://127.0.0.1:{closed}/secret-path"),
         &serde_json::json!({}),
+        false,
     )
     .unwrap_err();
     assert!(
