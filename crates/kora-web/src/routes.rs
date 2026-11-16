@@ -1,5 +1,6 @@
 //! The Op → handler table. The `match` has no wildcard arm, so adding an [`Op`] without a handler
 //! does not compile; the HTTP method and path always come from [`Op::route`].
+use axum::extract::DefaultBodyLimit;
 use axum::handler::Handler;
 use axum::routing::{on, MethodFilter, MethodRouter};
 use axum::Router;
@@ -102,6 +103,13 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::UserRemove => on_op(op, handlers::remote::user_remove),
         Op::SessionLogout => on_op(op, crate::session_logout),
         Op::CheckCfx => on_op(op, handlers::install::check_cfx),
+        Op::AssetsList => on_op(op, handlers::assets::assets_list),
+        // The zip is the request body: streamed to a file, so the panel-wide 1 MiB limit does not apply.
+        Op::AssetInspect => on_op(op, handlers::assets::asset_inspect)
+            .layer(DefaultBodyLimit::max(handlers::assets::UPLOAD_LIMIT as usize)),
+        Op::AssetImport => on_op(op, handlers::assets::asset_import),
+        Op::AssetRemove => on_op(op, handlers::assets::asset_remove),
+        Op::AssetDownloads => on_op(op, handlers::assets::asset_downloads),
     }
 }
 

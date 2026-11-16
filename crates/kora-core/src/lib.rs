@@ -29,4 +29,5 @@ pub mod installer;
 pub mod launch;
 pub mod monitor;
 pub mod notify;
+pub mod paidassets;
 pub mod self_update;

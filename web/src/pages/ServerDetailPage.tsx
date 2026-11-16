@@ -13,6 +13,7 @@ import { ConsoleTab } from './server/ConsoleTab'
 import { LogsTab } from './server/LogsTab'
 import { UpdatesTab } from './server/UpdatesTab'
 import { ResourcesTab } from './server/ResourcesTab'
+import { PaidAssetsTab } from './server/PaidAssetsTab'
 import { ScheduleTab } from './server/ScheduleTab'
 import { NotificationsTab } from './server/NotificationsTab'
 import { PortsTab } from './server/PortsTab'
@@ -47,6 +48,7 @@ export default function ServerDetailPage() {
           <TabsTrigger value="updates">Updates</TabsTrigger>
           <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
           <TabsTrigger value="resources">Resources</TabsTrigger>
+          <TabsTrigger value="assets">Paid assets</TabsTrigger>
           {dev && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="ports">Ports</TabsTrigger>
@@ -59,6 +61,7 @@ export default function ServerDetailPage() {
         <TabsContent value="updates"><UpdatesTab server={s} /></TabsContent>
         <TabsContent value="monitoring"><MonitoringTab server={s} /></TabsContent>
         <TabsContent value="resources"><ResourcesTab server={s} /></TabsContent>
+        <TabsContent value="assets"><PaidAssetsTab server={s} /></TabsContent>
         {dev && <TabsContent value="schedule"><ScheduleTab server={s} /></TabsContent>}
         <TabsContent value="notifications"><NotificationsTab server={s} /></TabsContent>
         <TabsContent value="ports"><PortsTab server={s} /></TabsContent>

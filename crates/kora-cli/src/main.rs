@@ -301,6 +301,21 @@ struct AddResourcesArgs {
 }
 
 #[derive(Args, Debug)]
+struct AddAssetArgs {
+    /// Server name or folder.
+    server: String,
+    /// The .zip file(s) you downloaded from the Cfx.re Portal (as they are; do not unpack them).
+    #[arg(required = true, value_name = "ZIP")]
+    zip: Vec<std::path::PathBuf>,
+    /// Show what would be imported, then stop.
+    #[arg(long)]
+    dry_run: bool,
+    /// Do not ask for confirmation.
+    #[arg(long, short = 'y')]
+    yes: bool,
+}
+
+#[derive(Args, Debug)]
 struct PanelArgs {
     /// Port to listen on. Default: 47120, or the next free one (up to 47140) when something else uses it.
     #[arg(long)]
@@ -373,6 +388,9 @@ enum Command {
     Update(UpdateArgs),
     /// Add compatibility, bridge or creator resources (or any catalog resource) to an installed server.
     AddResources(AddResourcesArgs),
+    /// Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal.
+    #[command(after_help = "Download the assets you bought from https://portal.cfx.re/assets/granted-assets (Assets → Granted Assets), signed in with the same Cfx.re account that owns this server's licence key, then pass the .zip files here as they are.")]
+    AddAsset(AddAssetArgs),
     /// Show registered servers.
     Status,
     /// Update the kora program itself to the newest release (checksum-verified).
@@ -1523,6 +1541,101 @@ fn confirm(question: &str) -> bool {
     std::io::stdin().read_line(&mut line).is_ok() && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
+/// The folder of `server` (a registered name or a folder).
+fn server_dir(server: &str) -> Result<std::path::PathBuf, String> {
+    let reg = registry::Registry::load().unwrap_or_default();
+    if let Some(e) = reg.find(server) {
+        return Ok(e.dir.clone());
+    }
+    let p = std::path::Path::new(server);
+    if p.join("server.cfg").is_file() || p.join("kora-server.json").is_file() {
+        return Ok(p.to_path_buf());
+    }
+    Err(format!("there is no server called '{server}' (see `kora status`), and it is not a server folder"))
+}
+
+fn print_asset_plan(p: &kora_core::paidassets::ImportPlan) {
+    use kora_core::paidassets::{human, CATEGORY};
+    println!("{}:", p.zip_name);
+    for r in &p.resources {
+        if !r.has_fxmanifest {
+            continue;
+        }
+        let mut tags = vec![human(r.size)];
+        if let Some(v) = &r.version {
+            tags.push(format!("version {v}"));
+        }
+        tags.push(if r.escrowed { "escrowed".into() } else { "not escrowed".into() });
+        if r.escrowed {
+            tags.push(if r.has_fxap { ".fxap present".into() } else { ".fxap MISSING".into() });
+        }
+        let what = if r.replaces { "replaces the imported copy (kept as a backup)" } else { "new" };
+        println!("  {}  ->  resources/{CATEGORY}/{}  ({}; {what})", r.name, r.name, tags.join(", "));
+    }
+    for pr in &p.problems {
+        println!("  {} {}", if pr.blocking { "[!!]" } else { "note:" }, pr.message);
+    }
+}
+
+/// `kora add-asset <server> <zip>...`: import paid assets downloaded from the Cfx.re Portal.
+fn add_asset(a: &AddAssetArgs) -> i32 {
+    use kora_core::paidassets as pa;
+    let dir = match server_dir(&a.server) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    let plans: Vec<(std::path::PathBuf, pa::ImportPlan)> = a.zip.iter().map(|z| (z.clone(), pa::inspect(&dir, z))).collect();
+    for (_, p) in &plans {
+        print_asset_plan(p);
+    }
+    let ok: Vec<&(std::path::PathBuf, pa::ImportPlan)> = plans.iter().filter(|(_, p)| p.can_import).collect();
+    if ok.len() < plans.len() {
+        eprintln!("{} of {} zip(s) can't be imported; see [!!] above.", plans.len() - ok.len(), plans.len());
+    }
+    if ok.is_empty() {
+        println!("Get your assets from {}", pa::PORTAL_URL);
+        return 1;
+    }
+    println!("The server's licence key must belong to the Cfx.re account that bought these assets.");
+    if a.dry_run {
+        println!("Dry run: nothing was changed.");
+        return 0;
+    }
+    if !a.yes && !confirm("Import these now?") {
+        eprintln!("Cancelled.");
+        return 1;
+    }
+    let mut failed = plans.len() - ok.len();
+    for (zip, p) in ok {
+        match pa::import(&dir, zip, &pa::ImportOpts::default(), &mut |m| println!("{m}...")) {
+            Ok(r) => {
+                for i in &r.imported {
+                    let v = i.version.as_deref().map(|v| format!(" {v}")).unwrap_or_default();
+                    println!("[ok] {}{v}{}", i.name, if i.replaced { " (replaced; the old copy is kept as a backup)" } else { "" });
+                }
+                for n in &r.ensured {
+                    println!("Added `ensure {n}` to server.cfg.");
+                }
+                for n in &r.notes {
+                    println!("note: {n}");
+                }
+            }
+            Err(e) => {
+                eprintln!("[!!] {}: {e}", p.zip_name);
+                failed += 1;
+            }
+        }
+    }
+    if failed > 0 {
+        1
+    } else {
+        0
+    }
+}
+
 /// `kora add-resources <server> --resource ID...`. Browsing the catalog sections
 /// (with per-creator drill-in) is in the manager: `kora manager` > Add resources.
 fn add_resources(a: AddResourcesArgs) -> i32 {
@@ -2140,6 +2253,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Helper { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },
+        Some(Command::AddAsset(_)) => K::Update { auto: false },
         Some(Command::Start { .. }) => K::Start,
         Some(Command::Stop { .. }) => K::Stop,
         Some(Command::Restart { .. }) => K::Restart,
@@ -2286,6 +2400,7 @@ fn main() {
         Some(Command::Panel(a)) => panel(&a),
         Some(Command::Update(a)) => update(a),
         Some(Command::AddResources(a)) => add_resources(a),
+        Some(Command::AddAsset(a)) => add_asset(&a),
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
@@ -2331,6 +2446,24 @@ mod tests {
             Some(Command::AddResources(a)) => Ok(a),
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn add_asset_arguments_and_help() {
+        let parse = |args: &[&str]| {
+            let mut v = vec!["kora", "add-asset"];
+            v.extend_from_slice(args);
+            Cli::try_parse_from(v).map(|c| match c.command {
+                Some(Command::AddAsset(a)) => a,
+                _ => unreachable!(),
+            })
+        };
+        let a = parse(&["srv", "a.zip", "b.zip", "--dry-run"]).unwrap();
+        assert_eq!((a.server.as_str(), a.zip.len(), a.dry_run, a.yes), ("srv", 2, true, false));
+        assert!(parse(&["srv", "a.zip", "-y"]).unwrap().yes);
+        assert!(parse(&["srv"]).is_err(), "at least one zip");
+        let help = <Cli as clap::CommandFactory>::command().find_subcommand_mut("add-asset").unwrap().render_long_help().to_string();
+        assert!(help.contains("https://portal.cfx.re/assets/granted-assets"), "{help}");
     }
 
     #[test]

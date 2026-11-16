@@ -9,6 +9,7 @@ Commands:
   panel          Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up)
   update         Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers)
   add-resources  Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
+  add-asset      Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal
   status         Show registered servers
   self-update    Update the kora program itself to the newest release (checksum-verified)
   webhook        Discord notifications for update reports
@@ -99,11 +100,11 @@ Options:
       --db-admin-host <DB_ADMIN_HOST>
           Database server address for the admin login (default 127.0.0.1)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --db-admin-port <DB_ADMIN_PORT>
           Database server port for the admin login (default 3306)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --start
           Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)
@@ -336,6 +337,33 @@ Options:
 
   -h, --help
           Print help
+
+===== kora add-asset =====
+Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal
+
+Usage: kora add-asset [OPTIONS] <SERVER> <ZIP>...
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+  <ZIP>...
+          The .zip file(s) you downloaded from the Cfx.re Portal (as they are; do not unpack them)
+
+Options:
+      --dry-run
+          Show what would be imported, then stop
+
+  -y, --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+Download the assets you bought from https://portal.cfx.re/assets/granted-assets (Assets → Granted Assets), signed in with the same Cfx.re account that owns this server's licence key, then pass the .zip files here as they are.
 
 ===== kora status =====
 Show registered servers

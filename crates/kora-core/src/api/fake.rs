@@ -5,7 +5,7 @@
 //! `calls` so tests can assert on what a request did.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::backend::{badge_of, Backend, Res, Status, StatusDetail, UpdateBadge};
@@ -15,6 +15,7 @@ use crate::feedback::PrPlan;
 use crate::installer::registry::{PortsRecord, ServerEntry};
 use crate::installer::{Mode, Ports};
 use crate::notify::NotifyConfig;
+use crate::paidassets::{AssetsView, FoundResource, ImportOpts, ImportPlan, ImportReport, ImportedAsset};
 use crate::service::{ControlAction, ScheduleConfig};
 use crate::update::manual::{ApplyOpts, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
 use crate::update::UpdateReport;
@@ -50,6 +51,13 @@ pub struct FakeState {
     /// `Some(args)`: changing the schedule needs elevation and these are the `kora` arguments.
     pub elevation: Option<Vec<String>>,
     pub ports_error: Option<String>,
+    /// Paid assets per server name.
+    pub assets: HashMap<String, AssetsView>,
+    /// What `asset_inspect` answers (`None`: an importable plan named after the zip).
+    pub asset_plan: Option<Res<ImportPlan>>,
+    /// What `asset_import` answers (`None`: one asset named after the zip).
+    pub asset_import: Option<Res<ImportReport>>,
+    pub asset_remove_error: Option<String>,
 }
 
 /// Cheap to clone; clones share state. Give `move || Box::new(fake.clone())` to the panel.
@@ -300,6 +308,53 @@ impl Backend for FakeBackend {
         }
         Ok(vec!["Firewall rules were not changed.".into()])
     }
+    fn assets_list(&mut self, e: &ServerEntry) -> Res<AssetsView> {
+        Ok(self.state().assets.get(&e.name).cloned().unwrap_or_default())
+    }
+    fn asset_inspect(&mut self, e: &ServerEntry, zip: &Path) -> Res<ImportPlan> {
+        let mut s = self.state();
+        // The zip's name and size, so tests can check what reached the backend.
+        let size = std::fs::metadata(zip).map(|m| m.len()).unwrap_or(0);
+        s.calls.push(format!("asset_inspect {} {} {size}", e.name, file_name(zip)));
+        s.asset_plan.clone().unwrap_or_else(|| {
+            let name = zip.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            Ok(ImportPlan {
+                zip_name: file_name(zip),
+                resources: vec![FoundResource { name, zip_path: String::new(), has_fxmanifest: true, has_fxap: true, escrowed: true, size, files: 1, version: None, replaces: false }],
+                problems: vec![],
+                total_size: size,
+                can_import: true,
+            })
+        })
+    }
+    fn asset_import(&mut self, e: &ServerEntry, zip: &Path, o: &ImportOpts, say: &mut dyn FnMut(&str)) -> Res<ImportReport> {
+        let result = {
+            let mut s = self.state();
+            s.calls.push(format!("asset_import {} {} replace={}", e.name, file_name(zip), o.replace));
+            s.asset_import.clone()
+        };
+        say("Unpacking");
+        result.unwrap_or_else(|| {
+            let name = zip.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            Ok(ImportReport { zip_name: file_name(zip), imported: vec![ImportedAsset { name: name.clone(), version: None, replaced: false, backup: None }], ensured: vec![name], notes: vec![] })
+        })
+    }
+    fn asset_remove(&mut self, e: &ServerEntry, name: &str) -> Res<Vec<String>> {
+        let mut s = self.state();
+        s.calls.push(format!("asset_remove {} {name}", e.name));
+        if let Some(x) = &s.asset_remove_error {
+            return Err(x.clone());
+        }
+        let Some(v) = s.assets.get_mut(&e.name).filter(|v| v.assets.iter().any(|a| a.name == name)) else {
+            return Err(format!("There is no paid asset called {name} on this server (not found)."));
+        };
+        v.assets.retain(|a| a.name != name);
+        Ok(vec![format!("{name} was removed.")])
+    }
+}
+
+fn file_name(p: &Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 #[cfg(test)]

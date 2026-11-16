@@ -19,6 +19,7 @@ use crate::git::{self, SystemRunner};
 use crate::installer::registry::{self, Registry, ServerEntry, ServerFile};
 use crate::installer::{self, host, RollbackOptions};
 use crate::launch;
+use crate::paidassets;
 use crate::service::{ControlAction, ServiceState};
 
 use crate::notify::{self, NotifyConfig};
@@ -358,6 +359,22 @@ impl Backend for SystemBackend {
             Some(c) => schedule::set_args(e, c),
             None => vec!["schedule".into(), "off".into(), e.dir.to_string_lossy().into_owned()],
         })
+    }
+
+    fn assets_list(&mut self, e: &ServerEntry) -> Res<paidassets::AssetsView> {
+        paidassets::view(&e.dir)
+    }
+
+    fn asset_inspect(&mut self, e: &ServerEntry, zip: &Path) -> Res<paidassets::ImportPlan> {
+        Ok(paidassets::inspect(&e.dir, zip))
+    }
+
+    fn asset_import(&mut self, e: &ServerEntry, zip: &Path, o: &paidassets::ImportOpts, say: &mut dyn FnMut(&str)) -> Res<paidassets::ImportReport> {
+        paidassets::import(&e.dir, zip, o, say)
+    }
+
+    fn asset_remove(&mut self, e: &ServerEntry, name: &str) -> Res<Vec<String>> {
+        paidassets::remove(&e.dir, name)
     }
 }
 

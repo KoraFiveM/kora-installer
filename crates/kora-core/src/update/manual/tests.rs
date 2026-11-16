@@ -102,7 +102,7 @@ fn dev_env() -> Env {
         sh(t.path(), &["clone", "-q", up.to_str().unwrap(), fork.to_str().unwrap()]);
         sh(&fork, &["remote", "add", "upstream", up.to_str().unwrap()]);
         commit(&up, "2", &format!("{id} two"));
-        recs.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None, third_party: false });
+        recs.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None, third_party: false, ..Default::default() });
     }
     server(Mode::Development, recs, t, dir)
 }
@@ -146,6 +146,29 @@ fn preview_of_one_resource_accepts_underscore_ids_and_rejects_unknown() {
     assert_eq!(p.resources.len(), 1);
     assert_eq!(p.resources[0].id, "kora-hud");
     assert!(preview_with(&env.sf, Scope::Resources(vec!["nope".into()]), &GitCli::default(), None).is_err());
+}
+
+#[test]
+fn paid_portal_assets_are_never_updated() {
+    let mut env = dev_env();
+    let paid = env.sf.dir.join("resources/[paid]/qs-housing");
+    std::fs::create_dir_all(&paid).unwrap();
+    std::fs::write(paid.join("fxmanifest.lua"), "fx_version 'cerulean'\n").unwrap();
+    env.sf.resources.push(ResourceRecord {
+        id: "qs-housing".into(),
+        path: "[paid]/qs-housing".into(),
+        source: Some(crate::paidassets::SOURCE.into()),
+        version: Some("1.0".into()),
+        ..Default::default()
+    });
+    let p = preview_with(&env.sf, Scope::All, &GitCli::default(), None).unwrap();
+    assert_eq!(p.resources.len(), 3, "the paid asset is not part of an update");
+    assert!(p.resources.iter().all(|c| c.id != "qs-housing"));
+    let e = preview_with(&env.sf, Scope::Resources(vec!["qs-housing".into()]), &GitCli::default(), None).unwrap_err();
+    assert!(e.to_string().contains("paid asset"), "{e}");
+    let (r, _) = run(&env, Scope::All, opts(RestartPolicy::WhenQuiet, &[]), &Health::ok(), Some(0), 1000);
+    assert!(r.updated.iter().all(|u| u.id != "qs-housing"));
+    assert!(paid.join("fxmanifest.lua").is_file(), "left alone");
 }
 
 #[test]
@@ -276,7 +299,7 @@ fn prod_env() -> (Env, [String; 3]) {
     std::fs::create_dir_all(fork.parent().unwrap()).unwrap();
     sh(t.path(), &["clone", "-q", up.to_str().unwrap(), fork.to_str().unwrap()]);
     sh(&fork, &["checkout", "-q", "--detach", &c1]);
-    let rec = ResourceRecord { id: "kora-chat".into(), path: "[kora]/kora_chat".into(), repository: "https://github.com/x/kora_chat.git".into(), branch: "main".into(), commit: Some(c1.clone()), third_party: false };
+    let rec = ResourceRecord { id: "kora-chat".into(), path: "[kora]/kora_chat".into(), repository: "https://github.com/x/kora_chat.git".into(), branch: "main".into(), commit: Some(c1.clone()), third_party: false, ..Default::default() };
     let env = server(Mode::Production, vec![rec], t, dir);
     env.sf.save().unwrap();
     (env, [c1, c2, c3])
@@ -713,6 +736,7 @@ fn production_lists_resources_the_catalog_dropped_and_warns_about_the_built_in_c
         branch: "main".into(),
         commit: Some(c1.clone()),
         third_party: false,
+        ..Default::default()
     });
     let cat = prod_cat(&env, &[("0.2.0", &c2), ("0.1.0", &c1)], "0.2.0");
     let note = catalog_note(&catalog::CatalogOrigin::Embedded("offline".into()));

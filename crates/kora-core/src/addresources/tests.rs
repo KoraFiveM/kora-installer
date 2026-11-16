@@ -43,6 +43,7 @@ fn server(dir: &Path, mode: Mode, owner: Option<&str>) -> ServerFile {
             branch: "dev".into(),
             commit: None,
             third_party: false,
+            ..Default::default()
         }],
     }
 }

@@ -347,6 +347,7 @@ pub fn execute(
                         branch: item.branch.clone(),
                         commit: item.commit.clone(),
                         third_party: item.third_party,
+                        ..Default::default()
                     });
                 }
                 if fresh {

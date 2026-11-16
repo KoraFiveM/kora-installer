@@ -12,3 +12,4 @@ pub mod maintenance;
 pub mod monitor;
 pub mod hub;
 pub mod remote;
+pub mod assets;

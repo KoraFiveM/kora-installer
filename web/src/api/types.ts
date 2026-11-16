@@ -579,3 +579,115 @@ export interface Fleet {
   /** True when some node could not be reached. */
   partial: boolean
 }
+
+// ---- paid assets (Cfx.re Portal) -------------------------------------------------------------
+
+export type AssetProblemKind =
+  | 'not_a_zip'
+  | 'no_resources'
+  | 'no_fxmanifest'
+  | 'missing_fxap'
+  | 'unsafe_path'
+  | 'skipped_entry'
+  | 'too_big'
+  | 'zip_bomb'
+  | 'encrypted'
+  | 'name_taken'
+  | 'bad_name'
+  | 'duplicate'
+  | 'no_folder'
+
+export interface AssetProblem {
+  kind: AssetProblemKind
+  resource: string | null
+  message: string
+  /** Stops the import; otherwise a warning. */
+  blocking: boolean
+}
+
+/** One folder found in a zip. Only the ones with `has_fxmanifest` are imported. */
+export interface FoundAsset {
+  name: string
+  zip_path: string
+  has_fxmanifest: boolean
+  has_fxap: boolean
+  escrowed: boolean
+  /** Unpacked size in bytes. */
+  size: number
+  files: number
+  version: string | null
+  /** An imported copy is replaced (and kept as a backup). */
+  replaces: boolean
+}
+
+export interface AssetPlan {
+  zip_name: string
+  resources: FoundAsset[]
+  problems: AssetProblem[]
+  total_size: number
+  can_import: boolean
+}
+
+/** `upload` (an uploaded zip, null when refused) or `download` (a zip from the Downloads folder). */
+export interface AssetInspectResult {
+  plan: AssetPlan
+  upload?: string | null
+  download?: string | null
+}
+
+export type AssetSource = { upload: string } | { download: string }
+
+export interface PaidAsset {
+  name: string
+  /** Relative to resources/. */
+  path: string
+  version: string | null
+  imported_unix: number | null
+  present: boolean
+  has_fxap: boolean
+  backups: number
+}
+
+export type AssetHintKind = 'entitlement' | 'verify_failed' | 'download_failed'
+
+export interface AssetHint {
+  kind: AssetHintKind
+  resource: string | null
+  /** The console line it was found in. */
+  line: string
+  fix: string
+}
+
+export interface PaidAssets {
+  assets: PaidAsset[]
+  hints: AssetHint[]
+  portal_url: string
+}
+
+export interface DownloadZip {
+  name: string
+  size: number
+  modified_unix: number
+}
+
+export interface RecentDownloads {
+  found: boolean
+  folder?: string
+  zips: DownloadZip[]
+}
+
+export interface ImportedAsset {
+  name: string
+  version: string | null
+  replaced: boolean
+  backup: string | null
+}
+
+export interface AssetImportReport {
+  zip_name: string
+  imported: ImportedAsset[]
+  ensured: string[]
+  notes: string[]
+}
+
+export type AssetImportEvent = { type: 'status'; message: string } | { type: 'asset'; name: string; state: 'imported' }

@@ -722,7 +722,7 @@ mod tests {
             sh(&fork, &["remote", "add", "upstream", up.to_str().unwrap()]);
             std::fs::write(up.join("a"), "2").unwrap();
             sh(&up, &["commit", "-qam", "two"]);
-            records.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None, third_party: false });
+            records.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None, third_party: false, ..Default::default() });
         }
         // make the second fork dirty
         std::fs::write(t.path().join("srv/resources/[kora]/kora_hud/a"), "local edit").unwrap();
