@@ -139,6 +139,11 @@ connect it with `sudo tailscale up`, then run `kora panel --tailscale` again."
     if !s.running || !s.ips.iter().any(|i| is_tailnet_ip(*i)) {
         return Err("Tailscale is installed but not connected. Run `sudo tailscale up`, then `kora panel --tailscale` again.".into());
     }
+    if s.tun == Some(false) {
+        return Err("Tailscale runs in userspace networking mode here (no network device, common in containers), so no other \
+program can listen on its address. Give the container a TUN device and restart Tailscale, or use an SSH tunnel instead (see `kora panel --help`)."
+            .into());
+    }
     Ok(s)
 }
 
@@ -150,6 +155,17 @@ pub fn configure(admin_flag: Option<&str>) -> Result<Ready, String> {
     let mut cfg = RemoteConfig::load(&path)?;
     let ssh = ssh_client_on_tailnet(std::env::var("SSH_CONNECTION").ok().as_deref());
     let (admin, source) = match choose_admin(admin_flag, ssh, &SystemWhois, &status, &cfg)? {
+        // Chosen by Kora (not by you): confirm when someone is at the terminal, so an SSH jump host or an
+        // old auth key never quietly decides who owns the panel.
+        Some((l, src)) if !matches!(src, AdminSource::Flag | AdminSource::Existing) => {
+            match ask_line(&format!("Make {l} the panel's admin ({})? [Y/n] ", src.why())) {
+                Some(answer) if is_no(&answer) => match ask_line("Their Tailscale login instead (name@example.com): ") {
+                    Some(other) if !other.trim().is_empty() => (normalise_login(&other)?, AdminSource::Flag),
+                    _ => return Err("No admin chosen; nothing was changed. Run it again with --admin you@example.com.".into()),
+                },
+                _ => (l, src),
+            }
+        }
         Some(a) => a,
         None => match ask_line("This computer belongs to no Tailscale account (it is tagged), so Kora cannot tell who should be the panel's admin.\nYour Tailscale login (name@example.com): ") {
             Some(l) if !l.trim().is_empty() => (normalise_login(&l)?, AdminSource::Flag),
@@ -227,7 +243,7 @@ pub fn start_background(a: &super::PanelArgs, home: &Path, ready: &Ready) -> i32
 /// Already set up: print the address. Otherwise, on a server with no screen, ask (on the terminal,
 /// even under `curl | sh`); `KORA_TAILSCALE=1` says yes without asking, `KORA_TAILSCALE=0` never asks.
 pub fn after_setup(a: &super::PanelArgs, home: &Path, headless: bool) {
-    if svc::saved_tailscale(home) {
+    if tailnet_on(home) {
         if let Some(port) = svc::saved_port(home) {
             print_tailnet_address(home, port);
         }
@@ -243,7 +259,7 @@ pub fn after_setup(a: &super::PanelArgs, home: &Path, headless: bool) {
     let yes = match choice.as_deref() {
         Some("1") => true,
         _ if headless => ask_line("Tailscale is running on this computer. Open Kora Panel from your own devices over Tailscale\n(no link or tunnel needed, only your tailnet can reach it)? [Y/n] ")
-            .is_some_and(|l| !matches!(l.trim().to_ascii_lowercase().as_str(), "n" | "no")),
+            .is_some_and(|l| !is_no(&l)),
         _ => false,
     };
     if !yes {
@@ -262,12 +278,22 @@ pub fn after_setup(a: &super::PanelArgs, home: &Path, headless: bool) {
 
 /// Print the Tailscale address of the background panel, when it listens there.
 pub fn print_tailnet_address(home: &Path, port: u16) {
-    if !svc::saved_tailscale(home) {
+    if !tailnet_on(home) {
         return;
     }
     if let Some(url) = SystemWhois.status().filter(|s| s.running).and_then(|s| s.url(port)) {
         println!("From your Tailscale devices (sign in with your Tailscale account): {url}");
     }
+}
+
+/// The background panel listens on Tailscale AND the settings let Tailscale accounts in.
+fn tailnet_on(home: &Path) -> bool {
+    svc::saved_tailscale(home) && RemoteConfig::load(&config::default_path()).is_ok_and(|c| c.enabled && c.tailscale)
+}
+
+/// "n" or "no" (any case).
+fn is_no(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no")
 }
 
 /// `kora panel tailscale ...`. The running panel notices changes to the settings by itself.
@@ -312,11 +338,13 @@ pub fn command(cmd: &TailscaleCmd, home: &Path) -> i32 {
                     cfg.enabled = false;
                 }
                 cfg.save(&path)?;
+                let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
                 if svc::saved_tailscale(home) {
-                    let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
                     super::start_background_service(home, port, false)?;
+                    close_firewall(port);
                 }
-                println!("Tailscale access is off. The panel listens on this computer only. (The list of accounts is kept for next time.)");
+                println!("Tailscale access is off: nobody can sign in with Tailscale, and the background panel listens on this computer only.");
+                println!("(The list of accounts is kept for next time. A panel you started with --foreground keeps its listener until you stop it.)");
             }
         }
         Ok(())
@@ -402,6 +430,20 @@ fn open_firewall(port: u16) {
     println!("The firewall (ufw) is on. If the page does not load from your devices, run:  sudo ufw {}", quoted.join(" "));
 }
 
+/// Undo [`open_firewall`]'s ufw rule (as root), or say how.
+fn close_firewall(port: u16) {
+    if cfg!(windows) || !std::process::Command::new("ufw").arg("status").output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("Status: active")) {
+        return;
+    }
+    let mut rule = vec!["delete".to_string()];
+    rule.extend(ufw_rule(port).into_iter().take(10)); // without the comment: ufw matches the rule itself
+    if super::launch_uid_is_root() && std::process::Command::new("ufw").args(&rule).stdin(std::process::Stdio::null()).output().is_ok_and(|o| o.status.success()) {
+        println!("The firewall rule for the panel on the Tailscale interface was removed.");
+    } else {
+        println!("If you added the firewall rule for the panel, remove it with:  sudo ufw {}", rule.join(" "));
+    }
+}
+
 /// Ask a question on the terminal, also when stdin is a pipe (`curl | sh`). `None` when there is no terminal.
 fn ask_line(question: &str) -> Option<String> {
     use std::io::{IsTerminal, Write};
@@ -413,8 +455,9 @@ fn ask_line(question: &str) -> Option<String> {
             let _ = write!(w, "{question}");
             let _ = w.flush();
             let mut line = String::new();
-            std::io::BufReader::new(tty).read_line(&mut line).ok()?;
-            return Some(line);
+            // End of input (Ctrl-D, a closed terminal) is no answer, never a "yes".
+            let n = std::io::BufReader::new(tty).read_line(&mut line).ok()?;
+            return (n > 0).then_some(line);
         }
     }
     if !std::io::stdin().is_terminal() {
@@ -423,8 +466,8 @@ fn ask_line(question: &str) -> Option<String> {
     print!("{question}");
     let _ = std::io::stdout().flush();
     let mut line = String::new();
-    std::io::stdin().read_line(&mut line).ok()?;
-    Some(line)
+    let n = std::io::stdin().read_line(&mut line).ok()?;
+    (n > 0).then_some(line)
 }
 
 #[cfg(test)]
@@ -488,6 +531,16 @@ mod tests {
         assert_eq!(cfg.tailscale_users.get("me@x"), Some(&Role::Admin));
         assert_eq!(cfg.tailscale_users.get("friend@x"), Some(&Role::Viewer), "others are left alone");
         assert!(!cfg.allow_remote_destructive, "destructive actions stay off for remote sessions");
+    }
+
+    #[test]
+    fn only_n_or_no_is_a_no() {
+        for no in ["n", "N", " no\n", "NO"] {
+            assert!(is_no(no), "{no}");
+        }
+        for yes in ["", "\n", "y", "yes", "maybe"] {
+            assert!(!is_no(yes), "{yes}");
+        }
     }
 
     #[test]

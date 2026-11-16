@@ -43,7 +43,7 @@ Options:
 | Option | What it does |
 |---|---|
 | `--port <PORT>` | The port to listen on. Without it Kora uses 47120, or the next free port up to 47140 when something else uses 47120. |
-| `--setup` | Never asks anything: makes sure the background panel is set up and running, opens it in your browser (where there is a screen) and prints the sign-in link. The install scripts run this. |
+| `--setup` | Makes sure the background panel is set up and running, opens it in your browser (where there is a screen) and prints the sign-in link. The install scripts run this. It never reads what is piped in; on a server with no screen and Tailscale running it asks once, on the terminal, whether to use Tailscale (`KORA_TAILSCALE=1` or `0` answers in advance, for example in automation). |
 | `--no-open` | Do not open a browser; print the address and sign-in link instead. This is automatic over SSH or when the computer has no desktop. |
 | `--tailscale` | Open the panel to your own devices over Tailscale (see below). Run once; it keeps running in the background. |
 | `--new-token` | Make a new sign-in token: links shown before stop working. |
@@ -355,7 +355,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
 - **Strict page policy.** The page can only load its own files: no inline scripts, no other sites, no framing.
 - **Secrets are write-only.** Licence keys, database passwords and webhook addresses are accepted but never sent back to
   the browser.
-- **No elevated panel.** The panel runs as you. Privileged actions are a command you run, or a helper that accepts only
+- **No elevated panel.** The panel runs as you (as root only when you are signed in as root, see [section 10](#10-optional-remote-access)). Privileged actions are a command you run, or a helper that accepts only
   Kora's fixed actions.
 - **No telemetry.** The page makes no requests to other websites. Fonts and icons are built in.
 
