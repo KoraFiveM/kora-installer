@@ -83,6 +83,11 @@ pub enum Op {
     JobsGet,
     JobEvents,
     Events,
+    MetricsGet,
+    AlertsList,
+    AlertsAck,
+    AlertSettingsGet,
+    AlertSettingsSet,
 }
 
 impl Op {
@@ -147,6 +152,11 @@ impl Op {
         Op::JobsGet,
         Op::JobEvents,
         Op::Events,
+        Op::MetricsGet,
+        Op::AlertsList,
+        Op::AlertsAck,
+        Op::AlertSettingsGet,
+        Op::AlertSettingsSet,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -212,6 +222,11 @@ impl Op {
             Op::JobsGet => "jobs_get",
             Op::JobEvents => "job_events",
             Op::Events => "events",
+            Op::MetricsGet => "metrics_get",
+            Op::AlertsList => "alerts_list",
+            Op::AlertsAck => "alerts_ack",
+            Op::AlertSettingsGet => "alert_settings_get",
+            Op::AlertSettingsSet => "alert_settings_set",
         }
     }
 
@@ -278,6 +293,11 @@ impl Op {
             Op::JobsGet => (Method::Get, "/jobs/{id}"),
             Op::JobEvents => (Method::Get, "/jobs/{id}/events"),
             Op::Events => (Method::Get, "/events"),
+            Op::MetricsGet => (Method::Get, "/servers/{s}/metrics"),
+            Op::AlertsList => (Method::Get, "/alerts"),
+            Op::AlertsAck => (Method::Post, "/alerts/{id}/ack"),
+            Op::AlertSettingsGet => (Method::Get, "/servers/{s}/alerts"),
+            Op::AlertSettingsSet => (Method::Put, "/servers/{s}/alerts"),
         }
     }
 
@@ -412,13 +432,18 @@ mod tests {
             | Op::UninstallRun
             | Op::JobsGet
             | Op::JobEvents
-            | Op::Events => Op::ALL.contains(&op),
+            | Op::Events
+            | Op::MetricsGet
+            | Op::AlertsList
+            | Op::AlertsAck
+            | Op::AlertSettingsGet
+            | Op::AlertSettingsSet => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 60);
+        assert_eq!(Op::ALL.len(), 65);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

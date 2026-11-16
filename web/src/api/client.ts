@@ -196,6 +196,15 @@ export const api = {
     eventsUrl: (id: string) => `${BASE}/jobs/${enc(id)}/events`,
   },
   eventsUrl: () => `${BASE}/events`,
+  metrics: {
+    get: (name: string, range: T.MetricsRange) => get<T.Metrics>(`${s(name)}/metrics`, { range }),
+  },
+  alerts: {
+    list: () => get<{ alerts: T.PanelAlert[] }>('/alerts').then((r) => r.alerts),
+    ack: (id: number) => post<void>(`/alerts/${id}/ack`),
+    settings: (name: string) => get<T.AlertSettings>(`${s(name)}/alerts`),
+    setSettings: (name: string, body: T.AlertSettingsUpdate) => put<T.AlertSettings>(`${s(name)}/alerts`, body),
+  },
 }
 
 export type Api = typeof api

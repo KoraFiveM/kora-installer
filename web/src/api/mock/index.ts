@@ -1,6 +1,7 @@
 // In-app mock backend: replaces window.fetch (for /api/v1) and window.EventSource.
 // Only loaded when VITE_MOCK=1 (or `npm run dev`), see src/main.tsx.
 import type * as T from '../types'
+import { installMonitorMock } from './monitor'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 
@@ -696,6 +697,8 @@ route('GET', '/jobs/{id}', (m) => {
   if (!j) throw new Fail(404, 'not_found', 'That job is not known (it may be from before Kora restarted).')
   return jobView(j)
 })
+
+installMonitorMock({ route, servers, fail: (status, code, message) => new Fail(status, code, message) })
 
 // ---- fetch shim -----------------------------------------------------------------------------
 

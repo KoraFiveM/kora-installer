@@ -410,3 +410,74 @@ export interface ServerEvent {
   status: ServerStatus
   badge: Badge | null
 }
+
+// ---- monitoring and alerts ----------------------------------------------------------------
+
+export type MetricsRange = '1h' | '6h' | '24h'
+
+/** One look at a server; absent numbers could not be measured (stopped server, no access to the process). */
+export interface MetricSample {
+  /** Unix seconds. */
+  t: number
+  up: boolean
+  players?: number
+  max_players?: number
+  /** Percent of the whole machine's CPU. */
+  cpu?: number
+  /** Megabytes used by the server and what it started. */
+  ram_mb?: number
+  /** Percent of this machine's memory in use. */
+  sys_ram_pct?: number
+  disk_free_mb?: number
+  disk_free_pct?: number
+  game_up: boolean
+  txadmin_up: boolean
+}
+export interface Metrics {
+  samples: MetricSample[]
+  latest: MetricSample | null
+}
+
+export type AlertKind = 'stopped' | 'recovered' | 'disk_low' | 'ram_high' | 'update_attention'
+export interface PanelAlert {
+  id: number
+  server: string
+  kind: AlertKind
+  tone: 'danger' | 'warning' | 'success'
+  title: string
+  message: string
+  raised: number
+  /** When the problem went away; null while it is still there. */
+  resolved: number | null
+  acked: boolean
+}
+
+export interface AlertRules {
+  stopped: boolean
+  recovered: boolean
+  disk: boolean
+  ram: boolean
+  updates: boolean
+}
+export interface AlertSettings {
+  enabled: boolean
+  rules: AlertRules
+  disk_min_gb: number
+  disk_min_percent: number
+  ram_max_percent: number
+  /** Also post to the server's Discord webhook (Notifications tab). */
+  discord: boolean
+  /** The address itself is never returned. */
+  webhook: { configured: boolean; redacted: string | null }
+  email: { supported: boolean }
+}
+export interface AlertSettingsUpdate {
+  enabled?: boolean
+  rules?: Partial<AlertRules>
+  disk_min_gb?: number
+  disk_min_percent?: number
+  ram_max_percent?: number
+  discord?: boolean
+  /** Omit to keep the address; '' removes it. */
+  webhook_url?: string
+}

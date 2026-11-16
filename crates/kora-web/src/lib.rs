@@ -266,11 +266,15 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
             println!("Could not open a browser; open the URL above manually.");
         }
         println!("Press Ctrl+C to stop.");
-        axum::serve(listener, router(state))
+        // Sample the servers and raise alerts for as long as the panel runs.
+        let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
+        let served = axum::serve(listener, router(state))
             .with_graceful_shutdown(async {
                 let _ = tokio::signal::ctrl_c().await;
             })
-            .await?;
+            .await;
+        monitor.stop();
+        served?;
         Ok(())
     })
 }

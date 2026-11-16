@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { useAlerts } from '@/lib/app'
 import { useServerEvents } from '@/hooks/useServerEvents'
 import { Alert } from '@/components/ui/alert'
+import { AlertsBanner } from '@/components/AlertsBanner'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { cn } from '@/lib/utils'
 
@@ -56,6 +57,7 @@ export function AppShell() {
             </div>
           ))}
         </div>
+        <div className="px-6 pt-4 empty:hidden"><AlertsBanner /></div>
         <main className="p-6">
           <ErrorBoundary resetKey={loc.pathname}>
             <Outlet />

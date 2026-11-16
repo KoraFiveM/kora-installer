@@ -158,6 +158,15 @@ Options:
       --no-open
           Do not open a browser; print the address and sign-in link instead (automatic over SSH or without a desktop)
 
+      --install-service
+          Keep the panel running in the background so monitoring and alerts work while it is closed (starts at sign-in; no administrator rights needed)
+
+      --remove-service
+          Stop and remove the background panel installed with --install-service
+
+      --print-link
+          Print the sign-in link of the background panel
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
