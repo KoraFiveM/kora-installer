@@ -1,4 +1,4 @@
-## Kora Installer v0.6.2
+## Kora Installer v0.6.3
 
 Install and manage a Kora FiveM server from your browser: run `kora panel`.
 
@@ -12,6 +12,11 @@ Windows (PowerShell):
 irm https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.ps1 | iex
 ```
 Already have Kora? Run `kora self-update`.
+
+### New in 0.6.3
+- **A much shorter install.** Three screens: your licence key, the server's name, and a summary of what Kora will do, with a "Change" link on every line. "Choose everything myself" brings back the full step-by-step wizard.
+- **Start, Stop and Restart of one resource now work for every resource** (0.6.2 sent the wrong name for most of them), and so does "Start a resource with the server".
+- Clearer words and next steps across the panel: signing in, errors, a server that will not start.
 
 ### New in 0.6.2
 - **Start, stop and restart a single resource** from the server's Resources tab, without typing console commands.

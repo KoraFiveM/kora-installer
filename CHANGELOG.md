@@ -5,6 +5,8 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-16
+
 ### Changed
 - **A much shorter install wizard.** A default install is three screens: your licence key, the server's name, and a summary of everything Kora will do, each line with a "Change" link. "Choose everything myself" brings back the step-by-step wizard. Ports are checked before you click Install.
 - Plainer words in the panel: "Sign in to Kora" with where to get a link, "Start a resource with the server" instead of "Ensure a resource", clearer help when a resource has changes of your own, a Start button where the console says the server is stopped, and next steps on common errors.
