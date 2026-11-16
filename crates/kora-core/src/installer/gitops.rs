@@ -101,6 +101,24 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     fn behind_count(&self, repo: &Path, upstream: &str) -> GitResult<u32> {
         self.count(repo, &format!("HEAD..{upstream}"))
     }
+    fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> GitResult<bool> {
+        let o = self
+            .0
+            .run(
+                "git",
+                &["merge-base", "--is-ancestor", ancestor, descendant],
+                Some(repo),
+            )
+            .map_err(gerr)?;
+        match o.code {
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(UpdateError::Git(format!(
+                "could not compare {ancestor} with {descendant}: {}",
+                o.stderr.trim()
+            ))),
+        }
+    }
     fn fetch_origin(&self, repo: &Path) -> GitResult<()> {
         self.git(repo, &["fetch", "origin"]).map(|_| ())
     }
@@ -151,7 +169,11 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     fn move_pinned(&self, repo: &Path, commit: &str) -> GitResult<()> {
         git::move_pinned(&self.0, repo, commit).map(|_| ()).map_err(gerr)
     }
-    fn sync_forks(&self, targets: &[UpdateTarget]) -> Vec<(String, git::SyncOutcome)> {
+    fn sync_forks(
+        &self,
+        targets: &[UpdateTarget],
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Vec<(String, git::SyncOutcome)> {
         // Needs gh and a signed-in user; otherwise the forks are simply left as they are.
         let slug = |repo: &Path, remote: &str| self.git(repo, &["remote", "get-url", remote]).ok().and_then(|o| git::slug_of_url(o.stdout.trim()));
         let jobs: Vec<git::SyncJob> = targets
@@ -166,7 +188,15 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
         if jobs.is_empty() || !git::is_signed_in(&self.0) {
             return Vec::new();
         }
-        git::sync_forks_paced(&self.0, &jobs, &git::ForkConfig { sync_existing: true, ..git::ForkConfig::default() })
+        git::sync_forks_paced(
+            &self.0,
+            &jobs,
+            &git::ForkConfig {
+                sync_existing: true,
+                ..git::ForkConfig::default()
+            },
+            progress,
+        )
     }
     fn log_subjects(&self, repo: &Path, from: &str, to: &str, max: usize) -> Vec<String> {
         let range = format!("{from}..{to}");
@@ -336,8 +366,10 @@ impl HealthCheck for ServiceHealth {
         HealthOutcome::Unhealthy { reason: "server did not come back after the update".into(), failed: req.updated.clone() }
     }
 
-    fn recover(&self, _req: &HealthRequest) {
-        if self.running() && self.has_service() {
+    /// Only after a full restart: anything else never restarted the server, so it still runs the
+    /// old code and players are not kicked for nothing.
+    fn recover(&self, req: &HealthRequest) {
+        if req.full_restart && self.running() && self.has_service() {
             let _ = self.restart();
         }
     }
@@ -356,22 +388,78 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         let entry = reg.find(server).ok_or_else(|| InstallError(format!("no registered server named '{server}' (see `kora status`)")))?;
         (entry.name.clone(), entry.dir.clone())
     };
-    let sf = ServerFile::load(&dir).map_err(|e| InstallError(format!("cannot read {}: {e}", dir.join("kora-server.json").display())))?;
-    let health = service_health(&name, &dir, &sf);
-    // Running server: ask it for its player count (restart-needing updates wait for 0 players);
-    // a server that is not running has none.
-    let players = if health.running() { online_players(sf.ports.game) } else { Some(0) };
-    let res = with_git(&dir, |git| update_server(&name, &dir, &sf, git, &FaultInjecting(&health), players));
+    let res = with_git(&dir, |git| {
+        // Read the server file under the lock, so a concurrent manual update is never overwritten.
+        auto_update_in(
+            &name,
+            &dir,
+            git,
+            &|sf| service_health(&name, &dir, sf),
+            &|sf, h| {
+                if h.running() {
+                    online_players(sf.ports.game)
+                } else {
+                    Some(0)
+                }
+            },
+        )
+    });
+    if let Ok((report, sf)) = &res {
+        let record = super::registry::ServerEntry {
+            name: name.clone(),
+            dir: dir.clone(),
+            mode: sf.mode,
+            ports: sf.ports,
+            created_unix: sf.created_unix,
+        };
+        crate::notify::after_update(&record, report);
+    }
+    res.map(|(r, _)| r)
+}
+
+/// The locked part of [`auto_update`], with injectable git, health and player count: takes the
+/// server's update lock (busy: logs that this run was skipped and returns the busy error), runs
+/// [`update_server`], then writes `update.log` and the status file.
+pub fn auto_update_in<H: HealthCheck>(
+    name: &str,
+    dir: &Path,
+    git: &dyn GitOps,
+    health: &dyn Fn(&ServerFile) -> H,
+    players: &dyn Fn(&ServerFile, &H) -> Option<u32>,
+) -> Result<(UpdateReport, ServerFile)> {
+    let _lock = match update::lock::acquire(dir) {
+        Ok(l) => l,
+        Err(e) => {
+            append_log(dir, &format!("skipped: {e}"));
+            return Err(InstallError(e.to_string()));
+        }
+    };
+    let res = ServerFile::load(dir)
+        .map_err(|e| {
+            InstallError(format!(
+                "cannot read {}: {e}",
+                dir.join("kora-server.json").display()
+            ))
+        })
+        .and_then(|sf| {
+            let h = health(&sf);
+            // Running server: ask it for its player count (restart-needing updates wait for 0 players);
+            // a server that is not running has none. Asked after the fork sync, which can take minutes.
+            update_server(name, dir, &sf, git, &FaultInjecting(&h), &|| {
+                players(&sf, &h)
+            })
+            .map(|r| (r, sf))
+        });
     let line = match &res {
-        Ok(r) => r.summary(),
+        Ok((r, _)) => r.summary(),
         Err(e) => format!("update failed: {e}"),
     };
-    append_log(&dir, &line);
-    if let Ok(report) = &res {
-        let now = now_unix();
-        crate::update::status::record(&dir, &crate::update::manual::apply_status(report, now, &None));
-        let record = super::registry::ServerEntry { name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
-        crate::notify::after_update(&record, report);
+    append_log(dir, &line);
+    if let Ok((report, _)) = &res {
+        crate::update::status::record(
+            dir,
+            &crate::update::manual::apply_status(report, now_unix(), &None),
+        );
     }
     res
 }
@@ -406,14 +494,15 @@ fn append_log(dir: &Path, text: &str) {
     }
 }
 
-/// The engine wiring, with injectable git and health (used by tests).
+/// The engine wiring, with injectable git and health (used by tests). Does not take the update lock:
+/// [`auto_update_in`] does. `players` is asked after the forks were synced.
 pub fn update_server(
     name: &str,
     dir: &Path,
     sf: &ServerFile,
     git: &dyn GitOps,
     health: &dyn HealthCheck,
-    players: Option<u32>,
+    players: &dyn Fn() -> Option<u32>,
 ) -> Result<UpdateReport> {
     if sf.mode != Mode::Development {
         return err_msg("auto-update only supports development servers; production servers move to newer releases manually");
@@ -430,15 +519,37 @@ pub fn update_server(
         })
         .collect();
     // Bring the user's forks on GitHub up to date first (fast-forward only), then the local checkouts.
-    let fork_sync = git.sync_forks(&targets);
-    let plan = update::plan(git, &targets);
-    let snap_dir = dir.join("snapshots");
-    std::fs::create_dir_all(&snap_dir).map_err(|e| InstallError(e.to_string()))?;
-    let snapshot = snap_dir.join("last-update.json");
-    let restart: RestartDecision = update::decide_restart(players, 0, &QuietConfig { window: None, max_players: 0 });
-    let opts = RunOptions { server: name, snapshot_file: &snapshot, now_unix: now_unix(), restart };
-    let mut report = update::run_update(git, health, &NoMigrations, &plan, &opts).map_err(|e| InstallError(e.to_string()))?;
+    let fork_sync = git.sync_forks(&targets, &mut |_, _| {});
+    let mut plan = update::plan(git, &targets);
+    // A version an earlier automatic rollback undid is not tried again every night.
+    let held = update::apply_holds(dir, &mut plan);
+    // Same place and format as manual snapshots, so `kora update --rollback` and the panel list them.
+    let now = now_unix();
+    let snap_dir = update::snapshot_dir(dir);
+    let snapshot = snap_dir.join(format!("{}.json", update::new_snapshot_id(&snap_dir, now)));
+    let restart: RestartDecision = update::decide_restart(
+        players(),
+        0,
+        &QuietConfig {
+            window: None,
+            max_players: 0,
+        },
+    );
+    let opts = RunOptions {
+        server: name,
+        snapshot_file: &snapshot,
+        now_unix: now,
+        restart,
+    };
+    let mut report = update::run_update(git, health, &NoMigrations, &plan, &opts)
+        .map_err(|e| InstallError(e.to_string()))?;
     update::add_fork_sync(&mut report, fork_sync);
+    report.held = held
+        .iter()
+        .map(|(id, c)| (id.clone(), update::held_text(c)))
+        .collect();
+    update::record_holds(dir, &plan, &report);
+    update::prune_snapshots(dir, update::KEEP_SNAPSHOTS);
     Ok(report)
 }
 
@@ -505,18 +616,37 @@ mod tests {
             }
             fn sleep(&self, _: Duration) {}
         }
-        let t = |id: &str| UpdateTarget { id: id.into(), path: PathBuf::from("/x"), upstream_ref: "upstream/dev".into(), class: ResourceClass::Other };
-        let g = GitCli(Gh { calls: RefCell::new(vec![]), signed_in: true });
-        let out = g.sync_forks(&[t("res")]);
-        assert_eq!(out, vec![("res".to_string(), git::SyncOutcome::Synced { commits: 3 })]);
+        let t = |id: &str| UpdateTarget {
+            id: id.into(),
+            path: PathBuf::from("/x"),
+            upstream_ref: "upstream/dev".into(),
+            class: ResourceClass::Other,
+        };
+        let g = GitCli(Gh {
+            calls: RefCell::new(vec![]),
+            signed_in: true,
+        });
+        let out = g.sync_forks(&[t("res")], &mut |_, _| {});
+        assert_eq!(
+            out,
+            vec![("res".to_string(), git::SyncOutcome::Synced { commits: 3 })]
+        );
         let calls = g.0.calls.borrow();
         assert!(calls.contains(&"gh repo sync me/res --branch dev".to_string()), "{calls:?}");
         assert!(calls.iter().all(|c| !c.contains("--force")));
         drop(calls);
         // signed out: no GitHub call beyond the auth check
-        let g = GitCli(Gh { calls: RefCell::new(vec![]), signed_in: false });
-        assert!(g.sync_forks(&[t("res")]).is_empty());
-        assert!(g.0.calls.borrow().iter().all(|c| !c.contains("/compare/") && !c.contains("repo sync")));
+        let g = GitCli(Gh {
+            calls: RefCell::new(vec![]),
+            signed_in: false,
+        });
+        assert!(g.sync_forks(&[t("res")], &mut |_, _| {}).is_empty());
+        assert!(g
+            .0
+            .calls
+            .borrow()
+            .iter()
+            .all(|c| !c.contains("/compare/") && !c.contains("repo sync")));
     }
 
     #[test]
@@ -609,13 +739,87 @@ mod tests {
             kora_version: "0".into(),
             resources: records,
         };
-        let rep = update_server("t", &t.path().join("srv"), &sf, &GitCli::default(), &Healthy, Some(0)).unwrap();
+        let rep = update_server(
+            "t",
+            &t.path().join("srv"),
+            &sf,
+            &GitCli::default(),
+            &Healthy,
+            &|| Some(0),
+        )
+        .unwrap();
         assert_eq!(rep.updated.len(), 1, "{}", rep.summary());
         assert_eq!(rep.updated[0].id, "kora-chat");
         assert!(rep.needs_attention.iter().any(|(id, _)| id == "kora-hud"));
-        assert_eq!(std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_chat/a")).unwrap(), "2");
-        assert_eq!(std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_hud/a")).unwrap(), "local edit");
-        let prod = ServerFile { mode: Mode::Production, ..sf };
-        assert!(update_server("t", &t.path().join("srv"), &prod, &GitCli::default(), &Healthy, Some(0)).is_err());
+        assert_eq!(
+            std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_chat/a")).unwrap(),
+            "2"
+        );
+        assert_eq!(
+            std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_hud/a")).unwrap(),
+            "local edit"
+        );
+        let prod = ServerFile {
+            mode: Mode::Production,
+            ..sf
+        };
+        assert!(update_server(
+            "t",
+            &t.path().join("srv"),
+            &prod,
+            &GitCli::default(),
+            &Healthy,
+            &|| Some(0)
+        )
+        .is_err());
+        // The automatic run saves its snapshot where `kora update --rollback` and the panel look.
+        let snaps = update::list_snapshots(&t.path().join("srv"));
+        assert_eq!(snaps.len(), 1);
+        assert_eq!(snaps[0].1.entries[0].id, "kora-chat");
+        assert!(!t.path().join("srv/snapshots").exists());
+    }
+
+    #[test]
+    fn auto_update_skips_and_logs_when_another_update_runs() {
+        use crate::installer::registry::PortsRecord;
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("srv");
+        std::fs::create_dir_all(&dir).unwrap();
+        let sf = ServerFile {
+            name: "t".into(),
+            mode: Mode::Development,
+            dir: dir.clone(),
+            ports: PortsRecord {
+                game: 1,
+                txadmin: 2,
+            },
+            game_build: 1,
+            artifact_build: 1,
+            database: None,
+            github_owner: None,
+            created_unix: 0,
+            kora_version: "0".into(),
+            resources: vec![],
+        };
+        sf.save().unwrap();
+        let held = update::lock::acquire(&dir).unwrap();
+        let asked = std::cell::Cell::new(false);
+        let e = auto_update_in("t", &dir, &GitCli::default(), &|_| Healthy, &|_, _| {
+            asked.set(true);
+            Some(0)
+        })
+        .unwrap_err();
+        assert!(update::lock::is_busy_message(&e.to_string()), "{e}");
+        assert!(!asked.get(), "nothing was looked at");
+        let log = std::fs::read_to_string(dir.join("update.log")).unwrap();
+        assert!(
+            log.contains("skipped: Another update is running for this server"),
+            "{log}"
+        );
+        drop(held);
+        let (r, _) =
+            auto_update_in("t", &dir, &GitCli::default(), &|_| Healthy, &|_, _| Some(0)).unwrap();
+        assert!(!r.has_problems());
+        assert!(crate::update::status::read(&dir).is_some());
     }
 }

@@ -128,9 +128,21 @@ impl Backend for FakeBackend {
     fn preview(&mut self, _e: &ServerEntry, scope: Scope) -> Res<UpdatePreview> {
         let f = self.0.borrow();
         assert_eq!(scope, Scope::All);
-        f.preview.clone().unwrap_or_else(|| Ok(UpdatePreview { resources: vec![], new_release: None }))
+        f.preview.clone().unwrap_or_else(|| {
+            Ok(UpdatePreview {
+                resources: vec![],
+                new_release: None,
+                notes: vec![],
+            })
+        })
     }
-    fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
+    fn apply(
+        &mut self,
+        e: &ServerEntry,
+        scope: Scope,
+        o: ApplyOpts,
+        on: &mut dyn FnMut(UpdateEvent),
+    ) -> Res<UpdateReport> {
         let (events, result) = {
             let mut f = self.0.borrow_mut();
             f.calls.push(format!("apply {} {scope:?} restart={:?}", e.name, o.restart));
@@ -141,8 +153,11 @@ impl Backend for FakeBackend {
         }
         result
     }
-    fn rollback(&mut self, e: &ServerEntry, snapshot: &str) -> Res<()> {
-        self.0.borrow_mut().calls.push(format!("rollback {} {snapshot}", e.name));
+    fn rollback(&mut self, e: &ServerEntry, snapshot: &str, _force: bool) -> Res<()> {
+        self.0
+            .borrow_mut()
+            .calls
+            .push(format!("rollback {} {snapshot}", e.name));
         Ok(())
     }
     fn snapshots(&mut self, _e: &ServerEntry) -> Vec<SnapshotInfo> {
@@ -153,7 +168,17 @@ impl Backend for FakeBackend {
         f.calls.push(format!("check {}", e.name));
         match f.checked.clone() {
             Some(r) => r,
-            None => f.preview.clone().unwrap_or_else(|| Ok(UpdatePreview { resources: vec![], new_release: None })).map(|p| super::backend::badge_of(&p)),
+            None => f
+                .preview
+                .clone()
+                .unwrap_or_else(|| {
+                    Ok(UpdatePreview {
+                        resources: vec![],
+                        new_release: None,
+                        notes: vec![],
+                    })
+                })
+                .map(|p| super::backend::badge_of(&p)),
         }
     }
     fn ports_set(&mut self, e: &ServerEntry, p: kora_core::installer::Ports) -> Res<Vec<String>> {
