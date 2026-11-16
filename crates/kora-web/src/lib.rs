@@ -370,6 +370,10 @@ async fn remote_sign_in(
     let r = &st.remote;
     // Counted per source address: one person guessing does not lock out everyone else.
     let ip = caller.peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |p| p.ip());
+    // The guard refuses these already; a program on this computer must never be taken for the owner.
+    if r.is_self_ip(ip) {
+        return Err(ApiError::forbidden(security::SELF_ADDRESS_REFUSED));
+    }
     if r.limiter.locked(ip) {
         return Err(ApiError::rate_limited("too many failed attempts, try again later"));
     }
@@ -448,6 +452,7 @@ async fn serve_tailnet(state: AppState, port: u16) {
         if let Some(s) = status {
             // The names a browser on the tailnet uses (MagicDNS name, short name, addresses).
             state.remote.set_dynamic_hosts(s.host_names());
+            state.remote.set_self_ips(s.ips.clone());
             for ip in s.ips.iter().copied().filter(|ip| remote::is_tailnet_ip(*ip)) {
                 if bound.contains(&ip) {
                     continue;

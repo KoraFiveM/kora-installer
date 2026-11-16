@@ -1436,3 +1436,43 @@ async fn live_streams_are_capped_per_remote_account() {
     open.remove(0);
     assert_eq!(open_stream(&w, &vera, REMOTE_PEER).await.status(), 200);
 }
+
+/// A program on this computer that connects to the machine's own Tailscale address looks remote, and
+/// whois names the machine's owner for it. It must get nothing beyond `/meta`.
+#[tokio::test]
+async fn the_machines_own_tailscale_address_never_signs_in() {
+    const SELF_PEER: &str = "100.64.0.5:40000";
+    let mut cfg = enabled_cfg();
+    cfg.tailscale = true;
+    cfg.tailscale_users.insert("boss@example.com".into(), Role::Admin);
+    cfg.tailscale_users.insert("alice@example.com".into(), Role::Operator);
+    let admin = cfg.add_user("adam", Role::Admin).unwrap();
+    let who = FakeWhois::with("100.64.0.5", "boss@example.com");
+    who.logins.lock().unwrap().push(("100.64.0.20".into(), "alice@example.com".into()));
+    let w = world_with(Remote::new(None, cfg).with_whois(who.clone()));
+    w.remote.set_self_ips(vec!["100.64.0.5".parse().unwrap(), "fd7a:115c:a1e0::5".parse().unwrap()]);
+    assert!(w.remote.is_self_ip("::ffff:100.64.0.5".parse().unwrap()), "compared in canonical form");
+    assert!(!w.remote.is_self_ip("100.64.0.20".parse().unwrap()));
+
+    let r = req("POST", "/api/v1/session").peer(SELF_PEER).h("x-kora", "1").json(json!({})).send(&w.app).await;
+    assert_eq!(r.status, 403, "{:?}", r.json);
+    assert!(r.msg().contains("another device") && r.msg().contains("kora panel"), "{}", r.msg());
+    assert!(r.cookie.is_none());
+    assert!(who.asked.lock().unwrap().is_empty(), "Tailscale is not even asked");
+    // A user token through that address is refused too.
+    let r = req("GET", "/api/v1/servers").peer(SELF_PEER).bearer(&admin).send(&w.app).await;
+    assert_eq!(r.status, 403);
+    let r = req("POST", "/api/v1/session").peer(SELF_PEER).h("x-kora", "1").json(json!({"token": admin})).send(&w.app).await;
+    assert_eq!(r.status, 403);
+    // The page can still load and explain.
+    let r = req("GET", "/api/v1/meta").peer(SELF_PEER).send(&w.app).await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.json["identity"], Value::Null);
+
+    // Another device on the tailnet still signs in as before.
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({})).send(&w.app).await;
+    assert_eq!(r.status, 200, "{:?}", r.json);
+    assert_eq!(r.json["identity"]["name"], "alice@example.com");
+    let r = req("GET", "/api/v1/servers").bearer(&admin).send(&w.app).await;
+    assert_eq!(r.status, 200);
+}

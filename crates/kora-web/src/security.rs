@@ -517,6 +517,10 @@ pub const PROXY_HEADERS: &[&str] = &[
 pub const PROXY_REFUSED: &str = "Kora Panel must not be put behind a proxy or `tailscale serve`: they make every visitor look like this computer. \
 To reach the panel from your own devices, run `kora panel --tailscale`, or use an SSH tunnel.";
 
+/// For a request from this machine's own Tailscale address (see [`check`]).
+pub const SELF_ADDRESS_REFUSED: &str =
+    "Open the panel from another device, or run `kora panel` on this computer for a sign-in link.";
+
 fn bearer(h: &HeaderMap) -> Option<&str> {
     let v = h.get(header::AUTHORIZATION)?.to_str().ok()?;
     let (scheme, tok) = v.split_once(' ')?;
@@ -608,13 +612,21 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
     if !st.host_ok(host) {
         return Err(ApiError::forbidden("host not allowed"));
     }
+    let method = req.method();
+    let path = req.uri().path();
+    // A program on this computer reaching the panel through the machine's own Tailscale address looks
+    // remote, and Tailscale names the machine's owner for it: any local account would become an admin.
+    // Only the page's first question (`/meta`) is answered, so it can explain.
+    let api = path == "/api" || path.starts_with("/api/");
+    let meta = (method == Method::GET || method == Method::HEAD) && path == "/api/v1/meta";
+    if remote && api && !meta && peer.is_some_and(|p| st.remote.is_self_ip(p.ip())) {
+        return Err(ApiError::forbidden(SELF_ADDRESS_REFUSED));
+    }
     if remote && !st.remote.enabled() {
         return Err(ApiError::forbidden(
             "Remote access is turned off on this computer.",
         ));
     }
-    let method = req.method();
-    let path = req.uri().path();
     let safe = method == Method::GET || method == Method::HEAD;
     // The launch token is for the computer itself. Remote callers present a per-user token.
     let bearer_identity = bearer(h).and_then(|t| {

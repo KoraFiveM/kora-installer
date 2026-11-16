@@ -98,6 +98,9 @@ pub struct Remote {
     dynamic_hosts: Mutex<Vec<String>>,
     /// Where tailnet devices open the panel, once it listens on Tailscale (`--tailscale`).
     tailnet_url: Mutex<Option<String>>,
+    /// This machine's own Tailscale addresses. A connection from one of them comes from a program on this
+    /// computer, and Tailscale would name the machine's owner for it.
+    self_ips: Mutex<Vec<IpAddr>>,
 }
 
 impl Remote {
@@ -116,6 +119,7 @@ impl Remote {
             limiter: IpLimiter::new(10, Duration::from_secs(60), Duration::from_secs(60), 4096),
             dynamic_hosts: Mutex::new(Vec::new()),
             tailnet_url: Mutex::new(None),
+            self_ips: Mutex::new(Vec::new()),
         }
     }
 
@@ -201,13 +205,33 @@ impl Remote {
         self.whois.status()
     }
 
-    /// Ask tailscaled for this machine's MagicDNS names and allow them as `Host` values.
+    /// Ask tailscaled for this machine's MagicDNS names and allow them as `Host` values. Also note its
+    /// own Tailscale addresses (see [`is_self_ip`](Self::is_self_ip)).
     pub fn learn_self_names(&self) {
         let names = self.whois.self_names();
         *self
             .dynamic_hosts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = names;
+        if let Some(s) = self.whois.status() {
+            self.set_self_ips(s.ips);
+        }
+    }
+
+    /// This machine's own Tailscale addresses (kept up to date while the panel listens on Tailscale).
+    pub fn set_self_ips(&self, ips: Vec<IpAddr>) {
+        *self.self_ips.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            ips.into_iter().map(|i| i.to_canonical()).collect();
+    }
+
+    /// Is `ip` one of this machine's own Tailscale addresses? Such a caller is a program on this computer
+    /// (any account, a game server resource), not one of the owner's devices.
+    pub fn is_self_ip(&self, ip: IpAddr) -> bool {
+        let ip = ip.to_canonical();
+        self.self_ips
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&ip)
     }
 
     /// The panel now listens on Tailscale; `url` is what to open there.
@@ -381,6 +405,29 @@ Bind to one address instead (for example your Tailscale address), or add the nam
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SelfOnly;
+    impl Whois for SelfOnly {
+        fn whois(&self, _: SocketAddr) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn status(&self) -> Option<TsSelf> {
+            Some(TsSelf {
+                running: true,
+                ips: vec!["100.64.0.5".parse().unwrap()],
+                ..TsSelf::default()
+            })
+        }
+    }
+
+    #[test]
+    fn own_addresses_are_learnt_with_the_names() {
+        let r = Remote::memory().with_whois(Arc::new(SelfOnly));
+        assert!(!r.is_self_ip("100.64.0.5".parse().unwrap()));
+        r.learn_self_names();
+        assert!(r.is_self_ip("100.64.0.5".parse().unwrap()));
+        assert!(!r.is_self_ip("100.64.0.6".parse().unwrap()));
+    }
 
     fn cfg_with_user() -> RemoteConfig {
         let mut c = RemoteConfig::default();
