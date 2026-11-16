@@ -72,7 +72,8 @@ impl Source {
 }
 
 pub fn releases_url(api_base: &str) -> String {
-    format!("{}/repos/{REPO}/releases?per_page=10", api_base.trim_end_matches('/'))
+    // 30 like install.sh / install.ps1: a run of pre-releases must not hide the latest stable one.
+    format!("{}/repos/{REPO}/releases?per_page=30", api_base.trim_end_matches('/'))
 }
 
 pub fn fetch_releases(src: &Source) -> Result<Vec<Release>, SelfUpdateError> {

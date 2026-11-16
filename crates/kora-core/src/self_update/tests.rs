@@ -246,10 +246,19 @@ fn explicit_version_may_go_either_way() {
 }
 
 #[test]
+fn a_stable_release_behind_many_pre_releases_is_still_found() {
+    assert!(releases_url("https://api.github.com").ends_with("/releases?per_page=30"));
+    let mut list: Vec<(String, bool)> = (1..=12).map(|i| (format!("v0.4.0-rc{i}"), false)).collect();
+    list.push(("v0.3.5".into(), false));
+    let r = rels(&list.iter().map(|(t, p)| (t.as_str(), *p)).collect::<Vec<_>>());
+    assert!(matches!(decide(&v("0.3.0"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.3.5"));
+}
+
+#[test]
 fn fetches_and_picks_from_the_releases_endpoint() {
     let m = Mock::start();
     m.put(
-        "/repos/KoraFiveM/kora-installer/releases?per_page=10",
+        "/repos/KoraFiveM/kora-installer/releases?per_page=30",
         br#"[{"tag_name":"v0.2.2-rc1","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.2.1","assets":[]}]"#,
     );
     let r = fetch_releases(&m.src()).unwrap();
@@ -314,7 +323,7 @@ fn refresh_writes_the_cache_and_notice_follows() {
     let m = Mock::start();
     // This build is stable, so the release candidate listed first is not offered.
     m.put(
-        "/repos/KoraFiveM/kora-installer/releases?per_page=10",
+        "/repos/KoraFiveM/kora-installer/releases?per_page=30",
         br#"[{"tag_name":"v7.0.0-rc1","prerelease":true,"assets":[]},{"tag_name":"v6.0.0","assets":[]}]"#,
     );
     let d = tempfile::tempdir().unwrap();
