@@ -76,17 +76,16 @@ mod unix {
 
     impl Server {
         /// Bind `path` (replacing a stale socket file). `owner` = (uid, gid) to chown the socket to;
-        /// `None` leaves it as the creating user (tests). The mode is `0660` from the start.
+        /// `None` leaves it as the creating user (tests). The mode is set to `0660` straight after binding.
         pub fn bind(path: &Path, allowed_uid: u32, owner: Option<(u32, u32)>, validator: Arc<dyn Validator>, executor: Arc<dyn Executor>) -> io::Result<Server> {
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
             let _ = std::fs::remove_file(path);
-            // SAFETY: umask only changes this process's file-creation mask; restored below.
-            let old = unsafe { libc::umask(0o117) };
-            let listener = UnixListener::bind(path);
-            unsafe { libc::umask(old) };
-            let listener = listener?;
+            // No umask change: it is process-wide and would race with other threads creating files.
+            // The socket is tightened straight after binding; the peer-uid check on every connection
+            // is the real control, so the brief window before the chmod grants nothing.
+            let listener = UnixListener::bind(path)?;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o660))?;
             if let Some((uid, gid)) = owner {
                 let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| io::Error::other("bad socket path"))?;

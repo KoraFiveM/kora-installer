@@ -248,6 +248,8 @@ impl HttpClient {
             let n = match std::io::Read::read(&mut reader, &mut buf) {
                 Ok(0) => break,
                 Ok(n) => n,
+                // A signal (for example a child process ending) interrupts the read: just read again.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {
                     return Err(format!("no data for {} seconds (stalled)", cfg.stall.as_secs()));
                 }
