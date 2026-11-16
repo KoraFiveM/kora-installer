@@ -123,6 +123,11 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | user_add | POST /users | `{name, role}` → 201 `{name, role, token}`; the token is shown once; local sessions only |
 | user_remove | DELETE /users/{name} | 204; their sessions end at once; local sessions only |
 | session_logout | POST /session/logout | ends this session, clears the cookie; 204 |
+| assets_list | GET /servers/{s}/assets | paid (Cfx.re Portal) assets: `{assets: [{name, path, version, imported_unix, present, has_fxap, backups}], hints: [{kind, resource, line, fix}], portal_url}`; hints come from the newest console output ("lack the required entitlement", "failed to verify protected resource", "could not be downloaded"). Operator or above. |
+| asset_inspect | POST /servers/{s}/assets/inspect | body = the zip (`application/zip`, name in `X-File-Name`, URL-encoded), streamed to `<server>/.kora/asset-uploads/<id>/`, up to 2 GiB → `{plan, upload}` (`upload` is null when the plan is refused); or JSON `{download: "<file>.zip"}` for a recent zip in the Downloads folder (local sessions only) → `{plan, download}`. Admin. |
+| asset_import | POST /servers/{s}/assets | `{upload: id}` or `{download: name}`, `replace` (default true); job with `status` events; result `{zip_name, imported: [{name, version, replaced, backup}], ensured, notes}`. Admin. |
+| asset_remove | DELETE /servers/{s}/assets/{name} | moves the folder to `.kora/asset-backups`, drops its `ensure` line and record → `{notes}`. Admin. |
+| asset_downloads | GET /assets/downloads | `{found, folder, zips: [{name, size, modified_unix}]}`: `*.zip` in the Downloads folder changed in the last 24 h. **Admin, local only.** |
 
 ### 2.2 Conventions
 

@@ -145,7 +145,7 @@ mod offline {
     use kora_core::firewall::ports::PortProber;
     use kora_core::installer::{DbAdmin, InstallOutcome, InstallRequest, ProgressSink};
     use kora_core::space::DiskInfo;
-    use kora_web::handlers::{github, hub, install, resources, servers, system, updates};
+    use kora_web::handlers::{assets, github, hub, install, resources, servers, system, updates};
 
     struct Env;
     impl PortProber for Env {
@@ -219,6 +219,8 @@ mod offline {
         // Hub: an empty nodes file that does not exist, and a transport that never reaches the network.
         hub::set_store_path(Some(std::env::temp_dir().join(format!("kora-parity-hub-{}.json", std::process::id()))));
         hub::set_transport(Some(Arc::new(NoNet)));
+        // Never list the real Downloads folder.
+        assets::set_downloads_dir(Some(std::env::temp_dir().join(format!("kora-parity-downloads-{}", std::process::id()))));
     }
 
     pub fn remove() {
@@ -230,6 +232,7 @@ mod offline {
         system::seam::set_headless(None);
         hub::set_store_path(None);
         hub::set_transport(None);
+        assets::set_downloads_dir(None);
     }
 
     struct NoNet;

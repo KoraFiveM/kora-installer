@@ -101,6 +101,11 @@ pub enum Op {
     UserRemove,
     SessionLogout,
     CheckCfx,
+    AssetsList,
+    AssetInspect,
+    AssetImport,
+    AssetRemove,
+    AssetDownloads,
 }
 
 impl Op {
@@ -183,6 +188,11 @@ impl Op {
         Op::UserRemove,
         Op::SessionLogout,
         Op::CheckCfx,
+        Op::AssetsList,
+        Op::AssetInspect,
+        Op::AssetImport,
+        Op::AssetRemove,
+        Op::AssetDownloads,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -266,6 +276,11 @@ impl Op {
             Op::UserRemove => "user_remove",
             Op::SessionLogout => "session_logout",
             Op::CheckCfx => "check_cfx",
+            Op::AssetsList => "assets_list",
+            Op::AssetInspect => "asset_inspect",
+            Op::AssetImport => "asset_import",
+            Op::AssetRemove => "asset_remove",
+            Op::AssetDownloads => "asset_downloads",
         }
     }
 
@@ -350,6 +365,11 @@ impl Op {
             Op::UserRemove => (Method::Delete, "/users/{name}"),
             Op::SessionLogout => (Method::Post, "/session/logout"),
             Op::CheckCfx => (Method::Post, "/checks/cfx"),
+            Op::AssetsList => (Method::Get, "/servers/{s}/assets"),
+            Op::AssetInspect => (Method::Post, "/servers/{s}/assets/inspect"),
+            Op::AssetImport => (Method::Post, "/servers/{s}/assets"),
+            Op::AssetRemove => (Method::Delete, "/servers/{s}/assets/{name}"),
+            Op::AssetDownloads => (Method::Get, "/assets/downloads"),
         }
     }
 
@@ -370,6 +390,7 @@ impl Op {
                 | Op::SelfUpdateApply
                 | Op::UninstallRun
                 | Op::NodeServerControl
+                | Op::AssetImport
         )
     }
 
@@ -420,6 +441,11 @@ impl Op {
                 | Op::NodeServers
                 | Op::NodeServerControl
                 | Op::Fleet
+                | Op::AssetsList
+                | Op::AssetInspect
+                | Op::AssetImport
+                | Op::AssetRemove
+                | Op::AssetDownloads
         )
     }
 }
@@ -509,13 +535,18 @@ mod tests {
             | Op::UserAdd
             | Op::UserRemove
             | Op::SessionLogout
-            | Op::CheckCfx => Op::ALL.contains(&op),
+            | Op::CheckCfx
+            | Op::AssetsList
+            | Op::AssetInspect
+            | Op::AssetImport
+            | Op::AssetRemove
+            | Op::AssetDownloads => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 78);
+        assert_eq!(Op::ALL.len(), 83);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

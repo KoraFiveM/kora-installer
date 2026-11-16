@@ -1,7 +1,7 @@
 //! Everything a front end (TUI, CLI, web panel) does to the outside world, behind one trait so
 //! the screens can be tested with a fake. The real implementation is `super::system::SystemBackend`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,7 @@ use crate::installer::Ports;
 use crate::service::ControlAction;
 
 use crate::notify::NotifyConfig;
+use crate::paidassets::{AssetsView, ImportOpts, ImportPlan, ImportReport};
 use crate::service::ScheduleConfig;
 use crate::update::manual::{ApplyOpts, ChangeStatus, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
 use crate::update::UpdateReport;
@@ -144,4 +145,24 @@ pub trait Backend {
 
     /// Change the game and txAdmin ports of a stopped server. Returns notes to show (firewall, restart).
     fn ports_set(&mut self, e: &ServerEntry, p: Ports) -> Res<Vec<String>>;
+
+    /// Paid (Cfx.re Portal) assets imported on the server, and console hints about licence problems.
+    fn assets_list(&mut self, _e: &ServerEntry) -> Res<AssetsView> {
+        Err(NO_PAID_ASSETS.into())
+    }
+    /// What importing the zip at `zip` would do. Reads only.
+    fn asset_inspect(&mut self, _e: &ServerEntry, _zip: &Path) -> Res<ImportPlan> {
+        Err(NO_PAID_ASSETS.into())
+    }
+    /// Import the zip at `zip` into `resources/[paid]`. `say` receives progress lines.
+    fn asset_import(&mut self, _e: &ServerEntry, _zip: &Path, _o: &ImportOpts, _say: &mut dyn FnMut(&str)) -> Res<ImportReport> {
+        Err(NO_PAID_ASSETS.into())
+    }
+    /// Take an imported paid asset off the server (it is kept as a backup). Returns notes to show.
+    fn asset_remove(&mut self, _e: &ServerEntry, _name: &str) -> Res<Vec<String>> {
+        Err(NO_PAID_ASSETS.into())
+    }
 }
+
+/// What a front end without paid-asset support answers.
+pub const NO_PAID_ASSETS: &str = "Paid assets can't be managed from here.";

@@ -94,7 +94,9 @@ pub fn min_role(op: Op) -> Role {
         | Op::CheckDisk
         | Op::InstallLog
         | Op::AlertsAck
-        | Op::NodeServerControl => Operator,
+        | Op::NodeServerControl
+        // Lists imported paid assets with hints taken from the console output.
+        | Op::AssetsList => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
         | Op::ServerUnregister
@@ -134,7 +136,12 @@ pub fn min_role(op: Op) -> Role {
         | Op::AlertSettingsSet
         | Op::NodesList
         | Op::NodeAdd
-        | Op::NodeRemove => Admin,
+        | Op::NodeRemove
+        // Uploading, importing and removing paid assets writes into the server folder.
+        | Op::AssetInspect
+        | Op::AssetImport
+        | Op::AssetRemove
+        | Op::AssetDownloads => Admin,
     }
 }
 
@@ -219,7 +226,13 @@ pub fn destructive(op: Op) -> bool {
         | Op::NodeRemove
         | Op::NodeServers
         | Op::NodeServerControl
-        | Op::Fleet => false,
+        | Op::Fleet
+        // Removing a paid asset keeps it as a backup.
+        | Op::AssetsList
+        | Op::AssetInspect
+        | Op::AssetImport
+        | Op::AssetRemove
+        | Op::AssetDownloads => false,
     }
 }
 
@@ -236,7 +249,9 @@ pub fn local_only(op: Op) -> bool {
         // Node tokens are stored here: a remote caller must not manage the node list.
         | Op::NodesList
         | Op::NodeAdd
-        | Op::NodeRemove => true,
+        | Op::NodeRemove
+        // Lists files in the Downloads folder of the computer that runs Kora.
+        | Op::AssetDownloads => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -305,7 +320,11 @@ pub fn local_only(op: Op) -> bool {
         | Op::AlertSettingsSet
         | Op::NodeServers
         | Op::NodeServerControl
-        | Op::Fleet => false,
+        | Op::Fleet
+        | Op::AssetsList
+        | Op::AssetInspect
+        | Op::AssetImport
+        | Op::AssetRemove => false,
     }
 }
 

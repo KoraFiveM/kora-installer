@@ -176,6 +176,18 @@ pub struct PaidAsset {
     pub backups: usize,
 }
 
+/// The paid-assets screen of one server: what is imported and what the console says about it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AssetsView {
+    pub assets: Vec<PaidAsset>,
+    pub hints: Vec<EntitlementHint>,
+}
+
+/// [`AssetsView`] for the server at `dir`.
+pub fn view(dir: &Path) -> Res<AssetsView> {
+    Ok(AssetsView { assets: list(dir)?, hints: hints_for_server(dir) })
+}
+
 /// A zip in the Downloads folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadZip {
