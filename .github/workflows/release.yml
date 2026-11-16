@@ -1,5 +1,6 @@
-# Release. Binaries are built from source in CI, including the panel UI (web/), and ship unsigned
-# with a .sha256 next to each one.
+# Release. Binaries are built from source in CI, including the panel UI (web/), and ship with a
+# .sha256 next to each one and a signed build provenance attestation (no Authenticode signature yet).
+# Every action is pinned to a full commit SHA (checked by supply-chain.yml).
 name: Release
 on:
   push:
@@ -25,9 +26,11 @@ jobs:
             name: kora-windows-x86_64.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: stable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.nvmrc
           cache: npm
@@ -59,7 +62,7 @@ jobs:
           mkdir dist
           cp "target/release/${{ matrix.bin }}" "dist/${{ matrix.name }}"
           (cd dist && sha256sum "${{ matrix.name }}" > "${{ matrix.name }}.sha256")
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.name }}
           path: dist/*
@@ -68,8 +71,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7   # for the install scripts
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1  (for the install scripts)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
@@ -91,25 +94,49 @@ jobs:
           [ "$(dist/kora-linux-x86_64 --version)" = "kora $ver" ]
       - name: install.sh passes its tests
         run: sh -n scripts/install.sh && bash scripts/test-install.sh
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets
           path: dist/*
 
-  publish:
+  attest:
     needs: verify
+    # Signed build provenance (Sigstore, keyless): anyone can check that a downloaded file was built by
+    # this workflow from this repository: `gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer`.
+    # Its own job so the OIDC token never sits next to `contents: write`.
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/kora-linux-x86_64
+            dist/kora-windows-x86_64.exe
+            dist/install.sh
+            dist/install.ps1
+
+  publish:
+    needs: attest
     # Rehearsals (publish=false, or not on a tag) stop after verify.
     if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.publish)
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7   # for RELEASE_NOTES.md
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1  (for RELEASE_NOTES.md)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-assets
           path: dist
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: dist/*
           draft: true   # TODO: maintainer reviews/approves before publishing

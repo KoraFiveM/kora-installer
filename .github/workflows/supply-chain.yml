@@ -43,16 +43,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Report unpinned actions
-        # Only this workflow is enforced; the others are reported as warnings (they use version tags).
+      - name: Every action in every workflow is pinned to a commit SHA
+        # A tag can be moved to other code by whoever controls the action; a full commit SHA cannot.
+        # Pin as `owner/repo@<40-hex SHA> # vX.Y.Z` (git ls-remote https://github.com/owner/repo 'refs/tags/vX.Y.Z*').
         run: |
-          fail=0
-          for f in .github/workflows/*.yml; do
-            grep -nE '^\s*-?\s*uses:\s*[^./][^@ ]*@' "$f" | grep -vE '@[0-9a-f]{40}(\s|$)' | while IFS= read -r l; do
-              echo "::warning file=$f::not pinned to a commit SHA: $l"
+          bad="$(grep -nE '^\s*-?\s*uses:\s*[^./][^@ ]*@' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null | grep -vE '@[0-9a-f]{40}(\s|$)' || true)"
+          if [ -n "$bad" ]; then
+            printf '%s\n' "$bad" | while IFS= read -r l; do
+              echo "::error file=${l%%:*}::not pinned to a commit SHA: ${l#*:}"
             done
-          done
-          if grep -nE '^\s*-?\s*uses:\s*[^./][^@ ]*@' .github/workflows/supply-chain.yml | grep -vE '@[0-9a-f]{40}(\s|$)'; then
-            echo "::error::supply-chain.yml has an action not pinned by SHA"; fail=1
+            exit 1
           fi
-          exit $fail
+          echo "Every action is pinned to a commit SHA."
