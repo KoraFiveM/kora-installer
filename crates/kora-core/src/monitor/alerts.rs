@@ -810,31 +810,52 @@ mod tests {
         assert!(l.accept().is_err(), "nothing connected");
         // Set on this computer: the same address is used as before.
         let t = std::thread::spawn(move || {
-            use std::io::{Read, Write};
+            use std::io::Write;
             l.set_nonblocking(false).unwrap();
             let (mut c, _) = l.accept().unwrap();
-            let mut buf = [0u8; 4096];
-            let _ = c.read(&mut buf);
+            let _ = read_request(&mut c);
             let _ = c.write_all(b"HTTP/1.0 204 No Content\r\n\r\n");
         });
         post_json(&format!("http://127.0.0.1:{port}/x"), &json!({}), false).unwrap();
         t.join().unwrap();
     }
 
-    // Unix only for now: on the Windows CI runner the request never reaches the local listener
-    // (not understood yet; tracked as a known gap for remotely set webhooks on Windows).
-    #[cfg(unix)]
+    /// Read one whole HTTP request (headers and body) before the test server answers: closing with
+    /// unread data resets the connection, and on Windows the body often arrives in a second packet.
+    fn read_request(c: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        let _ = c.set_nonblocking(false);
+        let _ = c.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut data = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let text = String::from_utf8_lossy(&data).into_owned();
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let len = head
+                    .lines()
+                    .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                    .unwrap_or(0);
+                if body.len() >= len {
+                    return text;
+                }
+            }
+            match c.read(&mut buf) {
+                Ok(0) | Err(_) => return text,
+                Ok(n) => data.extend_from_slice(&buf[..n]),
+            }
+        }
+    }
+
     #[test]
     fn the_connection_goes_to_the_checked_addresses() {
-        use std::io::{Read, Write};
+        use std::io::Write;
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();
         let t = std::thread::spawn(move || {
             let (mut c, _) = l.accept().unwrap();
-            let mut buf = [0u8; 4096];
-            let n = c.read(&mut buf).unwrap_or(0);
+            let req = read_request(&mut c);
             let _ = c.write_all(b"HTTP/1.0 204 No Content\r\n\r\n");
-            String::from_utf8_lossy(&buf[..n]).into_owned()
+            req
         });
         // A name nobody can look up still reaches the listener: only the given lookup was used.
         post_via("http://hook.invalid/p", &json!({}), move |n: &str| {
