@@ -11,7 +11,6 @@ import NotFound from '@/pages/NotFound'
 import { OverviewTab } from './server/OverviewTab'
 import { ConsoleTab } from './server/ConsoleTab'
 import { LogsTab } from './server/LogsTab'
-import { UpdatesTab } from './server/UpdatesTab'
 import { ResourcesTab } from './server/ResourcesTab'
 import { PaidAssetsTab } from './server/PaidAssetsTab'
 import { ScheduleTab } from './server/ScheduleTab'
@@ -31,7 +30,9 @@ export default function ServerDetailPage() {
   if (q.isError || !q.data) return <ErrorNotice error={q.error} />
   const s = q.data
   const dev = s.mode === 'development'
-  const tab = params.get('tab') ?? 'overview'
+  // The Updates tab now lives in Resources; old links to ?tab=updates land there.
+  const requested = params.get('tab') ?? 'overview'
+  const tab = requested === 'updates' ? 'resources' : requested
   return (
     <div className="space-y-5">
       <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> All servers</Link>
@@ -45,7 +46,6 @@ export default function ServerDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="console">Console</TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
-          <TabsTrigger value="updates">Updates</TabsTrigger>
           <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
           <TabsTrigger value="resources">Resources</TabsTrigger>
           <TabsTrigger value="assets">Paid assets</TabsTrigger>
@@ -58,7 +58,6 @@ export default function ServerDetailPage() {
         <TabsContent value="overview"><OverviewTab server={s} ctl={ctl} /></TabsContent>
         <TabsContent value="console"><ConsoleTab server={s} /></TabsContent>
         <TabsContent value="logs"><LogsTab server={s} /></TabsContent>
-        <TabsContent value="updates"><UpdatesTab server={s} /></TabsContent>
         <TabsContent value="monitoring"><MonitoringTab server={s} /></TabsContent>
         <TabsContent value="resources"><ResourcesTab server={s} /></TabsContent>
         <TabsContent value="assets"><PaidAssetsTab server={s} /></TabsContent>

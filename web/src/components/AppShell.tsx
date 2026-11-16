@@ -7,6 +7,7 @@ import { useServerEvents } from '@/hooks/useServerEvents'
 import { Alert } from '@/components/ui/alert'
 import { AlertsBanner } from '@/components/AlertsBanner'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { KoraLogo } from '@/components/KoraLogo'
 import { cn } from '@/lib/utils'
 
 const nav = [
@@ -25,7 +26,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="border-b border-border bg-card md:min-h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r">
-        <div className="px-5 py-4 font-heading text-xl font-bold tracking-tight">Kora</div>
+        <div className="px-5 py-4"><KoraLogo className="h-7 w-auto text-foreground" /></div>
         <nav aria-label="Main" className="flex gap-1 px-3 pb-3 md:flex-col md:pb-0">
           {/* The fleet uses the tokens of other panels stored here, so it is only offered on this computer. */}
           {nav.filter((n) => !(n.to === '/fleet' && meta.data?.remote)).map(({ to, label, icon: Icon, end }) => (

@@ -22,7 +22,7 @@ export const RESTART_OPTIONS: { value: RestartPolicy; label: string; hint: strin
   { value: 'when_quiet', label: 'Restart only when nobody is playing', hint: 'If players are online, the restart is left for later.' },
 ]
 
-const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'orange'; text: string; why?: string }> = {
+export const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'orange'; text: string; why?: string }> = {
   up_to_date: { tone: 'plain', text: 'Up to date' },
   clean: { tone: 'info', text: 'Ready to update' },
   dirty: { tone: 'orange', text: 'Needs attention', why: 'You have changed files here. Kora leaves this resource alone so your changes are not lost. To update it, put your changes aside first (for example with "git stash" in the resource folder; "git stash pop" brings them back), then check again. Committing them does not help: Kora never mixes your own commits with new ones.' },
@@ -76,7 +76,7 @@ function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, checked
   )
 }
 
-function ReportView({ r }: { r: UpdateReport }) {
+export function ReportView({ r }: { r: UpdateReport }) {
   const sec = (title: string, items: string[]) => items.length > 0 && <div><div className="text-sm font-semibold">{title}</div><ul className="list-disc pl-5 text-sm text-muted-foreground">{items.map((i, k) => <li key={k}>{i}</li>)}</ul></div>
   return (
     <div className="space-y-3">
@@ -95,7 +95,8 @@ function ReportView({ r }: { r: UpdateReport }) {
   )
 }
 
-export function UpdatesTab({ server: s }: { server: ServerDetail }) {
+/** The whole-server update flow: check, pick, apply, progress, snapshots and rollback. Shown at the top of the Resources tab. */
+export function UpdatesPanel({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()
   const [checkJob, setCheckJob] = useState<string | null>(null)
   const [applyJob, setApplyJob] = useState<string | null>(null)
