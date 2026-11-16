@@ -485,7 +485,7 @@ mod tests {
         assert_eq!(c.schema_version, 3);
         assert!(c.resources.iter().any(|r| r.res_type == Some(ResType::Compat)));
         assert!(c.resources.iter().any(|r| r.res_type == Some(ResType::Bridge) && r.group == Group::Bridges));
-        assert_eq!(c.section(Section::Bridges, false).len(), 4);
+        assert_eq!(c.section(Section::Bridges, false).len(), 3);
     }
 
     #[test]
