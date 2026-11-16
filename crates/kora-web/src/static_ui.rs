@@ -13,7 +13,7 @@ background:#111315;color:#e6e8e3;font:16px/1.5 system-ui,sans-serif}main{max-wid
 h1{color:#A8FF00;margin:0 0 .5rem}code{background:#1c1f22;padding:.15rem .4rem;border-radius:4px;\
 color:#A8FF00}</style></head><body><main><h1>Kora Panel</h1>\
 <p>The web UI was not built into this binary.</p>\
-<p>Build it with <code>cd web &amp;&amp; npm ci &amp;&amp; npm run build</code> and rebuild kora.</p>\
+<p>Build it with <code>cd web &amp;&amp; npm ci --ignore-scripts &amp;&amp; npm run build</code> and rebuild kora.</p>\
 </main></body></html>";
 
 fn content_type(path: &str) -> &'static str {
