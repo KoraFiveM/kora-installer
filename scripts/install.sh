@@ -18,6 +18,8 @@
 #   KORA_INSTALL_DIR   target folder. Default: /usr/local/bin as root, else ~/.local/bin.
 #   KORA_FORCE=1       replace an existing file at the target even if it is not a kora program.
 #   KORA_NO_LAUNCH=1   only install the program: do not start Kora Panel or open a browser.
+#   KORA_TAILSCALE=1   on a server with Tailscale, open Kora Panel to your own Tailscale devices without asking
+#                      (KORA_TAILSCALE=0: never ask). See `kora panel --tailscale`.
 # For tests only (same https:// rule): KORA_API_BASE (default https://api.github.com) and
 # KORA_DOWNLOAD_BASE (default https://github.com) point the release lookup at a fake server.
 #

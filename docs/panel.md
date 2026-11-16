@@ -34,7 +34,7 @@ Run this on the computer that hosts your servers (Windows 10/11 or Server 2019+,
 kora panel
 ```
 
-Kora starts a small web server, prints a line like `Kora Panel: http://127.0.0.1:47120/#token=...` and opens your
+Kora starts a small web server, prints a line like `Kora Panel: http://127.0.0.1:47120/#code=...` and opens your
 browser at that address. The panel keeps running in that terminal; press Ctrl+C to stop it. Closing the terminal also
 stops it (servers you started are not affected: they run as services).
 
@@ -81,7 +81,7 @@ prints the sign-in link and the tunnel line:
 
 ```
 The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.
-Sign in with: http://127.0.0.1:47120/#token=...
+Sign in with: http://127.0.0.1:47120/#code=...
 On a server with no screen, open a tunnel from your own computer first:  ssh -L 47120:127.0.0.1:47120 you@203.0.113.7
 ```
 
@@ -90,25 +90,29 @@ running). Answer `n`, or use `kora panel --foreground`, to run it in this window
 same without asking.
 
 On your own computer, open a second terminal and run the `ssh -L` line it printed (replace `user@host` with your login).
-Leave it open, then paste the full link, including the `#token=...` part, into your browser. The tunnel carries the page
+Leave it open, then paste the full link, including the `#code=...` part, into your browser. The tunnel carries the page
 over SSH, so nothing is exposed to the network.
 
 ## 2. Signing in
 
-The link that `kora panel` prints contains a one-time secret (the token). When you open it:
+The link that `kora panel` prints contains a one-time code: it works once, within 10 minutes. When you open it:
 
-1. The page sends the token to the panel, which checks it and gives your browser a session cookie.
-2. The token is removed from the address bar straight away. The page never stores it.
-3. From then on the cookie keeps you signed in.
+1. The page sends the code to the panel, which checks it and signs your browser in.
+2. The code is removed from the address bar straight away.
+3. From then on you stay signed in (also after a reload or in a new tab).
 
-**Do not share the link** while the panel is running; it is the password. A panel started in a window gets a new
-one every time; the background panel keeps its token until you run `kora panel --new-token`.
+If the link has expired, run `kora panel` (or `kora panel --print-link`) again for a new one. On another computer
+you sign in with your Tailscale account (see [Remote access](#10-optional-remote-access)) or a user token.
+
+**Do not share a link** while it is still valid: it signs in as you. Behind every link is the panel's long-lived
+token (kept owner-only in `~/.kora/panel-token`), which never appears in a link; replace it with
+`kora panel --new-token` if you think it leaked.
 
 ### When the session expires
 
 Sessions last until you stop the panel. If you restart `kora panel`, or open the panel in a new browser, you see
-"Session expired, or not signed in". To fix it, run `kora panel` again and open the new link. You can also paste the token
-(the part after `#token=`) into the box on that page.
+"Session expired, or not signed in". To fix it, run `kora panel` again and open the new link. You can also paste the code
+(the part after `#code=`) into the box on that page.
 
 Too many wrong attempts at the sign-in box lock it for about a minute.
 
@@ -332,8 +336,19 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   only on private addresses (Tailscale with `--tailscale`); public addresses need `--allow-public`.
 - **Identity from Tailscale, not the browser.** Tailscale sign-in asks the Tailscale service on the computer who is
   connecting, and only listed accounts get in, each with a role.
-- **A secret link.** A random token is generated at every start and given to you in the link. It is exchanged for a
-  session cookie (`HttpOnly`, `SameSite=Strict`). Wrong tokens are rate limited.
+- **One-time sign-in links.** The link printed by `kora panel` holds a one-time code (it works once, for 10 minutes,
+  and only on the computer that runs Kora), never the panel's long-lived token. It is exchanged for a session.
+  Wrong codes and tokens are rate limited: on the computer itself, and per address for remote sign-ins (so a
+  stranger guessing only locks themselves out). `kora panel --new-token` replaces the token.
+- **A cookie is not enough.** Browsers send a cookie to every port of a host, so the panel's cookie also reaches
+  txAdmin and the FiveM server's own web server, where any resource can log it. Each session therefore also has a
+  secret that the page keeps for its own address and port and sends with every request (`X-Kora-Session`); the
+  cookie alone is refused. The cookie (`kora_session_<port>`) is `HttpOnly` and `SameSite=Strict`.
+- **No proxies.** Requests that came through a reverse proxy or `tailscale serve` are refused (they connect from
+  127.0.0.1, so everyone would look like the owner).
+- **Limits for remote sessions.** At most 8 live views per account and 64 in total. A remote session can only read a
+  job its role could have started. The hub (fleet, other panels' servers) is local only. Alert webhooks set from
+  another computer must point to the public internet.
 - **Protection against other websites.** Every request must come with the panel's own address in the `Host` header
   (stops DNS rebinding). Changing requests must also carry a matching `Origin` and an `X-Kora` header (stops cross-site
   requests).

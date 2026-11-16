@@ -518,9 +518,15 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         if non_loopback {
             println!("Kora Panel: http://{addr}/");
             println!("Sign in with a user token (kora panel user add <name> --role <role>) or, if set up, your Tailscale account.");
+        } else if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+            // A service: what it prints ends up in the system log, which other accounts may read
+            // (Linux: the `adm` group). So no sign-in link there; `--print-link` makes one when asked.
+            println!("Kora Panel: http://{addr}/ (get a sign-in link with `kora panel --print-link`)");
         } else {
-            let url = format!("http://{addr}/#token={token}");
+            // A one-time code, not the token: the link may end up in a browser's history.
+            let url = launch::code_link(addr.port(), &state.mint_link_code());
             println!("Kora Panel: {url}");
+            println!("The link works once, within 10 minutes. `kora panel` shows a new one while this runs.");
             // The tunnel hint is for people on a machine without a desktop, whether or not we would have
             // tried to open a browser (`--no-open` must not hide it).
             if launch::is_headless() {

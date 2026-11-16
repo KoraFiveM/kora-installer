@@ -46,6 +46,8 @@ export interface RemoteSettings {
   enabled_by_flag: boolean
   bind: string
   port: number
+  /** Where Tailscale devices open the panel, while it also listens there (`kora panel --tailscale`). */
+  tailnet_url: string | null
   tailscale: boolean
   tailscale_users: Record<string, Role>
   allowed_hosts: string[]
