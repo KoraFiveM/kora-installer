@@ -404,9 +404,10 @@ fn open_firewall(port: u16) {
 
 /// Ask a question on the terminal, also when stdin is a pipe (`curl | sh`). `None` when there is no terminal.
 fn ask_line(question: &str) -> Option<String> {
-    use std::io::{BufRead, IsTerminal, Write};
+    use std::io::{IsTerminal, Write};
     #[cfg(unix)]
     {
+        use std::io::BufRead;
         if let Ok(tty) = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty") {
             let mut w = tty.try_clone().ok()?;
             let _ = write!(w, "{question}");
