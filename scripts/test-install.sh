@@ -1,4 +1,6 @@
 #!/bin/bash
+# The checks pass shell code in single quotes to `eval` on purpose (expanded there, not here).
+# shellcheck disable=SC2016
 # Tests scripts/install.sh against a local HTTP server that serves a fake release layout.
 # Usage: scripts/test-install.sh   (needs python3; runs entirely in a temp dir, no root, no network)
 set -u

@@ -251,7 +251,9 @@ pub fn owner_sid_command(path: &Path) -> CommandSpec {
     let quoted = path.to_string_lossy().replace('\'', "''");
     CommandSpec::new(
         "powershell",
-        &["-NoProfile", "-NonInteractive", "-Command", &format!("(Get-Acl -LiteralPath '{quoted}').GetOwner([System.Security.Principal.SecurityIdentifier]).Value")],
+        &["-NoProfile", "-NonInteractive", "-Command", // .NET directly, not Get-Acl: started from PowerShell 7, Windows PowerShell inherits a module
+        // path it cannot load Microsoft.PowerShell.Security from.
+        &format!("(New-Object System.Security.AccessControl.DirectorySecurity -ArgumentList '{quoted}', 'Owner').GetOwner([System.Security.Principal.SecurityIdentifier]).Value")],
     )
 }
 
