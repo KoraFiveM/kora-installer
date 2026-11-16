@@ -60,6 +60,8 @@ struct Rig {
     app: axum::Router,
     fake: FakeBackend,
     mon: Monitor,
+    // Keeps the temp dir alive; only read by the unix-only mode test.
+    #[cfg_attr(not(unix), allow(dead_code))]
     dir: tempfile::TempDir,
 }
 
