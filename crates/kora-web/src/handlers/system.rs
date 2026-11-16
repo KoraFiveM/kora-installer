@@ -5,16 +5,20 @@
 #![allow(clippy::unused_async)]
 
 use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::Json;
+use axum::{Extension, Json};
 use serde_json::{json, Value};
+use tokio::sync::broadcast;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::servers::list_json;
-use crate::{blocking, ApiError, AppState};
+use crate::remote::Caller;
+use crate::security::Limited;
+use crate::{blocking, ApiError, AppState, BackendFactory};
 
 /// How often the event stream looks at the servers again.
 const POLL: Duration = Duration::from_secs(3);
@@ -79,29 +83,147 @@ fn servers_event(v: &Value) -> Event {
     Event::default().event("servers").data(v.to_string())
 }
 
-pub async fn events(State(st): State<AppState>) -> Sse<ReceiverStream<Result<Event, Infallible>>> {
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
-    tokio::spawn(async move {
-        let mut last: Option<Value> = None;
-        loop {
-            if tx.is_closed() {
-                return;
+/// The single poller behind every `GET /events` stream: however many streams are open, the servers are
+/// read once per [`POLL`]. It starts with the first stream and stops when the last one has gone.
+pub struct EventsHub {
+    poll: Duration,
+    slot: Mutex<Slot>,
+}
+
+#[derive(Default)]
+struct Slot {
+    tx: Option<broadcast::Sender<Value>>,
+    /// The latest list, sent first to a stream that joins a running poller.
+    last: Option<Value>,
+}
+
+impl Default for EventsHub {
+    fn default() -> Self {
+        Self::new(POLL)
+    }
+}
+
+impl EventsHub {
+    pub fn new(poll: Duration) -> Self {
+        Self {
+            poll,
+            slot: Mutex::default(),
+        }
+    }
+    fn lock(&self) -> std::sync::MutexGuard<'_, Slot> {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    /// Join the poller (starting it if needed): the latest list, if any, and the later changes.
+    pub fn subscribe(self: &Arc<Self>, make: BackendFactory) -> (Option<Value>, broadcast::Receiver<Value>) {
+        let mut g = self.lock();
+        if let Some(tx) = &g.tx {
+            return (g.last.clone(), tx.subscribe());
+        }
+        let (tx, rx) = broadcast::channel(16);
+        g.tx = Some(tx.clone());
+        g.last = None;
+        tokio::spawn(self.clone().run(tx, make));
+        (None, rx)
+    }
+    /// Is a poller running (tests)?
+    pub fn running(&self) -> bool {
+        self.lock().tx.is_some()
+    }
+    /// Stop when nobody listens. Decided under the lock that `subscribe` takes, so a stream that joins
+    /// at that moment either gets this poller or starts a new one.
+    fn keep_going(&self, tx: &broadcast::Sender<Value>) -> bool {
+        let mut g = self.lock();
+        if tx.receiver_count() == 0 {
+            if g.tx.as_ref().is_some_and(|t| t.same_channel(tx)) {
+                g.tx = None;
+                g.last = None;
             }
-            let s = st.clone();
-            let now = blocking(move || list_json(&mut *s.backend())).await;
-            if let Ok(v) = now {
+            return false;
+        }
+        true
+    }
+    async fn run(self: Arc<Self>, tx: broadcast::Sender<Value>, make: BackendFactory) {
+        let mut last: Option<Value> = None;
+        while self.keep_going(&tx) {
+            let m = make.clone();
+            if let Ok(v) = blocking(move || list_json(&mut *m())).await {
                 if last.as_ref() != Some(&v) {
-                    if tx.send(Ok(servers_event(&v))).await.is_err() {
-                        return;
-                    }
+                    self.lock().last = Some(v.clone());
+                    let _ = tx.send(v.clone());
                     last = Some(v);
                 }
             }
+            tokio::time::sleep(self.poll).await;
+        }
+    }
+}
+
+pub async fn events(
+    State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Sse<Limited<ReceiverStream<Result<Event, Infallible>>>>, ApiError> {
+    let permit = st.stream_permit(&caller)?;
+    let (first, mut sub) = st.events.subscribe(st.backend.clone());
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
+    tokio::spawn(async move {
+        if let Some(v) = first {
+            if tx.send(Ok(servers_event(&v))).await.is_err() {
+                return;
+            }
+        }
+        loop {
             tokio::select! {
-                () = tokio::time::sleep(POLL) => {}
+                r = sub.recv() => match r {
+                    Ok(v) => {
+                        if tx.send(Ok(servers_event(&v))).await.is_err() {
+                            return;
+                        }
+                    }
+                    // Fell behind: the next change carries the whole list anyway.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return,
+                },
                 () = tx.closed() => return,
             }
         }
     });
-    Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+    Ok(Sse::new(Limited::new(ReceiverStream::new(rx), permit))
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn one_poller_for_every_stream_and_it_stops_when_they_go() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let fake = kora_core::api::fake::FakeBackend::sample();
+        let make: BackendFactory = Arc::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            Box::new(fake.clone())
+        });
+        let hub = Arc::new(EventsHub::new(Duration::from_millis(200)));
+        let (_, mut a) = hub.subscribe(make.clone());
+        let first = a.recv().await.unwrap();
+        let (latest, b) = hub.subscribe(make.clone());
+        assert_eq!(latest.as_ref(), Some(&first), "a new stream gets the current list at once");
+        let (_, c2) = hub.subscribe(make.clone());
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let n = calls.load(Ordering::SeqCst);
+        assert!((2..=4).contains(&n), "one read per poll for three streams, got {n}");
+        drop((a, b, c2));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!hub.running(), "stopped with nobody listening");
+        let after = calls.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), after);
+        // And it starts again for the next stream.
+        let (_, mut d) = hub.subscribe(make);
+        assert!(d.recv().await.is_ok());
+    }
 }

@@ -72,11 +72,9 @@ pub fn min_role(op: Op) -> Role {
         | Op::JobEvents
         | Op::Events
         | Op::SessionLogout
-        // Monitoring charts and the fleet list are status, like the server list.
+        // Monitoring charts are status, like the server list.
         | Op::MetricsGet
-        | Op::AlertsList
-        | Op::NodeServers
-        | Op::Fleet => Viewer,
+        | Op::AlertsList => Viewer,
         // Running servers day to day. Logs and the console can hold player names and addresses,
         // so they are operator and above even though they only read.
         Op::ServerControl
@@ -94,7 +92,6 @@ pub fn min_role(op: Op) -> Role {
         | Op::CheckDisk
         | Op::InstallLog
         | Op::AlertsAck
-        | Op::NodeServerControl
         // Lists imported paid assets with hints taken from the console output.
         | Op::AssetsList => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
@@ -137,6 +134,12 @@ pub fn min_role(op: Op) -> Role {
         | Op::NodesList
         | Op::NodeAdd
         | Op::NodeRemove
+        // The hub acts on other panels with their stored tokens (local only, see below).
+        | Op::NodeServers
+        | Op::NodeServerControl
+        | Op::Fleet
+        // Mints sign-in codes for the launch link (local only).
+        | Op::SessionLink
         // Uploading, importing and removing paid assets writes into the server folder.
         | Op::AssetInspect
         | Op::AssetImport
@@ -211,6 +214,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::JobEvents
         | Op::Events
         | Op::SessionLogout
+        | Op::SessionLink
         | Op::RemoteGet
         | Op::RemoteSet
         | Op::UsersList
@@ -250,6 +254,13 @@ pub fn local_only(op: Op) -> bool {
         | Op::NodesList
         | Op::NodeAdd
         | Op::NodeRemove
+        // The hub uses those tokens to read and control other panels: a remote session must not borrow
+        // them (it would reach panels its own account was never given).
+        | Op::NodeServers
+        | Op::NodeServerControl
+        | Op::Fleet
+        // Sign-in codes stand in for the launch token, which never leaves this computer.
+        | Op::SessionLink
         // Lists files in the Downloads folder of the computer that runs Kora.
         | Op::AssetDownloads => true,
         Op::Meta
@@ -318,9 +329,6 @@ pub fn local_only(op: Op) -> bool {
         | Op::AlertsAck
         | Op::AlertSettingsGet
         | Op::AlertSettingsSet
-        | Op::NodeServers
-        | Op::NodeServerControl
-        | Op::Fleet
         | Op::AssetsList
         | Op::AssetInspect
         | Op::AssetImport
@@ -470,6 +478,15 @@ mod tests {
         assert_eq!(op_for("HEAD", "/api/v1/servers/prod"), Some(Op::ServerGet));
         assert_eq!(op_for("GET", "/api/v1/nothing"), None);
         assert_eq!(op_for("PATCH", "/api/v1/servers"), None);
+    }
+
+    #[test]
+    fn hub_and_sign_in_links_are_local_only() {
+        for op in [Op::NodesList, Op::NodeAdd, Op::NodeRemove, Op::NodeServers, Op::NodeServerControl, Op::Fleet, Op::SessionLink] {
+            assert!(local_only(op), "{op:?}");
+        }
+        assert_eq!(op_for("POST", "/api/v1/session/link"), Some(Op::SessionLink));
+        assert_eq!(op_for("POST", "/api/v1/session/logout"), Some(Op::SessionLogout));
     }
 
     #[test]

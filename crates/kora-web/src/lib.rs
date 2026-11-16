@@ -87,6 +87,14 @@ pub struct AppState {
     pub addr: SocketAddr,
     /// Optional remote access: settings, identity providers, roles. Off unless configured.
     pub remote: Arc<remote::Remote>,
+    /// One-time codes for sign-in links (`/#code=...`).
+    pub link_codes: Arc<security::LinkCodes>,
+    /// Open live streams of remote callers.
+    pub streams: Arc<security::StreamLimits>,
+    /// The one poller behind every `GET /events` stream.
+    pub events: Arc<handlers::system::EventsHub>,
+    /// The last `GET /fleet` answer, for a few seconds.
+    pub fleet_cache: Arc<handlers::hub::FleetCache>,
 }
 
 impl AppState {
@@ -107,7 +115,29 @@ impl AppState {
             addr,
             // Memory only by default: nothing on disk is read, so tests and embedders stay local.
             remote: Arc::new(remote::Remote::memory()),
+            link_codes: Arc::default(),
+            streams: Arc::default(),
+            events: Arc::default(),
+            fleet_cache: Arc::default(),
         }
+    }
+    /// A one-time code for a sign-in link: `http://127.0.0.1:<port>/#code=<code>`. Works once, for ten
+    /// minutes, from this computer only.
+    pub fn mint_link_code(&self) -> String {
+        self.link_codes.mint()
+    }
+    /// A place for one more live stream: always for this computer; for a remote caller only while it
+    /// (and everyone together) is under the caps.
+    pub fn stream_permit(&self, caller: &remote::Caller) -> Result<Option<security::StreamPermit>, ApiError> {
+        if !caller.remote {
+            return Ok(None);
+        }
+        let who = caller
+            .identity
+            .as_ref()
+            .map(|i| format!("{:?}:{}", i.provider, i.name))
+            .unwrap_or_default();
+        self.streams.acquire(&who).map(Some)
     }
     pub fn with_remote(mut self, r: Arc<remote::Remote>) -> Self {
         self.remote = r;
@@ -153,9 +183,17 @@ impl AppState {
     where
         F: FnOnce(&kora_core::api::JobHandle) -> Result<Value, String> + Send + 'static,
     {
-        match self.registry.spawn(op, server, f) {
+        // A job changes what the fleet shows: forget the cached list when it starts and when it ends.
+        self.fleet_cache.clear();
+        let cache = self.fleet_cache.clone();
+        let body = move |h: &kora_core::api::JobHandle| {
+            let r = f(h);
+            cache.clear();
+            r
+        };
+        match self.registry.spawn(op, server, body) {
             Ok(id) => Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response()),
-            Err(c) => Err(ApiError::conflict(c.to_string())),
+            Err(c) => Err(ApiError::conflict(conflict_message(&c))),
         }
     }
     /// Replace where session expiry reads the time (tests).
@@ -169,11 +207,23 @@ impl AppState {
     }
 }
 
+/// "Busy" without the running job's id: the id is all it takes to follow that job, and the UI never
+/// needed it here.
+pub(crate) fn conflict_message(c: &kora_core::api::jobs::Conflict) -> String {
+    format!(
+        "Another operation is already running for '{}'. Wait for it to finish, then try again.",
+        c.server
+    )
+}
+
 #[derive(Deserialize)]
 struct SessionReq {
     /// Local: the launch token. Remote: a user token, or absent to sign in by Tailscale identity.
     #[serde(default)]
     token: Option<String>,
+    /// Local only: a one-time code from a sign-in link (`/#code=...`).
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// `GET /meta`. `identity` is `null` unless the request carries a valid session or bearer token;
@@ -208,13 +258,23 @@ fn hostname() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
+/// `POST /session`. Local: `{"token"}` (the launch token, as pasted) or `{"code"}` (from a sign-in link).
+/// Remote: `{"token"}` (a user token) or `{}` (Tailscale identity). Answers
+/// `{"ok": true, "identity", "secret"}` and sets the session cookie; the page must send `secret` back with
+/// every request (header `X-Kora-Session`, or `?ks=` on a stream).
 pub(crate) async fn session_create(
     State(st): State<AppState>,
     Extension(caller): Extension<remote::Caller>,
     Json(req): Json<SessionReq>,
 ) -> Result<Response, ApiError> {
     let token = req.token.as_deref().map(str::trim).filter(|t| !t.is_empty());
-    let (id, identity) = if caller.remote {
+    let code = req.code.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let (session, identity) = if caller.remote {
+        if code.is_some() {
+            return Err(ApiError::forbidden(
+                "Sign-in links only work on the computer that runs Kora. Sign in with your user token or your Tailscale account.",
+            ));
+        }
         remote_sign_in(&st, &caller, token).await?
     } else {
         if st.limiter.locked() {
@@ -222,40 +282,71 @@ pub(crate) async fn session_create(
                 "too many failed attempts, try again later",
             ));
         }
-        if !token.is_some_and(|t| security::ct_eq(t, &st.token)) {
+        let ok = match code {
+            Some(c) => st.link_codes.consume(c),
+            None => token.is_some_and(|t| security::ct_eq(t, &st.token)),
+        };
+        if !ok {
             st.limiter.failure();
-            return Err(ApiError::unauthorized("invalid token"));
+            return Err(ApiError::unauthorized(if code.is_some() {
+                "That sign-in link has expired or was already used. Run `kora panel` again for a new one."
+            } else {
+                "invalid token"
+            }));
         }
         st.limiter.success();
         (st.sessions.create(), remote::Identity::local())
     };
     let cookie = format!(
-        "{}={id}; HttpOnly; SameSite=Strict; Path=/",
-        security::COOKIE
+        "{}={}; HttpOnly; SameSite=Strict; Path=/",
+        security::cookie_name(st.addr.port()),
+        session.id
     );
-    let mut r = Json(json!({"ok": true, "identity": identity})).into_response();
+    let mut r = Json(json!({"ok": true, "identity": identity, "secret": session.secret})).into_response();
     r.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_str(&cookie).expect("ascii cookie"),
     );
+    // Older versions used one name for every port, sent to every service on this host: drop it.
+    r.headers_mut().append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&format!("{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0", security::COOKIE)).expect("ascii cookie"),
+    );
     Ok(r)
+}
+
+/// `POST /session/link`: a one-time sign-in code, `{"code", "expires_in": 600}`. Only for a caller on this
+/// computer that is already signed in (the launch token as a bearer token, or a local session).
+pub(crate) async fn session_link(
+    State(st): State<AppState>,
+    Extension(caller): Extension<remote::Caller>,
+) -> Result<Json<Value>, ApiError> {
+    let local = !caller.remote
+        && caller
+            .identity
+            .as_ref()
+            .is_some_and(|i| i.provider == remote::Provider::Local);
+    if !local {
+        return Err(ApiError::forbidden(
+            "Sign-in links can only be made on the computer that runs Kora.",
+        ));
+    }
+    Ok(Json(json!({
+        "code": st.mint_link_code(),
+        "expires_in": security::LINK_CODE_TTL.as_secs(),
+    })))
 }
 
 /// `POST /session/logout`: forget this session and clear the cookie. 204.
 pub(crate) async fn session_logout(State(st): State<AppState>, req_headers: axum::http::HeaderMap) -> Response {
-    for v in req_headers.get_all(header::COOKIE) {
-        for part in v.to_str().unwrap_or("").split(';') {
-            if let Some((k, id)) = part.trim().split_once('=') {
-                if k == security::COOKIE {
-                    st.sessions.remove(id);
-                }
-            }
-        }
+    let name = security::cookie_name(st.addr.port());
+    if let Some(id) = security::cookie_value(&req_headers, &name) {
+        st.sessions.remove(&id);
     }
     let mut r = StatusCode::NO_CONTENT.into_response();
     r.headers_mut().insert(
         header::SET_COOKIE,
-        HeaderValue::from_str(&format!("{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0", security::COOKIE)).expect("ascii cookie"),
+        HeaderValue::from_str(&format!("{name}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")).expect("ascii cookie"),
     );
     r
 }
@@ -266,16 +357,18 @@ async fn remote_sign_in(
     st: &AppState,
     caller: &remote::Caller,
     token: Option<&str>,
-) -> Result<(String, remote::Identity), ApiError> {
+) -> Result<(security::NewSession, remote::Identity), ApiError> {
     let r = &st.remote;
-    if r.limiter.locked() {
+    // Counted per source address: one person guessing does not lock out everyone else.
+    let ip = caller.peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |p| p.ip());
+    if r.limiter.locked(ip) {
         return Err(ApiError::rate_limited("too many failed attempts, try again later"));
     }
     let identity = match token {
         Some(t) => {
             let found = r.identity_for_token(t);
             if found.is_none() {
-                r.limiter.failure();
+                r.limiter.failure(ip);
                 return Err(ApiError::unauthorized("invalid token"));
             }
             found
@@ -297,9 +390,9 @@ async fn remote_sign_in(
         }
     };
     let identity = identity.expect("checked above");
-    r.limiter.success();
-    let id = st.sessions.create_for(identity.provider, &identity.name, true, identity.role);
-    Ok((id, identity))
+    r.limiter.success(ip);
+    let session = st.sessions.create_for(identity.provider, &identity.name, true, identity.role);
+    Ok((session, identity))
 }
 
 async fn fallback(req: Request) -> Response {
