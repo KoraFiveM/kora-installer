@@ -108,20 +108,10 @@ impl CommandRunner for SystemRunner {
         })
     }
 
+    /// Never through a symbolic link: some targets (`<server>/secrets.env`) are in folders the
+    /// service account can change, and a planted link would make root overwrite or chmod any file.
     fn write_file(&self, path: &str, contents: &str, mode: Option<u32>) -> io::Result<()> {
-        let p = std::path::Path::new(path);
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(p, file_bytes(contents))?;
-        #[cfg(unix)]
-        if let Some(m) = mode {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m))?;
-        }
-        #[cfg(not(unix))]
-        let _ = mode;
-        Ok(())
+        crate::fsutil::write_no_follow(std::path::Path::new(path), &file_bytes(contents), mode.unwrap_or(0o644))
     }
 
     fn remove_file(&self, path: &str) -> io::Result<()> {

@@ -388,12 +388,7 @@ impl Ctx {
         let _g = self.manifest_lock.lock().unwrap();
         let mut c = self.load_created();
         f(&mut c);
-        std::fs::create_dir_all(self.meta_dir()).map_err(|e| InstallError(format!("cannot write install state: {e}")))?;
-        let p = self.meta_dir().join("created.json");
-        let tmp = p.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&c).map_err(|e| InstallError(e.to_string()))?)
-            .and_then(|_| std::fs::rename(&tmp, &p))
-            .map_err(|e| InstallError(format!("cannot write install state: {e}")))
+        save_created_to(&self.req.dir, &c)
     }
 }
 
@@ -413,12 +408,11 @@ pub fn load_request_from(dir: &Path) -> Option<InstallRequest> {
     Some(r)
 }
 
+/// Root writes this into a folder other accounts can change, so never through a planted link
+/// (a fresh temporary file renamed into place; see `fsutil::write_no_follow`).
 pub(crate) fn save_created_to(dir: &Path, c: &Created) -> Result<()> {
-    let p = meta_dir(dir).join("created.json");
-    let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(c).map_err(|e| InstallError(e.to_string()))?)
-        .and_then(|_| std::fs::rename(&tmp, &p))
-        .map_err(|e| InstallError(format!("cannot write install state: {e}")))
+    let bytes = serde_json::to_vec_pretty(c).map_err(|e| InstallError(e.to_string()))?;
+    crate::fsutil::write_no_follow(&meta_dir(dir).join("created.json"), &bytes, 0o644).map_err(|e| InstallError(format!("cannot write install state: {e}")))
 }
 
 fn new_ctx(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<ProgressEvent>, keep_db: bool, keep_files: bool) -> Arc<Ctx> {
@@ -593,12 +587,8 @@ fn save_request(ctx: &Ctx) -> Result<()> {
     let mut r = ctx.req.clone();
     r.license_key = None;
     r.dry_run = false;
-    std::fs::create_dir_all(ctx.meta_dir()).map_err(|e| InstallError(e.to_string()))?;
-    std::fs::write(
-        ctx.meta_dir().join("request.json"),
-        serde_json::to_vec_pretty(&r).map_err(|e| InstallError(e.to_string()))?,
-    )
-    .map_err(|e| InstallError(e.to_string()))
+    let bytes = serde_json::to_vec_pretty(&r).map_err(|e| InstallError(e.to_string()))?;
+    crate::fsutil::write_no_follow(&ctx.meta_dir().join("request.json"), &bytes, 0o644).map_err(|e| InstallError(format!("cannot write install state: {e}")))
 }
 
 fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, admin: bool) -> Result<InstallOutcome> {
