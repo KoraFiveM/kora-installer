@@ -14,6 +14,11 @@ use crate::clipboard::{sanitize_paste, Clipboard, SystemClipboard};
 use crate::elev::{self, Elevator};
 use crate::wizard_view;
 use std::ffi::OsString;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
+
+/// Looks a Cfx.re username up (the real forum in the app, a fake in tests).
+pub type CfxLookup = Arc<dyn Fn(&str) -> Result<kora_core::cfx::CfxAccount, String> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -37,6 +42,8 @@ pub enum Screen {
     /// Windows: put a Kora shortcut on the desktop (the Start Menu entry is always added).
     Shortcut,
     License,
+    /// Cfx.re username, so the person installing becomes the txAdmin admin (optional).
+    Cfx,
     // Advanced only
     Hostname,
     GithubOwner,
@@ -111,6 +118,12 @@ pub struct Wizard {
     pub(crate) gh: Option<crate::github_screens::GithubFlow>,
     pub game_build: String,
     cfx_identifier: Option<String>,
+    /// The Cfx.re username as typed on the Cfx screen (kept when going back).
+    pub cfx_name: String,
+    /// The name Cfx.re spells for the resolved account (shown on Review).
+    cfx_username: Option<String>,
+    cfx_lookup: CfxLookup,
+    cfx_job: Option<Receiver<Result<kora_core::cfx::CfxAccount, String>>>,
     /// Selected row for choice screens.
     pub selected: usize,
     /// Focused input for text screens.
@@ -308,6 +321,10 @@ impl Wizard {
             gh: None,
             game_build: String::new(),
             cfx_identifier: None,
+            cfx_name: String::new(),
+            cfx_username: None,
+            cfx_lookup: Arc::new(kora_core::cfx::lookup),
+            cfx_job: None,
             selected: 0,
             focus: 0,
             help_open: false,
@@ -377,6 +394,7 @@ impl Wizard {
             v.push(Shortcut);
         }
         v.push(License);
+        v.push(Cfx);
         if self.advanced {
             v.push(Hostname);
         }
@@ -421,6 +439,7 @@ impl Wizard {
             | Screen::ArtifactUrl
             | Screen::ResourceList
             | Screen::License
+            | Screen::Cfx
             | Screen::Hostname
             | Screen::GithubOwner
             | Screen::GameBuild => 1,
@@ -451,6 +470,7 @@ impl Wizard {
             (Screen::ArtifactUrl, _) => &mut self.artifact_url,
             (Screen::ResourceList, _) => &mut self.resource_ids,
             (Screen::License, _) => &mut self.license,
+            (Screen::Cfx, _) => &mut self.cfx_name,
             (Screen::Hostname, _) => &mut self.hostname,
             (Screen::GithubOwner, _) => &mut self.github_owner,
             (Screen::GameBuild, _) => &mut self.game_build,
@@ -553,6 +573,12 @@ impl Wizard {
             }
             Screen::Folder => self.dir_touched = true,
             Screen::Hostname => self.host_touched = true,
+            Screen::Cfx => {
+                // A different name is a different account: forget the earlier answer and any lookup in flight.
+                self.cfx_identifier = None;
+                self.cfx_username = None;
+                self.cfx_job = None;
+            }
             Screen::DbAdminLogin => self.db_test = None,
             _ => {}
         }
@@ -687,6 +713,7 @@ impl Wizard {
             (Screen::Name, _) | (Screen::Hostname, _) => 64,
             (Screen::GithubOwner, _) | (Screen::DbAdminLogin, 0) => 64,
             (Screen::License, _) => 128,
+            (Screen::Cfx, _) => 32,
             (Screen::DbAdminLogin, 1) | (Screen::DbAdminLogin, 2) => 256,
             (Screen::DbAdminLogin, 3) => 255,
             (Screen::Folder, _) => 260,
@@ -1024,6 +1051,7 @@ impl Wizard {
 
     pub fn go_back(&mut self) {
         self.error = None;
+        self.cfx_job = None;
         if let (Screen::GithubAccount, Some(g)) = (self.screen, self.gh.as_mut()) {
             g.leave();
         }
@@ -1082,6 +1110,9 @@ impl Wizard {
                 return;
             }
             self.choose_limited();
+        }
+        if self.screen == Screen::Cfx && self.cfx_step() {
+            return;
         }
         if self.screen == Screen::Review && !self.review_reasons().is_empty() {
             self.error = Some("Kora needs your permission first: press R (or click Restart with permission), or go back and change those answers.".into());
@@ -1168,6 +1199,72 @@ impl Wizard {
         }
     }
 
+    /// Use another Cfx.re lookup (tests inject a fake one, so they never reach the network).
+    pub fn with_cfx_lookup(mut self, f: CfxLookup) -> Self {
+        self.cfx_lookup = f;
+        self
+    }
+
+    /// A Cfx.re lookup is running in the background.
+    pub fn cfx_checking(&self) -> bool {
+        self.cfx_job.is_some()
+    }
+
+    /// Resolved admin for the Review screen: `(username, identifier)`.
+    pub fn cfx_account(&self) -> Option<(String, String)> {
+        Some((self.cfx_username.clone().unwrap_or_default(), self.cfx_identifier.clone()?))
+    }
+
+    /// Enter on the Cfx screen. Returns true when it handled the key (a lookup started or is running, or the name is wrong);
+    /// false when the screen can be left (empty = skip, or the name is already resolved).
+    fn cfx_step(&mut self) -> bool {
+        if self.cfx_job.is_some() {
+            return true;
+        }
+        let name = self.cfx_name.trim().trim_start_matches('@').to_string();
+        if name.is_empty() {
+            self.cfx_identifier = None;
+            self.cfx_username = None;
+            return false;
+        }
+        if self.cfx_identifier.is_some() && self.cfx_username.is_some() {
+            return false;
+        }
+        if !kora_core::cfx::valid_username(&name) {
+            self.error = Some("A Cfx.re username has 3 to 20 letters, numbers, dots, dashes or underscores. It is the name on your forum.cfx.re profile. Or leave it empty to skip.".into());
+            return true;
+        }
+        self.error = None;
+        let (tx, rx) = mpsc::channel();
+        let f = self.cfx_lookup.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(f(&name));
+        });
+        self.cfx_job = Some(rx);
+        true
+    }
+
+    /// Poll the Cfx.re lookup. Found: remember the account and continue; failed: stay and show why.
+    pub(crate) fn cfx_tick(&mut self) -> bool {
+        let Some(rx) = &self.cfx_job else { return false };
+        let r = match rx.try_recv() {
+            Ok(r) => r,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err("The Cfx.re check stopped unexpectedly. Try again, or leave the name empty to skip.".into()),
+        };
+        self.cfx_job = None;
+        match r {
+            Ok(a) => {
+                self.status = Some(format!("Found {} ({})", a.username, a.identifier()));
+                self.cfx_identifier = Some(a.identifier());
+                self.cfx_username = Some(a.username);
+                self.go_next();
+            }
+            Err(e) => self.error = Some(e),
+        }
+        true
+    }
+
     /// Which ports will be opened in the firewall, in plain words (also says when none are).
     pub fn firewall_line(&self) -> String {
         let (g, t) = (self.game_port.trim(), self.tx_port.trim());
@@ -1231,6 +1328,9 @@ impl Wizard {
         }
         if !self.license.trim().is_empty() {
             v.push("Save your license key inside the server's private settings file (it never leaves this computer)".into());
+        }
+        if self.cfx_identifier.is_some() {
+            v.push("Send your Cfx.re username to forum.cfx.re once (already done) and make that account the txAdmin admin".into());
         }
         v
     }
@@ -1983,7 +2083,7 @@ mod tests {
     fn ports_are_rechecked_on_the_way_into_review_and_when_installing() {
         let f = Fake::default();
         let mut w = pwiz(&f);
-        walk_to(&mut w, Screen::License);
+        walk_to(&mut w, Screen::Cfx);
         f.take(&[30120]); // someone grabs the port after it was chosen
         w.go_next();
         assert_eq!(w.screen, Screen::Ports, "sent back instead of reaching Review");
@@ -2258,5 +2358,164 @@ mod tests {
         let mut w = wiz();
         w.screen = Screen::Review;
         let _ = w.view().help; // still renders
+    }
+
+    // ---- Cfx.re account screen ----
+
+    use std::sync::Mutex;
+
+    /// A fake forum: answers by name and records every lookup.
+    fn cfx_wiz(calls: &Arc<Mutex<Vec<String>>>) -> Wizard {
+        let calls = calls.clone();
+        wiz().with_cfx_lookup(Arc::new(move |n: &str| {
+            calls.lock().unwrap().push(n.to_string());
+            match n.to_ascii_lowercase().as_str() {
+                "jsixty" => Ok(kora_core::cfx::CfxAccount { id: 4465268, username: "JSixty".into() }),
+                "offline" => Err("Could not reach forum.cfx.re. Check the internet connection and try again.".into()),
+                _ => Err(format!("There is no Cfx.re account called '{n}'.")),
+            }
+        }))
+    }
+
+    fn at_cfx(w: &mut Wizard) {
+        w.screen = Screen::Cfx;
+        w.load_selection();
+    }
+
+    fn type_text(w: &mut Wizard, s: &str) {
+        for c in s.chars() {
+            w.handle_key(key(KeyCode::Char(c)));
+        }
+    }
+
+    /// Enter, then wait for the background lookup like the runner's tick loop does.
+    fn enter_and_wait(w: &mut Wizard) {
+        w.handle_key(key(KeyCode::Enter));
+        for _ in 0..500 {
+            if !w.cfx_checking() {
+                return;
+            }
+            w.tick();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("lookup did not finish");
+    }
+
+    #[test]
+    fn the_cfx_screen_comes_after_the_licence_key_and_before_review() {
+        let flow = wiz().flow();
+        let at = flow.iter().position(|s| *s == Screen::Cfx).unwrap();
+        assert_eq!((flow[at - 1], flow[at + 1]), (Screen::License, Screen::Review));
+        let mut w = wiz();
+        w.advanced = true;
+        w.mode = Mode::Development;
+        let f = w.flow();
+        let at = f.iter().position(|s| *s == Screen::Cfx).unwrap();
+        assert_eq!(f[at - 1], Screen::License);
+        assert_eq!(&f[at + 1..at + 3], &[Screen::Hostname, Screen::GithubOwner]);
+    }
+
+    #[test]
+    fn a_found_account_goes_into_the_request_and_onto_the_review_screen() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        type_text(&mut w, "@jsixty");
+        w.handle_key(key(KeyCode::Enter));
+        assert!(w.cfx_checking(), "the lookup runs in the background");
+        assert_eq!(w.screen, Screen::Cfx);
+        for _ in 0..500 {
+            if w.screen != Screen::Cfx {
+                break;
+            }
+            w.tick();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(w.screen, Screen::Review);
+        assert!(w.error.is_none());
+        assert_eq!(w.status.as_deref(), Some("Found JSixty (fivem:4465268)"));
+        assert_eq!(w.build_request().cfx_identifier.as_deref(), Some("fivem:4465268"));
+        assert_eq!(calls.lock().unwrap().as_slice(), ["jsixty"]);
+        assert!(w.view().lines.join("\n").contains("Admin: JSixty (fivem:4465268)"));
+        assert!(w.system_changes().iter().any(|c| c.contains("forum.cfx.re")));
+    }
+
+    #[test]
+    fn not_found_and_network_errors_keep_you_on_the_screen_with_the_message() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        type_text(&mut w, "nobodyhere");
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Cfx);
+        assert!(w.error.as_deref().unwrap().contains("no Cfx.re account called 'nobodyhere'"));
+        assert_eq!(w.build_request().cfx_identifier, None);
+        // Retry with another name (typing clears the message), then a network failure.
+        w.clear_field();
+        type_text(&mut w, "offline");
+        assert!(w.error.is_none());
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Cfx);
+        assert!(w.error.as_deref().unwrap().contains("Could not reach forum.cfx.re"));
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        // And it can still be skipped.
+        w.clear_field();
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Review);
+        assert_eq!(w.build_request().cfx_identifier, None);
+    }
+
+    #[test]
+    fn empty_skips_without_any_lookup_and_review_says_generated_local_account() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        w.handle_key(key(KeyCode::Enter));
+        assert_eq!(w.screen, Screen::Review);
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(w.build_request().cfx_identifier, None);
+        assert!(w.view().lines.join("\n").contains("Admin: generated local account"));
+    }
+
+    #[test]
+    fn invalid_characters_are_rejected_before_any_lookup() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        for bad in ["ab", "a b c", "../etc", "x?y=1", "näme", "way-too-long-name-for-cfx-account"] {
+            w.clear_field();
+            type_text(&mut w, bad);
+            w.handle_key(key(KeyCode::Enter));
+            assert_eq!(w.screen, Screen::Cfx, "{bad}");
+            assert!(!w.cfx_checking(), "{bad}");
+            assert!(w.error.as_deref().unwrap().contains("3 to 20"), "{bad}");
+        }
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn going_back_keeps_the_typed_name_and_the_found_account() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        let mut w = cfx_wiz(&calls);
+        at_cfx(&mut w);
+        type_text(&mut w, "jsixty");
+        enter_and_wait(&mut w);
+        assert_eq!(w.screen, Screen::Review);
+        w.go_back();
+        assert_eq!(w.screen, Screen::Cfx);
+        assert_eq!(w.cfx_name, "jsixty");
+        w.handle_key(key(KeyCode::Enter)); // already found: no second lookup
+        assert_eq!(w.screen, Screen::Review);
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert_eq!(w.build_request().cfx_identifier.as_deref(), Some("fivem:4465268"));
+        // Editing the name forgets the old account.
+        w.go_back();
+        w.handle_key(key(KeyCode::Backspace));
+        assert_eq!(w.build_request().cfx_identifier, None);
+        // Back from the screen itself goes to the licence key and keeps the text.
+        w.go_back();
+        assert_eq!(w.screen, Screen::License);
+        w.go_next();
+        assert_eq!(w.cfx_name, "jsixt");
     }
 }

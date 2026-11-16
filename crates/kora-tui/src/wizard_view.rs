@@ -297,6 +297,19 @@ pub fn view(w: &Wizard) -> View {
             v.inputs = vec![InputView { masked: true, ..inp("License key", &w.license, "paste here", true) }];
             v.help = l("Go to portal.cfx.re, sign in, open 'Registration keys' and choose 'New registration key'. The key is stored only in your server's private settings file.");
         }
+        Screen::Cfx => {
+            v.title = l("Your Cfx.re account");
+            v.lines = vec![
+                l("Type your Cfx.re username so you can sign in to txAdmin (the server control panel) with your Cfx.re account. Only the username is sent, to forum.cfx.re, to find your account number."),
+                String::new(),
+                l("Leave empty to use a generated local admin; you can sign in with the password saved in the server folder."),
+            ];
+            if w.cfx_checking() {
+                v.lines.extend([String::new(), l("Checking forum.cfx.re ...")]);
+            }
+            v.inputs = vec![inp("Cfx.re username", &w.cfx_name, "e.g. JSixty (or leave empty)", true)];
+            v.help = l("It is the name on your profile at forum.cfx.re, the same one you use to sign in to txAdmin. Kora looks it up once to get your account number; nothing else is sent.");
+        }
         Screen::Hostname => {
             v.title = l("Public server name");
             v.lines = vec![l("The name players see in the server list.")];
@@ -338,6 +351,14 @@ pub fn view(w: &Wizard) -> View {
                 format!("Name: {}", w.name.trim()),
                 format!("Folder: {}", w.dir.trim()),
                 format!("DB admin: {admin}"),
+                format!(
+                    "Admin: {}",
+                    match w.cfx_account() {
+                        Some((n, id)) if !n.is_empty() => format!("{n} ({id})"),
+                        Some((_, id)) => id,
+                        None => "generated local account".to_string(),
+                    }
+                ),
                 format!("License Key: {}", if w.license.trim().is_empty() { "not set (add later)" } else { "provided (hidden)" }),
                 format!("Server Software: {}", if w.artifact_custom { "chosen build" } else { "recommended" }),
             ];
