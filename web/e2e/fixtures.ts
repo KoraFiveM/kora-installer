@@ -8,8 +8,8 @@ import AxeBuilder from '@axe-core/playwright'
 
 export const KEY = 'cfxk_abcdefghij_12345'
 
-export type Scenario = 'default' | 'empty' | 'fleet' | 'trouble' | 'slow' | 'offline' | 'down' | 'windows' | 'service' | 'noservice' | 'notallowed'
-export type Viewer = 'local' | 'operator' | 'remote-operator' | 'remote-admin'
+export type Scenario = 'default' | 'empty' | 'fleet' | 'trouble' | 'slow' | 'offline' | 'down' | 'windows' | 'service' | 'noservice' | 'notallowed' | 'restarted'
+export type Viewer = 'local' | 'operator' | 'remote-operator' | 'remote-admin' | 'remote-tailscale-admin'
 
 class Problems {
   readonly list: string[] = []

@@ -368,7 +368,8 @@ mod tests {
             let c = Created { binary: bin.map(String::from), ..Created::default() };
             std::fs::write(d.join(".kora/created.json"), serde_json::to_vec(&c).unwrap()).unwrap();
         }
-        let entry = |n: &str, d: &PathBuf| ServerEntry { name: n.into(), dir: d.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
+        let entry =
+            |n: &str, d: &PathBuf| ServerEntry { source: None, versions: None, name: n.into(), dir: d.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
         let reg = Registry { servers: vec![entry("a", &a), entry("b", &b)] };
         assert!(binary_used_elsewhere(&reg, "/opt/kora/v/kora", &[b.as_path()]), "a uses it");
         assert!(!binary_used_elsewhere(&reg, "/opt/kora/v/kora", &[a.as_path()]), "only a does, and a is being removed");

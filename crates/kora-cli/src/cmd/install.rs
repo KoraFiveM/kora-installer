@@ -14,6 +14,18 @@ pub(crate) enum ModeArg {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum SourceArg {
+    Clone,
+    Fork,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum VersionsArg {
+    Released,
+    Latest,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
 pub(crate) enum DbArg {
     Existing,
     Install,
@@ -32,9 +44,15 @@ pub(crate) struct InstallArgs {
     /// Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: C:\Kora\<name>, the same as in the panel).
     #[arg(long)]
     pub(crate) dir: Option<PathBuf>,
-    /// prod = pinned release clones, dev = forks on your GitHub account.
+    /// The old spelling of --source and --versions: prod = clone + released, dev = fork + latest. Still works.
     #[arg(long, value_enum)]
     pub(crate) mode: Option<ModeArg>,
+    /// Where the resources come from: clone = plain clones of the originals (no GitHub account needed), fork = your own copies on GitHub.
+    #[arg(long, value_enum)]
+    pub(crate) source: Option<SourceArg>,
+    /// Which versions the server follows: released = pinned to released versions (the default for clone), latest = the latest changes of the main branch (the default for fork).
+    #[arg(long, value_enum)]
+    pub(crate) versions: Option<VersionsArg>,
     /// Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable).
     #[arg(long, env = "CFX_LICENSE_KEY", hide_env_values = true)]
     pub(crate) license_key: Option<String>,
@@ -72,8 +90,8 @@ pub(crate) struct InstallArgs {
     /// Open the game port in the OS firewall (needs admin).
     #[arg(long)]
     pub(crate) firewall: bool,
-    /// Dev mode: GitHub user or organisation to fork into (`list` shows the choices).
-    #[arg(long)]
+    /// With --source fork: the GitHub user or organisation to fork into (`list` shows the choices; default: your own account). The old name --github-owner still works.
+    #[arg(long = "fork-owner", alias = "github-owner", value_name = "LOGIN_OR_ORG")]
     pub(crate) github_owner: Option<String>,
     /// Catalog file or URL (default: the public catalog with an embedded fallback). Env: KORA_CATALOG.
     #[arg(long, hide = true)]
@@ -128,6 +146,8 @@ impl InstallArgs {
             || self.hostname.is_some()
             || self.game_build.is_some()
             || self.mode.is_some()
+            || self.source.is_some()
+            || self.versions.is_some()
             || self.license_key.is_some()
             || self.license_key_name.is_some()
             || self.save_license_key.is_some()
@@ -175,11 +195,24 @@ impl InstallArgs {
             Some(list) => ResourceSelection::Only(list.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
         };
         let defaults = Ports::default();
-        Ok(InstallRequest {
-            mode: match self.mode.unwrap_or(ModeArg::Prod) {
+        let (source, versions) = installer::resolve(
+            self.mode.map(|m| match m {
                 ModeArg::Prod => Mode::Production,
                 ModeArg::Dev => Mode::Development,
-            },
+            }),
+            self.source.map(|s| match s {
+                SourceArg::Clone => installer::Source::Clone,
+                SourceArg::Fork => installer::Source::Fork,
+            }),
+            self.versions.map(|v| match v {
+                VersionsArg::Released => installer::Versions::Released,
+                VersionsArg::Latest => installer::Versions::Latest,
+            }),
+        );
+        Ok(InstallRequest {
+            mode: installer::compat_mode(versions),
+            source: Some(source),
+            versions: Some(versions),
             hostname: self.hostname.clone().unwrap_or_else(|| name.clone()),
             name,
             dir,
@@ -288,23 +321,7 @@ fn settle_ports_avoiding(req: &mut InstallRequest, auto: bool, prober: &dyn Port
 
 /// Dry-run header: the effective choices (from the flags). Never includes secrets.
 fn request_summary(req: &InstallRequest) -> String {
-    use kora_core::installer::{Mode, ResourceSelection};
-    let resources = match &req.resources {
-        ResourceSelection::All => "all".to_string(),
-        ResourceSelection::Only(v) => format!("{} chosen ({})", v.len(), v.join(", ")),
-    };
-    format!(
-        "Your choices:\n  name:      {}\n  mode:      {}\n  resources: {}\n  ports:     game {}, txAdmin {}\n  artifact:  {}\n  game build: {}\n  hostname:  {}\n  cfx owner: {}\n",
-        req.name,
-        if req.mode == Mode::Production { "production" } else { "development" },
-        resources,
-        req.ports.game,
-        req.ports.txadmin,
-        req.artifact_url.as_deref().unwrap_or("recommended"),
-        req.game_build.map_or("default".to_string(), |b| b.to_string()),
-        if req.hostname.is_empty() { "(none)" } else { &req.hostname },
-        req.cfx_identifier.as_deref().unwrap_or("(none)"),
-    )
+    kora_core::api::install::request_summary(req)
 }
 
 fn print_outcome(out: &installer::InstallOutcome, dry: bool) {
@@ -379,8 +396,8 @@ pub(crate) fn install(args: InstallArgs) -> i32 {
     }
     let args_auto_ports = args.auto_ports;
     let fix_permissions = args.fix_permissions;
-    let dev_mode = matches!(args.mode, Some(ModeArg::Dev));
-    if dev_mode && !args.dry_run {
+    let forking = args.source.is_some_and(|s| matches!(s, SourceArg::Fork)) || (args.source.is_none() && matches!(args.mode, Some(ModeArg::Dev)));
+    if forking && !args.dry_run {
         match resolve_github_owner(args.github_owner.as_deref()) {
             Ok(l) => {
                 kora_core::profile::ProfileStore::default().remember_github_owner(&l);
@@ -499,7 +516,7 @@ mod tests {
             ..Default::default()
         };
         let text = request_summary(&a.into_request().unwrap());
-        for want in ["Alpha One", "development", "2 chosen (a, b)", "game 31120, txAdmin 41120", "https://runtime.fivem.net/x", "3258", "fivem:1"] {
+        for want in ["Alpha One", "the latest changes", "your own copies", "2 chosen (a, b)", "game 31120, txAdmin 41120", "https://runtime.fivem.net/x", "3258", "fivem:1"] {
             assert!(text.contains(want), "missing {want}: {text}");
         }
         assert!(!text.contains("cfxk_secret"));

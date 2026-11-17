@@ -12,13 +12,13 @@ UNIT=/etc/systemd/system/$SVC.service
 ACCOUNT=kora-$NAME
 export CFX_LICENSE_KEY="$FAKE_KEY"
 state() { systemctl is-active "$SVC" 2>/dev/null || true; }
-install_it() { kora install --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --service -y; }
+install_it() { kora install --mode prod --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --service -y; }
 txadmin_up() { curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$TX_PORT/"; }
 assert_gone() {
   assert "unit file $UNIT is gone" test ! -e "$UNIT"
   assert "service user $ACCOUNT is gone" bash -c "! id -u $ACCOUNT"
   assert "server folder is gone" test ! -e "$D"
-  assert "no registry entry" bash -c "! sudo grep -q '\"name\": \"$NAME\"' '$KORA_HOME/servers.json' 2>/dev/null"
+  assert "no registry entry" registry_lacks "$NAME"
   assert "systemd does not know the unit" bash -c "! systemctl list-unit-files $SVC.service --no-legend | grep -q ."
 }
 
@@ -47,7 +47,7 @@ KORA_COPY="$(sed -n 's/^ExecStart=\([^ ]*\) service-host.*/\1/p' "$UNIT" | tr -d
 note "service runs: $KORA_COPY"
 assert_eq "the service program is a root-owned copy" root "$(stat -c %U "$KORA_COPY")"
 kora status
-assert_matches "status shows stopped" "$OUT" "$NAME[[:space:]]+prod[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
+assert_matches "status shows stopped" "$OUT" "$NAME[[:space:]]+clone, released[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
 
 step "3. uninstall --dry-run leaves everything"
 kora uninstall --dry-run
@@ -69,7 +69,7 @@ wait_for "licence rejection logged" 120 logfound || { jr | tail -n 80; fail "no 
 assert "log shows FXServer rejected the fake licence key (expected)" logfound
 assert "an FXServer process of the service user runs" pgrep -u $ACCOUNT -f 'FXServer|run.sh'
 kora status
-assert_matches "status shows running" "$OUT" "$NAME[[:space:]]+prod[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+running"
+assert_matches "status shows running" "$OUT" "$NAME[[:space:]]+clone, released[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+running"
 sleep 15
 assert_eq "still active 15 s after start" active "$(state)"
 PID1="$(systemctl show -p MainPID --value $SVC)"
@@ -79,6 +79,35 @@ assert_eq "active after restart" active "$(state)"
 PID2="$(systemctl show -p MainPID --value $SVC)"
 assert "restart really replaced the process ($PID1 -> $PID2)" test "$PID1" != "$PID2"
 assert "txAdmin answers again after restart" wait_for txadmin 180 txadmin_up
+
+step "4b. txAdmin through the panel's own address (the txAdmin gateway)"
+PANEL_PORT=47131
+GW_PORT=$((TX_PORT + 10000))
+PANEL_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+# The panel runs as whoever runs kora in this job (root when KORA_SUDO=1: the home was made by root).
+SUDO=""; if [ "${KORA_SUDO:-}" = "1" ]; then SUDO="sudo"; fi
+$SUDO mkdir -p "$KORA_HOME"
+printf '%s' "$PANEL_TOKEN" | $SUDO tee "$KORA_HOME/panel-token" >/dev/null
+$SUDO chmod 600 "$KORA_HOME/panel-token"
+run_kora panel --foreground --no-open --port "$PANEL_PORT" >"$SMOKE_ROOT/panel.log" 2>&1 &
+PANEL_PID=$!
+panel_up() { curl -fsS --max-time 3 "http://127.0.0.1:$PANEL_PORT/api/v1/meta" >/dev/null; }
+wait_for "panel" 40 panel_up || { cat "$SMOKE_ROOT/panel.log" || true; $SUDO kill "$PANEL_PID" 2>/dev/null || true; fail "the panel did not start"; }
+JAR="$SMOKE_ROOT/panel.jar"; GJAR="$SMOKE_ROOT/gate.jar"; rm -f "$JAR" "$GJAR"
+SESSION="$(curl -fsS -c "$JAR" -H 'X-Kora: 1' -H 'Content-Type: application/json' -d "{\"token\":\"$PANEL_TOKEN\"}" "http://127.0.0.1:$PANEL_PORT/api/v1/session")"
+SECRET="$(sed -n 's/.*"secret":"\([^"]*\)".*/\1/p' <<<"$SESSION")"
+assert "panel sign-in gave a session secret" test -n "$SECRET"
+TICKET="$(curl -fsS -b "$JAR" -H "X-Kora-Session: $SECRET" -H 'X-Kora: 1' -X POST "http://127.0.0.1:$PANEL_PORT/api/v1/servers/$NAME/txadmin/ticket")"
+URL="$(sed -n 's/.*"url":"\([^"]*\)".*/\1/p' <<<"$TICKET")"
+assert_contains "the ticket points at the panel-side port ($GW_PORT = txAdmin $TX_PORT + 10000)" "$URL" ":$GW_PORT/__kora/enter?t="
+assert_eq "entering with the one-time ticket redirects" 303 "$(curl -sS -o /dev/null -w '%{http_code}' -c "$GJAR" "$URL")"
+assert_eq "a ticket works once" 401 "$(curl -sS -o /dev/null -w '%{http_code}' "$URL")"
+DIRECT="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://127.0.0.1:$TX_PORT/")"
+VIA="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -b "$GJAR" "http://127.0.0.1:$GW_PORT/")"
+assert_eq "txAdmin answers through the panel like it does directly (HTTP $DIRECT)" "$DIRECT" "$VIA"
+assert_eq "the gateway answers nothing without the panel sign-in" 401 "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$GW_PORT/")"
+$SUDO kill "$PANEL_PID" 2>/dev/null || true; wait "$PANEL_PID" 2>/dev/null || true
+$SUDO rm -f "$KORA_HOME/panel-token"; rm -f "$JAR" "$GJAR"
 sudo systemctl stop $SVC
 assert_eq "plain systemctl stop works too" inactive "$(state)"
 kora start $NAME

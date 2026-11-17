@@ -79,6 +79,10 @@ pub trait GitOps {
     fn current_branch(&self, _repo: &Path) -> GitResult<Option<String>> {
         Ok(None)
     }
+    /// True for the view a server on released versions uses: resources sit on a commit, so a named branch was put there on purpose.
+    fn pinned_releases(&self) -> bool {
+        false
+    }
     /// Check out `branch` (`"HEAD"` = detach). Used to put a resource back on the branch a snapshot was taken on.
     fn switch_branch(&self, _repo: &Path, _branch: &str) -> GitResult<()> {
         Err(UpdateError::Git("switching branches is not supported here".into()))
@@ -261,11 +265,17 @@ impl UpdatePlan {
 }
 
 /// Development: the branch a resource is on when it is not the one updates follow (`upstream/<branch>`); `None` = fine.
+///
+/// Released versions: a resource is checked out on a commit of its own (no branch), so a named branch or a pull request is
+/// always something a person put there on purpose.
 pub(crate) fn off_branch(git: &dyn GitOps, path: &Path, followed: &str) -> Option<String> {
-    let want = followed.strip_prefix("upstream/")?;
-    match git.current_branch(path) {
-        Ok(Some(cur)) if cur != want => Some(cur),
-        _ => None,
+    match followed.strip_prefix("upstream/") {
+        Some(want) => match git.current_branch(path) {
+            Ok(Some(cur)) if cur != want => Some(cur),
+            _ => None,
+        },
+        None if git.pinned_releases() => git.current_branch(path).ok().flatten().filter(|cur| cur != "HEAD"),
+        None => None,
     }
 }
 

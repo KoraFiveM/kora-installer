@@ -6,19 +6,27 @@
 //! a field, `#[serde(default, skip_serializing_if = "Option::is_none")]` plus `#[ts(optional)]` for a
 //! field that is left out (TypeScript gets `field?:`), a plain `Option` for a field that is sent as `null`.
 
+mod audit;
+mod collab;
 mod common;
 mod install;
 mod keys;
 mod more;
+mod reach;
+mod resource;
 mod servers;
 mod session;
 mod system;
 mod updates;
 
+pub use audit::*;
+pub use collab::*;
 pub use common::*;
 pub use install::*;
 pub use keys::*;
 pub use more::*;
+pub use reach::*;
+pub use resource::*;
 pub use servers::*;
 pub use session::*;
 pub use system::*;

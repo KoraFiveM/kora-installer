@@ -171,7 +171,13 @@ fn lost(e: &ClientError, ctx: &Context) -> Problem {
 /// Run `command` (`["kora", verb, args...]`) with administrator rights, through the service. `what`
 /// completes "Kora cannot ...".
 pub fn privileged_as(what: &str, message: &str, command: Vec<String>, env: Vec<(String, String)>, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
-    let ctx = Context { what: what.to_string(), command: command.clone(), can_skip_admin: false };
+    privileged_shown(what, message, command.clone(), command, env, on_line)
+}
+
+/// [`privileged_as`] where the command shown to the person ("Show me the command", for an administrator terminal)
+/// is not the request sent to the service: `shown` is what they can run, `command` what is sent.
+pub fn privileged_shown(what: &str, message: &str, shown: Vec<String>, command: Vec<String>, env: Vec<(String, String)>, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
+    let ctx = Context { what: what.to_string(), command: shown, can_skip_admin: false };
     let mut parts = command.iter().map(String::as_str);
     let (Some("kora"), Some(verb)) = (parts.next(), parts.next()) else { return Err(ApiError::needs_elevation(message, command)) };
     let verb = verb.to_string();
@@ -206,10 +212,12 @@ pub fn privileged_as(what: &str, message: &str, command: Vec<String>, env: Vec<(
 /// folder's install record (never from here), applies the same port rules as the install's firewall step (never below 1024,
 /// never remote administration or database ports) and records the rules as the caller's (`firewall:<slug>`, closed again when
 /// the server is deleted). Only the game port: never txAdmin.
-pub fn reach_open_firewall(dir: &std::path::Path, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
+pub fn reach_open_firewall(name: &str, dir: &std::path::Path, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
     let dir = dir.to_string_lossy().into_owned();
+    // What a person can run themselves, in an administrator terminal: the command that exists for it.
+    let shown = vec!["kora".to_string(), "reach".into(), name.to_string(), "--open-firewall".into()];
     let command = vec!["kora".to_string(), "admin-step".into(), "run".into(), "--step".into(), "reach.firewall".into(), "--dir".into(), dir];
-    privileged_as("open the firewall for this server's game port", "Opening the firewall for the game port needs administrator rights. Run this command as administrator:", command, vec![], on_line)
+    privileged_shown("open the firewall for this server's game port", "Opening the firewall for the game port needs administrator rights. Run this command as administrator:", shown, command, vec![], on_line)
 }
 
 /// [`privileged_as`] for the toolchain actions, whose sentence names no particular thing.

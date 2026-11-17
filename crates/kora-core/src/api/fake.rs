@@ -22,6 +22,11 @@ use crate::update::UpdateReport;
 
 #[derive(Default)]
 pub struct FakeState {
+    /// `reach_check` answers this (`None`: a plausible checklist).
+    pub reach_report: Option<crate::reach::ReachReport>,
+    pub reach_consent: crate::reach::settings::Consent,
+    pub forwarding: HashMap<String, bool>,
+    pub firewall_open_error: Option<String>,
     pub servers: Vec<ServerEntry>,
     pub status: HashMap<String, Status>,
     pub badges: HashMap<String, UpdateBadge>,
@@ -62,6 +67,8 @@ pub struct FakeState {
     pub asset_remove_error: Option<String>,
     /// What `branches` answers (`None`: an error that says nothing is set up). Every request is in `calls` as `branches {request:?}`.
     pub branches: Option<Res<crate::branches::Reply>>,
+    /// The answer to the next `collab` request.
+    pub collab: Option<Res<crate::collab::Reply>>,
 }
 
 /// Cheap to clone; clones share state. Give `move || Box::new(fake.clone())` to the panel.
@@ -70,7 +77,7 @@ pub struct FakeBackend(pub Arc<Mutex<FakeState>>);
 
 /// A registry entry for tests.
 pub fn entry(name: &str, mode: Mode, game: u16, txadmin: u16) -> ServerEntry {
-    ServerEntry { name: name.into(), dir: PathBuf::from(format!("/srv/{name}")), mode, ports: PortsRecord { game, txadmin }, created_unix: 0 }
+    ServerEntry { source: None, versions: None, name: name.into(), dir: PathBuf::from(format!("/srv/{name}")), mode, ports: PortsRecord { game, txadmin }, created_unix: 0 }
 }
 
 impl FakeBackend {
@@ -105,6 +112,15 @@ fn err_or<T>(e: &Option<String>, ok: impl FnOnce() -> T) -> Res<T> {
 }
 
 impl Backend for FakeBackend {
+    fn collab(&mut self, e: &ServerEntry, req: &crate::collab::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
+        let mut s = self.state();
+        s.calls.push(format!("collab {} {req:?}", e.name));
+        if matches!(req, crate::collab::Request::Fork { .. }) {
+            say(0, 1, "");
+            say(1, 1, "kora_hud");
+        }
+        s.collab.clone().unwrap_or_else(|| Err("No collab answer is set up.".into()))
+    }
     fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
         let mut s = self.state();
         s.calls.push(format!("branches {} {req:?}", e.name));
@@ -305,6 +321,37 @@ impl Backend for FakeBackend {
             x.ports = PortsRecord { game: p.game, txadmin: p.txadmin };
         }
         Ok(vec!["Firewall rules were not changed.".into()])
+    }
+    fn reach_check(&mut self, e: &ServerEntry, consent: Option<crate::reach::settings::Consent>) -> Res<crate::reach::ReachReport> {
+        let mut s = self.state();
+        s.calls.push(format!("reach_check {} {consent:?}", e.name));
+        let on = s.forwarding.get(&e.name).copied().unwrap_or(false);
+        let mut f = crate::reach::sample_facts(&e.name, e.ports.game);
+        f.forwarding.enabled = on;
+        Ok(s.reach_report.clone().unwrap_or_else(|| crate::reach::assess(&f)))
+    }
+    fn reach_consent(&mut self) -> crate::reach::settings::Consent {
+        self.state().reach_consent
+    }
+    fn reach_consent_set(&mut self, c: crate::reach::settings::Consent) -> Res<()> {
+        let mut s = self.state();
+        s.calls.push(format!("reach_consent_set {c:?}"));
+        s.reach_consent = c;
+        Ok(())
+    }
+    fn forwarding_set(&mut self, e: &ServerEntry, on: bool) -> Res<crate::reach::ForwardingView> {
+        let mut s = self.state();
+        s.calls.push(format!("forwarding_set {} {on}", e.name));
+        s.forwarding.insert(e.name.clone(), on);
+        Ok(crate::reach::ForwardingView { enabled: on, status: None })
+    }
+    fn firewall_open(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
+        let mut s = self.state();
+        s.calls.push(format!("firewall_open {}", e.name));
+        match &s.firewall_open_error {
+            Some(x) => Err(x.clone()),
+            None => Ok(vec![format!("Opened port {} (TCP and UDP) in the firewall.", e.ports.game)]),
+        }
     }
     fn assets_list(&mut self, e: &ServerEntry) -> Res<AssetsView> {
         Ok(self.state().assets.get(&e.name).cloned().unwrap_or_default())

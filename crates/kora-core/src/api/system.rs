@@ -203,7 +203,12 @@ impl Backend for SystemBackend {
             // So the monitor does not report this stop as a crash.
             crate::monitor::mark_stop_intent(&e.dir);
         }
-        control_with(&SystemControl, &e.name, a)
+        control_with(&SystemControl, &e.name, a)?;
+        if a != ControlAction::Stop {
+            // Everything is loaded fresh: no resource still needs a restart.
+            crate::resourcestate::mark_server_restarted(&e.dir);
+        }
+        Ok(())
     }
 
     fn resources(&mut self, e: &ServerEntry) -> Vec<String> {
@@ -254,15 +259,20 @@ impl Backend for SystemBackend {
     }
 
     fn unregister(&mut self, e: &ServerEntry) -> Res<()> {
-        let mut r = Registry::load().map_err(err)?;
-        r.remove(&e.name);
-        r.save_or_clean_to(&registry::registry_path()).map_err(err)
+        crate::reach::forward::release_for_dir(&e.dir);
+        Registry::update(|r| {
+            r.remove(&e.name);
+            Ok(())
+        })
+        .map_err(err)
     }
 
     fn register(&mut self, e: ServerEntry) -> Res<()> {
-        let mut r = Registry::load().map_err(err)?;
-        r.upsert(e);
-        r.save().map_err(err)
+        Registry::update(|r| {
+            r.upsert(e);
+            Ok(())
+        })
+        .map_err(err)
     }
 
     fn scan_roots(&self) -> Vec<PathBuf> {
@@ -382,6 +392,26 @@ impl Backend for SystemBackend {
         })
     }
 
+    fn reach_check(&mut self, e: &ServerEntry, consent: Option<crate::reach::settings::Consent>) -> Res<crate::reach::ReachReport> {
+        Ok(crate::reach::check(&crate::reach::SystemReach::default(), e, consent))
+    }
+
+    fn reach_consent(&mut self) -> crate::reach::settings::Consent {
+        crate::reach::settings::load_consent()
+    }
+
+    fn reach_consent_set(&mut self, c: crate::reach::settings::Consent) -> Res<()> {
+        crate::reach::settings::save_consent(&c)
+    }
+
+    fn forwarding_set(&mut self, e: &ServerEntry, on: bool) -> Res<crate::reach::ForwardingView> {
+        crate::reach::set_forwarding(e, on)
+    }
+
+    fn firewall_open(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
+        crate::reach::fw::open_game_port(e)
+    }
+
     fn assets_list(&mut self, e: &ServerEntry) -> Res<paidassets::AssetsView> {
         paidassets::view(&e.dir)
     }
@@ -396,6 +426,11 @@ impl Backend for SystemBackend {
 
     fn asset_remove(&mut self, e: &ServerEntry, name: &str) -> Res<Vec<String>> {
         paidassets::remove(&e.dir, name)
+    }
+
+    fn collab(&mut self, e: &ServerEntry, req: &crate::collab::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
+        crate::installer::gitops::with_runner(&e.dir, |r| crate::collab::run_on(r, &sf, req, say)).map_err(String::from)
     }
 
     fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
@@ -429,6 +464,8 @@ mod tests {
         use crate::installer::registry::{PortsRecord, ResourceRecord};
         let rec = |id: &str, path: &str| ResourceRecord { id: id.into(), path: path.into(), ..Default::default() };
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "a".into(),
             mode: installer::Mode::Production,
             dir: PathBuf::from("/srv/a"),

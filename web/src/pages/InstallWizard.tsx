@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { InstallDefaults, InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
+import type { InstallDefaults, InstallEvent, InstallOutcome, InstallRequest, ProgressEvent, StatusEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
-import { OpenFolderButton, useTxAdminLink } from '@/components/ServerLinks'
+import { OpenFolderButton, TxAdminButton, useTxAdminLink } from '@/components/ServerLinks'
+import { MoreAddresses, ReachCard } from '@/components/ReachCard'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -21,7 +22,7 @@ import { formatBytes, validatePorts } from '@/lib/utils'
 import { useInstallBlock } from './install/access'
 import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
-import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
+import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, OptionsStep, PortsStep, ResourcesStep, SourceStep, VersionsStep } from './install/Steps'
 import { cn } from '@/lib/utils'
 
 interface ReviewRow {
@@ -37,7 +38,8 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
   const rows: ReviewRow[] = [
     { label: 'Licence key', value: f.licenceChoice === 'saved' ? (f.licenceName ? `Your saved licence key "${f.licenceName}"` : 'Not picked yet') : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? `Provided (hidden). It will be saved as "${f.saveKeyName.trim()}".` : 'Provided (hidden). It will not be saved.') : 'Not given yet', step: 'licence' },
-    { label: 'Kind of server', value: f.mode === 'production' ? 'Production (a server for players)' : 'Development (for building and changing resources)', step: 'mode' },
+    { label: 'Resources come from', value: f.source === 'clone' ? "Kora's resources as they are (plain copies)" : 'Your own copies on GitHub', step: 'source' },
+    { label: 'Versions', value: f.versions === 'released' ? 'Released versions (stable)' : 'Latest changes (the main branch)', step: 'versions' },
     { label: 'Name', value: req.name || 'Not given yet', step: 'name' },
     { label: 'Folder', value: req.dir || 'Not given yet', step: 'name' },
     { label: 'Server name for players', value: req.hostname || '(default)', step: 'name', advanced: true },
@@ -54,7 +56,7 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
     value: f.cfxFound ? `${f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier}${f.cfxRemembered ? '. Remembered from your last install.' : ''}` : 'Not set. Kora makes a local admin with a generated password.',
     step: 'cfx',
   })
-  if (f.mode === 'development') rows.push({ label: 'GitHub forks go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
+  if (f.source === 'fork') rows.push({ label: 'Your copies go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
   return rows
 }
 
@@ -98,7 +100,7 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
   /** Drop the parts that need administrator rights (Windows notice). */
   onWithoutAdmin?: () => void
 }) {
-  const safeKey = JSON.stringify([req.dir, req.mode, req.firewall, req.service, req.db, req.txadmin_public])
+  const safeKey = JSON.stringify([req.dir, req.source, req.versions, req.firewall, req.service, req.db, req.txadmin_public])
   const disk = useQuery({ queryKey: ['disk', req.dir], queryFn: () => api.installs.checkDisk(req.dir) })
   useEffect(() => onDisk(disk.data ? disk.data.ok : true), [disk.data, onDisk])
   const plan = useQuery({ queryKey: ['plan', safeKey], queryFn: () => api.installs.plan({ ...req, dry_run: true }) })
@@ -145,7 +147,6 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
 export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin: number }; cfx?: string | null }) {
   // The same address, hint and note the server's Overview page gives (right for local, tunnelled and remote visits).
   const link = useTxAdminLink(ports.txadmin)
-  const tx = link.url
   return (
     <div className="space-y-4">
       <Alert tone={o.running ? 'success' : 'warning'} title={o.running ? 'Your server is installed and running' : 'Your server is installed'}>
@@ -159,9 +160,11 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       </div>
       <div className="space-y-1.5">
         <div className="text-sm text-muted-foreground">txAdmin</div>
-        <CopyField value={tx} label="txAdmin address" />
+        {link.url ? <CopyField value={link.url} label="txAdmin address" /> : <p className="text-sm">Open it with the button below: it goes through this panel, so no extra port has to be open on this computer.</p>}
         {link.hint && <p className="text-xs text-muted-foreground">{link.hint}</p>}
       </div>
+      <ReachCard name={o.name} compact />
+      <MoreAddresses name={o.name} />
       {!o.admin_user && cfx && (
         <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
       )}
@@ -170,7 +173,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       )}
       {o.notes.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">{o.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
       <div className="flex flex-wrap gap-2">
-        <Button asChild variant="default"><a href={tx} target="_blank" rel="noopener noreferrer"><ExternalLink /> Open txAdmin</a></Button>
+        <TxAdminButton name={o.name} port={ports.txadmin} up={o.running} size="default" />
         <CopyButton text={o.connect} label="Copy connect address" size="default" />
         <OpenFolderButton name={o.name} dir={o.dir} size="default" />
         <Button asChild><Link to={`/servers/${encodeURIComponent(o.name)}`}>Go to the server</Link></Button>
@@ -251,13 +254,13 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const [autoRetried, setAutoRetried] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
   const ports = usePortsCheck(f.game, f.tx)
-  const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
+  const run = useJob<InstallOutcome, InstallEvent>(job, onServersChanged)
   /** Windows: the panel can ask Windows for permission itself ("Ask again" / "Ask for administrator permission"). */
 
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
   const req = buildRequest(f, { artifactUrl: artUrl })
-  const stepsOf = (mode: WizardForm['mode']) => (everyStep ? stepsFor(mode) : quickStepsFor(mode))
-  const steps = stepsOf(f.mode)
+  const stepsOf = (source: WizardForm['source']) => (everyStep ? stepsFor(source) : quickStepsFor(source))
+  const steps = stepsOf(f.source)
   const at = Math.min(step, steps.length - 1)
   const id: StepId = steps[at]
   const ctx = { ports: ports.state, githubSignedIn }
@@ -296,7 +299,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     setResumeErr(null)
     setGithubAsked(false)
     setStep(steps.length - 1)
-    setEditing(sectionStep(section, f.mode))
+    setEditing(sectionStep(section, f.source))
   }
   /** A fix launched from the failed step worked: say so and retry that step (only when the install can carry on). */
   const retryAfterFix = run.error?.resume ? async () => { await resume(); setAutoRetried(true) } : undefined
@@ -320,12 +323,15 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   }
   /** Errors from starting (on the summary): change an answer, or drop the parts that need administrator rights. */
   const startActions: ActionHandlers = {
-    change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.mode)) },
+    change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.source)) },
     continue_without_admin: () => { setStartErr(null); setF(withoutAdmin(f)); setEditing(null) },
-    sign_in_github: () => { setStartErr(null); setEditing(f.mode === 'development' ? 'github' : null) },
+    sign_in_github: () => { setStartErr(null); setEditing(f.source === 'fork' ? 'github' : null) },
   }
 
   // ---- running / finished ----
+  // Step rows come from the installer; plain status lines come from an install run by the Linux helper.
+  const progressRows = run.events.filter((e): e is ProgressEvent => 'step' in e)
+  const statusLines = run.events.filter((e): e is StatusEvent => 'type' in e && e.type === 'status')
   if (job) {
     return (
       <div className="mx-auto max-w-2xl space-y-5">
@@ -339,7 +345,12 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
                 <Loader2 className="size-4 animate-spin text-info" aria-hidden /> Getting ready. The first step shows up in a moment...
               </p>
             ) : (
-              <StepProgress events={run.events as ProgressEvent[]} />
+              <>
+                {progressRows.length > 0 && <StepProgress events={progressRows} />}
+                {statusLines.length > 0 && (
+                  <pre aria-label="What Kora is doing" className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{statusLines.slice(-12).map((l) => l.message).join('\n')}</pre>
+                )}
+              </>
             )}
             {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
             {run.phase === 'failed' && (
@@ -395,7 +406,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved licence key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
           {defaults.saved_key_missing && <p className="mt-1">The saved licence key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
           <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
+            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>Continue where I left off</Button>
             <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>
           </div>
         </Alert>
@@ -407,7 +418,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               <span>&quot;{r.name}&quot; stopped{r.failed_step ? ` at the step ${r.failed_step}` : ''}. Its answers and licence key are kept.</span>
               <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>Carry on</Button>
               {saved && saved.name === r.name && (
-                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Change my answers first</Button>
+                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>Change my answers first</Button>
               )}
             </div>
           ))}
@@ -422,7 +433,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       <Card>
         <CardHeader><CardTitle className="text-lg">{STEP_LABEL[showing]}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {showing === 'mode' && <ModeStep {...common} />}
+          {showing === 'source' && <SourceStep {...common} />}
+          {showing === 'versions' && <VersionsStep {...common} />}
           {showing === 'name' && <NameStep {...common} quick={!everyStep && !editing} />}
           {showing === 'ports' && <PortsStep {...common} ports={ports} />}
           {showing === 'build' && <BuildStep {...common} />}

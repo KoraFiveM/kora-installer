@@ -12,7 +12,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Tools that live in `System32` on every Windows.
-const SYSTEM32: &[&str] = &["icacls", "sc", "netsh", "netstat", "tasklist", "taskkill", "schtasks", "msiexec", "whoami", "attrib", "takeown"];
+const SYSTEM32: &[&str] = &["icacls", "sc", "netsh", "netstat", "tasklist", "taskkill", "schtasks", "msiexec", "whoami", "attrib", "takeown", "route"];
 
 fn stem(program: &str) -> String {
     let l = program.to_ascii_lowercase();

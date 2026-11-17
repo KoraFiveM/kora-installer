@@ -322,7 +322,7 @@ mod tests {
     }
 
     fn entry(name: &str, dir: &str, g: u16, t: u16) -> ServerEntry {
-        ServerEntry { name: name.into(), dir: dir.into(), mode: Mode::Production, ports: PortsRecord { game: g, txadmin: t }, created_unix: 0 }
+        ServerEntry { source: None, versions: None, name: name.into(), dir: dir.into(), mode: Mode::Production, ports: PortsRecord { game: g, txadmin: t }, created_unix: 0 }
     }
 
     #[test]

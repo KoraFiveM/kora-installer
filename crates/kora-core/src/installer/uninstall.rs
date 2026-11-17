@@ -291,6 +291,8 @@ mod tests {
 
     fn request(name: &str, dir: &Path) -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: name.into(),
             dir: dir.to_path_buf(),
@@ -323,7 +325,7 @@ mod tests {
         std::fs::write(dir.join("precious.txt"), b"keep me").unwrap();
         std::fs::write(dir.join(".kora/request.json"), serde_json::to_vec(&request(name, &dir)).unwrap()).unwrap();
         std::fs::write(dir.join(".kora/created.json"), serde_json::to_vec(c).unwrap()).unwrap();
-        ServerEntry { name: name.into(), dir, mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 }
+        ServerEntry { source: None, versions: None, name: name.into(), dir, mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 }
     }
 
     const BIN: &str = "/opt/kora/0.1.0-0123456789ab/kora";
@@ -490,7 +492,7 @@ mod tests {
         let dir = t.path().join("stranger");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("x"), b"x").unwrap();
-        let entry = ServerEntry { name: "stranger".into(), dir: dir.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
+        let entry = ServerEntry { source: None, versions: None, name: "stranger".into(), dir: dir.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
         let mut reg = Registry { servers: vec![entry] };
         let r = FakeRunner::default();
         let mut del = vec![];

@@ -8,7 +8,7 @@
 use std::ffi::{OsStr, OsString};
 
 use crate::db;
-use crate::installer::{DbChoice, InstallRequest, Mode};
+use crate::installer::{DbChoice, InstallRequest, Versions};
 
 /// Set in the elevated copy so it can wait for a key before its console window closes.
 pub const RELAUNCHED_ENV: &str = "KORA_RELAUNCHED";
@@ -90,7 +90,7 @@ pub fn admin_reasons_with(req: &InstallRequest, windows: bool, db_missing: bool,
     if req.firewall {
         v.push(if req.txadmin_public { "open the game and txAdmin ports in the firewall".to_string() } else { "open the game port in the firewall".to_string() });
     }
-    if req.service && req.mode == Mode::Development {
+    if req.service && req.versions() == Versions::Latest {
         v.push("set up the daily automatic update task".to_string());
     }
     v
@@ -428,11 +428,15 @@ pub fn not_elevated_db_message(version: &str, folder: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::installer::Mode;
     use crate::installer::{Ports, ResourceSelection};
     use std::cell::{Cell, RefCell};
 
     fn req() -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: "s".into(),
             dir: "d".into(),

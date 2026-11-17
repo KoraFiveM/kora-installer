@@ -24,8 +24,15 @@ test.describe('server list', () => {
   })
 })
 
+test.describe('a server Kora did not install', () => {
+  test('the Resources tab explains instead of asking for a catalogue that is not there', async ({ page, open }) => {
+    await open('/servers/adopted-existing-server?tab=resources', { scenario: 'fleet' })
+    await expect(page.getByText(/added from an existing folder, so Kora did not install it/)).toBeVisible()
+  })
+})
+
 test.describe("a server's tabs", () => {
-  test('every tab of a Production server opens, and has no accessibility problems', async ({ page, open, scan }) => {
+  test('every tab of a server on released versions opens, and has no accessibility problems', async ({ page, open, scan }) => {
     await open('/servers/kora-live')
     await expect(page.getByRole('heading', { name: 'kora-live', level: 1 })).toBeVisible()
     for (const name of TABS_PROD) {
@@ -34,10 +41,11 @@ test.describe("a server's tabs", () => {
       await expect(page.getByRole('tabpanel')).toBeVisible()
       await scan(`kora-live, ${name} tab`)
     }
-    for (const name of TABS_DEV) await expect(tab(page, name)).toHaveCount(0)
+    // Every server has them now, whatever it follows.
+    for (const name of TABS_DEV) await expect(tab(page, name)).toHaveCount(1)
   })
 
-  test('a Development server also has Schedule and GitHub', async ({ page, open, scan }) => {
+  test('a server that follows the latest changes has the same tabs, Schedule and GitHub included', async ({ page, open, scan }) => {
     await open('/servers/kora-dev')
     for (const name of TABS_DEV) {
       await tab(page, name).click()

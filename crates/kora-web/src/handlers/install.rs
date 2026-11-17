@@ -18,7 +18,7 @@ use axum::{Extension, Json};
 use kora_core::api::install::{self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall};
 use kora_core::api::Op;
 use kora_core::installer::paused::PausedStore;
-use kora_core::installer::{slug, InstallRequest, Mode};
+use kora_core::installer::{slug, InstallRequest};
 use kora_core::keystore::KeyStore;
 use kora_core::problem::{codes, Action, Problem};
 use kora_core::profile::ProfileStore;
@@ -415,6 +415,11 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
         for ev in &finished {
             h.event(ev.clone());
         }
+        // Written down (without any secret, and only when the key is a SAVED one) so that a panel that dies
+        // mid-install leaves something to carry on from; see `PausedStore::save_in_progress`.
+        if !req.dry_run {
+            let _ = PausedStore::default().save_in_progress(&id, &req, false, &finished);
+        }
         let service_admin = matches!(mode, AdminMode::Service { .. });
         let admin = match mode {
             AdminMode::Service { eager } => {
@@ -441,7 +446,10 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
         });
         log_finish(&id, fin.log_path.clone());
         match fin.outcome {
-            Ok(out) => Ok(core::outcome_json(&out)),
+            Ok(out) => {
+                PausedStore::default().remove(&id);
+                Ok(core::outcome_json(&out))
+            }
             Err(msg) => {
                 let problem = fin.problem.unwrap_or_else(|| Problem::decode(&msg));
                 if !req.dry_run {
@@ -499,7 +507,7 @@ pub async fn install_start(State(st): State<AppState>, Extension(caller): Extens
         if servers.iter().any(|s| slug(&s.name) == slug(&req.name) || s.dir == req.dir) {
             return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name)).with_action(Action::change_answers("name")));
         }
-        if req.mode == Mode::Development {
+        if req.source() == kora_core::installer::Source::Fork {
             let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|m| {
                 if Problem::is_encoded(&m) {
                     ApiError::core(m)

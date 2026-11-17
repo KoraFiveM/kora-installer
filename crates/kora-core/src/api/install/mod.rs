@@ -17,7 +17,7 @@ use crate::artifacts::{self, Platform};
 use crate::firewall::ports::{self, PortProber, SystemProber};
 use crate::firewall::PortRequest;
 use crate::installer::registry::ServerEntry;
-use crate::installer::{self, slug, DbAdmin, DbChoice, InstallOutcome, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, StepStatus};
+use crate::installer::{self, slug, DbAdmin, DbChoice, InstallOutcome, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, Source, StepStatus, Versions};
 use crate::problem::{codes, Action, Problem};
 use crate::space::{self, DiskInfo, SystemDisk};
 
@@ -149,6 +149,12 @@ pub struct WirePorts {
 pub struct WireInstall {
     #[serde(default)]
     pub mode: Option<Mode>,
+    /// Clone or fork (new in 0.8; wins over `mode`).
+    #[serde(default)]
+    pub source: Option<Source>,
+    /// Released versions or the latest changes (new in 0.8; wins over `mode`).
+    #[serde(default)]
+    pub versions: Option<Versions>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -256,12 +262,13 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         }
     }
     PortRequest { server: slug(&name), game_port: ports.game, txadmin_port: ports.txadmin, expose_txadmin: w.txadmin_public }.validate().map_err(|e| e.to_string())?;
-    let mode = w.mode.unwrap_or(Mode::Production);
+    let (source, versions) = crate::installer::resolve(w.mode, w.source, w.versions);
+    let mode = crate::installer::compat_mode(versions);
     let artifact_url = non_empty(&w.artifact_url);
     if let Some(u) = &artifact_url {
         artifacts::validate_url(u, Platform::current()).map_err(|e| e.to_string())?;
     }
-    let github_owner = if mode == Mode::Development { non_empty(&w.github_owner) } else { None };
+    let github_owner = if source == Source::Fork { non_empty(&w.github_owner) } else { None };
     if let Some(o) = &github_owner {
         if !o.eq_ignore_ascii_case("list") {
             crate::git::owners::check_login_syntax(o)?;
@@ -287,6 +294,8 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
     };
     Ok(InstallRequest {
         mode,
+        source: Some(source),
+        versions: Some(versions),
         hostname: non_empty(&Some(w.hostname.clone())).unwrap_or_else(|| name.clone()),
         name,
         dir,
@@ -318,7 +327,9 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
 /// The answers in the UI's shape, WITHOUT any secret (no licence key, no database login at all).
 pub fn request_json(r: &InstallRequest) -> Value {
     json!({
-        "mode": if r.mode == Mode::Production { "production" } else { "development" },
+        "mode": if r.versions() == Versions::Released { "production" } else { "development" },
+        "source": r.source(),
+        "versions": r.versions(),
         "name": r.name,
         "dir": r.dir.to_string_lossy(),
         "hostname": r.hostname,
@@ -502,9 +513,16 @@ pub fn request_summary(req: &InstallRequest) -> String {
         ResourceSelection::Only(v) => format!("{} chosen ({})", v.len(), v.join(", ")),
     };
     format!(
-        "Your choices:\n  name:      {}\n  mode:      {}\n  resources: {}\n  ports:     game {}, txAdmin {}\n  artifact:  {}\n  game build: {}\n  hostname:  {}\n  cfx owner: {}\n",
+        "Your choices:\n  name:      {}\n  copies:    {}\n  versions:  {}\n  resources: {}\n  ports:     game {}, txAdmin {}\n  artifact:  {}\n  game build: {}\n  hostname:  {}\n  cfx owner: {}\n",
         req.name,
-        if req.mode == Mode::Production { "production" } else { "development" },
+        match req.source() {
+            Source::Clone => "plain clones of the originals".to_string(),
+            Source::Fork => format!("your own copies (forks) in {}", req.github_owner.as_deref().unwrap_or("your GitHub account")),
+        },
+        match req.versions() {
+            Versions::Released => "released versions",
+            Versions::Latest => "the latest changes",
+        },
         resources,
         req.ports.game,
         req.ports.txadmin,
@@ -540,7 +558,7 @@ pub fn plan(env: &dyn InstallEnv, req: &InstallRequest, servers: &[ServerEntry])
     if !disk.ok {
         warnings.push(disk.message.clone());
     }
-    if req.mode == Mode::Development && req.github_owner.is_none() {
+    if req.source() == Source::Fork && req.github_owner.is_none() {
         warnings.push("No GitHub account was chosen to fork into. Kora uses your personal account when it is the only choice, otherwise pick one.".into());
     }
     if !needs_admin.is_empty() && !admin {
@@ -568,7 +586,8 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
     let mut v: Vec<String> = ["kora", "install", "--name"].iter().map(|s| s.to_string()).collect();
     v.push(req.name.clone());
     v.extend(["--dir".to_string(), req.dir.to_string_lossy().into_owned()]);
-    v.extend(["--mode".to_string(), if req.mode == Mode::Production { "prod" } else { "dev" }.to_string()]);
+    v.extend(["--source".to_string(), if req.source() == Source::Clone { "clone" } else { "fork" }.to_string()]);
+    v.extend(["--versions".to_string(), if req.versions() == Versions::Released { "released" } else { "latest" }.to_string()]);
     if !req.hostname.is_empty() && req.hostname != req.name {
         v.extend(["--hostname".to_string(), req.hostname.clone()]);
     }
@@ -843,6 +862,37 @@ mod tests {
         assert_eq!(v["cfx_identifier"], "fivem:4465268");
         let text = v.to_string();
         assert!(!text.contains("SECRET") && !text.contains("hunter2"), "{text}");
+    }
+
+    #[test]
+    fn the_old_mode_and_the_new_fields_both_work_and_the_new_ones_win() {
+        let pick = |mode: Option<Mode>, source: Option<Source>, versions: Option<Versions>| {
+            let mut w = wire("Alpha");
+            w.mode = mode;
+            w.source = source;
+            w.versions = versions;
+            let r = build_request(&w).unwrap();
+            (r.source(), r.versions(), r.mode)
+        };
+        assert_eq!(pick(None, None, None), (Source::Clone, Versions::Released, Mode::Production));
+        assert_eq!(pick(Some(Mode::Development), None, None), (Source::Fork, Versions::Latest, Mode::Development));
+        assert_eq!(pick(None, Some(Source::Fork), None), (Source::Fork, Versions::Latest, Mode::Development));
+        assert_eq!(pick(Some(Mode::Production), Some(Source::Fork), None), (Source::Fork, Versions::Released, Mode::Production));
+        assert_eq!(pick(None, Some(Source::Clone), Some(Versions::Latest)), (Source::Clone, Versions::Latest, Mode::Development));
+    }
+
+    #[test]
+    fn a_fork_owner_only_counts_when_forking_and_the_command_uses_the_new_flags() {
+        let mut w = wire("Alpha");
+        w.github_owner = Some("my-org".into());
+        assert_eq!(build_request(&w).unwrap().github_owner, None, "a clone has no owner to fork into");
+        w.source = Some(Source::Fork);
+        let r = build_request(&w).unwrap();
+        assert_eq!(r.github_owner.as_deref(), Some("my-org"));
+        let cmd = install_command(&r);
+        assert!(cmd.windows(2).any(|p| p == ["--source", "fork"]) && cmd.windows(2).any(|p| p == ["--versions", "latest"]), "{cmd:?}");
+        let v = request_json(&r);
+        assert_eq!((v["source"].as_str(), v["versions"].as_str(), v["mode"].as_str()), (Some("fork"), Some("latest"), Some("development")));
     }
 
     #[test]

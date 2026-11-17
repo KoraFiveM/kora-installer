@@ -290,6 +290,8 @@ mod tests {
             name: "Main".into(),
             dir: srv.clone(),
             mode: crate::installer::Mode::Production,
+            source: None,
+            versions: None,
             ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
             created_unix: 1,
         };

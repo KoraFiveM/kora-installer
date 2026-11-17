@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Play, RefreshCw, RotateCw, Square } from 'lucide-react'
 import { api } from '@/api/client'
@@ -18,8 +19,10 @@ import { Field } from '@/components/Field'
 import { ResourceProgress } from '@/components/JobProgress'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { STATUS_INFO, UpdatesPanel } from './UpdatesPanel'
-import { branchBadge, useBranches } from './branches/useBranches'
+import { useBranches } from './branches/useBranches'
+import { VersionBadge } from './branches/VersionBadge'
 import { useUpdates, type Updates } from './useUpdates'
+import { VersionsCard } from './VersionsCard'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
   const [name, setName] = useState('')
@@ -64,14 +67,15 @@ function PlanView({ plan, dev }: { plan: AddPlan; dev: boolean }) {
           <pre className="rounded-md border border-border bg-ink p-3 font-mono text-xs">{plan.ensure.map((e) => `ensure ${e}`).join('\n')}</pre>
         </div>
       )}
-      {dev && <p className="text-xs text-muted-foreground">On a development server, Kora's own resources are forked into your GitHub account so you can change them.</p>}
+      {dev && <p className="text-xs text-muted-foreground">Resources you add are made into your own copies on GitHub (forks), like the rest, so you can change them.</p>}
     </div>
   )
 }
 
 function AddResources({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()
-  const cat = useQuery({ queryKey: ['server-catalog', s.name], queryFn: () => api.resources.catalog(s.name) })
+  // A server Kora did not install has no record of how it was set up, so there is no catalogue to ask for (the panel would answer 422).
+  const cat = useQuery({ queryKey: ['server-catalog', s.name], queryFn: () => api.resources.catalog(s.name), enabled: s.managed })
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [plan, setPlan] = useState<AddPlan | null>(null)
@@ -86,6 +90,9 @@ function AddResources({ server: s }: { server: ServerDetail }) {
   const groups = useMemo(() => groupResources(cat.data?.catalog.resources ?? [], query), [cat.data, query])
   const installed = new Set(cat.data?.installed ?? [])
   const toggle = (id: string) => { setPlan(null); setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n }) }
+  if (!s.managed) {
+    return <p className="text-sm text-muted-foreground">This server was added from an existing folder, so Kora did not install it and has no record of how it was set up. Adding resources from the catalogue only works for servers that Kora installed. Resources already in the folder are listed above.</p>
+  }
   return (
     <div className="space-y-4">
       {cat.data?.note && <p className="text-sm text-muted-foreground">{cat.data.note}</p>}
@@ -107,7 +114,7 @@ function AddResources({ server: s }: { server: ServerDetail }) {
         {plan && plan.items.length > 0 && <Button variant="default" disabled={run.phase === 'running' || no !== null} title={no ?? undefined} onClick={async () => { setErr(null); try { setJob((await api.resources.add(s.name, [...picked])).job) } catch (e) { setErr(e) } }}>Install {plan.items.length} resource{plan.items.length === 1 ? '' : 's'}</Button>}
       </div>
       {no && <p className="text-xs text-muted-foreground">{no}</p>}
-      {plan && <PlanView plan={plan} dev={s.mode === 'development'} />}
+      {plan && <PlanView plan={plan} dev={s.source === 'fork'} />}
       <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
       {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
       {run.phase === 'done' && run.result && (
@@ -131,9 +138,10 @@ const CONTROL: Record<ControlAction, { label: string; Icon: typeof Play }> = {
 const CONSOLE_RESOURCE = 'kora_console'
 
 /** One installed resource: its name, what the last check found, and the buttons to check, start, stop and restart it. */
-function InstalledResource({ id, updates: u, branch, noCheck, noControl, pending, said, onControl }: {
+function InstalledResource({ id, serverName, updates: u, branch, noCheck, noControl, pending, said, onControl }: {
   id: string
-  /** Development: the branch it is on. */
+  serverName: string
+  /** Where its files are (branch, pull request, released version). */
   branch?: ResourceBranch
   updates: Updates
   /** Why checking is off (null = allowed). */
@@ -152,8 +160,8 @@ function InstalledResource({ id, updates: u, branch, noCheck, noControl, pending
   return (
     <li className="py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="min-w-0 flex-1 break-all font-mono text-sm">{id}</span>
-        {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <Badge tone={branchBadge(branch).tone} title="Change it in the GitHub tab">{branchBadge(branch).text}</Badge>}
+        <Link className="min-w-0 flex-1 break-all font-mono text-sm underline-offset-2 hover:underline" to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} aria-label={`Open the page of ${id}`}>{id}</Link>
+        {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <VersionBadge branch={branch} to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} />}
         {checking ? <span className="text-xs text-muted-foreground" role="status">Checking...</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
         <div className="flex items-center gap-1">
           <Button size="icon" variant="ghost" className="size-8" disabled={u.busy || noCheck !== null} aria-busy={checking} aria-label={`Check ${id} for updates`} title={noCheck ?? 'Check for updates'} onClick={() => void u.checkOne(id)}>
@@ -176,7 +184,7 @@ function InstalledResource({ id, updates: u, branch, noCheck, noControl, pending
 }
 
 function InstalledList({ server: s, installed, updates: u }: { server: ServerDetail; installed: string[]; updates: Updates }) {
-  const branches = useBranches(s.name, s.mode === 'development')
+  const branches = useBranches(s.name, s.managed)
   const role = useRole()
   const noOperator = whyNot(role, 'operator')
   const noControl = noOperator
@@ -206,6 +214,7 @@ function InstalledList({ server: s, installed, updates: u }: { server: ServerDet
           <InstalledResource
             key={r}
             id={r}
+            serverName={s.name}
             updates={u}
             branch={branches.byId.get(r)}
             noCheck={noOperator}
@@ -258,10 +267,13 @@ export function ResourcesTab({ server: s }: { server: ServerDetail }) {
             <CardContent><EnsureForm server={s} installed={installed} /></CardContent>
           </Card>
         </div>
-        <Card>
-          <CardHeader><CardTitle>Add resources</CardTitle></CardHeader>
-          <CardContent><AddResources server={s} /></CardContent>
-        </Card>
+        <div className="space-y-5">
+          <VersionsCard server={s} />
+          <Card>
+            <CardHeader><CardTitle>Add resources</CardTitle></CardHeader>
+            <CardContent><AddResources server={s} /></CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

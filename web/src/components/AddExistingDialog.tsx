@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { ScanCandidate } from '@/api/types'
 import { useAlerts } from '@/lib/app'
+import { browseForFolder, inShell } from '@/lib/shell'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { useJob } from '@/hooks/useJob'
 import { Button } from '@/components/ui/button'
@@ -80,6 +81,9 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
             <Field label="Server folder" hint="The folder that contains server.cfg and resources, for example /srv/fivem/my-server.">
               <Input value={dir} disabled={!!noAdd} onChange={(e) => setDir(e.target.value)} placeholder="/srv/fivem/my-server" />
             </Field>
+            {inShell() && (
+              <Button type="button" disabled={!!noAdd} onClick={async () => { const d = await browseForFolder('Choose your server folder'); if (d) setDir(d) }}>Browse...</Button>
+            )}
             <Button type="submit" variant="default" disabled={busy || !dir.trim() || !!noAdd} title={noAdd ?? undefined}>Add this folder</Button>
             {noAdd && <p className="text-xs text-muted-foreground">{noAdd}</p>}
           </form>

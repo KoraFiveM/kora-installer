@@ -2,10 +2,10 @@
 //!
 //! A failed install pauses with its answers held in memory (the panel's `Paused`), because they include
 //! the licence key. When that key is a SAVED one (see `keystore`) the answers hold only its name, so
-//! they can also be written down: `<kora home>/paused-installs/<job>.json`. No secret is in the file:
-//! the key is removed, and the database administrator password is never serialised (so an install that
-//! needs that password asks for it again, or uses the automatic login). After a restart the panel reads
-//! the file back and looks the key up by name.
+//! they can also be written down (the store's `paused_installs` table; `<kora home>/paused-installs/<job>.json`
+//! before v0.8). No secret is in the row: the key is removed, and the database administrator password is
+//! never serialised (so an install that needs that password asks for it again, or uses the automatic login).
+//! After a restart the panel reads the row back and looks the key up by name.
 //!
 //! A pasted key the person chose not to save is never persisted: that install stays in memory only.
 
@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use super::registry::kora_home;
 use super::InstallRequest;
+use crate::store::{problem_to_io, Store};
 
 /// How long a stopped install can be continued after a restart.
 pub const KEEP_SECS: u64 = 3 * 24 * 3600;
@@ -45,6 +46,8 @@ fn windows_device_name(s: &str) -> bool {
     matches!(u.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
 }
 
+/// The stopped installs in the store. `dir` is `<kora home>/paused-installs` (the folder they were files
+/// in before v0.8): it only says which Kora home. A folder with another name (tests) is its own home.
 #[derive(Debug, Clone)]
 pub struct PausedStore {
     dir: PathBuf,
@@ -61,54 +64,76 @@ impl PausedStore {
         Self { dir: dir.into() }
     }
 
-    fn file(&self, job: &str) -> Option<PathBuf> {
-        valid_id(job).then(|| self.dir.join(format!("{job}.json")))
+    fn home(&self) -> &Path {
+        if self.dir.file_name().is_some_and(|n| n == "paused-installs") {
+            self.dir.parent().unwrap_or(&self.dir)
+        } else {
+            &self.dir
+        }
     }
 
     /// Write a stopped install down. Only installs that use a saved key can be (`Ok(false)` otherwise:
-    /// nothing is written). One stopped install per folder: an older file for the same folder goes.
+    /// nothing is written). One stopped install per folder: an older one for the same folder goes.
     pub fn save(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value]) -> std::io::Result<bool> {
-        let (Some(path), Some(_)) = (self.file(job), req.license_key_name.as_ref()) else { return Ok(false) };
+        self.save_as(job, req, via_helper, failed_step, finished, false)
+    }
+
+    /// An install that is RUNNING now, written down so that a panel that dies leaves something to carry on
+    /// from. It is not offered as "carry on" while its job runs ([`list`](Self::list) skips it); the next
+    /// panel that finds the job unfinished makes it a stopped install (see `store::jobs::recover`).
+    pub fn save_in_progress(&self, job: &str, req: &InstallRequest, via_helper: bool, finished: &[Value]) -> std::io::Result<bool> {
+        self.save_as(job, req, via_helper, None, finished, true)
+    }
+
+    fn save_as(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value], in_progress: bool) -> std::io::Result<bool> {
+        if !valid_id(job) || req.license_key_name.is_none() {
+            return Ok(false);
+        }
         let mut r = req.clone();
         r.license_key = None;
         r.catalog = None;
-        let item = Stored { job: job.to_string(), req: r, via_helper, failed_step: failed_step.map(String::from), finished: finished.to_vec(), saved_at: now() };
-        for old in self.all() {
-            if old.req.dir == item.req.dir && old.job != job {
-                self.remove(&old.job);
-            }
-        }
-        let text = serde_json::to_string_pretty(&item).map_err(std::io::Error::other)?;
-        // Never through a link, and the folder is made the same way (see `fsutil::write_no_follow`).
-        crate::fsutil::write_no_follow(&path, text.as_bytes(), 0o644)?;
-        crate::keystore::hand_to_home_owner(&path);
-        crate::keystore::hand_to_home_owner(&self.dir);
+        let req_json = serde_json::to_string(&r).map_err(std::io::Error::other)?;
+        let finished_json = serde_json::to_string(finished).map_err(std::io::Error::other)?;
+        let dir = r.dir.to_string_lossy().into_owned();
+        let s = Store::open(self.home()).map_err(problem_to_io)?;
+        s.write(|tx| {
+            tx.execute("DELETE FROM paused_installs WHERE dir = ?1 AND job <> ?2", rusqlite::params![dir, job])?;
+            tx.execute(
+                "INSERT INTO paused_installs (job, dir, via_helper, failed_step, req_json, finished_json, saved_at, in_progress) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(job) DO UPDATE SET dir = excluded.dir, via_helper = excluded.via_helper, failed_step = excluded.failed_step, req_json = excluded.req_json, finished_json = excluded.finished_json, saved_at = excluded.saved_at, in_progress = excluded.in_progress",
+                rusqlite::params![job, dir, via_helper, failed_step, req_json, finished_json, now() as i64, in_progress],
+            )?;
+            Ok(())
+        })
+        .map_err(problem_to_io)?;
         Ok(true)
     }
 
-    /// A stopped install, if it is still there and not too old (a file that cannot be read is skipped).
+    /// A stopped install, if it is still there and not too old (one that cannot be read is skipped).
     pub fn load(&self, job: &str) -> Option<Stored> {
-        let path = self.file(job)?;
-        let item: Stored = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-        if now().saturating_sub(item.saved_at) > KEEP_SECS {
-            let _ = std::fs::remove_file(&path);
+        if !valid_id(job) {
             return None;
         }
-        (item.job == job).then_some(item)
+        self.all().into_iter().find(|s| s.job == job)
     }
 
     pub fn remove(&self, job: &str) {
-        if let Some(p) = self.file(job) {
-            let _ = std::fs::remove_file(p);
+        if let Ok(Some(s)) = Store::open_existing(self.home()) {
+            let _ = s.write(|tx| {
+                tx.execute("DELETE FROM paused_installs WHERE job = ?1", [job])?;
+                Ok(())
+            });
         }
     }
 
     /// Forget stopped installs of this folder (a new start replaces them).
     pub fn remove_for_dir(&self, dir: &Path) {
-        for s in self.all() {
-            if s.req.dir == dir {
-                self.remove(&s.job);
-            }
+        if let Ok(Some(s)) = Store::open_existing(self.home()) {
+            let d = dir.to_string_lossy().into_owned();
+            let _ = s.write(|tx| {
+                tx.execute("DELETE FROM paused_installs WHERE dir = ?1", [d])?;
+                Ok(())
+            });
         }
     }
 
@@ -117,12 +142,40 @@ impl PausedStore {
         self.all()
     }
 
+    /// Every stopped install in an open store (the export of the old-format files).
+    pub(crate) fn list_in(s: &Store) -> Vec<Stored> {
+        let rows: Vec<(String, bool, Option<String>, String, String, i64)> = s
+            .read(|c| {
+                let mut st = c.prepare("SELECT job, via_helper, failed_step, req_json, finished_json, saved_at FROM paused_installs ORDER BY saved_at, job")?;
+                let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?.collect::<Result<Vec<_>, _>>()?;
+                Ok(v)
+            })
+            .unwrap_or_default();
+        rows.into_iter()
+            .filter_map(|(job, via_helper, failed_step, req, finished, saved_at)| {
+                Some(Stored { job, req: serde_json::from_str(&req).ok()?, via_helper, failed_step, finished: serde_json::from_str(&finished).ok()?, saved_at: saved_at as u64 })
+            })
+            .collect()
+    }
+
     fn all(&self) -> Vec<Stored> {
-        let Ok(rd) = std::fs::read_dir(&self.dir) else { return vec![] };
-        rd.flatten()
-            .filter_map(|e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                self.load(name.strip_suffix(".json")?)
+        let Ok(Some(s)) = Store::open_existing(self.home()) else { return vec![] };
+        let cutoff = now().saturating_sub(KEEP_SECS) as i64;
+        // Old ones are forgotten when anyone looks (what the file version did when it read one).
+        let _ = s.write(|tx| {
+            tx.execute("DELETE FROM paused_installs WHERE saved_at < ?1", [cutoff])?;
+            Ok(())
+        });
+        let rows: Vec<(String, bool, Option<String>, String, String, i64)> = s
+            .read(|c| {
+                let mut st = c.prepare("SELECT job, via_helper, failed_step, req_json, finished_json, saved_at FROM paused_installs WHERE in_progress = 0 ORDER BY saved_at, job")?;
+                let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?.collect::<Result<Vec<_>, _>>()?;
+                Ok(v)
+            })
+            .unwrap_or_default();
+        rows.into_iter()
+            .filter_map(|(job, via_helper, failed_step, req, finished, saved_at)| {
+                Some(Stored { job, req: serde_json::from_str(&req).ok()?, via_helper, failed_step, finished: serde_json::from_str(&finished).ok()?, saved_at: saved_at as u64 })
             })
             .collect()
     }
@@ -148,9 +201,15 @@ impl PausedStore {
         for mut s in self.all() {
             if s.req.license_key_name.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(old)) {
                 s.req.license_key_name = Some(new.to_string());
-                if let (Some(p), Ok(text)) = (self.file(&s.job), serde_json::to_string_pretty(&s)) {
-                    if crate::fsutil::write_no_follow(&p, text.as_bytes(), 0o644).is_ok() {
-                        crate::keystore::hand_to_home_owner(&p);
+                if let (Ok(text), Ok(st)) = (serde_json::to_string(&s.req), Store::open(self.home())) {
+                    let job = s.job.clone();
+                    if st
+                        .write(|tx| {
+                            tx.execute("UPDATE paused_installs SET req_json = ?1 WHERE job = ?2", rusqlite::params![text, job])?;
+                            Ok(())
+                        })
+                        .is_ok()
+                    {
                         n += 1;
                     }
                 }
@@ -164,14 +223,14 @@ fn now() -> u64 {
     crate::monitor::now_unix()
 }
 
-// ---- the saved answers (last-install.json) ------------------------------------------------------
+// ---- the saved answers ----------------------------------------------------------------------------
 
-/// Does the saved answers file at `path` use the saved key `name`?
+/// Does the saved answers in the Kora home beside `path` use the saved key `name`?
 pub fn saved_answers_use_key(path: &Path, name: &str) -> bool {
     read_saved(path).is_some_and(|r| r.license_key_name.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(name)))
 }
 
-/// Follow a renamed key in the saved answers at `path`. Returns whether the file changed.
+/// Follow a renamed key in the saved answers beside `path`. Returns whether they changed.
 pub fn rename_key_in_saved_answers(path: &Path, old: &str, new: &str) -> bool {
     let Some(mut r) = read_saved(path) else { return false };
     if !r.license_key_name.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(old)) {
@@ -179,12 +238,11 @@ pub fn rename_key_in_saved_answers(path: &Path, old: &str, new: &str) -> bool {
     }
     r.license_key_name = Some(new.to_string());
     r.license_key = None;
-    let Ok(text) = serde_json::to_string_pretty(&r) else { return false };
-    crate::fsutil::write_no_follow(path, text.as_bytes(), 0o644).is_ok()
+    super::saved::store_beside(path, &r)
 }
 
 fn read_saved(path: &Path) -> Option<InstallRequest> {
-    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+    super::saved::load_beside(path)
 }
 
 #[cfg(test)]
@@ -194,6 +252,8 @@ mod tests {
 
     fn req(dir: &str, key_name: Option<&str>) -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: "Dev Den".into(),
             dir: dir.into(),
@@ -227,10 +287,16 @@ mod tests {
         assert!(!s.save("job1", &req("/srv/a", None), false, Some("build.clone"), &ev).unwrap());
         assert!(!d.path().join("p").exists());
         assert!(s.save("job2", &req("/srv/a", Some("Main")), false, Some("build.clone"), &ev).unwrap());
-        let text = std::fs::read_to_string(d.path().join("p/job2.json")).unwrap();
+        let st = Store::open(&d.path().join("p")).unwrap();
+        let text: String = st.read(|c| Ok(c.query_row("SELECT req_json FROM paused_installs WHERE job = 'job2'", [], |r| r.get(0))?)).unwrap();
         assert!(!text.contains("SECRETKEY") && !text.contains("hunter2"), "{text}");
         let v: Value = serde_json::from_str(&text).unwrap();
-        assert!(v["req"]["license_key"].is_null(), "{text}");
+        assert!(v["license_key"].is_null(), "{text}");
+        // no secret in the database FILE either (the key was never written, so not even a deleted copy is left)
+        for f in std::fs::read_dir(crate::store::store_dir(&d.path().join("p"))).unwrap().flatten().filter(|f| f.path().is_file()) {
+            let b = std::fs::read(f.path()).unwrap();
+            assert!(!b.windows(9).any(|w| w == b"SECRETKEY") && !b.windows(7).any(|w| w == b"hunter2"), "{}", f.path().display());
+        }
         let back = s.load("job2").unwrap();
         assert_eq!(back.req.license_key, None);
         assert_eq!(back.req.license_key_name.as_deref(), Some("Main"));
@@ -261,40 +327,28 @@ mod tests {
         assert!(valid_id("0123456789abcdef") && valid_id("com10") && valid_id("lpt0") && valid_id("console"));
         assert!(s.load("../a2").is_none());
         // Too old.
-        let mut old: Stored = serde_json::from_slice(&std::fs::read(d.path().join("a2.json")).unwrap()).unwrap();
-        old.saved_at = 1;
-        std::fs::write(d.path().join("a2.json"), serde_json::to_string(&old).unwrap()).unwrap();
+        let st = Store::open(d.path()).unwrap();
+        st.write(|tx| {
+            tx.execute("UPDATE paused_installs SET saved_at = 1 WHERE job = 'a2'", [])?;
+            Ok(())
+        })
+        .unwrap();
         assert!(s.load("a2").is_none());
-        assert!(!d.path().join("a2.json").exists());
+        let n: i64 = st.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM paused_installs WHERE job = 'a2'", [], |r| r.get(0))?)).unwrap();
+        assert_eq!(n, 0, "forgotten when seen");
     }
 
-    /// A stopped install is written by the panel, or by `kora install` as root through the helper, inside the user's
-    /// folder: a link left at the file or at its temporary name is replaced, never written through.
-    #[cfg(unix)]
     #[test]
-    fn writing_never_goes_through_a_link() {
+    fn saved_answers_follow_a_renamed_key_in_the_store() {
         let d = tempfile::tempdir().unwrap();
-        let victim = d.path().join("victim.txt");
-        std::fs::write(&victim, "keep me").unwrap();
-        let dir = d.path().join("p");
-        std::fs::create_dir_all(&dir).unwrap();
-        for name in ["job1.json", "job1.json.tmp"] {
-            std::os::unix::fs::symlink(&victim, dir.join(name)).unwrap();
-        }
-        let s = PausedStore::at(&dir);
-        assert!(s.save("job1", &req("/srv/a", Some("Main")), false, None, &[]).unwrap());
-        assert_eq!(s.rename_key("Main", "Live"), 1);
-        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
-        assert_eq!(s.load("job1").unwrap().req.license_key_name.as_deref(), Some("Live"));
         let answers = d.path().join("last-install.json");
-        std::os::unix::fs::symlink(&victim, &answers).unwrap();
         let mut r = req("/srv/a", Some("Main"));
         r.license_key = None;
-        std::fs::remove_file(&answers).unwrap();
-        std::fs::write(&answers, serde_json::to_string(&r).unwrap()).unwrap();
-        std::os::unix::fs::symlink(&victim, answers.with_extension("json.tmp")).unwrap();
+        super::super::saved::save_beside(&answers, &r).unwrap();
+        assert!(saved_answers_use_key(&answers, "main"));
         assert!(rename_key_in_saved_answers(&answers, "Main", "Live"));
-        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
+        assert!(saved_answers_use_key(&answers, "Live") && !saved_answers_use_key(&answers, "Main"));
+        assert!(!rename_key_in_saved_answers(&d.path().join("elsewhere/none.json"), "a", "b"));
     }
 
     #[test]
@@ -304,25 +358,12 @@ mod tests {
         let saved = d.path().join("last-install.json");
         let mut a = req("/srv/a", Some("Main"));
         a.license_key = None;
-        std::fs::write(&saved, serde_json::to_string(&a).unwrap()).unwrap();
+        super::super::saved::save_beside(&saved, &a).unwrap();
         assert_eq!(s.count_key_with_saved(&saved, "main"), 1, "saved answers alone");
         s.save("j1", &req("/srv/a", Some("Main")), false, None, &[]).unwrap();
         assert_eq!(s.count_key_with_saved(&saved, "main"), 1, "the same install, paused and saved");
         s.save("j2", &req("/srv/b", Some("Main")), false, None, &[]).unwrap();
         assert_eq!(s.count_key_with_saved(&saved, "main"), 2, "another folder is another install");
         assert_eq!(s.count_key_with_saved(&saved, "other"), 0);
-    }
-
-    #[test]
-    fn saved_answers_follow_a_renamed_key() {
-        let d = tempfile::tempdir().unwrap();
-        let p = d.path().join("last-install.json");
-        let mut r = req("/srv/a", Some("Main"));
-        r.license_key = None;
-        std::fs::write(&p, serde_json::to_string(&r).unwrap()).unwrap();
-        assert!(saved_answers_use_key(&p, "main"));
-        assert!(rename_key_in_saved_answers(&p, "Main", "Live"));
-        assert!(saved_answers_use_key(&p, "Live") && !saved_answers_use_key(&p, "Main"));
-        assert!(!rename_key_in_saved_answers(&d.path().join("none.json"), "a", "b"));
     }
 }

@@ -7,6 +7,8 @@ import { useRole, whyNot } from '@/hooks/useRole'
 import { ShortcutsCard } from '@/components/Shortcuts'
 import { LicenceKeysCard, RememberedCard } from '@/components/LicenceKeys'
 import { RemoteAccessCard, SignedInCard } from '@/components/RemoteAccess'
+import { AuditLogCard } from '@/components/AuditLog'
+import { JobHistoryCard } from '@/components/JobHistory'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -135,6 +137,8 @@ export default function SettingsPage() {
       <ShortcutsCard />
       <LicenceKeysCard />
       <RememberedCard />
+      <JobHistoryCard />
+      <AuditLogCard />
       <Card><CardHeader><CardTitle>GitHub account</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>
       <Uninstall />
       <Card>

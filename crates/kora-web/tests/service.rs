@@ -167,6 +167,7 @@ async fn rig(helper: Option<Arc<FakeHelper>>) -> Rig {
     install_seam::set_env(Some(env.clone()));
     let fake = FakeBackend::sample();
     let f = fake.clone();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone())));
     Rig { app: router(st), fake, maint, env, _turn: turn }
 }
@@ -391,7 +392,7 @@ async fn opening_the_game_port_goes_to_the_service_as_one_typed_step() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h.clone())).await;
     let dir = std::path::Path::new("/home/jo/kora/main");
-    let out = kora_web::elevated::reach_open_firewall(dir, &mut |_| {}).unwrap();
+    let out = kora_web::elevated::reach_open_firewall("main", dir, &mut |_| {}).unwrap();
     assert_eq!(out["via_service"], true);
     let calls = h.calls();
     assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("admin-step", vec!["run".to_string(), "--step".into(), "reach.firewall".into(), "--dir".into(), "/home/jo/kora/main".into()]));
@@ -399,7 +400,9 @@ async fn opening_the_game_port_goes_to_the_service_as_one_typed_step() {
     drop(r); // the rig holds the test turn
              // without the service: the choices, never a silent failure
     let _r = rig(None).await;
-    let e = kora_web::elevated::reach_open_firewall(dir, &mut |_| {}).unwrap_err();
+    let e = kora_web::elevated::reach_open_firewall("main", dir, &mut |_| {}).unwrap_err();
     assert_eq!(e.status, 403);
+    let shown = e.to_problem().actions.iter().find_map(|a| if let kora_core::problem::Action::ShowCommand { command, .. } = a { Some(command.clone()) } else { None }).unwrap();
+    assert_eq!(shown, ["kora", "reach", "main", "--open-firewall"], "a command that exists, for an administrator terminal");
     set_broker_override(None);
 }

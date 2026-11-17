@@ -370,7 +370,7 @@ struct CloneItem {
 fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
     let sh = ctx.shared.lock().unwrap();
     let root = res_dir(ctx);
-    let fork_state = if ctx.req.mode == Mode::Development {
+    let fork_state = if ctx.req.source() == Source::Fork {
         let st = std::fs::read(forks_path(ctx)).ok().and_then(|b| serde_json::from_slice::<git::ForkState>(&b).ok());
         Some(st.ok_or_else(|| InstallError("fork state missing".into()))?)
     } else {
@@ -381,7 +381,7 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
         .map(|r| {
             let repo = repo_slug(&r.repository);
             // Pinned copies (bridge / creator resources, subpath installs) are never forked, in any mode.
-            let commit = match (ctx.req.mode == Mode::Production || r.is_pinned_copy(), r.resolve(catalog::Mode::Prod)) {
+            let commit = match (ctx.req.versions() == Versions::Released || r.is_pinned_copy(), r.resolve(catalog::Mode::Prod)) {
                 (true, ResolvedVersion::Pinned { commit, .. }) => Some(commit),
                 _ => None,
             };
@@ -429,6 +429,8 @@ mod fork_sync_tests {
     fn development_clones_come_from_the_recorded_fork() {
         let d = tempfile::tempdir().unwrap();
         let req = InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Development,
             name: "s".into(),
             dir: d.path().to_path_buf(),
@@ -681,7 +683,7 @@ impl InstallStep {
             }
             "prepare.catalog" => {
                 let (cat, note) = load_catalog(&ctx.req, &ctx.hooks)?;
-                let sel: Vec<Resource> = select_resources(&cat, &ctx.req.resources, ctx.req.mode == Mode::Development)?.into_iter().cloned().collect();
+                let sel: Vec<Resource> = select_resources(&cat, &ctx.req.resources, ctx.req.versions() == Versions::Latest)?.into_iter().cloned().collect();
                 if sel.is_empty() {
                     return err("no resources selected");
                 }
@@ -738,7 +740,7 @@ impl InstallStep {
     fn prepare_tools(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let r = git::SystemRunner;
-        let dev = ctx.req.mode == Mode::Development;
+        let dev = ctx.req.source() == Source::Fork;
         let mut tools = git::detect(&r);
         // Kora's own copies (no administrator rights, no PATH change): the GitHub CLI wherever it is missing and
         // Git on Windows. They are checked against pinned checksums before anything is unpacked.
@@ -783,7 +785,7 @@ impl InstallStep {
             if tools.gh.is_none() {
                 return Err(Problem::new(codes::GH_MISSING, "Development servers need the GitHub CLI (gh), and it is not installed.")
                     .with_actions(known::gh_missing().actions)
-                    .with_action(Action::change_answers("mode"))
+                    .with_action(Action::change_answers("source"))
                     .into());
             }
             let mut st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
@@ -1258,7 +1260,7 @@ impl InstallStep {
         let Some(kind) = firewall::detect(svc_platform(), &rn) else {
             if !ctx.req.txadmin_public {
                 ctx.note(format!(
-                    "txAdmin (port {}) listens on all interfaces: txAdmin 8.1.2 cannot bind only the panel to loopback. No firewall is active here, so block that port from outside yourself or use it through an SSH tunnel.",
+                    "txAdmin (port {}) listens on all interfaces: txAdmin 8.1.2 cannot bind only the panel to loopback. No firewall is active here, so block that port from outside yourself. You do not need it open to use txAdmin from other devices: the panel's Open txAdmin button reaches it for you.",
                     ctx.req.ports.txadmin
                 ));
             }
@@ -1474,7 +1476,7 @@ impl InstallStep {
                 path: r.install_rel(),
                 repository: r.repository.clone(),
                 branch: r.branch.clone(),
-                commit: match (req.mode == Mode::Production || r.is_pinned_copy(), r.resolve(catalog::Mode::Prod)) {
+                commit: match (req.versions() == Versions::Released || r.is_pinned_copy(), r.resolve(catalog::Mode::Prod)) {
                     (true, ResolvedVersion::Pinned { commit, .. }) => Some(commit),
                     _ => None,
                 },
@@ -1486,7 +1488,9 @@ impl InstallStep {
         let now = now_unix();
         let sf = ServerFile {
             name: req.name.clone(),
-            mode: req.mode,
+            mode: compat_mode(req.versions()),
+            source: Some(req.source()),
+            versions: Some(req.versions()),
             dir: req.dir.clone(),
             ports: PortsRecord::from(&req.ports),
             game_build: req.game_build.unwrap_or(artifacts::KORA_MIN_GAME_BUILD),
@@ -1504,9 +1508,21 @@ impl InstallStep {
             c.registered = true;
         })?;
         io(sf.save(), "cannot write kora-server.json")?;
-        let mut reg = io(Registry::load(), "cannot read the server registry")?;
-        reg.upsert(ServerEntry { name: req.name.clone(), dir: req.dir.clone(), mode: req.mode, ports: PortsRecord::from(&req.ports), created_unix: now });
-        io(reg.save(), "cannot write the server registry")?;
+        io(
+            Registry::update(|reg| {
+                reg.upsert(ServerEntry {
+                    source: Some(req.source()),
+                    versions: Some(req.versions()),
+                    name: req.name.clone(),
+                    dir: req.dir.clone(),
+                    mode: compat_mode(req.versions()),
+                    ports: PortsRecord::from(&req.ports),
+                    created_unix: now,
+                });
+                Ok(())
+            }),
+            "cannot write the server registry",
+        )?;
         // A server in the `kora` account's home without a service belongs to `kora` (with a service the
         // service step already handed it to the service's own account).
         if ctx.admin && !req.service && ctx.plan.iter().any(|p| p.id == "prepare.account") {
@@ -1514,7 +1530,7 @@ impl InstallStep {
             let plan = crate::userhome::chown_to_kora_plan(std::slice::from_ref(&req.dir), true);
             service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         }
-        Ok(format!("Registered '{}' in {}", req.name, registry::registry_path().display()))
+        Ok(format!("Registered '{}' in Kora's server list", req.name))
     }
 
     // ---- rollback -------------------------------------------------------------------------
@@ -1709,13 +1725,10 @@ impl InstallStep {
             }
             "finalize" => {
                 // By folder, not by the (possibly forged) recorded name: only this server's entry goes.
-                if let Ok(mut reg) = Registry::load() {
-                    let n = reg.servers.len();
+                let _ = Registry::update(|reg| {
                     reg.servers.retain(|s| !registry::same_path(&s.dir, &ctx.req.dir));
-                    if reg.servers.len() != n {
-                        let _ = reg.save();
-                    }
-                }
+                    Ok(())
+                });
                 if !ctx.keep_files {
                     let _ = std::fs::remove_file(registry::server_file_path(&ctx.req.dir));
                 }
@@ -1848,7 +1861,8 @@ mod db_admin_tests {
             std::fs::create_dir_all(d.join(".kora")).unwrap();
             st(db).save(&d.join(".kora/db-provision.json")).unwrap();
         }
-        let entry = |n: &str, d: &PathBuf| ServerEntry { name: n.into(), dir: d.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
+        let entry =
+            |n: &str, d: &PathBuf| ServerEntry { source: None, versions: None, name: n.into(), dir: d.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
         let reg = Registry { servers: vec![entry("A", &a), entry("B", &b)] };
         // A's account forged A's records to name B's database: refused.
         assert_eq!(db_used_elsewhere(&reg, &st("kora_bbbb"), &a).as_deref(), Some("B"));
@@ -1903,6 +1917,8 @@ mod problem_tests {
     fn dev_ctx(owner: Option<&str>) -> Arc<Ctx> {
         let d = std::env::temp_dir().join("kora-problem-tests");
         let req = InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Development,
             name: "s".into(),
             dir: d,

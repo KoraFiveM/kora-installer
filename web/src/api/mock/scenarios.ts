@@ -1,7 +1,7 @@
 // Mock scenarios: which fake world the in-app backend simulates. Chosen with `?scenario=<name>` (kept in
 // sessionStorage so navigating keeps it) or with the floating "Mock" switcher. Only bundled in mock builds.
 
-export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows', 'service', 'noservice', 'notallowed'] as const
+export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows', 'service', 'noservice', 'notallowed', 'restarted'] as const
 export type ScenarioName = (typeof SCENARIOS)[number]
 
 export const SCENARIO_INFO: Record<ScenarioName, string> = {
@@ -16,6 +16,7 @@ export const SCENARIO_INFO: Record<ScenarioName, string> = {
   noservice: "A per-user install without Kora's administrator service: the administrator parts offer the choices (install the service, continue without them, the command).",
   notallowed: "Kora's administrator service is installed but not turned on for your account: the administrator parts say so and show the command an administrator runs (kora service allow).",
   windows: "Windows, a per-user install without Kora's administrator service: the administrator parts offer 'Install Kora's administrator service', which runs the installer (one permission prompt) and then works.",
+  restarted: 'The panel was restarted: Settings shows the jobs and activity from before, one install was stopped by the restart (Carry on), one update job was interrupted.',
 }
 
 export const STORAGE_KEY = 'kora-mock-scenario'

@@ -17,7 +17,7 @@ test.describe('GitHub tab: branches and pull requests', () => {
   test('shows where every resource is, and says updates leave a switched one alone', async ({ page, open, scan }) => {
     await open('/servers/kora-dev')
     await openGithubTab(page)
-    await expect(row(page, 'kora_phone')).toContainText('Branch fix-contacts')
+    await expect(row(page, 'kora_phone')).toContainText('On branch fix-contacts')
     await expect(row(page, 'kora_jobs')).toContainText('2 changed files')
     await expect(page.getByText(/1 resource is not on the normal version/)).toBeVisible()
     await expect(page.getByText(/Updates leave it alone/)).toBeVisible()
@@ -36,7 +36,7 @@ test.describe('GitHub tab: branches and pull requests', () => {
     await dialog.getByRole('button', { name: 'Switch' }).click()
     await expect(dialog.getByText(/Now on branch feature\/new-ui/)).toBeVisible()
     await expect(dialog.getByText(/The server is not running, so it will use the new version when it starts/)).toBeVisible()
-    await expect(row(page, 'kora_core')).toContainText('Branch feature/new-ui')
+    await expect(row(page, 'kora_core')).toContainText('On branch feature/new-ui')
     await dialog.getByRole('button', { name: 'Back to the normal version' }).click()
     await expect(dialog.getByText(/Now on the normal version \(dev\)/)).toBeVisible()
   })
@@ -88,22 +88,26 @@ test.describe('GitHub tab: branches and pull requests', () => {
     await expect(row(page, 'kora_jobs')).not.toContainText('2 changed files')
   })
 
-  test('pull requests: someone else\'s code is warned about before anyone tries one', async ({ page, open, scan }) => {
+  test('pull requests: someone else\'s code is warned about before anyone tries one; the list is on the resource page', async ({ page, open, scan }) => {
     await open('/servers/kora-dev')
     await openGithubTab(page)
     await signIn(page)
     await page.getByRole('button', { name: 'Change the branch of kora_core' }).click()
     const dialog = page.getByRole('dialog', { name: /Branch of kora_core/ })
     await expect(dialog.getByRole('note')).toContainText(/someone else's code.*runs on your server.*people you trust/)
-    await dialog.getByRole('button', { name: 'Show open pull requests' }).click()
-    const prs = dialog.getByRole('list', { name: 'Open pull requests' })
+    // The list, with checks and reviews, is on the page of the resource (the dialog points there).
+    await dialog.getByRole('link', { name: 'page of kora_core' }).click()
+    await expect(page.getByRole('heading', { name: 'kora_core', level: 1 })).toBeVisible()
+    const prs = page.getByRole('list', { name: 'Open pull requests' })
     await expect(prs.getByText('Original repository')).toHaveCount(2)
-    await expect(prs.getByText('Your fork')).toBeVisible()
+    await expect(prs.getByText('Your own copy')).toBeVisible()
     await expect(prs.getByText('Draft')).toBeVisible()
-    await scan('GitHub tab: pull requests')
+    await expect(prs.getByText('Checks failing')).toBeVisible()
+    await scan('resource page: pull requests')
     await prs.getByRole('button', { name: 'Try it: pull request #41' }).click()
-    await expect(dialog.getByText(/Now on pull request #41/)).toBeVisible()
-    await expect(row(page, 'kora_core')).toContainText('Trying pull request #41')
+    await expect(page.getByText(/Now on pull request #41/)).toBeVisible()
+    // The badge carries the pull request's title, in the header of the page.
+    await expect(page.getByRole('heading', { name: 'kora_core', level: 1 }).locator('xpath=..').getByText('Trying pull request #41: Fix the payroll rounding')).toBeVisible()
   })
 
   test('pull request numbers that cannot be tried are explained without leaving the dialog', async ({ page, open }) => {
@@ -121,13 +125,9 @@ test.describe('GitHub tab: branches and pull requests', () => {
     }
   })
 
-  test('without being signed in, a pull request list says so plainly', async ({ page, open }) => {
-    await open('/servers/kora-dev')
-    await openGithubTab(page)
-    await page.getByRole('button', { name: 'Change the branch of kora_core' }).click()
-    const dialog = page.getByRole('dialog', { name: /Branch of kora_core/ })
-    await dialog.getByRole('button', { name: 'Show open pull requests' }).click()
-    await expect(dialog.getByText('You are not signed in to GitHub.')).toBeVisible()
+  test('without being signed in, the pull request list says so plainly', async ({ page, open }) => {
+    await open('/servers/kora-dev/resources/kora_core')
+    await expect(page.getByText('You are not signed in to GitHub.').first()).toBeVisible()
   })
 
   test('many at once: shows who has the branch, switches only those, and asks about changes', async ({ page, open }) => {
@@ -160,13 +160,12 @@ test.describe('GitHub tab: branches and pull requests', () => {
     await expect(page.getByText(/Not updated: on another branch/).first()).toBeVisible()
   })
 
-  test('report an issue and open a pull request need the sign-in first, then appear', async ({ page, open, scan }) => {
+  test('the GitHub tab points to the resource pages for issues, pull requests and the rest', async ({ page, open, scan }) => {
     await open('/servers/kora-dev')
     await openGithubTab(page)
-    await expect(page.getByRole('heading', { name: 'Report an issue' })).toHaveCount(0)
-    await signIn(page)
-    await expect(page.getByRole('heading', { name: 'Report an issue' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Open a pull request' })).toBeVisible()
-    await scan('GitHub tab: signed in')
+    await expect(page.getByText(/These live on each resource's own page/)).toBeVisible()
+    await page.getByRole('link', { name: 'Open the page of kora_core' }).click()
+    await expect(page.getByRole('heading', { name: 'kora_core', level: 1 })).toBeVisible()
+    await scan('GitHub tab entry to the resource page')
   })
 })

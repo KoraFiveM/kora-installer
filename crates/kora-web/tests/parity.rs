@@ -33,6 +33,7 @@ async fn every_op_has_a_real_route() {
     maintenance::set_override(Some(FakeMaintenance::new(false)));
     offline::install();
     let fake = FakeBackend::sample();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(TOKEN.into(), ADDR.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone())));
     let app = router(st);
     let mut bad = Vec::new();

@@ -254,12 +254,36 @@ export const api = {
   },
   resources: {
     list: (name: string) => call('resources_list', { params: { s: name } }).then((r) => r.resources),
+    /** The page of one resource: where its files are, the server's state, the restart notice. */
+    get: (name: string, resource: string) => call('resource_get', { params: { s: name, name: resource } }),
     ensure: (name: string, body: { name: string; restart: boolean }) => call('resource_ensure', { params: { s: name }, body }),
     /** Start, stop or restart one resource on a running server. */
     control: (name: string, resource: string, action: T.ControlAction) => call('resource_control', { params: { s: name, name: resource }, body: { action } }),
     plan: (name: string, ids: string[]) => call('resources_plan', { params: { s: name }, body: { ids } }),
     add: (name: string, ids: string[]) => call('resources_add', { params: { s: name }, body: { ids } }),
     catalog: (name: string) => call('catalog_for_server', { params: { s: name } }),
+    /** What changed in the folder, with a read-only diff. */
+    changes: (name: string, resource: string) => call('resource_changes', { params: { s: name, name: resource } }),
+    /** The latest commits of the branch it is on. */
+    log: (name: string, resource: string) => call('resource_log', { params: { s: name, name: resource } }),
+    /** Save everything that changed, with a message. */
+    commit: (name: string, resource: string, message: string) => call('resource_commit', { params: { s: name, name: resource }, body: { message } }),
+    /** Push the branch to your own copy on GitHub (never forced). Acts as the GitHub account the computer is signed in as. */
+    push: (name: string, resource: string) => call('resource_push', { params: { s: name, name: resource } }),
+    /** A new branch from where it is now. */
+    newBranch: (name: string, resource: string, branch: string) => call('resource_new_branch', { params: { s: name, name: resource }, body: { name: branch } }),
+    issues: (name: string, resource: string) => call('issues_list', { params: { s: name, name: resource } }),
+    issueComment: (name: string, resource: string, number: number, body: string) => call('issue_comment', { params: { s: name, name: resource, number: String(number) }, body: { body } }),
+    releases: (name: string, resource: string) => call('resource_releases', { params: { s: name, name: resource } }),
+  },
+  /** One pull request: details, checks, conversation and (for people with the rights) review and merge. */
+  pulls: {
+    view: (name: string, resource: string, number: number, source?: T.PrSource) => call('pr_view', { params: { s: name, name: resource, number: String(number) }, query: source === 'fork' ? { source: 'fork' } : undefined }),
+    comment: (name: string, resource: string, number: number, body: string, source?: T.PrSource) => call('pr_comment', { params: { s: name, name: resource, number: String(number) }, body: { body, source: source === 'fork' ? 'fork' : undefined } }),
+    review: (name: string, resource: string, number: number, action: 'approve' | 'request_changes' | 'comment', body?: string, source?: T.PrSource) =>
+      call('pr_review', { params: { s: name, name: resource, number: String(number) }, body: { action, body, source: source === 'fork' ? 'fork' : undefined } }),
+    merge: (name: string, resource: string, number: number, method?: string, source?: T.PrSource) =>
+      call('pr_merge', { params: { s: name, name: resource, number: String(number) }, body: { method, source: source === 'fork' ? 'fork' : undefined } }),
   },
   assets: {
     list: (name: string) => call('assets_list', { params: { s: name } }),
@@ -294,6 +318,15 @@ export const api = {
     set: (name: string, cfg: T.ScheduleConfig) => call('schedule_set', { params: { s: name }, body: cfg }),
     remove: (name: string) => call('schedule_remove', { params: { s: name } }),
   },
+  reach: {
+    /** `once`: allow a lookup for this check only (nothing is saved). */
+    check: (name: string, once?: T.ReachConsentPatch) => call('reach_check', { params: { s: name }, body: once ?? {} }),
+    settings: () => call('reach_settings_get', {}),
+    setSettings: (c: T.ReachConsentPatch) => call('reach_settings_set', { body: c }),
+    setForwarding: (name: string, enabled: boolean) => call('forwarding_set', { params: { s: name }, body: { enabled } }),
+    openFirewall: (name: string) => call('reach_firewall_open', { params: { s: name } }),
+    txadminTicket: (name: string) => call('txadmin_ticket', { params: { s: name } }),
+  },
   ports: {
     set: (name: string, ports: T.Ports) => call('ports_set', { params: { s: name }, body: ports }),
   },
@@ -303,7 +336,7 @@ export const api = {
     prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => call('pr_open', { params: { s: name }, body }),
   },
   branches: {
-    /** Where each resource is (nothing is downloaded). Development servers only. */
+    /** Where each resource is (nothing is downloaded). */
     list: (name: string) => call('branches_list', { params: { s: name } }).then((r) => r.resources),
     /** Branches and kept-aside changes of one resource; `refresh` downloads the newest lists from GitHub first. */
     choices: (name: string, resource: string, refresh = false) => call('branch_choices', { params: { s: name, name: resource }, query: refresh ? { refresh: '1' } : undefined }),
@@ -319,6 +352,11 @@ export const api = {
     bulkApply: (name: string, body: { action: 'branch'; branch: string; resources?: string[]; changes?: T.ChangesChoice } | { action: 'default'; resources?: string[]; changes?: T.ChangesChoice }) =>
       call('branch_bulk_apply', { params: { s: name }, body }),
   },
+  /** Make your own copy (a fork) of resources that are plain clones (a job), and the "which versions" setting. */
+  copies: {
+    fork: (name: string, body: { owner?: string; resources?: string[] } = {}) => call('resources_fork', { params: { s: name }, body }),
+    setVersions: (name: string, versions: T.Versions) => call('versions_set', { params: { s: name }, body: { versions } }),
+  },
   github: {
     status: () => call('github_status', {}),
     login: () => call('github_login', {}),
@@ -333,6 +371,11 @@ export const api = {
   systemCheck: {
     get: () => call('system_check', {}),
     startDatabase: () => call('db_start', {}),
+  },
+  /** The audit log (administrators only). `before` is the id of the oldest row already shown. */
+  audit: {
+    list: (q: { limit?: number; before?: number; server?: string; op?: string; actor?: string; result?: string } = {}) =>
+      call('audit_list', { query: { limit: q.limit, before: q.before, server: q.server || undefined, op: q.op || undefined, actor: q.actor || undefined, result: q.result || undefined } }),
   },
   keys: {
     list: () => call('keys_list', {}),
@@ -388,6 +431,8 @@ export const api = {
     run: (body: { answers: { item: string; remove: boolean }[]; delete_files: boolean; delete_databases: boolean; only: string[] }) => call('uninstall_run', { body }),
   },
   jobs: {
+    /** Recent jobs, also from before the panel last restarted (newest first, without events). */
+    list: (limit = 50) => call('jobs_list', { query: { limit } }).then((r) => r.jobs),
     get: <R = unknown, E = unknown>(id: string) => call('jobs_get', { params: { id } }) as Promise<T.Job<R, E>>,
     eventsUrl: (id: string) => streamOf('job_events', { id }),
   },

@@ -8,17 +8,20 @@ use kora_core::elevate;
 use kora_core::installer::{self, host, registry};
 
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
+use crate::cmd::desktop::DesktopCmd;
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::install::{install, InstallArgs};
 use crate::cmd::panel::{panel, PanelArgs};
+use crate::cmd::reach::ReachArgs;
 use crate::cmd::resources::{add_asset, add_resources, AddAssetArgs, AddResourcesArgs};
 use crate::cmd::schedule::{schedule, ScheduleCmd};
 use crate::cmd::server::{control, delete, status};
+use crate::cmd::store::{AuditArgs, StoreCmd};
 use crate::cmd::toolchain::ToolsCmd;
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
 use crate::cmd::webhook::{webhook, WebhookCmd};
-use crate::cmd::{admin_step, bare, branch, keys_cmd, service_cmd, toolchain};
+use crate::cmd::{admin_step, bare, branch, keys_cmd, resource, service_cmd, toolchain};
 
 #[derive(Parser)]
 #[command(name = "kora", version, about = "Kora installer and server manager")]
@@ -61,6 +64,8 @@ enum Command {
         #[arg(long, value_name = "vX.Y.Z")]
         version: Option<String>,
     },
+    /// Can players reach a server? A checklist (running, firewall, router, internet) and the fixes.
+    Reach(ReachArgs),
     /// Discord notifications for update reports.
     Webhook {
         #[command(subcommand)]
@@ -90,6 +95,13 @@ enum Command {
         #[command(subcommand)]
         cmd: AppCmd,
     },
+    /// Who changed what (from the panel and from `kora` commands), newest first.
+    Audit(AuditArgs),
+    /// Kora's own data file: where it is, a backup or restore of it, and the way back to the old JSON files.
+    Store {
+        #[command(subcommand)]
+        cmd: StoreCmd,
+    },
     /// Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key.
     Keys {
         #[command(subcommand)]
@@ -109,6 +121,11 @@ enum Command {
     Pr {
         #[command(subcommand)]
         cmd: branch::PrCmd,
+    },
+    /// One resource: what it is, which version it is on, and whether a restart is needed.
+    Resource {
+        #[command(subcommand)]
+        cmd: resource::ResourceCmd,
     },
     /// GitHub helpers for development mode.
     Github {
@@ -179,6 +196,12 @@ enum Command {
     /// Start (or install) Kora's own MariaDB on Windows, run by Kora's administrator service.
     #[command(hide = true)]
     AdminDb(admin_step::AdminDbArgs),
+    /// What the Kora desktop app (tray icon and window) asks of kora. Run by the app, never by a person.
+    #[command(hide = true)]
+    Desktop {
+        #[command(subcommand)]
+        cmd: DesktopCmd,
+    },
 }
 
 fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
@@ -199,10 +222,15 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Tools { .. }
             | Command::Check { .. }
             | Command::Keys { .. }
+            | Command::Audit(_)
+            | Command::Store { .. }
             | Command::Profile { .. }
             | Command::Branch { .. }
             | Command::Pr { .. }
+            | Command::Resource { .. }
             | Command::Webhook { .. }
+            | Command::Desktop { .. }
+            | Command::Reach(_)
             | Command::SelfUpdate { .. }
             | Command::Panel(_),
         ) => K::Other,
@@ -356,6 +384,7 @@ fn main() {
     // Bare `kora` opens the panel (see `bare`); it never asks for administrator rights.
     let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     elevate_if_needed(&cli, &cli.command);
+    let audit = crate::cmd::store::audit_start::<Cli>();
     let command = cli.command;
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
@@ -396,14 +425,19 @@ fn main() {
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
+        Some(Command::Desktop { cmd }) => cmd::desktop::run(cmd),
+        Some(Command::Reach(a)) => cmd::reach::run(a),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
+        Some(Command::Resource { cmd }) => resource::resource(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Tools { cmd: ToolsCmd::Status }) => toolchain::run_tools_status(),
         Some(Command::Tools { cmd: ToolsCmd::Install { tool } }) => toolchain::run_tools_install(tool.as_deref()),
         Some(Command::Check { start_database }) => toolchain::run_check(start_database),
         Some(Command::Keys { cmd }) => keys_cmd::keys(cmd),
+        Some(Command::Audit(a)) => crate::cmd::store::audit(a),
+        Some(Command::Store { cmd }) => crate::cmd::store::store(cmd),
         Some(Command::Profile { cmd }) => keys_cmd::profile(cmd),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {
@@ -429,6 +463,7 @@ fn main() {
     if let Some(line) = pending.and_then(|p| p.finish(std::time::Duration::from_secs(2))) {
         println!("\n{line}");
     }
+    audit.finish(code);
     finish(code);
 }
 

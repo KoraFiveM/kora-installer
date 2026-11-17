@@ -239,7 +239,7 @@ fn apply(f: &FakeBackend) {
 }
 
 fn snapshots(f: &FakeBackend) {
-    f.state().snapshots = vec![kora_core::update::manual::SnapshotInfo { id: "snap1".into(), created_unix: 1_700_000_000, resources: vec!["kora_hud".into()] }];
+    f.state().snapshots = vec![kora_core::update::manual::SnapshotInfo { id: "snap1".into(), created_unix: 1_700_000_000, resources: vec!["kora_hud".into()], ..Default::default() }];
 }
 
 fn catalog(f: &FakeBackend) {
@@ -323,6 +323,7 @@ fn branch_state(id: &str) -> kora_core::branches::ResourceBranch {
         state: kora_core::branches::State::Branch,
         branch: Some("fix-hud".into()),
         pr: None,
+        pr_title: None,
         default_branch: "dev".into(),
         label: "branch fix-hud".into(),
         changed_count: 1,
@@ -330,6 +331,172 @@ fn branch_state(id: &str) -> kora_core::branches::ResourceBranch {
         note: None,
         problem: None,
     }
+}
+
+fn resource_page(f: &FakeBackend) {
+    f.state().branches = Some(Ok(kora_core::branches::Reply::Page(Box::new(kora_core::branches::Page {
+        id: "kora_hud".into(),
+        folder: "[kora]/kora_hud".into(),
+        repository: "https://github.com/KoraFiveM/kora_hud.git".into(),
+        default_branch: "dev".into(),
+        pinned_commit: Some("aaaaaaaa".into()),
+        third_party: false,
+        source: None,
+        version: None,
+        branch: branch_state("kora_hud"),
+        repos: Some(kora_core::collab::Repos { original: Some("KoraFiveM/kora_hud".into()), fork: None }),
+    }))));
+}
+
+fn collab(f: &FakeBackend, r: kora_core::collab::Reply) {
+    f.state().collab = Some(Ok(r));
+}
+
+fn collab_changes(f: &FakeBackend) {
+    use kora_core::collab::*;
+    collab(
+        f,
+        Reply::Changes(Box::new(LocalChanges {
+            branch: Some("fix-hud".into()),
+            files: vec![ChangedFile { path: "hud.lua".into(), status: "modified".into() }],
+            count: 1,
+            diff: "diff --git a/hud.lua b/hud.lua\n+x\n".into(),
+            diff_truncated: false,
+            ahead: Some(1),
+            behind: None,
+            repos: Repos { original: Some("KoraFiveM/kora_hud".into()), fork: None },
+        })),
+    );
+}
+
+fn collab_log(f: &FakeBackend) {
+    use kora_core::collab::*;
+    collab(
+        f,
+        Reply::Log(Log {
+            branch: Some("dev".into()),
+            commits: vec![LogEntry { sha: "0123456789abcdef0123456789abcdef01234567".into(), subject: "One".into(), author: "sam".into(), when: 1_700_000_000 }],
+        }),
+    );
+}
+
+fn collab_committed(f: &FakeBackend) {
+    collab(f, kora_core::collab::Reply::Committed(kora_core::collab::Committed { commit: "0123456789abcdef0123456789abcdef01234567".into(), files: 1, branch: Some("fix-hud".into()) }));
+}
+
+fn collab_pushed(f: &FakeBackend) {
+    collab(f, kora_core::collab::Reply::Pushed(kora_core::collab::Pushed { branch: "fix-hud".into(), to: "sam/kora_hud".into(), new_branch: true, acting_as: Some("sam".into()) }));
+}
+
+fn collab_where(f: &FakeBackend) {
+    collab(
+        f,
+        kora_core::collab::Reply::Where(kora_core::git::branches::Where {
+            kind: kora_core::git::branches::Kind::Branch,
+            branch: Some("my-idea".into()),
+            pr: None,
+            changed_files: vec![],
+            changed_count: 0,
+        }),
+    );
+}
+
+fn collab_pr(f: &FakeBackend) {
+    use kora_core::collab::*;
+    collab(
+        f,
+        Reply::Pr(Box::new(PrView {
+            number: 12,
+            title: "Fix the HUD".into(),
+            body: "Does a thing".into(),
+            author: "sam".into(),
+            state: "OPEN".into(),
+            draft: false,
+            url: "https://github.com/KoraFiveM/kora_hud/pull/12".into(),
+            repo: "KoraFiveM/kora_hud".into(),
+            base: "dev".into(),
+            head: "fix-hud".into(),
+            created: "2026-03-01T10:00:00Z".into(),
+            updated: "2026-03-02T10:00:00Z".into(),
+            review: "REVIEW_REQUIRED".into(),
+            checks: Checks::Failing,
+            check_list: vec![Check { name: "build".into(), state: Checks::Failing, url: Some("https://ci/1".into()) }],
+            mergeable: "MERGEABLE".into(),
+            files: vec![PrFile { path: "hud.lua".into(), additions: 3, deletions: 1 }],
+            comments: vec![PrComment { author: "jo".into(), body: "nice".into(), created: "2026-03-01T12:00:00Z".into(), kind: "comment".into() }],
+            merge_methods: vec!["squash".into()],
+            can_merge: true,
+            acting_as: Some("sam".into()),
+            trying: Some(Trying { branch: "pr/12".into(), behind: Some(2), ahead: 0 }),
+        })),
+    );
+}
+
+fn collab_acted(f: &FakeBackend) {
+    collab(
+        f,
+        kora_core::collab::Reply::Acted(kora_core::collab::Acted { message: "Your comment was added.".into(), acting_as: Some("sam".into()), url: Some("https://github.com/x/y/pull/12#c1".into()) }),
+    );
+}
+
+fn collab_issues(f: &FakeBackend) {
+    use kora_core::collab::*;
+    collab(
+        f,
+        Reply::Issues(Issues {
+            repo: "KoraFiveM/kora_hud".into(),
+            issues: vec![IssueItem {
+                number: 4,
+                title: "Crash".into(),
+                author: "a".into(),
+                url: "https://github.com/x/y/issues/4".into(),
+                comments: 2,
+                created: "2026-01-01".into(),
+                labels: vec!["bug".into()],
+            }],
+            new_issue_url: "https://github.com/KoraFiveM/kora_hud/issues/new".into(),
+        }),
+    );
+}
+
+fn collab_releases(f: &FakeBackend) {
+    use kora_core::collab::*;
+    collab(
+        f,
+        Reply::Releases(Releases {
+            repo: "KoraFiveM/kora_hud".into(),
+            pinned_commit: Some("0123456789abcdef0123456789abcdef01234567".into()),
+            releases: vec![ReleaseItem {
+                tag: "v0.3.0".into(),
+                name: "Three".into(),
+                published: "2026-03-01".into(),
+                prerelease: false,
+                url: "https://github.com/x/y/releases/tag/v0.3.0".into(),
+                notes: "notes".into(),
+                pinned: false,
+                newer: true,
+            }],
+        }),
+    );
+}
+
+fn collab_fork(f: &FakeBackend) {
+    use kora_core::collab::*;
+    collab(
+        f,
+        Reply::Forked(Box::new(ForkOutcome {
+            owner: "sam".into(),
+            forked: vec![Forked { resource: "kora_hud".into(), fork: "sam/kora_hud".into(), message: "kora_hud now has your own copy (sam/kora_hud).".into() }],
+            skipped: vec![],
+            failed: vec![],
+            server_is_fork: true,
+        })),
+    );
+}
+
+fn collab_versions(f: &FakeBackend) {
+    use kora_core::installer::{Source, Versions};
+    collab(f, kora_core::collab::Reply::Versions(kora_core::collab::VersionsSet { source: Source::Clone, versions: Versions::Latest, message: "This server now follows the latest changes.".into() }));
 }
 
 fn branches_overview(f: &FakeBackend) {
@@ -360,6 +527,9 @@ fn branches_prs(f: &FakeBackend) {
             draft: false,
             url: "https://github.com/x/y/pull/12".into(),
             updated: "2026-01-01".into(),
+            created: "2025-12-01".into(),
+            review: "APPROVED".into(),
+            checks: kora_core::collab::Checks::Passing,
         }],
         notes: vec![],
     })));
@@ -467,6 +637,7 @@ fn cases() -> Vec<Case> {
         case(Op::ServerControl, s, Some(json!({"action": "restart"}))),
         case(Op::ServersScan, &[], None),
         case(Op::ResourcesList, s, None),
+        with(case(Op::ResourceGet, &[("s", "prod"), ("name", "kora_hud")], None), resource_page),
         case(Op::ResourceEnsure, s, Some(json!({"name": "kora_hud", "restart": false}))),
         with(case(Op::UpdatePreview, s, Some(json!({"scope": "all"}))), preview),
         with(case(Op::UpdateApply, s, Some(json!({"scope": {"resources": ["kora_hud"]}, "restart": "when_quiet", "skip": [], "targets": {"kora_hud": "2222222"}}))), apply),
@@ -511,6 +682,8 @@ fn cases() -> Vec<Case> {
         case(Op::SystemCheck, &[], None),
         case(Op::DbStart, &[], None),
         case(Op::KeysList, &[], None),
+        case(Op::JobsList, &[], None),
+        case(Op::AuditList, &[], None),
         case(Op::KeyAdd, &[], Some(json!({"name": "Main", "license_key": "cfxk_0123456789abcdef0123456789abcdef_ab12cd"}))),
         case(Op::ProfileGet, &[], None),
         case(Op::ProfileSet, &[], Some(json!({"github_owner": null}))),
@@ -523,12 +696,33 @@ fn cases() -> Vec<Case> {
         with(case(Op::BranchSwitch, &[("s", "dev"), ("name", "kora_hud")], Some(json!({"action": "branch", "branch": "fix-hud", "remote": "origin", "changes": "stash"}))), branches_switched),
         with(case(Op::StashRestore, &[("s", "dev"), ("name", "kora_hud")], Some(json!({"index": 0}))), branches_switched),
         with(case(Op::BranchBulkPreview, dev, Some(json!({"branch": "fix-hud", "fetch": true}))), bulk_preview),
+        with(case(Op::ResourceChanges, &[("s", "dev"), ("name", "kora_hud")], None), collab_changes),
+        with(case(Op::ResourceLog, &[("s", "dev"), ("name", "kora_hud")], None), collab_log),
+        with(case(Op::ResourceCommit, &[("s", "dev"), ("name", "kora_hud")], Some(json!({"message": "Fix the HUD"}))), collab_committed),
+        with(case(Op::ResourcePush, &[("s", "dev"), ("name", "kora_hud")], None), collab_pushed),
+        with(case(Op::ResourceNewBranch, &[("s", "dev"), ("name", "kora_hud")], Some(json!({"name": "my-idea"}))), collab_where),
+        with(case(Op::PrView, &[("s", "dev"), ("name", "kora_hud"), ("number", "12")], None), collab_pr),
+        with(query(case(Op::PrView, &[("s", "dev"), ("name", "kora_hud"), ("number", "12")], None), "source=fork"), collab_pr),
+        with(case(Op::PrComment, &[("s", "dev"), ("name", "kora_hud"), ("number", "12")], Some(json!({"body": "Looks good", "source": "fork"}))), collab_acted),
+        with(case(Op::PrReview, &[("s", "dev"), ("name", "kora_hud"), ("number", "12")], Some(json!({"action": "approve"}))), collab_acted),
+        with(case(Op::PrMerge, &[("s", "dev"), ("name", "kora_hud"), ("number", "12")], Some(json!({"method": "squash"}))), collab_acted),
+        with(case(Op::IssuesList, &[("s", "dev"), ("name", "kora_hud")], None), collab_issues),
+        with(case(Op::IssueComment, &[("s", "dev"), ("name", "kora_hud"), ("number", "4")], Some(json!({"body": "Me too"}))), collab_acted),
+        with(case(Op::ResourceReleases, &[("s", "dev"), ("name", "kora_hud")], None), collab_releases),
+        with(case(Op::ResourcesFork, dev, Some(json!({"owner": "sam", "resources": ["kora_hud"]}))), collab_fork),
+        with(case(Op::VersionsSet, dev, Some(json!({"versions": "latest"}))), collab_versions),
         with(case(Op::BranchBulkApply, dev, Some(json!({"action": "default", "changes": "ask"}))), bulk_apply),
+        case(Op::ReachCheck, s, Some(json!({}))),
+        case(Op::ReachSettingsGet, &[], None),
+        case(Op::ReachSettingsSet, &[], Some(json!({"cfx_list": true}))),
+        case(Op::ForwardingSet, s, Some(json!({"enabled": true}))),
+        case(Op::ReachFirewallOpen, s, None),
     ]
 }
 
 /// Operations the contract test does not run yet, and why. Shrinks as cases are added.
 const UNVERIFIED: &[(Op, &str)] = &[
+    (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),
     (Op::PanelRestart, "would restart the process"),

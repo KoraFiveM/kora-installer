@@ -208,6 +208,19 @@ pub struct PullRequest {
     pub draft: bool,
     pub url: String,
     pub updated: String,
+    /// When it was opened.
+    #[serde(default)]
+    pub created: String,
+    /// `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or empty when GitHub did not say.
+    #[serde(default)]
+    pub review: String,
+    /// Whether its checks pass, fail, are still running, or there are none.
+    #[serde(default = "no_checks")]
+    pub checks: crate::collab::Checks,
+}
+
+fn no_checks() -> crate::collab::Checks {
+    crate::collab::Checks::None
 }
 
 /// A pull request the person named: a number, or an address.
@@ -569,6 +582,35 @@ pub fn back_to_default(r: &dyn CommandRunner, repo: &Path, default_branch: &str,
     switch_branch(r, repo, default_branch, default_branch, None, changes)
 }
 
+/// The commit checked out now.
+pub fn head_commit(r: &dyn CommandRunner, repo: &Path) -> PResult<String> {
+    Ok(pr(run_ok(r, "git", &["rev-parse", "HEAD"], Some(repo)))?.stdout.trim().to_string())
+}
+
+/// Back to the released version a server is pinned to: exactly that commit, on no branch (how a released resource is
+/// installed). Kept changes and commits that belong to no branch are dealt with like in any other switch.
+pub fn back_to_release(r: &dyn CommandRunner, repo: &Path, default_branch: &str, commit: &str, changes: Changes) -> PResult<Outcome> {
+    check_commit(commit)?;
+    let now = locate(r, repo, default_branch)?;
+    let head = head_commit(r, repo)?;
+    if now.kind == Kind::Detached && !head.is_empty() && (head.starts_with(commit) || commit.starts_with(&head)) {
+        return Ok(Outcome { status: Status::Already, message: "Already on the released version.".into(), now, stashed: None, saved_branch: None, title: None });
+    }
+    let (stashed, saved_branch) = match prepare_leave(r, repo, &now, "the released version", changes)? {
+        Prep::NeedsChoice => return Ok(needs_choice(now)),
+        Prep::Ready { stashed, saved_branch } => (stashed, saved_branch),
+    };
+    let spec = format!("{commit}^{{commit}}");
+    if !pr(run(r, "git", &["cat-file", "-e", &spec], Some(repo)))?.ok() {
+        let mut args: Vec<&str> = FETCH.to_vec();
+        args.extend(["fetch", "--tags", "origin"]);
+        pr(run_ok(r, "git", &args, Some(repo)))?;
+    }
+    pr(run_ok(r, "git", &["checkout", "--detach", commit], Some(repo)))?;
+    let what = format!("Back on the released version ({}).", &commit[..commit.len().min(7)]);
+    finish(r, repo, default_branch, stashed, saved_branch, None, &what)
+}
+
 /// Switch the checkout to `name`'s tip only if safe; used by rollback to return to the branch a snapshot was taken on.
 /// `"HEAD"` means "no branch". Never creates branches and never touches changes: a dirty conflict is an error.
 pub(crate) fn switch_to(r: &dyn CommandRunner, repo: &Path, branch: &str) -> super::Result<()> {
@@ -639,12 +681,22 @@ fn first_lines(o: &Output) -> String {
 // Pull requests (through gh)
 // ---------------------------------------------------------------------------------------------
 
+#[cfg(test)]
+pub(crate) fn slugs_for_test(r: &dyn CommandRunner, repo: &Path) -> (Option<String>, Option<String>) {
+    slugs(r, repo).unwrap()
+}
+
 fn slugs(r: &dyn CommandRunner, repo: &Path) -> PResult<(Option<String>, Option<String>)> {
     let get = |remote: &str| -> PResult<Option<String>> {
         let o = pr(run(r, "git", &["remote", "get-url", remote], Some(repo)))?;
         Ok(o.ok().then(|| slug_of_url(o.stdout.trim())).flatten())
     };
-    Ok((get("upstream")?, get("origin")?))
+    let (up, origin) = (get("upstream")?, get("origin")?);
+    // A plain clone has only `origin`, and that IS the original repository.
+    if up.is_none() {
+        return Ok((origin, None));
+    }
+    Ok((up, origin))
 }
 
 /// Open pull requests of the original repository and of the person's fork, labelled by where they are.
@@ -669,7 +721,18 @@ pub fn list_prs(r: &dyn CommandRunner, repo: &Path) -> PResult<(Vec<PullRequest>
     let mut first_error: Option<Problem> = None;
     let mut worked = 0;
     for (source, slug) in &sides {
-        let args = ["pr", "list", "--repo", slug.as_str(), "--state", "open", "--limit", "100", "--json", "number,title,author,headRefName,headRepository,headRepositoryOwner,isDraft,url,updatedAt"];
+        let args = [
+            "pr",
+            "list",
+            "--repo",
+            slug.as_str(),
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,author,headRefName,headRepository,headRepositoryOwner,isDraft,url,updatedAt,createdAt,reviewDecision,statusCheckRollup",
+        ];
         match run_ok(r, "gh", &args, None) {
             Ok(o) => {
                 worked += 1;
@@ -718,6 +781,9 @@ fn pr_from_json(v: &Value, source: PrSource, slug: &str) -> Option<PullRequest> 
         draft: v.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
         url: s("url"),
         updated: s("updatedAt"),
+        created: s("createdAt"),
+        review: s("reviewDecision"),
+        checks: crate::collab::rollup(&v.get("statusCheckRollup").and_then(Value::as_array).cloned().unwrap_or_default()).0,
     })
 }
 

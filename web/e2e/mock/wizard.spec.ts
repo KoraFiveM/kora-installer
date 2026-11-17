@@ -4,13 +4,14 @@ const installButton = (page: import('@playwright/test').Page) => page.getByRole(
 const next = (page: import('@playwright/test').Page) => page.getByRole('button', { name: 'Next' })
 
 test.describe('install wizard: the happy paths', () => {
-  test('a Production server: licence key, name, summary, install, finished page', async ({ page, open, scan }) => {
+  test('plain copies of released versions: licence key, name, summary, install, finished page', async ({ page, open, scan }) => {
     await open('/install')
     await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible()
     await expect(next(page)).toBeDisabled()
     await scan('wizard: licence key')
     await toSummary(page, 'friday-night')
-    await expect(page.getByText('Production (a server for players)')).toBeVisible()
+    await expect(page.getByText("Kora's resources as they are (plain copies)")).toBeVisible()
+    await expect(page.getByText('Released versions (stable)')).toBeVisible()
     await expect(page.getByText('/srv/fivem/friday-night')).toBeVisible()
     await scan('wizard: summary')
 
@@ -19,6 +20,9 @@ test.describe('install wizard: the happy paths', () => {
     await expect(page.getByRole('progressbar').first()).toBeVisible()
     await expect(page.getByRole('heading', { name: 'All done' })).toBeVisible({ timeout: 40_000 })
     await expect(page.getByText(/address on your own network/)).toBeVisible()
+    // The reachability check is offered right here, and txAdmin opens with a button (through the panel when away from this computer).
+    await expect(page.getByRole('heading', { name: 'Can players reach this server?' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Check now' })).toBeVisible()
     await scan('wizard: all done')
 
     // The new server is in the list, running.
@@ -26,12 +30,16 @@ test.describe('install wizard: the happy paths', () => {
     await expect(page.getByRole('link', { name: 'friday-night' })).toBeVisible()
   })
 
-  test('a Development server adds the GitHub step, which needs the sign-in first', async ({ page, open, scan }) => {
+  test('your own copies add the GitHub step, which needs the sign-in first, then personal account or organisation', async ({ page, open, scan }) => {
     await open('/install')
     await page.getByLabel('Licence key', { exact: true }).fill('cfxk_abcdefghij_12345')
     await next(page).click()
-    await page.getByRole('button', { name: 'Make a development server instead' }).click()
-    await page.getByLabel(/Development/).check()
+    await page.getByRole('button', { name: 'Choose where they come from' }).click()
+    await expect(page.getByLabel(/Kora's resources as they are/)).toBeChecked()
+    await expect(page.getByLabel(/Released versions/)).toBeChecked()
+    await page.getByLabel(/Make my own copies on GitHub/).check()
+    // The versions follow the usual answer for your own copies until you choose versions yourself.
+    await expect(page.getByLabel(/Latest changes/)).toBeChecked()
     await expect(page.getByText('3. GitHub')).toBeVisible()
     await next(page).click()
     await expect(page.getByRole('heading', { name: 'GitHub' })).toBeVisible()
@@ -43,15 +51,18 @@ test.describe('install wizard: the happy paths', () => {
     // The one-time code is shown, and the page notices the approval by itself.
     await expect(page.getByText('Finish signing in on GitHub')).toBeVisible()
     await expect(page.getByText('Signed in', { exact: true })).toBeVisible({ timeout: 30_000 })
-    // The forks go into an account: pick the first one offered.
-    const owner = page.getByLabel('Put the forks in')
-    await expect(owner.locator('option')).not.toHaveCount(1)
-    await owner.selectOption({ index: 1 })
+    // Two plain questions: personal account (with its login), or an organisation and which one.
+    // The demo's only organisation does not let this account create repositories: it is explained, not offered.
+    await expect(page.getByLabel(/An organisation I belong to/)).toBeDisabled()
+    await expect(page.getByText(/you may not create repositories there/)).toBeVisible()
+    await expect(next(page)).toBeDisabled()
+    await page.getByLabel(/My personal account \(sam-rp\)/).check()
     await scan('wizard: GitHub step, signed in')
     await expect(next(page)).toBeEnabled()
     await next(page).click()
     await expect(page.getByRole('heading', { name: 'Check and install' })).toBeVisible()
-    await expect(page.getByText('Development (for building and changing resources)', { exact: false })).toBeVisible()
+    await expect(page.getByText('Your own copies on GitHub')).toBeVisible()
+    await expect(page.getByText('Latest changes (the main branch)')).toBeVisible()
     await expect(installButton(page)).toBeEnabled()
     await installButton(page).click()
     await expect(page.getByRole('heading', { name: 'All done' })).toBeVisible({ timeout: 40_000 })
@@ -60,7 +71,7 @@ test.describe('install wizard: the happy paths', () => {
   test('"Choose everything myself" walks every step and "Change" returns to the summary', async ({ page, open, scan }) => {
     await open('/install')
     await page.getByRole('button', { name: 'Choose everything myself' }).click()
-    for (const title of ['Kind of server', 'Name your server', 'Ports', 'FiveM server build', 'Resources', 'Database', 'Options']) {
+    for (const title of ['Where the resources come from', 'Which versions', 'Name your server', 'Ports', 'FiveM server build', 'Resources', 'Database', 'Options']) {
       await expect(page.getByRole('heading', { name: title })).toBeVisible()
       if (title === 'Ports') await expect(page.getByText(/is free/).first()).toBeVisible()
       await scan(`wizard step: ${title}`)

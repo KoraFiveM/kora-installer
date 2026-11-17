@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use kora_core::api::panel_updates::schedule_state_json;
 use kora_core::api::{Status, WebhookView};
-use kora_core::installer::{Mode, Ports};
+use kora_core::installer::Ports;
 use kora_core::notify::{self, NotifyConfig};
 use kora_core::service::ScheduleConfig;
 use serde_json::{json, Value};
@@ -100,9 +100,6 @@ pub async fn schedule_set(State(st): State<AppState>, Path(s): Path<String>, Jso
     cfg.validate().map_err(|e| ApiError::bad_request(e.to_string()))?;
     blocking(move || {
         let e = st.entry(&s)?;
-        if e.mode != Mode::Development {
-            return Err(ApiError::bad_request("Automatic updates are only for development servers."));
-        }
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, Some(&cfg)) {
             run_elevated(args)?;

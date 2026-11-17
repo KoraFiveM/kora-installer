@@ -205,6 +205,7 @@ async fn rig(broker: Arc<FakeBroker>) -> Rig {
     install_seam::set_env(Some(env.clone()));
     let fake = FakeBackend::sample();
     let f = fake.clone();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone())));
     Rig { app: router(st), fake, env, _turn: turn }
 }
@@ -276,6 +277,9 @@ async fn every_administrator_step_of_an_install_is_one_request_to_the_service_wi
     let (_, j) = r.job(r.call("POST", "/installs", Some(install_body(&abs("kora-svc-one")))).await).await;
     assert_eq!(j["state"], "done", "{j}");
     assert!(!j["events"].as_array().unwrap().iter().any(|e| e["step"] == "admin"), "no permission step any more");
+    // The whole outcome, as the finished-install page reads it: the install ran in the person's own process, so it is the full one.
+    let out: kora_core::installer::InstallOutcome = serde_json::from_value(j["result"].clone()).expect("reads as InstallOutcome");
+    assert!(!out.connect.is_empty() && !out.txadmin_url.is_empty(), "{out:?}");
     assert!(j["events"].to_string().contains("working as administrator"), "the service's lines are part of the same job");
     let log = b.log();
     assert_eq!(log.calls.iter().map(|c| c.1[2].clone()).collect::<Vec<_>>(), ["system.firewall", "system.service"]);

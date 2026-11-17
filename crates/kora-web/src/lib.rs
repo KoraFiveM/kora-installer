@@ -1,4 +1,6 @@
 //! Kora Panel HTTP server: security middleware, sessions, jobs/SSE, embedded UI.
+#[doc(hidden)]
+pub mod audit;
 pub mod elevated;
 mod error;
 pub mod handlers;
@@ -8,6 +10,7 @@ pub mod remote;
 pub mod routes;
 pub mod security;
 mod static_ui;
+pub mod txgate;
 mod wire_from;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -94,6 +97,11 @@ pub struct AppState {
     pub events: Arc<handlers::system::EventsHub>,
     /// The last `GET /fleet` answer, for a few seconds.
     pub fleet_cache: Arc<handlers::hub::FleetCache>,
+    /// txAdmin through the panel: tickets, sessions and the per-server gateway listeners.
+    pub txgate: Arc<txgate::Gate>,
+    /// The Kora folder whose store gets an audit row for every state-changing request. `None` (the default: tests and
+    /// embedders) records nothing and never touches the disk; the real panel sets it ([`AppState::with_audit`]).
+    pub audit_home: Option<std::path::PathBuf>,
 }
 
 impl AppState {
@@ -118,7 +126,14 @@ impl AppState {
             streams: Arc::default(),
             events: Arc::default(),
             fleet_cache: Arc::default(),
+            txgate: Arc::default(),
+            audit_home: None,
         }
+    }
+    /// Record state-changing requests in the audit log of the store in this Kora folder.
+    pub fn with_audit(mut self, home: std::path::PathBuf) -> Self {
+        self.audit_home = Some(home);
+        self
     }
     /// A one-time code for a sign-in link: `http://127.0.0.1:<port>/#code=<code>`. Works once, for ten
     /// minutes, from this computer only.
@@ -184,8 +199,14 @@ impl AppState {
             cache.clear();
             r
         };
+        let server_name = server.clone();
         match self.registry.spawn(op, server, body) {
-            Ok(id) => Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response()),
+            Ok(id) => {
+                let mut resp = (StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response();
+                // The guard follows the job to its end for the audit log.
+                resp.extensions_mut().insert(audit::JobStarted { id: id.0.clone(), server: server_name });
+                Ok(resp)
+            }
             Err(c) => Err(ApiError::conflict(conflict_message(&c))),
         }
     }
@@ -396,6 +417,7 @@ async fn serve_tailnet(state: AppState, port: u16) {
                 match tokio::net::TcpListener::bind(SocketAddr::new(ip, port)).await {
                     Ok(l) => {
                         bound.push(ip);
+                        state.txgate.add_ip(&state, ip);
                         let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
                         tokio::spawn(async move {
                             let _ = axum::serve(l, app).await;
@@ -456,7 +478,9 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let listener = bind_retrying(addr).await.map_err(|source| PanelError::Bind { addr, source })?;
         let addr = listener.local_addr()?;
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
-        let state = AppState::system(token.clone(), addr).with_remote(rem);
+        // The real panel keeps its jobs in the store: history survives a restart, and what was running when the last panel died is
+        // marked interrupted. (Tests use `AppState::system` with the in-memory registry and never touch the Kora folder.)
+        let state = AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem);
         for w in &warnings {
             eprintln!("{w}");
         }
@@ -499,12 +523,15 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         println!("Press Ctrl+C to stop.");
         // Sample the servers and raise alerts for as long as the panel runs.
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
+        // Forward the game port on the router for servers that have it switched on (and run without a service).
+        let port_keeper = kora_core::reach::forward::keeper::spawn_panel_keeper();
         let served = axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(async {
                 let _ = tokio::signal::ctrl_c().await;
             })
             .await;
         monitor.stop();
+        port_keeper.stop();
         served?;
         Ok(())
     })

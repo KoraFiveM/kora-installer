@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Status, StatusDetail};
-use crate::installer::{Mode, Ports};
+use crate::installer::{Mode, Ports, Source, Versions};
 use crate::service::ControlAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +47,12 @@ impl From<crate::api::UpdateBadge> for Badge {
 pub struct ServerSummary {
     pub name: String,
     pub dir: PathBuf,
+    /// The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
     pub mode: Mode,
+    /// Plain clones of the originals, or the person's own copies (forks).
+    pub source: Source,
+    /// Released versions (pinned) or the latest changes.
+    pub versions: Versions,
     pub ports: Ports,
     pub created_unix: u64,
     pub status: Status,

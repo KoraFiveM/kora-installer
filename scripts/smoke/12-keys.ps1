@@ -1,6 +1,8 @@
-# Saved licence keys on a real Windows machine (0.7.0): secrets.json is created with its inherited permissions removed
-# (no Users / Everyone / Authenticated Users), the list only shows the last four characters, the same key twice is
-# refused, an install can name a saved key, and rename/remove work. Uses a throw-away KORA_HOME.
+# Saved licence keys on a real Windows machine: they live in Kora's data file (<Kora folder>\store\kora.db). The store FOLDER is
+# created with its inherited permissions removed (no Users / Everyone / Authenticated Users), so the database and the -wal/-shm files
+# SQLite makes in it inherit that; the list only shows the last four characters, the same key twice is refused, an install can name
+# a saved key, rename/remove work, and an old-format secrets.json (Kora 0.7) is imported once and moved to store\before-sqlite.
+# Uses a throw-away KORA_HOME.
 . "$PSScriptRoot/common.ps1"
 
 $kora = Get-KoraExe
@@ -12,13 +14,17 @@ $e = @{ KORA_HOME = $home1; CFX_LICENSE_KEY = $key }
 $r = Invoke-Native $kora @('keys', 'add', 'Main') $e; Show 'keys add' $r
 Assert-That ($r.Code -eq 0) 'keys add exits 0'
 Assert-That ($r.Output -notmatch [regex]::Escape($key)) 'add never prints the key'
-$file = Join-Path $home1 'secrets.json'
-Assert-That (Test-Path $file) 'secrets.json was written in the Kora folder'
-$acl = Get-Acl-Text $file; Write-Host $acl
-Assert-That ($acl -notmatch '(?i)\\Users:|Everyone|Authenticated Users|BUILTIN\\Users') 'secrets.json ACL does not grant Users/Everyone/Authenticated Users'
-Assert-That ($acl -match [regex]::Escape($env:USERNAME)) 'secrets.json ACL names the signed-in user'
-$readOk = $false; try { [void][IO.File]::ReadAllText($file); $readOk = $true } catch {}
-Assert-That $readOk 'the signed-in user can still read secrets.json'
+$dir = Join-Path $home1 'store'
+$file = Join-Path $dir 'kora.db'
+Assert-That (Test-Path $file) 'the data file was created in the Kora folder (store\kora.db)'
+Assert-That (-not (Test-Path (Join-Path $home1 'secrets.json'))) 'no secrets.json is written any more'
+$acl = Get-Acl-Text $dir; Write-Host $acl
+Assert-That ($acl -notmatch '(?i)\\Users:|Everyone|Authenticated Users|BUILTIN\\Users') 'the store folder ACL does not grant Users/Everyone/Authenticated Users'
+Assert-That ($acl -match [regex]::Escape($env:USERNAME)) 'the store folder ACL names the signed-in user'
+$aclFile = Get-Acl-Text $file; Write-Host $aclFile
+Assert-That ($aclFile -notmatch '(?i)\\Users:|Everyone|Authenticated Users|BUILTIN\\Users') 'the data file ACL does not grant Users/Everyone/Authenticated Users either'
+$readOk = $false; try { [void][IO.File]::ReadAllBytes($file); $readOk = $true } catch {}
+Assert-That $readOk 'the signed-in user can still read the data file'
 
 $r = Invoke-Native $kora @('keys', 'list') $e; Show 'keys list' $r
 Assert-That ($r.Code -eq 0 -and $r.Output -match '1234') 'list shows the last four characters'
@@ -35,5 +41,23 @@ Assert-That ($r.Code -eq 2 -and $r.Output -match 'no saved licence key called') 
 
 $r = Invoke-Native $kora @('keys', 'rename', 'main', 'Live') $e; Assert-That ($r.Code -eq 0) 'rename exits 0'
 $r = Invoke-Native $kora @('keys', 'remove', 'live', '-y') $e; Assert-That ($r.Code -eq 0) 'remove exits 0'
-Assert-That ((Get-Content -Raw $file) -notmatch 'SAVEDSAVED') 'the file no longer holds the key'
-Remove-Item -Recurse -Force $home1
+$bytes = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($file))
+Assert-That ($bytes -notmatch 'SAVEDSAVED') 'the data file no longer holds the key'
+$r = Invoke-Native $kora @('audit') $e; Show 'audit' $r
+Assert-That ($r.Code -eq 0 -and $r.Output -match 'key_add' -and $r.Output -notmatch 'SAVEDSAVED') 'the audit log recorded the key being added and never holds a key'
+
+# --- an old-format secrets.json (Kora 0.7) is imported once and moved aside, privately ----------------------------
+$home2 = Join-Path ([IO.Path]::GetTempPath()) ("kora-keys-old-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $home2 | Out-Null
+$old = '{"version":1,"keys":[{"name":"Old main","key":"cfxk_OLDOLDOLDOLDOLDOLD_5678","added":1700000001}]}'
+Set-Content -Path (Join-Path $home2 'secrets.json') -Value $old -NoNewline
+$e2 = @{ KORA_HOME = $home2 }
+$r = Invoke-Native $kora @('keys', 'list') $e2; Show 'keys list (after the upgrade)' $r
+Assert-That ($r.Code -eq 0 -and $r.Output -match 'Old main' -and $r.Output -match '5678') 'the old key is listed after the upgrade'
+Assert-That ($r.Output -notmatch 'OLDOLDOLD') 'and never shown in full'
+Assert-That (-not (Test-Path (Join-Path $home2 'secrets.json'))) 'the old secrets.json was moved out of the Kora folder'
+$kept = Join-Path $home2 'store\before-sqlite\secrets.json'
+Assert-That (Test-Path $kept) 'it is kept (not deleted) in store\before-sqlite'
+$aclKept = Get-Acl-Text $kept; Write-Host $aclKept
+Assert-That ($aclKept -notmatch '(?i)\\Users:|Everyone|Authenticated Users|BUILTIN\\Users') 'the kept copy is private too'
+Remove-Item -Recurse -Force $home1, $home2

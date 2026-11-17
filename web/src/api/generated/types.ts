@@ -6,6 +6,12 @@
 /** Not described by the Rust side yet: the shape is unknown, so check it before use. */
 export type Untyped = unknown
 
+export type Acted = {
+  message: string,
+  acting_as: string | null,
+  url: string | null,
+};
+
 /**
  * Something the user can do about a [`Problem`]. Plain data: the front end decides what each
  * one does (the panel's handler registry; a terminal prints a hint). Never put secrets in here.
@@ -62,6 +68,10 @@ export type Action =
   }
   | {
     "kind": "start_database"
+  }
+  | {
+    "kind": "make_fork",
+    resource?: string,
   }
   | {
     "kind": "unknown"
@@ -346,6 +356,80 @@ export type AssetProblem = {
 export type AssetProblemKind = "not_a_zip" | "no_resources" | "no_fxmanifest" | "missing_fxap" | "unsafe_path" | "skipped_entry" | "too_big" | "zip_bomb" | "encrypted" | "name_taken" | "bad_name" | "duplicate" | "no_folder";
 
 /**
+ * `GET /audit`.
+ */
+export type AuditPage = {
+  /**
+   * Newest first.
+   */
+  entries: Array<AuditRow>,
+  /**
+   * There are older rows than these.
+   */
+  more: boolean,
+  retention_days: number,
+};
+
+/**
+ * The filters and paging of `GET /audit`; every one is optional.
+ */
+export type AuditQuery = {
+  /**
+   * At most this many (default 100, at most 500).
+   */
+  limit?: number,
+  /**
+   * Only rows older than this id (to show more).
+   */
+  before?: number,
+  server?: string,
+  op?: string,
+  /**
+   * Part of the actor's name.
+   */
+  actor?: string,
+  result?: string,
+  /**
+   * Only rows at or after this time (unix seconds).
+   */
+  since?: number,
+};
+
+/**
+ * One row: who did what, when. Never a secret or a request body.
+ */
+export type AuditRow = {
+  id: number,
+  /**
+   * Unix seconds.
+   */
+  at: number,
+  /**
+   * The operation's name (`Op::name`).
+   */
+  op: string,
+  server: string | null,
+  /**
+   * `local` (the person on this computer), `remote` (signed in from another device) or `cli` (a `kora` command).
+   */
+  actor_kind: string,
+  actor_name: string | null,
+  /**
+   * For remote: `token` or `tailscale`.
+   */
+  provider: string | null,
+  role: string | null,
+  /**
+   * `ok`, `failed`, `refused` or `started`.
+   */
+  result: string,
+  /**
+   * A short note Kora wrote (a job id, an error code).
+   */
+  detail: string | null,
+};
+
+/**
  * The small update badge of a server (`None` on the server = not known yet).
  */
 export type Badge = {
@@ -580,7 +664,21 @@ export type CfxRequest = {
 
 export type ChangeStatus = "up_to_date" | "clean" | "dirty" | "diverged" | "other_branch";
 
+export type ChangedFile = {
+  path: string,
+  /**
+   * `modified`, `added`, `deleted`, `renamed` or `new` (not yet known to git).
+   */
+  status: string,
+};
+
 export type ChangesChoice = "ask" | "stash" | "discard";
+
+export type Check = {
+  name: string,
+  state: ChecksState,
+  url?: string,
+};
 
 /**
  * One line of the System check.
@@ -601,6 +699,72 @@ export type CheckItem = {
 
 export type CheckState = "ok" | "problem" | "info";
 
+export type ChecksState = "passing" | "failing" | "pending" | "none";
+
+/**
+ * `POST .../prs/{number}/comment` and `POST .../issues/{number}/comment`.
+ */
+export type CommentRequest = {
+  body: string,
+  source?: string,
+};
+
+/**
+ * `POST /servers/{s}/resources/{name}/commit`.
+ */
+export type CommitRequest = {
+  message: string,
+};
+
+export type Committed = {
+  commit: string,
+  files: number,
+  branch: string | null,
+};
+
+/**
+ * The addresses to give people, each for who it works for.
+ */
+export type Connect = {
+  /**
+   * `ip:port` on the same network.
+   */
+  lan: string | null,
+  /**
+   * `ip:port` from the internet, once the public address is known (and not behind carrier-grade NAT).
+   */
+  public: string | null,
+  /**
+   * `https://cfx.re/join/<code>` when the server has a join code.
+   */
+  cfx: string | null,
+  /**
+   * What to type in FiveM's console (F8) for the best address.
+   */
+  command: string | null,
+};
+
+/**
+ * Which outside services the reachability check may contact. Nothing is contacted by default.
+ */
+export type Consent = {
+  /**
+   * Ask Cfx.re's public server list about this server's own join code (it learns nothing new: the
+   * server already announces itself there). Gives the address Cfx.re sees.
+   */
+  cfx_list: boolean,
+  /**
+   * Ask a plain "what is my address" website (`api.ipify.org`) for this connection's public
+   * address. It sees that address and that a request was made, nothing else.
+   */
+  ip_echo: boolean,
+};
+
+/**
+ * An outside lookup the person may allow.
+ */
+export type ConsentKind = "cfx_list" | "ip_echo";
+
 /**
  * `POST /servers/{s}/console`.
  */
@@ -613,6 +777,14 @@ export type ConsoleCommand = {
  */
 export type ConsoleLine = {
   line: string,
+};
+
+/**
+ * What was (and was not) contacted outside this computer, for the "what did you do" line.
+ */
+export type Contacted = {
+  what: string,
+  learned: string,
 };
 
 /**
@@ -768,6 +940,16 @@ export type ErrorEnvelope = {
   error: ErrorBody,
 };
 
+export type Fix = {
+  id: FixId,
+  label: string,
+};
+
+/**
+ * A button the panel can show on a line.
+ */
+export type FixId = "start_server" | "open_firewall" | "enable_forwarding" | "allow_cfx_list" | "allow_ip_echo";
+
 /**
  * `GET /fleet`.
  */
@@ -792,7 +974,18 @@ export type FleetServer = {
   actions: Array<ControlAction>,
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -806,6 +999,97 @@ export type FleetServer = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+};
+
+/**
+ * Progress of making copies, one event per resource.
+ */
+export type ForkEvent = {
+  "type": "forked",
+  done: number,
+  total: number,
+  id: string,
+};
+
+export type ForkFailure = {
+  resource: string,
+  problem: Problem,
+};
+
+export type ForkOutcome = {
+  /**
+   * Where the copies are (login or organisation).
+   */
+  owner: string,
+  forked: Array<Forked>,
+  /**
+   * Resources that were not plain clones of a repository (paid assets, copies of someone else's resource).
+   */
+  skipped: Array<string>,
+  failed: Array<ForkFailure>,
+  /**
+   * Every resource of the server is now your own copy, so the server follows "your own copies".
+   */
+  server_is_fork: boolean,
+};
+
+/**
+ * `POST /servers/{s}/fork`: make your own copy of some resources (left out = every plain clone).
+ */
+export type ForkRequest = {
+  /**
+   * A GitHub login or organisation; left out = the signed-in account.
+   */
+  owner?: string,
+  resources?: Array<string>,
+};
+
+export type Forked = {
+  resource: string,
+  /**
+   * `owner/name` of the new copy.
+   */
+  fork: string,
+  message: string,
+};
+
+/**
+ * What the last attempt to forward the port did (written by whichever process maintains the mapping).
+ */
+export type ForwardStatus = {
+  /**
+   * Unix seconds.
+   */
+  at: number,
+  ok: boolean,
+  /**
+   * `UPnP`, `NAT-PMP` or `PCP` when it worked.
+   */
+  via?: string,
+  /**
+   * In words for a person.
+   */
+  message: string,
+  /**
+   * The router's own report of its internet-side address.
+   */
+  external_ip?: string,
+  /**
+   * The mapping is not removed by the router itself (`lease` 0): only Kora removes it.
+   */
+  permanent: boolean,
+};
+
+/**
+ * `PUT /servers/{s}/forwarding`.
+ */
+export type ForwardingRequest = {
+  enabled: boolean,
+};
+
+export type ForwardingView = {
+  enabled: boolean,
+  status: ForwardStatus | null,
 };
 
 /**
@@ -1065,7 +1349,19 @@ export type InstallPlan = {
  * `POST /installs` and `POST /installs/plan`.
  */
 export type InstallRequest = {
-  mode: Mode,
+  /**
+   * The old spelling (`production` = clone + released, `development` = fork + latest). Optional: `source` and
+   * `versions` win when they are sent.
+   */
+  mode?: Mode,
+  /**
+   * Plain clones of the originals, or your own copies (forks).
+   */
+  source?: Source,
+  /**
+   * Released versions (pinned) or the latest changes (the main branch).
+   */
+  versions?: Versions,
   name: string,
   dir: string,
   hostname: string,
@@ -1099,6 +1395,16 @@ export type InstallRequest = {
   cfx_identifier: string | null,
 };
 
+export type IssueItem = {
+  number: number,
+  title: string,
+  author: string,
+  url: string,
+  comments: number,
+  created: string,
+  labels: Array<string>,
+};
+
 /**
  * `POST /servers/{s}/issues`.
  */
@@ -1106,6 +1412,12 @@ export type IssueRequest = {
   resource: string,
   title: string,
   text: string,
+};
+
+export type Issues = {
+  repo: string,
+  issues: Array<IssueItem>,
+  new_issue_url: string,
 };
 
 /**
@@ -1156,6 +1468,14 @@ export type JobRecord<R = JsonValue, E = JsonValue> = {
   events: Array<E>,
   result: R | null,
   error: JobError | null,
+  /**
+   * Unix seconds.
+   */
+  started: number,
+  /**
+   * Unix seconds; `null` while it runs.
+   */
+  ended: number | null,
 };
 
 /**
@@ -1165,7 +1485,37 @@ export type JobStarted = {
   job: string,
 };
 
-export type JobState = "running" | "done" | "failed";
+export type JobState = "running" | "done" | "failed" | "interrupted";
+
+/**
+ * One job in `GET /jobs`: this run's and, after a restart, the remembered ones (newest first, no events).
+ * `state` can be `interrupted`: the panel stopped while it ran, and `error` says what to do (`resume` when an install can carry on).
+ */
+export type JobSummary = {
+  id: string,
+  op: string,
+  server: string | null,
+  state: JobState,
+  events: Array<JsonValue>,
+  result: JsonValue | null,
+  error: JobError | null,
+  started: number,
+  ended: number | null,
+};
+
+/**
+ * `GET /jobs`.
+ */
+export type JobsList = {
+  jobs: Array<JobSummary>,
+};
+
+/**
+ * `?limit=` of `GET /jobs` (default 50, at most 300).
+ */
+export type JobsQuery = {
+  limit?: number,
+};
 
 export type JsonValue = number
   | string
@@ -1214,6 +1564,55 @@ export type KeyUpdateRequest = {
 
 export type Kind = "kora" | "dependency" | "optional" | "internal";
 
+export type Layer = {
+  id: LayerId,
+  state: ReachState,
+  title: string,
+  detail: string,
+  /**
+   * What to do by hand, one step per line, with the exact values to enter.
+   */
+  steps: Array<string>,
+  fixes: Array<Fix>,
+};
+
+export type LayerId = "running" | "firewall" | "router" | "internet";
+
+export type LocalChanges = {
+  branch: string | null,
+  files: Array<ChangedFile>,
+  /**
+   * The real number of changed files (`files` stops at 200).
+   */
+  count: number,
+  /**
+   * A readable diff (read-only), cut at about 60 000 characters.
+   */
+  diff: string,
+  diff_truncated: boolean,
+  /**
+   * Commits on this branch that are not on its remote yet, and the other way round. `None` = no remote branch.
+   */
+  ahead: number | null,
+  behind: number | null,
+  repos: Repos,
+};
+
+export type Log = {
+  branch: string | null,
+  commits: Array<LogEntry>,
+};
+
+export type LogEntry = {
+  sha: string,
+  subject: string,
+  author: string,
+  /**
+   * Unix time of the commit.
+   */
+  when: number,
+};
+
 export type LogFile = {
   name: string,
   size: number,
@@ -1237,6 +1636,14 @@ export type LogTailQuery = {
  */
 export type LogsList = {
   files: Array<LogFile>,
+};
+
+/**
+ * `POST .../prs/{number}/merge`: `merge`, `squash` or `rebase`; left out = the first the repository allows.
+ */
+export type MergeRequest = {
+  method?: string,
+  source?: string,
 };
 
 /**
@@ -1321,6 +1728,13 @@ export type MetricsQuery = {
 };
 
 export type Mode = "production" | "development";
+
+/**
+ * `POST /servers/{s}/resources/{name}/new-branch`.
+ */
+export type NewBranchRequest = {
+  name: string,
+};
 
 /**
  * `POST /users` answer: the token is shown this once.
@@ -1515,6 +1929,22 @@ export type PrChoices = {
   notes: Array<string>,
 };
 
+export type PrComment = {
+  author: string,
+  body: string,
+  created: string,
+  /**
+   * `comment`, or a review: `approved`, `changes_requested`, `commented`.
+   */
+  kind: string,
+};
+
+export type PrFile = {
+  path: string,
+  additions: number,
+  deletions: number,
+};
+
 /**
  * `POST /servers/{s}/pr`: the plan is worked out again on the server and must be exactly what was sent.
  */
@@ -1552,7 +1982,60 @@ export type PrPlanRequest = {
  */
 export type PrRef = number | string;
 
+/**
+ * Which side a pull request or issue is on: the original (default) or the person's own copy.
+ */
+export type PrSideQuery = {
+  source?: string,
+};
+
 export type PrSource = "upstream" | "fork";
+
+export type PrView = {
+  number: number,
+  title: string,
+  body: string,
+  author: string,
+  /**
+   * `OPEN`, `MERGED` or `CLOSED`.
+   */
+  state: string,
+  draft: boolean,
+  url: string,
+  /**
+   * `owner/name` it is on.
+   */
+  repo: string,
+  base: string,
+  head: string,
+  created: string,
+  updated: string,
+  /**
+   * `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED` or empty (no reviews needed).
+   */
+  review: string,
+  checks: ChecksState,
+  check_list: Array<Check>,
+  /**
+   * `MERGEABLE`, `CONFLICTING` or `UNKNOWN`.
+   */
+  mergeable: string,
+  files: Array<PrFile>,
+  comments: Array<PrComment>,
+  /**
+   * Which ways of merging the repository allows: `merge`, `squash`, `rebase`.
+   */
+  merge_methods: Array<string>,
+  /**
+   * Whether the signed-in account may merge here (`ADMIN`, `MAINTAIN` or `WRITE` on the repository).
+   */
+  can_merge: boolean,
+  acting_as: string | null,
+  /**
+   * Set when this pull request is the one checked out in the resource.
+   */
+  trying?: Trying,
+};
 
 export type Preset = "daily" | "weekly" | "custom";
 
@@ -1623,6 +2106,8 @@ export type ProgressEvent = {
  */
 export type Provider = "local" | "tailscale" | "token";
 
+export type PublicSource = "router" | "cfx" | "ip_echo";
+
 export type PullRequest = {
   number: number,
   title: string,
@@ -1643,7 +2128,72 @@ export type PullRequest = {
   draft: boolean,
   url: string,
   updated: string,
+  /**
+   * When it was opened.
+   */
+  created: string,
+  /**
+   * `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or empty when GitHub did not say.
+   */
+  review: string,
+  /**
+   * Whether its checks pass, fail, are still running, or there are none.
+   */
+  checks: ChecksState,
 };
+
+export type Pushed = {
+  branch: string,
+  /**
+   * `owner/name` it went to.
+   */
+  to: string,
+  /**
+   * The branch did not exist on GitHub before.
+   */
+  new_branch: boolean,
+  acting_as: string | null,
+};
+
+/**
+ * `POST /servers/{s}/reach` and `PUT /reach/settings`: which outside lookups to allow. A field that is left out
+ * changes nothing (settings) or keeps the saved choice (a check). A check never saves what it is given.
+ */
+export type ReachConsentPatch = {
+  cfx_list?: boolean,
+  ip_echo?: boolean,
+};
+
+export type ReachReport = {
+  server: string,
+  game_port: number,
+  layers: Array<Layer>,
+  /**
+   * `ok`, `problem` or `unknown`: the worst of the layers, in one word.
+   */
+  verdict: ReachState,
+  headline: string,
+  lan_ip: string | null,
+  public_ip: string | null,
+  public_source: PublicSource | null,
+  behind_nat: boolean | null,
+  cgnat: boolean,
+  join_code: string | null,
+  connect: Connect,
+  forwarding: ForwardingView,
+  contacted: Array<Contacted>,
+  /**
+   * Outside lookups that would help but were not allowed: `cfx_list`, `ip_echo`.
+   */
+  needs_consent: Array<ConsentKind>,
+  checked_unix: number,
+  /**
+   * The saved choices about outside lookups (the check itself may have used wider ones for one time).
+   */
+  consent: Consent,
+};
+
+export type ReachState = "ok" | "likely" | "problem" | "unknown";
 
 /**
  * `GET /assets/downloads`.
@@ -1652,6 +2202,32 @@ export type RecentDownloads = {
   found: boolean,
   folder?: string,
   zips: Array<DownloadZip>,
+};
+
+export type ReleaseItem = {
+  tag: string,
+  name: string,
+  published: string,
+  prerelease: boolean,
+  url: string,
+  notes: string,
+  /**
+   * This is the release the server is pinned to.
+   */
+  pinned: boolean,
+  /**
+   * This is newer than the release the server is pinned to.
+   */
+  newer: boolean,
+};
+
+export type Releases = {
+  repo: string,
+  /**
+   * The pinned release of this resource (a commit), when the server follows released versions.
+   */
+  pinned_commit: string | null,
+  releases: Array<ReleaseItem>,
 };
 
 export type Remote = "origin" | "upstream";
@@ -1694,6 +2270,20 @@ export type RemoteSettingsUpdate = {
   allow_remote_destructive?: boolean,
 };
 
+/**
+ * The repositories of a resource: the original, and the person's own copy when there is one.
+ */
+export type Repos = {
+  /**
+   * `owner/name` of the original repository.
+   */
+  original: string | null,
+  /**
+   * `owner/name` of the person's own copy (fork), when there is one.
+   */
+  fork: string | null,
+};
+
 export type ResourceBranch = {
   id: string,
   /**
@@ -1706,6 +2296,10 @@ export type ResourceBranch = {
    */
   branch?: string,
   pr?: number,
+  /**
+   * The title of that pull request, when Kora has it (kept when the pull request is tried, refreshed by "Get the latest commits").
+   */
+  pr_title?: string,
   /**
    * The normal branch (`dev`).
    */
@@ -1760,6 +2354,39 @@ export type ResourceEvent = {
 };
 
 /**
+ * `GET /servers/{s}/resources/{name}`.
+ */
+export type ResourcePage = {
+  id: string,
+  /**
+   * Relative to `resources/`.
+   */
+  folder: string,
+  repository: string,
+  /**
+   * The branch it normally follows.
+   */
+  default_branch: string,
+  /**
+   * The release it is pinned to, when the server uses released versions.
+   */
+  pinned_commit?: string,
+  third_party: boolean,
+  source?: string,
+  version?: string,
+  /**
+   * Where its files are: the normal version, a branch, a pull request.
+   */
+  branch: ResourceBranch,
+  /**
+   * The original repository and your own copy; `null` when it is not a git clone.
+   */
+  repos: Repos | null,
+  restart: RestartInfo,
+  server: ResourceServerState,
+};
+
+/**
  * `"all"` or `{"only": [ids]}`.
  */
 export type ResourceSelection = "all"
@@ -1768,10 +2395,42 @@ export type ResourceSelection = "all"
   };
 
 /**
+ * The server the resource is on, as far as the page needs it.
+ */
+export type ResourceServerState = {
+  name: string,
+  mode: Mode,
+  source: Source,
+  versions: Versions,
+  running: boolean,
+  console_enabled: boolean,
+  console_waiting_for_restart: boolean,
+};
+
+/**
  * `GET /servers/{s}/resources`.
  */
 export type ResourcesList = {
   resources: Array<string>,
+};
+
+/**
+ * What the panel shows for one resource.
+ */
+export type RestartInfo = {
+  /**
+   * The running server still has the old version of this resource.
+   */
+  needed: boolean,
+  /**
+   * What changed, when it is `needed`.
+   */
+  why?: string,
+  changed_unix?: number,
+  /**
+   * The words to show.
+   */
+  notice?: string,
 };
 
 export type RestartPolicy = "none" | "ensure" | "full_restart" | "when_quiet";
@@ -1797,6 +2456,15 @@ export type ResumeRequest = {
    * Carry on without the parts that need administrator rights.
    */
   without_admin?: boolean,
+};
+
+/**
+ * `POST .../prs/{number}/review`: `approve`, `request_changes` (with a reason) or `comment`.
+ */
+export type ReviewRequest = {
+  action: string,
+  body?: string,
+  source?: string,
 };
 
 /**
@@ -1830,7 +2498,12 @@ export type SampleBadge = "up_to_date"
  * The answers of an install that stopped part-way, as saved: never a licence key or a database login.
  */
 export type SavedInstall = {
+  /**
+   * The old spelling, always sent.
+   */
   mode: Mode,
+  source?: Source,
+  versions?: Versions,
   name: string,
   dir: string,
   hostname: string,
@@ -2001,7 +2674,18 @@ export type ServerDetail = {
   console_enabled: boolean,
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -2047,7 +2731,18 @@ export type ServerKeyRequest =
 export type ServerSummary = {
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -2104,10 +2799,22 @@ export type SessionRequest = {
   code?: string,
 };
 
+export type SnapshotBranch = {
+  id: string,
+  /**
+   * The branch it was on when the snapshot was taken (not its normal one).
+   */
+  branch: string,
+};
+
 export type SnapshotInfo = {
   id: string,
   created_unix: number,
   resources: Array<string>,
+  /**
+   * Resources that were not on their normal branch when the snapshot was taken: a rollback puts them back on it.
+   */
+  on_other_branch: Array<SnapshotBranch>,
 };
 
 /**
@@ -2116,6 +2823,12 @@ export type SnapshotInfo = {
 export type SnapshotsList = {
   snapshots: Array<SnapshotInfo>,
 };
+
+/**
+ * Where a server's resources come from. This is the whole difference between the old "Production" and "Development"
+ * as far as GitHub goes: nothing else about a server depends on it.
+ */
+export type Source = "clone" | "fork";
 
 /**
  * `POST /servers/{s}/resources/{name}/stash/restore`.
@@ -2326,6 +3039,35 @@ export type ToolsList = {
   tools: Array<ToolStatus>,
 };
 
+/**
+ * A pull request that is checked out here: how it stands against its newest commit on GitHub.
+ */
+export type Trying = {
+  branch: string,
+  /**
+   * Commits GitHub has that this folder does not (`None` = the folder has not downloaded its newest commit: get the latest).
+   */
+  behind: number | null,
+  /**
+   * Commits made here on top of it.
+   */
+  ahead: number,
+};
+
+/**
+ * `POST /servers/{s}/txadmin/ticket`: where to open txAdmin through the panel. The address works once, for a minute.
+ * txAdmin has its own sign-in; `username` is the account Kora made at install (never its password).
+ */
+export type TxAdminTicket = {
+  url: string,
+  /**
+   * The panel-side port of this server's txAdmin.
+   */
+  port: number,
+  expires_in: number,
+  username: string | null,
+};
+
 export type UninstallAnswer = {
   item: string,
   remove: boolean,
@@ -2495,6 +3237,27 @@ export type UserAddRequest = {
  */
 export type UsersList = {
   users: Array<PanelUser>,
+};
+
+/**
+ * Which versions of the resources a server follows. A separate setting from [`Source`].
+ */
+export type Versions = "released" | "latest";
+
+/**
+ * `PUT /servers/{s}/versions`.
+ */
+export type VersionsRequest = {
+  versions: Versions,
+};
+
+export type VersionsSet = {
+  source: Source,
+  versions: Versions,
+  /**
+   * What to do next, in words.
+   */
+  message: string,
 };
 
 /**

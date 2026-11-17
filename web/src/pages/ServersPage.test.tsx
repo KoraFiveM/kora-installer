@@ -9,7 +9,7 @@ const fetchMock = vi.fn()
 beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock) })
 afterEach(() => vi.unstubAllGlobals())
 
-const srv = (name: string, badge: ServerSummary['badge']): ServerSummary => ({ name, dir: `/srv/${name}`, mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: 0, status: 'stopped', badge, managed: true, connect: null })
+const srv = (name: string, badge: ServerSummary['badge']): ServerSummary => ({ name, dir: `/srv/${name}`, mode: 'production', source: 'clone', versions: 'released', ports: { game: 30120, txadmin: 40120 }, created_unix: 0, status: 'stopped', badge, managed: true, connect: null })
 
 describe('ServersPage', () => {
   it('links the update chip to the Resources tab of that server, when there is something to look at', async () => {
@@ -30,7 +30,8 @@ describe('ServersPage quick buttons', () => {
       return jsonResponse(200, { alerts: [] })
     })
     renderApp(<ServersPage />)
-    expect(await screen.findByRole('link', { name: /open txadmin/i })).toHaveAttribute('href', 'http://localhost:40120')
+    // Not at the computer that runs Kora (a tunnel to a machine with no desktop): txAdmin opens through the panel.
+    expect(await screen.findByRole('button', { name: /open txadmin/i })).toBeInTheDocument()
     // On a computer with no desktop (or from afar) the folder button is "Copy path".
     expect(await screen.findByRole('button', { name: /copy path/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy connect address/i })).toBeInTheDocument()

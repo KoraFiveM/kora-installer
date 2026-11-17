@@ -24,6 +24,7 @@ export interface OpTypes {
   console_send: { method: 'POST'; path: '/servers/{s}/console'; params: { s: string }; query: undefined; body: ConsoleCommand; response: undefined; events: undefined; result: undefined }
   console_enable: { method: 'PUT'; path: '/servers/{s}/console/enabled'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
   resources_list: { method: 'GET'; path: '/servers/{s}/resources'; params: { s: string }; query: undefined; body: undefined; response: ResourcesList; events: undefined; result: undefined }
+  resource_get: { method: 'GET'; path: '/servers/{s}/resources/{name}'; params: { s: string; name: string }; query: undefined; body: undefined; response: ResourcePage; events: undefined; result: undefined }
   resource_ensure: { method: 'POST'; path: '/servers/{s}/ensure'; params: { s: string }; query: undefined; body: EnsureRequest; response: Message; events: undefined; result: undefined }
   resource_control: { method: 'POST'; path: '/servers/{s}/resources/{name}/control'; params: { s: string; name: string }; query: undefined; body: ResourceControlRequest; response: Message; events: undefined; result: undefined }
   update_preview: { method: 'POST'; path: '/servers/{s}/update/preview'; params: { s: string }; query: undefined; body: UpdatePreviewRequest; response: JobStarted; events: UpdateEvent; result: UpdatePreviewResult }
@@ -69,6 +70,8 @@ export interface OpTypes {
   uninstall_run: { method: 'POST'; path: '/uninstall'; params: Record<string, never>; query: undefined; body: UninstallRequest; response: JobStarted; events: StatusEvent; result: UninstallResult }
   jobs_get: { method: 'GET'; path: '/jobs/{id}'; params: { id: string }; query: undefined; body: undefined; response: JobRecord<JsonValue, JsonValue>; events: undefined; result: undefined }
   job_events: { method: 'GET'; path: '/jobs/{id}/events'; params: { id: string }; query: undefined; body: undefined; response: JobFailedData; events: undefined; result: undefined }
+  jobs_list: { method: 'GET'; path: '/jobs'; params: Record<string, never>; query: JobsQuery; body: undefined; response: JobsList; events: undefined; result: undefined }
+  audit_list: { method: 'GET'; path: '/audit'; params: Record<string, never>; query: AuditQuery; body: undefined; response: AuditPage; events: undefined; result: undefined }
   events: { method: 'GET'; path: '/events'; params: Record<string, never>; query: undefined; body: undefined; response: ServersList; events: undefined; result: undefined }
   metrics_get: { method: 'GET'; path: '/servers/{s}/metrics'; params: { s: string }; query: MetricsQuery; body: undefined; response: Metrics; events: undefined; result: undefined }
   alerts_list: { method: 'GET'; path: '/alerts'; params: Record<string, never>; query: undefined; body: undefined; response: AlertsList; events: undefined; result: undefined }
@@ -113,6 +116,26 @@ export interface OpTypes {
   stash_restore: { method: 'POST'; path: '/servers/{s}/resources/{name}/stash/restore'; params: { s: string; name: string }; query: undefined; body: StashRestoreRequest; response: SwitchResult; events: undefined; result: undefined }
   branch_bulk_preview: { method: 'POST'; path: '/servers/{s}/branches/preview'; params: { s: string }; query: undefined; body: BulkPreviewRequest; response: JobStarted; events: BulkEvent; result: BulkPreview }
   branch_bulk_apply: { method: 'POST'; path: '/servers/{s}/branches/apply'; params: { s: string }; query: undefined; body: BulkApplyRequest; response: JobStarted; events: BulkEvent; result: BulkResult }
+  resource_changes: { method: 'GET'; path: '/servers/{s}/resources/{name}/changes'; params: { s: string; name: string }; query: undefined; body: undefined; response: LocalChanges; events: undefined; result: undefined }
+  resource_log: { method: 'GET'; path: '/servers/{s}/resources/{name}/log'; params: { s: string; name: string }; query: undefined; body: undefined; response: Log; events: undefined; result: undefined }
+  resource_commit: { method: 'POST'; path: '/servers/{s}/resources/{name}/commit'; params: { s: string; name: string }; query: undefined; body: CommitRequest; response: Committed; events: undefined; result: undefined }
+  resource_push: { method: 'POST'; path: '/servers/{s}/resources/{name}/push'; params: { s: string; name: string }; query: undefined; body: undefined; response: Pushed; events: undefined; result: undefined }
+  resource_new_branch: { method: 'POST'; path: '/servers/{s}/resources/{name}/new-branch'; params: { s: string; name: string }; query: undefined; body: NewBranchRequest; response: SwitchNow; events: undefined; result: undefined }
+  pr_view: { method: 'GET'; path: '/servers/{s}/resources/{name}/prs/{number}'; params: { s: string; name: string; number: string }; query: PrSideQuery; body: undefined; response: PrView; events: undefined; result: undefined }
+  pr_comment: { method: 'POST'; path: '/servers/{s}/resources/{name}/prs/{number}/comment'; params: { s: string; name: string; number: string }; query: undefined; body: CommentRequest; response: Acted; events: undefined; result: undefined }
+  pr_review: { method: 'POST'; path: '/servers/{s}/resources/{name}/prs/{number}/review'; params: { s: string; name: string; number: string }; query: undefined; body: ReviewRequest; response: Acted; events: undefined; result: undefined }
+  pr_merge: { method: 'POST'; path: '/servers/{s}/resources/{name}/prs/{number}/merge'; params: { s: string; name: string; number: string }; query: undefined; body: MergeRequest; response: Acted; events: undefined; result: undefined }
+  issues_list: { method: 'GET'; path: '/servers/{s}/resources/{name}/issues'; params: { s: string; name: string }; query: undefined; body: undefined; response: Issues; events: undefined; result: undefined }
+  issue_comment: { method: 'POST'; path: '/servers/{s}/resources/{name}/issues/{number}/comment'; params: { s: string; name: string; number: string }; query: undefined; body: CommentRequest; response: Acted; events: undefined; result: undefined }
+  resource_releases: { method: 'GET'; path: '/servers/{s}/resources/{name}/releases'; params: { s: string; name: string }; query: undefined; body: undefined; response: Releases; events: undefined; result: undefined }
+  resources_fork: { method: 'POST'; path: '/servers/{s}/fork'; params: { s: string }; query: undefined; body: ForkRequest; response: JobStarted; events: ForkEvent; result: ForkOutcome }
+  versions_set: { method: 'PUT'; path: '/servers/{s}/versions'; params: { s: string }; query: undefined; body: VersionsRequest; response: VersionsSet; events: undefined; result: undefined }
+  reach_check: { method: 'POST'; path: '/servers/{s}/reach'; params: { s: string }; query: undefined; body: ReachConsentPatch; response: ReachReport; events: undefined; result: undefined }
+  reach_settings_get: { method: 'GET'; path: '/reach/settings'; params: Record<string, never>; query: undefined; body: undefined; response: Consent; events: undefined; result: undefined }
+  reach_settings_set: { method: 'PUT'; path: '/reach/settings'; params: Record<string, never>; query: undefined; body: ReachConsentPatch; response: Consent; events: undefined; result: undefined }
+  forwarding_set: { method: 'PUT'; path: '/servers/{s}/forwarding'; params: { s: string }; query: undefined; body: ForwardingRequest; response: ForwardingView; events: undefined; result: undefined }
+  reach_firewall_open: { method: 'POST'; path: '/servers/{s}/reach/firewall'; params: { s: string }; query: undefined; body: undefined; response: Notes; events: undefined; result: undefined }
+  txadmin_ticket: { method: 'POST'; path: '/servers/{s}/txadmin/ticket'; params: { s: string }; query: undefined; body: undefined; response: TxAdminTicket; events: undefined; result: undefined }
 }
 
 export type OpName = keyof OpTypes
@@ -148,6 +171,7 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   console_send: { method: 'POST', path: '/servers/{s}/console', job: false, stream: false, raw: null },
   console_enable: { method: 'PUT', path: '/servers/{s}/console/enabled', job: false, stream: false, raw: null },
   resources_list: { method: 'GET', path: '/servers/{s}/resources', job: false, stream: false, raw: null },
+  resource_get: { method: 'GET', path: '/servers/{s}/resources/{name}', job: false, stream: false, raw: null },
   resource_ensure: { method: 'POST', path: '/servers/{s}/ensure', job: false, stream: false, raw: null },
   resource_control: { method: 'POST', path: '/servers/{s}/resources/{name}/control', job: false, stream: false, raw: null },
   update_preview: { method: 'POST', path: '/servers/{s}/update/preview', job: true, stream: false, raw: null },
@@ -193,6 +217,8 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   uninstall_run: { method: 'POST', path: '/uninstall', job: true, stream: false, raw: null },
   jobs_get: { method: 'GET', path: '/jobs/{id}', job: false, stream: false, raw: null },
   job_events: { method: 'GET', path: '/jobs/{id}/events', job: false, stream: true, raw: null },
+  jobs_list: { method: 'GET', path: '/jobs', job: false, stream: false, raw: null },
+  audit_list: { method: 'GET', path: '/audit', job: false, stream: false, raw: null },
   events: { method: 'GET', path: '/events', job: false, stream: true, raw: null },
   metrics_get: { method: 'GET', path: '/servers/{s}/metrics', job: false, stream: false, raw: null },
   alerts_list: { method: 'GET', path: '/alerts', job: false, stream: false, raw: null },
@@ -237,6 +263,26 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   stash_restore: { method: 'POST', path: '/servers/{s}/resources/{name}/stash/restore', job: false, stream: false, raw: null },
   branch_bulk_preview: { method: 'POST', path: '/servers/{s}/branches/preview', job: true, stream: false, raw: null },
   branch_bulk_apply: { method: 'POST', path: '/servers/{s}/branches/apply', job: true, stream: false, raw: null },
+  resource_changes: { method: 'GET', path: '/servers/{s}/resources/{name}/changes', job: false, stream: false, raw: null },
+  resource_log: { method: 'GET', path: '/servers/{s}/resources/{name}/log', job: false, stream: false, raw: null },
+  resource_commit: { method: 'POST', path: '/servers/{s}/resources/{name}/commit', job: false, stream: false, raw: null },
+  resource_push: { method: 'POST', path: '/servers/{s}/resources/{name}/push', job: false, stream: false, raw: null },
+  resource_new_branch: { method: 'POST', path: '/servers/{s}/resources/{name}/new-branch', job: false, stream: false, raw: null },
+  pr_view: { method: 'GET', path: '/servers/{s}/resources/{name}/prs/{number}', job: false, stream: false, raw: null },
+  pr_comment: { method: 'POST', path: '/servers/{s}/resources/{name}/prs/{number}/comment', job: false, stream: false, raw: null },
+  pr_review: { method: 'POST', path: '/servers/{s}/resources/{name}/prs/{number}/review', job: false, stream: false, raw: null },
+  pr_merge: { method: 'POST', path: '/servers/{s}/resources/{name}/prs/{number}/merge', job: false, stream: false, raw: null },
+  issues_list: { method: 'GET', path: '/servers/{s}/resources/{name}/issues', job: false, stream: false, raw: null },
+  issue_comment: { method: 'POST', path: '/servers/{s}/resources/{name}/issues/{number}/comment', job: false, stream: false, raw: null },
+  resource_releases: { method: 'GET', path: '/servers/{s}/resources/{name}/releases', job: false, stream: false, raw: null },
+  resources_fork: { method: 'POST', path: '/servers/{s}/fork', job: true, stream: false, raw: null },
+  versions_set: { method: 'PUT', path: '/servers/{s}/versions', job: false, stream: false, raw: null },
+  reach_check: { method: 'POST', path: '/servers/{s}/reach', job: false, stream: false, raw: null },
+  reach_settings_get: { method: 'GET', path: '/reach/settings', job: false, stream: false, raw: null },
+  reach_settings_set: { method: 'PUT', path: '/reach/settings', job: false, stream: false, raw: null },
+  forwarding_set: { method: 'PUT', path: '/servers/{s}/forwarding', job: false, stream: false, raw: null },
+  reach_firewall_open: { method: 'POST', path: '/servers/{s}/reach/firewall', job: false, stream: false, raw: null },
+  txadmin_ticket: { method: 'POST', path: '/servers/{s}/txadmin/ticket', job: false, stream: false, raw: null },
 }
 
 /** Operations that still have an `Untyped` request, response or job type (a list to shrink). */

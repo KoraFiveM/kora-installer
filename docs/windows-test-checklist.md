@@ -113,20 +113,27 @@ does not, stop on that step, write down its number and collect the items under *
       "Logged in".
     *If not, copy back:* the Show details text and the output above.
 
-## 4. Saved licence keys and `secrets.json`
+## 4. Saved licence keys and the private data file
 
 19. [ ] **Add a key in Settings.** Settings > Licence keys > add one named "Main" with your real key. The list shows
     "Main" and only the **last four characters**. The full key is nowhere on the page (also not in "Show details").
-20. [ ] **`secrets.json` is private to you.** In a normal PowerShell window run
-    `icacls "$env:LOCALAPPDATA\Kora\secrets.json"`. *Should happen:* exactly one entry, your own account
-    (`<MACHINE>\<you>:(R,W)`); **no** `BUILTIN\Users`, `Everyone`, `Authenticated Users`, and no `(I)` inherited
-    entries. You can still open the file in Notepad (do not paste its contents anywhere).
+20. [ ] **The data file is private to you.** Kora keeps the saved keys in `%LOCALAPPDATA%\Kora\store\kora.db` (there is no
+    `secrets.json` any more). In a normal PowerShell window run `icacls "$env:LOCALAPPDATA\Kora\store"` and
+    `icacls "$env:LOCALAPPDATA\Kora\store\kora.db"`. *Should happen:* exactly one entry, your own account
+    (`<MACHINE>\<you>:(OI)(CI)(F)` for the folder, `<MACHINE>\<you>:(F)` for the file; the file's entry may show `(I)` because it
+    comes from the folder); **no** `BUILTIN\Users`, `Everyone`, `Authenticated Users`. While the panel runs, any `kora.db-wal` /
+    `kora.db-shm` next to it shows the same single entry.
     *If not, copy back:* the `icacls` output only.
+20a. [ ] **An old install is carried over.** If this computer had Kora 0.7 before: after the first start of this version Settings >
+    Licence keys still lists your keys, Settings > Recent jobs and the server list are intact, and
+    `%LOCALAPPDATA%\Kora\store\before-sqlite\` holds the old `secrets.json`, `servers.json` etc. (nothing was deleted).
+    `kora store status` prints the data file, its version and what is in it; `kora store backup` makes a copy in `store\backups`.
+    *If not, copy back:* the output of `kora store status`.
 21. [ ] **Replace, rename and delete work on that private file.** In Settings > Licence keys rename "Main" to "Live", add a
     second key "Test" (any text of the right shape, for example `cfxk_` followed by 20 letters/digits, then `_` and
     four more), replace "Test" with another, delete "Test". Every action succeeds with no "access denied" and
-    `icacls` on the file still shows only your account. (The file is rewritten through a temporary file each time; this
-    is the one place Windows permissions could get in the way.)
+    `icacls` on the file still shows only your account. (SQLite creates and removes `kora.db-wal` and `kora.db-shm` in the
+    private folder each time; this is the one place Windows permissions could get in the way.)
     *If not, copy back:* the error text and the `icacls` output.
 22. [ ] **`kora keys list`** in a normal window shows the same names and last four characters, never a full key.
 
@@ -251,6 +258,24 @@ S13. [ ] **Service account narrowing (owner decision).** The service runs as Loc
     account with only the privileges it uses is worth it (service control, firewall, folder ACL changes, task creation
     for other users) and write down what failed if you try one.
 
+## Can players reach my server, and txAdmin through the panel (unverified on Windows)
+
+These were written on Linux; what Windows prints and does is yours to check.
+
+- [ ] **Reachability card.** On a server's Overview press **Check now**. *Should happen:* four lines (Running, Firewall,
+  Router, Internet). With the server running the first is OK; the firewall line says Windows Firewall and "Kora did not
+  open port ..." unless the install opened it (then OK). Nothing outside is contacted (the card says so). Run
+  `kora reach <name>` in a terminal: the same lines.
+- [ ] **Gateway address.** `route print -4 0.0.0.0` shows your default gateway; Kora reads the same row for NAT-PMP/PCP.
+  *Should happen:* with a router that offers UPnP, **Forward port ... for me** turns the line OK, and your router's page
+  lists "Kora <name> game" for TCP and UDP. Stop the server: the entries disappear (within a minute).
+- [ ] **Service host.** With the server running as a service, switch forwarding on, then `sc stop kora-<name>`: the router
+  entries are removed before the service reports stopped.
+- [ ] **txAdmin through the panel.** From another device open the panel and press **Open txAdmin** on a server: a new tab
+  opens txAdmin's sign-in page on the panel's address with port txAdmin + 10000. Sign in to txAdmin; the live console
+  updates. Sign out of the panel: the console tab closes within about 20 seconds and reloading it shows "Open txAdmin
+  from the Kora panel". Windows Firewall may ask about the panel's new port (allow private networks only).
+
 ## 7. Upgrade delta: a machine that has 0.6.x with the old machine-wide app
 
 Do this **instead of** section 1 on a machine that already has 0.6.x, or on a second VM that has it. To make that
@@ -288,12 +313,60 @@ run `kora app install` (this is how 0.6.x made the machine-wide app, with its ad
     the servers and the panel are untouched; **no UAC prompt**. Make them again with `kora app install`.
 43. [ ] **Panel Uninstall.** Settings > Uninstall Kora shows an item-by-item list that names the shortcuts and Kora's own
     Git/GitHub CLI copies. Do **not** tick the server folders or databases. Run it (type `uninstall`): services, firewall
-    rules and the server-list entries go; **the server folders and `secrets.json` stay**.
+    rules and the server-list entries go; **the server folders and Kora's data file stay**.
 44. [ ] **`kora delete "test dev"`** and **`kora delete "test prod"`** (administrator window if it says so) remove the
     server, its service and its firewall rule: `Get-Service kora-*` and
     `Get-NetFirewallRule -DisplayName "*kora*"` show nothing for them.
 45. [ ] **Tidy the test machine**: delete the test forks on GitHub, run `kora uninstall` in a terminal and answer **yes**
     to removing saved keys and Kora's own tools; the folder `%LOCALAPPDATA%\Kora` is gone or empty apart from the program.
+
+## The desktop app: tray icon, window, notifications (never run on Windows before this pass)
+
+The desktop app (`kora-desktop.exe`) was compiled and smoke-tested only by CI; this is its first real pass. Install it next
+to `kora.exe` (for now copy `kora-desktop-windows-x86_64.exe` from the CI artifact next to `kora.exe` and rename it
+`kora-desktop.exe`), then run `kora app install`. Note for each failure what you saw and, if the window is blank, whether
+the address bar of your browser shows the panel when you run `kora`.
+
+D1. [ ] **Start it** (the Kora shortcut, now pointing at `kora-desktop.exe`; check with `kora app status`). A small Kora
+    window opens, already signed in, showing the servers screen. No console window flashes. An icon appears in the
+    notification area (click the little arrow by the clock if it is hidden; drag it onto the bar to keep it visible).
+D2. [ ] **Tray colour and words.** Hover the icon: "Kora: all N servers are running" with the icon green. Stop one server from
+    its tray submenu: the icon turns amber/red within about 10 seconds and the hover text says "1 of N servers running".
+    Start it again from the menu: green again.
+D3. [ ] **Menu.** Right-click: Open Kora, each server (Open in Kora, Start/Stop/Restart, Open txAdmin when running), Check
+    for updates, Pause notifications, Start with Windows (ticked), a line saying Quit keeps your servers and the background
+    service running, Quit, Quit and turn off Kora's background service. Left-click the icon opens/shows the window.
+D4. [ ] **Close to tray.** Close the window with the X: a notification says Kora is still running in the notification
+    area (once only). The icon stays. Left-click it: the window is back, still signed in, on the same page.
+D5. [ ] **Single instance.** With the window closed to the tray, start Kora from the Start menu again: the existing window
+    appears; no second icon; Task Manager shows one `kora-desktop.exe`.
+D6. [ ] **Notification on a crash.** End a server's process in Task Manager (`FXServer.exe`) with the window closed to the
+    tray and alert rule "stopped" on (server, Monitoring tab): within about a minute a Windows notification says "<name>
+    stopped" and clicking it opens that server's page. With the rule off: no notification. With **Pause notifications**: none;
+    "Turn notifications back on" restores them. Stop 4 servers at once (if you have them): ONE summary notification.
+    *If no notification appears at all, note it: it is the first thing to check (the notification identity `Kora.Desktop`).*
+D7. [ ] **Update notification.** (Only when a newer Kora exists.) "Kora X is ready" once, clicking it opens Settings.
+D8. [ ] **Start with Windows.** Sign out and in: the Kora icon appears with no window; the background panel is running.
+    Untick "Start with Windows" in the tray menu, sign out and in: no icon. Tick it again.
+    Also check Settings > Apps > Startup: Kora is listed; switch it off there and the tray menu shows it unticked.
+D9. [ ] **Browser still works.** Run `kora` in PowerShell with the app running: it opens your browser at the panel as
+    before (the app and the browser can be open at once).
+D10. [ ] **Links.** In the window, click a link to GitHub (or "Open txAdmin" on a local server): it opens in your default
+    browser, and the app window does not navigate away.
+D11. [ ] **Browse.** Servers > Add an existing server > **Browse...**: the Windows folder dialog opens; the chosen folder
+    appears in the box. Cancel leaves the box alone. In a normal browser there is no Browse button.
+D12. [ ] **The administrator prompt in front.** (Needs the privileged-service build.) From the app press "Install Kora's
+    administrator service": the Windows prompt appears **in front of the Kora window** (not a flashing shield in the
+    taskbar). Say No: "Windows asked for permission and it was not given." Compare with the same button in a browser (the
+    old behaviour): note whether it flashes in the taskbar.
+D13. [ ] **WebView2 missing.** On a machine or VM without WebView2 (or after uninstalling "Microsoft Edge WebView2 Runtime"
+    where Windows allows it): starting the app gives one notification explaining it and opens Kora in the browser; the tray
+    icon still works. The message names the Microsoft download link.
+D14. [ ] **Quit.** Quit: the icon disappears (no ghost icon), the game servers and the background panel keep running
+    (`Get-Process kora*`, the browser still reaches the panel). Start the app again, then **Quit and turn off Kora's
+    background service**: the panel stops answering; servers keep running; the next `kora` starts the panel again.
+D15. [ ] **Uninstall.** `kora app uninstall` (or the MSI uninstall) removes the shortcuts and the start-up entry
+    (`reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Kora` finds nothing).
 
 ## 9. Report back
 

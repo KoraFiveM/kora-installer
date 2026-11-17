@@ -76,8 +76,50 @@ pub enum BranchCmd {
     },
 }
 
+#[derive(clap::Args, Clone)]
+pub struct PrRef {
+    /// Registry name, or the server folder.
+    server: String,
+    resource: String,
+    /// The pull request's number.
+    number: u32,
+    /// Which repository it is on: upstream (the original, the default) or fork (yours).
+    #[arg(long, value_name = "upstream|fork")]
+    source: Option<String>,
+}
+
 #[derive(Subcommand)]
 pub enum PrCmd {
+    /// A pull request in full: checks, reviews, files, conversation, and whether you may merge it.
+    View(PrRef),
+    /// Comment on a pull request, as the GitHub account `gh` is signed in as.
+    Comment {
+        #[command(flatten)]
+        pr: PrRef,
+        #[arg(short = 'm', long)]
+        message: String,
+    },
+    /// Approve, ask for changes or comment on a pull request (as the signed-in GitHub account).
+    Review {
+        #[command(flatten)]
+        pr: PrRef,
+        /// approve, request-changes or comment.
+        #[arg(long, value_name = "approve|request-changes|comment")]
+        action: String,
+        #[arg(short = 'm', long)]
+        message: Option<String>,
+    },
+    /// Merge a pull request, if your GitHub account may (the way the repository allows).
+    Merge {
+        #[command(flatten)]
+        pr: PrRef,
+        /// merge, squash or rebase (default: the first the repository allows).
+        #[arg(long)]
+        method: Option<String>,
+        /// Do not ask first.
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
     /// List the open pull requests of the original repository and your fork, for one resource.
     List { server: String, resource: String },
     /// Try a pull request on one resource: its number or its GitHub address.
@@ -125,7 +167,9 @@ fn show_row(r: &ResourceBranch) {
         (c, s) => format!("  ({c} changed file(s), {s} set(s) kept aside)"),
     };
     let note = r.note.as_deref().filter(|_| matches!(r.state, State::Pinned | State::Unavailable)).map(|n| format!(": {n}")).unwrap_or_default();
-    println!("{:<28} {}{note}{extra}", r.id, r.label);
+    // Not on the normal version: marked, in the same words as `kora status` and the panel.
+    let mark = if crate::cmd::resource::off_normal_line(r).is_some() { "!" } else { " " };
+    println!("{mark} {:<28} {}{note}{extra}", r.id, r.label);
 }
 
 fn print_switched(r: &br::SwitchResult) -> i32 {
@@ -269,8 +313,92 @@ fn bulk_apply(server: &str, target: Target, changes: Changes) -> i32 {
     }
 }
 
+fn side_of(r: &PrRef) -> Result<Option<String>, i32> {
+    match r.source.as_deref() {
+        None | Some("upstream") => Ok(None),
+        Some("fork") => Ok(Some("fork".into())),
+        Some(other) => {
+            eprintln!("error: --source must be upstream or fork, not '{other}'");
+            Err(2)
+        }
+    }
+}
+
+fn collab_pr(pr: &PrRef, build: impl FnOnce(String, Option<String>) -> kora_core::collab::Request) -> Result<kora_core::collab::Reply, i32> {
+    let source = side_of(pr)?;
+    kora_core::collab::run_for(&pr.server, &build(pr.resource.clone(), source), &mut |_, _, _| {}).map_err(|p| fail(&p))
+}
+
+fn print_pr_view(v: &kora_core::collab::PrView) {
+    println!("#{} {}  ({} by {}, {})", v.number, v.title, v.state.to_ascii_lowercase(), v.author, v.repo);
+    println!(
+        "  {} into {}   checks: {}   review: {}   mergeable: {}",
+        v.head,
+        v.base,
+        crate::cmd::resource::checks_word(v.checks),
+        if v.review.is_empty() { "none needed" } else { &v.review },
+        v.mergeable.to_ascii_lowercase()
+    );
+    for c in v.check_list.iter().filter(|c| c.state != kora_core::collab::Checks::Passing) {
+        println!("    check {}: {}", c.name, crate::cmd::resource::checks_word(c.state));
+    }
+    for f in &v.files {
+        println!("  {:<40} +{} -{}", f.path, f.additions, f.deletions);
+    }
+    if let Some(t) = &v.trying {
+        match t.behind {
+            Some(0) => println!("  You are trying this one and have its newest commit."),
+            Some(n) => println!("  You are trying this one; GitHub has {n} newer commit(s). Run `kora pr checkout` again to get them."),
+            None => println!("  You are trying this one; GitHub has newer commits. Run `kora pr checkout` again to get them."),
+        }
+    }
+    println!("  You are signed in to GitHub as {}{}.", v.acting_as.as_deref().unwrap_or("(not known)"), if v.can_merge { " and may merge here" } else { "" });
+}
+
 pub fn pr(cmd: PrCmd) -> i32 {
+    use kora_core::collab::{Reply as CReply, Request as CRequest};
     match cmd {
+        PrCmd::View(r) => match collab_pr(&r, |resource, source| CRequest::PrView { resource, number: r.number, source }) {
+            Ok(CReply::Pr(v)) => {
+                print_pr_view(&v);
+                0
+            }
+            Ok(_) => 1,
+            Err(c) => c,
+        },
+        PrCmd::Comment { pr, message } => match collab_pr(&pr, |resource, source| CRequest::Comment { resource, kind: "pr".into(), number: pr.number, body: message.clone(), source }) {
+            Ok(CReply::Acted(a)) => {
+                println!("{}{}", a.message, a.acting_as.map(|l| format!(" (as {l})")).unwrap_or_default());
+                0
+            }
+            Ok(_) => 1,
+            Err(c) => c,
+        },
+        PrCmd::Review { pr, action, message } => {
+            let action = action.replace('-', "_");
+            match collab_pr(&pr, |resource, source| CRequest::Review { resource, number: pr.number, action: action.clone(), body: message.clone().unwrap_or_default(), source }) {
+                Ok(CReply::Acted(a)) => {
+                    println!("{}{}", a.message, a.acting_as.map(|l| format!(" (as {l})")).unwrap_or_default());
+                    0
+                }
+                Ok(_) => 1,
+                Err(c) => c,
+            }
+        }
+        PrCmd::Merge { pr, method, yes } => {
+            if !yes && !crate::ui::confirm(&format!("Merge pull request #{} for real, as the GitHub account `gh` is signed in as?", pr.number)) {
+                println!("Cancelled. Nothing was merged.");
+                return 0;
+            }
+            match collab_pr(&pr, |resource, source| CRequest::Merge { resource, number: pr.number, method: method.clone(), source }) {
+                Ok(CReply::Acted(a)) => {
+                    println!("{}{}", a.message, a.acting_as.map(|l| format!(" (as {l})")).unwrap_or_default());
+                    0
+                }
+                Ok(_) => 1,
+                Err(c) => c,
+            }
+        }
         PrCmd::List { server, resource } => match ask(&server, &Request::Prs { resource }) {
             Ok(Reply::Prs(p)) => {
                 for n in &p.notes {
@@ -336,6 +464,7 @@ mod tests {
 
     #[test]
     fn a_server_that_is_not_registered_is_a_plain_error_and_a_non_zero_exit() {
+        kora_core::installer::registry::use_test_home();
         assert_eq!(branch(BranchCmd::List { server: "no-such-server".into() }), 1);
         assert_eq!(pr(PrCmd::List { server: "no-such-server".into(), resource: "kora_hud".into() }), 1);
     }

@@ -150,6 +150,12 @@ export function useUpdates(server: string) {
       const targets = Object.fromEntries(chosen.map((r) => [r.id, r.to]))
       setApplyJob((await api.update.apply(server, { scope: { resources: Object.keys(targets) }, restart, skip, targets })).job)
     }),
+    /** Update this one resource to the version the last check showed (no restart: the resource page offers it). */
+    applyOne: (id: string) => start(async () => {
+      const row = rows.find((r) => r.id === id)
+      if (!row || row.status !== 'clean') return
+      setApplyJob((await api.update.apply(server, { scope: { resources: [id] }, restart: 'none', skip: [], targets: { [id]: row.to } })).job)
+    }),
     rollback: (snapshot: string, force: boolean) => start(async () => {
       setLastRollback(snapshot)
       setRollJob((await api.snapshots.rollback(server, snapshot, force)).job)

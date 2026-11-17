@@ -27,11 +27,11 @@ Assert-That (Test-Path $srv) 'the earlier step-3 server exists (this step starts
 $r = Invoke-Native $kora @('delete', 'smoke', '-y'); Show 'kora delete smoke -y' $r
 Assert-That ($r.Code -eq 0) 'kora delete exits 0'
 Assert-That (-not (Test-Path $srv)) 'kora delete removed the server folder (no file-lock leftovers)'
-$reg = Get-Content "$env:LOCALAPPDATA\Kora\servers.json" -Raw -ErrorAction SilentlyContinue
+$reg = Get-RegistryText
 Assert-That (-not $reg -or $reg -notmatch '"smoke"') 'kora delete removed the registry entry'
 
 # --- fresh install with the service + firewall ---------------------------------------------
-$r = Invoke-Native $kora @('install', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '--service', '--firewall', '--txadmin-public', '-y')
+$r = Invoke-Native $kora @('install', '--mode', 'prod', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '--service', '--firewall', '--txadmin-public', '-y')
 Show 'kora install --service --firewall' $r
 Assert-That ($r.Code -eq 0) 'kora install --service --firewall exits 0'
 Assert-That ((Wait-SvcState 'STOPPED' 10) -eq 'STOPPED') "service $svc is registered and stopped"
@@ -64,6 +64,13 @@ while ((Get-Date) -lt $end -and -not $up) {
 }
 Show-ServerLogs
 Assert-That $up 'txAdmin answers on 127.0.0.1:41120 (fake key)'
+# ... and through the panel: the txAdmin gateway signs the panel's session in, then proxies to the same txAdmin.
+$gw = Test-TxAdminThroughPanel $kora 'smoke' 41120
+Write-Host "txAdmin gateway: $($gw | ConvertTo-Json -Compress)"
+Assert-That ($gw.Port -eq 51120) 'the gateway port for txAdmin 41120 is 51120'
+Assert-That ($gw.Enter -eq 303) 'entering with the one-time ticket redirects (303)'
+Assert-That ($gw.Via -eq $gw.Direct) "txAdmin answers through the panel like it does directly (HTTP $($gw.Direct))"
+Assert-That ($gw.Anonymous -eq 401) 'the gateway answers nothing to a browser without the panel sign-in (401)'
 $fx = @(Get-Process FXServer -ErrorAction SilentlyContinue)
 Assert-That ($fx.Count -ge 1) 'an FXServer.exe process is running'
 $st = Invoke-Native $kora @('status'); Show 'kora status' $st
@@ -103,7 +110,7 @@ Assert-That ((Get-SvcState) -eq 'GONE') 'the service is gone'
 $fw = (& netsh advfirewall firewall show rule name=all | Out-String)
 Assert-That ($fw -notmatch 'Kora smoke') 'all Kora firewall rules are gone'
 Assert-That (-not (Test-Path $srv)) 'the server folder is gone'
-$reg = Get-Content "$env:LOCALAPPDATA\Kora\servers.json" -Raw -ErrorAction SilentlyContinue
+$reg = Get-RegistryText
 Assert-That (-not $reg -or $reg -notmatch '"smoke"') 'the registry entry is gone'
 Assert-That (-not (Test-Path "$env:ProgramFiles\Kora\bin\*\kora.exe")) 'the Program Files kora copy is gone'
 $t = (& schtasks.exe /Query /FO LIST 2>&1 | Out-String)

@@ -13,6 +13,7 @@ const TOKEN: &str = "testtoken";
 
 fn setup() -> (axum::Router, Arc<MemoryJobs>) {
     let jobs = Arc::new(MemoryJobs::new());
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::new(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap(), jobs.clone());
     (router(st), jobs)
 }
@@ -201,6 +202,7 @@ async fn bad_codes_count_towards_the_lockout() {
 async fn a_code_pasted_in_the_box_signs_in_once() {
     let (app, jobs) = setup();
     jobs.create("j1");
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::new(TOKEN.into(), ADDR.parse().unwrap(), Arc::new(MemoryJobs::new())).with_limiter(3, Duration::from_secs(60));
     let codes = st.link_codes.clone();
     let app2 = router(st);
@@ -219,6 +221,7 @@ async fn a_code_pasted_in_the_box_signs_in_once() {
 /// the owner's failed attempts.
 #[tokio::test]
 async fn a_local_identity_try_is_explained_not_counted() {
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::new(TOKEN.into(), ADDR.parse().unwrap(), Arc::new(MemoryJobs::new())).with_limiter(2, Duration::from_secs(60));
     let app = router(st);
     for _ in 0..5 {
@@ -340,6 +343,7 @@ async fn every_route_needs_the_secret_with_the_cookie() {
 
 #[tokio::test]
 async fn mint_link_code_works_in_process() {
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::new(TOKEN.into(), ADDR.parse().unwrap(), Arc::new(MemoryJobs::new()));
     let code = st.mint_link_code();
     let app = router(st);
@@ -364,6 +368,7 @@ async fn requests_through_a_proxy_are_refused() {
 
 #[tokio::test]
 async fn busy_answers_do_not_give_away_the_running_job() {
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(TOKEN.into(), ADDR.parse().unwrap());
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let first = st
@@ -400,6 +405,7 @@ async fn wrong_token_and_lockout() {
 #[tokio::test]
 async fn lockout_expires() {
     let jobs = Arc::new(MemoryJobs::new());
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::new(TOKEN.into(), ADDR.parse().unwrap(), jobs).with_limiter(2, Duration::from_millis(100));
     let app = router(st);
     bad_login(&app, "x").await;
@@ -549,6 +555,7 @@ async fn spa_does_not_swallow_api() {
 async fn real_listener_roundtrip() {
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = l.local_addr().unwrap();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::new(TOKEN.into(), addr, Arc::new(MemoryJobs::new()));
     tokio::spawn(async move { axum::serve(l, router(st)).await.unwrap() });
     let out = tokio::task::spawn_blocking(move || {

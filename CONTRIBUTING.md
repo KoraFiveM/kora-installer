@@ -42,6 +42,14 @@ if you add or update a dependency.
   for user-visible changes.
 - Install scripts: HTTPS only, always verify SHA-256, never overwrite a file that is not a kora program.
 
+## Tests never touch your real Kora folder
+
+`kora_home()` (`installer/registry.rs`) panics in a test binary that has not chosen a folder, and says what to use: call
+`kora_core::installer::registry::use_test_home()` (an empty temporary folder for the test process), or set `KORA_HOME` to a
+`tempfile::tempdir()` path and keep the `TempDir` alive, or give the `::at(path)` constructor of the store an explicit path. (The unit
+tests of `kora-core` itself get the temporary folder automatically.) `KORA_ALLOW_REAL_HOME=1` switches the guard off for a deliberate
+run. It guards the Kora folder only; a test that reads `HOME` directly is still on its own.
+
 ## Adding a command
 
 `crates/kora-cli/src/main.rs` holds only the top-level `Cli` and `Command` enums, the process-level

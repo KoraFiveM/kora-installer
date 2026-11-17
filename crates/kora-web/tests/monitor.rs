@@ -60,7 +60,15 @@ fn rig(install: bool) -> Rig {
     let fake = FakeBackend::new();
     {
         let mut s = fake.state();
-        s.servers.push(ServerEntry { name: "prod".into(), dir: dir.path().to_path_buf(), mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 });
+        s.servers.push(ServerEntry {
+            source: None,
+            versions: None,
+            name: "prod".into(),
+            dir: dir.path().to_path_buf(),
+            mode: Mode::Production,
+            ports: PortsRecord { game: 30120, txadmin: 40120 },
+            created_unix: 0,
+        });
         s.status.insert("prod".into(), Status::Running);
     }
     let f = fake.clone();

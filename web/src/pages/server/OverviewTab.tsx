@@ -1,11 +1,13 @@
 import type { ServerDetail } from '@/api/types'
 import type { useServerControl } from '@/hooks/useServerControl'
 import { Badge } from '@/components/ui/badge'
+import { OffNormalSummary } from '@/components/OffNormalSummary'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CopyField } from '@/components/CopyButton'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton, useCanOpenFolder, useTxAdminLink } from '@/components/ServerLinks'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { LicenceKeyCard } from '@/components/ChangeLicenceKey'
+import { MoreAddresses, ReachCard } from '@/components/ReachCard'
 import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
 
@@ -28,6 +30,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
             <dt className="text-muted-foreground">Updates</dt><dd><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></dd>
           </dl>
           <ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} size="default" />
+          <OffNormalSummary server={s} list />
           {s.status === 'missing' && <p className="text-sm text-amber">The server folder cannot be found. It may have been moved or deleted. You can remove this entry on the Danger zone tab.</p>}
         </CardContent>
       </Card>
@@ -35,7 +38,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
         <CardHeader><CardTitle>Connect and manage</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <TxAdminButton port={s.ports.txadmin} up={s.txadmin_up} size="default" />
+            <TxAdminButton name={s.name} port={s.ports.txadmin} up={s.txadmin_up} size="default" />
             <OpenFolderButton name={s.name} dir={s.dir} size="default" />
             <CopyConnectButton connect={s.connect} size="default" />
           </div>
@@ -46,6 +49,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
             {s.connect ? <CopyField value={s.connect} label="Connect address" /> : <p className="text-sm">Kora could not find this computer's network address. Players connect to this computer's address with port {s.ports.game}.</p>}
             <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
           </div>
+          <MoreAddresses name={s.name} />
           <div className="space-y-1.5">
             <div className="text-sm text-muted-foreground">Server folder</div>
             <CopyField value={s.dir} label="Server folder" />
@@ -53,6 +57,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
           </div>
         </CardContent>
       </Card>
+      <div className="lg:col-span-2"><ReachCard name={s.name} onStart={s.status === 'stopped' ? () => void ctl.run('start') : undefined} /></div>
       <LicenceKeyCard server={s} busy={ctl.busy} restart={() => void ctl.run('restart')} />
     </div>
   )
