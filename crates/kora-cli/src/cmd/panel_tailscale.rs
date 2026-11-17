@@ -180,13 +180,13 @@ pub fn configure(admin_flag: Option<&str>) -> Result<Ready, String> {
 
 /// Start (or restart) the background panel listening on Tailscale too, wait for it, and say where to go.
 pub fn start_background(a: &crate::PanelArgs, home: &Path, ready: &Ready) -> i32 {
-    if cfg!(target_os = "linux") && !crate::user_services_available() {
+    if cfg!(target_os = "linux") && !crate::cmd::panel_background::user_services_available() {
         eprintln!("Kora Panel cannot run in the background from this session (common after sudo or su, or in a container).");
         eprintln!("Run it in a window instead (it stops when the window closes):  kora panel --tailscale --foreground");
         return 1;
     }
     let ports = kora_web::launch::SystemPorts;
-    let port = match crate::background_port(a, home, &ports) {
+    let port = match crate::cmd::panel_running::background_port(a, home, &ports) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -194,12 +194,12 @@ pub fn start_background(a: &crate::PanelArgs, home: &Path, ready: &Ready) -> i32
         }
     };
     println!("Starting Kora Panel in the background, on this computer and on Tailscale ...");
-    if let Err(e) = crate::start_background_service(home, port, true) {
+    if let Err(e) = crate::cmd::panel_background::start_background_service(home, port, true) {
         eprintln!("error: could not set up the background panel: {e}");
         return 1;
     }
-    if !kora_web::launch::wait_for_panel(port, crate::SETUP_WAIT, Duration::from_millis(250), &ports) {
-        eprintln!("Kora Panel did not answer within {} seconds.", crate::SETUP_WAIT.as_secs());
+    if !kora_web::launch::wait_for_panel(port, crate::cmd::panel_background::SETUP_WAIT, Duration::from_millis(250), &ports) {
+        eprintln!("Kora Panel did not answer within {} seconds.", crate::cmd::panel_background::SETUP_WAIT.as_secs());
         if cfg!(target_os = "linux") {
             eprintln!("See what happened with:  systemctl --user status kora-panel");
         }
@@ -332,7 +332,7 @@ pub fn command(cmd: &TailscaleCmd, home: &Path) -> i32 {
                 cfg.save(&path)?;
                 let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
                 if svc::saved_tailscale(home) {
-                    crate::start_background_service(home, port, false)?;
+                    crate::cmd::panel_background::start_background_service(home, port, false)?;
                     close_firewall(port);
                 }
                 println!("Tailscale access is off: nobody can sign in with Tailscale, and the background panel listens on this computer only.");
@@ -359,7 +359,7 @@ pub fn new_token(home: &Path) -> i32 {
     let platform = kora_core::service::Platform::current();
     if svc::service_installed(platform) {
         let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
-        if let Err(e) = crate::start_background_service(home, port, svc::saved_tailscale(home)) {
+        if let Err(e) = crate::cmd::panel_background::start_background_service(home, port, svc::saved_tailscale(home)) {
             eprintln!("error: the new token is saved, but the background panel could not be restarted: {e}");
             return 1;
         }

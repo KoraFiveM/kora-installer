@@ -10,8 +10,9 @@
 //! * started from an administrator/root prompt: open a running panel, run Kora again as the normal user
 //!   (Linux `sudo`), or explain (the panel never runs with administrator rights).
 
+use crate::cmd::panel_background::{start_background_service, svc_tailscale, user_services_available, SETUP_WAIT};
 use crate::cmd::panel_running::{background_port_for, one_time_link, running_panel, Running};
-use crate::{headless_session, panel_with, start_background_service, svc_tailscale, user_services_available, ROOT_ONLY_HELP, SETUP_WAIT};
+use crate::{headless_session, panel_with, ROOT_ONLY_HELP};
 use std::ffi::OsString;
 
 use crate::cmd::panel_tailscale;

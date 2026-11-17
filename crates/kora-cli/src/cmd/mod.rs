@@ -8,6 +8,7 @@ pub(crate) mod github;
 pub(crate) mod helper;
 pub(crate) mod install;
 pub(crate) mod keys_cmd;
+pub(crate) mod panel_background;
 pub(crate) mod panel_remote;
 pub(crate) mod panel_running;
 pub(crate) mod panel_tailscale;
