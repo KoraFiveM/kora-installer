@@ -10,13 +10,20 @@ Please report security problems **privately**, not in a public issue:
 We aim to acknowledge a report within 7 days and to tell you what we plan to do within 30 days. Please give us a
 reasonable time to release a fix before you disclose publicly.
 
-## Kora Panel security model (0.4.0)
+## Kora Panel security model
 
 `kora panel` runs a small web server on your computer. In brief:
 
-- It binds to `127.0.0.1` (default port 47120), so other computers cannot connect.
-- A random token, new at each start, is printed in a sign-in link and exchanged for an `HttpOnly; SameSite=Strict`
-  session cookie. Wrong tokens are rate-limited. `Authorization: Bearer <token>` is also accepted for scripts.
+- It binds to `127.0.0.1` (default port 47120), so other computers cannot connect. A public address or every interface
+  (`0.0.0.0`) is refused unless you add `--allow-public`; any other address needs remote access turned on first.
+- The sign-in link holds a one-time code (works once, within 10 minutes; the long-lived token never needs to sit in a browser's
+  history). It is exchanged for an `HttpOnly; SameSite=Strict` session cookie, named per port, so another service on the same
+  host cannot read or replace it. Every request must also carry the session's own secret in the `X-Kora-Session` header
+  (stream requests that cannot set headers pass it as `?ks=`): a stolen cookie alone is useless. Sessions end after 12 hours
+  idle or 7 days in all. Wrong codes and tokens are rate-limited, counted per address (IPv6 per /64) so a stranger only locks
+  themselves out. `Authorization: Bearer <token>` is also accepted for scripts.
+- Requests that carry proxy headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`...) are refused outright: behind a reverse
+  proxy or `tailscale serve` every visitor would look like this computer. Use `kora panel --tailscale` instead.
 - Every request must carry the panel's own address in `Host` (DNS rebinding). Changing requests must also have a
   matching `Origin` (when sent) and an `X-Kora` header (CSRF).
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
@@ -34,6 +41,9 @@ reasonable time to release a fix before you disclose publicly.
   is run on the machine, and deleting always needs the server name typed. Reasoning: a Tailscale identity is checked by the local Tailscale
   service (a person on a device they signed in), never from request headers; a token is a bearer secret that can leak, and a leaked token that
   can only install can be undone by removing the new server, while one that can delete cannot be undone.
+- The old machine-wide "Kora app" (administrator shortcuts, a copy in `Program Files` or `/opt/kora`) is no longer installed. The
+  per-user shortcuts that replace it never need administrator rights and are not "Run as administrator"; "Tidy up old shortcuts"
+  removes the old copy, which needs administrator rights through the helper or a command shown to you.
 - Hub nodes authenticate with bearer tokens; treat them like passwords.
 - Kora's own Git (MinGit, Windows) and GitHub CLI are downloaded only from `https://github.com/` release assets at a version
   and SHA-256 pinned in the source (`crates/kora-core/src/tools/pins.rs`, updated with `scripts/update-tool-pins.sh`).
