@@ -135,7 +135,7 @@ class Trouble {
 
 export const test = base.extend<{ trouble: Trouble; signedIn: Page }, { panel: Panel }>({
   panel: [
-    async ({}, use) => {
+    async (_deps, use) => {
       const { panel, stop } = await startPanel()
       try {
         await use(panel)
