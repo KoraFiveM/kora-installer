@@ -1,4 +1,4 @@
-import { test, expect, keyForm, saveKey, toSummary } from '../fixtures'
+import { test, expect, keyForm, saveKey } from '../fixtures'
 
 const MAIN = 'cfxk_MAINKEYMAINKEY12345_1111'
 const TEST = 'cfxk_TESTKEYTESTKEY12345_2222'

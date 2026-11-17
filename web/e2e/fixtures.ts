@@ -3,7 +3,7 @@
 //    the end if there was one (a journey that expects one removes it with `problems.expect(/text/)`).
 //  - `scan(label)`: runs axe on the page as it is now and fails on serious or critical violations.
 //  - `open(path, opts)`: goes to a page in a chosen mock scenario / viewer.
-import { test as base, expect, type Page } from '@playwright/test'
+import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
 export const KEY = 'cfxk_abcdefghij_12345'
@@ -82,4 +82,20 @@ export async function saveKey(page: Page, name: string, key: string) {
   await form.getByLabel('Name', { exact: true }).fill(name)
   await form.getByLabel('Licence key', { exact: true }).fill(key)
   await form.getByRole('button', { name: 'Save key' }).click()
+}
+
+/**
+ * Keyboard only: press Tab until `target` has focus (at most `max` presses, going forward). Fails with the
+ * element that had focus last, so an unreachable control shows up as a clear message.
+ */
+export async function tabTo(page: Page, target: Locator, max = 60) {
+  for (let i = 0; i < max; i++) {
+    if (await target.evaluate((el) => el === document.activeElement).catch(() => false)) return
+    await page.keyboard.press('Tab')
+  }
+  const where = await page.evaluate(() => {
+    const a = document.activeElement
+    return a ? `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') ?? a.textContent ?? '').trim().slice(0, 50)}"` : 'nothing'
+  })
+  throw new Error(`could not reach ${target} with the Tab key in ${max} presses (focus ended on ${where})`)
 }

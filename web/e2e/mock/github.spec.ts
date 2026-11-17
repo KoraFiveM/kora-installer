@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '../fixtures'
+import { test, expect } from '../fixtures'
+import type { Page } from '@playwright/test'
 
 const row = (page: Page, id: string) => page.getByRole('list', { name: 'Resources and their branches', includeHidden: true }).getByText(id, { exact: true }).locator('xpath=ancestor::li[1]')
 

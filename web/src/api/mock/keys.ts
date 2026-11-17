@@ -28,7 +28,7 @@ export interface KeysMock {
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 const last4 = (k: string) => k.slice(-4)
 
-export function installKeysMock(route: Route, Fail: FailCtor, servers: () => T.ServerSummary[]): KeysMock {
+export function installKeysMock(route: Route, Fail: FailCtor, servers: () => T.ServerSummary[], canManage: () => boolean = () => true): KeysMock {
   let keys: Stored[] = []
   let trouble = false
   let profile: T.Profile = { cfx_username: null, cfx_identifier: null, github_owner: null }
@@ -71,7 +71,7 @@ export function installKeysMock(route: Route, Fail: FailCtor, servers: () => T.S
     need()
     return {
       keys: keys.map((k) => ({ ...info(k), servers: Object.entries(usedBy).filter(([s, n]) => same(n, k.name) && servers().some((x) => x.name === s)).map(([s]) => s), stopped_installs: 0 })),
-      can_manage: true,
+      can_manage: canManage(),
       path: '/home/demo/.kora/secrets.json',
     } satisfies T.SavedKeys
   })

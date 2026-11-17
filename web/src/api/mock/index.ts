@@ -388,7 +388,7 @@ let lastHeaders = new Headers()
 /** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
 const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
-const keysMock = installKeysMock(route, Fail, () => servers)
+const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: false }) satisfies T.Meta)
