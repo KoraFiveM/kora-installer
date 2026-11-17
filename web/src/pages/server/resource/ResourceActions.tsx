@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, Loader2, Play, RefreshCw, RotateCw, Square } from 'lucide-react'
 import type { ControlAction, ResourcePage } from '@/api/types'
@@ -6,7 +5,6 @@ import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { ResourceProgress } from '@/components/JobProgress'
 import { timeAgo } from '@/lib/ago'
@@ -38,6 +36,7 @@ export function ResourceActions({ page, updates: u, pending, said, onControl, on
   /** The control action being sent right now. */
   pending?: ControlAction
   said?: { ok: boolean; text: string } | null
+  /** Asks first for stop and restart (the page does), starts at once. */
   onControl: (a: ControlAction) => void
   onStartServer: () => void
 }) {
@@ -50,7 +49,6 @@ export function ResourceActions({ page, updates: u, pending, said, onControl, on
   const checking = u.checkingRow === id
   const updating = u.apply.phase === 'running'
   const block = controlBlock(page, noOperator)
-  const [ask, setAsk] = useState<ControlAction | null>(null)
   const canUpdate = row?.status === 'clean'
   return (
     <div className="space-y-4">
@@ -80,7 +78,7 @@ export function ResourceActions({ page, updates: u, pending, said, onControl, on
             const { label, Icon } = CONTROL[a]
             const why = block?.why ?? (a === 'stop' && id === CONSOLE_RESOURCE ? 'Kora uses this resource to send commands to the server, so it cannot be stopped from here.' : null)
             return (
-              <Button key={a} disabled={why !== null || pending !== undefined} title={why ?? undefined} aria-busy={pending === a} onClick={() => (a === 'start' ? onControl(a) : setAsk(a))}>
+              <Button key={a} disabled={why !== null || pending !== undefined} title={why ?? undefined} aria-busy={pending === a} onClick={() => onControl(a)}>
                 {pending === a ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />} {label}
               </Button>
             )
@@ -95,20 +93,6 @@ export function ResourceActions({ page, updates: u, pending, said, onControl, on
         )}
         {said && <p className={`text-sm ${said.ok ? 'text-muted-foreground' : 'text-red'}`} role="status">{said.text}</p>}
       </section>
-      <ConfirmDialog
-        open={ask !== null}
-        onOpenChange={(o) => { if (!o) setAsk(null) }}
-        title={ask === 'stop' ? `Stop ${id}?` : `Restart ${id}?`}
-        description={ask === 'stop'
-          ? 'The resource stops for everyone on the server until it is started again. Other resources that need it may stop working. The server itself keeps running.'
-          : 'The resource stops and starts again. Players may notice a short interruption in what it does. The server itself keeps running.'}
-        confirmLabel={ask === 'stop' ? 'Stop resource' : 'Restart resource'}
-        destructive={ask === 'stop'}
-        onConfirm={() => {
-          if (ask) onControl(ask)
-          setAsk(null)
-        }}
-      />
     </div>
   )
 }

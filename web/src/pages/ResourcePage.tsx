@@ -1,4 +1,5 @@
 import { Link, useParams } from 'react-router-dom'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
@@ -7,6 +8,7 @@ import { useServerControl } from '@/hooks/useServerControl'
 import { useKept } from '@/lib/kept'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Skeleton } from '@/components/Skeleton'
 import { StatusChip } from '@/components/Status'
@@ -27,6 +29,7 @@ export default function ResourcePage() {
   const updates = useUpdates(name)
   const ctl = useServerControl(name)
   const noOperator = whyNot(useRole(), 'operator')
+  const [ask, setAsk] = useState<ControlAction | null>(null)
   const [said, setSaid] = useKept<Record<string, { ok: boolean; text: string }>>(`control:${name}:said`, {})
   const control = useMutation({
     mutationFn: (a: ControlAction) => api.resources.control(name, resource, a),
@@ -60,7 +63,7 @@ export default function ResourcePage() {
         info={page.restart}
         pending={control.isPending || ctl.busy}
         disabledReason={block?.why ?? null}
-        onRestartResource={() => control.mutate('restart')}
+        onRestartResource={() => setAsk('restart')}
         onRestartServer={() => ctl.run('restart')}
       />
       <Card>
@@ -71,11 +74,26 @@ export default function ResourcePage() {
             updates={updates}
             pending={control.isPending ? control.variables : undefined}
             said={said[resource]}
-            onControl={(a) => control.mutate(a)}
+            // Starting harms nothing. Stopping or restarting can interrupt players, so it is asked first, from every button.
+            onControl={(a) => (a === 'start' ? control.mutate(a) : setAsk(a))}
             onStartServer={() => ctl.run('start')}
           />
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={ask !== null}
+        onOpenChange={(o) => { if (!o) setAsk(null) }}
+        title={ask === 'stop' ? `Stop ${page.id}?` : `Restart ${page.id}?`}
+        description={ask === 'stop'
+          ? 'The resource stops for everyone on the server until it is started again. Other resources that need it may stop working. The server itself keeps running.'
+          : 'The resource stops and starts again. Players may notice a short interruption in what it does. The server itself keeps running.'}
+        confirmLabel={ask === 'stop' ? 'Stop resource' : 'Restart resource'}
+        destructive={ask === 'stop'}
+        onConfirm={() => {
+          if (ask) control.mutate(ask)
+          setAsk(null)
+        }}
+      />
       {page.branch.note && <p className="text-sm text-muted-foreground">{page.branch.note}</p>}
     </div>
   )

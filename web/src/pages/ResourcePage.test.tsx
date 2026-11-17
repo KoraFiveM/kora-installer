@@ -61,6 +61,8 @@ describe('resource page', () => {
     expect(await screen.findByText('Restart needed: the running server still has the old version.')).toBeInTheDocument()
     expect(screen.getByText(/moved to pull request #12/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Restart this resource/ }))
+    // The same question as the Restart button in Actions.
+    await user.click(await screen.findByRole('button', { name: 'Restart resource' }))
     await waitFor(() => expect(screen.queryByText(/Restart needed/)).toBeNull())
     expect(calls.some((c) => c.startsWith('POST') && c.endsWith('/resources/kora_hud/control'))).toBe(true)
   })

@@ -50,6 +50,12 @@ pub trait Probe: Send + Sync {
     fn memory(&self) -> Option<MemUsage>;
 }
 
+/// When the game server of this folder started (seconds since 1970), when it can be told. `None` on Windows and when
+/// the process cannot be found.
+pub fn server_started_unix(dir: &Path) -> Option<u64> {
+    os::server_started_unix(dir)
+}
+
 // ------------------------------------------------------------------------- local HTTP
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -197,6 +203,30 @@ mod os {
         PathBuf::from(String::from_utf8_lossy(first).into_owned()).starts_with(dir)
     }
 
+    /// When the server's own process was started (seconds since 1970): the oldest of the processes of the folder.
+    /// Used to tell that the whole server restarted, whoever restarted it.
+    pub fn server_started_unix(dir: &Path) -> Option<u64> {
+        let btime: u64 = std::fs::read_to_string("/proc/stat").ok()?.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())?;
+        let me = std::process::id();
+        let mut pids_of_dir: Vec<u32> = Vec::new();
+        if let Some(p) = std::fs::read_to_string(dir.join(".kora").join("server.pid")).ok().and_then(|t| t.trim().parse::<u32>().ok()) {
+            if std::path::Path::new(&format!("/proc/{p}")).exists() {
+                pids_of_dir.push(p);
+            }
+        }
+        if pids_of_dir.is_empty() {
+            pids_of_dir = pids().into_iter().filter(|p| *p != me && belongs(*p, dir)).collect();
+        }
+        let tick = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as u64;
+        pids_of_dir.iter().filter_map(|p| parse_start_ticks(&std::fs::read_to_string(format!("/proc/{p}/stat")).ok()?)).min().map(|t| btime + t / tick)
+    }
+
+    /// The start time (in ticks after boot) from the text of `/proc/<pid>/stat`.
+    pub fn parse_start_ticks(text: &str) -> Option<u64> {
+        let rest = &text[text.rfind(')')? + 1..];
+        rest.split_whitespace().nth(19)?.parse().ok()
+    }
+
     pub fn process_tree(dir: &Path) -> Option<(f64, u64)> {
         let me = std::process::id();
         let mut table: HashMap<u32, (u64, u32, u64)> = HashMap::new();
@@ -245,6 +275,12 @@ mod os {
         fn stat_with_spaces_and_brackets_in_the_name() {
             let t = "1234 (FX (server) x) S 77 1 1 0 -1 4194560 100 0 0 0 150 50 0 0 20 0 5 0 99 1000000 2500 18446744073709551615";
             assert_eq!(parse_stat(t), Some((200, 77, 2500)));
+        }
+
+        #[test]
+        fn the_start_time_is_the_twentieth_field_after_the_name() {
+            let t = "1234 (FX (server) x) S 77 1 1 0 -1 4194560 100 0 0 0 150 50 0 0 20 0 5 0 99 1000000 2500 18446744073709551615";
+            assert_eq!(parse_start_ticks(t), Some(99));
         }
 
         #[test]
@@ -303,6 +339,11 @@ mod os {
     use super::*;
 
     pub fn process_tree(_dir: &Path) -> Option<(f64, u64)> {
+        None
+    }
+
+    /// Not read on Windows yet: the notice then only clears through Kora's own restarts.
+    pub fn server_started_unix(_dir: &Path) -> Option<u64> {
         None
     }
 

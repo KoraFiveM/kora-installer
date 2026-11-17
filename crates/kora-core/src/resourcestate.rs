@@ -162,14 +162,16 @@ pub struct RestartInfo {
 /// Is a restart needed for `id`? A server that is not running has nothing old loaded, so it never is.
 pub fn info_with(store: &dyn StateStore, dir: &Path, id: &str, server_running: bool) -> RestartInfo {
     let st = store.load(dir);
-    info_of(&st, id, server_running)
+    info_of(&st, id, server_running, None)
 }
 
-pub fn info_of(st: &State, id: &str, server_running: bool) -> RestartInfo {
+/// `server_started`: when the game server process started, if it could be read. A server that started after the change
+/// has loaded the new files, whoever restarted it (txAdmin included).
+pub fn info_of(st: &State, id: &str, server_running: bool, server_started: Option<u64>) -> RestartInfo {
     let Some(m) = st.resources.get(&key(id)) else {
         return RestartInfo::default();
     };
-    if !server_running || m.changed_seq <= m.restarted_seq.max(st.server_restarted_seq) {
+    if !server_running || m.changed_seq <= m.restarted_seq.max(st.server_restarted_seq) || server_started.is_some_and(|t| t > m.changed_unix) {
         return RestartInfo::default();
     }
     RestartInfo { needed: true, why: Some(m.why.clone()).filter(|w| !w.is_empty()), changed_unix: Some(m.changed_unix), notice: Some(NOTICE.to_string()) }
@@ -178,7 +180,8 @@ pub fn info_of(st: &State, id: &str, server_running: bool) -> RestartInfo {
 /// Ids of the resources that need a restart now.
 pub fn pending_with(store: &dyn StateStore, dir: &Path, server_running: bool) -> Vec<String> {
     let st = store.load(dir);
-    st.resources.keys().filter(|id| info_of(&st, id, server_running).needed).cloned().collect()
+    let started = if server_running { crate::monitor::probe::server_started_unix(dir) } else { None };
+    st.resources.keys().filter(|id| info_of(&st, id, server_running, started).needed).cloned().collect()
 }
 
 // Everyday entry points: the file store and the clock.
@@ -196,7 +199,8 @@ pub fn mark_server_restarted(dir: &Path) {
 }
 
 pub fn info(dir: &Path, id: &str, server_running: bool) -> RestartInfo {
-    info_with(&FileStore, dir, id, server_running)
+    let started = if server_running { crate::monitor::probe::server_started_unix(dir) } else { None };
+    info_of(&FileStore.load(dir), id, server_running, started)
 }
 
 pub fn pending(dir: &Path, server_running: bool) -> Vec<String> {
@@ -267,6 +271,16 @@ mod tests {
         assert!(FileStore.load(d.path()).resources.contains_key("a"));
         std::fs::write(d.path().join(FILE), "not json").unwrap();
         assert!(!info(d.path(), "a", true).needed);
+    }
+
+    #[test]
+    fn a_server_that_started_after_the_change_has_the_new_files() {
+        let mut st = State::default();
+        st.clock = 1;
+        st.resources.insert("a".into(), ResourceMark { changed_seq: 1, changed_unix: 1000, why: "x".into(), ..Default::default() });
+        assert!(info_of(&st, "a", true, None).needed);
+        assert!(info_of(&st, "a", true, Some(900)).needed, "started before the change: still old");
+        assert!(!info_of(&st, "a", true, Some(1001)).needed, "restarted from txAdmin after the change");
     }
 
     #[test]
