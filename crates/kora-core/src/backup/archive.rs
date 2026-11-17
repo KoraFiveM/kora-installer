@@ -427,6 +427,8 @@ mod tests {
             server: ServerInfo {
                 name: "Test".into(),
                 mode: "production".into(),
+                source: crate::installer::Source::Fork,
+                versions: crate::installer::Versions::Latest,
                 game_port: 30120,
                 txadmin_port: 40120,
                 game_build: 3000,

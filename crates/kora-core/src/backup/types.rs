@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::installer::{Source, Versions};
+
 /// Version of the archive layout. A Kora that reads a higher number refuses politely.
 pub const FORMAT: u32 = 1;
 
@@ -91,6 +93,40 @@ pub enum StoredAs {
     Full,
 }
 
+/// Where a resource is relative to its normal version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum VersionKind {
+    /// On the version the server follows (the released version, or the main branch).
+    #[default]
+    Normal,
+    /// On a named branch.
+    Branch,
+    /// Trying a pull request.
+    Pr,
+    /// On a commit that is not a branch and not the normal version.
+    Detached,
+}
+
+/// How a resource was set when the backup was made: put back exactly so on restore and import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct VersionState {
+    pub kind: VersionKind,
+    /// The branch (also for a pull request: its local branch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub branch: Option<String>,
+    /// The pull request being tried.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub pr: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub pr_title: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ResourceBackup {
@@ -98,8 +134,15 @@ pub struct ResourceBackup {
     /// Relative to `<server>/resources/`.
     pub path: String,
     pub stored: StoredAs,
+    /// Where the files are fetched from (the person's copy for a fork server).
     #[serde(default)]
     pub repository: String,
+    /// The original repository (the catalogue's), for "use the originals" when a fork cannot be used.
+    #[serde(default)]
+    pub upstream: String,
+    /// Normal version, a branch, or a pull request being tried.
+    #[serde(default)]
+    pub state: VersionState,
     #[serde(default)]
     pub branch: String,
     /// The commit the folder was on.
@@ -128,8 +171,12 @@ pub struct FileEntry {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ServerInfo {
     pub name: String,
-    /// "production" or "development" (older wording kept for the file format).
+    /// The old spelling of the pair below ("production" or "development"), still written for older Kora versions.
     pub mode: String,
+    /// Plain clones of the original repositories, or the person's own copies (forks).
+    pub source: Source,
+    /// Released versions or the latest changes.
+    pub versions: Versions,
     pub game_port: u16,
     pub txadmin_port: u16,
     pub game_build: u32,
@@ -139,7 +186,7 @@ pub struct ServerInfo {
     pub os: String,
     /// The folder it lived in (shown, and used to rewrite paths when it moves).
     pub dir: String,
-    /// Where it was listed, e.g. the licence key's saved name (never the key).
+    /// The GitHub account the forks are in (a fork server only). A login is not a secret.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub github_owner: Option<String>,

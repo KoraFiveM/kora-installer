@@ -494,13 +494,15 @@ impl Backend for FakeBackend {
             server: Some(crate::backup::ServerInfo {
                 name: "Old server".into(),
                 mode: "production".into(),
+                source: crate::installer::Source::Fork,
+                versions: crate::installer::Versions::Latest,
                 game_port: 30120,
                 txadmin_port: 40120,
                 game_build: 3258,
                 artifact_build: 17000,
                 os: "windows".into(),
                 dir: "C:\\Servers\\old".into(),
-                github_owner: None,
+                github_owner: Some("old-owner".into()),
             }),
             database: Some(crate::backup::DatabaseBackup {
                 kind: crate::backup::DbKind::Dumped,
@@ -519,6 +521,7 @@ impl Backend for FakeBackend {
             warnings: vec!["This server was made on a different operating system.".into()],
             saved_keys: vec!["Main".into()],
             licence_note: crate::backup::import::LICENCE_NOTE.into(),
+            fork: Some(crate::backup::import::ForkNote { owner: "old-owner".into(), usable: false, signed_in_as: Some("me".into()), message: "This server follows copies (forks) in the GitHub account old-owner, which the account signed in here (me) cannot use. Choose what to do about them below.".into() }),
         })
     }
     fn import_run(&mut self, req: &crate::backup::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::import::ImportResult> {

@@ -47,16 +47,19 @@ impl Rig {
         write(&dir.join("resources/local-only/fxmanifest.lua"), "-- changed by me\n");
         write(&dir.join("resources/local-only/.git/HEAD"), "ref: refs/heads/main\n");
         write(&dir.join(".kora/alerts.json"), "{}");
+        write(&dir.join("kora-resource-state.json"), r#"{"version":1,"clock":0,"resources":{}}"#);
         write(&dir.join(".kora/plan-state.json"), "{}");
         let sf = ServerFile {
             name: name.clone(),
             mode: Mode::Production,
+            source: Some(crate::installer::Source::Fork),
+            versions: Some(crate::installer::Versions::Latest),
             dir: dir.clone(),
             ports: PortsRecord { game: 30120, txadmin: 40120 },
             game_build: 3000,
             artifact_build: 1234,
             database: Some("kora_abc".into()),
-            github_owner: None,
+            github_owner: Some("old-owner".into()),
             created_unix: 1,
             kora_version: "0.7.0".into(),
             resources: vec![
@@ -65,7 +68,7 @@ impl Rig {
             ],
         };
         sf.save().unwrap();
-        let entry = ServerEntry { name, dir, mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
+        let entry = ServerEntry { name, dir, mode: Mode::Production, source: Some(crate::installer::Source::Fork), versions: Some(crate::installer::Versions::Latest), ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
         Rig { tmp, entry, db: FakeDb::default() }
     }
 

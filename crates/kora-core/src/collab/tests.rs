@@ -429,7 +429,7 @@ fn changing_the_versions_writes_both_spellings_and_moves_nothing() {
     })
     .unwrap();
     set_versions(&sf, Versions::Released).unwrap();
-    let e = crate::installer::registry::Registry::load().unwrap().servers.into_iter().next().unwrap();
+    let e = crate::installer::registry::Registry::load().unwrap().servers.into_iter().find(|e| e.name == "s").unwrap();
     assert_eq!((e.versions(), e.mode), (Versions::Released, crate::installer::Mode::Production));
     let _ = home;
 }

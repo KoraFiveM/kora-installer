@@ -448,6 +448,7 @@ fn apply(e: &ServerEntry, m: &Manifest, stage: &Path, tools: &Tools<'_>, ev: &mu
             Err(msg) => report.problems.push(format!("{msg}. It was left as it is.")),
         }
     }
+    super::resources::finish_resource_state(&e.dir, &m.resources);
     let _ = now_unix();
     Ok(())
 }
@@ -604,6 +605,28 @@ mod tests {
         let p = preview(&rig.entry, &info, &path, None, false).unwrap();
         assert!(p.needs_passphrase && p.server.is_none());
         assert!(preview(&rig.entry, &info, &path, Some(&Passphrase::new("a good passphrase")), false).unwrap().server.is_some());
+    }
+
+    #[test]
+    fn a_restored_resource_trying_a_pull_request_comes_back_trying_it_and_needs_a_restart() {
+        let rig = Rig::new();
+        let git = rig.clean_git();
+        git.say("core:rev-parse --abbrev-ref HEAD", "pr/12");
+        crate::resourcestate::set_pr_title(&rig.entry.dir, "core", 12, "Fix the HUD");
+        let (_, path) = make(&rig, &git, None);
+        // the page forgets the title and the server is restarted since: nothing needs a restart
+        write(&rig.entry.dir.join("kora-resource-state.json"), r#"{"version":1,"clock":5,"server_restarted_seq":5,"resources":{}}"#);
+        assert!(crate::resourcestate::pending(&rig.entry.dir, true).is_empty());
+        git.say("cat-file -e abcdef1234567890abcdef1234567890abcdef12^{commit}", "");
+        git.say("checkout -f -B pr/12 abcdef1234567890abcdef1234567890abcdef12", "");
+        let r = restore(&rig.entry, &path, &RestoreOptions::default(), &mut FakeHost::new(false), &rig.tools(&git), &mut |_| {}).unwrap();
+        assert!(r.problems.is_empty(), "{:?}", r.problems);
+        // the pull request branch was recreated at the recorded commit
+        assert!(git.log.borrow().iter().any(|l| l.starts_with("checkout -f -B pr/12 ")));
+        // the title is back, and every restored resource is marked as changed
+        assert_eq!(crate::resourcestate::pr_title(&rig.entry.dir, "core", 12).as_deref(), Some("Fix the HUD"));
+        let pending = crate::resourcestate::pending(&rig.entry.dir, true);
+        assert!(pending.contains(&"core".to_string()) && pending.contains(&"local-only".to_string()), "{pending:?}");
     }
 
     #[test]

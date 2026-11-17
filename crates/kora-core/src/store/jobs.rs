@@ -54,26 +54,9 @@ fn secret_name(k: &str) -> bool {
     ["license_key", "licence_key", "password", "token", "secret", "authorization"].iter().any(|s| k.contains(s)) && !k.ends_with("_name") && k != "token_set"
 }
 
-/// `cfxk_...` licence keys (and anything shaped like one) inside text.
+/// Text with its secrets hidden: the one redaction of the code base (`support::redact`).
 pub fn redact_text(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < b.len() {
-        if s[i..].starts_with("cfxk_") {
-            let mut j = i + 5;
-            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_' || b[j] == b'-') {
-                j += 1;
-            }
-            out.push_str("<hidden key>");
-            i = j;
-        } else {
-            let ch = s[i..].chars().next().unwrap_or(' ');
-            out.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-    out
+    crate::support::redact::scrub(s).text
 }
 
 /// A copy of `v` with secrets replaced.

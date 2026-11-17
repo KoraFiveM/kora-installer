@@ -226,7 +226,7 @@ fn open_source(src: &super::import::ImportSource, allow_path: bool) -> Result<Pa
 pub fn import_inspect(src: &super::import::ImportSource, passphrase: Option<&str>, allow_path: bool, servers: &[ServerEntry]) -> Res<super::import::ImportPreview> {
     let file = open_source(src, allow_path)?;
     let keys: Vec<String> = crate::keystore::KeyStore::default().list().map(|l| l.into_iter().map(|k| k.name).collect()).unwrap_or_default();
-    super::import::inspect(&file, passphrase, servers, &keys, &super::import::SystemPorts, &crate::api::install::default_dir).map_err(pack)
+    super::import::inspect(&file, passphrase, servers, &keys, &super::import::SystemPorts, &super::import::SystemForks, &crate::api::install::default_dir).map_err(pack)
 }
 
 pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(BackupEvent)) -> Res<super::import::ImportResult> {
@@ -238,7 +238,7 @@ pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportReq
     let prov = super::import::SystemProvisioner { admin };
     let keys = crate::keystore::KeyStore::default();
     let saved = |n: &str| keys.get(n).ok();
-    let env = super::import::Env { tools: &tools, fetcher: &super::import::SystemFetcher, provisioner: Some(&prov), saved_key: &saved, ports: &super::import::SystemPorts, servers };
+    let env = super::import::Env { tools: &tools, fetcher: &super::import::SystemFetcher, provisioner: Some(&prov), saved_key: &saved, ports: &super::import::SystemPorts, forks: &super::import::SystemForks, servers };
     let result = super::import::run(req, &file, &env, say).map_err(pack)?;
     // the upload has done its job
     if let Some(id) = req.source.upload.as_deref() {

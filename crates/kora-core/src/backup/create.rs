@@ -256,7 +256,10 @@ pub fn create_unguarded(e: &ServerEntry, o: &CreateOptions, host: &mut dyn Host,
     let mut resources: Vec<ResourceBackup> = Vec::new();
     if let Some(sf) = &server_file {
         for rec in &sf.resources {
-            if let Some(rb) = super::resources::classify(tools.git, &resources_dir, rec, everything) {
+            if let Some(mut rb) = super::resources::classify(tools.git, &resources_dir, rec, everything) {
+                if let Some(n) = rb.state.pr {
+                    rb.state.pr_title = crate::resourcestate::pr_title(&e.dir, &rb.id, n);
+                }
                 resources.push(rb);
             }
         }
@@ -368,6 +371,8 @@ fn build(
     let info_server = ServerInfo {
         name: e.name.clone(),
         mode: format!("{:?}", e.mode).to_lowercase(),
+        source: e.source(),
+        versions: e.versions(),
         game_port: e.ports.game,
         txadmin_port: e.ports.txadmin,
         game_build: sf.map_or(0, |s| s.game_build),
@@ -673,6 +678,30 @@ pub(crate) mod tests {
         let left = dest::LocalFolder::for_server("", &rig.entry.name).list();
         assert_eq!(left.len(), 2);
         assert_eq!(left[0].created_unix, 1_700_000_300);
+    }
+
+    #[test]
+    fn the_manifest_records_source_versions_fork_owner_and_how_each_resource_was_set() {
+        let rig = Rig::new();
+        let git = rig.clean_git();
+        // the clean clone is trying pull request 12, whose title the resource page saved
+        git.say("core:rev-parse --abbrev-ref HEAD", "pr/12");
+        crate::resourcestate::set_pr_title(&rig.entry.dir, "core", 12, "Fix the HUD");
+        let r = create(&rig.entry, &CreateOptions::default(), &mut FakeHost::new(false), &rig.tools(&git), &mut |_| {}).unwrap();
+        let m = archive::scan(&r.path, None, None, 1 << 30, None).unwrap();
+        assert_eq!((m.server.source, m.server.versions, m.server.github_owner.as_deref()), (crate::installer::Source::Fork, crate::installer::Versions::Latest, Some("old-owner")));
+        let core = m.resources.iter().find(|r| r.id == "core").unwrap();
+        assert_eq!((core.state.kind, core.state.pr, core.state.pr_title.as_deref()), (VersionKind::Pr, Some(12), Some("Fix the HUD")));
+        assert_eq!(core.upstream, "https://github.com/KoraFiveM/core");
+        // the resource page's own state file travels in the archive
+        assert!(m.files.iter().any(|f| f.path == "server/kora-resource-state.json"));
+        // a named branch is "branch", the normal one "normal"
+        let git = rig.clean_git();
+        git.say("core:rev-parse --abbrev-ref HEAD", "fix-ui");
+        let r = create(&rig.entry, &CreateOptions::default(), &mut FakeHost::new(false), &rig.tools(&git), &mut |_| {}).unwrap();
+        let m = archive::read_head(&r.path, None).unwrap();
+        assert_eq!(m.resources.iter().find(|r| r.id == "core").unwrap().state.kind, VersionKind::Branch);
+        assert_eq!(m.resources.iter().find(|r| r.id == "local-only").unwrap().state.kind, VersionKind::Normal);
     }
 
     #[allow(dead_code)]

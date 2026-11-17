@@ -224,10 +224,24 @@ pub fn build(m: &dyn Machine, server: Option<&str>) -> Bundle {
                 m.free_bytes(&e.dir).map_or("unknown".to_string(), crate::space::human)
             ),
         );
+        // each resource: where it follows, and whether it is on its normal version (no secrets in any of it)
+        if let Ok(sf) = crate::installer::ServerFile::load(&e.dir) {
+            let st = crate::resourcestate::StateStore::load(&crate::resourcestate::FileStore, &e.dir);
+            let pending = crate::resourcestate::pending(&e.dir, true);
+            let mut lines = vec![format!("Source: {:?}, versions: {:?}{}", sf.source(), sf.versions(), sf.github_owner.as_deref().map(|o| format!(", forks in the GitHub account {o}")).unwrap_or_default())];
+            for r in &sf.resources {
+                let key = crate::catalog::normalize_id(&r.id);
+                let mark = st.resources.get(&key);
+                let pr = mark.and_then(|m| m.pr).map(|n| format!("trying pull request #{n}{}", mark.and_then(|m| m.pr_title.as_deref()).map(|t| format!(" ({t})")).unwrap_or_default()));
+                lines.push(format!("{}  follows {}  {}  {}", r.id, if r.branch.is_empty() { "a pinned version" } else { &r.branch }, pr.unwrap_or_else(|| "normal version unless its branch says otherwise".into()), if pending.contains(&r.id) || pending.contains(&key) { "RESTART NEEDED" } else { "" }));
+            }
+            lines.push(format!("Restart needed (if the server is running): {}", if pending.is_empty() { "none".to_string() } else { pending.join(", ") }));
+            put(&mut b, &format!("{base}/resources.txt"), &lines.join("\n"));
+        }
         let mut listing = Vec::new();
         dir_listing(&e.dir, 2, "", &mut listing);
         put(&mut b, &format!("{base}/files.txt"), &listing.join("\n"));
-        for rel in ["server.cfg", "permissions.cfg", "kora-server.json", ".kora/schedule.json"] {
+        for rel in ["server.cfg", "permissions.cfg", "kora-server.json", "kora-resource-state.json", ".kora/schedule.json"] {
             let p = e.dir.join(rel);
             match redact::policy(rel) {
                 Policy::Omit(why) => b.omitted.push(Omitted { name: format!("{base}/{rel}"), why: why.to_string() }),
@@ -384,14 +398,15 @@ pub(crate) mod tests {
         w("permissions.cfg", "add_principal identifier.fivem:123456 group.admin\n");
         w("secrets.cfg", &format!("sv_licenseKey \"{KEY}\"\n"));
         w("database.json", r#"{"password":"s3cr3t-db-pass"}"#);
-        w("kora-server.json", r#"{"name":"Prod","license_key_name":"Main","ports":{"game":30120,"txadmin":40120}}"#);
+        w("kora-server.json", r#"{"name":"Prod","mode":"development","source":"fork","versions":"latest","dir":"/srv/prod","ports":{"game":30120,"txadmin":40120},"game_build":3258,"artifact_build":1,"database":null,"github_owner":"me","created_unix":1,"kora_version":"0.8.0","resources":[{"id":"core","path":"core","repository":"https://github.com/KoraFiveM/core","branch":"main"}],"license_key_name":"Main"}"#);
         w("txData/default/config.json", r#"{"global":{"adminPassword":"hunter2-and-more"}}"#);
         w("txData/default/data/admins.json", r#"[{"name":"root","password_hash":"$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234"}]"#);
         w(".kora/notify.json", r#"{"discord_webhook":"https://discord.com/api/webhooks/123456789012345678/1234567890AbCdEfGhIjKlMnOpQrStUv"}"#);
         w(".kora/alerts.json", r#"{"webhook_url":"https://hooks.example.com/x?token=abcdef0123456789abcdef"}"#);
         w(".kora/install.log", &format!("starting\ngit clone https://ghp_0123456789abcdefghijklmnopqrstuvwxyz@github.com/a/b.git\nlicence {KEY} accepted\ndone\n"));
+        w("kora-resource-state.json", r#"{"version":1,"clock":3,"resources":{"core":{"changed_seq":3,"changed_unix":1,"why":"switched","pr":12,"pr_title":"Fix the HUD"}}}"#);
         w("resources/core/fxmanifest.lua", "fx_version 'cerulean'\n");
-        let entry = ServerEntry { name: "Prod".into(), dir: root, mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
+        let entry = ServerEntry { name: "Prod".into(), dir: root, mode: Mode::Production, source: None, versions: None, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
         Fixture { dir, entry }
     }
 
@@ -512,6 +527,10 @@ pub(crate) mod tests {
         assert!(b.text("jobs.txt").unwrap().contains("install_start") && b.text("jobs.txt").unwrap().contains("git clone failed"));
         assert!(b.text("about.txt").unwrap().contains("Ubuntu 24.04") && b.text("about.txt").unwrap().contains("~/.kora"));
         assert!(b.text("redactions.txt").unwrap().contains("servers/prod/server.cfg"));
+        // each resource's branch / pull request and the restart-needed state are listed
+        let res = b.text("servers/prod/resources.txt").unwrap();
+        assert!(res.contains("trying pull request #12 (Fix the HUD)") && res.contains("Source:") && res.contains("RESTART NEEDED"), "{res}");
+        assert!(b.text("servers/prod/kora-resource-state.json").unwrap().contains("Fix the HUD"));
     }
 
     #[test]

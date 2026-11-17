@@ -37,6 +37,7 @@ use super::dbdump;
 use super::restore::{archive_problem, write_into};
 use super::types::*;
 use super::{codes, create, BackupEvent, Tools};
+use crate::installer::Source;
 use crate::installer::registry::{now_unix, PortsRecord, Registry, ResourceRecord, ServerEntry, ServerFile};
 use crate::problem::{Action, Problem};
 
@@ -65,6 +66,76 @@ pub struct Clash {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub suggestion: Option<String>,
+}
+
+/// What to do about a fork owner this computer's GitHub sign-in cannot use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ForkChoice {
+    /// Keep the remotes as recorded (the old owner's copies). Fetching them may fail if they are private.
+    #[default]
+    Keep,
+    /// Make my own copies here: fork the original repositories into the account signed in on this computer.
+    OwnCopies,
+    /// Use the originals: plain clones of the original repositories (the server becomes a clone server).
+    Originals,
+}
+
+/// The fork owner of the server, and whether this computer's GitHub sign-in can use it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ForkNote {
+    pub owner: String,
+    /// The signed-in account here is that owner, or may create forks in it.
+    pub usable: bool,
+    pub signed_in_as: Option<String>,
+    pub message: String,
+}
+
+/// What Kora asks GitHub on this computer (a fake in tests).
+pub trait ForkTools {
+    /// Can the signed-in account use `owner` (it is the account, or an organisation it may fork into)?
+    /// Returns (usable, the signed-in login).
+    fn usable(&self, owner: &str) -> (bool, Option<String>);
+    /// Make a fork of the original repository `upstream` in `owner`; returns its address.
+    fn fork(&self, upstream: &str, owner: &str) -> Result<String, String>;
+}
+
+pub struct SystemForks;
+
+impl ForkTools for SystemForks {
+    fn usable(&self, owner: &str) -> (bool, Option<String>) {
+        use crate::api::install::github::{GithubEnv, SystemGithub};
+        let g = SystemGithub;
+        let me = g.auth();
+        if !me.signed_in {
+            return (false, None);
+        }
+        let login = me.user.clone();
+        if login.as_deref().is_some_and(|l| l.eq_ignore_ascii_case(owner)) {
+            return (true, login);
+        }
+        let ok = g.owners().map(|l| l.iter().any(|o| o.login.eq_ignore_ascii_case(owner) && o.can_fork)).unwrap_or(false);
+        (ok, login)
+    }
+    fn fork(&self, upstream: &str, owner: &str) -> Result<String, String> {
+        let slug = crate::installer::repo_slug(upstream);
+        let name = slug.rsplit('/').next().unwrap_or(&slug).to_string();
+        let r = crate::git::SystemRunner;
+        use crate::api::install::github::GithubEnv as _;
+        let is_me = crate::api::install::github::SystemGithub.auth().user.as_deref().is_some_and(|l| l.eq_ignore_ascii_case(owner));
+        let mut args = vec!["repo", "fork", slug.as_str(), "--clone=false"];
+        if !is_me {
+            args.extend(["--org", owner]);
+        }
+        let o = crate::git::CommandRunner::run(&r, "gh", &args, None).map_err(|e| format!("gh could not run ({e})"))?;
+        if o.ok() || o.stderr.contains("already exists") {
+            Ok(format!("https://github.com/{owner}/{name}.git"))
+        } else {
+            Err(o.stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("GitHub refused").trim().to_string())
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +171,8 @@ pub struct ImportPreview {
     pub saved_keys: Vec<String>,
     /// The licence-key warning, always shown.
     pub licence_note: String,
+    /// A fork server whose owner cannot be used here: the guided choice (see [`ForkChoice`]).
+    pub fork: Option<ForkNote>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +187,9 @@ pub struct ImportRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub licence_key_name: Option<String>,
+    /// What to do when the fork owner cannot be used on this computer.
+    #[serde(default)]
+    pub fork_choice: ForkChoice,
     /// Start the server when it is imported.
     #[serde(default)]
     pub start: bool,
@@ -212,7 +288,7 @@ fn free_name(base: &str, used: &[String]) -> String {
 }
 
 /// Look at a file. Reads only its start. `servers`: the servers already registered here.
-pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], saved_keys: &[String], ports: &dyn PortCheck, default_dir: &dyn Fn(&str) -> String) -> Result<ImportPreview, Problem> {
+pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], saved_keys: &[String], ports: &dyn PortCheck, forks: &dyn ForkTools, default_dir: &dyn Fn(&str) -> String) -> Result<ImportPreview, Problem> {
     let file_name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut p = ImportPreview {
         file_name,
@@ -230,6 +306,7 @@ pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], s
         warnings: vec![],
         saved_keys: saved_keys.to_vec(),
         licence_note: LICENCE_NOTE.into(),
+        fork: None,
     };
     let head = match archive::read_head(file, pass(passphrase).as_ref()) {
         Ok(m) => m,
@@ -295,6 +372,20 @@ pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], s
     }
     if !head.stopped {
         p.warnings.push("The backup was made while the server was running, so it is consistent for the database but a few files may be from slightly different moments.".into());
+    }
+    if head.server.source == Source::Fork {
+        if let Some(owner) = head.server.github_owner.clone() {
+            let (usable, me) = forks.usable(&owner);
+            let message = if usable {
+                format!("This server follows your own copies (forks) in the GitHub account {owner}. You are signed in to GitHub here with access to it, so they can be used as they are.")
+            } else {
+                match &me {
+                    Some(m) => format!("This server follows copies (forks) in the GitHub account {owner}, which the account signed in here ({m}) cannot use. Choose what to do about them below."),
+                    None => format!("This server follows copies (forks) in the GitHub account {owner}, and you are not signed in to GitHub on this computer. Sign in, or choose what to do about them below."),
+                }
+            };
+            p.fork = Some(ForkNote { owner, usable, signed_in_as: me, message });
+        }
     }
     p.server = Some(head.server);
     p.database = Some(head.database);
@@ -412,6 +503,7 @@ pub struct Env<'a> {
     /// The key of a saved name.
     pub saved_key: &'a dyn Fn(&str) -> Option<String>,
     pub ports: &'a dyn PortCheck,
+    pub forks: &'a dyn ForkTools,
     pub servers: Vec<ServerEntry>,
 }
 
@@ -496,6 +588,45 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         old_machine_steps: vec![],
     };
     let mut manifest: Option<Manifest> = None;
+    // What to do about a fork owner this computer cannot use (decided once, the same on every resume).
+    let mut resources_plan = head.resources.clone();
+    let mut new_source = head.server.source;
+    let mut new_owner = head.server.github_owner.clone();
+    let mut repointed: Vec<String> = Vec::new();
+    if head.server.source == Source::Fork {
+        if let Some(old) = head.server.github_owner.clone() {
+            let (usable, me) = env.forks.usable(&old);
+            if !usable {
+                match req.fork_choice {
+                    ForkChoice::Keep => {}
+                    ForkChoice::Originals => {
+                        for rb in resources_plan.iter_mut().filter(|r| !r.upstream.is_empty()) {
+                            rb.repository = rb.upstream.clone();
+                            repointed.push(rb.id.clone());
+                        }
+                        new_source = Source::Clone;
+                        new_owner = None;
+                        result.notes.push("The resources follow the original repositories now (this server is a clone server here). Your old copies were not touched.".into());
+                    }
+                    ForkChoice::OwnCopies => {
+                        let Some(owner) = me else {
+                            return Err(Problem::new(codes::NOT_FOUND, "To make your own copies, sign in to GitHub on this computer first (the System check page helps), or choose another option.").with_action(Action::SignInGithub { scopes: vec![] }));
+                        };
+                        for rb in resources_plan.iter_mut().filter(|r| !r.upstream.is_empty()) {
+                            match env.forks.fork(&rb.upstream, &owner) {
+                                Ok(url) => {
+                                    rb.repository = url;
+                                    repointed.push(rb.id.clone());
+                                }
+                                Err(why) => result.problems.push(format!("{}: your own copy could not be made ({why}); it follows the old owner's copy instead.", rb.id)),
+                            }
+                        }
+                        new_owner = Some(owner);
+                    }
+                }
+            }
+        }
+    }
 
     let run = (|| -> Result<(), Problem> {
         // 1. unpack and prove
@@ -625,7 +756,12 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                     write_into(&dest, &stage.join(RESOURCES_DIR).join(&rel), false).map_err(|e| io_problem("placing a resource", e))?;
                 }
             }
-            let refs: Vec<&ResourceBackup> = m.resources.iter().filter(|r| r.stored == StoredAs::Reference).collect();
+            // resources kept in full: their git history comes along; point `origin` where the choice above says
+            for rb in resources_plan.iter().filter(|r| r.stored == StoredAs::Full && repointed.contains(&r.id)) {
+                let folder = res_dir.join(&rb.path);
+                let _ = env.tools.git.run("git", &["remote", "set-url", "origin", &rb.repository], Some(&folder));
+            }
+            let refs: Vec<&ResourceBackup> = resources_plan.iter().filter(|r| r.stored == StoredAs::Reference).collect();
             for (i, rb) in refs.iter().enumerate() {
                 ev("resources", &format!("Fetching {} ({}/{})", rb.id, i + 1, refs.len()), (72 + i * 18 / refs.len().max(1)) as u8);
                 match super::resources::ensure_at_commit(env.tools.git, &res_dir, rb) {
@@ -633,6 +769,8 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                     Err(msg) => result.problems.push(format!("{msg}. Fetch it later from the Resources tab; the server is otherwise complete.")),
                 }
             }
+            // every resource counts as changed ("Restart needed"), and a pull request being tried keeps its title
+            super::resources::finish_resource_state(&dir, &resources_plan);
             st.done.push("resources".into());
             save_state(&dir, &st)?;
         }
@@ -642,17 +780,23 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         let mut sf = std::fs::read(stage.join(SERVER_DIR).join("kora-server.json")).ok().and_then(|b| serde_json::from_slice::<ServerFile>(&b).ok()).unwrap_or_else(|| ServerFile {
             name: c.name.clone(),
             mode: if m.server.mode == "development" { crate::installer::Mode::Development } else { crate::installer::Mode::Production },
+            source: Some(m.server.source),
+            versions: Some(m.server.versions),
             dir: dir.clone(),
             ports: PortsRecord { game: c.game_port, txadmin: c.txadmin_port },
             game_build: m.server.game_build,
             artifact_build: m.server.artifact_build,
             database: None,
-            github_owner: m.server.github_owner.clone(),
+            github_owner: new_owner.clone(),
             created_unix: now_unix(),
             kora_version: env!("CARGO_PKG_VERSION").into(),
             resources: Vec::<ResourceRecord>::new(),
         });
         sf.name = c.name.clone();
+        sf.source = Some(new_source);
+        sf.versions = Some(m.server.versions);
+        sf.github_owner = new_owner.clone();
+        sf.mode = crate::installer::compat_mode(m.server.versions);
         sf.dir = dir.clone();
         sf.ports = PortsRecord { game: c.game_port, txadmin: c.txadmin_port };
         sf.database = creds.as_ref().map(|c| c.database.clone());
@@ -667,7 +811,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             ..Default::default()
         };
         let _ = crate::installer::save_created_to(&dir, &created);
-        let entry = ServerEntry { name: c.name.clone(), dir: dir.clone(), mode: sf.mode, ports: PortsRecord { game: c.game_port, txadmin: c.txadmin_port }, created_unix: now_unix() };
+        let entry = ServerEntry { name: c.name.clone(), dir: dir.clone(), mode: sf.mode, source: Some(new_source), versions: Some(m.server.versions), ports: PortsRecord { game: c.game_port, txadmin: c.txadmin_port }, created_unix: now_unix() };
         Registry::update(|r| {
             r.upsert(entry.clone());
             Ok(())
@@ -734,10 +878,36 @@ mod tests {
     use crate::backup::tests_support::*;
     use std::cell::RefCell;
 
+    const SAMEFORKS: SameOwner = SameOwner;
+    struct SameOwner;
+    impl ForkTools for SameOwner {
+        fn usable(&self, _: &str) -> (bool, Option<String>) {
+            (true, Some("old-owner".into()))
+        }
+        fn fork(&self, _: &str, _: &str) -> Result<String, String> {
+            Err("not needed".into())
+        }
+    }
+
     struct NoPorts;
     impl PortCheck for NoPorts {
         fn is_busy(&self, _: u16) -> bool {
             false
+        }
+    }
+
+    /// A GitHub where the signed-in account is `me` and only `me` may be used; forks are recorded.
+    struct FakeForks {
+        me: Option<&'static str>,
+        made: RefCell<Vec<String>>,
+    }
+    impl ForkTools for FakeForks {
+        fn usable(&self, owner: &str) -> (bool, Option<String>) {
+            (self.me == Some(owner), self.me.map(str::to_string))
+        }
+        fn fork(&self, upstream: &str, owner: &str) -> Result<String, String> {
+            self.made.borrow_mut().push(upstream.to_string());
+            Ok(format!("https://github.com/{owner}/{}", upstream.rsplit('/').next().unwrap()))
         }
     }
 
@@ -781,6 +951,7 @@ mod tests {
             passphrase: Some(pass.into()),
             choices: ImportChoices { name: name.into(), dir: dir.display().to_string(), game_port: 31120, txadmin_port: 41120 },
             licence_key_name: None,
+            fork_choice: ForkChoice::Keep,
             start: false,
             start_over: false,
         }
@@ -792,14 +963,14 @@ mod tests {
         let git = rig.clean_git();
         let path = make_backup(&rig, &git, "a good passphrase");
         // no password: says so and nothing else
-        let p = inspect(&path, None, &[], &[], &NoPorts, &|_| "/srv/new".into()).unwrap();
+        let p = inspect(&path, None, &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|_| "/srv/new".into()).unwrap();
         assert!(p.needs_passphrase && p.server.is_none());
         // wrong password
-        assert_eq!(inspect(&path, Some("wrong wrong wrong"), &[], &[], &NoPorts, &|_| "/srv/new".into()).unwrap_err().code, codes::WRONG_PASSPHRASE);
+        assert_eq!(inspect(&path, Some("wrong wrong wrong"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|_| "/srv/new".into()).unwrap_err().code, codes::WRONG_PASSPHRASE);
         // right: this machine already has a server with that name and those ports
         let here =
-            vec![ServerEntry { name: rig.entry.name.clone(), dir: "/srv/other".into(), mode: crate::installer::Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 }];
-        let p = inspect(&path, Some("a good passphrase"), &here, &["Main".into()], &NoPorts, &|n| format!("/srv/{}", crate::installer::slug(n))).unwrap();
+            vec![ServerEntry { name: rig.entry.name.clone(), dir: "/srv/other".into(), mode: crate::installer::Mode::Production, source: None, versions: None, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 }];
+        let p = inspect(&path, Some("a good passphrase"), &here, &["Main".into()], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|n| format!("/srv/{}", crate::installer::slug(n))).unwrap();
         let kinds: Vec<&str> = p.clashes.iter().map(|c| c.kind.as_str()).collect();
         assert_eq!(kinds, ["name", "game_port", "txadmin_port"]);
         let s = p.suggested.unwrap();
@@ -811,7 +982,7 @@ mod tests {
         // a busy folder is a clash too
         let busy = tempfile::tempdir().unwrap();
         std::fs::write(busy.path().join("x"), b"1").unwrap();
-        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &|_| busy.path().display().to_string()).unwrap();
+        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|_| busy.path().display().to_string()).unwrap();
         assert!(p.clashes.iter().any(|c| c.kind == "folder"));
     }
 
@@ -828,7 +999,7 @@ mod tests {
         git.say("checkout -f -B main abcdef1234567890abcdef1234567890abcdef12", "");
         let fetch = FakeFetcher { calls: RefCell::new(vec![]) };
         let prov = FakeProvisioner { fail: false, dropped: RefCell::new(false) };
-        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&prov), saved_key: &|_| None, ports: &NoPorts, servers: vec![] };
+        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&prov), saved_key: &|_| None, ports: &NoPorts, forks: &SAMEFORKS, servers: vec![] };
         let newname = format!("{} moved", rig.entry.name);
         let target = rig.tmp.path().join("moved");
         let mut steps = vec![];
@@ -883,7 +1054,7 @@ mod tests {
         let name = format!("{} resumed", rig.entry.name);
         // first attempt: the database server cannot be reached
         let bad = FakeProvisioner { fail: true, dropped: RefCell::new(false) };
-        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&bad), saved_key: &|_| None, ports: &NoPorts, servers: vec![] };
+        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&bad), saved_key: &|_| None, ports: &NoPorts, forks: &SAMEFORKS, servers: vec![] };
         let err = run(&request(&path, "a good passphrase", &target, &name), &path, &env, &mut |_| {}).unwrap_err();
         assert_eq!(err.code, codes::DB_STOPPED);
         assert!(err.actions.contains(&Action::StartDatabase) && err.message.contains("Nothing is registered yet"));
@@ -892,7 +1063,7 @@ mod tests {
         assert_eq!(fetch.calls.borrow().len(), 1);
         // second attempt with a working database: carries on, does not download the server program again
         let good = FakeProvisioner { fail: false, dropped: RefCell::new(false) };
-        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&good), saved_key: &|_| None, ports: &NoPorts, servers: vec![] };
+        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&good), saved_key: &|_| None, ports: &NoPorts, forks: &SAMEFORKS, servers: vec![] };
         git.say("cat-file -e abcdef1234567890abcdef1234567890abcdef12^{commit}", "");
         git.say("checkout -f -B main abcdef1234567890abcdef1234567890abcdef12", "");
         run(&request(&path, "a good passphrase", &target, &name), &path, &env, &mut |_| {}).unwrap();
@@ -918,7 +1089,7 @@ mod tests {
         let fetch = FakeFetcher { calls: RefCell::new(vec![]) };
         let prov = FakeProvisioner { fail: false, dropped: RefCell::new(false) };
         let lookup = |n: &str| (n == "Other").then(|| "cfxk_OTHERKEY0123456789_abcdef".to_string());
-        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&prov), saved_key: &lookup, ports: &NoPorts, servers: vec![] };
+        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&prov), saved_key: &lookup, ports: &NoPorts, forks: &SAMEFORKS, servers: vec![] };
         git.say("cat-file -e abcdef1234567890abcdef1234567890abcdef12^{commit}", "");
         git.say("checkout -f -B main abcdef1234567890abcdef1234567890abcdef12", "");
         let target = rig.tmp.path().join("keyed");
@@ -941,12 +1112,70 @@ mod tests {
         let new_db = FakeDbOnly::default();
         let tools = Tools { db: &new_db.0, git: &git, db_client: "mariadb".into(), dump_program: None, now: 1 };
         let fetch = FakeFetcher { calls: RefCell::new(vec![]) };
-        let here = vec![ServerEntry { name: "Taken".into(), dir: "/x".into(), mode: crate::installer::Mode::Production, ports: PortsRecord { game: 31120, txadmin: 50000 }, created_unix: 1 }];
-        let env = Env { tools: &tools, fetcher: &fetch, provisioner: None, saved_key: &|_| None, ports: &NoPorts, servers: here };
+        let here = vec![ServerEntry { name: "Taken".into(), dir: "/x".into(), mode: crate::installer::Mode::Production, source: None, versions: None, ports: PortsRecord { game: 31120, txadmin: 50000 }, created_unix: 1 }];
+        let env = Env { tools: &tools, fetcher: &fetch, provisioner: None, saved_key: &|_| None, ports: &NoPorts, forks: &SAMEFORKS, servers: here };
         let t = rig.tmp.path().join("t");
         assert!(run(&request(&path, "a good passphrase", &t, "Taken"), &path, &env, &mut |_| {}).unwrap_err().message.contains("already here"));
         assert!(run(&request(&path, "a good passphrase", &t, "Fresh Name"), &path, &env, &mut |_| {}).unwrap_err().message.contains("port 31120"));
         assert!(!t.exists(), "nothing was made");
+    }
+
+    fn moved(rig: &Rig, choice: ForkChoice, forks: &FakeForks, tag: &str) -> (PathBuf, ImportResult, Vec<String>) {
+        let mut git = rig.clean_git();
+        git.clone_makes_git_dir = true;
+        let path = make_backup(rig, &git, "a good passphrase");
+        let new_db = FakeDbOnly::default();
+        let tools = Tools { db: &new_db.0, git: &git, db_client: "mariadb".into(), dump_program: None, now: 1_700_000_500 };
+        git.say("cat-file -e abcdef1234567890abcdef1234567890abcdef12^{commit}", "");
+        git.say("checkout -f -B main abcdef1234567890abcdef1234567890abcdef12", "");
+        let fetch = FakeFetcher { calls: RefCell::new(vec![]) };
+        let prov = FakeProvisioner { fail: false, dropped: RefCell::new(false) };
+        let env = Env { tools: &tools, fetcher: &fetch, provisioner: Some(&prov), saved_key: &|_| None, ports: &NoPorts, forks, servers: vec![] };
+        let target = rig.tmp.path().join(tag);
+        let mut req = request(&path, "a good passphrase", &target, &format!("{} {tag}", rig.entry.name));
+        req.fork_choice = choice;
+        let r = run(&req, &path, &env, &mut |_| {}).unwrap();
+        let log = git.log.borrow().clone();
+        (target, r, log)
+    }
+
+    #[test]
+    fn a_fork_owner_this_computer_cannot_use_is_a_guided_choice_and_each_choice_does_what_it_says() {
+        let rig = Rig::new();
+        let git = rig.clean_git();
+        let path = make_backup(&rig, &git, "a good passphrase");
+        // the preview names the owner and says it cannot be used here
+        let other = FakeForks { me: Some("someone-else"), made: Default::default() };
+        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &other, &|_| "/srv/n".into()).unwrap();
+        let note = p.fork.unwrap();
+        assert_eq!((note.owner.as_str(), note.usable, note.signed_in_as.as_deref()), ("old-owner", false, Some("someone-else")));
+        assert!(note.message.contains("cannot use"));
+        let same = FakeForks { me: Some("old-owner"), made: Default::default() };
+        assert!(inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &same, &|_| "/srv/n".into()).unwrap().fork.unwrap().usable);
+        let out = FakeForks { me: None, made: Default::default() };
+        assert!(inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &out, &|_| "/srv/n".into()).unwrap().fork.unwrap().message.contains("not signed in"));
+
+        // keep: the remotes stay as recorded; the server is still a fork server of the old owner
+        let (t, _, log) = moved(&rig, ForkChoice::Keep, &other, "keep");
+        assert!(!log.iter().any(|l| l.contains("remote set-url")));
+        let sf = ServerFile::load(&t).unwrap();
+        assert_eq!((sf.source(), sf.github_owner.as_deref()), (Source::Fork, Some("old-owner")));
+        // originals: plain clones of the original repositories, a clone server without an owner
+        let (t, r, log) = moved(&rig, ForkChoice::Originals, &other, "orig");
+        assert!(log.iter().any(|l| l.contains("remote set-url origin https://github.com/KoraFiveM/local-only")), "{log:?}");
+        let sf = ServerFile::load(&t).unwrap();
+        assert_eq!((sf.source(), sf.github_owner.clone()), (Source::Clone, None));
+        assert!(r.notes.iter().any(|n| n.contains("original repositories")));
+        // own copies: forks are made in the account signed in here and the server follows them
+        let (t, _, log) = moved(&rig, ForkChoice::OwnCopies, &other, "own");
+        assert_eq!(other.made.borrow().len(), 2, "one fork per resource");
+        assert!(log.iter().any(|l| l.contains("remote set-url origin https://github.com/someone-else/local-only")), "{log:?}");
+        assert!(log.iter().any(|l| l.starts_with("clone -- https://github.com/someone-else/core")), "{log:?}");
+        let sf = ServerFile::load(&t).unwrap();
+        assert_eq!((sf.source(), sf.github_owner.as_deref()), (Source::Fork, Some("someone-else")));
+        // every restored resource needs a restart, and the version setting is kept
+        assert!(crate::resourcestate::pending(&t, true).contains(&"core".to_string()));
+        assert_eq!(sf.versions(), crate::installer::Versions::Latest);
     }
 
     #[test]

@@ -243,6 +243,33 @@ pub fn scrub(text: &str) -> Scrubbed {
     Scrubbed { text: cur, hits }
 }
 
+/// [`scrub`] for a unified diff: the text is cleaned as a whole (private keys span lines), then each added, removed or
+/// context line is cleaned again WITHOUT its first column, so a changed line such as `+password = x` is read like the file
+/// line it comes from. File and hunk headers are left alone.
+pub fn scrub_diff(diff: &str) -> Scrubbed {
+    let first = scrub(diff);
+    let mut hits = first.hits;
+    let mut out: Vec<String> = Vec::new();
+    for l in first.text.lines() {
+        let headed = l.starts_with("+++") || l.starts_with("---") || l.starts_with("@@");
+        match (l.chars().next(), headed) {
+            (Some(c @ ('+' | '-' | ' ')), false) => {
+                let one = scrub(&l[1..]);
+                for (k, n) in one.hits {
+                    bump(&mut hits, k, n);
+                }
+                out.push(format!("{c}{}", one.text));
+            }
+            _ => out.push(l.to_string()),
+        }
+    }
+    let mut text = out.join("\n");
+    if diff.ends_with('\n') {
+        text.push('\n');
+    }
+    Scrubbed { text, hits }
+}
+
 /// [`scrub`] after also masking the given folder prefixes (the person's home folder) with `~`.
 pub fn scrub_with_homes(text: &str, homes: &[String]) -> Scrubbed {
     let mut t = text.to_string();

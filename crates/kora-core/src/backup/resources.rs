@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use super::types::{ResourceBackup, StoredAs};
+use super::types::{ResourceBackup, StoredAs, VersionKind, VersionState};
 use crate::git::CommandRunner;
 use crate::installer::registry::ResourceRecord;
 
@@ -47,17 +47,39 @@ fn run(git: &dyn CommandRunner, cwd: &Path, args: &[&str]) -> Option<String> {
     o.ok().then(|| o.stdout.trim().to_string())
 }
 
+/// Where the resource is relative to its normal version: on it, on a named branch, or trying a pull request (the
+/// local branch of a pull request is named `pr-<number>`, see `git::branches::pr_number_of`). The title of a pull
+/// request is filled in by the caller from `kora-resource-state.json`.
+pub fn version_state(git: &dyn CommandRunner, folder: &Path, rec: &ResourceRecord) -> VersionState {
+    let head = run(git, folder, &["rev-parse", "HEAD"]);
+    let branch = run(git, folder, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD");
+    match branch {
+        Some(b) if b == rec.branch => VersionState { kind: VersionKind::Normal, branch: Some(b), pr: None, pr_title: None },
+        Some(b) => match crate::git::branches::pr_number_of(&b) {
+            Some(n) => VersionState { kind: VersionKind::Pr, branch: Some(b), pr: Some(n), pr_title: None },
+            None => VersionState { kind: VersionKind::Branch, branch: Some(b), pr: None, pr_title: None },
+        },
+        // a detached head on the pinned commit is the released version: normal
+        None if head.is_some() && head.as_deref() == rec.commit.as_deref() => VersionState { kind: VersionKind::Normal, branch: None, pr: None, pr_title: None },
+        None => VersionState { kind: VersionKind::Detached, branch: None, pr: None, pr_title: None },
+    }
+}
+
 /// How to keep one recorded resource. `None`: its folder is not on disk (nothing to keep).
 pub fn classify(git: &dyn CommandRunner, resources_dir: &Path, rec: &ResourceRecord, everything: bool) -> Option<ResourceBackup> {
     let folder = resources_dir.join(&rec.path);
     if !folder.is_dir() {
         return None;
     }
+    let upstream = strip_userinfo(&rec.repository);
+    let state = if folder.join(".git").exists() { version_state(git, &folder, rec) } else { VersionState::default() };
     let full = |why: &str| ResourceBackup {
         id: rec.id.clone(),
         path: rec.path.clone(),
         stored: StoredAs::Full,
         repository: strip_userinfo(&rec.repository),
+        upstream: upstream.clone(),
+        state: state.clone(),
         branch: rec.branch.clone(),
         commit: rec.commit.clone(),
         why_full: Some(why.to_string()),
@@ -96,7 +118,19 @@ pub fn classify(git: &dyn CommandRunner, resources_dir: &Path, rec: &ResourceRec
         None => return Some(full("its commits could not be compared with the remote")),
     }
     let branch = run(git, &folder, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD").unwrap_or_default();
-    Some(ResourceBackup { id: rec.id.clone(), path: rec.path.clone(), stored: StoredAs::Reference, repository: repo, branch, commit: Some(head), why_full: None, bytes: 0 })
+    Some(ResourceBackup { id: rec.id.clone(), path: rec.path.clone(), stored: StoredAs::Reference, repository: repo, upstream, state, branch, commit: Some(head), why_full: None, bytes: 0 })
+}
+
+/// After resources were put back (restore or import): every one counts as changed, so "Restart needed" is right, and a
+/// pull request being tried keeps its title.
+pub fn finish_resource_state(server_dir: &Path, resources: &[ResourceBackup]) {
+    let ids: Vec<String> = resources.iter().map(|r| r.id.clone()).collect();
+    crate::resourcestate::mark_changed(server_dir, &ids, "restored from a backup");
+    for r in resources {
+        if let (Some(n), Some(t)) = (r.state.pr, r.state.pr_title.as_deref()) {
+            crate::resourcestate::set_pr_title(server_dir, &r.id, n, t);
+        }
+    }
 }
 
 /// Put a referenced resource back at its recorded commit: clone it when the folder is missing, fetch when
@@ -272,6 +306,8 @@ mod tests {
             path: "core".into(),
             stored: StoredAs::Reference,
             repository: "https://github.com/KoraFiveM/x.git".into(),
+            upstream: "https://github.com/KoraFiveM/x.git".into(),
+            state: VersionState::default(),
             branch: "main".into(),
             commit: Some("abcdef1234567890".into()),
             why_full: None,
