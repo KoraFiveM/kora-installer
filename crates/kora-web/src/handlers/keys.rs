@@ -69,7 +69,7 @@ pub async fn keys_list(State(st): State<AppState>, Extension(c): Extension<Calle
             .map(|(k, used)| {
                 let mut v = key_json(k);
                 v["servers"] = json!(used);
-                v["stopped_installs"] = json!(pending.count_key(&k.name) + usize::from(paused::saved_answers_use_key(&saved, &k.name)));
+                v["stopped_installs"] = json!(pending.count_key_with_saved(&saved, &k.name));
                 v
             })
             .collect();
@@ -102,7 +102,10 @@ pub async fn key_update(Extension(c): Extension<Caller>, Path(name): Path<String
         let k = KeyStore::default().update(&name, new_name.as_deref(), key.as_deref()).map_err(api)?;
         let mut notes = vec![];
         if name != k.name {
-            let n = PausedStore::default().rename_key(&name, &k.name) + usize::from(paused::rename_key_in_saved_answers(&kora_core::installer::saved::path(), &name, &k.name));
+            let saved = kora_core::installer::saved::path();
+            let n = PausedStore::default().count_key_with_saved(&saved, &name);
+            PausedStore::default().rename_key(&name, &k.name);
+            paused::rename_key_in_saved_answers(&saved, &name, &k.name);
             if n > 0 {
                 notes.push(format!("{n} unfinished install{} now use{} the new name.", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }));
             }
@@ -120,7 +123,7 @@ pub async fn key_update(Extension(c): Extension<Caller>, Path(name): Path<String
 pub async fn key_remove(Extension(c): Extension<Caller>, Path(name): Path<String>) -> Result<Json<Value>, ApiError> {
     require_manage(&c)?;
     blocking(move || {
-        let waiting = PausedStore::default().count_key(&name) + usize::from(paused::saved_answers_use_key(&kora_core::installer::saved::path(), &name));
+        let waiting = PausedStore::default().count_key_with_saved(&kora_core::installer::saved::path(), &name);
         KeyStore::default().remove(&name).map_err(api)?;
         let mut notes = vec!["Servers that were installed with this key keep working: they have their own copy.".to_string()];
         if waiting > 0 {

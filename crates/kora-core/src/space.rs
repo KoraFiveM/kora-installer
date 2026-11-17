@@ -180,7 +180,7 @@ pub fn check(disk: &dyn DiskInfo, needs: &[Need]) -> Result<(), String> {
     if problems.is_empty() {
         Ok(())
     } else {
-        Err(format!("{} Free up some space or choose another folder (--dir), then run the installer again (to install anyway, set KORA_SKIP_SPACE_CHECK=1). Nothing was changed.", problems.join(" ")))
+        Err(format!("{} Free up some space or choose another folder, then try again. Nothing was changed.", problems.join(" ")))
     }
 }
 
@@ -222,9 +222,9 @@ mod tests {
         let small = Fake { volumes: vec![("/", "root", total - 1)], fail: false };
         let e = check(&small, &needs).unwrap_err();
         assert!(e.contains("Not enough free disk space"), "{e}");
-        assert!(e.contains("/srv/kora/a") && e.contains("4.3 GiB") && e.contains("--dir"), "{e}");
+        assert!(e.contains("/srv/kora/a") && e.contains("4.3 GiB"), "{e}");
         assert!(e.contains("1.0 GiB for the FXServer build") && e.contains("54 resources"), "{e}");
-        assert!(e.contains("Nothing was changed") && e.contains("KORA_SKIP_SPACE_CHECK=1"));
+        assert!(e.contains("Nothing was changed") && !e.contains("--dir"));
     }
 
     #[test]

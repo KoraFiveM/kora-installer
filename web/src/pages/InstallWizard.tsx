@@ -93,7 +93,7 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk }: {
           )
         })}
       </dl>
-      {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!disk.data.message.includes('GB') && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
+      {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!/Gi?B/.test(disk.data.message) && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
       <ErrorNotice error={disk.error ?? plan.error} />
       {plan.data && (
         <Alert tone={plan.data.needs_admin.length ? 'warning' : 'info'} title="Administrator rights">

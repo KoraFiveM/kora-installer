@@ -125,6 +125,16 @@ impl PausedStore {
         self.all().iter().filter(|s| s.req.license_key_name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name))).count()
     }
 
+    /// How many unfinished installs use the saved key `name`, counting the saved answers at `saved` too. A
+    /// stopped install leaves both a paused entry and saved answers for the same folder: that is ONE install.
+    pub fn count_key_with_saved(&self, saved: &Path, name: &str) -> usize {
+        let same = |k: &Option<String>| k.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name));
+        let paused = self.all();
+        let n = paused.iter().filter(|s| same(&s.req.license_key_name)).count();
+        let extra = read_saved(saved).is_some_and(|r| same(&r.license_key_name) && !paused.iter().any(|s| s.req.dir == r.dir));
+        n + usize::from(extra)
+    }
+
     /// The saved key was renamed: follow it. Returns how many stopped installs changed.
     pub fn rename_key(&self, old: &str, new: &str) -> usize {
         let mut n = 0;
@@ -246,6 +256,22 @@ mod tests {
         std::fs::write(d.path().join("a2.json"), serde_json::to_string(&old).unwrap()).unwrap();
         assert!(s.load("a2").is_none());
         assert!(!d.path().join("a2.json").exists());
+    }
+
+    #[test]
+    fn a_stopped_install_with_both_a_paused_entry_and_saved_answers_counts_once() {
+        let d = tempfile::tempdir().unwrap();
+        let s = PausedStore::at(d.path().join("p"));
+        let saved = d.path().join("last-install.json");
+        let mut a = req("/srv/a", Some("Main"));
+        a.license_key = None;
+        std::fs::write(&saved, serde_json::to_string(&a).unwrap()).unwrap();
+        assert_eq!(s.count_key_with_saved(&saved, "main"), 1, "saved answers alone");
+        s.save("j1", &req("/srv/a", Some("Main")), false, None, &[]).unwrap();
+        assert_eq!(s.count_key_with_saved(&saved, "main"), 1, "the same install, paused and saved");
+        s.save("j2", &req("/srv/b", Some("Main")), false, None, &[]).unwrap();
+        assert_eq!(s.count_key_with_saved(&saved, "main"), 2, "another folder is another install");
+        assert_eq!(s.count_key_with_saved(&saved, "other"), 0);
     }
 
     #[test]
