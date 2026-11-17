@@ -24,7 +24,7 @@ export function AlertsBanner() {
             {a.message}
           </Alert>
           {canAck && (
-            <button className="absolute right-3 top-3 text-muted-foreground hover:text-foreground" aria-label={t('core.alertsBanner.dismissAlertServer', { server: a.server })} title={t('core.alertsBanner.dismiss')} onClick={() => ack.mutate(a.id)}>
+            <button className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground hover:text-foreground" aria-label={t('core.alertsBanner.dismissAlertServer', { server: a.server })} title={t('core.alertsBanner.dismiss')} onClick={() => ack.mutate(a.id)}>
               <X className="size-4" />
             </button>
           )}

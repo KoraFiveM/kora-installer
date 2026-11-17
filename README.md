@@ -34,7 +34,7 @@ shows at a glance whether your servers run, its menu starts, stops and restarts 
 stops. It is a thin client of the panel (nothing changes for the browser route, remote use or a server without a screen),
 Windows first (WebView2; Linux with WebKitGTK second). See [docs/desktop-app.md](docs/desktop-app.md).
 
-Guide: [docs/panel.md](docs/panel.md). Where Kora keeps its own data, backups and the way back to older versions: [docs/store.md](docs/store.md).
+Guide: [docs/panel.md](docs/panel.md). Languages and how to add one: [docs/translations.md](docs/translations.md); accessibility: [docs/accessibility.md](docs/accessibility.md). Where Kora keeps its own data, backups and the way back to older versions: [docs/store.md](docs/store.md).
 
 ## Install
 

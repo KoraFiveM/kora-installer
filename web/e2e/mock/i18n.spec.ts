@@ -16,8 +16,8 @@ const MOCK_TEXT: string[] = (() => {
   const out: string[] = []
   for (const f of readdirSync(dir).filter((x) => x.endsWith('.ts'))) {
     for (const m of readFileSync(join(dir, f), 'utf8').matchAll(/'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)"|`((?:[^`\\]|\\.)+)`/g)) {
-      const t = (m[1] ?? m[2] ?? m[3] ?? '').replace(/\\(.)/g, '$1').replace(/\$\{[^}]*\}/g, '\u0001').replace(/\s+/g, ' ').trim()
-      if (/[A-Za-z]{3,}\s+[A-Za-z]{3,}/.test(t.replace(/\u0001/g, ' '))) out.push(t)
+      const t = (m[1] ?? m[2] ?? m[3] ?? '').replace(/\\(.)/g, '$1').replace(/\$\{[^}]*\}/g, '\uE000').replace(/\s+/g, ' ').trim()
+      if (/[A-Za-z]{3,}\s+[A-Za-z]{3,}/.test(t.replace(/\uE000/g, ' '))) out.push(t)
     }
   }
   return out
@@ -41,7 +41,7 @@ async function plainEnglish(page: Page): Promise<string[]> {
     return out
   })
   // A mock sentence with a hole (`There is no server called "${name}".`) matches as a pattern.
-  const patterns = MOCK_TEXT.filter((m) => m.includes('\u0001')).map((m) => new RegExp(m.split('\u0001').map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+')))
+  const patterns = MOCK_TEXT.filter((m) => m.includes('\uE000')).map((m) => new RegExp(m.split('\uE000').map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+')))
   const dynamic = [/^Installed [\d.]+ \(/] // mock sentences whose holes hold quotes (not found by the extraction above)
   return found.filter((t) => !dynamic.some((re) => re.test(t)) && !MOCK_TEXT.some((m) => (t.length >= 14 ? m.includes(t) || t.includes(m) : m === t)) && !patterns.some((re) => re.test(t)))
 }
@@ -114,10 +114,12 @@ test.describe('German (beta)', () => {
     }
   })
 
-  test('a server problem that carries a message id is shown in German, one without it in English', async ({ page, open }) => {
-    await open('/install', { lang: 'de', scenario: 'trouble' })
-    await page.getByLabel('Lizenzschlüssel', { exact: true }).fill('cfxk_abcdefghij_12345')
-    await expect(page.getByRole('button', { name: 'Weiter' })).toBeVisible()
+  test('a server problem that carries a message id is shown in German; the same problem in English keeps its wording', async ({ page, open }) => {
+    // The mock sends `i18n: { id: 'errors.problems.githubSignedOut' }` next to the English message (as the real panel does for the known problems).
+    await open('/system', { lang: 'de' })
+    await expect(page.getByText('Du bist nicht bei GitHub angemeldet.')).toBeVisible()
+    await open('/system')
+    await expect(page.getByText('You are not signed in to GitHub.')).toBeVisible()
   })
 })
 
