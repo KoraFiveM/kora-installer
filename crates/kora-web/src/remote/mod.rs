@@ -5,6 +5,7 @@
 //! * [`tailscale`]: the `whois` seam (identity comes from the local tailscaled, never from headers).
 //! * [`proxy`]: the opt-in trusted reverse proxy.
 //! * [`roles`]: viewer / operator / admin, the exhaustive Op classification and request → Op lookup.
+pub mod auth;
 pub mod config;
 pub mod proxy;
 pub mod roles;
