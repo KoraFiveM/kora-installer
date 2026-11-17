@@ -9,6 +9,10 @@ use serde::Deserialize;
 
 use crate::nav;
 
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
 /// What `kora desktop session --json` printed.
 #[derive(Deserialize, Clone, PartialEq, Eq)]
 pub struct Session {
@@ -25,8 +29,8 @@ pub struct Session {
     /// The panel's token (API calls from the shell). Never printed.
     #[serde(default)]
     pub token: String,
-    /// A plain sentence when `ok` is false.
-    #[serde(default)]
+    /// A plain sentence when `ok` is false (`kora desktop session` prints `"message": null` when it has nothing to say).
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub message: String,
 }
 
@@ -119,6 +123,14 @@ mod tests {
     use super::*;
 
     const GOOD: &str = r##"{"ok":true,"mode":"running","port":47120,"link":"http://127.0.0.1:47120/#code=abcdefghijklmnopqrstuv","token":"tok"}"##;
+
+    #[test]
+    fn the_answer_exactly_as_kora_prints_it_is_read() {
+        // `kora desktop session --no-background` printed this (a null message) and the app could not read it.
+        assert_eq!(parse_output("{\"message\":null,\"mode\":\"foreground_needed\",\"ok\":true}\n"), Outcome::NeedForeground);
+        assert_eq!(parse_output("{\"message\":\"No.\",\"ok\":false}"), Outcome::Failed("No.".into()));
+        assert_eq!(parse_output("{\"message\":null,\"ok\":false}"), Outcome::Failed("Kora could not start its panel.".into()));
+    }
 
     #[test]
     fn a_good_answer_is_ready() {
