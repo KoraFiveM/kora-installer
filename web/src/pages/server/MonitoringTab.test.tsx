@@ -16,7 +16,7 @@ const server = { name: 'prod', dir: '/srv/prod', mode: 'production', source: 'cl
 const up = (t: number, players: number): MetricSample => ({ t, up: true, players, max_players: 48, cpu: 12.5, ram_mb: 2048, sys_ram_pct: 55, disk_free_mb: 51200, disk_free_pct: 25, game_up: true, txadmin_up: true })
 const settings: AlertSettings = {
   enabled: true,
-  rules: { stopped: true, recovered: true, disk: true, ram: true, updates: true },
+  rules: { stopped: true, recovered: true, disk: true, ram: true, updates: true, machine: true },
   disk_min_gb: 5,
   disk_min_percent: 5,
   ram_max_percent: 90,

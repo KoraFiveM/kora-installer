@@ -118,6 +118,7 @@ function SettingsForm({ name, cur }: { name: string; cur: AlertSettings }) {
         <Checkbox label="Memory is nearly full" checked={rules.ram} onChange={rule('ram')} />
         <div className="pl-7 sm:max-w-xs"><Field label="Alert above (% of the machine in use)"><Input inputMode="decimal" value={ram} onChange={(e) => setRam(e.target.value)} /></Field></div>
         <Checkbox label="Updates need attention" hint="Some resources have changes Kora cannot update on its own." checked={rules.updates} onChange={rule('updates')} />
+        <Checkbox label="Problems with Kora itself" hint="The panel's HTTPS certificate is ending or could not be renewed, or Kora's administrator service stopped answering. These belong to no server, so they go to every server's address that has this on, each once." checked={rules.machine} onChange={rule('machine')} />
       </fieldset>
       <div className="space-y-3 border-t border-border pt-4">
         <h3 className="text-sm font-semibold">Where alerts are sent</h3>

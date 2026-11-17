@@ -227,7 +227,7 @@ export type AlertEmail = {
   supported: boolean,
 };
 
-export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention" | "backup_failed";
+export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention" | "backup_failed" | "cert_expiring" | "cert_expired" | "cert_renewal_failed" | "service_stopped";
 
 export type AlertRules = {
   stopped: boolean,
