@@ -40,33 +40,42 @@ const MAX_POINTS: usize = 360;
 
 /// One look at one server. Absent fields were not measurable.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "MetricSample"))]
 pub struct Sample {
     /// Unix seconds.
     pub t: u64,
     /// The server is running.
     pub up: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub players: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub max_players: Option<u32>,
     /// Percent of the whole machine's CPU used by the server and what it started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub cpu: Option<f32>,
     /// Megabytes of RAM used by the server and what it started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub ram_mb: Option<u32>,
     /// Percent of this machine's RAM in use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub sys_ram_pct: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub disk_free_mb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub disk_free_pct: Option<f32>,
     #[serde(default)]
     pub game_up: bool,
     #[serde(default)]
     pub txadmin_up: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub badge: Option<UpdateBadge>,
 }
 

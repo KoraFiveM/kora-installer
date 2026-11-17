@@ -111,7 +111,7 @@ export function BuildStep({ f, set, advanced }: StepProps) {
           <Field label="Build">
             <Select value={f.artifactBuild ?? ''} onChange={(e) => set({ artifactBuild: e.target.value ? Number(e.target.value) : null })}>
               <option value="">Choose a build</option>
-              {(arts.data?.items ?? []).map((a) => <option key={a.build} value={a.build}>{a.build}{a.build === arts.data?.recommended ? ' (recommended)' : ''}{a.date ? `, ${a.date}` : ''}</option>)}
+              {(arts.data?.items ?? []).map((a) => <option key={a.build} value={a.build}>{a.build}{a.build === arts.data?.recommended ? ' (recommended)' : ''}</option>)}
             </Select>
           </Field>
         )}

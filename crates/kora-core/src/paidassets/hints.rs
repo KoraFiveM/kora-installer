@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetHintKind"))]
 #[serde(rename_all = "snake_case")]
 pub enum HintKind {
     /// "You lack the required entitlement".
@@ -18,6 +19,7 @@ pub enum HintKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetHint"))]
 pub struct EntitlementHint {
     pub kind: HintKind,
     /// The asset, when the line names it.

@@ -93,7 +93,7 @@ state, a table with long content, the console view and skeletons. The page is `s
 
 ## Layout
 
-- `src/api/types.ts`: TypeScript mirror of the API (snake_case). `src/api/client.ts`: one function per route of table 2.1.
+- `src/api/generated/`: the API's types and route map, GENERATED from the Rust side (never edit; see `CONTRIBUTING.md`, "Adding or changing an API operation"). `src/api/types.ts`: re-exports them under the names the pages use. `src/api/client.ts`: one function per operation, calling `call('<op name>', ...)`.
 - `src/hooks/useJob.ts` follows a job (SSE, falls back to polling); `src/components/JobProgress.tsx` shows it.
 - `src/pages/`: `ServersPage`, `ServerDetailPage` (+ `server/*` tabs), `InstallWizard` (+ `install/*`), `SettingsPage`.
 - `src/components/ui/`: shadcn-style primitives.
@@ -107,7 +107,7 @@ Lime is used only for the primary button and the active navigation item. Fonts: 
 
 ## Assumptions about the API (the backend must match)
 
-The shapes are in `src/api/types.ts` and the routes in `src/api/client.ts`. Where the plan is silent, the UI assumes:
+The shapes are generated into `src/api/generated/types.ts` (Rust: `crates/kora-core/src/api/wire/`) and the routes into `src/api/generated/routes.ts`. Where the plan is silent, the UI assumes:
 enums are snake_case strings (`use_existing`, `full_restart`, `up_to_date`, step status `pending|running|done|skipped|failed`;
 capitalised Rust-style step statuses and `{"Resource": {...}}` update events are also tolerated); list routes wrap arrays
 (`{servers}`, `{files}`, `{resources}`, `{snapshots}`, `{owners}`); job `error` is `{code, message, command?, kept?, log_path?}`;

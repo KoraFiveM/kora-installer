@@ -340,6 +340,8 @@ pub fn request_json(r: &InstallRequest) -> Value {
         "github_owner": r.github_owner,
         "start": r.start,
         "license_key_name": r.license_key_name,
+        // Not a secret; the wizard puts it back so a resumed install keeps the same txAdmin admin.
+        "cfx_identifier": r.cfx_identifier,
     })
 }
 
@@ -827,6 +829,20 @@ mod tests {
             dir: std::env::temp_dir().join("kora-x").to_string_lossy().into_owned(),
             ..Default::default()
         }
+    }
+
+    /// The wizard puts the saved answers back and reads `cfx_identifier` from them (the panel's TypeScript
+    /// always declared it); it is an account name, not a secret, so a resumed install keeps its txAdmin admin.
+    #[test]
+    fn saved_answers_keep_the_cfx_identifier_but_never_a_secret() {
+        let mut w = wire("Alpha");
+        w.cfx_identifier = Some("fivem:4465268".into());
+        w.license_key = Some("cfxk_SECRETKEYSECRETKEY".into());
+        w.db_admin = Some(WireDbAdmin { host: "".into(), port: None, user: "root".into(), password: Some("hunter2".into()) });
+        let v = request_json(&build_request(&w).unwrap());
+        assert_eq!(v["cfx_identifier"], "fivem:4465268");
+        let text = v.to_string();
+        assert!(!text.contains("SECRET") && !text.contains("hunter2"), "{text}");
     }
 
     #[test]
