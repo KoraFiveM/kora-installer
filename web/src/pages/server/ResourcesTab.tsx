@@ -184,7 +184,7 @@ function InstalledResource({ id, serverName, updates: u, branch, noCheck, noCont
 }
 
 function InstalledList({ server: s, installed, updates: u }: { server: ServerDetail; installed: string[]; updates: Updates }) {
-  const branches = useBranches(s.name)
+  const branches = useBranches(s.name, s.managed)
   const role = useRole()
   const noOperator = whyNot(role, 'operator')
   const noControl = noOperator

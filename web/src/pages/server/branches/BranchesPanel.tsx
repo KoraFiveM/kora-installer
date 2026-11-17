@@ -16,7 +16,8 @@ import { VersionBadge } from './VersionBadge'
  * "the normal version", "try a pull request"; the git names are there but secondary.
  */
 export function BranchesPanel({ server: s }: { server: ServerDetail }) {
-  const b = useBranches(s.name)
+  // A server Kora did not install has no record of its resources, so there is nothing to look at.
+  const b = useBranches(s.name, s.managed)
   const [open, setOpen] = useState<ResourceBranch | null>(null)
   const rows = b.rows.filter((r) => r.state !== 'pinned')
   const away = rows.filter((r) => r.state !== 'default' && r.state !== 'unavailable')

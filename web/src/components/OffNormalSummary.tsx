@@ -7,14 +7,14 @@ import { Badge } from '@/components/ui/badge'
 import { isOffNormal, offNormalSummary } from './NotNormalBadge'
 
 /** Where each resource of a server is (local reads only); kept a minute so a long servers list does not hammer the disk. */
-export function useOffNormal(server: Pick<ServerSummary, 'name'>) {
-  const q = useQuery({ queryKey: ['branches', server.name], queryFn: () => api.branches.list(server.name), staleTime: 60_000 })
+export function useOffNormal(server: Pick<ServerSummary, 'name' | 'managed'>) {
+  const q = useQuery({ queryKey: ['branches', server.name], queryFn: () => api.branches.list(server.name), staleTime: 60_000, enabled: server.managed })
   const rows = (q.data ?? []).filter(isOffNormal)
   return { rows, summary: offNormalSummary(q.data ?? []) }
 }
 
 /** The small "N resources not on their normal version" line, linking to the Resources tab. */
-export function OffNormalSummary({ server, list }: { server: Pick<ServerSummary, 'name'>; list?: boolean }) {
+export function OffNormalSummary({ server, list }: { server: Pick<ServerSummary, 'name' | 'managed'>; list?: boolean }) {
   const { rows, summary } = useOffNormal(server)
   if (!summary) return null
   const base = `/servers/${encodeURIComponent(server.name)}`
