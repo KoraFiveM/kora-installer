@@ -7,6 +7,7 @@ pub mod addresources;
 pub mod api;
 pub mod app_install;
 pub mod artifacts;
+pub mod backup;
 pub mod branches;
 pub mod catalog;
 pub mod cfx;

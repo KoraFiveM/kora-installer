@@ -25,6 +25,7 @@ ureq = "2"
 url = "2"
 xz2 = "0.1.7"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
+age = { version = "0.12", default-features = false }
 
 [features]
 # `kora_core::api::fake::FakeBackend` for other crates' tests.
