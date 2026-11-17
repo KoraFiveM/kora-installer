@@ -60,6 +60,55 @@ pub fn clean_line(s: &str) -> String {
     out
 }
 
+/// Like [`clean_line`], but keeps the colour codes (`ESC[...m`, SGR) so the panel can colour the
+/// line the way the game and txAdmin do. Every other escape sequence and control character is
+/// dropped, and a colour code is only kept when it is made of digits and semicolons.
+pub fn clean_line_keep_colour(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        match c {
+            '\u{1b}' => match it.peek() {
+                Some('[') => {
+                    it.next();
+                    let mut params = String::new();
+                    let mut end = None;
+                    for n in it.by_ref() {
+                        if ('@'..='~').contains(&n) {
+                            end = Some(n);
+                            break;
+                        }
+                        // Anything but digits and ';' before the final byte is not a colour code.
+                        if !(n.is_ascii_digit() || n == ';') || params.len() > 32 {
+                            break;
+                        }
+                        params.push(n);
+                    }
+                    if end == Some('m') {
+                        out.push('\u{1b}');
+                        out.push('[');
+                        out.push_str(&params);
+                        out.push('m');
+                    }
+                }
+                Some(']') => {
+                    it.next();
+                    while let Some(n) = it.next() {
+                        if n == '\u{7}' || (n == '\u{1b}' && it.peek() == Some(&'\\')) {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '\t' => out.push_str("    "),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// The last `max` lines of a file (reads only its end).
 pub fn tail(path: &Path, max: usize) -> Result<Vec<String>, String> {
     let mut f = std::fs::File::open(path).map_err(|e| format!("Can't read {}: {e}", path.display()))?;
@@ -74,7 +123,7 @@ pub fn tail(path: &Path, max: usize) -> Result<Vec<String>, String> {
         lines.remove(0); // probably cut in the middle
     }
     let skip = lines.len().saturating_sub(max);
-    Ok(lines.into_iter().skip(skip).map(clean_line).collect())
+    Ok(lines.into_iter().skip(skip).map(clean_line_keep_colour).collect())
 }
 
 #[cfg(test)]
@@ -86,6 +135,19 @@ mod tests {
         assert_eq!(clean_line("\u{1b}[31mred\u{1b}[0m ok\r"), "red ok");
         assert_eq!(clean_line("a\tb\u{7}"), "a    b");
         assert_eq!(clean_line("\u{1b}]0;title\u{7}x"), "x");
+    }
+
+    #[test]
+    fn keeps_colours_and_drops_everything_else() {
+        assert_eq!(clean_line_keep_colour("\u{1b}[31mred\u{1b}[0m ok\r"), "\u{1b}[31mred\u{1b}[0m ok");
+        assert_eq!(clean_line_keep_colour("\u{1b}[1;38;5;208mx\u{1b}[m"), "\u{1b}[1;38;5;208mx\u{1b}[m");
+        assert_eq!(clean_line_keep_colour("a\tb\u{7}"), "a    b");
+        assert_eq!(clean_line_keep_colour("\u{1b}]0;title\u{7}x"), "x");
+        // Cursor movement and clears are not colours: dropped.
+        assert_eq!(clean_line_keep_colour("\u{1b}[2Kx\u{1b}[1;1Hy"), "xy");
+        // A sequence with odd characters inside is dropped, and the text after it stays.
+        assert_eq!(clean_line_keep_colour("\u{1b}[3<1mz"), "1mz");
+        assert_eq!(clean_line_keep_colour("plain ^1 text"), "plain ^1 text");
     }
 
     #[test]

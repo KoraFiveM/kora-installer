@@ -75,7 +75,7 @@ impl Follower {
         };
         let rest = self.partial.split_off(end + 1);
         let done = std::mem::replace(&mut self.partial, rest);
-        done.lines().map(kora_core::api::logs::clean_line).collect()
+        done.lines().map(kora_core::api::logs::clean_line_keep_colour).collect()
     }
 }
 
