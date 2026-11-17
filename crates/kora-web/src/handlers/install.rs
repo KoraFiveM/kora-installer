@@ -406,12 +406,7 @@ fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &InstallRequ
     });
     log_finish(id, None);
     match r {
-        Ok(_) => Ok(json!({
-            "name": req.name,
-            "dir": req.dir,
-            "txadmin_url": format!("http://127.0.0.1:{}", req.ports.txadmin),
-            "notes": ["Installed by the Kora helper."],
-        })),
+        Ok(_) => serde_json::to_value(outcome_from_record(req)).map_err(|e| e.to_string()),
         Err(e) => {
             let mut p = e.to_problem();
             if p.code == "bad_request" || p.code == "internal" {
@@ -421,6 +416,39 @@ fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &InstallRequ
             pause(id, Paused { req: req.clone(), via_helper: true, windows_admin: false, failed_step: None, finished: vec![], at: Instant::now() });
             Err(stopped_error(id, p, &[], None, None))
         }
+    }
+}
+
+/// The outcome of an install the helper ran, read back from what it left in the server folder (the panel
+/// never sees the helper's own result): the address, whether it is running, the generated txAdmin account
+/// (its NAME only: the password stays in its file, which is never read). Panel-side so that it goes with the
+/// helper when the helper is replaced.
+pub(crate) fn outcome_from_record(req: &InstallRequest) -> kora_core::installer::InstallOutcome {
+    use kora_core::launch;
+    let pw_file = req.dir.join("secrets").join("txadmin-admin.txt");
+    let local_admin = pw_file.is_file();
+    let spec = launch::Spec { name: req.name.clone(), dir: req.dir.clone(), game_port: req.ports.game, txadmin_port: req.ports.txadmin };
+    let st = req.start.then(|| launch::status_of(&launch::SystemEnv::default(), &spec));
+    let running = st.as_ref().is_some_and(|s| s.running && s.txadmin_up);
+    let log_tail = if req.start && !running { kora_core::api::logs::discover(&req.dir).first().and_then(|l| kora_core::api::logs::tail(&l.path, 20).ok()).unwrap_or_default() } else { vec![] };
+    let mut notes = vec!["Installed by the Kora helper.".to_string()];
+    if !req.start {
+        notes.push(format!("The server is installed but not started. Start it with `kora start {}`. txAdmin runs on port {}.", req.name, req.ports.txadmin));
+    }
+    kora_core::installer::InstallOutcome {
+        dir: req.dir.clone(),
+        connect: launch::connect_address(req.ports.game),
+        txadmin_url: format!("http://localhost:{}", req.ports.txadmin),
+        notes,
+        name: req.name.clone(),
+        start_attempted: req.start,
+        running,
+        txadmin_up: st.as_ref().is_some_and(|s| s.txadmin_up),
+        game_listening: st.as_ref().is_some_and(|s| s.game_listening),
+        launch_problem: (req.start && !running).then(|| "The server did not come up yet. The last lines of its log are below; look at the server's Logs tab.".to_string()),
+        log_tail,
+        admin_user: local_admin.then(|| kora_core::txadmin::LOCAL_ADMIN_USER.to_string()),
+        admin_password_file: local_admin.then_some(pw_file),
     }
 }
 

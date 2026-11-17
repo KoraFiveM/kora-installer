@@ -5,6 +5,11 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **The Resources tab of a server Kora did not install** no longer asks for a catalogue that does not exist (the panel answered 422 and the browser logged an error): it says in words that resources can only be added to servers Kora installed. The real-panel browser smoke no longer allows that error.
+- **An install run through the Linux helper** now finishes with the full outcome (connect address, whether it is running, the generated txAdmin account name and where its password is saved), read back from the server folder after the helper finishes (the password file is never read). The page shows the helper's status lines while it works.
+- The `secrets/txadmin-admin.txt` note says to use the Open txAdmin button in the panel from other devices (it used to say "use an SSH tunnel").
+
 ### Changed
 - Progress bars are green, the same colour as the main buttons (they were blue).
 - The wizard's "Also open the txAdmin port" explains that the panel's Open txAdmin button reaches txAdmin without it.

@@ -1,5 +1,5 @@
 txAdmin master account created by the Kora installer
-URL:      http://127.0.0.1:40120/ (use an SSH tunnel for remote access)
+URL:      http://127.0.0.1:40120/ (from other devices use the Open txAdmin button in the Kora panel: it opens through the panel)
 Username: kora-admin
 Password: pw-for-golden
 

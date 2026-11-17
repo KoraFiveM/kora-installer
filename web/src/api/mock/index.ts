@@ -400,7 +400,7 @@ const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identi
 const reachMock = installReachMock(route, () => servers)
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: false }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: viewer.identity?.provider === 'tailscale' }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
 const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
@@ -435,8 +435,8 @@ route('POST', '/session/link', () => {
   return { code, expires_in: 600 }
 })
 route('GET', '/system', () => (beh.windows
-  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
-  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true, admin_prompt: false }) satisfies T.SystemInfo)
+  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: !viewer.remote, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
+  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: !viewer.remote, kora_home: '/home/sam/.kora', can_restart: true, admin_prompt: false }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -1157,7 +1157,7 @@ let realFetch: typeof window.fetch | null = null
 
 /**
  * Who is looking, for the browser tests of what other people see: `?as=operator` (this computer, an operator),
- * `?as=remote-operator` (another device through Tailscale), `?as=remote-admin` (another device with an admin token).
+ * `?as=remote-operator` (another device through Tailscale), `?as=remote-admin` (another device with an admin token), `?as=remote-tailscale-admin` (another device, a Tailscale administrator).
  * Remembered for the tab like the scenario; `?as=local` goes back to the default.
  */
 type Viewer = { identity: T.Meta['identity']; remote: boolean }
@@ -1165,6 +1165,7 @@ const VIEWERS: Record<string, Viewer> = {
   operator: { identity: { name: 'kim', provider: 'local', role: 'operator' }, remote: false },
   'remote-operator': { identity: { name: 'kim', provider: 'tailscale', role: 'operator' }, remote: true },
   'remote-admin': { identity: { name: 'sam', provider: 'token', role: 'admin' }, remote: true },
+  'remote-tailscale-admin': { identity: { name: 'ada', provider: 'tailscale', role: 'admin' }, remote: true },
 }
 let viewer: Viewer = { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
 function resolveViewer(search: string, storage: Storage | null): Viewer {

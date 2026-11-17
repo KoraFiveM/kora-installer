@@ -18,11 +18,21 @@ export function installReachMock(route: Route, servers: () => T.ServerSummary[])
   const report = (name: string, once: Partial<ReachConsent>): ReachReport => {
     const s = servers().find((x) => x.name === name)
     const port = s?.ports.game ?? 30120
-    const running = s?.status === 'running'
+    const running = s?.status === 'running' || port === 30190
     const allowCfx = once.cfx_list ?? consent.cfx_list
     const allowEcho = once.ip_echo ?? consent.ip_echo
     const fwd = forwarding[name] ?? false
     const publicIp = '84.12.5.6'
+    // The demo server "adopted-existing-server" sits behind a provider's shared address (carrier-grade NAT).
+    if (port === 30190) {
+      const layers: ReachReport['layers'] = [
+        { id: 'running', state: 'ok', title: `The server is running and listening on port ${port} (TCP and UDP)`, detail: 'This computer accepts connections on the game port.', steps: [], fixes: [] },
+        { id: 'firewall', state: 'ok', title: 'No firewall is blocking this computer', detail: 'No active firewall (ufw, firewalld, Windows Firewall) was found.', steps: [], fixes: [] },
+        { id: 'router', state: 'problem', title: 'Your internet provider shares your public address', detail: 'Players on the internet cannot reach a server behind carrier-grade NAT, whatever you set in the router.', steps: ['Your internet provider shares one public address between many customers (carrier-grade NAT). Port forwarding on your own router cannot work behind it.', 'Ask your provider for a public IPv4 address (many do this free or for a small fee: say you host a game server), or', 'Run the server at a hosting provider or a cheap VPS instead, or', "Let friends join over a private network such as Tailscale or ZeroTier (everyone installs it, then they connect to the server's private address)."], fixes: [] },
+        { id: 'internet', state: 'problem', title: 'Not reachable from the internet', detail: "Your provider's shared address blocks incoming connections (see the line above).", steps: [], fixes: [] },
+      ]
+      return { server: name, game_port: port, layers, verdict: 'problem', headline: 'Something is in the way: Your internet provider shares your public address.', lan_ip: '192.168.1.50', public_ip: null, public_source: null, behind_nat: true, cgnat: true, join_code: null, connect: { lan: `192.168.1.50:${port}`, public: null, cfx: null, command: null }, forwarding: { enabled: false, status: null }, contacted: [], needs_consent: [], checked_unix: Math.floor(Date.now() / 1000), consent }
+    }
     const layers: ReachReport['layers'] = [
       running
         ? { id: 'running', state: 'ok', title: `The server is running and listening on port ${port} (TCP and UDP)`, detail: 'This computer accepts connections on the game port.', steps: [], fixes: [] }

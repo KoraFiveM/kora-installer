@@ -10,7 +10,7 @@ import { jsonResponse, renderApp } from '@/test/utils'
 
 const row = (id: string, status: ResourceChange['status'], behind = 1): ResourceChange => ({ id, from: 'aaaaaaa', to: 'bbbbbbb', behind, changelog: [], needs_restart: false, status })
 const all: UpdatePreview = { new_release: null, resources: [row('kora_core', 'clean'), row('kora_hud', 'clean'), row('kora_chat', 'up_to_date', 0)] }
-const server = { name: 'dev', mode: 'production', running: true, console_enabled: true } as unknown as ServerDetail
+const server = { name: 'dev', mode: 'production', running: true, console_enabled: true, managed: true } as unknown as ServerDetail
 
 const fetchMock = vi.fn()
 let bodies: unknown[] = []
@@ -290,5 +290,21 @@ describe('update results', () => {
     expect(await screen.findByText('Update finished, but some things need a look')).toBeInTheDocument()
     expect(screen.queryByText('Update finished')).not.toBeInTheDocument()
     expect(screen.getByText('kora_hud')).toBeInTheDocument()
+  })
+})
+
+describe('a server Kora did not install', () => {
+  it('does not ask for a catalogue (there is none, the panel would answer 422) and says why', async () => {
+    install({}, ['chat'])
+    renderApp(<ResourcesTab server={{ ...server, managed: false }} />)
+    expect(await screen.findByText(/added from an existing folder/i)).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/resources'))).toBe(true))
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/catalog'))).toBe(false)
+  })
+
+  it('still asks for it when Kora installed the server', async () => {
+    install({}, [])
+    renderApp(<ResourcesTab server={server} />)
+    await waitFor(() => expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/catalog'))).toBe(true))
   })
 })

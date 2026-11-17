@@ -123,11 +123,17 @@ describe('TxAdminButton', () => {
       expect(popup.close).toHaveBeenCalled()
     })
 
-    it('is off for people who are not administrators (txAdmin can run code on the server)', async () => {
+    it('is not shown to people who are not administrators (txAdmin can run code on the server)', async () => {
       remoteSetup(() => jsonResponse(200, {}), { identity: { name: 'olly', provider: 'token', role: 'operator' }, remote: true })
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      expect(screen.queryByRole('button', { name: /open txadmin/i })).not.toBeInTheDocument()
+    })
+
+    it('says in words, with the command, why a token administrator cannot open it until remote actions are on', async () => {
+      remoteSetup(() => jsonResponse(200, {}), { identity: { name: 'sam', provider: 'token', role: 'admin' }, remote: true, allow_remote_destructive: false })
       const b = await screen.findByRole('button', { name: /open txadmin/i })
       expect(b).toBeDisabled()
-      expect(b).toHaveAttribute('title', expect.stringContaining('admin'))
+      expect(screen.getByText(/kora panel remote-actions on/)).toBeInTheDocument()
     })
   })
 })

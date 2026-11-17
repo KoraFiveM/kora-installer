@@ -65,6 +65,8 @@ export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; p
       </Button>
     )
   }
+  // txAdmin can run code on the server: nobody below administrator sees the button at all.
+  if (!role.can('admin')) return null
   const off = whyNot(role, 'admin', true)
   const open = async () => {
     setFailed(null)
@@ -87,6 +89,7 @@ export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; p
   return (
     <span className="inline-flex flex-col items-start gap-1">
       <Button size={size} variant="default" disabled={off !== null} title={off ?? link.hint ?? undefined} onClick={() => void open()}><ExternalLink /> Open txAdmin</Button>
+      {off && <span className="max-w-sm text-xs text-muted-foreground">{off}</span>}
       {failed && <span className="max-w-sm text-xs text-destructive">{failed}</span>}
       {note?.url && <a className="text-xs underline" href={note.url} target="_blank" rel="noopener noreferrer">Your browser blocked the new tab: click here to open txAdmin.</a>}
       {note && <span className="max-w-sm text-xs text-muted-foreground">txAdmin has its own sign-in{note.username ? <>: use the account <strong>{note.username}</strong> that Kora made when it installed the server (its password is in <code className="font-mono">secrets/txadmin-admin.txt</code> in the server folder)</> : '.'}. The panel cannot sign you in to it.</span>}

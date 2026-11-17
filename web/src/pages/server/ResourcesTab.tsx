@@ -71,7 +71,8 @@ function PlanView({ plan, dev }: { plan: AddPlan; dev: boolean }) {
 
 function AddResources({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()
-  const cat = useQuery({ queryKey: ['server-catalog', s.name], queryFn: () => api.resources.catalog(s.name) })
+  // A server Kora did not install has no record of how it was set up, so there is no catalogue to ask for (the panel would answer 422).
+  const cat = useQuery({ queryKey: ['server-catalog', s.name], queryFn: () => api.resources.catalog(s.name), enabled: s.managed })
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [plan, setPlan] = useState<AddPlan | null>(null)
@@ -86,6 +87,9 @@ function AddResources({ server: s }: { server: ServerDetail }) {
   const groups = useMemo(() => groupResources(cat.data?.catalog.resources ?? [], query), [cat.data, query])
   const installed = new Set(cat.data?.installed ?? [])
   const toggle = (id: string) => { setPlan(null); setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n }) }
+  if (!s.managed) {
+    return <p className="text-sm text-muted-foreground">This server was added from an existing folder, so Kora did not install it and has no record of how it was set up. Adding resources from the catalogue only works for servers that Kora installed. Resources already in the folder are listed above.</p>
+  }
   return (
     <div className="space-y-4">
       {cat.data?.note && <p className="text-sm text-muted-foreground">{cat.data.note}</p>}

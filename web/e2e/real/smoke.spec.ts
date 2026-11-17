@@ -68,10 +68,7 @@ test.describe('the main pages', () => {
 })
 
 test.describe('an existing (fake) server folder', () => {
-  test('is added, listed, and every tab of it opens', async ({ signedIn: page, panel, trouble }) => {
-    // Known: the Resources tab asks for the catalogue of a server Kora did not install and gets a guided 422 (it then
-    // explains that in words). The browser logs every 4xx as a console error. Listed in the web-e2e report.
-    trouble.expect(/HTTP 422 GET .*\/catalog|status of 422/)
+  test('is added, listed, and every tab of it opens', async ({ signedIn: page, panel }) => {
     const dir = panel.fakeServer('smoke-existing')
     await page.goto(panel.origin + '/?add=1')
     const dialog = page.getByRole('dialog', { name: 'Add an existing server' })

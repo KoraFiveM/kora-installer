@@ -24,6 +24,13 @@ test.describe('server list', () => {
   })
 })
 
+test.describe('a server Kora did not install', () => {
+  test('the Resources tab explains instead of asking for a catalogue that is not there', async ({ page, open }) => {
+    await open('/servers/adopted-existing-server?tab=resources', { scenario: 'fleet' })
+    await expect(page.getByText(/added from an existing folder, so Kora did not install it/)).toBeVisible()
+  })
+})
+
 test.describe("a server's tabs", () => {
   test('every tab of a Production server opens, and has no accessibility problems', async ({ page, open, scan }) => {
     await open('/servers/kora-live')
