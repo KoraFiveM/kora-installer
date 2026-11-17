@@ -119,7 +119,12 @@ foreach ($f in 'kora-windows-x86_64.exe', 'kora-windows-x86_64.msi') {
 }
 $port = 47411
 $server = Open-ReleaseServer -Dir $rel -Port $port
-Start-Sleep -Seconds 2
+$ready = $false
+for ($i = 0; $i -lt 40 -and -not $ready; $i++) {
+    try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/kora-windows-x86_64.exe.sha256" | Out-Null; $ready = $true } catch { Start-Sleep -Milliseconds 500 }
+}
+if (-not $ready) { Write-Host "the local release server on port $port never answered (python: $((Get-Command python -ErrorAction SilentlyContinue).Source); exited: $($server.HasExited))" }
+Assert-That $ready 'the local release server answers'
 $base = "http://127.0.0.1:$port"
 $installPs1 = (Resolve-Path "$PSScriptRoot/../install.ps1").Path
 $adm = $null; $std = $null
