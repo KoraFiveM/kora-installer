@@ -441,7 +441,7 @@ fn internet_layer(f: &Facts, cgnat: bool, public: Option<(IpAddr, &'static str)>
                 format!(
                     "Cfx.re's server list shows it as cfx.re/join/{}{}. That is a good sign, but only a real player joining proves that the game's UDP port works too.",
                     listing.code,
-                    listing.endpoints.first().map(|e| format!(" (address {e})")).unwrap_or_default()
+                    listing.endpoints.first().map(|e| format!(" (address {e}{})", listing.last_seen.as_ref().map(|t| format!(", last seen {t}")).unwrap_or_default())).unwrap_or_default()
                 ),
             );
             if mismatch {

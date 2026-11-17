@@ -34,6 +34,8 @@ pub struct Listing {
     pub endpoints: Vec<String>,
     pub hostname: Option<String>,
     pub clients: Option<u32>,
+    /// When Cfx.re last saw the server (its own timestamp, e.g. `2026-11-17T16:00:41Z`), for "last seen".
+    pub last_seen: Option<String>,
 }
 
 /// The join code in FXServer's output: the id before `.users.cfx.re` in
@@ -72,6 +74,13 @@ pub fn parse_listing(code: &str, body: &str) -> Option<Listing> {
         endpoints,
         hostname: data.get("hostname").and_then(|h| h.as_str()).map(|h| h.chars().filter(|c| !c.is_control()).take(80).collect()),
         clients: data.get("clients").and_then(serde_json::Value::as_u64).and_then(|n| u32::try_from(n).ok()),
+        // `lastSeen` is inside `Data` in the single-server answer (verified against a live listing on 2026-11-17: fields hostname, clients, selfReportedClients, connectEndPoints, lastSeen).
+        last_seen: v
+            .get("Data")
+            .and_then(|d| d.get("lastSeen"))
+            .and_then(|t| t.as_str())
+            .filter(|t| t.len() <= 40 && t.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'-' | b':' | b'T' | b'Z' | b'.' | b'+')))
+            .map(str::to_string),
     })
 }
 
@@ -157,10 +166,11 @@ mod tests {
 
     #[test]
     fn listing_parsing() {
-        let body = r#"{"EndPoint":"qwerty","Data":{"hostname":"^5My server","clients":3,"connectEndPoints":["203.0.113.5:30120","not an address"],"players":[{"name":"x"}]}}"#;
+        let body = r#"{"EndPoint":"qwerty","Data":{"hostname":"^5My server","clients":3,"connectEndPoints":["203.0.113.5:30120","not an address"],"lastSeen":"2026-11-17T16:00:41.78Z","players":[{"name":"x"}]}}"#;
         let l = parse_listing("qwerty", body).unwrap();
         assert_eq!(l.endpoints, ["203.0.113.5:30120"]);
         assert_eq!(l.clients, Some(3));
+        assert_eq!(l.last_seen.as_deref(), Some("2026-11-17T16:00:41.78Z"));
         assert!(parse_listing("qwerty", "{}").is_none());
         assert!(parse_listing("qwerty", "<html>").is_none());
     }

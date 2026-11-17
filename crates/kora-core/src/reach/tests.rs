@@ -26,7 +26,7 @@ fn layer_of<'a>(r: &'a ReachReport, id: &str) -> &'a Layer {
 }
 
 fn listing(ep: &str) -> Lookup<Listing> {
-    Lookup::Found(Listing { code: "abc123".into(), endpoints: vec![ep.into()], hostname: None, clients: Some(0) })
+    Lookup::Found(Listing { code: "abc123".into(), endpoints: vec![ep.into()], hostname: None, clients: Some(0), last_seen: Some("2026-11-17T16:00:41Z".into()) })
 }
 
 #[test]
