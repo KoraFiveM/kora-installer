@@ -57,7 +57,7 @@ public static class KoraTok
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr buf, int len, out int ret);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int cls, IntPtr buf, int len);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertStringSidToSid(string s, out IntPtr sid);
     [DllImport("advapi32.dll")] static extern int GetLengthSid(IntPtr sid);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
