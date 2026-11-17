@@ -15,6 +15,8 @@ VITE_MOCK=0 npm run dev      # dev server against a real backend: /api is proxie
 npm run build                # tsc (strict) + vite build -> web/dist (hashed files under dist/assets/)
 VITE_MOCK=1 npm run build    # a build that includes the mock (for demos); normal builds contain no mock data
 npm run lint                 # eslint (flat config)
+npm run size                 # after a build: first-load size (raw + gzip) and a check that the mock is not in the bundle
+npm run e2e                  # browser tests (Playwright) against the mock build: see CONTRIBUTING.md, "Browser tests"
 npm test                     # vitest + Testing Library (jsdom)
 ```
 
@@ -57,7 +59,7 @@ page) and a link to the styleguide. Waits and "random" values are seeded, so a s
 | `down` | Every request fails with a network error: the "Kora is not answering" states. |
 
 Code: `src/api/mock/scenarios.ts` (names, selection, behaviour), `data.ts` (seeds), `index.ts` (the backend),
-`Switcher.tsx` / `boot.tsx` (the floating control). The mock follows the real backend's response shapes
+`Switcher.tsx` / `boot.tsx` (the floating control). `?as=operator|remote-operator|remote-admin` (kept like the scenario; `?as=local` resets) shows the panel as another person sees it: a local operator, an operator signed in from another device, or a token administrator from another device. The mock follows the real backend's response shapes
 (`crates/kora-web/src/handlers/*.rs`): `needs_elevation` commands are `["kora", ...]` without `sudo` (the UI shows
 `sudo ` in front on Linux), uninstall plan ids are `<server>/service|firewall|registry|folder|database` and `app`.
 
@@ -112,3 +114,14 @@ enums are snake_case strings (`use_existing`, `full_restart`, `up_to_date`, step
 capitalised Rust-style step statuses and `{"Resource": {...}}` update events are also tolerated); list routes wrap arrays
 (`{servers}`, `{files}`, `{resources}`, `{snapshots}`, `{owners}`); job `error` is `{code, message, command?, kept?, log_path?}`;
 `github_login` answers `202 {job, code, url}`.
+
+## Code splitting
+
+The first load is the shell and the server list; everything else is fetched when first opened (`src/App.tsx`: the install
+wizard, a server's page, Fleet, Settings and the System check are lazy routes; `src/pages/ServerDetailPage.tsx`: each server
+tab except Overview is lazy). React, the router, TanStack Query, Radix and the icons are separate vendor chunks
+(`vite.config.ts`), so a browser keeps them cached across Kora updates. While a file is loading the shell shows a loading
+state (`RouteLoading`). The panel binary embeds the UI, so after Kora updates itself an old tab asks for chunk files that
+no longer exist (the panel answers 404 for them): the error boundary then shows "This page needs to be reloaded" with a
+Reload button (`src/lib/chunkError.ts`, `src/components/ErrorBoundary.tsx`) instead of a blank page. `npm run size` prints
+the first-load size and fails if it grows past the budget in `scripts/bundle-size.mjs`.

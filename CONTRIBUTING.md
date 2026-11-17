@@ -14,7 +14,8 @@ cargo fmt --all
 The panel's browser UI is in `web/` (Vite, React, TypeScript): run `npm ci --ignore-scripts` once, then `npm run lint`,
 `npm test` and `npm run build` there (a mock backend is included; see `web/README.md`).
 
-CI runs build, tests and clippy on Linux and Windows, lint, tests and build of the UI, `shellcheck` and the tests for
+CI runs build, tests and clippy on Linux and Windows, lint, tests, build and bundle-size check of the UI, the browser tests
+(see below), `shellcheck` and the tests for
 `scripts/install.sh`, and a supply-chain check (`cargo deny`, `npm audit`). All must pass. Run `cargo deny check` locally
 if you add or update a dependency.
 
@@ -38,6 +39,48 @@ if you add or update a dependency.
 - **Small commits** with a clear message; one topic per pull request. Add a line under `[Unreleased]` in `CHANGELOG.md`
   for user-visible changes.
 - Install scripts: HTTPS only, always verify SHA-256, never overwrite a file that is not a kora program.
+
+## Browser tests (Playwright)
+
+The panel UI is also tested in a real browser: `web/e2e/`, run by the **Browser tests** workflow (`e2e.yml`). Two layers:
+
+- **`web/e2e/mock/`**: the UI built with the mock backend (`VITE_MOCK=1`, see `web/README.md`) and served by `vite preview`.
+  Fast and deterministic. Journeys: first run and the wizard, a full Production and Development install, a failing step with
+  retry / skip / change answers, the fixes that carry on by themselves, the Windows permission prompt, saved licence keys,
+  the System check, every server tab, branches and pull requests, updates, Settings, what a remote operator or token admin
+  sees, two keyboard-only journeys, and the "page file is gone after an update" reload screen. Every test also **fails on a
+  browser console error, an unhandled rejection or a failed request**, and runs an **axe accessibility scan** on the pages it
+  reaches (serious and critical violations fail the test).
+- **`web/e2e/real/`**: a small smoke layer against the real `kora panel` binary (Linux in CI): a throw-away `HOME` and
+  `KORA_HOME`, a spare port, a one-time sign-in link, the main pages, adding a fake server folder and opening its tabs. No
+  installs.
+
+```sh
+cd web
+npm ci --ignore-scripts
+npx playwright install chromium              # once; a separate download, never part of `npm ci` (add --with-deps on a fresh Linux box)
+npm run e2e                                  # the mock layer, Chromium (builds the mock UI into dist-mock/ and serves it)
+npx playwright test e2e/mock/wizard.spec.ts  # one file; add -g "text" for one test, --headed to watch, --ui for the inspector
+npm run e2e:real                             # the real-panel layer: needs a built kora (cargo build -p kora-cli, after `npm run build` so the UI is embedded) or KORA_BIN=/path/to/kora
+npm run e2e:all                              # the mock layer in Chromium and the core journey in WebKit
+npx playwright show-trace e2e-results/<test>/trace.zip   # after a failure (CI uploads these as an artifact)
+```
+
+Writing a test:
+
+- Import `test` and `expect` from `e2e/fixtures.ts` (mock layer) or `e2e/real/panel.ts` (real layer): they add the
+  console/request watcher. If a journey provokes an error on purpose, say so with `problems.expect(/text/)`.
+- Open a page with `open('/path', { scenario, as })`: the scenario is a mock scenario (`default`, `empty`, `fleet`, `trouble`,
+  `windows`, ...), `as` is who is looking (`operator`, `remote-operator`, `remote-admin`). The special install names of the
+  mock (`fail-`, `skip-`, `github-`, `nogh-`, `nodb-`, `decline-`, `nobody-`, `remote-`) are described in `web/README.md`.
+  The mock's world is rebuilt on every page load, so tests are independent; never rely on state from another test.
+- Locate things like a person does: `getByRole`, `getByLabel`, `getByText` (always with `exact: true` when a name is also a
+  prefix of another). No CSS selectors, no `waitForTimeout`: use `expect(...).toBeVisible()` and friends, which wait. A dialog
+  hides the page behind it from the accessibility tree: use `includeHidden: true` to look at the page below.
+- Call `await scan('what this page is')` on each new screen: it fails on serious or critical accessibility violations. Set
+  `E2E_AXE_REPORT=1` to print the moderate ones as well. Fix a violation in the component when the fix is small; do not
+  silence it in the test.
+- Keyboard-only journeys use `tabTo(page, locator)` (Tab until that control has focus), `keyboard.press` and never `click`.
 
 ## Windows smoke tests
 

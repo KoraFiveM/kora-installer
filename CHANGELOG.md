@@ -5,6 +5,15 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Browser tests for the panel UI (Playwright).** `web/e2e/` runs every main journey in a real browser against the mock backend (first run, the full install wizard, failing steps and their fixes, the Windows permission prompt, licence keys, System check, every server tab, branches and pull requests, updates, Settings, remote roles, two keyboard-only journeys), failing on any console error and on serious accessibility violations (axe); a small smoke layer drives the real `kora panel` binary on Linux (sign-in link, pages, a fake server folder, its tabs). New workflow `e2e.yml`; see CONTRIBUTING.md.
+
+### Changed
+- **The panel loads faster.** The UI is split: the first load is 454 kB (146 kB gzipped) instead of 636 kB (191 kB), and the install wizard, Settings, Fleet, System check and each server tab load when first opened. If Kora was updated while a page was open and a part of it is gone, the page now says "This page needs to be reloaded" with a Reload button instead of staying blank.
+
+### Fixed
+- Accessibility problems found by the new browser tests: red text was too dark on dark backgrounds, the solid red buttons did not have enough contrast, a link in the install wizard was told apart only by colour, several buttons had an accessible name that did not contain their visible text (the screen reader said "Replace key of Main" for a button labelled "Replace key"), and dialogs lost the keyboard position when closed (focus now goes back to the button that opened them).
+
 ## [0.7.0] - 2026-11-17
 
 This is 0.7.0, "panel first": the web panel is the only interface, nothing needed to get started asks for administrator rights, and failures say what to do and offer the button to do it.
