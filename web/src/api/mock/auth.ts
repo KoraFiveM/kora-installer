@@ -9,6 +9,8 @@ type Route = (method: string, pattern: string, h: (m: RegExpMatchArray, b: Recor
 const now = () => Math.floor(Date.now() / 1000)
 
 interface Account {
+  /** The credential ids the browser made (base64url), so a sign-in can name them like the real panel does. */
+  credentialIds: string[]
   passkeys: T.PasskeyView[]
   code: boolean
   recovery_left: number
@@ -28,17 +30,22 @@ export interface AuthMockHooks {
 
 export function installAuthMock(route: Route, FailC: Fail, hooks: AuthMockHooks) {
   const Fail = FailC
-  const links = new Map<string, { user: string; role: T.Role }>()
+  // Two invitations that exist from the start, for the browser tests (`/#enrol=demo-invite`).
+  const links = new Map<string, { user: string; role: T.Role }>([
+    ['demo-invite', { user: 'newbie', role: 'operator' }],
+    ['demo-invite-codes', { user: 'amy', role: 'viewer' }],
+  ])
   const accounts = new Map<string, Account>()
   const tokens: T.ApiTokenView[] = []
   let nextToken = 1
   let nextKey = 1
-  let secure = false
-  let fresh = true
+  const FRESH_KEY = 'kora-mock-fresh'
+  const isFresh = () => { try { return window.sessionStorage.getItem(FRESH_KEY) !== '0' } catch { return true } }
+  const setFresh = (v: boolean) => { try { window.sessionStorage.setItem(FRESH_KEY, v ? '1' : '0') } catch { /* private mode */ } }
   const acct = (u: string): Account => {
     if (!accounts.has(u)) {
-      const legacy = hooks.users().find((x) => x.name === u)?.legacy_token ?? false
-      accounts.set(u, { passkeys: [], code: false, recovery_left: 0, legacy_token: legacy, devices: [{ handle: 'dev-this', device: 'Chrome on Linux', address: '192.168.1.20', signed_in: now() - 600, last_seen: now(), current: true }] })
+      const legacy = (hooks.users().find((x) => x.name === u)?.legacy_token ?? false) || hooks.viewer().provider === 'token'
+      accounts.set(u, { credentialIds: [], passkeys: [], code: false, recovery_left: 0, legacy_token: legacy, devices: [{ handle: 'dev-this', device: 'Chrome on Linux', address: '192.168.1.20', signed_in: now() - 600, last_seen: now(), current: true }] })
     }
     return accounts.get(u)!
   }
@@ -48,16 +55,30 @@ export function installAuthMock(route: Route, FailC: Fail, hooks: AuthMockHooks)
     const u = hooks.users().find((x) => x.name === name)
     if (u) Object.assign(u, { passkeys: a.passkeys.length, code: a.code, legacy_token: a.legacy_token })
   }
-  const options = (user: string) => ({ publicKey: { challenge: 'AAAA', rp: { id: location.hostname, name: 'Kora Panel' }, user: { id: 'AAAA', name: user, displayName: user }, pubKeyCredParams: [{ type: 'public-key', alg: -7 }], timeout: 60000 } })
+  // A passkey needs a NAME; on a bare address the browser refuses it, as it does for real.
+  const rpId = location.hostname
+  const options = (user: string, ids: string[] = []) => ({
+    publicKey: {
+      challenge: 'AAAA',
+      rp: { id: rpId, name: 'Kora Panel' },
+      rpId,
+      user: { id: 'AAAA', name: user, displayName: user },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+      ...(ids.length ? { allowCredentials: ids.map((id) => ({ type: 'public-key', id })) } : {}),
+      timeout: 60000,
+    },
+  })
+  const rawIdOf = (b: Record<string, unknown>) => String((b.credential as { rawId?: string } | undefined)?.rawId ?? '')
   const qr = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" role="img" aria-label="QR code for the authenticator app"><rect width="10" height="10" fill="#fff"/><rect x="1" y="1" width="3" height="3"/><rect x="6" y="1" width="3" height="3"/><rect x="1" y="6" width="3" height="3"/></svg>'
 
-  route('GET', '/auth/options', () => ({ passkey: secure || location.protocol === 'https:' || true, passkey_problem: null, code: true, token: true, tailscale: false, strong_required: false }) satisfies T.AuthOptions)
+  route('GET', '/auth/options', () => ({ passkey: true, passkey_problem: null, code: true, token: true, tailscale: false, strong_required: false }) satisfies T.AuthOptions)
   route('POST', '/auth/login', (_m, b) => {
     const step = b.step as string
     const who = hooks.viewer()
     if (step === 'passkey_begin') {
       if (b.user === 'nobody') throw new Fail(401, 'unauthorized', 'There is no passkey for that name on this address. Use the name you registered it with, sign in with a one-time code, or ask an administrator for a new enrolment link.')
-      return { step: 'challenge', handle: 'h1', options: options(String(b.user)) } satisfies T.LoginResponse
+      return { step: 'challenge', handle: 'h1', options: options(String(b.user), acct(String(b.user)).credentialIds) } satisfies T.LoginResponse
     }
     if (step === 'code' && b.password === 'wrong') throw new Fail(401, 'unauthorized', 'That name, password or code is not right (or the account is locked for a few minutes). Try again, or use a passkey.')
     const identity: T.Identity = { name: String(b.user ?? who.name), provider: step === 'code' ? 'code' : 'passkey', role: 'admin' }
@@ -76,7 +97,8 @@ export function installAuthMock(route: Route, FailC: Fail, hooks: AuthMockHooks)
       case 'passkey_finish': {
         links.delete(link)
         const a = acct(l.user)
-        a.passkeys.push({ id: nextKey++, label: String(b.label || 'Passkey'), rp_id: location.hostname, created: now(), last_used: 0 })
+        a.credentialIds.push(rawIdOf(b))
+        a.passkeys.push({ id: nextKey++, label: String(b.label || 'Passkey'), rp_id: rpId, created: now(), last_used: 0 })
         sync(l.user)
         const identity: T.Identity = { name: l.user, provider: 'passkey', role: l.role }
         hooks.setSignedIn(identity)
@@ -100,9 +122,9 @@ export function installAuthMock(route: Route, FailC: Fail, hooks: AuthMockHooks)
     throw new Fail(400, 'bad_request', 'Unknown step.')
   })
   route('POST', '/auth/reauth', (_m, b) => {
-    if (b.step === 'passkey_begin') return { step: 'challenge', handle: 'r1', options: options(hooks.viewer().name) } satisfies T.ReauthResponse
+    if (b.step === 'passkey_begin') return { step: 'challenge', handle: 'r1', options: options(hooks.viewer().name, acct(hooks.viewer().name).credentialIds) } satisfies T.ReauthResponse
     if (b.step === 'code' && b.password === 'wrong') throw new Fail(401, 'unauthorized', 'That name, password or code is not right (or the account is locked for a few minutes). Try again, or use a passkey.')
-    fresh = true
+    setFresh(true)
     return { step: 'fresh', valid_for: 600 } satisfies T.ReauthResponse
   })
   route('GET', '/auth/account', () => {
@@ -127,12 +149,13 @@ export function installAuthMock(route: Route, FailC: Fail, hooks: AuthMockHooks)
     const a = acct(v.name)
     const strong = a.passkeys.length > 0 || a.code
     const protective = b.step === 'device_revoke' || b.step === 'devices_revoke_others'
-    if (strong && !protective && !fresh) throw new Fail(403, 'remote.reauth_required', 'Confirm it is you first: use your passkey or a one-time code, then try again.')
+    if (strong && !protective && !isFresh()) throw new Fail(403, 'remote.reauth_required', 'Confirm it is you first: use your passkey or a one-time code, then try again.')
     switch (b.step) {
       case 'passkey_begin':
         return { step: 'challenge', handle: 'a1', options: options(v.name) } satisfies T.AccountChanged
       case 'passkey_finish':
-        a.passkeys.push({ id: nextKey++, label: String(b.label || 'Passkey'), rp_id: location.hostname, created: now(), last_used: 0 })
+        a.credentialIds.push(rawIdOf(b))
+        a.passkeys.push({ id: nextKey++, label: String(b.label || 'Passkey'), rp_id: rpId, created: now(), last_used: 0 })
         sync(v.name)
         return { step: 'done' } satisfies T.AccountChanged
       case 'passkey_remove':
@@ -247,10 +270,7 @@ export function installAuthMock(route: Route, FailC: Fail, hooks: AuthMockHooks)
       tls = { ...tls, ...p }
     },
     needFresh(v: boolean) {
-      fresh = !v
-    },
-    setSecure(v: boolean) {
-      secure = v
+      setFresh(!v)
     },
     reset() {
       links.clear()

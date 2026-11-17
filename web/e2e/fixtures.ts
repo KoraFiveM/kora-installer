@@ -9,7 +9,7 @@ import AxeBuilder from '@axe-core/playwright'
 export const KEY = 'cfxk_abcdefghij_12345'
 
 export type Scenario = 'default' | 'empty' | 'fleet' | 'trouble' | 'slow' | 'offline' | 'down' | 'windows' | 'restarted'
-export type Viewer = 'local' | 'operator' | 'remote-operator' | 'remote-admin' | 'remote-tailscale-admin'
+export type Viewer = 'local' | 'operator' | 'remote-operator' | 'remote-admin' | 'remote-tailscale-admin' | 'remote-passkey-admin' | 'remote-code-operator'
 
 class Problems {
   readonly list: string[] = []

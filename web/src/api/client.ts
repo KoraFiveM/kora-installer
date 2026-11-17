@@ -285,7 +285,7 @@ export const api = {
     login: (body: T.LoginRequest) => call('auth_login', { body }, { quiet401: true }).then(keepSecret),
     enrol: (body: T.EnrolRequest) => call('auth_enrol', { body }, { quiet401: true }).then(keepSecret),
     account: () => call('auth_account', {}),
-    change: (body: T.AccountChange) => call('auth_account_change', { body }, { noReauth: true }),
+    change: (body: T.AccountChange) => call('auth_account_change', { body }),
     reauth: (body: T.ReauthRequest) => call('auth_reauth', { body }, { noReauth: true }),
   },
   tls: {

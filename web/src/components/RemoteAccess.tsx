@@ -77,7 +77,7 @@ function Users({ settings }: { settings: T.RemoteSettings | undefined }) {
               <span className="block text-xs text-muted-foreground">Signs in with: {howSignsIn(u)}</span>
             </span>
             <span className="flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => { setWhat('all'); setResetting(u.name) }} aria-label={`Reset sign-in for ${u.name}`}>Lost a device?</Button>
+              <Button size="sm" variant="secondary" onClick={() => { setWhat('all'); setResetting(u.name) }} aria-label={`Reset sign-in for ${u.name}`}>Reset sign-in</Button>
               <Button size="sm" variant="destructive" disabled={remove.isPending} onClick={() => setRemoving(u.name)} aria-label={`Remove ${u.name}`}>Remove</Button>
             </span>
           </li>

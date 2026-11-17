@@ -39,15 +39,7 @@ export function AccountCard() {
     try {
       return await change.mutateAsync(b)
     } catch (e) {
-      // A fresh check is asked for by the app, then this is repeated.
-      if (e instanceof ApiError && e.code === 'remote.reauth_required' && e.replay) {
-        try {
-          return (await e.replay()) as AccountChanged
-        } catch (e2) {
-          setErr(e2 instanceof ApiError ? e2.message : passkeyErrorText(e2))
-          return null
-        }
-      }
+      // (A fresh check, when the panel asks for one, is handled for every request by the app: see ReauthProvider.)
       setErr(e instanceof ApiError ? e.message : passkeyErrorText(e))
       return null
     }
