@@ -9,11 +9,11 @@ use axum::http::{header, Request};
 use kora_core::api::fake::FakeBackend;
 use kora_core::api::install::github::{GithubEnv, GithubUser, LoginFlow, OwnerChoice};
 use kora_core::api::toolchain::{AdminState, DbState, ToolchainEnv};
-use kora_core::helper::client::{Helper, HelperError, Outcome};
+use kora_core::helper::client::HelperError;
 use kora_core::helper::worker::{OpenError, StepOutcome};
 use kora_core::problem::{codes, Action, Problem, Tool};
 use kora_core::tools::{Source, ToolStatus};
-use kora_web::elevated::{set_broker_override, set_helper_override, Broker, Channel};
+use kora_web::elevated::{set_broker_override, Broker, Channel};
 use kora_web::handlers::{github as gh_seam, toolchain as seam};
 use kora_web::{router, AppState};
 use serde_json::{json, Value};
@@ -105,32 +105,6 @@ impl GithubEnv for Gh {
     }
 }
 
-#[cfg(unix)]
-#[derive(Default)]
-struct FakeHelper {
-    calls: Mutex<Vec<(String, Vec<String>)>>,
-}
-#[cfg(unix)]
-impl Helper for FakeHelper {
-    fn available(&self) -> bool {
-        true
-    }
-    fn run(&self, verb: &str, args: &[String], _: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<Outcome, HelperError> {
-        self.calls.lock().unwrap().push((verb.into(), args.to_vec()));
-        on_line("done");
-        Ok(Outcome { ok: true, code: 0 })
-    }
-}
-struct NoHelper;
-impl Helper for NoHelper {
-    fn available(&self) -> bool {
-        false
-    }
-    fn run(&self, _: &str, _: &[String], _: &[(String, String)], _: &mut dyn FnMut(&str)) -> Result<Outcome, HelperError> {
-        Err(HelperError::Unavailable("none".into()))
-    }
-}
-
 struct Rig {
     app: axum::Router,
     fake: Arc<Fake>,
@@ -142,7 +116,7 @@ async fn rig(github: GithubUser) -> Rig {
     let fake = Fake::new();
     seam::set_env(Some(fake.clone()));
     gh_seam::set_env(Some(Arc::new(Gh(github))));
-    set_helper_override(Some(Arc::new(NoHelper)));
+    set_broker_override(Some(broker(false, false)));
     let fb = FakeBackend::sample();
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(fb.clone())));
     Rig { app: router(st), fake, _turn: turn }
@@ -152,7 +126,7 @@ impl Drop for Rig {
     fn drop(&mut self) {
         seam::set_env(None);
         gh_seam::set_env(None);
-        set_helper_override(None);
+        set_broker_override(None);
     }
 }
 
@@ -273,15 +247,16 @@ async fn git_on_linux_needs_root_so_without_the_helper_it_is_the_command_to_run(
 
 #[cfg(unix)]
 #[tokio::test]
-async fn git_on_linux_goes_through_the_helper_when_it_is_installed() {
+async fn git_on_linux_goes_through_the_service_when_it_is_installed() {
     let r = rig(GithubUser::ready("sam")).await;
-    let h = Arc::new(FakeHelper::default());
-    set_helper_override(Some(h.clone()));
+    let h = broker(true, true);
+    set_broker_override(Some(h.clone()));
     r.fake.admin.lock().unwrap().elevated = false;
     let job = r.job(r.call("POST", "/tools/git/install").await).await;
+    set_broker_override(None);
     assert_eq!(job["state"], "done", "{job}");
     assert_eq!(*h.calls.lock().unwrap(), vec![("tools".to_string(), vec!["install".to_string(), "git".to_string()])]);
-    assert!(r.fake.install_calls.lock().unwrap().is_empty(), "the helper did it, not this process");
+    assert!(r.fake.install_calls.lock().unwrap().is_empty(), "the service did it, not this process");
 }
 
 #[tokio::test]
@@ -346,7 +321,7 @@ async fn without_administrator_rights_the_start_is_the_elevation_problem() {
     let (s, v) = r.call("POST", "/system/database/start").await;
     set_broker_override(None);
     assert_eq!((s, v["error"]["code"].as_str()), (403, Some("needs_elevation")), "{v}");
-    assert_eq!(v["error"]["actions"][0], json!({"kind": "request_admin"}));
+    assert_eq!(v["error"]["actions"][0], json!({"kind": "install_admin_service"}));
     let shown = v["error"]["actions"].as_array().unwrap().iter().find(|a| a["kind"] == "show_command").unwrap();
     assert_eq!(shown["command"], json!(["kora", "check", "--start-database"]), "{shown}");
     assert_eq!(*r.fake.db_starts.lock().unwrap(), 0, "nothing was started");
@@ -373,12 +348,13 @@ async fn on_windows_start_it_for_me_goes_through_the_worker_after_one_prompt() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn the_database_start_goes_through_the_helper_when_it_is_installed() {
+async fn the_database_start_goes_through_the_service_when_it_is_installed() {
     let r = rig(GithubUser::ready("sam")).await;
-    let h = Arc::new(FakeHelper::default());
-    set_helper_override(Some(h.clone()));
+    let h = broker(true, true);
+    set_broker_override(Some(h.clone()));
     r.fake.admin.lock().unwrap().elevated = false;
     let job = r.job(r.call("POST", "/system/database/start").await).await;
+    set_broker_override(None);
     assert_eq!(job["state"], "done", "{job}");
     assert_eq!(*h.calls.lock().unwrap(), vec![("check".to_string(), vec!["--start-database".to_string()])]);
 }

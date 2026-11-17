@@ -20,6 +20,8 @@ const MAX_ARG: usize = 1024;
 const MAX_ENV_VALUE: usize = 2048;
 /// The only environment variables a request may set for the child.
 pub const SECRET_ENV: &[&str] = &["CFX_LICENSE_KEY", "KORA_DB_ADMIN_PASSWORD"];
+/// The wire verbs the service takes (what [`parse`] accepts at all).
+pub const VERBS: &[&str] = &["admin-step", "admin-db", "check", "tools", "schedule", "self-update"];
 /// Ports are opened only from here up.
 pub const FIRST_PORT: u16 = 1024;
 /// Never opened, even above 1023: remote administration and database ports.

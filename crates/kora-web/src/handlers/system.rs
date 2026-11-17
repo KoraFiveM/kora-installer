@@ -134,9 +134,13 @@ pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiE
             "elevated": elevated,
             // The UI reads `admin`; `elevated` is the same answer under the plan's name.
             "admin": elevated,
+            // Kept for older pages: the administrator service is there and serves this account.
             "helper_installed": crate::elevated::helper_installed(),
-            // Windows: the panel asks Windows for permission itself (one prompt per install or action).
-            "admin_prompt": crate::elevated::worker_supported() && !elevated,
+            // Kora's administrator service for this account: ready (no prompt, locally or remotely),
+            // missing (a per-user install: Settings offers to install it) or not_allowed.
+            "admin_service": crate::elevated::service_state(),
+            // The old Windows worker only: the panel asks Windows for permission itself.
+            "admin_prompt": crate::elevated::prompts() && crate::elevated::worker_supported() && !elevated,
             "headless": headless,
             "local": loopback && !headless,
             "kora_home": kora_core::installer::registry::kora_home(),

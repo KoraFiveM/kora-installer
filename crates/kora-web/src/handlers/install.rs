@@ -393,37 +393,6 @@ fn stopped_error(job: &str, problem: Problem, kept: &[String], log_path: Option<
     err.to_string()
 }
 
-/// The install runs in the privileged helper as `kora install ...` (the same command the user would
-/// have been asked to run). The licence key and the database admin password go in the environment, never
-/// on the command. The helper's output lines become job events and go in the install log.
-/// A failure can be retried (the helper's install continues where it stopped), not skipped: the
-/// helper's install state belongs to the administrator account.
-fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &InstallRequest) -> Result<Value, String> {
-    let env = crate::elevated::secret_env(req.license_key.as_deref(), req.db_admin.as_ref().and_then(|a| a.password.as_deref()));
-    let r = crate::elevated::privileged(core::install_command(req), env, &mut |line| {
-        h.event(json!({"type": "status", "message": line}));
-        log_push(id, line.to_string());
-    });
-    log_finish(id, None);
-    match r {
-        Ok(_) => Ok(json!({
-            "name": req.name,
-            "dir": req.dir,
-            "txadmin_url": format!("http://127.0.0.1:{}", req.ports.txadmin),
-            "notes": ["Installed by the Kora helper."],
-        })),
-        Err(e) => {
-            let mut p = e.to_problem();
-            if p.code == "bad_request" || p.code == "internal" {
-                p.code = kora_core::problem::codes::FAILED.to_string();
-            }
-            let p = p.with_action(Action::Retry).with_action(Action::ChangeAnswers { section: None });
-            pause(id, Paused { req: req.clone(), via_helper: true, windows_admin: false, failed_step: None, finished: vec![], at: Instant::now() });
-            Err(stopped_error(id, p, &[], None, None))
-        }
-    }
-}
-
 /// The progress row of "Windows is asking for permission" (not an installer step).
 pub const ADMIN_STEP: &str = "admin";
 
@@ -432,10 +401,9 @@ pub const ADMIN_STEP: &str = "admin";
 enum AdminMode {
     /// It needs none, it has them, or the person chose to go on without them.
     None,
-    /// Linux: the whole install runs in the privileged helper.
-    Helper,
-    /// Windows: the person's own install, with its administrator steps done by the elevated
-    /// worker. `eager`: ask before the first step (a new install), else when a step needs it.
+    /// The person's own install, with its administrator steps done by the administrator service
+    /// (Windows, until the service lands there: the elevated worker after one prompt). `eager`: ask
+    /// before the first step (a new install), else when a step needs it.
     Worker { ask: AdminAsk, eager: bool },
 }
 
@@ -457,9 +425,6 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
         log_begin(&id);
         for ev in &finished {
             h.event(ev.clone());
-        }
-        if mode == AdminMode::Helper {
-            return install_via_helper(h, &id, &req);
         }
         let windows_admin = matches!(mode, AdminMode::Worker { .. });
         let admin = match mode {
@@ -581,13 +546,11 @@ pub async fn install_start(State(st): State<AppState>, Extension(caller): Extens
         }
         let reasons = e2.admin_reasons(&req);
         if !reasons.is_empty() && !e2.is_elevated() {
-            // Windows: one permission prompt when the install starts (not for a remote session
-            // unless the person asked). Linux: the helper when installed, otherwise the command.
+            // With the administrator service its steps just happen (no prompt, local or remote); Windows
+            // still shows one prompt when the install starts (not for a remote session unless asked).
+            // Without the service the answer carries the choices: install it, continue without, the command.
             crate::elevated::precheck(ask, &admin_context(&req, &reasons), &core::elevation_message(&req, &reasons))?;
-            if crate::elevated::worker_supported() {
-                return Ok((req, AdminMode::Worker { ask, eager: true }));
-            }
-            return Ok((req, AdminMode::Helper));
+            return Ok((req, AdminMode::Worker { ask, eager: true }));
         }
         Ok((req, AdminMode::None))
     })
@@ -686,8 +649,6 @@ pub async fn install_resume(State(st): State<AppState>, Extension(caller): Exten
     let again = Paused { req: req.clone(), via_helper, windows_admin, failed_step, finished: finished.clone(), at: Instant::now() };
     let (req, mode) = if without_admin {
         (core::without_admin(&req), AdminMode::None)
-    } else if via_helper {
-        (req, AdminMode::Helper)
     } else if windows_admin {
         (req, AdminMode::Worker { ask, eager: false })
     } else {

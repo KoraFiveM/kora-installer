@@ -736,16 +736,7 @@ pub fn shell_execute_error(code: u32) -> OpenError {
     }
 }
 
-/// What the failed attempt was for, to word the problem and offer the right choices.
-#[derive(Debug, Clone, Default)]
-pub struct Context {
-    /// "install the server" / "change the automatic updates" (after "Kora needed permission to ").
-    pub what: String,
-    /// The command to run as administrator instead ("Show me the command").
-    pub command: Vec<String>,
-    /// "Continue without the administrator parts" makes sense here (installs).
-    pub can_skip_admin: bool,
-}
+pub use crate::privsvc::problems::Context;
 
 fn with_choices(mut p: Problem, ctx: &Context) -> Problem {
     p.push_action(Action::RequestAdmin);

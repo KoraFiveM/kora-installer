@@ -82,8 +82,8 @@ pub async fn self_update_apply(State(st): State<AppState>, Extension(caller): Ex
         }
         let msg = "Updating Kora needs administrator rights. Run this command as administrator:";
         let what = "update Kora";
-        crate::elevated::precheck(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
-        // The worker (Windows) or the helper (Linux) does it: the same command, run as administrator, as a job.
+        crate::elevated::precheck_verb(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
+        // The administrator service does it: the same command, run as administrator, as a job.
         return st.spawn_job(Op::SelfUpdateApply, None, move |h| {
             let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(job_error)?;
             Ok(json!({"version": v2, "output": out["output"]}))
@@ -235,7 +235,7 @@ pub async fn uninstall_run(State(st): State<AppState>, Extension(caller): Extens
         // risk). Which ones is decided now, before the server list changes.
         // (Windows only: on Linux the folders belong to the servers' own accounts, so the root
         // helper deletes them as before.)
-        let split = crate::elevated::worker_supported();
+        let split = crate::elevated::worker_supported() && crate::elevated::can_route("uninstall");
         let folders = if split {
             blocking({
                 let r = UninstallRequest { answers: r.answers.clone(), delete_files: r.delete_files, delete_databases: r.delete_databases, only: r.only.clone() };
@@ -257,7 +257,7 @@ pub async fn uninstall_run(State(st): State<AppState>, Extension(caller): Extens
         }
         let msg = "Removing services, firewall rules and accounts needs administrator rights. Run this command as administrator:";
         let what = "remove the services, firewall rules and accounts Kora set up";
-        crate::elevated::precheck(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
+        crate::elevated::precheck_verb(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
         let server = if let [one] = r.only.as_slice() { Some(one.clone()) } else { None };
         return st.spawn_job(Op::UninstallRun, server, move |h| {
             let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(job_error)?;

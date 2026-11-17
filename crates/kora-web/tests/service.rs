@@ -1,8 +1,8 @@
-//! The privileged helper from the panel's side: without it every privileged action still answers
-//! `needs_elevation`; with a (fake) helper the action runs and succeeds. Linux/Unix helper only, but the
-//! "no helper" cases hold everywhere a panel is not already an administrator. On Windows the panel uses its
-//! administrator worker instead (tests/admin_worker.rs), and the CI runner there is elevated, so this file is
-//! for Unix.
+//! Kora's administrator service from the panel's side (fake service, no socket): without it every
+//! privileged action answers `needs_elevation` with the choices (install the service, continue without,
+//! the command); with it the actions it does run as jobs, and the ones that stay commands for an
+//! administrator terminal (`uninstall`, `app`) still say so. Unix only (the Windows panel uses its
+//! worker until the Windows service lands: tests/admin_worker.rs).
 #![cfg(unix)]
 use std::io;
 use std::net::SocketAddr;
@@ -14,14 +14,15 @@ use axum::body::Body;
 use axum::http::{header, Request};
 use kora_core::api::fake::FakeBackend;
 use kora_core::api::install::InstallEnv;
+use kora_core::api::maintenance;
 use kora_core::api::maintenance::fake::FakeMaintenance;
-use kora_core::api::maintenance::{self, PlanItem};
 use kora_core::artifacts::ArtifactList;
 use kora_core::firewall::ports::PortProber;
-use kora_core::helper::client::{Helper, HelperError, Outcome};
+use kora_core::helper::client::HelperError;
+use kora_core::helper::worker::{OpenError, StepOutcome};
 use kora_core::installer::{DbAdmin, InstallOutcome, InstallRequest, ProgressSink};
 use kora_core::space::DiskInfo;
-use kora_web::elevated::set_helper_override;
+use kora_web::elevated::{set_broker_override, Broker, Channel};
 use kora_web::handlers::install as install_seam;
 use kora_web::{router, AppState};
 use serde_json::{json, Value};
@@ -57,20 +58,44 @@ impl FakeHelper {
     }
 }
 
-impl Helper for FakeHelper {
-    fn available(&self) -> bool {
-        self.up
+/// The service as the panel sees it: no prompt, a short list of verbs, one connection per request.
+struct FakeService {
+    helper: Option<Arc<FakeHelper>>,
+}
+
+impl Broker for FakeService {
+    fn supported(&self) -> bool {
+        self.helper.as_ref().is_some_and(|h| h.up)
     }
-    fn run(&self, verb: &str, args: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<Outcome, HelperError> {
-        if self.vanish {
+    fn prompts(&self) -> bool {
+        false
+    }
+    fn handles(&self, verb: &str) -> bool {
+        kora_core::privsvc::op::VERBS.contains(&verb)
+    }
+    fn open(&self, _: Option<&str>) -> Result<Box<dyn Channel>, OpenError> {
+        match &self.helper {
+            Some(h) => Ok(Box::new(FakeConn(h.clone()))),
+            None => Err(OpenError::Unsupported),
+        }
+    }
+}
+
+struct FakeConn(Arc<FakeHelper>);
+
+impl Channel for FakeConn {
+    fn run(&mut self, verb: &str, args: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, HelperError> {
+        let h = &self.0;
+        if h.vanish {
             return Err(HelperError::Unavailable("gone".into()));
         }
-        self.calls.lock().unwrap().push((verb.into(), args.to_vec(), env.to_vec()));
-        for l in &self.lines {
+        h.calls.lock().unwrap().push((verb.into(), args.to_vec(), env.to_vec()));
+        for l in &h.lines {
             on_line(l);
         }
-        Ok(Outcome { ok: self.code == 0, code: self.code })
+        Ok(StepOutcome { ok: h.code == 0, code: h.code, data: None })
     }
+    fn finish(self: Box<Self>) {}
 }
 
 // ---- install env ----------------------------------------------------------------------------
@@ -145,7 +170,7 @@ struct Rig {
 
 async fn rig(helper: Option<Arc<FakeHelper>>) -> Rig {
     let turn = TURN.lock().await;
-    set_helper_override(Some(helper.map_or_else(|| Arc::new(Down) as Arc<dyn Helper>, |h| h as Arc<dyn Helper>)));
+    set_broker_override(Some(Arc::new(FakeService { helper })));
     std::env::remove_var("KORA_APP_PREFIX");
     let maint = FakeMaintenance::new(false);
     maintenance::set_override(Some(maint.clone()));
@@ -155,17 +180,6 @@ async fn rig(helper: Option<Arc<FakeHelper>>) -> Rig {
     let f = fake.clone();
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone())));
     Rig { app: router(st), fake, maint, env, _turn: turn }
-}
-
-/// "No helper installed".
-struct Down;
-impl Helper for Down {
-    fn available(&self) -> bool {
-        false
-    }
-    fn run(&self, _: &str, _: &[String], _: &[(String, String)], _: &mut dyn FnMut(&str)) -> Result<Outcome, HelperError> {
-        Err(HelperError::Unavailable("not installed".into()))
-    }
 }
 
 impl Rig {
@@ -214,23 +228,24 @@ fn install_body(dir: &str) -> Value {
     })
 }
 
-// ---- without the helper: exactly as before ----------------------------------------------------
+// ---- without the service: the choices ---------------------------------------------------------------
+
+fn kinds(e: &Value) -> Vec<String> {
+    e["actions"].as_array().unwrap().iter().map(|a| a["kind"].as_str().unwrap().to_string()).collect()
+}
 
 #[tokio::test]
-async fn without_a_helper_everything_still_answers_needs_elevation() {
+async fn without_the_service_everything_answers_needs_elevation_with_the_choices() {
     let r = rig(None).await;
     let (s, j) = r.call("GET", "/system", None).await;
-    assert_eq!((s, &j["helper_installed"]), (200, &json!(false)));
+    assert_eq!((s, &j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (200, &json!(false), &json!("missing"), &json!(false)));
 
-    // "Tidy up old shortcuts": the per-user half is done, the old copy needs the command.
+    // "Tidy up old shortcuts": the per-user half is done, the old copy needs the command (never the service's job).
     r.maint.app.lock().unwrap().legacy = true;
     let (s, j) = r.call("PUT", "/app", Some(json!({"desktop_shortcut": false}))).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
     assert_eq!(j["error"]["command"], json!(["kora", "uninstall", "--app", "--yes"]));
     assert!(j["error"]["message"].as_str().unwrap().contains("old copy of Kora"));
-
-    let (s, j) = r.call("DELETE", "/app", None).await;
-    assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
 
     let (s, j) = r.call("POST", "/uninstall", Some(json!({"answers": [], "only": ["prod"]}))).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
@@ -240,54 +255,49 @@ async fn without_a_helper_everything_still_answers_needs_elevation() {
     let (s, j) = r.call("DELETE", "/servers/dev/schedule", None).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
     assert_eq!(j["error"]["command"], json!(["kora", "schedule", "off", "dev"]));
-    assert!(j["error"]["message"].as_str().unwrap().contains("automatic updates"));
+    assert_eq!(kinds(&j["error"]), ["install_admin_service", "show_command"], "no prompt to ask for any more");
+    assert!(j["error"]["message"].as_str().unwrap().contains("administrator service"));
 
-    let (s, j) = r.call("POST", "/installs", Some(install_body(&abs("kora-helper-test-a")))).await;
+    let (s, j) = r.call("POST", "/installs", Some(install_body(&abs("kora-service-test-a")))).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
+    assert_eq!(kinds(&j["error"])[..2], ["install_admin_service", "continue_without_admin"], "{j}");
     assert!(!j.to_string().contains("SECRETLICENCE") && !j.to_string().contains(DBPASS));
     assert_eq!(*r.env.runs.lock().unwrap(), 0);
     assert_eq!(r.maint.calls(), ["app_install shortcut=false force=false dry=false"], "only the per-user shortcuts, which need no rights");
-    set_helper_override(None);
+    set_broker_override(None);
 }
 
-// ---- with the helper --------------------------------------------------------------------------
+// ---- with the service --------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn system_reports_the_helper() {
+async fn system_reports_the_service() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h)).await;
-    assert_eq!(r.call("GET", "/system", None).await.1["helper_installed"], json!(true));
-    set_helper_override(None);
+    let j = r.call("GET", "/system", None).await.1;
+    assert_eq!((&j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (&json!(true), &json!("ready"), &json!(false)));
+    set_broker_override(None);
 }
 
 #[tokio::test]
-async fn app_install_and_removal_run_through_the_helper() {
+async fn removing_kora_s_old_copy_and_everything_it_set_up_stays_an_administrator_terminal_command() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h.clone())).await;
     r.maint.app.lock().unwrap().legacy = true;
     let (s, j) = r.call("PUT", "/app", Some(json!({"desktop_shortcut": false}))).await;
-    assert_eq!(s, 200, "{j}");
-    assert!(j["message"].as_str().unwrap().contains("old copy"));
+    assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")), "{j}");
     let (s, j) = r.call("DELETE", "/app", None).await;
-    assert_eq!(s, 200, "{j}");
-    let calls = h.calls();
-    assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("uninstall", vec!["--app".to_string(), "--yes".into()]));
-    assert_eq!((calls[1].0.as_str(), calls[1].1.clone()), ("uninstall", vec!["--app".to_string(), "--yes".into()]));
-    assert_eq!(r.maint.calls(), ["app_install shortcut=false force=false dry=false"], "the panel only made the per-user shortcuts; the helper removed the old copy");
-    set_helper_override(None);
+    assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")), "{j}");
+    let (s, j) = r.call("POST", "/uninstall", Some(json!({"answers": [], "delete_files": true, "only": ["prod"]}))).await;
+    assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")), "{j}");
+    assert_eq!(j["error"]["command"], json!(["kora", "uninstall", "--yes", "--delete-files", "prod"]), "the whole command, files included");
+    assert!(h.calls().is_empty(), "the service is never asked for what is not on its list");
+    set_broker_override(None);
 }
 
 #[tokio::test]
-async fn uninstall_and_self_update_are_jobs_that_stream_helper_lines() {
+async fn self_update_is_a_job_that_streams_the_services_lines() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h.clone())).await;
-    *r.maint.plan.lock().unwrap() = Vec::<PlanItem>::new();
-    let a = r.call("POST", "/uninstall", Some(json!({"answers": [], "delete_files": true, "only": ["prod"]}))).await;
-    let j = r.job(a).await;
-    assert_eq!(j["state"], "done", "{j}");
-    let msgs: Vec<&str> = j["events"].as_array().unwrap().iter().filter_map(|e| e["message"].as_str()).collect();
-    assert_eq!(msgs, ["working", "done"]);
-
     let m = &r.maint;
     maintenance::set_override(Some(Arc::new(FakeMaintenance {
         admin: m.admin,
@@ -302,14 +312,15 @@ async fn uninstall_and_self_update_are_jobs_that_stream_helper_lines() {
     let j = r.job(a).await;
     assert_eq!(j["state"], "done", "{j}");
     assert_eq!(j["result"]["version"], "0.4.1");
+    let msgs: Vec<&str> = j["events"].as_array().unwrap().iter().filter_map(|e| e["message"].as_str()).collect();
+    assert_eq!(msgs, ["working", "done"]);
     let calls = h.calls();
-    assert_eq!(calls[0].1, ["--yes", "--delete-files", "prod"]);
-    assert_eq!((calls[1].0.as_str(), calls[1].1.clone()), ("self-update", vec!["--yes".to_string(), "--version".into(), "0.4.1".into()]));
-    set_helper_override(None);
+    assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("self-update", vec!["--yes".to_string(), "--version".into(), "0.4.1".into()]));
+    set_broker_override(None);
 }
 
 #[tokio::test]
-async fn the_schedule_is_changed_by_the_helper_not_the_panel() {
+async fn the_schedule_is_changed_by_the_service_not_the_panel() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h.clone())).await;
     r.fake.state().elevation = Some(vec!["schedule".into(), "set".into(), "dev".into(), "--daily".into(), "04:00".into()]);
@@ -321,72 +332,51 @@ async fn the_schedule_is_changed_by_the_helper_not_the_panel() {
     let calls = h.calls();
     assert_eq!((calls[0].0.as_str(), calls[0].1[0].as_str()), ("schedule", "set"));
     assert!(!r.fake.calls().iter().any(|c| c.starts_with("schedule_set") || c.starts_with("schedule_remove")));
-    set_helper_override(None);
+    set_broker_override(None);
 }
 
 #[tokio::test]
-async fn a_failing_helper_run_is_an_error_not_a_success() {
+async fn an_update_task_that_runs_as_the_system_account_stays_a_command() {
+    let h = FakeHelper::new(0);
+    let r = rig(Some(h.clone())).await;
+    r.fake.state().elevation = Some(vec!["schedule".into(), "set".into(), "dev".into(), "--as-system".into()]);
+    let body = json!({"preset": "daily", "time": "04:00", "weekday": null, "run_as": "system", "enabled": true});
+    let (s, j) = r.call("PUT", "/servers/dev/schedule", Some(body)).await;
+    assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")), "{j}");
+    assert!(h.calls().is_empty());
+    set_broker_override(None);
+}
+
+#[tokio::test]
+async fn a_failing_service_run_is_an_error_not_a_success() {
     let h = FakeHelper::new(7);
     let r = rig(Some(h)).await;
-    r.maint.app.lock().unwrap().legacy = true;
-    let (s, j) = r.call("PUT", "/app", Some(json!({}))).await;
+    r.fake.state().elevation = Some(vec!["schedule".into(), "off".into(), "dev".into()]);
+    let (s, j) = r.call("DELETE", "/servers/dev/schedule", None).await;
     assert_eq!(s, 422, "{j}");
     let m = j["error"]["message"].as_str().unwrap();
     assert!(m.contains("code 7") && m.contains("done"), "{m}");
-    set_helper_override(None);
+    set_broker_override(None);
 }
 
 #[tokio::test]
-async fn a_helper_that_vanishes_falls_back_to_the_command() {
+async fn a_service_that_stops_midway_says_so_and_can_be_tried_again() {
     let mut h = FakeHelper::new(0);
     Arc::get_mut(&mut h).unwrap().vanish = true;
     let r = rig(Some(h)).await;
-    r.maint.app.lock().unwrap().legacy = true;
-    let (s, j) = r.call("PUT", "/app", Some(json!({}))).await;
-    assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
-    set_helper_override(None);
-}
-
-#[tokio::test]
-async fn an_install_runs_in_the_helper_with_secrets_in_the_environment_only() {
-    let h = FakeHelper::new(0);
-    let r = rig(Some(h.clone())).await;
-    let a = r.call("POST", "/installs", Some(install_body(&abs("kora-helper-test-b")))).await;
-    let j = r.job(a).await;
-    assert_eq!(j["state"], "done", "{j}");
-    assert_eq!(j["result"]["name"], "Alpha Town");
-    let calls = h.calls();
-    assert_eq!(calls.len(), 1);
-    let (verb, args, env) = &calls[0];
-    assert_eq!(verb, "install");
-    assert!(args.iter().any(|a| a == "--service") && args.iter().any(|a| a == "Alpha Town"));
-    assert!(args.iter().all(|a| !a.contains("SECRETLICENCE") && !a.contains(DBPASS)), "secrets never on the command: {args:?}");
-    assert!(env.contains(&("CFX_LICENSE_KEY".to_string(), LICENCE.to_string())));
-    assert!(env.contains(&("KORA_DB_ADMIN_PASSWORD".to_string(), DBPASS.to_string())));
-    assert_eq!(env.len(), 2);
-    assert!(!j.to_string().contains("SECRETLICENCE") && !j.to_string().contains(DBPASS));
-    assert_eq!(*r.env.runs.lock().unwrap(), 0, "the panel did not run the installer itself");
-    set_helper_override(None);
-}
-
-#[tokio::test]
-async fn a_failed_install_in_the_helper_is_a_failed_job_without_secrets() {
-    let h = FakeHelper::new(1);
-    let r = rig(Some(h)).await;
-    let a = r.call("POST", "/installs", Some(install_body(&abs("kora-helper-test-c")))).await;
-    let j = r.job(a).await;
-    assert_eq!(j["state"], "failed", "{j}");
-    assert!(j["error"]["message"].as_str().unwrap().contains("code 1"));
-    assert!(!j.to_string().contains("SECRETLICENCE") && !j.to_string().contains(DBPASS));
-    set_helper_override(None);
+    r.fake.state().elevation = Some(vec!["schedule".into(), "off".into(), "dev".into()]);
+    let (s, j) = r.call("DELETE", "/servers/dev/schedule", None).await;
+    assert_eq!((s, j["error"]["code"].as_str()), (422, Some("service.lost")), "{j}");
+    assert!(!j["error"]["message"].as_str().unwrap().to_lowercase().contains("windows"));
+    set_broker_override(None);
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_real_socket_client_without_a_socket_is_not_installed() {
+async fn the_real_socket_client_without_a_service_says_missing() {
     let _t = TURN.lock().await;
-    set_helper_override(None);
-    // On a machine that really has the helper this would be true, so only assert the shape.
-    let installed = kora_web::elevated::helper_installed();
-    assert_eq!(installed, std::path::Path::new(kora_core::helper::SOCKET_PATH).exists() && installed);
+    set_broker_override(None);
+    // On a machine that really has the service this would be "ready": only assert the shape.
+    let state = kora_web::elevated::service_state();
+    assert!(["ready", "missing", "not_allowed"].contains(&state["state"].as_str().unwrap()));
 }

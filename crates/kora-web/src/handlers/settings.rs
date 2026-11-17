@@ -80,20 +80,18 @@ pub async fn schedule_get(State(st): State<AppState>, Path(s): Path<String>) -> 
 }
 
 /// The schedule change needs administrator rights: on Windows the elevated worker does it (one
-/// permission prompt), on Linux the helper when it is installed; otherwise this is the
+/// permission prompt), elsewhere the administrator service; without it this is the
 /// `needs_elevation` answer with the command to run.
 fn run_elevated(ask: crate::elevated::AdminAsk, args: Vec<String>) -> Result<(), ApiError> {
     let mut command = vec!["kora".to_string()];
     command.extend(args);
-    crate::elevated::privileged_as(
-        ask,
-        "change the automatic updates",
-        "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.",
-        command,
-        vec![],
-        &mut |_| {},
-    )
-    .map(|_| ())
+    let message = "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.";
+    // An update task that runs as the system account on a folder the person controls is administrator
+    // code for them: the service never makes one, so that choice stays an administrator-terminal command.
+    if command.iter().any(|a| a == "--as-system") {
+        return Err(ApiError::needs_elevation(message, command));
+    }
+    crate::elevated::privileged_as(ask, "change the automatic updates", message, command, vec![], &mut |_| {}).map(|_| ())
 }
 
 pub async fn schedule_set(
