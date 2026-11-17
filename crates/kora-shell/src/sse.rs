@@ -40,11 +40,7 @@ impl Parser {
         };
         match field {
             "event" => self.name = value.to_string(),
-            "data" => {
-                if self.data.iter().map(String::len).sum::<usize>() + value.len() <= MAX_EVENT {
-                    self.data.push(value.to_string());
-                }
-            }
+            "data" if self.data.iter().map(String::len).sum::<usize>() + value.len() <= MAX_EVENT => self.data.push(value.to_string()),
             _ => {}
         }
         None
