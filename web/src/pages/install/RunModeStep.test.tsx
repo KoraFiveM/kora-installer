@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import InstallWizard from '../InstallWizard'
 import { installMock } from '@/api/mock'
@@ -12,6 +12,18 @@ const KEY = 'cfxk_abcdefghij_12345'
 beforeEach(() => {
   history.replaceState(null, '', '/')
 })
+
+/**
+ * Press "Next" until `arrived()` is true. "Next" is disabled while the wizard still waits for an answer (the ports
+ * check), and a click on a disabled button does nothing: so wait for it to be enabled instead of counting clicks.
+ */
+async function nextUntil(user: ReturnType<typeof userEvent.setup>, arrived: () => boolean) {
+  for (let i = 0; i < 10 && !arrived(); i++) {
+    const next = screen.getByRole('button', { name: 'Next' })
+    await waitFor(() => expect(next).toBeEnabled(), { timeout: 5000 })
+    await user.click(next)
+  }
+}
 
 async function toRunMode(user: ReturnType<typeof userEvent.setup>) {
   renderApp(<InstallWizard />, '/install')
@@ -39,7 +51,7 @@ describe('Install wizard: how the server runs (container mode)', () => {
     // the step is in the list, with the engine the System check found
     expect(await screen.findByText(/How the server runs/, { selector: 'li' })).toBeInTheDocument()
     // walk to the run-mode page by "Next" until its question is on screen
-    for (let i = 0; i < 8 && !screen.queryByText('How should this server run?'); i++) await user.click(screen.getByRole('button', { name: 'Next' }))
+    await nextUntil(user, () => !!screen.queryByText('How should this server run?'))
     expect(screen.getByText(/Podman 4\.9\.3, rootless: ready to run servers/)).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /As a system service/ })).toBeChecked()
     await user.click(screen.getByRole('radio', { name: /In a container/ }))
@@ -54,11 +66,7 @@ describe('Install wizard: how the server runs (container mode)', () => {
     expect(await screen.findByText(/There is no background service to install/)).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: /Install as a background service/ })).not.toBeInTheDocument()
     // on to the summary and install
-    for (let i = 0; i < 6 && !screen.queryByRole('button', { name: 'Install the server' }); i++) {
-      const n = screen.queryByRole('button', { name: 'Next' })
-      if (!n) break
-      await user.click(n)
-    }
+    await nextUntil(user, () => !!screen.queryByRole('button', { name: 'Install the server' }))
     expect(await screen.findByText('In a container', { selector: 'div' })).toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: 'Install the server' }))
     const sent = start.mock.calls[0][0]
