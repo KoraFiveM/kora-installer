@@ -140,6 +140,9 @@ pub fn restore(backup: &Path, exe: &Path) -> std::io::Result<()> {
     std::fs::rename(&new, exe)
 }
 
+/// How long the new program may take to print its version before it counts as broken.
+const START_PROBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// The update operation around the child (`run_child` does `kora self-update --yes`): keep the running program,
 /// let the child swap it, check the new one starts (else put the old one back at once), record the pending
 /// update and ask for a restart.
@@ -156,7 +159,10 @@ pub fn run_update(
     if ran.code != 0 || ran.timed_out {
         return Ok(ran); // the swap is atomic: nothing changed
     }
-    let out = std::process::Command::new(exe).arg("--version").env_clear().stdin(std::process::Stdio::null()).output();
+    // The new program might hang at start-up: it gets a time limit (and no input), else the service would wait for ever.
+    let mut probe = std::process::Command::new(exe);
+    probe.arg("--version").env_clear();
+    let out = crate::sysexe::output_within(probe, START_PROBE_LIMIT);
     let verdict = match out {
         Ok(o) if o.status.success() => new_program_ok(&String::from_utf8_lossy(&o.stdout), from),
         Ok(o) => Err(format!("the new program stopped with {}", o.status)),
