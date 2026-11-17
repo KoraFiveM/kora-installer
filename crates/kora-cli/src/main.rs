@@ -8,6 +8,7 @@ use kora_core::elevate;
 use kora_core::installer::{self, host, registry};
 
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
+use crate::cmd::desktop::DesktopCmd;
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::helper::{helper, HelperCmd};
 use crate::cmd::install::{install, InstallArgs};
@@ -191,6 +192,12 @@ enum Command {
     /// One administrator step of an install or delete, run by that helper.
     #[command(hide = true)]
     AdminStep(admin_worker::AdminStepArgs),
+    /// What the Kora desktop app (tray icon and window) asks of kora. Run by the app, never by a person.
+    #[command(hide = true)]
+    Desktop {
+        #[command(subcommand)]
+        cmd: DesktopCmd,
+    },
     /// Start (or install) Kora's own MariaDB on Windows, run by that helper.
     #[command(hide = true)]
     AdminDb(admin_worker::AdminDbArgs),
@@ -220,6 +227,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Branch { .. }
             | Command::Pr { .. }
             | Command::Webhook { .. }
+            | Command::Desktop { .. }
             | Command::Reach(_)
             | Command::SelfUpdate { .. }
             | Command::Panel(_),
@@ -413,6 +421,7 @@ fn main() {
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
+        Some(Command::Desktop { cmd }) => cmd::desktop::run(cmd),
         Some(Command::Reach(a)) => cmd::reach::run(a),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
