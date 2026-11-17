@@ -37,7 +37,7 @@ Assert-That ($gw.Anonymous -eq 401) 'the gateway answers nothing without the pan
 Assert-That ((Get-Item "$srv\.kora\server.log").Length -gt 0) 'FXServer output went to .kora\server.log'
 
 $st = Invoke-Native $kora @('status'); Show 'kora status' $st
-Assert-That ($st.Output -match "$name\s+prod\s+31120\s+41120\s+running") 'kora status shows the detached server as running'
+Assert-That ($st.Output -match "$name\s+clone, released\s+31120\s+41120\s+running") 'kora status shows the detached server as running'
 Assert-That ($st.Output -match 'txAdmin up') 'kora status shows the txAdmin port state'
 
 # kora stop ends the whole process tree.
