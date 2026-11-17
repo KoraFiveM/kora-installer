@@ -409,7 +409,15 @@ async fn logs_list_and_tail_only_known_files() {
     assert!(files[0]["size"].as_u64().unwrap() > 0);
     let j = json_of(call(&a, "GET", "/servers/mine/logs/server.log?lines=3", None).await).await;
     assert_eq!(j["file"], "server.log");
-    assert_eq!(j["lines"], json!(["line 7", "line 8", "line 9"]));
+    // Colour codes are kept for the panel to show; the text itself is unchanged.
+    assert_eq!(
+        j["lines"],
+        json!([
+            "\u{1b}[31mline 7\u{1b}[0m",
+            "\u{1b}[31mline 8\u{1b}[0m",
+            "\u{1b}[31mline 9\u{1b}[0m"
+        ])
+    );
     for bad in [
         "secret.txt",
         "..%2Fsecret.txt",
