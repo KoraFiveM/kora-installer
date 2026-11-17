@@ -161,16 +161,14 @@ fn runs_from(run_exe: &Path, dir: Option<&Path>) -> bool {
 pub fn plan_user_install(sys: &dyn Sys, ul: &UserLayout, run_exe: &Path, legacy_dir: Option<&Path>, opts: &UserOptions) -> Plan {
     let mut plan = Plan::default();
     let exe = target_exe(ul, run_exe, legacy_dir);
-    if runs_from(run_exe, legacy_dir) {
-        if !sys.exists(&ul.program) {
-            plan.actions.push(Action::CopyExe { from: run_exe.to_path_buf(), to: ul.program.clone(), kind: CopyKind::Fresh });
-            if let Some(dir) = ul.program.parent().filter(|_| ul.windows) {
-                let dir = dir.to_string_lossy().into_owned();
-                let on = sys.user_path().ok().flatten().is_some_and(|p| super::pathlist::contains(&p, &dir));
-                if !on {
-                    plan.actions.push(Action::AddUserPath(dir));
-                    plan.actions.push(Action::BroadcastEnv);
-                }
+    if runs_from(run_exe, legacy_dir) && !sys.exists(&ul.program) {
+        plan.actions.push(Action::CopyExe { from: run_exe.to_path_buf(), to: ul.program.clone(), kind: CopyKind::Fresh });
+        if let Some(dir) = ul.program.parent().filter(|_| ul.windows) {
+            let dir = dir.to_string_lossy().into_owned();
+            let on = sys.user_path().ok().flatten().is_some_and(|p| super::pathlist::contains(&p, &dir));
+            if !on {
+                plan.actions.push(Action::AddUserPath(dir));
+                plan.actions.push(Action::BroadcastEnv);
             }
         }
     }

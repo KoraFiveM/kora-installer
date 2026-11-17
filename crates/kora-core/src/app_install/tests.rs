@@ -561,7 +561,7 @@ mod per_user {
         let out = install_user_with(&mut f, &ul, &old.exe, Some(&old.dir), &UserOptions::default()).unwrap();
         assert_eq!(out.exe, PathBuf::from(EXE));
         assert_eq!(f.files[&PathBuf::from(EXE)], b"program".to_vec(), "copied");
-        assert!(f.shortcuts.values().all(|s| s.target == PathBuf::from(EXE)), "the shortcuts must not point at the folder that is about to go");
+        assert!(f.shortcuts.values().all(|s| s.target.as_path() == Path::new(EXE)), "the shortcuts must not point at the folder that is about to go");
         assert!(out.changes.iter().any(|c| c.contains("your PATH")), "{:?}", out.changes);
         assert!(!out.changes.iter().any(|c| c.contains("machine PATH")));
         // a per-user copy that is already there is kept as it is
