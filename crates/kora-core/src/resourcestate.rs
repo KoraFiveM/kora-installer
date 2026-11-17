@@ -275,8 +275,7 @@ mod tests {
 
     #[test]
     fn a_server_that_started_after_the_change_has_the_new_files() {
-        let mut st = State::default();
-        st.clock = 1;
+        let mut st = State { clock: 1, ..Default::default() };
         st.resources.insert("a".into(), ResourceMark { changed_seq: 1, changed_unix: 1000, why: "x".into(), ..Default::default() });
         assert!(info_of(&st, "a", true, None).needed);
         assert!(info_of(&st, "a", true, Some(900)).needed, "started before the change: still old");
