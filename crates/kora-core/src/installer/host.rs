@@ -285,14 +285,14 @@ mod scm {
         let log = open_service_log(&target);
         log_line(&log, &format!("kora service-host: starting FXServer for {target}"));
         let started = std::time::Instant::now();
-        let mut child = match build_command(&target).map_err(|e| e.to_string()).and_then(|mut c| {
+        let mut child = match build_command(&target).and_then(|mut c| {
             c.stdin(std::process::Stdio::null());
             c.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-            c.spawn().map_err(|e| format!("could not start FXServer: {e}"))
+            c.spawn().map_err(|e| Problem::from(e).lead("could not start FXServer"))
         }) {
             Ok(c) => c,
             Err(e) => {
-                log_line(&log, &format!("kora service-host: {e}"));
+                log_line(&log, &format!("kora service-host: {}", e.one_line()));
                 report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, 1, 0);
                 return Err(e);
             }
