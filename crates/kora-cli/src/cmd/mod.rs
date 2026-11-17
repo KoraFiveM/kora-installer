@@ -19,6 +19,7 @@ pub(crate) mod resources;
 pub(crate) mod schedule;
 pub(crate) mod server;
 pub(crate) mod store;
+pub(crate) mod support;
 pub(crate) mod toolchain;
 pub(crate) mod uninstall;
 pub(crate) mod update;

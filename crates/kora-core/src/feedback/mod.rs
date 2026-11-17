@@ -65,8 +65,10 @@ pub fn report_issue(r: &dyn CommandRunner, server: &ServerFile, resource_id: &st
     let res = find(server, resource_id)?;
     let dir = server.dir.join("resources").join(&res.path);
     let head = if dir.join(".git").exists() { git::head_commit(r, &dir).ok() } else { None };
-    let body = format!("{}\n\n{}", text.trim(), diagnostics(server, res, head.as_deref()));
-    git::create_issue(r, &repo_slug(&res.repository), title.trim(), &body).map_err(gh_err)
+    // An issue is public: whatever the person typed or attached goes through the same redaction as a support bundle.
+    let (title, text) = (crate::support::redact::scrub(title.trim()).text, crate::support::redact::scrub(text.trim()).text);
+    let body = format!("{}\n\n{}", text, diagnostics(server, res, head.as_deref()));
+    git::create_issue(r, &repo_slug(&res.repository), &title, &body).map_err(gh_err)
 }
 
 /// What a pull request would contain; shown to the user before anything is sent.

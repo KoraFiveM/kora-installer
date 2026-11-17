@@ -188,7 +188,19 @@ pub fn build(m: &dyn Machine, server: Option<&str>) -> Bundle {
         b.add(name, s.text, s.hits);
     };
 
-    put(&mut b, "about.txt", &format!("Kora {}\nOperating system: {}\nArchitecture: {}\nMade: {}\nKora folder: {}\nFree space in it: {}\n", m.kora_version(), m.os_text(), std::env::consts::ARCH, crate::backup::clock::utc_text(now), m.home().display(), m.free_bytes(&m.home()).map_or("unknown".to_string(), crate::space::human)));
+    put(
+        &mut b,
+        "about.txt",
+        &format!(
+            "Kora {}\nOperating system: {}\nArchitecture: {}\nMade: {}\nKora folder: {}\nFree space in it: {}\n",
+            m.kora_version(),
+            m.os_text(),
+            std::env::consts::ARCH,
+            crate::backup::clock::utc_text(now),
+            m.home().display(),
+            m.free_bytes(&m.home()).map_or("unknown".to_string(), crate::space::human)
+        ),
+    );
     put(&mut b, "system-check.txt", &m.system_check().unwrap_or_else(|| "The System check could not be run.".into()));
     put(&mut b, "tools.txt", &m.tool_versions().join("\n"));
     put(&mut b, "firewall.txt", &m.firewall_summary());
@@ -201,7 +213,17 @@ pub fn build(m: &dyn Machine, server: Option<&str>) -> Bundle {
     for e in chosen {
         let slug = crate::installer::slug(&e.name);
         let base = format!("servers/{slug}");
-        put(&mut b, &format!("{base}/status.txt"), &format!("{}\n{}\nBackups: {}\nFree space in the server folder: {}\n", m.server_status(e), m.service_status(e), m.backups_summary(e), m.free_bytes(&e.dir).map_or("unknown".to_string(), crate::space::human)));
+        put(
+            &mut b,
+            &format!("{base}/status.txt"),
+            &format!(
+                "{}\n{}\nBackups: {}\nFree space in the server folder: {}\n",
+                m.server_status(e),
+                m.service_status(e),
+                m.backups_summary(e),
+                m.free_bytes(&e.dir).map_or("unknown".to_string(), crate::space::human)
+            ),
+        );
         let mut listing = Vec::new();
         dir_listing(&e.dir, 2, "", &mut listing);
         put(&mut b, &format!("{base}/files.txt"), &listing.join("\n"));
@@ -256,7 +278,19 @@ pub fn build(m: &dyn Machine, server: Option<&str>) -> Bundle {
         let hits = Hits::new();
         b.add("omitted.txt", text, hits);
     }
-    let counts: String = b.files.iter().map(|f| format!("{}: {} value{} hidden{}\n", f.name, f.redactions, if f.redactions == 1 { "" } else { "s" }, if f.hidden.is_empty() { String::new() } else { format!(" ({})", f.hidden.join(", ")) })).collect();
+    let counts: String = b
+        .files
+        .iter()
+        .map(|f| {
+            format!(
+                "{}: {} value{} hidden{}\n",
+                f.name,
+                f.redactions,
+                if f.redactions == 1 { "" } else { "s" },
+                if f.hidden.is_empty() { String::new() } else { format!(" ({})", f.hidden.join(", ")) }
+            )
+        })
+        .collect();
     b.add("redactions.txt", counts, Hits::new());
     b.add("README.txt", README.to_string(), Hits::new());
     b
@@ -391,7 +425,13 @@ pub(crate) mod tests {
             Some(50 << 30)
         }
         fn jobs(&self) -> Vec<JobLine> {
-            vec![JobLine { op: "install_start".into(), server: Some("Prod".into()), state: "failed".into(), started: 1_699_999_000, error: Some(format!("git clone failed for https://oauth2:ghp_0123456789abcdefghijklmnopqrstuvwxyz@github.com/a/b.git with key {KEY}")) }]
+            vec![JobLine {
+                op: "install_start".into(),
+                server: Some("Prod".into()),
+                state: "failed".into(),
+                started: 1_699_999_000,
+                error: Some(format!("git clone failed for https://oauth2:ghp_0123456789abcdefghijklmnopqrstuvwxyz@github.com/a/b.git with key {KEY}")),
+            }]
         }
         fn audit(&self) -> Vec<String> {
             vec!["2023-11-14 server_control ok local".into()]
@@ -409,7 +449,24 @@ pub(crate) mod tests {
         let f = fixture();
         let b = build(&Fake { f: &f }, None);
         let names: Vec<&str> = b.files.iter().map(|x| x.name.as_str()).collect();
-        for want in ["about.txt", "system-check.txt", "tools.txt", "firewall.txt", "servers.json", "servers/prod/status.txt", "servers/prod/server.cfg", "servers/prod/permissions.cfg", "servers/prod/kora-server.json", "servers/prod/logs/install.log", "jobs.txt", "audit.txt", "panel.log", "redactions.txt", "README.txt", "omitted.txt"] {
+        for want in [
+            "about.txt",
+            "system-check.txt",
+            "tools.txt",
+            "firewall.txt",
+            "servers.json",
+            "servers/prod/status.txt",
+            "servers/prod/server.cfg",
+            "servers/prod/permissions.cfg",
+            "servers/prod/kora-server.json",
+            "servers/prod/logs/install.log",
+            "jobs.txt",
+            "audit.txt",
+            "panel.log",
+            "redactions.txt",
+            "README.txt",
+            "omitted.txt",
+        ] {
             assert!(names.contains(&want), "{want} missing in {names:?}");
         }
         // the files that hold secrets were never read
@@ -422,7 +479,17 @@ pub(crate) mod tests {
         }
         // not one secret anywhere in any file, or in the summary
         let all: String = b.files.iter().map(|x| b.text(&x.name).unwrap()).collect::<Vec<_>>().join("\n====\n");
-        for sec in [KEY, "s3cr3t-db-pass", "hunter2-and-more", "ghp_0123456789abcdefghijklmnopqrstuvwxyz", "1234567890AbCdEfGhIjKlMnOpQrStUv", "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "abcdef0123456789abcdef", "identifier.fivem:123456", "jamie"] {
+        for sec in [
+            KEY,
+            "s3cr3t-db-pass",
+            "hunter2-and-more",
+            "ghp_0123456789abcdefghijklmnopqrstuvwxyz",
+            "1234567890AbCdEfGhIjKlMnOpQrStUv",
+            "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+            "abcdef0123456789abcdef",
+            "identifier.fivem:123456",
+            "jamie",
+        ] {
             assert!(!all.contains(sec), "{sec} survived in the bundle:\n{all}");
         }
         assert!(redact::leaks(&all).is_none());

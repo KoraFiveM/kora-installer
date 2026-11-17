@@ -407,7 +407,13 @@ impl Backend for FakeBackend {
     fn backups_overview(&mut self) -> Res<crate::api::wire::BackupsOverview> {
         let servers = self.state().servers.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
         Ok(crate::api::wire::BackupsOverview {
-            servers: servers.into_iter().map(|server| crate::api::wire::ServerBackupLine { server, summary: crate::backup::BackupSummary { last_ok_unix: None, text: "No backup yet".into(), warning: None, scheduled: false } }).collect(),
+            servers: servers
+                .into_iter()
+                .map(|server| crate::api::wire::ServerBackupLine {
+                    server,
+                    summary: crate::backup::BackupSummary { last_ok_unix: None, text: "No backup yet".into(), warning: None, scheduled: false },
+                })
+                .collect(),
         })
     }
     fn backup_create(&mut self, e: &ServerEntry, req: &crate::api::wire::BackupCreateRequest, admin: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::BackupCreated> {
@@ -477,7 +483,8 @@ impl Backend for FakeBackend {
         self.state().calls.push(format!("support_summary {}", server.unwrap_or("-")));
         Ok("--- about.txt
 Kora 0.8.0
-".into())
+"
+        .into())
     }
     fn backup_file(&mut self, e: &ServerEntry, id: &str) -> Res<PathBuf> {
         self.state().calls.push(format!("backup_file {} {id}", e.name));

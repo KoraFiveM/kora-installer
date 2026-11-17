@@ -14,8 +14,8 @@ mod keys;
 mod more;
 mod reach;
 mod servers;
-mod support;
 mod session;
+mod support;
 mod system;
 mod updates;
 
@@ -27,7 +27,7 @@ pub use keys::*;
 pub use more::*;
 pub use reach::*;
 pub use servers::*;
-pub use support::*;
 pub use session::*;
+pub use support::*;
 pub use system::*;
 pub use updates::*;

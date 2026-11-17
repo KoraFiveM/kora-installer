@@ -14,6 +14,7 @@ Commands:
   self-update    Update the kora program itself to the newest stable release (checksum-verified)
   reach          Can players reach a server? A checklist (running, firewall, router, internet) and the fixes
   backup         Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule
+  support        Make one file to hand to whoever is helping you: your Kora's state with every secret removed
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
@@ -811,6 +812,43 @@ Options:
           Stop the server during scheduled backups
           
           [possible values: on, off]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora support =====
+Make one file to hand to whoever is helping you: your Kora's state with every secret removed
+
+Usage: kora support [OPTIONS] <COMMAND>
+
+Commands:
+  bundle  Prepare a support bundle, show what is in it, and save it on this computer after you agree
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora support bundle =====
+Prepare a support bundle, show what is in it, and save it on this computer after you agree
+
+Usage: kora support bundle [OPTIONS] [SERVER]
+
+Arguments:
+  [SERVER]
+          Only this server's files (default: every server)
+
+Options:
+      --show <FILE>
+          Print the cleaned text of one file of the bundle (for example servers/prod/server.cfg) and stop
+
+      --yes
+          Save it without asking
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

@@ -18,6 +18,7 @@ use crate::cmd::resources::{add_asset, add_resources, AddAssetArgs, AddResources
 use crate::cmd::schedule::{schedule, ScheduleCmd};
 use crate::cmd::server::{control, delete, status};
 use crate::cmd::store::{AuditArgs, StoreCmd};
+use crate::cmd::support::SupportCmd;
 use crate::cmd::toolchain::ToolsCmd;
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
@@ -71,6 +72,11 @@ enum Command {
     Backup {
         #[command(subcommand)]
         cmd: BackupCmd,
+    },
+    /// Make one file to hand to whoever is helping you: your Kora's state with every secret removed.
+    Support {
+        #[command(subcommand)]
+        cmd: SupportCmd,
     },
     /// Discord notifications for update reports.
     Webhook {
@@ -228,6 +234,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Webhook { .. }
             | Command::Reach(_)
             | Command::Backup { .. }
+            | Command::Support { .. }
             | Command::SelfUpdate { .. }
             | Command::Panel(_),
         ) => K::Other,
@@ -422,6 +429,7 @@ fn main() {
         Some(Command::Webhook { cmd }) => webhook(cmd),
         Some(Command::Reach(a)) => cmd::reach::run(a),
         Some(Command::Backup { cmd }) => cmd::backup::run(cmd),
+        Some(Command::Support { cmd }) => cmd::support::run(cmd),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),

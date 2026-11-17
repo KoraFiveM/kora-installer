@@ -107,7 +107,15 @@ impl<B: Backend + ?Sized> Machine for SystemMachine<'_, B> {
             Status::Missing => "folder missing",
         };
         let d = b.status_detail(e);
-        format!("Server {}: {st} (game port {}: {}, txAdmin port {}: {})\nMode: {:?}", e.name, e.ports.game, if d.game_listening { "listening" } else { "not listening" }, e.ports.txadmin, if d.txadmin_up { "answering" } else { "not answering" }, e.mode)
+        format!(
+            "Server {}: {st} (game port {}: {}, txAdmin port {}: {})\nMode: {:?}",
+            e.name,
+            e.ports.game,
+            if d.game_listening { "listening" } else { "not listening" },
+            e.ports.txadmin,
+            if d.txadmin_up { "answering" } else { "not answering" },
+            e.mode
+        )
     }
     fn service_status(&self, e: &ServerEntry) -> String {
         let svc = match crate::installer::host::service_state(&e.name) {

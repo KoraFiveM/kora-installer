@@ -54,7 +54,26 @@ pub fn policy(rel: &str) -> Policy {
     if matches!(name, "notify.json" | "alerts.json") || name.starts_with("notify.") && ext == "json" {
         return Policy::Omit("holds webhook addresses");
     }
-    if matches!(name, "owners.json" | "remote.json" | "users.json" | "secrets.json" | "keys.json" | "panel-token" | "panel.token" | "token" | ".env" | "credentials" | "id_rsa" | "id_ed25519" | "known_hosts" | ".netrc" | ".git-credentials" | "hosts.yml") || name.starts_with(".env.") {
+    if matches!(
+        name,
+        "owners.json"
+            | "remote.json"
+            | "users.json"
+            | "secrets.json"
+            | "keys.json"
+            | "panel-token"
+            | "panel.token"
+            | "token"
+            | ".env"
+            | "credentials"
+            | "id_rsa"
+            | "id_ed25519"
+            | "known_hosts"
+            | ".netrc"
+            | ".git-credentials"
+            | "hosts.yml"
+    ) || name.starts_with(".env.")
+    {
         return Policy::Omit("holds saved keys, tokens or sign-in details");
     }
     if matches!(ext, "pem" | "key" | "p12" | "pfx" | "crt" | "kdbx" | "db" | "sqlite" | "sqlite3" | "db-wal" | "db-shm") || p.ends_with("/store/kora.db") {
@@ -77,7 +96,10 @@ fn harmless_name(name: &str) -> bool {
 
 fn harmless_value(v: &str) -> bool {
     let t = v.trim().trim_matches(['"', '\'', ',', ';']);
-    t.is_empty() || matches!(t.to_ascii_lowercase().as_str(), "true" | "false" | "null" | "none" | "yes" | "no" | "on" | "off" | "<hidden>" | "<hidden>\"" | "[]" | "{}") || t.parse::<f64>().is_ok() || t.starts_with("<hidden")
+    t.is_empty()
+        || matches!(t.to_ascii_lowercase().as_str(), "true" | "false" | "null" | "none" | "yes" | "no" | "on" | "off" | "<hidden>" | "<hidden>\"" | "[]" | "{}")
+        || t.parse::<f64>().is_ok()
+        || t.starts_with("<hidden")
 }
 
 /// What was hidden, by kind (counts only: never the values).
@@ -150,11 +172,7 @@ fn name_rules() -> &'static [Regex; 4] {
 fn paths_rules() -> &'static [Regex; 3] {
     static CELL: OnceLock<[Regex; 3]> = OnceLock::new();
     CELL.get_or_init(|| {
-        [
-            Regex::new(r"(?i)([A-Z]:[\\/]+Users[\\/]+)[^\\/\s:*?<>|]+").expect("win home"),
-            Regex::new(r"(/home/)[^/\s:]+").expect("linux home"),
-            Regex::new(r"(/Users/)[^/\s:]+").expect("mac home"),
-        ]
+        [Regex::new(r"(?i)([A-Z]:[\\/]+Users[\\/]+)[^\\/\s:*?<>|]+").expect("win home"), Regex::new(r"(/home/)[^/\s:]+").expect("linux home"), Regex::new(r"(/Users/)[^/\s:]+").expect("mac home")]
     })
 }
 
@@ -314,7 +332,16 @@ add_principal identifier.discord:98765432109876 group.admin
     fn a_server_cfg_loses_its_secrets_and_keeps_its_shape() {
         let r = scrub(SERVER_CFG);
         assert_no_secret(&r.text);
-        for keep in ["endpoint_add_tcp \"0.0.0.0:30120\"", "sv_hostname \"My Kora Server\"", "sv_maxclients 48", "ensure oxmysql", "ensure kora_core", "setr game_language \"en\"", "add_ace group.admin command allow", "exec secrets.cfg"] {
+        for keep in [
+            "endpoint_add_tcp \"0.0.0.0:30120\"",
+            "sv_hostname \"My Kora Server\"",
+            "sv_maxclients 48",
+            "ensure oxmysql",
+            "ensure kora_core",
+            "setr game_language \"en\"",
+            "add_ace group.admin command allow",
+            "exec secrets.cfg",
+        ] {
             assert!(r.text.contains(keep), "{keep} lost:\n{}", r.text);
         }
         assert!(r.text.contains("sv_licenseKey \"<hidden"), "{}", r.text);
