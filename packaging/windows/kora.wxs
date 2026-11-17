@@ -52,14 +52,12 @@
 
     <StandardDirectory Id="ProgramMenuFolder">
       <Component Id="StartMenuShortcut" Guid="C41B8E2D-5F90-4A37-B6D1-0E9A7C3F8A52" Bitness="always64">
-        <?ifdef DesktopExe?><Condition>DESKTOP=&quot;0&quot;</Condition><?endif?>
         <Shortcut Id="KoraStartMenu" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
     <StandardDirectory Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="E7D2A049-1B38-4C65-8F90-3D5B6A1C9E04" Bitness="always64">
-        <?ifdef DesktopExe?><Condition>DESKTOP=&quot;0&quot;</Condition><?endif?>
         <Shortcut Id="KoraDesktop" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
@@ -111,9 +109,15 @@
       <ComponentRef Id="Program" />
       <ComponentRef Id="PathEntry" />
       <ComponentRef Id="DataFolder" />
-      <ComponentRef Id="StartMenuShortcut" />
-      <Feature Id="DesktopShortcutFeature" Title="Desktop shortcut" Level="1">
-        <ComponentRef Id="DesktopShortcut" />
+      <!-- Shortcuts that start a bare `kora`: only when the desktop app is left out (DESKTOP=0) or not in this MSI at all.
+           (WiX 5 has no condition on a component: the condition is on the feature's level.) -->
+      <Feature Id="BareShortcuts" Title="Start Menu shortcut" Level="1" AllowAbsent="no">
+        <?ifdef DesktopExe?><Level Value="0" Condition="DESKTOP&lt;&gt;&quot;0&quot;" /><?endif?>
+        <ComponentRef Id="StartMenuShortcut" />
+        <Feature Id="DesktopShortcutFeature" Title="Desktop shortcut" Level="1">
+          <?ifdef DesktopExe?><Level Value="0" Condition="DESKTOP&lt;&gt;&quot;0&quot;" /><?endif?>
+          <ComponentRef Id="DesktopShortcut" />
+        </Feature>
       </Feature>
       <?ifdef DesktopExe?>
       <Feature Id="DesktopApp" Title="Kora desktop app (tray icon and window)" Level="1" AllowAbsent="yes">

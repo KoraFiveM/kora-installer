@@ -105,7 +105,10 @@ pub fn classify(stderr: &str) -> DbFailure {
     } else if s.contains("unknown database") || s.contains("(1049)") {
         DbFailure::NoSuchDatabase
     } else {
-        DbFailure::Other(stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("the database tool failed").trim().chars().take(300).collect())
+        // The tools print harmless "Warning: ..." lines first; the line that says why it stopped is the first one that is not a warning.
+        let lines = || stderr.lines().map(str::trim).filter(|l| !l.is_empty());
+        let line = lines().find(|l| !l.to_ascii_lowercase().starts_with("warning")).or_else(|| lines().next()).unwrap_or("the database tool failed");
+        DbFailure::Other(line.chars().take(300).collect())
     }
 }
 
@@ -419,6 +422,7 @@ mod tests {
         assert_eq!(classify("ERROR 1049 (42000): Unknown database 'x'"), DbFailure::NoSuchDatabase);
         assert_eq!(classify("Error 28: No space left on device"), DbFailure::DiskFull);
         assert!(matches!(classify("something odd\nsecond"), DbFailure::Other(m) if m == "something odd"));
+        assert!(matches!(classify("Warning: Could not set terminology mode\nmysqldump: Couldn't execute 'x': boom (1234)"), DbFailure::Other(m) if m.contains("boom")), "a warning is not the reason");
     }
 
     #[test]
