@@ -71,6 +71,10 @@ pub mod codes {
     pub const FAILED: &str = "failed";
     /// A git or GitHub command failed (made from `git::GitError`).
     pub const GIT_FAILED: &str = "git.failed";
+    /// The folder has no `kora-server.json`: it was added from an existing folder, not installed by Kora.
+    pub const SERVER_NOT_KORA: &str = "server.not_kora";
+    /// The disk is full (made from `std::io::Error` of kind `StorageFull`).
+    pub const STORAGE_FULL: &str = "storage_full";
     /// A file or folder could not be read or written (made from `std::io::Error`).
     pub const IO: &str = "io";
     /// Saved data could not be read (from `serde_json` errors; `rusqlite` errors have their own codes in `store`).
@@ -163,6 +167,14 @@ pub mod known {
     pub const GH_URL: &str = "https://cli.github.com";
     /// Where Git can be downloaded by hand.
     pub const GIT_URL: &str = "https://git-scm.com/downloads";
+
+    /// The server has no `kora-server.json` (Kora did not install it).
+    pub fn not_a_kora_server() -> Problem {
+        Problem::new(
+            codes::SERVER_NOT_KORA,
+            "This server was added from an existing folder, so Kora did not install it and has no record of how it was set up. Updates, resources, ports and starting from Kora only work for servers that Kora installed.",
+        )
+    }
 
     /// `gh` is not installed.
     pub fn gh_missing() -> Problem {
@@ -457,6 +469,16 @@ impl Problem {
         self
     }
 
+    /// The whole problem on one line, for the few places that must keep a plain string (a field of a
+    /// wire type, a log line): the message, then the details in brackets. Not for showing a Problem
+    /// to a person: pass the Problem on instead.
+    pub fn one_line(&self) -> String {
+        match &self.details {
+            Some(d) => format!("{} ({})", self.message, d.replace('\n', "; ")),
+            None => self.message.clone(),
+        }
+    }
+
     /// Like [`Problem::context`] but takes the text from a closure (only built on the error path).
     pub fn context_with(self, doing: impl FnOnce() -> String) -> Self {
         self.context(&doing())
@@ -476,6 +498,9 @@ impl<T, E: Into<Problem>> Context<T> for Result<T, E> {
 
 impl From<std::io::Error> for Problem {
     fn from(e: std::io::Error) -> Self {
+        if e.kind() == std::io::ErrorKind::StorageFull {
+            return Self::new(codes::STORAGE_FULL, "There is no space left on the disk. Free up some space, then try again.").with_details(e.to_string()).with_action(Action::Retry);
+        }
         Self::low_level(codes::IO, "Kora could not read or write a file.", &e)
     }
 }

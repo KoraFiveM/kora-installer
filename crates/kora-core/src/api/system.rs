@@ -244,7 +244,9 @@ impl Backend for SystemBackend {
     }
 
     fn delete(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool) -> Res<Vec<String>> {
-        installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet).map_err(Problem::from).inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
+        installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet)
+            .map_err(Problem::from)
+            .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
     }
 
     fn delete_with_db_password(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>) -> Res<Vec<String>> {

@@ -271,7 +271,7 @@ impl Maintenance for SystemMaintenance {
     }
 
     fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, Problem> {
-        app::uninstall_app_opts(dry_run).map_err(|e| e.to_string())
+        app::uninstall_app_opts(dry_run).map_err(Problem::from)
     }
 
     fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, Problem> {

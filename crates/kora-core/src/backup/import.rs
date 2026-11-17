@@ -112,7 +112,7 @@ pub trait ForkTools {
     /// Returns (usable, the signed-in login).
     fn usable(&self, owner: &str) -> (bool, Option<String>);
     /// Make a fork of the original repository `upstream` in `owner`; returns its address.
-    fn fork(&self, upstream: &str, owner: &str) -> Result<String, String>;
+    fn fork(&self, upstream: &str, owner: &str) -> Result<String, Problem>;
 }
 
 pub struct SystemForks;
@@ -132,7 +132,7 @@ impl ForkTools for SystemForks {
         let ok = g.owners().map(|l| l.iter().any(|o| o.login.eq_ignore_ascii_case(owner) && o.can_fork)).unwrap_or(false);
         (ok, login)
     }
-    fn fork(&self, upstream: &str, owner: &str) -> Result<String, String> {
+    fn fork(&self, upstream: &str, owner: &str) -> Result<String, Problem> {
         let slug = crate::installer::repo_slug(upstream);
         let name = slug.rsplit('/').next().unwrap_or(&slug).to_string();
         let r = crate::git::SystemRunner;
@@ -146,7 +146,7 @@ impl ForkTools for SystemForks {
         if o.ok() || o.stderr.contains("already exists") {
             Ok(format!("https://github.com/{owner}/{name}.git"))
         } else {
-            Err(o.stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("GitHub refused").trim().to_string())
+            Err(o.stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("GitHub refused").trim().to_string().into())
         }
     }
 }
@@ -338,7 +338,7 @@ pub fn inspect(
     saved_keys: &[String],
     ports: &dyn PortCheck,
     forks: &dyn ForkTools,
-    db_check: &dyn Fn() -> Result<(), String>,
+    db_check: &dyn Fn() -> Result<(), Problem>,
     default_dir: &dyn Fn(&str) -> String,
 ) -> Result<ImportPreview, Problem> {
     let file_name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -445,7 +445,7 @@ pub fn inspect(
     if matches!(head.database.kind, DbKind::Dumped | DbKind::External) {
         p.db_login = Some(match db_check() {
             Ok(()) => DbLoginNote { ok: true, message: "Kora can log in to this computer's database server automatically.".into() },
-            Err(m) => DbLoginNote { ok: false, message: m },
+            Err(m) => DbLoginNote { ok: false, message: m.one_line() },
         });
     }
     p.server = Some(head.server);
@@ -504,13 +504,13 @@ fn secrets_cfg(key: &str, creds: Option<&crate::db::Credentials>) -> String {
 /// Downloads the FXServer build.
 pub trait Fetcher {
     /// Make `build` (or, if it is gone, the recommended one) the current build under `<dir>/artifacts`. Returns the build.
-    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, String>;
+    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, Problem>;
 }
 
 pub struct SystemFetcher;
 
 impl Fetcher for SystemFetcher {
-    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, String> {
+    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, Problem> {
         use crate::artifacts::{self, Channel, Platform, Verify};
         let http = crate::installer::HttpClient::default();
         let platform = Platform::current();
@@ -528,7 +528,7 @@ impl Fetcher for SystemFetcher {
         match store.swap(got, &file, platform) {
             Ok(()) => {}
             Err(artifacts::ArtifactError::Store(m)) if m.contains("already current") => {}
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e.to_string().into()),
         }
         let _ = std::fs::remove_dir_all(&dl);
         Ok(got)
@@ -537,7 +537,7 @@ impl Fetcher for SystemFetcher {
 
 /// Creates the new database and login (the admin login is the one install uses).
 pub trait Provisioner {
-    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, String>;
+    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, Problem>;
     /// Drop what `provision` made (rollback).
     fn drop_made(&self, state_path: &Path);
 }
@@ -547,8 +547,8 @@ pub struct SystemProvisioner {
 }
 
 impl Provisioner for SystemProvisioner {
-    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, String> {
-        crate::db::provision(&crate::db::SystemRunner, &self.admin, "localhost", "127.0.0.1", state_path).map_err(|e| e.to_string())
+    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, Problem> {
+        crate::db::provision(&crate::db::SystemRunner, &self.admin, "localhost", "127.0.0.1", state_path).map_err(Problem::from)
     }
     fn drop_made(&self, state_path: &Path) {
         if let Ok(mut st) = crate::db::ProvisionState::load(state_path) {
@@ -589,18 +589,18 @@ fn save_state(dir: &Path, s: &State) -> Result<(), Problem> {
         .map_err(|e| Problem::generic(format!("Kora could not write its progress note in the new folder: {e}")))
 }
 
-fn io_problem(what: &str, e: std::io::Error) -> Problem {
-    if e.kind() == std::io::ErrorKind::StorageFull {
+fn io_problem(what: &str, e: Problem) -> Problem {
+    if e.code == crate::problem::codes::STORAGE_FULL {
         return create::disk_full(&format!("There is no space left on the disk while {what}."));
     }
-    Problem::generic(format!("Kora could not finish {what}: {e}")).with_action(Action::Retry)
+    e.context(what).with_action(Action::Retry)
 }
 
 /// Run the import. Resumable: a second call with the same file and folder carries on after the last finished step.
 pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(BackupEvent)) -> Result<ImportResult, Problem> {
     let mut ev = |step: &str, msg: &str, pct: u8| say(BackupEvent { step: step.into(), message: msg.into(), percent: pct });
     let c = &req.choices;
-    crate::api::install::validate_name(&c.name).map_err(Problem::generic)?;
+    crate::api::install::validate_name(&c.name)?;
     let dir = PathBuf::from(&c.dir);
     if !dir.is_absolute() {
         return Err(Problem::new(codes::DEST_UNWRITABLE, "Give the full path of the folder for the new server."));
@@ -621,7 +621,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         return Err(Problem::new(codes::BUSY, "The game port and the txAdmin port must be different."));
     }
     let _guard = create::BusyGuard::take(&c.name)?;
-    let sha = archive::file_sha256(file).map_err(|e| io_problem("reading the file", e))?;
+    let sha = archive::file_sha256(file).map_err(|e| io_problem("reading the file", e.into()))?;
     let mut st = load_state(&dir);
     let resuming = dir.join(".kora").join("import-state.json").is_file() && st.source_sha == sha && !req.start_over;
     if req.start_over || (dir.exists() && !resuming) {
@@ -636,7 +636,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         st = State { source_sha: sha.clone(), ..State::default() };
     }
     let created_dir = !dir.exists();
-    std::fs::create_dir_all(&dir).map_err(|e| io_problem("creating the server folder", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| io_problem("creating the server folder", e.into()))?;
     let stage = dir.join(".kora").join("import-staging");
     let mut result = ImportResult {
         name: c.name.clone(),
@@ -695,7 +695,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         if !st.done.iter().any(|d| d == "unpack") || !stage.is_dir() {
             ev("unpack", "Unpacking and checking every file (nothing is placed yet)", 6);
             let _ = std::fs::remove_dir_all(&stage);
-            std::fs::create_dir_all(&stage).map_err(|e| io_problem("unpacking", e))?;
+            std::fs::create_dir_all(&stage).map_err(|e| io_problem("unpacking", e.into()))?;
             if let Some(free) = crate::space::SystemDisk.free_bytes_of(&dir) {
                 if free < head.payload_bytes.saturating_add(512 * crate::space::MIB) {
                     return Err(create::disk_full(&format!("Importing needs about {} of room and only {} is free here.", crate::space::human(head.payload_bytes), crate::space::human(free))));
@@ -725,17 +725,17 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 let Some(dest) = crate::fsutil::join_inside(&dir, &rel) else { continue };
                 let src = server_stage.join(&rel);
                 if is_converted_file(&rel) {
-                    let text = std::fs::read_to_string(&src).map_err(|e| io_problem("reading a settings file", e))?;
+                    let text = std::fs::read_to_string(&src).map_err(|e| io_problem("reading a settings file", e.into()))?;
                     let mut converted = convert_text(&text, &m.server.dir, &c.dir, to_windows);
                     if rel == "server.cfg" && c.game_port != m.server.game_port {
                         converted = crate::installer::change_ports::rewrite_cfg_game_port(&converted, c.game_port).unwrap_or(converted);
                     }
                     if let Some(parent) = dest.parent() {
-                        std::fs::create_dir_all(parent).map_err(|e| io_problem("placing a settings file", e))?;
+                        std::fs::create_dir_all(parent).map_err(|e| io_problem("placing a settings file", e.into()))?;
                     }
-                    std::fs::write(&dest, converted).map_err(|e| io_problem("placing a settings file", e))?;
+                    std::fs::write(&dest, converted).map_err(|e| io_problem("placing a settings file", e.into()))?;
                 } else {
-                    write_into(&dest, &src, false).map_err(|e| io_problem("placing a file", e))?;
+                    write_into(&dest, &src, false).map_err(|e| io_problem("placing a file", e.into()))?;
                 }
             }
             st.done.push("files".into());
@@ -771,7 +771,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 ev("database", "Creating a new database and login", 50);
                 let made = prov.provision(&ppath).map_err(|e| {
                     Problem::new(codes::DB_STOPPED, "Kora could not create the new database. Is the database server running? Kora uses the same database administrator login as an install: on Linux the root account's own login (run Kora as root for the import) or the KORA_DB_ADMIN_USER and KORA_DB_ADMIN_PASSWORD settings; on Windows the login of the MariaDB Kora set up.")
-                        .with_details(e)
+                        .with_details(e.to_string())
                         .with_action(Action::StartDatabase)
                         .with_action(Action::Retry)
                 })?;
@@ -812,10 +812,10 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         if !st.done.iter().any(|d| d == "resources") {
             ev("resources", "Placing the resources that were in the file", 70);
             let res_dir = dir.join(RESOURCES_DIR);
-            std::fs::create_dir_all(&res_dir).map_err(|e| io_problem("creating the resources folder", e))?;
+            std::fs::create_dir_all(&res_dir).map_err(|e| io_problem("creating the resources folder", e.into()))?;
             for rel in files_below(&stage.join(RESOURCES_DIR)) {
                 if let Some(dest) = crate::fsutil::join_inside(&res_dir, &rel) {
-                    write_into(&dest, &stage.join(RESOURCES_DIR).join(&rel), false).map_err(|e| io_problem("placing a resource", e))?;
+                    write_into(&dest, &stage.join(RESOURCES_DIR).join(&rel), false).map_err(|e| io_problem("placing a resource", e.into()))?;
                 }
             }
             // resources kept in full: their git history comes along; point `origin` where the choice above says
@@ -954,7 +954,7 @@ mod tests {
         fn usable(&self, _: &str) -> (bool, Option<String>) {
             (true, Some("old-owner".into()))
         }
-        fn fork(&self, _: &str, _: &str) -> Result<String, String> {
+        fn fork(&self, _: &str, _: &str) -> Result<String, Problem> {
             Err("not needed".into())
         }
     }
@@ -975,7 +975,7 @@ mod tests {
         fn usable(&self, owner: &str) -> (bool, Option<String>) {
             (self.me == Some(owner), self.me.map(str::to_string))
         }
-        fn fork(&self, upstream: &str, owner: &str) -> Result<String, String> {
+        fn fork(&self, upstream: &str, owner: &str) -> Result<String, Problem> {
             self.made.borrow_mut().push(upstream.to_string());
             Ok(format!("https://github.com/{owner}/{}", upstream.rsplit('/').next().unwrap()))
         }
@@ -985,7 +985,7 @@ mod tests {
         calls: RefCell<Vec<u32>>,
     }
     impl Fetcher for FakeFetcher {
-        fn artifact(&self, build: u32, dir: &Path, _say: &mut dyn FnMut(&str)) -> Result<u32, String> {
+        fn artifact(&self, build: u32, dir: &Path, _say: &mut dyn FnMut(&str)) -> Result<u32, Problem> {
             self.calls.borrow_mut().push(build);
             std::fs::create_dir_all(dir.join("artifacts/current")).map_err(|e| e.to_string())?;
             Ok(build)
@@ -997,7 +997,7 @@ mod tests {
         dropped: RefCell<bool>,
     }
     impl Provisioner for FakeProvisioner {
-        fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, String> {
+        fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, Problem> {
             if self.fail {
                 return Err("connection refused".into());
             }

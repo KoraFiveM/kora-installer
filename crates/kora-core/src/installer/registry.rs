@@ -377,8 +377,18 @@ impl ServerFile {
     pub fn versions(&self) -> Versions {
         super::style(self.mode, self.source, self.versions).1
     }
+    /// Read `kora-server.json`. A folder without one was not installed by Kora: that is
+    /// [`codes::SERVER_NOT_KORA`], with the plain explanation.
     pub fn load(dir: &Path) -> crate::problem::Res<Self> {
-        serde_json::from_slice(&fs::read(server_file_path(dir))?)
+        let path = server_file_path(dir);
+        let bytes = fs::read(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                crate::problem::known::not_a_kora_server().with_details(format!("{} does not exist", path.display()))
+            } else {
+                crate::problem::Problem::from(e).lead(&format!("Kora could not read {}", path.display()))
+            }
+        })?;
+        serde_json::from_slice(&bytes).map_err(|e| crate::problem::Problem::from(e).lead(&format!("Kora could not understand {}", path.display())))
     }
     pub fn save(&self) -> crate::problem::Res<()> {
         let p = server_file_path(&self.dir);
@@ -388,8 +398,7 @@ impl ServerFile {
         if out.versions.is_some() {
             out.mode = super::compat_mode(out.versions());
         }
-        fs::write(&tmp, serde_json::to_vec_pretty(&out)?)?;
-        fs::rename(tmp, p)
+        fs::write(&tmp, serde_json::to_vec_pretty(&out)?).and_then(|()| fs::rename(&tmp, &p)).map_err(|e| crate::problem::Problem::from(e).lead(&format!("Kora could not write {}", p.display())))
     }
 }
 

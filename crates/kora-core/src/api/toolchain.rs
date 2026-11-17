@@ -63,7 +63,7 @@ impl ToolchainEnv for SystemToolchain {
         if tool == Tool::Git && !cfg!(windows) {
             install_system_git(say)?;
         } else if tool == Tool::Git || tool == Tool::Gh {
-            tools::install_real(tool, say).map_err(String::from)?;
+            tools::install_real(tool, say)?;
         } else {
             return Err(Problem::new(codes::TOOLS_UNSUPPORTED, format!("Kora cannot install {} from here.", tool.label())).into());
         }
@@ -86,7 +86,7 @@ impl ToolchainEnv for SystemToolchain {
 
     fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, Problem> {
         let found = db::detect(&db::SystemRunner, db::Os::current()).map_err(|e| Problem::generic(format!("Kora could not look for the database server: {e}")).to_string())?;
-        start_database_with(&db::SystemRunner, &found, crate::elevate::is_elevated(), cfg!(windows), Duration::from_secs(45), say).map_err(String::from)
+        start_database_with(&db::SystemRunner, &found, crate::elevate::is_elevated(), cfg!(windows), Duration::from_secs(45), say)
     }
 
     fn admin(&self) -> AdminState {

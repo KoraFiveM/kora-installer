@@ -31,7 +31,7 @@ pub trait InstallEnv: Send + Sync {
     fn artifacts(&self) -> Result<artifacts::ArtifactList, Problem>;
     /// Look a Cfx.re username up on forum.cfx.re (the real lookup unless a test replaces it).
     fn cfx_lookup(&self, name: &str) -> Result<crate::cfx::CfxAccount, Problem> {
-        crate::cfx::lookup(name)
+        crate::cfx::lookup(name).map_err(Problem::from)
     }
     /// Does this process have administrator / root rights?
     fn is_elevated(&self) -> bool;
@@ -66,11 +66,11 @@ impl InstallEnv for SystemInstallEnv {
         &SystemDisk
     }
     fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), Problem> {
-        installer::check_db_admin(admin)
+        installer::check_db_admin(admin).map_err(Problem::from)
     }
     fn artifacts(&self) -> Result<artifacts::ArtifactList, Problem> {
         let http = installer::Hooks::from_env().http;
-        artifacts::list_artifacts(&http, Platform::current()).map_err(|e| e.to_string())
+        artifacts::list_artifacts(&http, Platform::current()).map_err(Problem::from)
     }
     fn is_elevated(&self) -> bool {
         installer::is_admin()
@@ -257,7 +257,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, Problem> {
     let ports = w.ports.as_ref().map_or(defaults, |p| Ports { game: p.game, txadmin: p.txadmin });
     for (label, p) in [("game", ports.game), ("txAdmin", ports.txadmin)] {
         if p < 1024 {
-            return Err(format!("The {label} port must be a number between 1024 and 65535."));
+            return Err(format!("The {label} port must be a number between 1024 and 65535.").into());
         }
     }
     PortRequest { server: slug(&name), game_port: ports.game, txadmin_port: ports.txadmin, expose_txadmin: w.txadmin_public }.validate().map_err(|e| e.to_string())?;
@@ -278,7 +278,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, Problem> {
         Some(WireResources::Only(ids)) => {
             let ids: Vec<String> = ids.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             if let Some(bad) = ids.iter().find(|i| !valid_resource_id(i)) {
-                return Err(format!("'{bad}' is not a resource name (letters, digits, _ . - only)."));
+                return Err(format!("'{bad}' is not a resource name (letters, digits, _ . - only).").into());
             }
             ResourceSelection::Only(ids)
         }
@@ -436,7 +436,7 @@ pub fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProbe
         req.ports.txadmin = t;
         return Ok(changes);
     }
-    Err(ports::conflict_messages(game, tx, &report, avoid).join(" "))
+    Err(ports::conflict_messages(game, tx, &report, avoid).join(" ").into())
 }
 
 /// A finished server (resume/reinstall of the same folder) keeps its ports.

@@ -284,8 +284,8 @@ fn problem(kind: ProblemKind, resource: Option<&str>, blocking: bool, message: i
 type Zip = zip::ZipArchive<io::BufReader<fs::File>>;
 
 fn open_zip(path: &Path) -> Res<Zip> {
-    let f = fs::File::open(path).map_err(|e| format!("Can't open {}: {e}", path.display()))?;
-    zip::ZipArchive::new(io::BufReader::new(f)).map_err(|_| format!("{} is not a zip file Kora can read.", file_name(path)))
+    let f = fs::File::open(path).map_err(|e| crate::problem::Problem::from(e).lead(&format!("Can't open {}", path.display())))?;
+    zip::ZipArchive::new(io::BufReader::new(f)).map_err(|_| crate::problem::Problem::generic(format!("{} is not a zip file Kora can read.", file_name(path))))
 }
 
 fn file_name(p: &Path) -> String {
@@ -461,7 +461,7 @@ pub fn inspect(server_dir: &Path, zip: &Path) -> ImportPlan {
     let mut z = match open_zip(zip) {
         Ok(z) => z,
         Err(m) => {
-            plan.problems.push(problem(ProblemKind::NotAZip, None, true, m));
+            plan.problems.push(problem(ProblemKind::NotAZip, None, true, m.one_line()));
             plan.refresh();
             return plan;
         }
@@ -578,13 +578,13 @@ pub fn side_path(dir: &Path) -> PathBuf {
 /// Load the records of the server at `dir`.
 pub fn records(dir: &Path) -> Res<Records> {
     if server_file_path(dir).exists() {
-        return ServerFile::load(dir).map(|s| Records::Server(Box::new(s))).map_err(|e| format!("cannot read kora-server.json: {e}"));
+        return ServerFile::load(dir).map(|s| Records::Server(Box::new(s)));
     }
     let path = side_path(dir);
     let list = match fs::read(&path) {
-        Ok(b) => serde_json::from_slice(&b).map_err(|e| format!("cannot read {}: {e}", path.display()))?,
+        Ok(b) => serde_json::from_slice(&b).map_err(|e| crate::problem::Problem::from(e).lead(&format!("cannot read {}", path.display())))?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
-        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+        Err(e) => return Err(crate::problem::Problem::from(e).lead(&format!("cannot read {}", path.display()))),
     };
     Ok(Records::Side { path, list })
 }
@@ -621,14 +621,14 @@ impl Records {
     }
     fn save(&self) -> Res<()> {
         match self {
-            Records::Server(s) => s.save().map_err(|e| format!("cannot write kora-server.json: {e}")),
+            Records::Server(s) => s.save(),
             Records::Side { path, list } => {
                 if let Some(p) = path.parent() {
-                    fs::create_dir_all(p).map_err(|e| format!("cannot create {}: {e}", p.display()))?;
+                    fs::create_dir_all(p).map_err(|e| crate::problem::Problem::from(e).lead(&format!("cannot create {}", p.display())))?;
                 }
                 let tmp = path.with_extension("json.tmp");
-                let body = serde_json::to_vec_pretty(list).map_err(|e| e.to_string())?;
-                fs::write(&tmp, body).and_then(|()| fs::rename(&tmp, path)).map_err(|e| format!("cannot write {}: {e}", path.display()))
+                let body = serde_json::to_vec_pretty(list)?;
+                fs::write(&tmp, body).and_then(|()| fs::rename(&tmp, path)).map_err(|e| crate::problem::Problem::from(e).lead(&format!("cannot write {}", path.display())))
             }
         }
     }
@@ -746,7 +746,7 @@ fn extract_into(z: &mut Zip, entries: &[Entry], root: &Path, dest: &Path, budget
         let mut out = fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|x| format!("cannot write {}: {x}", target.display()))?;
         let n = io::copy(&mut f.take(*budget + 1), &mut out).map_err(|x| format!("cannot unpack {}: {x}", e.rel.display()))?;
         if n > *budget {
-            return Err(format!("The zip unpacks to more than {}; it was refused.", human(MAX_TOTAL)));
+            return Err(format!("The zip unpacks to more than {}; it was refused.", human(MAX_TOTAL)).into());
         }
         *budget -= n;
     }
@@ -772,11 +772,11 @@ pub fn import(dir: &Path, zip: &Path, opts: &ImportOpts, say: &mut dyn FnMut(&st
     let plan = inspect(dir, zip);
     if !plan.can_import {
         let why = plan.blocking_text();
-        return Err(if why.is_empty() { format!("Nothing to import from {}.", plan.zip_name) } else { why });
+        return Err(if why.is_empty() { format!("Nothing to import from {}.", plan.zip_name).into() } else { why.into() });
     }
     if !opts.replace {
         if let Some(r) = plan.importable().find(|r| r.replaces) {
-            return Err(format!("{} is already imported. Choose to replace it to import this zip.", r.name));
+            return Err(format!("{} is already imported. Choose to replace it to import this zip.", r.name).into());
         }
     }
     let mut report = ImportReport { zip_name: plan.zip_name.clone(), ..Default::default() };
@@ -800,7 +800,7 @@ pub fn import(dir: &Path, zip: &Path, opts: &ImportOpts, say: &mut dyn FnMut(&st
         let to = staging.0.join(&r.name);
         extract_into(&mut z, &s.entries, root, &to, &mut budget)?;
         if !(to.join("fxmanifest.lua").is_file() || to.join("__resource.lua").is_file()) {
-            return Err(format!("{} has no fxmanifest.lua after unpacking.", r.name));
+            return Err(format!("{} has no fxmanifest.lua after unpacking.", r.name).into());
         }
         staged.push((r, to));
     }
@@ -823,7 +823,7 @@ pub fn import(dir: &Path, zip: &Path, opts: &ImportOpts, say: &mut dyn FnMut(&st
                 if let Some(b) = &backup {
                     let _ = fs::rename(b, &dest);
                 }
-                return Err(format!("cannot move {} into place: {e}", r.name));
+                return Err(format!("cannot move {} into place: {e}", r.name).into());
             }
             say(&format!("Placed {} in resources/{CATEGORY}", r.name));
             swaps.push(Swap { dest, backup });
@@ -845,7 +845,7 @@ pub fn import(dir: &Path, zip: &Path, opts: &ImportOpts, say: &mut dyn FnMut(&st
     })();
     if let Err(e) = result {
         undo(&swaps);
-        return Err(format!("{e}. Nothing was changed: any replaced asset was put back."));
+        return Err(format!("{e}. Nothing was changed: any replaced asset was put back.").into());
     }
 
     for ((r, _), s) in staged.iter().zip(&swaps) {
@@ -860,7 +860,7 @@ pub fn import(dir: &Path, zip: &Path, opts: &ImportOpts, say: &mut dyn FnMut(&st
     let names: Vec<String> = staged.iter().map(|(r, _)| r.name.clone()).collect();
     match crate::addresources::append_ensures_to_cfg(&dir.join("server.cfg"), &names) {
         Ok(added) => report.ensured = added,
-        Err(e) => report.notes.push(e),
+        Err(e) => report.notes.push(e.one_line()),
     }
     report.notes.push("Restart the server to load the new files.".into());
     Ok(report)
@@ -886,11 +886,11 @@ pub fn without_ensure(cfg: &str, name: &str) -> Option<String> {
 /// record are removed. Returns notes to show.
 pub fn remove(dir: &Path, name: &str) -> Res<Vec<String>> {
     if !valid_asset_name(name) {
-        return Err(format!("'{name}' is not a resource name."));
+        return Err(format!("'{name}' is not a resource name.").into());
     }
     let mut recs = records(dir)?;
     let Some(rec) = recs.paid().into_iter().find(|r| r.id == name) else {
-        return Err(format!("There is no paid asset called {name} on this server (not found)."));
+        return Err(format!("There is no paid asset called {name} on this server (not found).").into());
     };
     let mut notes = Vec::new();
     let folder = dir.join("resources").join(&rec.path);
@@ -966,7 +966,7 @@ pub fn recent_zips(dir: &Path, now: u64, max_age_secs: u64) -> Vec<DownloadZip> 
 pub fn resolve_download(dir: &Path, name: &str, now: u64, max_age_secs: u64) -> Res<PathBuf> {
     let plain = !name.is_empty() && Path::new(name).components().count() == 1 && matches!(Path::new(name).components().next(), Some(Component::Normal(_))) && !name.contains(['/', '\\']);
     if !plain || !recent_zips(dir, now, max_age_secs).iter().any(|z| z.name == name) {
-        return Err(format!("{name} is not one of the recent zips in your Downloads folder."));
+        return Err(format!("{name} is not one of the recent zips in your Downloads folder.").into());
     }
     Ok(dir.join(name))
 }

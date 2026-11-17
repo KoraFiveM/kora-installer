@@ -147,7 +147,6 @@ impl ProfileStore {
             write(tx, &p)?;
             Ok(p)
         })
-        
     }
 
     /// Remember a Cfx.re account that was just found.
@@ -166,7 +165,6 @@ impl ProfileStore {
             tx.execute("DELETE FROM profile", [])?;
             Ok(())
         })
-        
     }
 }
 

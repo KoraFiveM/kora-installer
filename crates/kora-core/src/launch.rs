@@ -524,7 +524,7 @@ impl LaunchEnv for SystemEnv {
     }
 
     fn service_start(&self, spec: &Spec) -> Result<(), crate::problem::Problem> {
-        crate::installer::host::service_control(&spec.name, crate::service::ControlAction::Start).map_err(|e| e.to_string())
+        crate::installer::host::service_control(&spec.name, crate::service::ControlAction::Start)
     }
 
     fn spawn_detached(&self, spec: &Spec, log: &Path) -> Result<u32, crate::problem::Problem> {

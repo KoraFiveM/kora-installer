@@ -9,6 +9,7 @@
 //!
 //! Everything goes through the git module's [`CommandRunner`] so tests use a fake.
 
+use crate::problem::Problem;
 use std::path::Path;
 
 use super::types::{ResourceBackup, StoredAs, VersionKind, VersionState};
@@ -136,15 +137,15 @@ pub fn finish_resource_state(server_dir: &Path, resources: &[ResourceBackup]) {
 /// Put a referenced resource back at its recorded commit: clone it when the folder is missing, fetch when
 /// the commit is not there yet, then check it out (on its branch when it was on one). Returns a plain
 /// sentence about what was done.
-pub fn ensure_at_commit(git: &dyn CommandRunner, resources_dir: &Path, rb: &ResourceBackup) -> Result<String, String> {
+pub fn ensure_at_commit(git: &dyn CommandRunner, resources_dir: &Path, rb: &ResourceBackup) -> Result<String, Problem> {
     let Some(commit) = rb.commit.as_deref().filter(|c| valid_commit(c)) else {
-        return Err(format!("{}: the backup does not name a commit", rb.id));
+        return Err(format!("{}: the backup does not name a commit", rb.id).into());
     };
     if !valid_repository(&rb.repository) {
-        return Err(format!("{}: the repository address in the backup is not one Kora will use", rb.id));
+        return Err(format!("{}: the repository address in the backup is not one Kora will use", rb.id).into());
     }
     if !rb.branch.is_empty() && !crate::git::branches::valid_branch(&rb.branch) {
-        return Err(format!("{}: the branch name in the backup is not valid", rb.id));
+        return Err(format!("{}: the branch name in the backup is not valid", rb.id).into());
     }
     let folder = crate::fsutil::join_inside(resources_dir, &rb.path).ok_or_else(|| format!("{}: the folder name in the backup is not valid", rb.id))?;
     let short = &commit[..commit.len().min(8)];
@@ -156,25 +157,25 @@ pub fn ensure_at_commit(git: &dyn CommandRunner, resources_dir: &Path, rb: &Reso
         let o = git.run("git", &["clone", "--", &rb.repository, &dest], None).map_err(|e| format!("{}: git could not run ({e})", rb.id))?;
         if !o.ok() {
             let _ = std::fs::remove_dir_all(&folder);
-            return Err(format!("{}: could not download {} ({})", rb.id, rb.repository, first_line(&o.stderr)));
+            return Err(format!("{}: could not download {} ({})", rb.id, rb.repository, first_line(&o.stderr)).into());
         }
     } else if !folder.join(".git").exists() {
-        return Err(format!("{}: a folder with that name is already there and is not a git copy, so it was left alone", rb.id));
+        return Err(format!("{}: a folder with that name is already there and is not a git copy, so it was left alone", rb.id).into());
     }
     let have = |c: &str| run(git, &folder, &["cat-file", "-e", &format!("{c}^{{commit}}")]).is_some();
     if !have(commit) {
         let o = git.run("git", &["fetch", "origin"], Some(&folder)).map_err(|e| format!("{}: git could not run ({e})", rb.id))?;
         if !o.ok() && !have(commit) {
-            return Err(format!("{}: could not fetch from {} ({})", rb.id, rb.repository, first_line(&o.stderr)));
+            return Err(format!("{}: could not fetch from {} ({})", rb.id, rb.repository, first_line(&o.stderr)).into());
         }
         if !have(commit) {
-            return Err(format!("{}: the version {short} is no longer on {}, so it could not be brought back", rb.id, rb.repository));
+            return Err(format!("{}: the version {short} is no longer on {}, so it could not be brought back", rb.id, rb.repository).into());
         }
     }
     let ok = if rb.branch.is_empty() { git.run("git", &["checkout", "-f", "--detach", commit], Some(&folder)) } else { git.run("git", &["checkout", "-f", "-B", &rb.branch, commit], Some(&folder)) }
         .map_err(|e| format!("{}: git could not run ({e})", rb.id))?;
     if !ok.ok() {
-        return Err(format!("{}: could not switch to version {short} ({})", rb.id, first_line(&ok.stderr)));
+        return Err(format!("{}: could not switch to version {short} ({})", rb.id, first_line(&ok.stderr)).into());
     }
     Ok(format!("{} is back at version {short}", rb.id))
 }

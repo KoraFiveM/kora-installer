@@ -11,7 +11,7 @@ use crate::service::{self, Platform, SystemRunner};
 /// Needs administrator rights (the caller checks and asks for them first).
 pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, Problem> {
     if !crate::privsvc::op::port_ok(e.ports.game) {
-        return Err(format!("Kora does not open port {} in the firewall: Windows, remote administration or databases use it. Choose another game port first.", e.ports.game));
+        return Err(format!("Kora does not open port {} in the firewall: Windows, remote administration or databases use it. Choose another game port first.", e.ports.game).into());
     }
     let rn = SystemRunner;
     let Some(kind) = firewall::detect(Platform::current(), &rn) else {

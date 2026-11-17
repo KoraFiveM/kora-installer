@@ -93,8 +93,7 @@ pub struct PrPlan {
 pub fn plan_pr(r: &dyn CommandRunner, server: &ServerFile, resource_id: &str) -> Result<PrPlan> {
     if server.source() != Source::Fork {
         return Err(Problem::generic(
-            "A pull request is made from your own copy of the resource on GitHub, and this server uses plain copies of the originals. Choose \"Make my own copy (fork)\" for this resource first."
-                .into(),
+            "A pull request is made from your own copy of the resource on GitHub, and this server uses plain copies of the originals. Choose \"Make my own copy (fork)\" for this resource first.",
         ));
     }
     let res = find(server, resource_id)?;
@@ -110,7 +109,8 @@ pub fn plan_pr(r: &dyn CommandRunner, server: &ServerFile, resource_id: &str) ->
     if upstream.split('/').next() == Some(head_owner.as_str()) {
         return Err(Problem::generic(format!("{} is not a fork of yours (its origin is the Kora repository itself).", res.id)));
     }
-    let head_branch = git::current_branch(r, &dir).map_err(gh_err)?.ok_or_else(|| Problem::generic(format!("{} is not on a branch (detached). Check out a branch with your changes first.", res.id)))?;
+    let head_branch =
+        git::current_branch(r, &dir).map_err(gh_err)?.ok_or_else(|| Problem::generic(format!("{} is not on a branch (detached). Check out a branch with your changes first.", res.id)))?;
     let ahead = git::ahead_of_upstream(r, &dir, &res.branch).map_err(gh_err)?;
     if ahead == 0 {
         return Err(Problem::generic(format!("{} has no commits that {upstream} (branch {}) lacks, so there is nothing to propose. Commit your change first.", res.id, res.branch)));

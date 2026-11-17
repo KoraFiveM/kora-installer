@@ -7,6 +7,7 @@
 //!
 //! Firewall rules are NOT changed: whoever opened the old ports has to open the new ones.
 
+use crate::problem::Problem;
 use std::path::Path;
 
 use crate::firewall::ports::{install_conflicts, PortProber};
@@ -73,14 +74,14 @@ pub fn rewrite_env_txadmin_port(env: &str, new: u16) -> Option<String> {
 }
 
 /// Check and apply a port change. `name` is the registry name of the server.
-pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber) -> Result<PortChange, String> {
+pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber) -> Result<PortChange, Problem> {
     let mut sf = ServerFile::load(dir).map_err(|e| format!("cannot read kora-server.json: {e}"))?;
     let old = Ports { game: sf.ports.game, txadmin: sf.ports.txadmin };
     if new == old {
         return Err("those are already the ports this server uses".into());
     }
     if new.game < MIN_PORT || new.txadmin < MIN_PORT {
-        return Err(format!("ports must be {MIN_PORT} or higher"));
+        return Err(format!("ports must be {MIN_PORT} or higher").into());
     }
     if new.game == new.txadmin {
         return Err("the game port and the txAdmin port must be different".into());
@@ -88,7 +89,7 @@ pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber)
     // The server's own old ports are free for it to keep; other Kora servers and busy ports are not.
     let conflicts = install_conflicts(name, dir, new.game, new.txadmin, prober);
     if !conflicts.is_empty() {
-        return Err(conflicts.join(" "));
+        return Err(conflicts.join(" ").into());
     }
 
     let mut notes = Vec::new();
@@ -106,7 +107,7 @@ pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber)
                     false
                 }
             },
-            Err(e) => return Err(format!("cannot read server.cfg: {e}")),
+            Err(e) => return Err(format!("cannot read server.cfg: {e}").into()),
         }
     } else {
         false

@@ -118,8 +118,8 @@ impl Step for InstallStep {
 // helpers
 // ---------------------------------------------------------------------------------------------
 
-fn io<T>(r: std::io::Result<T>, what: &str) -> Result<T> {
-    r.map_err(|e| Problem::generic(format!("{what}: {e}")))
+fn io<T, E: Into<Problem>>(r: std::result::Result<T, E>, what: &str) -> Result<T> {
+    r.map_err(|e| e.into().lead(what))
 }
 
 fn res_dir(ctx: &Ctx) -> PathBuf {
@@ -250,9 +250,9 @@ pub(crate) fn db_override(req: &InstallRequest) -> bool {
 
 /// Try a real login with the given admin choice (`None` = environment / root socket).
 /// Used by the wizard's "Test login" button. Returns a short plain-language error.
-pub fn check_db_admin(db_admin: Option<&DbAdmin>) -> std::result::Result<(), String> {
+pub fn check_db_admin(db_admin: Option<&DbAdmin>) -> std::result::Result<(), Problem> {
     let admin = admin_conn_for(db_admin);
-    login_problem(&admin).map_or(Ok(()), |why| Err(format!("could not log in to the database server as '{}' ({why}). Check the user, password and port, or pick another option.", admin.user)))
+    login_problem(&admin).map_or(Ok(()), |why| Err(format!("could not log in to the database server as '{}' ({why}). Check the user, password and port, or pick another option.", admin.user).into()))
 }
 
 /// `None` = the login works, otherwise the client's first error line.

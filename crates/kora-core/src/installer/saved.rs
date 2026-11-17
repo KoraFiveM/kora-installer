@@ -37,7 +37,6 @@ pub(crate) fn save_beside(file: &std::path::Path, req: &InstallRequest) -> crate
         )?;
         Ok(())
     })
-    
 }
 
 /// The saved answers in the Kora home beside `file`, if there are any and they can be read.

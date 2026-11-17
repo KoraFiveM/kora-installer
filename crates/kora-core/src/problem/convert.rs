@@ -18,7 +18,15 @@ macro_rules! sentence {
     )+};
 }
 
-sentence!(crate::notify::NotifyError, crate::service::ServiceError, crate::update::UpdateError, crate::catalog::CatalogError);
+sentence!(
+    crate::notify::NotifyError,
+    crate::service::ServiceError,
+    crate::update::UpdateError,
+    crate::catalog::CatalogError,
+    crate::artifacts::ArtifactError,
+    crate::app_install::AppError,
+    crate::db::DbError,
+);
 
 impl From<crate::git::GitError> for Problem {
     fn from(e: crate::git::GitError) -> Problem {

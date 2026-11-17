@@ -74,7 +74,7 @@ fn describe(i: &Item) -> String {
 }
 
 /// Run (or, with `dry_run`, preview) the uninstall for every registered server.
-pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, say: &mut dyn FnMut(&str), delete: Deleter, save: &mut dyn FnMut(&Registry) -> std::io::Result<()>) -> Summary {
+pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, say: &mut dyn FnMut(&str), delete: Deleter, save: &mut dyn FnMut(&Registry) -> crate::problem::Res<()>) -> Summary {
     let mut sum = Summary::default();
     let names: Vec<(String, std::path::PathBuf, super::registry::PortsRecord)> = reg
         .servers
@@ -213,7 +213,7 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
             sum.kept.push(format!("{name}: left in the server list"));
         }
         if let Err(e) = save(reg) {
-            sum.failed.push(format!("{name}: cannot write the server list: {e}"));
+            sum.failed.push(format!("{name}: cannot write the server list: {}", e.one_line()));
         }
     }
     sum

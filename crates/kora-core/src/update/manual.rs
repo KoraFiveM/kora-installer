@@ -745,7 +745,7 @@ pub fn apply_with_hints(
     if server.versions() == Versions::Released && !report.updated.is_empty() {
         let moved: Vec<(String, String)> = report.updated.iter().map(|u| (u.id.clone(), u.to.clone())).collect();
         if let Err(m) = record_commits(server, &moved) {
-            report.needs_attention.push(("kora-server.json".into(), m));
+            report.needs_attention.push(("kora-server.json".into(), m.one_line()));
         }
     }
     // A version that had to be rolled back is not retried by the nightly update; one that worked is released.
@@ -828,7 +828,7 @@ fn defer_text(d: &DeferReason) -> String {
 
 /// Production: keep each resource's pinned commit in `kora-server.json` current. The file is read
 /// again here (the caller holds the update lock), so nothing another tool wrote meanwhile is lost.
-fn record_commits(server: &ServerRecord, moved: &[(String, String)]) -> std::result::Result<(), String> {
+fn record_commits(server: &ServerRecord, moved: &[(String, String)]) -> std::result::Result<(), Problem> {
     let mut sf = ServerFile::load(&server.dir).map_err(|e| format!("updated, but could not read kora-server.json to record the new versions: {e}"))?;
     sf.dir = server.dir.clone();
     for r in &mut sf.resources {
@@ -836,7 +836,7 @@ fn record_commits(server: &ServerRecord, moved: &[(String, String)]) -> std::res
             r.commit = Some(c.clone());
         }
     }
-    sf.save().map_err(|e| format!("updated, but could not record the new versions: {e}"))
+    sf.save().map_err(|e| e.lead("updated, but could not record the new versions"))
 }
 
 // ---------------------------------------------------------------- snapshots
@@ -905,7 +905,7 @@ fn rollback_locked(server: &ServerRecord, snapshot_id: &str, git: &dyn GitOps, f
     crate::resourcestate::mark_changed(&server.dir, &restored_ids, "rolled back");
     if server.versions() == Versions::Released {
         if let Err(m) = record_commits(server, &restored) {
-            return err(m);
+            return Err(m);
         }
     }
     if failed.is_empty() {

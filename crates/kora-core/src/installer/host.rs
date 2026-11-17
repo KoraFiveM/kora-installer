@@ -258,7 +258,7 @@ mod scm {
         }
     }
 
-    fn run() -> std::result::Result<u32, String> {
+    fn run() -> std::result::Result<u32, Problem> {
         let target = TARGET.get().cloned().unwrap_or_default();
         let (tx, rx) = mpsc::channel::<()>();
         let handler = move |ev: ServiceControl| match ev {

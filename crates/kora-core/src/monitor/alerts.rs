@@ -4,6 +4,7 @@
 //! only answers with *changes*. Settings live in `<server>/.kora/alerts.json` (owner-only: the generic
 //! webhook address is a secret and is never returned, only [`redact_url`]).
 
+use crate::problem::Problem;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -122,15 +123,15 @@ pub fn load_settings(dir: &Path) -> AlertSettings {
     std::fs::read(settings_path(dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-pub fn save_settings(dir: &Path, s: &AlertSettings) -> Result<(), String> {
+pub fn save_settings(dir: &Path, s: &AlertSettings) -> Result<(), Problem> {
     let path = settings_path(dir);
     let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
-    super::write_private(&path, &text).map_err(|e| format!("Could not save the alert settings: {e}"))
+    super::write_private(&path, &text).map_err(|e| e.lead("Could not save the alert settings"))
 }
 
 /// Only `http(s)://host...`, no spaces, control characters or backslashes.
-pub fn validate_url(url: &str) -> Result<(), String> {
-    let bad = |m: &str| Err(format!("That is not a usable web address ({m})."));
+pub fn validate_url(url: &str) -> Result<(), Problem> {
+    let bad = |m: &str| Err(Problem::generic(format!("That is not a usable web address ({m}).")));
     if url.len() > 2048 || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return bad("it has spaces or is too long");
     }
@@ -201,7 +202,7 @@ its private network. Set it on the computer that runs Kora if you need a local a
 
 /// Check a webhook address set over remote access: its host must only resolve to public addresses. The
 /// address is read by the same rules the sender uses (`url`), so the host checked is the host contacted.
-pub fn public_webhook(url: &str, lookup: Lookup<'_>) -> Result<(), String> {
+pub fn public_webhook(url: &str, lookup: Lookup<'_>) -> Result<(), Problem> {
     validate_url(url)?;
     let u = url::Url::parse(url).map_err(|_| "That is not a usable web address.".to_string())?;
     if !matches!(u.scheme(), "http" | "https") {
@@ -214,7 +215,7 @@ pub fn public_webhook(url: &str, lookup: Lookup<'_>) -> Result<(), String> {
         Some(url::Host::Domain(d)) => {
             let looked = lookup(d, port).map_err(|_| format!("Could not look up '{d}'. Check the address."))?;
             if looked.is_empty() {
-                return Err(format!("Could not look up '{d}'. Check the address."));
+                return Err(format!("Could not look up '{d}'. Check the address.").into());
             }
             looked
         }
@@ -262,7 +263,7 @@ pub fn settings_view(s: &AlertSettings) -> Value {
 }
 
 /// Apply a partial update. Absent keys keep their value; `webhook_url` of `""` or `null` removes the address.
-pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, String> {
+pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, Problem> {
     let obj = body.as_object().ok_or("Send the alert settings as a JSON object.")?;
     let mut s = cur.clone();
     let flag = |v: &Value, name: &str| v.as_bool().ok_or_else(|| format!("'{name}' must be true or false."));
@@ -281,7 +282,7 @@ pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, 
                         "disk" => s.rules.disk = b,
                         "ram" => s.rules.ram = b,
                         "updates" => s.rules.updates = b,
-                        other => return Err(format!("There is no alert rule called '{other}'.")),
+                        other => return Err(format!("There is no alert rule called '{other}'.").into()),
                     }
                 }
             }
@@ -299,7 +300,7 @@ pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, 
             },
             // Read-only echoes from the view; ignored.
             "webhook" | "email" => {}
-            other => return Err(format!("Unknown alert setting '{other}'.")),
+            other => return Err(format!("Unknown alert setting '{other}'.").into()),
         }
     }
     if !(0.0..=100_000.0).contains(&s.disk_min_gb) {
@@ -392,7 +393,7 @@ pub fn evaluate(s: &Sample, f: &Facts, set: &AlertSettings, active: &HashMap<Ale
 /// POST `body` as JSON to a user-chosen address. Bounded time, no redirects; the address is never
 /// part of an error message. With `public_only` (the address was set over remote access) the name is
 /// looked up again now and the send is refused if any address it gives is internal.
-pub fn post_json(url: &str, body: &Value, public_only: bool) -> Result<(), String> {
+pub fn post_json(url: &str, body: &Value, public_only: bool) -> Result<(), Problem> {
     if public_only {
         post_via(url, body, |n: &str| public_addrs(n, &|n| n.to_socket_addrs().map(Iterator::collect)))
     } else {
@@ -401,7 +402,7 @@ pub fn post_json(url: &str, body: &Value, public_only: bool) -> Result<(), Strin
 }
 
 /// [`post_json`] with the lookup the connection uses (tests point a name at a local listener).
-pub(crate) fn post_via(url: &str, body: &Value, resolve: impl Fn(&str) -> std::io::Result<Vec<SocketAddr>> + Send + Sync + 'static) -> Result<(), String> {
+pub(crate) fn post_via(url: &str, body: &Value, resolve: impl Fn(&str) -> std::io::Result<Vec<SocketAddr>> + Send + Sync + 'static) -> Result<(), Problem> {
     validate_url(url)?;
     let t = Duration::from_secs(5);
     let agent = ureq::AgentBuilder::new()
@@ -414,7 +415,7 @@ pub(crate) fn post_via(url: &str, body: &Value, resolve: impl Fn(&str) -> std::i
         .build();
     match agent.post(url).set("Content-Type", "application/json").set("User-Agent", "kora-monitor").send_string(&body.to_string()) {
         Ok(r) if r.status() < 300 => Ok(()),
-        Ok(r) | Err(ureq::Error::Status(_, r)) => Err(format!("The webhook answered with HTTP {}.", r.status())),
+        Ok(r) | Err(ureq::Error::Status(_, r)) => Err(format!("The webhook answered with HTTP {}.", r.status()).into()),
         Err(_) => Err("Could not reach the webhook address.".into()),
     }
 }

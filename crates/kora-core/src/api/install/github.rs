@@ -130,12 +130,9 @@ impl GithubEnv for SystemGithub {
             wait: Box::new(move || match session.wait() {
                 Ok(GhAuth::LoggedIn { login }) => Ok(Some(login)),
                 Ok(GhAuth::LoggedOut) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "GitHub did not confirm the sign-in. Start it again and approve it in your browser.")
-                    .with_action(Action::SignInGithub { scopes: vec![] })
-                    ),
+                    .with_action(Action::SignInGithub { scopes: vec![] })),
                 Ok(GhAuth::Missing) => Err(known::gh_missing()),
-                Err(e) => {
-                    Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))
-                }
+                Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] })),
             }),
         })
     }
@@ -176,8 +173,8 @@ pub fn resolve_owner_with(runner: &dyn crate::git::CommandRunner, requested: Opt
         GhAuth::LoggedOut => return Err(known::github_signed_out()),
         GhAuth::LoggedIn { .. } => {}
     }
-    let all = owners::list_owners(runner).map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
-    owners::choose_owner(&all, requested).map(|o| o.login)
+    let all = owners::list_owners(runner).map_err(|e| Problem::new(codes::GH_UNAVAILABLE, format!("Could not read your GitHub accounts. {GH_HELP}")).with_details(e.to_string()))?;
+    owners::choose_owner(&all, requested).map(|o| o.login).map_err(Problem::from)
 }
 
 #[cfg(test)]

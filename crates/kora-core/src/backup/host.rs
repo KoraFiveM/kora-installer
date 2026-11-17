@@ -1,9 +1,9 @@
 //! [`Host`] over the panel's [`Backend`]: stop and start the server the way the Start / Stop buttons do.
 
-use crate::problem::Problem;
 use super::Host;
 use crate::api::{Backend, Status};
 use crate::installer::registry::ServerEntry;
+use crate::problem::Problem;
 use crate::service::ControlAction;
 
 pub struct BackendHost<'a, B: Backend + ?Sized> {
