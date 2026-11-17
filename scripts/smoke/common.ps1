@@ -46,7 +46,10 @@ function Test-TxAdminThroughPanel([string]$Kora, [string]$ServerName, [int]$TxPo
     $token = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
     Set-Content -Path $tokenPath -Value $token -NoNewline
     $out = Join-Path $env:TEMP 'kora-panel-smoke.out'; $err = Join-Path $env:TEMP 'kora-panel-smoke.err'
+    # The runner is an elevated administrator and the panel refuses to run that way on purpose: this test opts in.
+    $env:KORA_ALLOW_ROOT_PANEL = '1'
     $p = Start-Process -FilePath $Kora -ArgumentList @('panel', '--foreground', '--no-open', '--port', "$PanelPort") -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err
+    Remove-Item Env:KORA_ALLOW_ROOT_PANEL -ErrorAction SilentlyContinue
     try {
         $up = $false
         $end = (Get-Date).AddSeconds(40)
