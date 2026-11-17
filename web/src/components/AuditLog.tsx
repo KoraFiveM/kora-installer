@@ -65,13 +65,14 @@ export function AuditLogCard() {
             </Select>
           </Field>
         </div>
-        {q.isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
+        {q.isPending && <p role="status" className="text-sm text-muted-foreground">Loading...</p>}
         <ErrorNotice error={q.error} />
         {q.data && rows.length === 0 && <p className="text-sm">Nothing matches. {server || actor || result ? 'Clear the filters to see everything.' : 'Changes will appear here.'}</p>}
         {rows.length > 0 && (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Activity log entries">
             <table className="w-full text-left">
-              <thead><tr className="text-xs text-muted-foreground"><th className="pb-1 pr-3 font-medium">When</th><th className="pb-1 pr-3 font-medium">Who</th><th className="pb-1 pr-3 font-medium">What</th><th className="pb-1 font-medium">Result</th></tr></thead>
+              <caption className="sr-only">Activity log, newest first</caption>
+              <thead><tr className="text-xs text-muted-foreground"><th scope="col" className="pb-1 pr-3 font-medium">When</th><th scope="col" className="pb-1 pr-3 font-medium">Who</th><th scope="col" className="pb-1 pr-3 font-medium">What</th><th scope="col" className="pb-1 font-medium">Result</th></tr></thead>
               <tbody className="divide-y divide-border">{rows.map((r) => <Line key={r.id} r={r} />)}</tbody>
             </table>
           </div>
