@@ -21,7 +21,7 @@ const MAX_ENV_VALUE: usize = 2048;
 /// The only environment variables a request may set for the child.
 pub const SECRET_ENV: &[&str] = &["CFX_LICENSE_KEY", "KORA_DB_ADMIN_PASSWORD"];
 /// The wire verbs the service takes (what [`parse`] accepts at all).
-pub const VERBS: &[&str] = &["admin-step", "admin-db", "check", "tools", "schedule", "self-update", "backup-job", "hand-over"];
+pub const VERBS: &[&str] = &["admin-step", "admin-db", "check", "tools", "schedule", "self-update", "backup-job", "hand-over", "audit-read"];
 /// Ports are opened only from here up.
 pub const FIRST_PORT: u16 = 1024;
 /// Never opened, even above 1023: remote administration and database ports.
@@ -138,6 +138,11 @@ pub enum Op {
     HandOver {
         dir: String,
     },
+    /// Read the service's own audit log: the newest `lines` lines about the calling account (every account's when the caller
+    /// administers the machine). Read-only: answered by the service itself, no child runs and nothing is changed.
+    AuditRead {
+        lines: u16,
+    },
     /// Install Git from the system package manager (Linux only).
     InstallGit,
     /// Apply a verified Kora update (see the self-update slice). `version` only to a newer release.
@@ -159,6 +164,7 @@ impl Op {
             Op::BackupJobSet { .. } => "backup job set".into(),
             Op::BackupJobOff { .. } => "backup job off".into(),
             Op::HandOver { .. } => "hand over".into(),
+            Op::AuditRead { .. } => "audit read".into(),
             Op::InstallGit => "install git".into(),
             Op::UpdateApply { .. } => "update".into(),
         }
@@ -171,6 +177,7 @@ impl Op {
             Op::Step { step: StepId::BuildDb, .. } => 10,
             Op::Step { .. } | Op::ScheduleSet { .. } | Op::ScheduleOff { .. } | Op::BackupJobSet { .. } | Op::BackupJobOff { .. } => 3,
             Op::HandOver { .. } => 30,
+            Op::AuditRead { .. } => 1,
             Op::DbServer(DbAction::Start) | Op::StartDatabase => 5,
             Op::InstallGit => 15,
             Op::UpdateApply { .. } => 20,
@@ -216,6 +223,7 @@ impl Op {
             }
             Op::BackupJobOff { dir } => v.extend([s("backup-job"), s("off"), dir.clone()]),
             Op::HandOver { dir } => v.extend([s("hand-over"), dir.clone()]),
+            Op::AuditRead { lines } => v.extend([s("audit-read"), s("--lines"), lines.to_string()]),
             Op::InstallGit => v.extend([s("tools"), s("install"), s("git")]),
             Op::UpdateApply { version } => {
                 v.extend([s("self-update"), s("--yes")]);
@@ -328,6 +336,16 @@ pub fn parse(verb: &str, args: &[String], env: &BTreeMap<String, String>) -> Res
             (Some(d), true) if dir_shape_ok(d) => Op::HandOver { dir: d.to_string() },
             _ => return no("The Kora service needs the server's full folder path."),
         },
+        "audit-read" => {
+            let mut lines = 200u16;
+            while !w.done() {
+                match (w.next(), w.next().and_then(|n| n.parse::<u16>().ok())) {
+                    (Some("--lines"), Some(n)) if (1..=super::audit::READ_MAX_LINES as u16).contains(&n) => lines = n,
+                    _ => return no("The Kora service reads at most 500 lines of its log at a time."),
+                }
+            }
+            Op::AuditRead { lines }
+        }
         "self-update" => parse_update(&mut w)?,
         _ => return no("The Kora service does not run that."),
     };
@@ -677,5 +695,17 @@ mod tests {
         let op = Op::HandOver { dir: DIR.into() };
         assert_eq!(op.child_args(), ["--no-elevate", "hand-over", DIR]);
         assert_eq!(parse("hand-over", &op.child_args()[2..], &BTreeMap::new()), Ok(op));
+    }
+
+    #[test]
+    fn reading_the_log_is_typed_bounded_and_takes_nothing_else() {
+        assert_eq!(p("audit-read", &[]), Ok(Op::AuditRead { lines: 200 }));
+        assert_eq!(p("audit-read", &["--lines", "50"]), Ok(Op::AuditRead { lines: 50 }));
+        for args in [vec!["--lines", "0"], vec!["--lines", "501"], vec!["--lines", "x"], vec!["--lines"], vec!["--all"], vec!["--account", "uid:0"], vec!["/var/log/kora/audit.log"]] {
+            assert!(p("audit-read", &args).is_err(), "{args:?}");
+        }
+        let op = Op::AuditRead { lines: 77 };
+        assert_eq!(parse("audit-read", &op.child_args()[2..], &BTreeMap::new()), Ok(op.clone()));
+        assert_eq!((op.label().as_str(), op.dir()), ("audit read", None));
     }
 }

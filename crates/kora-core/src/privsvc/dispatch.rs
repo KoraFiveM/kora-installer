@@ -41,6 +41,15 @@ pub trait Host {
     fn load_ledger(&self) -> Result<Ledger, String>;
     fn save_ledger(&self, l: &Ledger) -> Result<(), String>;
     fn audit(&self, line: &str);
+    /// The newest part of the audit file (at most `max` bytes), for [`Op::AuditRead`].
+    fn read_audit(&self, _max: u64) -> Result<String, String> {
+        Ok(String::new())
+    }
+    /// Does this account administer the machine (Linux: a member of `sudo` / `wheel` / `admin`)? Root and an elevated
+    /// Windows token are recognised from the connection itself, not here.
+    fn is_machine_admin(&self, _id: &AccountId) -> bool {
+        false
+    }
     fn own_version(&self) -> String;
 }
 
@@ -109,6 +118,14 @@ pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller,
             return Reply::Refused(r);
         }
     };
+    // Read-only and answered here: no child, no ledger, and the read itself is not written to the log it reads.
+    if let Op::AuditRead { lines } = &operation {
+        let admin = caller.is_root || caller.integrity.is_some_and(|i| i >= policy::HIGH_INTEGRITY) || host.is_machine_admin(&me);
+        return match host.read_audit(audit::READ_MAX_BYTES) {
+            Ok(text) => Reply::Ran(Ran { code: 0, timed_out: false, data: Some(serde_json::json!({"admin": admin, "lines": audit::visible_lines(&text, me.as_str(), admin, usize::from(*lines))})) }),
+            Err(e) => Reply::CouldNotRun(format!("the service's log could not be read ({e})")),
+        };
+    }
     let argv = operation.child_args();
     match run(&RunSpec { argv: &argv, env, limit: operation.time_limit() }, progress) {
         Err(e) => {
@@ -509,5 +526,60 @@ mod tests {
         let mut none = fake();
         none.record = None;
         assert!(matches!(go(&none, me()), Reply::Refused(m) if m.0.contains("no Kora install record")));
+    }
+
+    #[test]
+    fn reading_the_log_gives_a_caller_their_own_lines_an_administrator_all_and_runs_nothing() {
+        struct Log(Fake);
+        impl Host for Log {
+            fn now(&self) -> u64 {
+                self.0.now()
+            }
+            fn account_name(&self, i: &AccountId) -> String {
+                self.0.account_name(i)
+            }
+            fn folder_owner(&self, d: &str) -> Result<Option<AccountId>, String> {
+                self.0.folder_owner(d)
+            }
+            fn is_server_account(&self, i: &AccountId) -> bool {
+                self.0.is_server_account(i)
+            }
+            fn install_record(&self, d: &str) -> Option<InstallRecord> {
+                self.0.install_record(d)
+            }
+            fn db_name(&self, d: &str) -> Option<String> {
+                self.0.db_name(d)
+            }
+            fn load_ledger(&self) -> Result<Ledger, String> {
+                self.0.load_ledger()
+            }
+            fn save_ledger(&self, l: &Ledger) -> Result<(), String> {
+                self.0.save_ledger(l)
+            }
+            fn audit(&self, l: &str) {
+                self.0.audit(l)
+            }
+            fn read_audit(&self, _: u64) -> Result<String, String> {
+                Ok("2026-11-17T09:00:00Z | uid:1000 (jo) | run x | done\n2026-11-17T09:01:00Z | uid:1001 (sam) | run y | done\n".into())
+            }
+            fn is_machine_admin(&self, id: &AccountId) -> bool {
+                *id == AccountId::uid(1001)
+            }
+            fn own_version(&self) -> String {
+                "0.8.0".into()
+            }
+        }
+        let h = Log(fake());
+        let read = |c: Caller| handle(&h, &policy(), &c, "audit-read", &s(&["--lines", "10"]), &BTreeMap::new(), &never, &mut |_, _| {});
+        let lines = |r: Reply| match r {
+            Reply::Ran(Ran { data: Some(d), .. }) => (d["admin"].as_bool().unwrap(), d["lines"].as_array().unwrap().len()),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(lines(read(caller(me()))), (false, 1), "jo sees only jo's line");
+        assert_eq!(lines(read(caller(AccountId::uid(1001)))), (true, 2), "sam administers the machine");
+        let elevated = Caller { id: Some(me()), integrity: Some(policy::HIGH_INTEGRITY), is_root: false, remote: false };
+        assert_eq!(lines(read(elevated)), (true, 2), "an elevated Windows token");
+        assert!(h.0.log.borrow().is_empty(), "reading the log writes nothing to it");
+        assert!(matches!(handle(&h, &policy(), &caller(AccountId::uid(2000)), "audit-read", &[], &BTreeMap::new(), &never, &mut |_, _| {}), Reply::Refused(_)), "an unlisted account reads nothing");
     }
 }
