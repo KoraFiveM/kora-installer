@@ -74,7 +74,11 @@ if ($env:PROCESSOR_ARCHITECTURE -notin @('AMD64', 'ARM64')) {
 function Invoke-HttpsOnly([string]$Uri, [string]$OutFile) {
     $request = @{ UseBasicParsing = $true; Uri = $Uri }
     if ($OutFile) { $request.OutFile = $OutFile; $request.PassThru = $true }
-    $response = Invoke-WebRequest @request
+    # Windows PowerShell 5.1 redraws a progress bar for every chunk, which makes a 30 MB download take over a minute.
+    $previousProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try { $response = Invoke-WebRequest @request }
+    finally { $ProgressPreference = $previousProgress }
     if ($Uri -match '^https://') {
         $final = $null
         $raw = $response.BaseResponse
