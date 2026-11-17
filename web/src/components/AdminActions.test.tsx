@@ -60,4 +60,33 @@ describe("Installing Kora's administrator service from any page", () => {
     expect(within(alert).queryByRole('button', { name: /Install Kora's administrator service/ })).toBeNull()
     expect(within(alert).getAllByText(/kora service install/).length).toBeGreaterThan(0)
   })
+
+  it('inside the desktop app the app launches the installer (prompt in front) and the page waits for the service', async () => {
+    installMock({ scenario: 'windows', speed: 0 })
+    const user = userEvent.setup()
+    let asked = 0
+    ;(window as unknown as { koraShell: unknown }).koraShell = {
+      hello: async () => ({ features: { elevate: true } }),
+      elevate: async (what: string) => {
+        asked++
+        expect(what).toBe('install_service')
+        // the installer finishes on its own: the mock's install job stands in for it
+        await api.adminService.install()
+        return { started: true }
+      },
+    }
+    try {
+      const replay = vi.fn(() => api.schedule.remove('kora-dev'))
+      const err = missing()
+      err.replay = replay
+      renderApp(<AdminActions><Banners /><ErrorNotice error={err} /></AdminActions>)
+      const alert = (await screen.findByText('This needs administrator rights')).closest('[role="alert"]') as HTMLElement
+      await user.click(await within(alert).findByRole('button', { name: "Install Kora's administrator service" }))
+      await waitFor(() => expect(replay).toHaveBeenCalledTimes(1), { timeout: 8000 })
+      expect(asked).toBe(1)
+      expect(await screen.findByText(/in front of this window/)).toBeInTheDocument()
+    } finally {
+      delete (window as unknown as { koraShell?: unknown }).koraShell
+    }
+  })
 })

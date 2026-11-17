@@ -1712,7 +1712,8 @@ impl InstallStep {
                 // In the administrator service the person's server list is not opened (their file or database, see
                 // `store::forbid_in_this_process`): the shared root-owned program copy is then simply kept (an
                 // administrator's `kora uninstall` removes it when no server uses it).
-                let used = crate::privsvc::paths::in_service() || created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&Registry::load().unwrap_or_default(), b, &[ctx.req.dir.as_path()]));
+                let used =
+                    crate::privsvc::paths::in_service() || created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&Registry::load().unwrap_or_default(), b, &[ctx.req.dir.as_path()]));
                 let target = system::Target::from_request(&ctx.req);
                 let items: Vec<system::Item> = system::items_for(&target, &created, svc_platform(), &rn, ctx.keep_files, used)?.into_iter().filter(|i| wanted.contains(&i.kind)).collect();
                 if items.is_empty() {

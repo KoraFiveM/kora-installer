@@ -372,4 +372,52 @@ mod tests {
             assert!(ok, "{args:?} was not understood as {op:?}");
         }
     }
+
+    /// The command the panel shows ("Show me the command") when the administrator service is missing is built from the
+    /// install request, including source (clone / fork), versions (released / latest) and the fork owner. It must be
+    /// understood by this command line, and what the service later reads from the folder's record must still parse.
+    #[test]
+    fn the_install_command_shown_without_the_service_is_understood_with_the_new_fields() {
+        use crate::{Cli, Command};
+        use clap::Parser;
+        use kora_core::installer::{DbChoice, InstallRequest, Mode, Ports, ResourceSelection, Source, Versions};
+        let mut req = InstallRequest {
+            source: Some(Source::Fork),
+            versions: Some(Versions::Latest),
+            mode: Mode::Development,
+            name: "Alpha Town".into(),
+            dir: "/home/jo/kora/alpha".into(),
+            hostname: "Alpha".into(),
+            license_key: None,
+            license_key_name: None,
+            cfx_identifier: None,
+            ports: Ports::default(),
+            txadmin_public: false,
+            artifact_url: None,
+            game_build: None,
+            resources: ResourceSelection::All,
+            db: DbChoice::UseExisting,
+            service: true,
+            firewall: true,
+            github_owner: Some("my-org".into()),
+            catalog: None,
+            dry_run: false,
+            db_admin: None,
+            start: false,
+            app: None,
+        };
+        for (source, versions) in [(Source::Fork, Versions::Latest), (Source::Clone, Versions::Released), (Source::Clone, Versions::Latest), (Source::Fork, Versions::Released)] {
+            req.source = Some(source);
+            req.versions = Some(versions);
+            let args = kora_core::api::install::install_command(&req);
+            assert!(args.windows(2).any(|w| w[0] == "--source" && w[1] == if source == Source::Clone { "clone" } else { "fork" }), "{args:?}");
+            let cli = Cli::try_parse_from(args.iter().cloned()).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            assert!(matches!(cli.command, Some(Command::Install(_))), "{args:?}");
+        }
+        // the record a server folder holds (what the service reads) still has the fields the service needs
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["name"], "Alpha Town");
+        assert_eq!(json["ports"]["game"], 30120);
+        assert!(serde_json::from_value::<InstallRequest>(json).is_ok());
+    }
 }

@@ -105,7 +105,7 @@ step "$A has a server folder (made as $A) and asks the service for its firewall 
 SRV="/home/$A/kora/smoke-a"
 sudo -u $A mkdir -p "$SRV/.kora"
 sudo -u $A tee "$SRV/.kora/request.json" >/dev/null <<JSON
-{"mode":"production","name":"smoke-a","dir":"$SRV","hostname":"","ports":{"game":31120,"txadmin":41120},"resources":"All","db":"Skip","service":false,"firewall":true,"dry_run":false}
+{"mode":"production","source":"clone","versions":"released","name":"smoke-a","dir":"$SRV","hostname":"","ports":{"game":31120,"txadmin":41120},"resources":"All","db":"Skip","service":false,"firewall":true,"dry_run":false}
 JSON
 svc $A admin-step run --step system.firewall --dir "$SRV"
 assert_eq "the step ran and succeeded" "0" "$CODE"

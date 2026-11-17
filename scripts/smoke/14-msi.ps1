@@ -90,7 +90,7 @@ try {
 
     Write-Host '=== A makes a server folder and asks the service for its firewall step ==='
     $srvA = "$work\a\smoke-a"
-    $r = Invoke-AsUser $A "New-Item -ItemType Directory -Force -Path '$srvA\.kora' | Out-Null; Set-Content -Path '$srvA\.kora\request.json' -Value '{""mode"":""production"",""name"":""smoke-a"",""dir"":""$($srvA -replace '\\','\\')"",""hostname"":"""",""ports"":{""game"":31120,""txadmin"":41120},""resources"":""All"",""db"":""Skip"",""service"":false,""firewall"":true,""dry_run"":false}'; exit 0"
+    $r = Invoke-AsUser $A "New-Item -ItemType Directory -Force -Path '$srvA\.kora' | Out-Null; Set-Content -Path '$srvA\.kora\request.json' -Value '{""mode"":""production"",""source"":""clone"",""versions"":""released"",""name"":""smoke-a"",""dir"":""$($srvA -replace '\\','\\')"",""hostname"":"""",""ports"":{""game"":31120,""txadmin"":41120},""resources"":""All"",""db"":""Skip"",""service"":false,""firewall"":true,""dry_run"":false}'; exit 0"
     $r = Svc $A 'admin-step' @('run', '--step', 'system.firewall', '--dir', $srvA)
     Assert-That ($r.Code -eq 0 -and $r.Output -match 'RESULT ok=true') 'the firewall step ran for A without any prompt'
     $rules = (& netsh advfirewall firewall show rule name=all | Out-String)
