@@ -225,18 +225,20 @@ pub fn ledger_note(keys: &[String], made: bool) {
     let _ = l.save(&p);
 }
 
-/// The request of an `admin-step` must be a sane one, and the opt-in helper opens only ports
-/// `helper::winhelper::port_allowed` accepts.
-pub fn check_step_request(req: &super::InstallRequest, step: &str, undo: bool, in_service: bool) -> Result<()> {
+/// The request of an `admin-step` must be a sane one, and an elevated step done for Kora Panel
+/// (`for_panel`: the worker; the record in the folder could have been written by any program
+/// running as the person) opens only ports `helper::winhelper::port_allowed` accepts: never the
+/// privileged range, remote desktop, remote management or database ports.
+pub fn check_step_request(req: &super::InstallRequest, step: &str, undo: bool, for_panel: bool) -> Result<()> {
     if undo {
         return Ok(());
     }
     super::validate_request(req)?;
-    if in_service && step == "system.firewall" {
+    if for_panel && step == "system.firewall" {
         for p in [req.ports.game, req.ports.txadmin] {
             if !crate::helper::winhelper::port_allowed(p) {
                 return Err(InstallError(format!(
-                    "Kora's helper does not open port {p} in the firewall (it is a port Windows or remote administration uses). Choose other ports, or ask for administrator permission at the computer."
+                    "Kora does not open port {p} in the firewall from the panel: Windows, remote administration or databases use it. Choose other ports for the server (30120 and 40120 are the usual ones)."
                 )));
             }
         }
@@ -301,7 +303,7 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     check_panel_dir(dir)?;
     let mut req = load_request_from(dir).ok_or_else(|| InstallError(format!("{} has no Kora install record", dir.display())))?;
     let in_service = crate::helper::winhelper::in_service();
-    check_step_request(&req, step, undo, in_service)?;
+    check_step_request(&req, step, undo, in_service || panel_user().is_some())?;
     // Removing system-wide things: the name and ports come from the server list, not from the
     // folder's own (changeable) record, exactly as `kora delete` does.
     let trusted = if undo {
@@ -429,8 +431,8 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e}"));
         assert!(check_step_request(&req, "system.firewall", false, true).is_ok());
         req.ports.game = 3389;
-        assert!(check_step_request(&req, "system.firewall", false, true).unwrap_err().0.contains("3389"), "remote desktop stays closed");
-        assert!(check_step_request(&req, "system.firewall", false, false).is_ok(), "through the prompt, as before (>= 1024)");
+        assert!(check_step_request(&req, "system.firewall", false, true).unwrap_err().0.contains("3389"), "remote desktop stays closed when the panel asks");
+        assert!(check_step_request(&req, "system.firewall", false, false).is_ok(), "an administrator terminal: as before (>= 1024)");
         assert!(check_step_request(&req, "system.firewall", true, true).is_ok(), "closing is always fine");
         req.ports.game = 445;
         assert!(check_step_request(&req, "system.firewall", false, false).is_err(), "never below 1024, even through the prompt");
