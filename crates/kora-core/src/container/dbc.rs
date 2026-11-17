@@ -23,7 +23,7 @@ use super::record::ContainerRecord;
 use super::spec;
 use crate::backup::dbdump::{self, DbFailure, StreamRunner};
 use crate::db::{CommandOutput, CommandSpec, Credentials, DbResult, Secret};
-use crate::problem::Problem;
+use crate::problem::{Context, Problem};
 
 /// The client and dump programs inside the official MariaDB image.
 pub const CLIENT: &str = "mariadb";
@@ -131,11 +131,11 @@ pub fn create_container(m: &Manager, creds: &Credentials, progress: &mut dyn FnM
     m.ensure_network()?;
     m.ensure_volume()?;
     let meta = m.dir.join(".kora");
-    std::fs::create_dir_all(&meta).map_err(|e| Problem::generic(format!("cannot create {}: {e}", meta.display())))?;
+    std::fs::create_dir_all(&meta).map_err(|e| Problem::from(e).context(&format!("creating {}", meta.display())))?;
     let env_path = meta.join("db-init.env");
     let _ = std::fs::remove_file(&env_path);
     let text = spec::db_env_file(&creds.database, &creds.user, creds.password.expose());
-    crate::fsutil::write_no_follow(&env_path, text.as_bytes(), 0o600).map_err(|e| Problem::generic(format!("cannot write the database's start-up file: {e}")))?;
+    crate::fsutil::write_no_follow(&env_path, text.as_bytes(), 0o600).context("writing the database's start-up file")?;
     struct Remove<'p>(&'p Path);
     impl Drop for Remove<'_> {
         fn drop(&mut self) {

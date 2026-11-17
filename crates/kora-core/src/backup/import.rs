@@ -816,7 +816,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 let rec = crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &lent, with_db_container)
                     .or_else(|_| crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &Default::default(), with_db_container))
                     .map_err(Problem::generic)?;
-                rec.save(&dir).map_err(|e| io_problem("saving the container record", e))?;
+                rec.save(&dir).map_err(|e| io_problem("saving the container record", e.into()))?;
                 st.done.push("container".into());
                 save_state(&dir, &st)?;
             }

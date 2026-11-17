@@ -539,4 +539,25 @@ mod tests {
         assert!(pull_problem(&e, "img", "dial tcp: lookup registry-1.docker.io: no such host").message.contains("internet"));
         assert!(pull_problem(&e, "img", "toomanyrequests: rate limit").message.contains("rate limit"));
     }
+
+    #[test]
+    fn every_guided_failure_carries_its_code_and_its_fix() {
+        use super::super::codes;
+        let e = Engine::new(EngineKind::Docker, false);
+        let f = |t: &str| EngineError::Failed { command: "docker create".into(), code: 125, stderr: t.into() };
+        let sock = problem_for_failure(&e, "x", &f("permission denied while trying to connect to the Docker daemon socket at /var/run/docker.sock"));
+        assert!(sock.has_code(codes::SOCKET_PERMISSION) && sock.actions.contains(&Action::show_command(&["usermod", "-aG", "docker", "<your user name>"], true)), "{sock:?}");
+        let sub = problem_for_failure(&Engine::new(EngineKind::Podman, true), "x", &f("cannot find newuidmap"));
+        assert!(sub.has_code(codes::NO_SUBUID) && sub.actions.iter().any(|a| matches!(a, Action::ShowCommand { elevated: true, .. })), "{sub:?}");
+        let pull = pull_problem(&e, "img", "dial tcp: no such host");
+        assert!(pull.has_code(codes::PULL_FAILED) && pull.actions.contains(&Action::Retry), "{pull:?}");
+        let sockpull = pull_problem(&e, "img", "permission denied ... docker.sock");
+        assert!(sockpull.has_code(codes::SOCKET_PERMISSION) && !sockpull.actions.is_empty());
+        let lg = linger_problem("alex");
+        assert!(lg.has_code(codes::NOT_LINGERING) && lg.actions.contains(&Action::show_command(&["loginctl", "enable-linger", "alex"], true)));
+        let cg = cgroup_problem("");
+        assert!(cg.has_code(codes::CGROUP_V1) && cg.message.contains("v2"));
+        let spawn = problem_for_failure(&e, "x", &EngineError::Spawn("docker".into(), "not found".into()));
+        assert!(spawn.has_code(codes::NO_ENGINE));
+    }
 }

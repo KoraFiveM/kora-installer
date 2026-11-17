@@ -347,9 +347,9 @@ fn container_target(name: &str) -> Result<Option<crate::container::lifecycle::Ta
     if !cfg!(unix) {
         return Ok(None);
     }
-    let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
+    let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
     let Some(entry) = reg.find(name) else { return Ok(None) };
-    crate::container::lifecycle::target_of(&entry.name, &entry.dir).map_err(InstallError)
+    crate::container::lifecycle::target_of(&entry.name, &entry.dir).map_err(Problem::from)
 }
 
 /// Current OS service state of a registered server (`NotInstalled` when it has no service). A container
@@ -367,7 +367,7 @@ pub fn service_state(name: &str) -> Result<crate::service::ServiceState> {
 pub fn service_control(name: &str, action: crate::service::ControlAction) -> Result<()> {
     use crate::service::ServiceState;
     if let Some(t) = container_target(name)? {
-        return crate::container::lifecycle::control(&t, action, &crate::container::lifecycle::system()).map_err(|p| InstallError(p.encode()));
+        return crate::container::lifecycle::control(&t, action, &crate::container::lifecycle::system());
     }
     if service_state(name)? == ServiceState::NotInstalled {
         return Err(Problem::generic(format!("'{name}' has no background service. Install with --service (as administrator), or run `kora service-host {name}` in a terminal.")));

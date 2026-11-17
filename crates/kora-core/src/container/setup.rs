@@ -105,11 +105,11 @@ pub fn ensure_database(m: &Manager, slug: &str, progress: &mut dyn FnMut(&str), 
                 )
                 .with_action(Action::change_answers("name")));
             }
-            let name = dbc::new_names().map_err(|e| Problem::generic(e.to_string()))?;
-            let pw = db::generate_password().map_err(|e| Problem::generic(e.to_string()))?;
+            let name = dbc::new_names()?;
+            let pw = db::generate_password()?;
             let creds = dbc::game_credentials(slug, &name, &name, &pw);
-            let json = serde_json::to_string_pretty(&creds).map_err(|e| Problem::generic(e.to_string()))?;
-            db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, None).map_err(|e| Problem::generic(e.to_string()))?;
+            let json = serde_json::to_string_pretty(&creds)?;
+            db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, None)?;
             on_new_login(&creds);
             creds
         }
@@ -205,5 +205,25 @@ mod tests {
         assert!(e.has_code(codes::NAME_TAKEN) && e.message.contains("kora-main-dbdata"), "{e:?}");
         assert!(!d.path().join("database.json").exists());
         assert!(!r.calls().iter().any(|c| c.contains(" create ") || c.contains(" start ")), "{:?}", r.calls());
+    }
+
+    #[test]
+    fn no_engine_is_a_guided_problem_with_a_link_and_a_way_back_to_the_answers() {
+        let none = ContainerCheck { available: false, chosen: None, engines: vec![], summary: String::new() };
+        let p = no_engine(&none, None);
+        assert!(p.has_code(codes::NO_ENGINE));
+        assert!(p.actions.contains(&Action::open_link("https://podman.io/docs/installation")) && p.actions.contains(&Action::change_answers("run_mode")), "{p:?}");
+        let w = no_engine(&none, Some(EngineKind::Docker));
+        assert!(w.message.contains("Docker") && w.has_code(codes::NO_ENGINE));
+    }
+
+    #[test]
+    fn a_leftover_volume_problem_offers_to_change_the_name() {
+        let d = server_dir();
+        let rec = sample();
+        let r = FakeRunner::default();
+        r.respond("volume inspect", 0, "x\n");
+        let e = ensure_database(&Manager::new(d.path(), &rec, &r), "main", &mut |_| {}, &mut |_| {}).unwrap_err();
+        assert!(e.has_code(codes::NAME_TAKEN) && e.actions.contains(&Action::change_answers("name")), "{e:?}");
     }
 }

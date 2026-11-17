@@ -27,8 +27,8 @@ impl InstallStep {
     /// The folder's record, checked against the server list's name for it.
     fn container_record(&self) -> Result<ContainerRecord> {
         let ctx = &*self.ctx;
-        let rec = ContainerRecord::load(&ctx.req.dir).ok_or_else(|| InstallError(format!("{} has no container record (kora-container.json)", ctx.req.dir.display())))?;
-        rec.check(&slug(&ctx.req.name)).map_err(InstallError)?;
+        let rec = ContainerRecord::load(&ctx.req.dir).ok_or_else(|| Problem::generic(format!("{} has no container record (kora-container.json)", ctx.req.dir.display())))?;
+        rec.check(&slug(&ctx.req.name)).map_err(Problem::from)?;
         Ok(rec)
     }
 
@@ -48,7 +48,7 @@ impl InstallStep {
         ctx.emit(self.id, StepStatus::Running, "Looking for a container engine and trying a test container", 0.2);
         let (engine, status, check) = container::setup::choose_engine(want.engine)?;
         let s = slug(&ctx.req.name);
-        let rec = container::setup::new_record(&ctx.req.dir, &s, &engine, status.as_ref(), &want, ctx.req.db == DbChoice::Container).map_err(InstallError)?;
+        let rec = container::setup::new_record(&ctx.req.dir, &s, &engine, status.as_ref(), &want, ctx.req.db == DbChoice::Container).map_err(Problem::from)?;
         io(rec.save(&ctx.req.dir), "cannot write kora-container.json")?;
         ctx.update_created(|c| {
             if !c.files.iter().any(|f| f == container::record::FILE) {
@@ -87,7 +87,7 @@ impl InstallStep {
     pub(super) fn container_database(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let rec = self.container_record()?;
-        let db = rec.db.clone().ok_or_else(|| InstallError("this server was not set up with a database container".into()))?;
+        let db = rec.db.clone().ok_or_else(|| Problem::generic("this server was not set up with a database container"))?;
         let r = lifecycle::system();
         let m = Manager::new(&ctx.req.dir, &rec, &r);
         let state_path = db_state_path(ctx);
@@ -98,9 +98,7 @@ impl InstallStep {
             let _ = ProvisionState { database: c.database.clone(), user: c.user.clone(), host: "%".into(), ..Default::default() }.save(&state_path);
         };
         let creds = container::setup::ensure_database(&m, &slug(&ctx.req.name), &mut say, &mut fresh)?;
-        ProvisionState { database: creds.database.clone(), user: creds.user.clone(), host: "%".into(), created_database: false, created_user: false, granted: true }
-            .save(&state_path)
-            .map_err(|e| InstallError(e.to_string()))?;
+        ProvisionState { database: creds.database.clone(), user: creds.user.clone(), host: "%".into(), created_database: false, created_user: false, granted: true }.save(&state_path)?;
         ctx.shared.lock().unwrap().db_name = Some(creds.database.clone());
         Ok(format!("Database {} is ready in the container {} (login {})", creds.database, db.container, creds.user))
     }
@@ -146,7 +144,7 @@ impl InstallStep {
             ));
             return Ok("Left alone (not in the server list; see notes)".into());
         }
-        rec.check(&slug(&ctx.req.name)).map_err(InstallError)?;
+        rec.check(&slug(&ctx.req.name)).map_err(Problem::from)?;
         let r = lifecycle::system();
         let m = Manager::new(&ctx.req.dir, &rec, &r);
         match self.id {
