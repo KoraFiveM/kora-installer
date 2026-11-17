@@ -204,8 +204,63 @@ export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailC
     return undefined
   })
 
+  // ---- bringing a server in from a backup file
+  const uploads = new Map<string, string>()
+  const taken = () => servers().map((x) => x.name)
+  const previewOf = (name: string, encrypted: boolean, pw: unknown): T.ImportPreview => {
+    const base = { file_name: name, encrypted, created_unix: nowS() - 3600, by_reference: 38, in_full: 2, saved_keys: ['Main', 'Spare'], licence_note: 'Your licence key moves with the server, but it is yours, not Kora\'s: Cfx.re ties a key to your account and the address the server runs on. Kora cannot make Cfx.re accept it on a new computer. If the server refuses to start with a licence error, check the key at portal.cfx.re (Keymaster), change its server IP address there if it has one, or pick a different saved key.' }
+    if (encrypted && !pw) return { ...base, needs_passphrase: true, server: null, database: null, suggested: null, clashes: [], will_create: [], wont_carry: [], warnings: [] }
+    if (encrypted && pw !== PASSWORD) throw new Fail(422, 'backup.wrong_passphrase', 'That password does not open this backup. Check it and try again. (Kora does not keep passwords, so a lost one cannot be recovered.)')
+    const used = taken().includes('Old RP server')
+    const clashes: T.Clash[] = used ? [{ kind: 'name', message: 'A server called "Old RP server" is already here.', suggestion: 'Old RP server 2' }] : []
+    clashes.push({ kind: 'game_port', message: 'The game port 30120 is already used on this computer.', suggestion: '30121' })
+    return {
+      ...base,
+      needs_passphrase: false,
+      server: { name: 'Old RP server', mode: 'production', game_port: 30120, txadmin_port: 40120, game_build: 3258, artifact_build: 17000, os: 'windows', dir: 'C:\\Servers\\old-rp' },
+      database: { kind: 'dumped', name: 'kora_ab12', host: '127.0.0.1', port: 3306, dump_bytes: 9_000_000, note: '' },
+      suggested: { name: used ? 'Old RP server 2' : 'Old RP server', dir: '/home/demo/kora/old-rp-server', game_port: 30121, txadmin_port: 40120 },
+      clashes,
+      will_create: ['A new server "Old RP server" in /home/demo/kora/old-rp-server', 'Its settings and txAdmin data, with the folders and line endings converted for this computer (the backup comes from Windows)', 'A NEW database and login on this computer\'s database server, filled from the backup (9.0 MB)', '38 resources fetched again from GitHub at the saved versions, 2 taken from the file', 'FXServer build 17000 (downloaded again)'],
+      wont_carry: ['The operating-system service that starts the server with the computer (set it up again on this computer).', 'Firewall rules and port forwarding (open the ports again for the new computer).', 'The automatic-update timer and the backup schedule.', 'Your GitHub sign-in (sign in again on this computer if the resources need it).', 'The FXServer program itself: it is downloaded again.'],
+      warnings: ['This server was made on a different operating system. Folders in its settings are rewritten, but a resource that runs a program only one system has (a Linux shell script, a Windows .exe) will not work here.'],
+    }
+  }
+  route('POST', '/backups/import/upload', (_m, b) => {
+    if (!(b.file instanceof Blob)) throw new Fail(400, 'bad_request', 'Send the backup file itself.')
+    const id = `${'ab'.repeat(8)}${n++}`.slice(0, 20).padEnd(20, '0')
+    const name = String(b.fileName ?? 'backup.tar.gz.age')
+    uploads.set(id, name)
+    return { upload: id, file_name: name, bytes: (b.file as Blob).size } satisfies T.ImportUploaded
+  })
+  route('POST', '/backups/import/inspect', (_m, b) => {
+    const src = b.source as T.ImportSource
+    const name = src.upload ? uploads.get(src.upload) : src.path ? src.path.split(/[\\/]/).pop() : undefined
+    if (!name) throw new Fail(404, 'backup.not_found', 'That upload is gone. Upload the file again.')
+    if (name.toLowerCase().includes('broken')) throw new Fail(422, 'backup.corrupt', 'This backup cannot be used: the backup file is damaged or incomplete.')
+    return previewOf(name, name.endsWith('.age'), b.passphrase)
+  })
+  route('POST', '/backups/import', (_m, b) => {
+    const req = b as unknown as T.ImportRequest
+    return startJob('backup_import_start', req.choices.name, async (emit) => {
+      emit({ step: 'unpack', message: 'Unpacking and checking every file (nothing is placed yet)', percent: 6 })
+      await sleep(400)
+      emit({ step: 'files', message: 'Placing the settings and txAdmin data', percent: 25 })
+      await sleep(400)
+      emit({ step: 'artifact', message: 'Getting the server program', percent: 40 })
+      await sleep(400)
+      if (dbStopped) throw dbProblem()
+      emit({ step: 'database', message: 'Creating a new database and login', percent: 55 })
+      await sleep(400)
+      emit({ step: 'resources', message: 'Fetching kora_core (1/38)', percent: 75 })
+      await sleep(400)
+      return { name: req.choices.name, dir: req.choices.dir, resources_fetched: ['kora_core is back at version 4f2a9c1e'], problems: [], notes: [], started: req.start, next_steps: ['Open the server\'s ports on this computer (the Overview\'s "Can players reach my server?" shows how).', 'If you want it to start with the computer, set up the background service.', 'Check your licence key at portal.cfx.re if the server says it is not valid here.'], old_machine_steps: [`When you are sure "${req.choices.name}" works here, stop it on the OLD computer (open Kora there, Servers, Stop).`, "Then remove it there: open the server's Danger zone tab and choose Remove. Kora never does this for you from here."] } satisfies T.ImportResult
+    })
+  })
+
   return {
     reset(scenario: string) {
+      uploads.clear()
       per = {}
       n = 1
       dbStopped = scenario === 'trouble'

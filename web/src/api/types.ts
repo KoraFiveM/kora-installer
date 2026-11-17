@@ -329,4 +329,12 @@ export type {
   Omitted,
   SupportRequest,
   SupportSummary,
+  Clash,
+  ImportChoices,
+  ImportInspectRequest,
+  ImportPreview,
+  ImportRequest,
+  ImportResult,
+  ImportSource,
+  ImportUploaded,
 } from './generated/types'

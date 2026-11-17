@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Lock, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { BackupCreated, BackupEvent, BackupInfo, BackupSettings, RestorePreview, RestoreReport, ServerDetail, VerifyResult } from '@/api/types'
+import type { BackupCreated, BackupEvent, BackupInfo, BackupSettings, BackupsView, RestorePreview, RestoreReport, ServerDetail, VerifyResult } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
@@ -221,7 +221,7 @@ function RestoreDialog({ server, backup, canRestore, why, onClose, onChanged }: 
   )
 }
 
-function UndoBanner({ server, undo, onChanged, canRestore }: { server: string; undo: { id: string; created_unix: number; encrypted: boolean }; onChanged: () => void; canRestore: boolean }) {
+function UndoBanner({ server, undo, onChanged, onDismiss, canRestore }: { server: string; undo: { id: string; created_unix: number; encrypted: boolean }; onChanged: () => void; onDismiss: () => void; canRestore: boolean }) {
   const [open, setOpen] = useState(false)
   const [pw, setPw] = useState('')
   const [job, setJob] = useState<string | null>(null)
@@ -235,7 +235,14 @@ function UndoBanner({ server, undo, onChanged, canRestore }: { server: string; u
       setErr(e)
     }
   }
-  if (run.phase === 'done' && run.result) return <Report r={run.result} />
+  if (run.phase === 'done' && run.result) {
+    return (
+      <div className="space-y-3">
+        <Report r={run.result} />
+        <Button size="sm" onClick={onDismiss}>Close</Button>
+      </div>
+    )
+  }
   return (
     <Alert tone="info" title="The last restore can be undone">
       <p>Just before it, Kora saved the server as it was ({when(undo.created_unix)}). You can put that back.</p>
@@ -340,6 +347,55 @@ function Settings({ server, view, canChange, why, onSaved }: { server: string; v
   )
 }
 
+// ---- move this server ------------------------------------------------------------------------------------------
+
+/** "Move this server to another computer": a backup that travels, so a password is required. */
+function MoveCard({ server: s, canMake, onDone }: { server: ServerDetail; canMake: boolean; onDone: () => void }) {
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [job, setJob] = useState<string | null>(null)
+  const [err, setErr] = useState<unknown>(null)
+  const run = useJob<BackupCreated, BackupEvent>(job, () => onDone())
+  const busy = run.phase === 'running'
+  const problem = pw.length < MIN_PASSWORD ? `Use at least ${MIN_PASSWORD} characters.` : pw !== pw2 ? 'The two passwords are not the same.' : null
+  const start = async () => {
+    setErr(null)
+    try {
+      setJob((await api.backups.create(s.name, { passphrase: pw, everything: false, stop_server: false, for_move: true })).job)
+    } catch (e) {
+      setErr(e)
+    }
+  }
+  return (
+    <Card>
+      <CardHeader><CardTitle>Move this server to another computer</CardTitle></CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <ol className="list-decimal space-y-1 pl-5">
+          <li>Make the file here (below). It holds your database, settings, txAdmin data and licence key, so it needs a password.</li>
+          <li>Copy the file to the new computer (a USB stick, a share, or download it from here).</li>
+          <li>On the new computer open Kora and choose &quot;Bring a server from a backup or another machine&quot; in the install wizard. It works between Linux and Windows.</li>
+          <li>When the server runs there, stop it here and remove it (Danger zone). Kora never touches the other computer for you.</li>
+        </ol>
+        <Alert tone="warning">The licence key moves with the server, but Cfx.re ties a key to your account and the address the server runs on. Kora cannot make Cfx.re accept it on a new computer: check the key at portal.cfx.re if the new server says the licence is not valid, or pick another saved key while importing.</Alert>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Password for the file" error={pw && problem ? problem : null}><Input type="password" autoComplete="new-password" value={pw} disabled={busy} onChange={(e) => setPw(e.target.value)} /></Field>
+          <Field label="Password again"><Input type="password" autoComplete="new-password" value={pw2} disabled={busy} onChange={(e) => setPw2(e.target.value)} /></Field>
+        </div>
+        <p className="text-xs text-muted-foreground">Kora does not keep this password and nobody can recover it. You need it on the new computer.</p>
+        <Button variant="default" disabled={!canMake || busy || !!problem} onClick={() => void start()}>{busy ? 'Making the file…' : 'Make the file to move'}</Button>
+        {busy && <JobBar events={run.events} label="Export progress" />}
+        <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
+        {run.phase === 'done' && run.result && (
+          <Alert tone="success" title="The file is ready">
+            <p>{run.result.info.file} · {fileSize(run.result.info.bytes)}</p>
+            <p className="mt-1">It is on the computer that runs Kora, in <span className="font-mono text-xs">{run.result.path}</span>. Copy it to the new computer, and keep the password for the other end.</p>
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ---- the tab ---------------------------------------------------------------------------------------------------
 
 function useBackupsView(name: string, enabled: boolean) {
@@ -354,12 +410,17 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
   const view = useBackupsView(s.name, !noList)
   const [verify, setVerify] = useState<BackupInfo | null>(null)
   const [restore, setRestore] = useState<BackupInfo | null>(null)
+  // The undo offer stays on screen after it has been used, so its result can be read (the list no longer has it).
+  const [undo, setUndo] = useState<NonNullable<BackupsView['undo']> | null>(null)
   const changed = () => {
     void qc.invalidateQueries({ queryKey: ['backups', s.name] })
     void qc.invalidateQueries({ queryKey: ['backups-overview'] })
   }
-  if (noList) return <Alert tone="info">{noList}</Alert>
   const v = view.data
+  useEffect(() => {
+    if (v?.undo) setUndo(v.undo)
+  }, [v?.undo])
+  if (noList) return <Alert tone="info">{noList}</Alert>
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <div className="space-y-5">
@@ -374,7 +435,7 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
             </CardContent>
           </Card>
         )}
-        {v?.undo && <UndoBanner server={s.name} undo={v.undo} onChanged={changed} canRestore={!whyAdmin} />}
+        {undo && <UndoBanner server={s.name} undo={undo} onChanged={changed} onDismiss={() => setUndo(null)} canRestore={!whyAdmin} />}
         <MakeBackup server={s} onDone={changed} />
         <Card>
           <CardHeader><CardTitle>Your backups{v ? ` (${v.backups.length})` : ''}</CardTitle></CardHeader>
@@ -389,7 +450,10 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
           </CardContent>
         </Card>
       </div>
-      <div className="space-y-5">{v && <Settings server={s.name} view={v} canChange={!whyAdmin} why={whyAdmin} onSaved={changed} />}</div>
+      <div className="space-y-5">
+        {v && <Settings server={s.name} view={v} canChange={!whyAdmin} why={whyAdmin} onSaved={changed} />}
+        <MoveCard server={s} canMake={!whyAdmin} onDone={changed} />
+      </div>
       {verify && <VerifyDialog server={s.name} backup={verify} onClose={() => setVerify(null)} />}
       {restore && <RestoreDialog server={s} backup={restore} canRestore={!whyAdmin} why={whyAdmin} onClose={() => setRestore(null)} onChanged={changed} />}
     </div>

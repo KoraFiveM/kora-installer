@@ -390,6 +390,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       {at === 0 && !editing && (
         <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline underline-offset-4">Add an existing server</Link> instead.</p>
       )}
+      {at === 0 && !editing && (
+        <p className="text-sm text-muted-foreground">Moving a server from another computer, or restoring one? <Link to="/import" className="text-info underline underline-offset-4">Bring a server from a backup or another machine</Link>.</p>
+      )}
       {saved && !defaults.resumable?.some((r) => r.name === saved.name) && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
           <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved licence key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>

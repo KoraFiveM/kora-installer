@@ -337,6 +337,12 @@ export const api = {
     /** The address of the archive (a download; it holds secrets: administrators only). Fetched with the session header, see `downloadBackup`. */
     fileUrl: (name: string, id: string) => `${BASE}/servers/${encodeURIComponent(name)}/backups/${encodeURIComponent(id)}/file`,
   },
+  imports: {
+    /** Upload a backup file (the file itself is the body, streamed): it waits on the computer that runs Kora. */
+    upload: (file: Blob, fileName: string) => call('backup_import_upload', {}, { raw: { body: file, type: 'application/octet-stream', headers: { 'X-File-Name': enc(fileName) } } }),
+    inspect: (source: T.ImportSource, passphrase?: string) => call('backup_import_inspect', { body: { source, passphrase } }),
+    start: (body: T.ImportRequest) => call('backup_import_start', { body }),
+  },
   support: {
     /** Prepare a support bundle and say what is in it. Nothing is saved or sent. */
     preview: (server?: string) => call('support_bundle_preview', { body: server ? { server } : {} }),

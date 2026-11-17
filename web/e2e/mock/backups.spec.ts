@@ -33,7 +33,7 @@ test.describe('Backups', () => {
     await expect(page.getByRole('button', { name: 'Back up now' })).toBeDisabled()
     await scan('the password fields')
     await page.getByLabel('Password', { exact: true }).fill('a long enough password')
-    await page.getByLabel('Password again').fill('a long enough password')
+    await page.getByLabel('Password again').first().fill('a long enough password')
     await page.getByRole('button', { name: 'Back up now' }).click()
     await expect(page.getByRole('progressbar', { name: 'Backup progress' })).toBeVisible()
     await expect(page.getByText('Backup finished').first()).toBeVisible()
