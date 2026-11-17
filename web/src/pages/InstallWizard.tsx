@@ -405,7 +405,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               onDisk={setDiskOk}
             />
           )}
-          <ErrorNotice error={startErr} actions={startActions} />
+          <ErrorNotice error={startErr} actions={startActions} onFixed={start} />
           {starting && (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your answers (ports, GitHub, permissions) and starting the install. This can take a few seconds.

@@ -899,6 +899,10 @@ pub fn failure_problem(req: &InstallRequest, error: &str, failed_step: Option<&s
         }
         None => p.push_action(Action::Retry),
     }
+    // Not enough room: trying again cannot help; the way on is another folder (the name-and-folder page).
+    if p.message.starts_with("Not enough free disk space") && !p.actions.iter().any(|a| matches!(a, Action::ChangeAnswers { .. })) {
+        p.actions.insert(0, Action::change_answers("name"));
+    }
     if !p.actions.iter().any(|a| matches!(a, Action::ChangeAnswers { .. })) {
         p.push_action(Action::ChangeAnswers { section: None });
     }
@@ -1052,6 +1056,9 @@ mod tests {
         // Stopped before the first step: try the whole install again.
         let p = failure_problem(&req, "ports taken", None);
         assert_eq!((p.code.as_str(), p.actions[0].clone()), (codes::FAILED, Action::Retry));
+        // A full disk points at the folder first: retrying cannot help.
+        let p = failure_problem(&req, "Not enough free disk space on the disk holding /srv/a: Kora needs about 4.6 GiB.", None);
+        assert_eq!(p.actions[0], Action::change_answers("name"), "{:?}", p.actions);
     }
 
     #[test]
