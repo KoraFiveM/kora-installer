@@ -78,11 +78,10 @@ pub async fn tool_install(State(st): State<AppState>, Path(tool): Path<String>) 
     if system_git && !elevated {
         let msg = "Installing Git needs administrator rights. Run this command as administrator:";
         let command = cmd(&["tools", "install", "git"]);
-        if !crate::elevated::helper_installed() {
-            return Err(ApiError::needs_elevation(msg, command));
-        }
+        let what = "install Git";
+        crate::elevated::precheck_verb(&kora_core::privsvc::problems::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, msg)?;
         return st.spawn_job(Op::ToolInstall, None, move |h| {
-            let out = crate::elevated::privileged_msg(msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| e.message)?;
+            let out = crate::elevated::privileged_as(what, msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| e.message)?;
             Ok(json!({"tool": "git", "output": out["output"]}))
         });
     }
@@ -93,11 +92,9 @@ pub async fn tool_install(State(st): State<AppState>, Path(tool): Path<String>) 
 }
 
 /// `POST /system/database/start` → `202 {job}`: start the installed (stopped) database server. It needs
-/// administrator rights: Linux through the helper when it is installed (else `needs_elevation` with the
-/// command), Windows answers `needs_elevation` with the `request_admin` action (the elevated worker builds
-/// that part: this handler only raises the Problem).
-pub async fn db_start(State(st): State<AppState>, axum::Extension(caller): axum::Extension<crate::remote::Caller>, headers: axum::http::HeaderMap) -> Result<axum::response::Response, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+/// administrator rights: through the administrator service when it is there for this account (no prompt),
+/// else `needs_elevation` with the choices (install the service, the command).
+pub async fn db_start(State(st): State<AppState>) -> Result<axum::response::Response, ApiError> {
     let e = env();
     let (db, admin) = {
         let e = e.clone();
@@ -112,35 +109,23 @@ pub async fn db_start(State(st): State<AppState>, axum::Extension(caller): axum:
     if db.running {
         return Err(ApiError::conflict("The database server is already running."));
     }
-    if !admin.elevated && crate::elevated::worker_supported() {
-        // Windows: the elevated worker starts it after one permission prompt (a remote session only
-        // when the person asked); the command is the fallback.
+    if !admin.elevated {
+        // The administrator service starts it (no prompt); Windows, until its service lands, after
+        // one permission prompt (a remote session only when the person asked). Without either:
+        // the choices (install the service, the command).
         let name = db.name.clone().unwrap_or_default();
         let msg = format!("Starting the database server {name} needs administrator rights. Run this command as administrator:");
         let command = cmd(&["check", "--start-database"]);
         let what = "start the database server";
-        crate::elevated::precheck(ask, &kora_core::helper::worker::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, &msg)?;
+        crate::elevated::precheck_verb(&kora_core::privsvc::problems::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, &msg)?;
         return st.spawn_job(Op::DbStart, None, move |h| {
-            h.event(json!({"type": "status", "message": "Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on."}));
-            let out = crate::elevated::privileged_as(ask, what, &msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| {
+            let out = crate::elevated::privileged_as(what, &msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| {
                 if e.actions().is_empty() {
                     e.message
                 } else {
                     e.to_problem().encode()
                 }
             })?;
-            Ok(json!({"output": out["output"]}))
-        });
-    }
-    if !admin.elevated {
-        let name = db.name.clone().unwrap_or_default();
-        let msg = format!("Starting the database server {name} needs administrator rights. Run this command as administrator:");
-        let command = cmd(&["check", "--start-database"]);
-        if !crate::elevated::helper_installed() {
-            return Err(ApiError::needs_elevation(msg, command));
-        }
-        return st.spawn_job(Op::DbStart, None, move |h| {
-            let out = crate::elevated::privileged_msg(&msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| e.message)?;
             Ok(json!({"output": out["output"]}))
         });
     }

@@ -51,7 +51,7 @@ export function AuditLogCard() {
     <Card>
       <CardHeader><CardTitle>Activity log</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">Who changed what, from this panel (on this computer or from another device) and from <code>kora</code> commands. Passwords, licence keys and what was typed are never recorded.{days ? ` Entries are kept for ${days} days.` : ''}</p>
+        <p className="text-sm text-muted-foreground">Who changed what, from this panel (on this computer or from another device) and from <code>kora</code> commands. Passwords, licence keys and what was typed are never recorded. What Kora&apos;s administrator service did with administrator rights (services, firewall rules, databases, updates) is kept in its own log that only administrators can read: <code>%ProgramFiles%\Kora\data\audit.log</code> on Windows, <code>/var/log/kora/audit.log</code> on Linux.{days ? ` Entries are kept for ${days} days.` : ''}</p>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Server"><Input value={server} onChange={(e) => setServer(e.target.value)} placeholder="Any server" /></Field>
           <Field label="Who"><Input value={actor} onChange={(e) => setActor(e.target.value)} placeholder="Any name" /></Field>

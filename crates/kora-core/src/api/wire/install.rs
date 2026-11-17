@@ -239,8 +239,10 @@ pub struct InstallPlan {
     pub warnings: Vec<String>,
     /// The same list as `warnings` (older name).
     pub notes: Vec<String>,
-    /// Windows: these parts are done after ONE permission prompt when the install starts.
-    pub admin_prompt: bool,
+    /// Kora's administrator service: `ready` = it does the `needs_admin` parts by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub admin_service: Option<super::system::AdminServiceState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

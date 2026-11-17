@@ -11,7 +11,7 @@ const fetchMock = vi.fn()
 beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock) })
 afterEach(() => vi.unstubAllGlobals())
 
-const sys = (over: Partial<SystemInfo>): SystemInfo => ({ admin: false, elevated: false, platform: 'linux', helper_installed: false, admin_prompt: false, headless: false, version: '0', local: true, kora_home: '/home/sam/.kora', can_restart: true, ...over })
+const sys = (over: Partial<SystemInfo>): SystemInfo => ({ admin: false, elevated: false, platform: 'linux', headless: false, version: '0', local: true, kora_home: '/home/sam/.kora', can_restart: true, ...over })
 
 function setup(system: SystemInfo, meta: Partial<Meta> = {}, ui = <OpenFolderButton name="prod" dir="/srv/fivem/prod" />) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {

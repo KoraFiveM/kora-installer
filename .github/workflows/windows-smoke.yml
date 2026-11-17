@@ -63,14 +63,11 @@ jobs:
       - name: "12. Saved licence keys (private data file, masking, named install, import of the old secrets.json)"
         timeout-minutes: 10
         run: ./scripts/smoke/12-keys.ps1
-      - name: "13. Panel's administrator worker without the prompt (pipe security, peer checks, protocol, allow-list, a step child)"
-        timeout-minutes: 10
-        run: ./scripts/smoke/13-admin-worker.ps1
-      - name: "13b. Worker unit tests on Windows (pipe names, peer checks, protocol helpers)"
+      - name: "13. Service building blocks on Windows (privsvc: pipe rights, ownership, update rollback, caller policy)"
         timeout-minutes: 15
         run: |
-          cargo test --locked -p kora-core -- helper:: system_ops
-          if ($LASTEXITCODE -ne 0) { throw 'worker unit tests failed' }
+          cargo test --locked -p kora-core -- privsvc system_ops
+          if ($LASTEXITCODE -ne 0) { throw 'privsvc unit tests failed' }
       - name: Collect logs
         if: always()
         run: |
@@ -166,3 +163,41 @@ jobs:
       - name: "9. Kora shortcuts: per-user install, status, uninstall; tidying up the old machine-wide app"
         timeout-minutes: 10
         run: ./scripts/smoke/09-app.ps1
+
+  msi:
+    name: "msi: install for real, the service from standard accounts, refusals, upgrade, uninstall"
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: smoke
+      - name: "Build kora.exe"
+        run: |
+          cargo build --release --locked -p kora-cli
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+      - name: "Build the desktop app (the MSI carries it as an optional feature)"
+        run: |
+          cargo build --release --locked --manifest-path crates/kora-desktop/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'desktop build failed' }
+      - name: "Install the WiX tool (fetched here, pinned, not vendored)"
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'wix install failed' }
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.dotnet\tools"
+      - name: "Build two MSIs (an older and a newer version) from the same program"
+        run: |
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          ./packaging/windows/build-msi.ps1 -Exe target/release/kora.exe -Version 0.0.1 -Out dist/old.msi
+          ./packaging/windows/build-msi.ps1 -Exe target/release/kora.exe -DesktopExe crates/kora-desktop/target/release/kora-desktop.exe -Version 0.0.2 -Out dist/new.msi
+      - name: "14. MSI: install, service from standard accounts (one allowed, one not), refusals, upgrade, uninstall"
+        timeout-minutes: 20
+        run: ./scripts/smoke/14-msi.ps1 -Msi dist/new.msi -OldMsi dist/old.msi
+

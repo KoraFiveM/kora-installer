@@ -133,6 +133,16 @@ fn db_state_path(ctx: &Ctx) -> PathBuf {
 /// The registered server (other than `dir`) whose records name the same database or database
 /// user as `st`. `st` comes from a folder the server's account can change: it must not be able to
 /// make `kora delete` drop another server's database.
+/// The server list for the "does another server use this too?" safety checks. Empty in the administrator service, which
+/// never opens a person's server list; the ownership records (one owner per database name) guard it there instead.
+fn list_for_safety_check() -> Registry {
+    if crate::privsvc::paths::in_service() {
+        Registry::default()
+    } else {
+        Registry::load().unwrap_or_default()
+    }
+}
+
 fn db_used_elsewhere(reg: &Registry, st: &ProvisionState, dir: &Path) -> Option<String> {
     reg.servers.iter().filter(|s| !registry::same_path(&s.dir, dir)).find_map(|s| {
         let other = ProvisionState::load(&super::meta_dir(&s.dir).join("db-provision.json")).ok()?;
@@ -285,7 +295,7 @@ fn db_stopped(name: &str, start: &[&str]) -> Problem {
 fn db_needs_admin(req: &InstallRequest, why: String) -> Problem {
     Problem::new(codes::NEEDS_ELEVATION, "Installing the database server needs administrator rights.")
         .with_details(why)
-        .with_action(Action::RequestAdmin)
+        .with_action(Action::InstallAdminService)
         .with_action(Action::show_command(&crate::api::install::install_command(req), true))
         .with_action(Action::change_answers("database"))
 }
@@ -293,7 +303,7 @@ fn db_needs_admin(req: &InstallRequest, why: String) -> Problem {
 /// Git is missing, and the system package manager (administrator rights) is the way to get it.
 fn git_needs_admin() -> Problem {
     Problem::new(codes::INSTALL_TOOL_MISSING, "Git is not installed, and installing it here needs administrator rights.")
-        .with_action(Action::RequestAdmin)
+        .with_action(Action::InstallAdminService)
         .with_action(Action::open_link(known::GIT_URL))
 }
 
@@ -622,7 +632,7 @@ impl InstallStep {
 
     /// Does this install's database work go to the helper (Kora's own MariaDB login)?
     fn db_helper(&self) -> bool {
-        super::system_ops::db_needs_helper(db::Os::current() == db::Os::Windows, self.ctx.admin, self.ctx.hooks.admin.is_some(), db_override(&self.ctx.req))
+        super::system_ops::db_needs_helper(self.ctx.admin, self.ctx.hooks.admin.is_some(), db_override(&self.ctx.req))
     }
 
     /// Have the administrator helper do `step` (see `system_ops`): its lines become this step's
@@ -1341,7 +1351,6 @@ impl InstallStep {
         let mut tail = Vec::new();
         if platform == SvcPlatform::Linux {
             tail.push(service::SystemStep::write("Save the server's non-secret environment (txAdmin data folder and port)", &server.env_file_path(), txadmin_env_text(ctx), 0o600));
-            tail.push(service::SystemStep::run(format!("Give '{account}' ownership of the server folder (and only that folder)"), "chown", &["-R", &format!("{account}:{account}"), &server.dir]));
         }
         if platform == SvcPlatform::Windows {
             server.validate().map_err(|e| InstallError(e.to_string()))?;
@@ -1360,7 +1369,7 @@ impl InstallStep {
             }
             tail.extend(reg.steps);
             // In the opt-in helper the person's own process grants the folder rights (see above).
-            if !crate::helper::winhelper::in_service() {
+            if !crate::privsvc::paths::in_service() {
                 tail.extend(service::windows_grant_plan(&server).steps);
             }
         } else {
@@ -1390,6 +1399,13 @@ impl InstallStep {
         super::check_dir_links(&ctx.req.dir)?;
         let unit = server.unit_path();
         ctx.update_created(|c| c.service_unit = Some(unit))?;
+        if platform == SvcPlatform::Linux {
+            // Hand the server folder (and only it) to the server's own account, through open folder
+            // handles: `chown -R <path>` would follow a link swapped in after the check above.
+            let (uid, gid) = crate::userhome::account_ids(&account).ok_or_else(|| InstallError(format!("cannot find the account '{account}'")))?;
+            ctx.emit(self.id, StepStatus::Running, format!("Giving '{account}' ownership of the server folder (and only that folder)"), 0.8);
+            crate::fsutil::chown_tree_no_follow(&ctx.req.dir, uid, gid).map_err(|e| InstallError(format!("cannot give '{account}' the server folder: {e}")))?;
+        }
         service::apply_plan(&service::Plan::new(tail), &rn).map_err(|e| InstallError(e.to_string()))?;
         if create_account {
             ctx.note(format!("Created the system account '{account}' (no login, no home folder) for the server; `kora delete` removes it again."));
@@ -1539,7 +1555,7 @@ impl InstallStep {
         }
         let Ok(mut st) = ProvisionState::load(&db_state_path(ctx)) else { return Ok(("No database to remove".into(), None)) };
         let (dbn, usr) = (st.database.clone(), st.user.clone());
-        if let Some(other) = db_used_elsewhere(&Registry::load().unwrap_or_default(), &st, &ctx.req.dir) {
+        if let Some(other) = db_used_elsewhere(&list_for_safety_check(), &st, &ctx.req.dir) {
             ctx.note(format!("Database '{dbn}' / user '{usr}' were kept: the server '{other}' uses them too (this folder's records name them)."));
             return Ok(("Database kept".into(), None));
         }
@@ -1632,7 +1648,7 @@ impl InstallStep {
                 let path = db_state_path(ctx);
                 let Ok(mut st) = ProvisionState::load(&path) else { return Ok("No database to remove".into()) };
                 let (dbn, usr) = (st.database.clone(), st.user.clone());
-                if let Some(other) = db_used_elsewhere(&Registry::load().unwrap_or_default(), &st, &ctx.req.dir) {
+                if let Some(other) = db_used_elsewhere(&list_for_safety_check(), &st, &ctx.req.dir) {
                     ctx.note(format!("Database '{dbn}' / user '{usr}' were kept: the server '{other}' uses them too (this folder's records name them)."));
                     return Ok("Database kept".into());
                 }
@@ -1693,8 +1709,11 @@ impl InstallStep {
                 let is_service = self.id == "system.service";
                 let wanted: &[system::Kind] = if is_service { &[system::Kind::Service, system::Kind::ServiceAccount, system::Kind::Binary] } else { &[system::Kind::UpdateTimer] };
                 let rn = service::SystemRunner;
-                let reg = Registry::load().unwrap_or_default();
-                let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&reg, b, &[ctx.req.dir.as_path()]));
+                // In the administrator service the person's server list is not opened (their file or database, see
+                // `store::forbid_in_this_process`): the shared root-owned program copy is then simply kept (an
+                // administrator's `kora uninstall` removes it when no server uses it).
+                let used =
+                    crate::privsvc::paths::in_service() || created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&Registry::load().unwrap_or_default(), b, &[ctx.req.dir.as_path()]));
                 let target = system::Target::from_request(&ctx.req);
                 let items: Vec<system::Item> = system::items_for(&target, &created, svc_platform(), &rn, ctx.keep_files, used)?.into_iter().filter(|i| wanted.contains(&i.kind)).collect();
                 if items.is_empty() {
@@ -1973,7 +1992,7 @@ mod problem_tests {
     fn tool_and_database_problems_offer_fitting_actions() {
         let p = git_needs_admin();
         assert_eq!(p.code, codes::INSTALL_TOOL_MISSING);
-        assert_eq!(p.actions[0], Action::RequestAdmin);
+        assert_eq!(p.actions[0], Action::InstallAdminService);
         assert!(!p.actions.contains(&Action::InstallTool { tool: Tool::Gh }), "gh is never installed by the system package manager");
 
         let p = db_stopped("mariadb", &["systemctl", "start", "mariadb"]);

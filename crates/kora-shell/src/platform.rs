@@ -33,9 +33,11 @@ pub struct Command {
 /// What the shell runs for a fixed administrator action. The page chooses only the action, never the program or
 /// the arguments.
 ///
-/// SEAM (privileged-service workstream): `InstallService` is "Install Kora's administrator service", which that
-/// workstream ships as `kora service install` (it fetches or finds the installer, checks it and launches the
-/// MSI). If its command line differs at merge, change it HERE and nowhere else.
+/// `InstallService` is "Install Kora's administrator service": `kora service install` (privileged-service work; it
+/// downloads this version's MSI, checks its checksum and runs `msiexec`; the command exists and is confirmed). Run
+/// by the app with Windows' permission prompt in front of its window. The service allows the account that runs the
+/// command: an administrator's elevated process is the same person; a standard user typing an administrator's password
+/// would allow that administrator (they then run `kora service allow <account>`; see docs/desktop-app.md).
 pub fn elevated_command(action: ElevatedAction, kora: &Path) -> Command {
     match action {
         ElevatedAction::InstallService => Command { program: kora.to_path_buf(), args: vec!["service".into(), "install".into()] },

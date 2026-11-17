@@ -495,3 +495,25 @@ mod tests {
         assert_eq!(kora_home_for_relaunch(false, ".kora".into()), None, "never a relative folder");
     }
 }
+
+/// `(uid, gid)` of the local account `name` (passwd lookup); `None` when there is no such account.
+#[cfg(unix)]
+pub fn account_ids(name: &str) -> Option<(u32, u32)> {
+    let c = std::ffi::CString::new(name).ok()?;
+    let mut buf = vec![0u8; 8192];
+    // SAFETY: a zeroed passwd is a valid out-buffer; the buffers are valid for the stated sizes.
+    let mut pw: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut res: *mut libc::passwd = std::ptr::null_mut();
+    let rc = unsafe { libc::getpwnam_r(c.as_ptr(), &mut pw, buf.as_mut_ptr().cast(), buf.len(), &mut res) };
+    (rc == 0 && !res.is_null()).then_some((pw.pw_uid, pw.pw_gid))
+}
+
+#[cfg(not(unix))]
+pub fn account_ids(_name: &str) -> Option<(u32, u32)> {
+    None
+}
+
+/// Look a uid up in the passwd database.
+pub fn lookup_account(uid: u32) -> Option<Account> {
+    SystemUserEnv.by_uid(uid)
+}

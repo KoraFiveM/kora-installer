@@ -10,7 +10,6 @@ use kora_core::installer::{self, host, registry};
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
 use crate::cmd::desktop::DesktopCmd;
 use crate::cmd::github::{github_owners, GithubCmd};
-use crate::cmd::helper::{helper, HelperCmd};
 use crate::cmd::install::{install, InstallArgs};
 use crate::cmd::panel::{panel, PanelArgs};
 use crate::cmd::reach::ReachArgs;
@@ -22,7 +21,7 @@ use crate::cmd::toolchain::ToolsCmd;
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
 use crate::cmd::webhook::{webhook, WebhookCmd};
-use crate::cmd::{admin_worker, bare, branch, keys_cmd, resource, toolchain};
+use crate::cmd::{admin_step, bare, branch, keys_cmd, resource, service_cmd, toolchain};
 
 #[derive(Parser)]
 #[command(name = "kora", version, about = "Kora installer and server manager")]
@@ -186,26 +185,23 @@ enum Command {
         #[arg(long)]
         app: bool,
     },
-    /// The optional privileged helper: lets the panel do the few things that need administrator rights.
-    Helper {
+    /// Kora's administrator service: who may use it, and whether it is running.
+    Service {
         #[command(subcommand)]
-        cmd: HelperCmd,
+        cmd: service_cmd::ServiceCmd,
     },
-    /// Windows: Kora Panel's short-lived administrator helper (started through the permission prompt).
+    /// One administrator step of an install or delete, run by Kora's administrator service.
     #[command(hide = true)]
-    AdminWorker(admin_worker::AdminWorkerArgs),
-    /// One administrator step of an install or delete, run by that helper.
+    AdminStep(admin_step::AdminStepArgs),
+    /// Start (or install) Kora's own MariaDB on Windows, run by Kora's administrator service.
     #[command(hide = true)]
-    AdminStep(admin_worker::AdminStepArgs),
+    AdminDb(admin_step::AdminDbArgs),
     /// What the Kora desktop app (tray icon and window) asks of kora. Run by the app, never by a person.
     #[command(hide = true)]
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCmd,
     },
-    /// Start (or install) Kora's own MariaDB on Windows, run by that helper.
-    #[command(hide = true)]
-    AdminDb(admin_worker::AdminDbArgs),
 }
 
 fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
@@ -239,9 +235,19 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Panel(_),
         ) => K::Other,
         // Already elevated (the worker) or run by it: never relaunched.
-        Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
-        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
-        Some(Command::Helper { .. }) => K::Other,
+        Some(Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. } }) => {
+            K::Uninstall { dry_run: false }
+        }
+        // Linux: relaunched with sudo. Windows: the install has its own single prompt (the installer's).
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => {
+            if cfg!(windows) {
+                K::Other
+            } else {
+                K::Uninstall { dry_run: false }
+            }
+        }
+        Some(Command::Service { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },
         Some(Command::AddAsset(_)) => K::Update { auto: false },
@@ -284,7 +290,8 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) => one("change the automatic-update schedule"),
         Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
-        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } }) => one("change which accounts may use Kora's administrator service"),
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => one("install or remove Kora's administrator service"),
         _ => vec![],
     }
 }
@@ -364,8 +371,8 @@ fn elevate_if_needed(cli: &Cli, effective: &Option<Command>) {
 }
 
 fn main() {
-    // An elevated child of the Windows worker or helper: drop every override variable first.
-    kora_core::helper::worker::scrub_overrides();
+    // An elevated child of the administrator service: drop every override variable first.
+    kora_core::privsvc::exec::scrub_overrides();
     // Saved licence keys may live in the system keychain (never touched by tests: see `store::keychain`).
     kora_core::store::keychain::enable_system_keychain();
     if std::env::args_os().any(|a| a == "--license-key" || a.to_string_lossy().starts_with("--license-key=")) {
@@ -384,21 +391,12 @@ fn main() {
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
         command,
-        Some(
-            Command::ServiceHost { .. }
-                | Command::SelfUpdate { .. }
-                | Command::Helper { .. }
-                | Command::AdminWorker(_)
-                | Command::AdminStep(_)
-                | Command::AdminDb(_)
-                | Command::Update(UpdateArgs { auto: true, .. })
-        )
+        Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Service { .. } | Command::AdminStep(_) | Command::AdminDb(_) | Command::Update(UpdateArgs { auto: true, .. }))
     );
     // The worker has a hidden window and its step children no terminal: never wait for a key.
     match &command {
-        Some(Command::AdminWorker(a)) => std::process::exit(admin_worker::admin_worker(a)),
-        Some(Command::AdminStep(a)) => std::process::exit(admin_worker::admin_step(a)),
-        Some(Command::AdminDb(a)) => std::process::exit(admin_worker::admin_db(a)),
+        Some(Command::AdminStep(a)) => std::process::exit(admin_step::admin_step(a)),
+        Some(Command::AdminDb(a)) => std::process::exit(admin_step::admin_db(a)),
         _ => {}
     }
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
@@ -454,8 +452,8 @@ fn main() {
         Some(Command::Start { server }) => control(&server, kora_core::service::ControlAction::Start),
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
-        Some(Command::Helper { cmd }) => helper(cmd),
-        Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => unreachable!("handled above"),
+        Some(Command::Service { cmd }) => service_cmd::service(cmd),
+        Some(Command::AdminStep(_) | Command::AdminDb(_)) => unreachable!("handled above"),
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run, false),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
@@ -491,15 +489,6 @@ mod tests {
         }
         assert!(kind(&["install", "--name", "a"]).privileged(), "an install with options is the scriptable installer");
         assert!(!kind(&["app", "install"]).privileged(), "the per-user shortcuts need no administrator rights");
-    }
-
-    #[test]
-    fn the_helper_command_is_classified() {
-        use elevate::CmdKind as K;
-        let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
-        assert_eq!(command_kind(&parse(&["helper", "install"])), K::Uninstall { dry_run: false });
-        assert_eq!(command_kind(&parse(&["helper", "status"])), K::Other);
-        assert_eq!(command_kind(&parse(&["helper", "serve"])), K::Other);
     }
 
     #[test]

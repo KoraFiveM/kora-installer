@@ -321,5 +321,41 @@ for cut in 2000 4000 $(( $(wc -c < "$SCRIPT") - 3 )); do
   check "script cut at $cut bytes does nothing" eval "head -c $cut '$SCRIPT' | env HOME='$WORK/home' KORA_RELEASE_BASE='$BASE' KORA_INSTALL_DIR='$WORK/t12/bin' sh > '$WORK/out' 2>&1; ! out_has Downloading && test ! -e '$WORK/t12'"
 done
 
+# 13. the system install (one administrator approval) comes first; every failure is explained, and the
+#     per-user install is the fallback unless KORA_SYSTEM=1 asked for the system one only.
+mkdir -p "$WORK/sysbin" "$WORK/t13"
+printf 'fake deb\n' > "$WORK/rel/kora-linux-x86_64.deb"
+echo "$(sha256sum "$WORK/rel/kora-linux-x86_64.deb" | cut -d ' ' -f 1)  kora-linux-x86_64.deb" > "$WORK/rel/kora-linux-x86_64.deb.sha256"
+cat > "$WORK/sysbin/sudo" <<'FAKE'
+#!/bin/sh
+echo "sudo $*" >> "$KORA_SYS_LOG"
+exec "$@"
+FAKE
+cat > "$WORK/sysbin/dpkg" <<'FAKE'
+#!/bin/sh
+echo "dpkg $* (KORA_SERVICE_USERS=${KORA_SERVICE_USERS:-})" >> "$KORA_SYS_LOG"
+exit "${KORA_TEST_DPKG_EXIT:-0}"
+FAKE
+cp "$WORK/sysbin/dpkg" "$WORK/sysbin/apt-get"
+chmod +x "$WORK/sysbin/"*
+SYSLOG="$WORK/t13.log"; : > "$SYSLOG"
+check "KORA_SYSTEM=1 asks sudo to install the package, naming the account to allow" run_fail PATH="$WORK/sysbin:$PATH" KORA_SYS_LOG="$SYSLOG" KORA_SYSTEM=1 KORA_RELEASE_BASE="$BASE" KORA_NO_LAUNCH=1
+check "  ... dpkg ran under sudo with the package and KORA_SERVICE_USERS" grep -q "^dpkg -i .*kora.deb (KORA_SERVICE_USERS=$(id -un))" "$SYSLOG"
+check "  ... no per-user fallback when the system install was asked for" out_has "KORA_SYSTEM=1, so nothing else was tried"
+if [ "$(id -u)" != "0" ]; then check "  ... through sudo (not root)" grep -q "^sudo env KORA_SERVICE_USERS" "$SYSLOG"; fi
+# a package that does not match its checksum is never installed
+echo "0000000000000000000000000000000000000000000000000000000000000000  kora-linux-x86_64.deb" > "$WORK/rel/kora-linux-x86_64.deb.sha256"
+: > "$SYSLOG"
+check "a package with a wrong checksum fails and dpkg never runs" run_fail PATH="$WORK/sysbin:$PATH" KORA_SYS_LOG="$SYSLOG" KORA_SYSTEM=1 KORA_RELEASE_BASE="$BASE" KORA_NO_LAUNCH=1
+check "  ... says so" out_has "does not match its checksum"
+check "  ... dpkg was not called" test ! -s "$SYSLOG"
+# without KORA_SYSTEM, with a chosen folder or nobody to ask: just for you, no sudo at all
+: > "$SYSLOG"
+check "a chosen folder is a per-user install: no sudo, no package" run PATH="$WORK/sysbin:$PATH" KORA_SYS_LOG="$SYSLOG" KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$WORK/t13/bin" KORA_NO_LAUNCH=1
+check "  ... installed there" test -x "$WORK/t13/bin/kora"
+check "  ... sudo was never called" test ! -s "$SYSLOG"
+check "KORA_SYSTEM=0 installs just for you" run PATH="$WORK/sysbin:$PATH" KORA_SYS_LOG="$SYSLOG" KORA_SYSTEM=0 KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$WORK/t13b/bin" KORA_NO_LAUNCH=1
+check "  ... sudo was never called" test ! -s "$SYSLOG"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all install.sh tests passed"; else echo "$fails install.sh test(s) FAILED"; exit 1; fi

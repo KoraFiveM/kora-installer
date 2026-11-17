@@ -245,6 +245,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::InstallResume => OpSpec::start_job_with::<w::ResumeRequest>().events::<w::InstallEvent>().result::<crate::installer::InstallOutcome>(),
         Op::InstallLog => OpSpec::get::<w::InstallLog>(),
         Op::SelfUpdateCheck => OpSpec::get::<w::SelfUpdateInfo>(),
+        Op::AdminServiceInstall => OpSpec::start_job().events::<w::StatusEvent>().result::<w::AdminServiceInstallResult>(),
         Op::SelfUpdateApply => OpSpec::start_job_with::<w::SelfUpdateRequest>().events::<w::StatusEvent>().result::<w::SelfUpdateResult>(),
         Op::AppStatus => OpSpec::get::<w::AppStatus>(),
         Op::AppInstall => OpSpec::call::<w::AppInstallRequest, w::Message>(),

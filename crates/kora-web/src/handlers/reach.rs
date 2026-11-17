@@ -56,7 +56,24 @@ pub async fn forwarding_set(State(st): State<AppState>, Path(s): Path<String>, J
 pub async fn reach_firewall_open(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
-        let notes = st.backend().firewall_open(&e).map_err(ApiError::core)?;
+        // Not elevated: the administrator service does it (the game port only, as the person's own server, recorded in
+        // its ownership ledger). Without the service the answer carries the choices and `kora reach <name> --open-firewall`.
+        if !kora_core::elevate::is_elevated() && crate::elevated::service_ready() {
+            crate::elevated::reach_open_firewall(&e.name, &e.dir, &mut |_| {})?;
+            return Ok(Json(json!({"notes": [format!("Opened port {} (TCP and UDP) in the firewall.", e.ports.game)]})));
+        }
+        let notes = match st.backend().firewall_open(&e) {
+            Ok(n) => n,
+            // The computer's own answer is "run this as administrator": the panel adds the way through the service
+            // (install it, or ask an administrator to turn it on for this account) and names the command that exists.
+            Err(m) if kora_core::problem::Problem::decode(&m).code == kora_core::problem::codes::NEEDS_ELEVATION => {
+                let shown = vec!["kora".to_string(), "reach".into(), e.name.clone(), "--open-firewall".into()];
+                let ctx = kora_core::privsvc::problems::Context { what: "open the firewall for this server's game port".into(), command: shown, can_skip_admin: false };
+                crate::elevated::precheck(&ctx, "Changing the firewall needs administrator rights. Run this command as administrator, then check again:")?;
+                return Err(ApiError::core(m));
+            }
+            Err(m) => return Err(ApiError::core(m)),
+        };
         Ok(Json(json!({"notes": notes})))
     })
     .await

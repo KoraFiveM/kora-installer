@@ -191,10 +191,14 @@ MSI): the web UI asks `window.koraShell.elevate('install_service')` (`elevateIns
 window, calls `SetForegroundWindow`, then `ShellExecuteExW("runas", <fixed command>, hwnd)` with `SEE_MASK_NOASYNC`
 (`os.rs::elevate`). Declining the prompt gives "Windows asked for permission and it was not given." (error 1223).
 
-**Seam for the privileged-service work:** the fixed command is `kora service install`, in one place
-(`kora-shell/src/platform.rs::elevated_command`). If its name or arguments differ at merge, change it there. The web
-button that offers "Install Kora's administrator service" should call `elevateInstallService()` first and fall back to
-what it does today when that returns false. Nothing in the app edits or depends on the service code.
+**Merged with the privileged service (confirmed):** the fixed command is `kora service install` (it exists: it downloads this
+version's MSI, checks the checksum and runs `msiexec`), in one place (`kora-shell/src/platform.rs::elevated_command`). The web
+button "Install Kora's administrator service" (`web/src/components/AdminActions.tsx`) calls `elevateInstallService()` first
+and, inside the app, waits until `GET /system` says `admin_service: ready` (the installer runs on its own); outside the app (false)
+it starts the install as a panel job as before. One caveat: the service allows the account that runs `kora service install`. For an
+administrator that is the person; if a standard user answers the prompt with an administrator's password, that administrator is the
+one allowed and has to run `kora service allow <the person's account>` (the panel says so when it then reports "not turned on
+for your account").
 
 ## Autostart, shortcuts, uninstall
 
@@ -217,8 +221,12 @@ what it does today when that returns false. Nothing in the app edits or depends 
 
 ## Shipping it in the MSI and the .deb
 
-The MSI, the `.deb` and `release.yml` belong to the privileged-service work. Nothing there was edited; these are the pieces
-to add at merge. **Decide where the app's binary comes from:** `desktop.yml` builds it and uploads
+**Done in the privileged-service merge** (`packaging/windows/kora.wxs`, `build-msi.ps1 -DesktopExe`, `packaging/linux/build-desktop-deb.sh`,
+`release.yml` jobs `build-desktop`, `sign-desktop`, `package-desktop-linux`): the MSI has an optional `DesktopApp` feature (on by default,
+`msiexec /i kora.msi DESKTOP=0` leaves it out; then the shortcuts start a bare `kora` as before), no autostart from the MSI, the
+uninstall runs `kora-desktop --uninstall` as the uninstalling user; the `.deb` is a separate `kora-desktop` package that depends on `kora`;
+the exe is signed by the same signing workflow as `kora.exe` (before the MSI is built, so the MSI embeds the signed one) and the
+checksums, `.deb` and attestation include it. None of it has run on a real machine. The snippets below are what it was built from. **Decide where the app's binary comes from:** `desktop.yml` builds it and uploads
 `kora-desktop-<os>-x86_64` with `SHA256SUMS.txt`; `release.yml` should download that artifact (or build it the same way)
 and sign it with the same signing step as `kora.exe` (an unsigned program that starts at sign-in and shows
 notifications is what SmartScreen and antivirus distrust most).

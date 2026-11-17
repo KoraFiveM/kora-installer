@@ -163,7 +163,7 @@ fn without_administrator_rights_the_start_is_refused_with_the_elevation_problem_
     let r = Svc::new();
     let p = start_database_with(&r, &stopped(), false, true, Duration::from_secs(1), &mut |_| {}).unwrap_err();
     assert_eq!(p.code, codes::NEEDS_ELEVATION);
-    assert_eq!(p.actions[0], Action::RequestAdmin);
+    assert_eq!(p.actions[0], Action::InstallAdminService);
     assert_eq!(p.actions[1], Action::show_command(&["net", "start", "mariadb"], true));
     assert!(r.calls.borrow().is_empty(), "nothing was run: {:?}", r.calls.borrow());
     let l = start_database_with(&r, &stopped(), false, false, Duration::from_secs(1), &mut |_| {}).unwrap_err();

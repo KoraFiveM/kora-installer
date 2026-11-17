@@ -1,7 +1,7 @@
 // Mock scenarios: which fake world the in-app backend simulates. Chosen with `?scenario=<name>` (kept in
 // sessionStorage so navigating keeps it) or with the floating "Mock" switcher. Only bundled in mock builds.
 
-export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows', 'restarted', 'keylost'] as const
+export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows', 'service', 'noservice', 'notallowed', 'restarted', 'keylost'] as const
 export type ScenarioName = (typeof SCENARIOS)[number]
 
 export const SCENARIO_INFO: Record<ScenarioName, string> = {
@@ -12,9 +12,12 @@ export const SCENARIO_INFO: Record<ScenarioName, string> = {
   slow: 'Like default, but every request takes 1.5 to 3 s and jobs run slowly (loading states).',
   offline: 'The API answers 401: the "session expired" screen.',
   down: 'Every request fails with a network error (Kora is not answering).',
+  service: "Not an administrator, with Kora's administrator service installed and turned on for you: the administrator parts of an install just happen (no prompt).",
+  noservice: "A per-user install without Kora's administrator service: the administrator parts offer the choices (install the service, continue without them, the command).",
+  notallowed: "Kora's administrator service is installed but not turned on for your account: the administrator parts say so and show the command an administrator runs (kora service allow).",
+  windows: "Windows, a per-user install without Kora's administrator service: the administrator parts offer 'Install Kora's administrator service', which runs the installer (one permission prompt) and then works.",
   restarted: 'The panel was restarted: Settings shows the jobs and activity from before, one install was stopped by the restart (Carry on), one update job was interrupted.',
   keylost: 'Like default, with one saved licence key (Main) whose system keychain entry has disappeared: Settings says so and offers to enter it again.',
-  windows: 'Windows: Kora asks Windows for permission itself. Install names starting with "decline" (No at the prompt), "nobody" (no answer) or "remote" (signed in from another device) show the choices.',
 }
 
 export const STORAGE_KEY = 'kora-mock-scenario'
@@ -49,12 +52,14 @@ export interface Behaviour {
   auth: 'ok' | 'expired' | 'down'
   /** Everything fails in realistic ways. */
   trouble: boolean
-  /** Windows: the panel asks Windows for administrator permission itself (`admin_prompt`). */
+  /** The Windows panel (paths, wording). The windows scenario is also a per-user install without the service. */
   windows: boolean
+  /** Not an administrator: Kora's administrator service is `ready` or `missing` (`admin_service`). `none` = the scenario does not say. */
+  service: 'none' | 'ready' | 'missing' | 'not_allowed'
 }
 
 export function behaviourOf(n: ScenarioName): Behaviour {
-  const base: Behaviour = { latency: [120, 120], jobSlow: 1, auth: 'ok', trouble: false, windows: false }
+  const base: Behaviour = { latency: [120, 120], jobSlow: 1, auth: 'ok', trouble: false, windows: false, service: 'none' }
   switch (n) {
     case 'slow':
       return { ...base, latency: [1500, 3000], jobSlow: 3 }
@@ -65,7 +70,13 @@ export function behaviourOf(n: ScenarioName): Behaviour {
     case 'trouble':
       return { ...base, trouble: true }
     case 'windows':
-      return { ...base, windows: true }
+      return { ...base, windows: true, service: 'missing' }
+    case 'service':
+      return { ...base, service: 'ready' }
+    case 'notallowed':
+      return { ...base, service: 'not_allowed' }
+    case 'noservice':
+      return { ...base, service: 'missing' }
     default:
       return base
   }

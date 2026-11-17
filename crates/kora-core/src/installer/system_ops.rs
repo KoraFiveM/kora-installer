@@ -1,5 +1,5 @@
 //! Administrator steps done for a process that is not elevated (the Windows panel), by an elevated
-//! helper (`helper::worker`). The install's plan, its state and every file in the server folder
+//! administrator service (`privsvc`). The install's plan, its state and every file in the server folder
 //! stay with the person's own process; only these steps run elevated, as
 //! `kora admin-step run|undo --step <id> --dir <folder>` ([`step_args`]):
 //!
@@ -13,7 +13,7 @@
 //!
 //! The elevated child never writes into the server folder: it reads the install record, works on a
 //! copy of `created.json` in memory (`Ctx::shadow`) and prints one [`StepResult`] line
-//! (`helper::worker::RESULT_PREFIX`), which the person's process applies (it writes the record, the
+//! (`privsvc::exec::RESULT_PREFIX`), which the person's process applies (it writes the record, the
 //! database login file, ...). So files stay theirs, a failed step can be retried with a new prompt or
 //! skipped, and the plan state never belongs to an administrator account.
 //!
@@ -55,7 +55,7 @@ impl std::fmt::Debug for SharedAdmin {
 }
 
 /// Steps the helper runs (`admin-step run --step <id>`).
-pub const RUN_STEPS: &[&str] = &["prepare.db", "build.db", "system.firewall", "system.service", "system.schedule"];
+pub const RUN_STEPS: &[&str] = &["prepare.db", "build.db", "system.firewall", "reach.firewall", "system.service", "system.schedule"];
 /// Steps the helper undoes (`admin-step undo --step <id>`, deleting a server).
 pub const UNDO_STEPS: &[&str] = &["build.db", "system.firewall", "system.service", "system.schedule"];
 
@@ -99,9 +99,9 @@ pub struct DbResult {
 }
 
 impl StepResult {
-    /// The child's last output line (`helper::worker::RESULT_PREFIX` + JSON).
+    /// The child's last output line (`privsvc::exec::RESULT_PREFIX` + JSON).
     pub fn to_line(&self) -> std::result::Result<String, String> {
-        serde_json::to_string(self).map(|j| format!("{}{j}", crate::helper::worker::RESULT_PREFIX)).map_err(|e| e.to_string())
+        serde_json::to_string(self).map(|j| format!("{}{j}", crate::privsvc::exec::RESULT_PREFIX)).map_err(|e| e.to_string())
     }
 }
 
@@ -131,11 +131,11 @@ pub fn step_args(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: 
     v
 }
 
-/// Should the database work of an install go to the helper? Only on Windows, not elevated, with a
-/// helper, when no login was given (so the login is Kora's own MariaDB one, which only
-/// administrators can read).
-pub fn db_needs_helper(windows: bool, admin: bool, has_helper: bool, login_given: bool) -> bool {
-    windows && !admin && has_helper && !login_given
+/// Should the database work of an install go to the administrator service? When not elevated, with
+/// the service available, and no login was given (so the login is the administrator one: Kora's own
+/// MariaDB login on Windows, the root socket on Linux; only administrators can use it).
+pub fn db_needs_helper(admin: bool, has_helper: bool, login_given: bool) -> bool {
+    !admin && has_helper && !login_given
 }
 
 /// The Administrators group (owner of what an elevated administrator creates on Windows Server).
@@ -147,7 +147,7 @@ pub const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
 /// `kora install` from an administrator terminal). `owner` = the folder's owner SID. A standard
 /// account never gets a folder of the administrators', even when an administrator typed the password.
 pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record: bool, admin_member: bool) -> std::result::Result<(), String> {
-    let no = |why: &str| Err(format!("Kora's administrator helper will not work on {}: {why}.", dir.display()));
+    let no = |why: &str| Err(format!("Kora's administrator service will not work on {}: {why}.", dir.display()));
     if !dir.is_absolute() || dir.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return no("it is not a full folder path");
     }
@@ -162,15 +162,13 @@ pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record
     }
 }
 
-/// Who an elevated child of the Windows worker or helper works for (`KORA_WORKER_USER_SID` and
-/// `KORA_WORKER_ADMIN_MEMBER`, set by the worker or helper from the panel's token; the child's
-/// environment is built by them, so the person cannot set these). `None` elsewhere (an
+/// Who an elevated child of the Windows service works for (`KORA_WORKER_USER_SID`, set by the service
+/// from the caller's token; the child's environment is built by the service, so the person cannot set it). `None` elsewhere (an
 /// administrator terminal, Linux).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PanelUser {
     pub sid: String,
-    /// May work on folders owned by the Administrators group (an elevated Kora made them). Never in
-    /// the opt-in helper.
+    /// May work on folders owned by the Administrators group (an elevated Kora made them). Never for a child of the service.
     pub admin_folders: bool,
 }
 
@@ -179,7 +177,7 @@ pub fn panel_user() -> Option<PanelUser> {
         return None;
     }
     let sid = std::env::var("KORA_WORKER_USER_SID").ok().filter(|s| !s.is_empty())?;
-    let admin_folders = std::env::var("KORA_WORKER_ADMIN_MEMBER").is_ok_and(|v| v == "1") && !crate::helper::winhelper::in_service();
+    let admin_folders = std::env::var("KORA_WORKER_ADMIN_MEMBER").is_ok_and(|v| v == "1") && !crate::privsvc::paths::in_service();
     Some(PanelUser { sid, admin_folders })
 }
 
@@ -191,43 +189,13 @@ pub fn check_panel_dir(dir: &Path) -> Result<()> {
     let Some(u) = panel_user() else { return Ok(()) };
     check_dir_links(dir)?;
     let record = super::meta_dir(dir).join("request.json").is_file() || dir.join("kora-server.json").is_file();
-    let owner = crate::helper::winpipe::path_owner_sid(dir);
+    let owner = crate::privsvc::winapi::path_owner_sid(dir);
     check_dir_for(dir, &u.sid, owner.as_deref(), record, u.admin_folders).map_err(InstallError)
-}
-
-/// The ownership ledger (`%ProgramFiles%\\Kora\\owners.json`) as this elevated child sees it.
-fn ledger_path() -> Option<std::path::PathBuf> {
-    crate::helper::winhelper::program_files().map(|pf| crate::helper::winhelper::ledger_path(&pf))
-}
-
-/// Before an elevated child makes (`undo` = false) or removes (`undo` = true) the things behind
-/// `keys` for the panel's person. Making: never something the ledger gives to another account.
-/// Removing: in the opt-in helper only what the ledger gives to this person; through the prompt,
-/// anything not recorded for another account (things made before the ledger existed).
-pub fn ledger_check(keys: &[String], undo: bool) -> Result<()> {
-    let (Some(u), Some(p)) = (panel_user(), ledger_path()) else { return Ok(()) };
-    let l = crate::helper::winhelper::Ledger::load(&p);
-    let strict_undo = undo && crate::helper::winhelper::in_service();
-    crate::helper::winhelper::ledger_allows(&l, keys, &u.sid, strict_undo).map_err(InstallError)
-}
-
-/// After an elevated child made (`made` = true) or removed the things behind `keys`.
-pub fn ledger_note(keys: &[String], made: bool) {
-    let (Some(u), Some(p)) = (panel_user(), ledger_path()) else { return };
-    let mut l = crate::helper::winhelper::Ledger::load(&p);
-    for k in keys {
-        if made {
-            l.record(k.clone(), &u.sid);
-        } else {
-            l.forget(k);
-        }
-    }
-    let _ = l.save(&p);
 }
 
 /// The request of an `admin-step` must be a sane one, and an elevated step done for Kora Panel
 /// (`for_panel`: the worker; the record in the folder could have been written by any program
-/// running as the person) opens only ports `helper::winhelper::port_allowed` accepts: never the
+/// running as the person) opens only ports `privsvc::op::port_ok` accepts: never the
 /// privileged range, remote desktop, remote management or database ports.
 pub fn check_step_request(req: &super::InstallRequest, step: &str, undo: bool, for_panel: bool) -> Result<()> {
     if undo {
@@ -236,7 +204,7 @@ pub fn check_step_request(req: &super::InstallRequest, step: &str, undo: bool, f
     super::validate_request(req)?;
     if for_panel && step == "system.firewall" {
         for p in [req.ports.game, req.ports.txadmin] {
-            if !crate::helper::winhelper::port_allowed(p) {
+            if !crate::privsvc::op::port_ok(p) {
                 return Err(InstallError(format!(
                     "Kora does not open port {p} in the firewall from the panel: Windows, remote administration or databases use it. Choose other ports for the server (30120 and 40120 are the usual ones)."
                 )));
@@ -260,12 +228,12 @@ pub fn delete_needs_admin(created: Option<&Created>, has_db_state: bool, keep_db
 pub fn delete_needs_admin_at(dir: &Path, keep_db: bool, password_given: bool) -> bool {
     let has_db = super::meta_dir(dir).join("db-provision.json").is_file();
     let own_login = load_request_from(dir).is_some_and(|r| r.db_admin.is_none());
-    delete_needs_admin(super::load_created_from(dir).as_ref(), has_db, keep_db, cfg!(windows) && !password_given && own_login)
+    delete_needs_admin(super::load_created_from(dir).as_ref(), has_db, keep_db, !password_given && own_login)
 }
 
 /// `kora admin-db start|install`: Kora's own MariaDB on Windows, outside an install (the panel's
 /// "Start database for me"). `start` starts its service and waits until it takes logins; `install`
-/// sets it up when it is not there yet. Run by the administrator helper.
+/// sets it up when it is not there yet. Run by the administrator service.
 pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
     use super::windows_db;
     if crate::db::Os::current() != crate::db::Os::Windows {
@@ -288,7 +256,7 @@ pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
             let rec = windows_db::install(&Hooks::from_env().http, say)?;
             Ok(format!("Kora installed its own MariaDB {} as the Windows service '{}'", rec.version, rec.service))
         }
-        other => Err(InstallError(format!("'{other}' is not something Kora's administrator helper does with the database server"))),
+        other => Err(InstallError(format!("'{other}' is not something Kora's administrator service does with the database server"))),
     }
 }
 
@@ -297,17 +265,30 @@ pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
 pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: bool, known: Known, say: &mut dyn FnMut(&str)) -> Result<StepResult> {
     let allowed = if undo { UNDO_STEPS } else { RUN_STEPS };
     if !allowed.contains(&step) {
-        return Err(InstallError(format!("'{step}' is not a step Kora's administrator helper does")));
+        return Err(InstallError(format!("'{step}' is not a step Kora's administrator service does")));
     }
     check_dir_links(dir)?;
     check_panel_dir(dir)?;
     let mut req = load_request_from(dir).ok_or_else(|| InstallError(format!("{} has no Kora install record", dir.display())))?;
-    let in_service = crate::helper::winhelper::in_service();
-    check_step_request(&req, step, undo, in_service || panel_user().is_some())?;
+    let in_service = crate::privsvc::paths::in_service();
+    check_step_request(&req, step, undo, in_service || crate::privsvc::paths::in_service() || panel_user().is_some())?;
+    // `reach.firewall`: the game port only (never txAdmin), through the same firewall step and the same port rules.
+    let reach = step == "reach.firewall";
+    let step = if reach { "system.firewall" } else { step };
+    if reach {
+        if !crate::privsvc::op::port_ok(req.ports.game) {
+            return Err(InstallError(format!("Kora does not open port {} in the firewall from the panel.", req.ports.game)));
+        }
+        req.txadmin_public = false;
+    }
     // Removing system-wide things: the name and ports come from the server list, not from the
     // folder's own (changeable) record, exactly as `kora delete` does.
     let trusted = if undo {
-        match known.or_else(|| registered(dir).map(|(n, p)| (n, p.game, p.txadmin))) {
+        // In the administrator service the name and ports come in the request (the panel read them from the
+        // person's own list); the child never opens the person's server list itself (a file, or the store's
+        // database, that the person controls and root must not read or create files next to).
+        let fallback = if in_service { None } else { registered(dir).map(|(n, p)| (n, p.game, p.txadmin)) };
+        match known.or(fallback) {
             Some((name, game, txadmin)) => {
                 req.name = name;
                 (req.ports.game, req.ports.txadmin) = (game, txadmin);
@@ -318,18 +299,12 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     } else {
         true
     };
-    // Which system-wide things this step touches, and whose they are (see `helper::winhelper::Ledger`).
-    let slug = super::slug(&req.name);
-    let old_db = crate::db::ProvisionState::load(&super::meta_dir(dir).join("db-provision.json")).ok().map(|s| s.database);
-    let keys_before = crate::helper::winhelper::ledger_keys(step, &slug, old_db.as_deref());
-    ledger_check(&keys_before, undo)?;
     let (tx, rx) = mpsc::channel();
     let mut ctx = new_ctx_trusted(&req, &Hooks::from_env(), true, tx, keep_db, keep_files, trusted);
     if let Some(c) = Arc::get_mut(&mut ctx) {
         c.shadow = Some(Mutex::new(super::load_created_from(dir).unwrap_or_default()));
     }
     let grants_left = !undo && step == "system.service" && in_service;
-    let step_name = step.to_string();
     let step = step.to_string();
     std::thread::scope(|s| {
         let h = s.spawn(move || {
@@ -344,14 +319,6 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
             }
         }
         let (r, created, notes) = h.join().map_err(|_| InstallError("the administrator step stopped unexpectedly".into()))?;
-        if let Ok((_, db)) = &r {
-            if undo {
-                ledger_note(&keys_before, false);
-            } else {
-                let new_db = db.as_ref().and_then(|d| d.state.as_ref()).map(|s| s.database.clone());
-                ledger_note(&crate::helper::winhelper::ledger_keys(&step_name, &slug, new_db.as_deref().or(old_db.as_deref())), true);
-            }
-        }
         Ok(match r {
             Ok((detail, db)) => StepResult { detail, notes, created, db, error: None, grants_left },
             Err(e) => StepResult { detail: String::new(), notes, created, db: None, error: Some(Problem::decode(&e.0)), grants_left: false },
@@ -374,12 +341,11 @@ mod tests {
     }
 
     #[test]
-    fn the_database_goes_to_the_helper_only_for_kora_s_own_login_on_windows() {
-        assert!(db_needs_helper(true, false, true, false));
-        assert!(!db_needs_helper(false, false, true, false), "Linux: root socket / given login");
-        assert!(!db_needs_helper(true, true, true, false), "already administrator");
-        assert!(!db_needs_helper(true, false, false, false), "no helper: the old behaviour");
-        assert!(!db_needs_helper(true, false, true, true), "a login the person typed works without administrator rights");
+    fn the_database_goes_to_the_service_only_for_the_administrator_login() {
+        assert!(db_needs_helper(false, true, false));
+        assert!(!db_needs_helper(true, true, false), "already administrator");
+        assert!(!db_needs_helper(false, false, false), "no service: the old behaviour");
+        assert!(!db_needs_helper(false, true, true), "a login the person typed works without administrator rights");
     }
 
     #[test]

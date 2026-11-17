@@ -41,9 +41,25 @@ pub(crate) enum ScheduleCmd {
 pub(crate) fn schedule(cmd: ScheduleCmd) -> i32 {
     use kora_core::service as svc;
     // Working for Kora Panel's person in the elevated worker: only servers on their list, in a
-    // folder that is theirs, and never another Windows account's update task (see `panel_task_check`).
+    // folder that is theirs, and never another Windows account's update task.
     let for_panel = installer::system_ops::panel_user().is_some();
     let find = |server: &str| -> Option<registry::ServerEntry> {
+        // A child of the administrator service: the server is the FOLDER the service checked (owner, links, install
+        // record), described by that folder's own record; the person's server list (their file, their database) is
+        // never opened here.
+        if kora_core::privsvc::paths::in_service() {
+            let dir = PathBuf::from(server);
+            let req = installer::load_request_from(&dir)?;
+            return Some(registry::ServerEntry {
+                source: None,
+                versions: None,
+                name: req.name,
+                dir,
+                mode: req.mode,
+                ports: registry::PortsRecord { game: req.ports.game, txadmin: req.ports.txadmin },
+                created_unix: 0,
+            });
+        }
         let reg = registry::Registry::load().unwrap_or_default();
         if for_panel {
             return reg.find(server).cloned();
@@ -102,13 +118,8 @@ pub(crate) fn schedule(cmd: ScheduleCmd) -> i32 {
                 eprintln!("error: {e}");
                 return 1;
             }
-            if let Err(e) = panel_task_check(&rec, false) {
-                eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
-                return 1;
-            }
             match svc::set(&rec, &cfg) {
                 Ok(()) => {
-                    installer::system_ops::ledger_note(&panel_task_keys(&rec), true);
                     println!("{}: {}", rec.name, svc::describe(&cfg));
                     0
                 }
@@ -120,13 +131,8 @@ pub(crate) fn schedule(cmd: ScheduleCmd) -> i32 {
         }
         ScheduleCmd::Off { server } => {
             let Some(rec) = find(&server) else { return missing(&server) };
-            if let Err(e) = panel_task_check(&rec, true) {
-                eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
-                return 1;
-            }
             match svc::remove(&rec) {
                 Ok(()) => {
-                    installer::system_ops::ledger_note(&panel_task_keys(&rec), false);
                     println!("{}: automatic updates are off", rec.name);
                     0
                 }
@@ -137,15 +143,4 @@ pub(crate) fn schedule(cmd: ScheduleCmd) -> i32 {
             }
         }
     }
-}
-
-fn panel_task_keys(rec: &registry::ServerEntry) -> Vec<String> {
-    kora_core::helper::winhelper::ledger_keys("system.schedule", &installer::slug(&rec.name), None)
-}
-
-/// In the elevated worker (no-op elsewhere): the server folder is the panel person's, and the
-/// update task's name is not another Windows account's.
-fn panel_task_check(rec: &registry::ServerEntry, undo: bool) -> installer::Result<()> {
-    installer::system_ops::check_panel_dir(&rec.dir)?;
-    installer::system_ops::ledger_check(&panel_task_keys(rec), undo)
 }

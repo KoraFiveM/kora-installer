@@ -18,7 +18,7 @@ export class ApiError extends Error {
   readonly command?: string[]
   readonly details?: string
   readonly actions?: T.ProblemAction[]
-  /** Send the request that failed again (`request_admin`: once more, now asking Windows for permission). */
+  /** Send the request that failed again (for example once Kora's administrator service is installed). */
   replay?: () => Promise<unknown>
   constructor(status: number, body: ApiErrorBody) {
     super(body.message)
@@ -114,22 +114,8 @@ export interface RequestOptions {
   quiet401?: boolean
   /** Send this file as the body instead of JSON (streamed by the browser). */
   raw?: { body: Blob; type: string; headers?: Record<string, string> }
-  /** The person chose "Ask for administrator permission": Windows may show its prompt even for a remote session. */
-  askAdmin?: boolean
   /** Do not ask for a fresh passkey check and retry (set on the retry itself). */
   noReauth?: boolean
-}
-
-/** Header of [`RequestOptions.askAdmin`] (`kora_web::elevated::ASK_HEADER`). */
-export const ADMIN_HEADER = 'X-Kora-Admin'
-
-let askAdminAt = 0
-/**
- * The next change sent within a minute asks Windows for administrator permission (the app-wide
- * `request_admin` button arms this, then repeats what failed). Used once.
- */
-export function askForAdminNext(): void {
-  askAdminAt = Date.now()
 }
 
 export async function request<R>(path: string, opts: RequestOptions = {}): Promise<R> {
@@ -138,10 +124,6 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   if (method !== 'GET') headers['X-Kora'] = '1'
   const secret = sessionSecret()
   if (secret) headers['X-Kora-Session'] = secret
-  if (method !== 'GET' && (opts.askAdmin || (askAdminAt && Date.now() - askAdminAt < 60_000))) {
-    headers[ADMIN_HEADER] = 'ask'
-    askAdminAt = 0
-  }
   let body: BodyInit | undefined
   if (opts.raw) {
     headers['Content-Type'] = opts.raw.type
@@ -205,7 +187,6 @@ export interface CallOptions {
   /** Do not ask for a fresh passkey check and retry (the check's own calls). */
   noReauth?: boolean
   raw?: RequestOptions['raw']
-  askAdmin?: boolean
 }
 
 /** `/servers/{s}/logs/{file}` with its parameters filled in (and escaped). */
@@ -471,15 +452,18 @@ export const api = {
     checkDisk: (dir: string) => call('check_disk', { body: { dir } }),
     checkDbLogin: (admin: T.DbAdmin | null) => call('check_db_login', { body: { admin } }),
     plan: (req: T.InstallRequest) => call('install_plan', { body: req }),
-    /** `askAdmin`: the person chose "Ask for administrator permission" (Windows may show its prompt). */
-    start: (req: T.InstallRequest, opts: { askAdmin?: boolean } = {}) => call('install_start', { body: req }, { askAdmin: opts.askAdmin }),
+    start: (req: T.InstallRequest) => call('install_start', { body: req }),
     /**
      * Carry on with a stopped install (its job error has `resume: true`): retry the failed step, or skip it.
-     * `withoutAdmin`: "Continue without the administrator parts"; `askAdmin`: ask Windows for permission again.
+     * `withoutAdmin`: "Continue without the administrator parts".
      */
-    resume: (job: string, skip?: string, opts: { askAdmin?: boolean; withoutAdmin?: boolean } = {}) =>
-      call('install_resume', { params: { job }, body: { ...(skip ? { skip } : {}), ...(opts.withoutAdmin ? { without_admin: true } : {}) } }, { askAdmin: opts.askAdmin }),
+    resume: (job: string, skip?: string, opts: { withoutAdmin?: boolean } = {}) =>
+      call('install_resume', { params: { job }, body: { ...(skip ? { skip } : {}), ...(opts.withoutAdmin ? { without_admin: true } : {}) } }),
     log: (job: string) => call('install_log', { params: { job } }).then((r) => r.lines),
+  },
+  /** Kora's administrator service: `install` launches the installer (Windows; elsewhere it answers with the command to run). */
+  adminService: {
+    install: () => call('admin_service_install', {}),
   },
   selfUpdate: {
     check: () => call('self_update_check', {}),

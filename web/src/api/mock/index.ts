@@ -14,7 +14,7 @@ import { installReachMock } from './reach'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { installAuthMock } from './auth'
-import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
+import { adminNeeds, adminWhat, installCommand, withoutAdminReq } from './adminParts'
 
 const BASE = '/api/v1'
 
@@ -25,6 +25,9 @@ const compatMode = (req: T.InstallRequest): T.Mode => (req.versions ? (req.versi
 
 let scenario: ScenarioName = 'default'
 let beh: Behaviour = behaviourOf('default')
+/** The administrator service was installed from the panel ("Install Kora's administrator service"). */
+let serviceInstalled = false
+const svc = (): Behaviour['service'] => (serviceInstalled && beh.service === 'missing' ? 'ready' : beh.service)
 let speed = 1 // multiplier for every wait; 0 in tests of the mock
 let rand = seeded(1)
 let catalog = seedCatalog()
@@ -44,6 +47,7 @@ let consoleTick = 0
 function init(name: ScenarioName) {
   scenario = name
   beh = behaviourOf(name)
+  serviceInstalled = false
   speed = beh.jobSlow
   rand = seeded(7)
   catalog = seedCatalog()
@@ -107,7 +111,7 @@ const find = (name: string): T.ServerSummary => {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms * speed))
 const elevate = (what: string, cmd: string[]) =>
   new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd], {
-    actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
+    actions: [...(svc() === 'missing' ? [{ kind: 'install_admin_service' } as const] : []), { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
   })
 
 // ---- buses ----------------------------------------------------------------------------------
@@ -306,21 +310,6 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
   if (run.attempt === 0 && lower.startsWith('nogh')) setMockGhInstalled(false)
   if (run.attempt === 0 && lower.startsWith('nodb')) stopMockDatabase()
   const failAt = lower.startsWith('nogh') && !mockGhInstalled() ? 'prepare.git' : lower.startsWith('nodb') && mockDbStoppedProblem() ? 'build.db' : lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
-  // Windows: one permission prompt before the first step (see ./windowsAdmin).
-  if (beh.windows && !run.noAdmin && adminNeeds(req).length > 0) {
-    const title = 'Administrator permission'
-    emit({ step: ADMIN_STEP, title, status: 'running', detail: 'Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on. If you do not see the prompt, look for a flashing shield icon in the taskbar.', percent: 0 } satisfies T.ProgressEvent)
-    await sleep(700)
-    const answer = promptAnswer(req.name, run.attempt)
-    if (answer !== 'yes') {
-      const p = promptProblem(req, answer)
-      emit({ step: ADMIN_STEP, title, status: 'failed', detail: p.message, percent: 0 } satisfies T.ProgressEvent)
-      const id = jobId()
-      paused.set(id, { req, failed: '', attempt: run.attempt + 1, done: run.done, skip: run.skip })
-      throw new Fail(403, p.code ?? 'admin.declined', p.message, undefined, { details: p.details, resume: true, kept: [], actions: [...(p.actions ?? []), { kind: 'change_answers' }, { kind: 'open_log', job: id }] })
-    }
-    emit({ step: ADMIN_STEP, title, status: 'done', detail: 'Permission given: Kora does the administrator steps when the install reaches them', percent: 0 } satisfies T.ProgressEvent)
-  }
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
   if (!req.service) skipped.add('build.service')
@@ -415,10 +404,6 @@ const route = (method: string, pattern: string, h: Handler) => {
   routes.push([method, new RegExp('^' + pattern.replace(/\{(\w+)\}/g, '([^/]+)') + '$'), h])
 }
 const dec = (s: string) => decodeURIComponent(s)
-/** The headers of the request being answered (the mock routes only get the body). */
-let lastHeaders = new Headers()
-/** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
-const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const reachMock = installReachMock(route, () => servers)
@@ -482,9 +467,28 @@ route('POST', '/session/link', () => {
   linkCodes.add(code)
   return { code, expires_in: 600 }
 })
-route('GET', '/system', () => (beh.windows
-  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: !viewer.remote, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
-  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: !viewer.remote, kora_home: '/home/sam/.kora', can_restart: true, admin_prompt: false }) satisfies T.SystemInfo)
+route('GET', '/system', () => {
+  const platform = beh.windows ? 'windows' : 'linux'
+  const home = beh.windows ? 'C:\\Users\\Sam\\.kora' : '/home/sam/.kora'
+  const base = { headless: false, version: prefs.version, local: !viewer.remote, kora_home: home, can_restart: true, platform } as const
+  const state = svc()
+  if (state !== 'none') return { ...base, admin: false, elevated: false, admin_service: { state } } satisfies T.SystemInfo
+  return { ...base, admin: !beh.trouble, elevated: !beh.trouble } satisfies T.SystemInfo
+})
+route('POST', '/system/admin-service/install', () => {
+  if (svc() === 'ready') throw new Fail(409, 'conflict', "Kora's administrator service is already installed and turned on for you.")
+  if (!beh.windows) {
+    throw new Fail(403, 'needs_elevation', "Installing Kora's administrator service needs administrator rights. Run this command as administrator, then come back here:", ['kora', 'service', 'install'], { actions: [{ kind: 'show_command', command: ['kora', 'service', 'install'], elevated: true }] })
+  }
+  return startJob('admin_service_install', null, async (emit) => {
+    emit({ type: 'status', message: 'Downloading the Kora installer' })
+    await sleep(600)
+    emit({ type: 'status', message: 'Windows asks for administrator permission on the computer that runs Kora: choose Yes.' })
+    await sleep(900)
+    serviceInstalled = true
+    return { installed: true }
+  })
+})
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -893,7 +897,7 @@ const githubStatus = (): T.GithubStatus => {
     : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } }
 }
 route('GET', '/github/status', () => githubStatus())
-installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble, windows: () => beh.windows })
+installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble })
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
     await sleep(beh.trouble ? 3000 : 6000)
@@ -960,11 +964,8 @@ route('POST', '/installs/plan', (_m, b) => {
   if (r.txadmin_public) needs.push('Open the txAdmin port in the firewall')
   if (r.service) needs.push('Install the background service')
   if (r.db === 'install_if_missing') needs.push('Install the database if it is missing')
-  if (beh.windows) {
-    const w = adminNeeds(r)
-    return { ...planBase(r), needs_admin: w, admin_prompt: w.length > 0 } satisfies T.InstallPlan
-  }
-  return { ...planBase(r), needs_admin: needs, admin_prompt: false } satisfies T.InstallPlan
+  const state = svc()
+  return { ...planBase(r), needs_admin: needs, ...(state !== 'none' ? { admin_service: state } : {}) } satisfies T.InstallPlan
 })
 route('POST', '/installs', (_m, b) => {
   const r = b as unknown as T.InstallRequest
@@ -974,9 +975,16 @@ route('POST', '/installs', (_m, b) => {
   if (servers.some((s) => s.name === r.name)) throw new Fail(409, 'conflict', `A server called "${r.name}" already exists.`)
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)
-  if (beh.windows && r.name.toLowerCase().startsWith('remote') && adminNeeds(r).length > 0 && !askedAdmin()) {
-    const p = remoteProblem(r)
-    throw new Fail(403, p.code ?? 'admin.remote', p.message, undefined, { actions: p.actions })
+  // A per-user install without the administrator service: no automatic path, so the choices.
+  if (svc() === 'not_allowed' && adminNeeds(r).length > 0 && !r.name.toLowerCase().startsWith('without')) {
+    throw new Fail(403, 'service.not_allowed', "Kora's administrator service is installed, but it is not turned on for your account, so Kora cannot " + adminWhat(r) + '. An administrator can turn it on for you.', ['kora', 'install'], {
+      actions: [{ kind: 'show_command', command: ['kora', 'service', 'allow', 'sam'], elevated: true }, { kind: 'continue_without_admin' }, { kind: 'show_command', command: installCommand(r), elevated: true }],
+    })
+  }
+  if (svc() === 'missing' && adminNeeds(r).length > 0 && !r.name.toLowerCase().startsWith('without')) {
+    throw new Fail(403, 'needs_elevation', `Kora needs administrator rights to ${adminWhat(r)}, and its administrator service is not installed on this computer. Install it once (one administrator approval) and Kora can do this, and the next time, without asking again. Or run the command yourself as administrator.`, ['kora', 'install'], {
+      actions: [{ kind: 'install_admin_service' }, { kind: 'continue_without_admin' }, { kind: 'show_command', command: installCommand(r), elevated: true }],
+    })
   }
   let id = ''
   const started = startJob('install', null, (emit) => runInstall(r, emit, () => id))
@@ -1104,7 +1112,6 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
     }
     if (!prefs.signedIn && !publicPath) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
-    lastHeaders = headers
     if (method !== 'GET' && !headers.has('X-Kora')) throw new Fail(403, 'forbidden', 'Missing the X-Kora header.')
     const raw = init?.body
     const body: Body = raw instanceof Blob ? { file: raw, fileName: decodeURIComponent(headers.get('X-File-Name') ?? 'upload.zip') } : raw ? (JSON.parse(String(raw)) as Body) : {}

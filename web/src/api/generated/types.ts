@@ -141,7 +141,7 @@ export type Action =
     tool: Tool,
   }
   | {
-    "kind": "request_admin"
+    "kind": "install_admin_service"
   }
   | {
     "kind": "continue_without_admin"
@@ -192,6 +192,26 @@ export type AddPlan = {
    */
   ensure: Array<string>,
 };
+
+/**
+ * The state of the administrator service, with the service's reason when it is not allowed.
+ */
+export type AdminServiceInfo = {
+  state: AdminServiceState,
+  reason?: string,
+};
+
+/**
+ * `POST /system/admin-service/install` result (a job; the installer ran).
+ */
+export type AdminServiceInstallResult = {
+  installed: boolean,
+};
+
+/**
+ * Is Kora's administrator service there for this account?
+ */
+export type AdminServiceState = "ready" | "missing" | "not_allowed";
 
 /**
  * `POST /servers/adopt`.
@@ -993,7 +1013,7 @@ export type DbLoginRequest = {
 };
 
 /**
- * Result of the start-the-database job: a plain sentence, or what the administrator helper printed.
+ * Result of the start-the-database job: a plain sentence, or what the administrator service printed.
  */
 export type DbStartResult = {
   message?: string,
@@ -1552,9 +1572,9 @@ export type InstallPlan = {
    */
   notes: Array<string>,
   /**
-   * Windows: these parts are done after ONE permission prompt when the install starts.
+   * Kora's administrator service: `ready` = it does the `needs_admin` parts by itself.
    */
-  admin_prompt: boolean,
+  admin_service?: AdminServiceState,
 };
 
 /**
@@ -3041,7 +3061,7 @@ export type SelfUpdateRequest = {
 };
 
 /**
- * Result of the self-update job. `output` is what the administrator helper printed, when it ran the update.
+ * Result of the self-update job. `output` is what the administrator service printed, when it ran the update.
  */
 export type SelfUpdateResult = {
   version: string,
@@ -3362,11 +3382,10 @@ export type SystemInfo = {
    * Same as `elevated` (the panel reads this name).
    */
   admin: boolean,
-  helper_installed: boolean,
   /**
-   * Windows: the panel asks Windows for administrator permission itself (one prompt per install or action).
+   * Kora's administrator service for this account (no prompt when `ready`, locally or remotely).
    */
-  admin_prompt: boolean,
+  admin_service?: AdminServiceInfo,
   headless: boolean,
   /**
    * The browser is on the same machine as Kora (enables "Open folder").

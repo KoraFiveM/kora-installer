@@ -137,6 +137,14 @@ see it in **Settings > Activity log**; on the command line `kora audit [--server
 Entries are kept 365 days (at most 100 000). It is a record for the person who runs Kora, not tamper-proof evidence: anyone who can open
 the (private) data file could change it.
 
+**The administrator service has its own audit log**, separate on purpose (`docs/privileged-service.md`, "Audit"): it records every
+operation the service did or refused for an account (when, which account, what, the result; never a path or a secret) in a file only
+administrators can read or change (`%ProgramFiles%\Kora\data\audit.log`, `/var/log/kora/audit.log` and the journal), because the
+people it audits must not be able to edit it, and the service never opens a person's data file (`store::forbid_in_this_process`,
+`store::peek`). The Activity log here is the person's own record; the Settings card points at the service's file. An administrator reads
+the service's log in a terminal (`kora service` has no command for it yet); showing it in this view would need an administrators-only
+read through the service and is not done.
+
 ## Adding to the store (for developers of Kora)
 
 - **A new field on a server entry** needs no migration: the server list is stored as JSON per server. Add the field to `ServerEntry`

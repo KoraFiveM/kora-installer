@@ -60,15 +60,29 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   return rows
 }
 
-/** Windows: said before anything starts, so the prompt is expected (and how to avoid it). */
-export function AdminPromptNotice({ needs, onWithout }: { needs: string[]; onWithout?: () => void }) {
+/** The administrator service: what it does for this install (ready), or that it is not there (a per-user install). */
+export function AdminServiceNotice({ state, needs, onWithout }: { state: 'ready' | 'missing' | 'not_allowed'; needs: string[]; onWithout?: () => void }) {
+  if (needs.length === 0) return null
+  const list = <ul className="mt-1 list-disc pl-5">{needs.map((n) => <li key={n}>{n}</li>)}</ul>
+  if (state === 'ready') {
+    return (
+      <Alert tone="info" title="Kora's administrator service will do these parts">
+        <p>These parts need administrator rights, and Kora&apos;s administrator service does them for you. There is nothing to approve:</p>
+        {list}
+      </Alert>
+    )
+  }
   return (
-    <Alert tone="info" title="Windows will ask for permission once">
+    <Alert tone="warning" title={state === 'missing' ? "Kora's administrator service is not installed" : "Kora's administrator service is not turned on for you"}>
       <p>These parts need administrator rights:</p>
-      <ul className="mt-1 list-disc pl-5">{needs.map((n) => <li key={n}>{n}</li>)}</ul>
-      <p className="mt-2">When you press Install, Windows asks once for permission on the computer that runs Kora: choose Yes, then watch the install carry on here. If you do not see the prompt, look for a flashing shield icon in the taskbar.</p>
+      {list}
+      <p className="mt-2">
+        {state === 'missing'
+          ? 'Install the administrator service once (it asks an administrator for approval one time) and Kora does these parts, now and later, without asking again. The install can also carry on without them.'
+          : 'An administrator can turn the service on for your account with the command shown if you go on. The install can also carry on without these parts.'}
+      </p>
       {onWithout && (
-        <p className="mt-2">Rather not? <Button variant="link" className="h-auto p-0" onClick={onWithout}>Install without these parts</Button> (no firewall change, no background service, and an existing database only).</p>
+        <p className="mt-2"><Button variant="link" className="h-auto p-0" onClick={onWithout}>Install without these parts</Button> (no firewall change, no background service, and an existing database only).</p>
       )}
     </Alert>
   )
@@ -114,8 +128,8 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
       </dl>
       {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!/Gi?B/.test(disk.data.message) && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
       <ErrorNotice error={disk.error ?? plan.error} />
-      {plan.data?.admin_prompt && <AdminPromptNotice needs={plan.data.needs_admin} onWithout={onWithoutAdmin} />}
-      {plan.data && !plan.data.admin_prompt && (
+      {plan.data && plan.data.admin_service && plan.data.needs_admin.length > 0 && <AdminServiceNotice state={plan.data.admin_service} needs={plan.data.needs_admin} onWithout={onWithoutAdmin} />}
+      {plan.data && !(plan.data.admin_service && plan.data.needs_admin.length > 0) && (
         <Alert tone={plan.data.needs_admin.length ? 'warning' : 'info'} title="Administrator rights">
           {plan.data.needs_admin.length === 0 ? 'Nothing in this install needs administrator rights.' : (
             <>
@@ -242,7 +256,6 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const ports = usePortsCheck(f.game, f.tx)
   const run = useJob<InstallOutcome, InstallEvent>(job, onServersChanged)
   /** Windows: the panel can ask Windows for permission itself ("Ask again" / "Ask for administrator permission"). */
-  const canAsk = !!useQuery({ queryKey: ['system'], queryFn: api.system, staleTime: 60_000 }).data?.admin_prompt
 
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
   const req = buildRequest(f, { artifactUrl: artUrl })
@@ -255,11 +268,11 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const saved = defaults.saved
   const common = { f, set, advanced, defaultsDir: defaults.dir }
 
-  const start = async (opts: { askAdmin?: boolean } = {}) => {
+  const start = async () => {
     setStartErr(null)
     setStarting(true)
     try {
-      setJob((await api.installs.start(req, opts)).job)
+      setJob((await api.installs.start(req)).job)
     } catch (e) {
       setStartErr(e)
     } finally {
@@ -268,7 +281,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   }
 
   /** Carry on with the stopped install `job` (same answers, licence key kept by Kora): retry the failed step, or skip it. */
-  const resume = async (skip?: string, opts: { askAdmin?: boolean; withoutAdmin?: boolean } = {}) => {
+  const resume = async (skip?: string, opts: { withoutAdmin?: boolean } = {}) => {
     if (!job) return
     setResumeErr(null)
     try {
@@ -301,8 +314,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     },
     change_answers: (a) => changeAnswers(a.section),
     sign_in_github: () => setGithubAsked(true),
-    // Windows said no (or nobody answered): ask again, or carry on as you, keeping what was done.
-    ...(canAsk ? { request_admin: () => resume(undefined, { askAdmin: true }) } : {}),
+    // The service stopped midway: carry on as you without the administrator parts, keeping what was done.
     continue_without_admin: async () => {
       setF(withoutAdmin(f))
       if (run.error?.resume) return resume(undefined, { withoutAdmin: true })
@@ -313,8 +325,6 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const startActions: ActionHandlers = {
     change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.source)) },
     continue_without_admin: () => { setStartErr(null); setF(withoutAdmin(f)); setEditing(null) },
-    // A remote session: Windows only asks when the person says so.
-    ...(canAsk ? { request_admin: () => start({ askAdmin: true }) } : {}),
     sign_in_github: () => { setStartErr(null); setEditing(f.source === 'fork' ? 'github' : null) },
   }
 

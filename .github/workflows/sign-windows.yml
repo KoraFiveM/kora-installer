@@ -160,7 +160,8 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $($s.Name)" }
             }
             else { Write-Host '::notice::signtool.exe not found on this runner; Get-AuthenticodeSignature was the only check' }
-            if ($s.Extension -eq '.exe') {
+            # (kora-desktop.exe is the tray app: it has no `--version` of the kora kind)
+            if ($s.Extension -eq '.exe' -and $s.Name -notlike 'kora-desktop*') {
               $v = ((& $s.FullName --version) -join '').Trim()
               Write-Host "$($s.Name) --version: $v"
               if ($v -notmatch '^kora \d+\.\d+\.\d+') { throw "the signed $($s.Name) does not run or reports '$v'" }

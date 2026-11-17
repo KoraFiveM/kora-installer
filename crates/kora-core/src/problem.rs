@@ -43,16 +43,10 @@ pub mod codes {
     pub const FAILED: &str = "failed";
     /// Administrator / root rights are needed and Kora does not have them.
     pub const NEEDS_ELEVATION: &str = "needs_elevation";
-    /// Windows: the administrator permission prompt was declined (`helper::worker`).
-    pub const ADMIN_DECLINED: &str = "admin.declined";
-    /// Windows: nobody answered the administrator permission prompt in time.
-    pub const ADMIN_TIMED_OUT: &str = "admin.timed_out";
-    /// Windows: a remote session; the prompt would appear on a desktop nobody may be watching.
-    pub const ADMIN_REMOTE: &str = "admin.remote";
-    /// Windows: an earlier permission prompt is still open.
-    pub const ADMIN_BUSY: &str = "admin.busy";
-    /// Windows: the administrator worker stopped before it finished.
-    pub const ADMIN_LOST: &str = "admin.lost";
+    /// Kora's administrator service is installed but not turned on for this account.
+    pub const SERVICE_NOT_ALLOWED: &str = "service.not_allowed";
+    /// Kora's administrator service stopped answering in the middle of a step.
+    pub const SERVICE_LOST: &str = "service.lost";
 
     /// An install step failed for a reason that has no code of its own.
     pub const INSTALL_STEP_FAILED: &str = "install.step_failed";
@@ -217,8 +211,9 @@ pub enum Action {
     },
     /// Install a tool for the user.
     InstallTool { tool: Tool },
-    /// Ask for administrator permission (the elevated worker / helper).
-    RequestAdmin,
+    /// Install Kora's administrator service (one administrator approval, once). The panel launches the
+    /// installer where it can (Windows) and otherwise shows the command (`kora service install`).
+    InstallAdminService,
     /// Carry on without the parts that need administrator rights.
     ContinueWithoutAdmin,
     /// Show a command the user can run themselves, with a copy button. `elevated`: it must be
@@ -276,7 +271,7 @@ impl Action {
             Action::SignInGithub { .. } => Some("Sign in to GitHub: gh auth login".into()),
             Action::InstallTool { tool } => Some(format!("Install {}.", tool.label())),
             Action::StartDatabase => Some("Start the database: kora check --start-database".into()),
-            Action::RequestAdmin => Some("This needs administrator rights: run it again as administrator (root).".into()),
+            Action::InstallAdminService => Some("Install Kora's administrator service once: kora service install".into()),
             _ => None,
         }
     }
@@ -468,7 +463,7 @@ mod tests {
             Action::change_answers("database"),
             Action::SignInGithub { scopes: vec![] },
             Action::InstallTool { tool: Tool::Gh },
-            Action::RequestAdmin,
+            Action::InstallAdminService,
             Action::ContinueWithoutAdmin,
             Action::show_command(&["kora", "x"], true),
             Action::open_link("https://cli.github.com"),
@@ -484,7 +479,7 @@ mod tests {
                 {"kind": "change_answers", "section": "database"},
                 {"kind": "sign_in_github"},
                 {"kind": "install_tool", "tool": "gh"},
-                {"kind": "request_admin"},
+                {"kind": "install_admin_service"},
                 {"kind": "continue_without_admin"},
                 {"kind": "show_command", "command": ["kora", "x"], "elevated": true},
                 {"kind": "open_link", "url": "https://cli.github.com"},

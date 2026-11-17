@@ -415,6 +415,9 @@ pub fn install_user(opts: &UserOptions) -> Result<UserInstall> {
             // The background panel may have been set up from the old copy: it must not lose its program.
             repoint_background_panel(&l.exe, &out.exe);
         }
+        // Running from the installed program (package / MSI) while an earlier per-user copy is still there:
+        // "Finish upgrading Kora" (set it aside, drop its PATH entry, re-point the background panel).
+        let _ = crate::privsvc::migrate_os::finish_upgrade_user(false);
     }
     Ok(out)
 }

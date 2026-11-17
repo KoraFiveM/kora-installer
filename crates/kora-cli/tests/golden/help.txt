@@ -31,7 +31,7 @@ Commands:
   stop           Stop a server's background service
   restart        Restart a server's background service
   uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
-  helper         The optional privileged helper: lets the panel do the few things that need administrator rights
+  service        Kora's administrator service: who may use it, and whether it is running
 
 Options:
       --no-elevate
@@ -2298,15 +2298,20 @@ Options:
   -h, --help
           Print help
 
-===== kora helper =====
-The optional privileged helper: lets the panel do the few things that need administrator rights
+===== kora service =====
+Kora's administrator service: who may use it, and whether it is running
 
-Usage: kora helper [OPTIONS] <COMMAND>
+Usage: kora service [OPTIONS] <COMMAND>
 
 Commands:
-  install    Install the helper service for your user account (needs administrator rights; run with sudo)
-  uninstall  Remove the helper service (needs administrator rights)
-  status     Say whether the helper is installed and running
+  status          Say whether the service is installed and running, and whether it serves your account
+  list            List the accounts that may use the service
+  allow           Let accounts use the service (administrators only). Give the accounts' names
+  install         Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
+  uninstall       Remove the service (needs administrator rights). Servers it set up keep working
+  migrate         Bring an earlier Kora layout (0.6.x / 0.7.0) over to the service without touching servers or data (administrators only; the package and the MSI run it): the old Linux helper goes, update tasks lose their full administrator token, servers set up the old way are recorded as yours
+  finish-upgrade  Finish upgrading for YOUR account (no administrator rights): your earlier copy of Kora is set aside, its PATH entry removed and the background panel pointed at the installed program
+  deny            Stop an account using the service (administrators only). Servers it set up keep working
 
 Options:
       --no-elevate
@@ -2315,22 +2320,10 @@ Options:
   -h, --help
           Print help
 
-===== kora helper serve =====
-Run the helper (started by its system service; not for people)
+===== kora service serve =====
+Run the service (started by the system; not for people)
 
-Usage: kora helper serve [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper install =====
-Install the helper service for your user account (needs administrator rights; run with sudo)
-
-Usage: kora helper install [OPTIONS]
+Usage: kora service serve [OPTIONS]
 
 Options:
       --no-elevate
@@ -2339,22 +2332,10 @@ Options:
   -h, --help
           Print help
 
-===== kora helper uninstall =====
-Remove the helper service (needs administrator rights)
+===== kora service status =====
+Say whether the service is installed and running, and whether it serves your account
 
-Usage: kora helper uninstall [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper status =====
-Say whether the helper is installed and running
-
-Usage: kora helper status [OPTIONS]
+Usage: kora service status [OPTIONS]
 
 Options:
       --no-elevate
@@ -2363,21 +2344,119 @@ Options:
   -h, --help
           Print help
 
-===== kora admin-worker =====
-Windows: Kora Panel's short-lived administrator helper (started through the permission prompt)
+===== kora service list =====
+List the accounts that may use the service
 
-Usage: kora admin-worker [OPTIONS]
+Usage: kora service list [OPTIONS]
 
 Options:
-      --pipe <PIPE>
-          The panel's pipe
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
-      --parent <PARENT>
-          The panel's process id
+  -h, --help
+          Print help
 
-      --selftest
-          CI only, on an account that is already elevated: run the panel's side and a worker without the prompt
+===== kora service allow =====
+Let accounts use the service (administrators only). Give the accounts' names
 
+Usage: kora service allow [OPTIONS] <ACCOUNTS>...
+
+Arguments:
+  <ACCOUNTS>...
+          Account names (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service install =====
+Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
+
+Usage: kora service install [OPTIONS]
+
+Options:
+      --allow <ACCOUNT>
+          Also let this account use the service (the account that ran sudo is always added)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service uninstall =====
+Remove the service (needs administrator rights). Servers it set up keep working
+
+Usage: kora service uninstall [OPTIONS]
+
+Options:
+      --purge
+          Also remove the list of allowed accounts, the ownership records and the audit log
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service migrate =====
+Bring an earlier Kora layout (0.6.x / 0.7.0) over to the service without touching servers or data (administrators only; the package and the MSI run it): the old Linux helper goes, update tasks lose their full administrator token, servers set up the old way are recorded as yours
+
+Usage: kora service migrate [OPTIONS]
+
+Options:
+      --quiet
+          Say nothing unless something is wrong
+
+      --dry-run
+          Only say what would be done
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service finish-upgrade =====
+Finish upgrading for YOUR account (no administrator rights): your earlier copy of Kora is set aside, its PATH entry removed and the background panel pointed at the installed program
+
+Usage: kora service finish-upgrade [OPTIONS]
+
+Options:
+      --dry-run
+          Only say what would be done
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service unit =====
+Print the systemd unit text (the package is built from it; not for people)
+
+Usage: kora service unit [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service deny =====
+Stop an account using the service (administrators only). Servers it set up keep working
+
+Usage: kora service deny [OPTIONS] <ACCOUNT>
+
+Arguments:
+  <ACCOUNT>
+          
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -2385,7 +2464,7 @@ Options:
           Print help
 
 ===== kora admin-step =====
-One administrator step of an install or delete, run by that helper
+One administrator step of an install or delete, run by Kora's administrator service
 
 Usage: kora admin-step [OPTIONS] --step <STEP> --dir <DIR> <ACTION>
 
@@ -2399,7 +2478,7 @@ Options:
       --step <STEP>
           The install step (see `kora_core::installer::system_ops`)
           
-          [possible values: prepare.db, build.db, system.firewall, system.service, system.schedule]
+          [possible values: prepare.db, build.db, system.firewall, reach.firewall, system.service, system.schedule]
 
       --dir <DIR>
           The server folder
@@ -2419,6 +2498,24 @@ Options:
       --keep-db
           
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora admin-db =====
+Start (or install) Kora's own MariaDB on Windows, run by Kora's administrator service
+
+Usage: kora admin-db [OPTIONS] <ACTION>
+
+Arguments:
+  <ACTION>
+          `start` Kora's own MariaDB, or `install` it when it is not there yet
+          
+          [possible values: start, install]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -2449,24 +2546,6 @@ Options:
       --no-background
           Never set up or start a background service (the app runs the panel itself instead)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora admin-db =====
-Start (or install) Kora's own MariaDB on Windows, run by that helper
-
-Usage: kora admin-db [OPTIONS] <ACTION>
-
-Arguments:
-  <ACTION>
-          `start` Kora's own MariaDB, or `install` it when it is not there yet
-          
-          [possible values: start, install]
-
-Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

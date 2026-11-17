@@ -362,7 +362,7 @@ async fn schedule_needs_elevation_without_changing_anything() {
     let app = app(&fake);
     let (s, v) = call(&app, "PUT", "/servers/dev/schedule", Some(daily())).await;
     assert_eq!((s, v["error"]["code"].as_str()), (403, Some("needs_elevation")));
-    assert_eq!(v["error"]["command"], json!(["kora", "schedule", "set", "dev"]));
+    assert_eq!(v["error"]["command"], json!(["kora", "schedule", "set", "/srv/dev"]));
     assert!(v["error"]["message"].as_str().unwrap().contains("administrator"));
     let (s, v) = call(&app, "DELETE", "/servers/dev/schedule", None).await;
     assert_eq!((s, v["error"]["code"].as_str()), (403, Some("needs_elevation")));

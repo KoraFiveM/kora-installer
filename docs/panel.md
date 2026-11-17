@@ -358,45 +358,55 @@ The same buttons appear wherever an error offers them (the install wizard, the G
 ## 7. Actions that need administrator rights
 
 The panel runs as you, not as an administrator. A few things need more rights: creating or changing services, firewall
-rules, update timers and scheduled tasks, installing MariaDB, and removing the old machine-wide Kora app.
+rules, update tasks and scheduled tasks, installing MariaDB, updating Kora itself.
 
-**Windows: Windows asks for permission, once.** The panel asks Windows itself, with the normal permission prompt
-(choose Yes). An install asks **once, when it starts**, for all of its administrator parts (the wizard says so on its
-last screen), then you watch it carry on in the browser. Other actions (the update schedule, Kora's self-update,
-"Tidy up old shortcuts", uninstalling, deleting a server that has a background service) ask once each. Behind the
-prompt is a short-lived copy of Kora running as administrator that does only those parts and then exits; your server
-folders, settings and the install's progress stay yours. If you do not see the prompt, look for a flashing shield icon
-in the taskbar. On an account that is not an administrator, Windows asks for an administrator's password instead; the
-server is still installed for you.
+**With Kora's administrator service there is no prompt at all.** The Windows installer (`.msi`) and the Linux package
+(`.deb`, or `sudo kora service install` on other systems) install a small service that does exactly those parts for
+the accounts an administrator allowed, and nothing else. One administrator approval at install time; after that the
+panel installs and removes servers, changes schedules and updates Kora with no password and no terminal, from this
+computer or from another device. The install wizard says so on its last screen ("Kora's administrator service will do
+these parts"), and its steps show in the same progress list as everything else.
 
-If Windows does not get permission (you chose No, nobody answered within five minutes, or you are signed in from
-another device so nobody may be at the computer to answer), nothing that needs administrator rights is changed and the
-panel offers three choices:
+Who may use it: the account that installed Kora, plus anyone an administrator adds. On a computer shared by several
+accounts each person's servers, services, firewall rules and databases are theirs alone.
 
-- **Ask again** (from another device: **Ask for administrator permission**): Windows asks on the computer that runs
-  Kora; someone there chooses Yes. From another device the panel never asks unless you press this.
+```
+kora service status          is it installed, running, and does it serve me?
+kora service list            the accounts that may use it
+kora service allow <account> (administrators) let another account use it
+kora service deny <account>  (administrators) stop an account using it; its servers keep working
+```
+
+**Without the service** (you installed Kora just for yourself, without administrator rights) there is no automatic
+path, and the panel never asks Windows or `sudo` by itself. When a step needs administrator rights it says so and
+offers:
+
+- **Install Kora's administrator service.** On Windows this starts the installer (one permission prompt, on the
+  computer that runs Kora; the file is checked against its checksum first). On Linux it shows
+  `sudo kora service install`.
 - **Continue without the administrator parts:** the install carries on as you, without the firewall change, the
-  background service and the daily update task (and with an existing database only). Everything already done is kept.
-- **Show me the command:** the command to run yourself from a terminal opened with "Run as administrator".
+  background service and the daily update task (and with an existing database only).
+- **Show me the command:** the command to run yourself from an administrator terminal.
 
-A step that failed halfway (for example the administrator copy was closed) can be tried again (Windows asks again) or,
-when it is safe, skipped, like any other install step.
+If the service is installed but not turned on for your account, the message says so and gives the command an
+administrator runs (`kora service allow <you>`). A step that failed halfway (for example the service was restarted)
+can be tried again or, when it is safe, skipped, like any other install step.
 
-**Linux** (and Windows when the panel itself runs as administrator, which it normally does not): the panel does one
-of two things:
+Two things stay commands for an administrator terminal even with the service: removing the old machine-wide copy of
+Kora and removing everything Kora set up on the machine (`kora uninstall`); Kora itself is removed in Apps & features
+(Windows) or with `sudo apt remove kora` (Linux). Update tasks that run as the system account (a choice in the
+schedule dialog) also stay a command: the service only makes update tasks that run as you.
 
-- **Shows the exact command to run.** A message appears with a command such as `sudo kora ...` (Linux) or an elevated
-  `kora ...` (Windows). Copy it into a terminal; the command asks for administrator permission itself. When it
-  finishes, return to the panel and refresh.
-- **Uses the helper, if it is installed (Linux only for now).** The helper is a small system service, installed once with
-  `sudo kora helper install`, that runs those same actions for the panel without a prompt each time. It accepts only the fixed list of privileged actions Kora already has and checks which user is asking. Check it with `kora helper status`, remove it with `kora helper uninstall`.
-  Be aware of what it means: with the helper installed, your account (and any program running as you) has the same
-  power as passwordless `sudo` for these Kora actions, so only install it on an account you keep safe. Through the
-  helper, servers are installed only into a new or empty folder in your home folder or in `/home/kora`, never from
-  another catalogue, and Kora is only updated to a newer version; for anything else run the command yourself with `sudo`.
+**Updating Kora.** With the service installed the panel's Update button (and `kora self-update` from a terminal) is
+applied by the service: it downloads the release, checks its checksum, keeps the old program, restarts itself on the
+new one and rolls back by itself if the new one does not run.
 
-The Settings page says when the helper is installed. The Linux helper is not used on Windows, where the panel asks
-Windows instead (above).
+**Upgrading from 0.7.0 or 0.6.x.** Run the new installer (MSI, `.deb`, or the one-liner, which offers it first). It
+brings the old layout over without touching servers or data: the old Linux helper is removed (its account stays
+allowed), update tasks that still ran with full administrator rights become unelevated, servers set up the old way
+are recorded as yours, and the panel's "Tidy up old shortcuts" also sets aside your own earlier copy of Kora (kept as
+`kora.previous`) and points the background panel at the installed one. To go back, install the earlier version's
+installer; the old copy is still there as `.previous`.
 
 ## 8. Troubleshooting
 

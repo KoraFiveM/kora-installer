@@ -10,7 +10,7 @@ use crate::service::{self, Platform, SystemRunner};
 
 /// Needs administrator rights (the caller checks and asks for them first).
 pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, String> {
-    if !crate::helper::winhelper::port_allowed(e.ports.game) {
+    if !crate::privsvc::op::port_ok(e.ports.game) {
         return Err(format!("Kora does not open port {} in the firewall: Windows, remote administration or databases use it. Choose another game port first.", e.ports.game));
     }
     let rn = SystemRunner;
@@ -20,8 +20,7 @@ pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, String> {
     let req = PortRequest { server: crate::installer::slug(&e.name), game_port: e.ports.game, txadmin_port: e.ports.txadmin, expose_txadmin: false };
     let plan = firewall::open_plan(&req, kind).map_err(|x| x.to_string())?;
     if !crate::elevate::is_elevated() {
-        // The command to run as administrator. (Seam: the privileged-service work can offer the
-        // permission prompt / helper for this verb; until then the person runs it.)
+        // The command to run as administrator (the panel goes through the administrator service instead).
         let command = vec!["kora".to_string(), "reach".into(), e.name.clone(), "--open-firewall".into()];
         return Err(Problem::new(codes::NEEDS_ELEVATION, "Changing the firewall needs administrator rights. Run this command as administrator, then check again:")
             .with_action(Action::ShowCommand { command, elevated: true })

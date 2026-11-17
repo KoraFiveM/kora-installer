@@ -129,21 +129,36 @@ pub fn items_for(t: &Target, c: &Created, platform: Platform, runner: &dyn Comma
                     }
                     account::UserStatus::Exists(_) => {
                         let mut steps: Vec<SystemStep> = Vec::new();
-                        if keep_files {
-                            match c.dir_owner.as_deref() {
-                                Some(owner) if valid_owner(owner) => steps.push(SystemStep::run(
-                                    format!("Give the kept server folder back to its previous owner ({owner}) before the account '{name}' is deleted"),
-                                    "chown",
-                                    &["-R", "--", owner, &t.dir.to_string_lossy()],
-                                )),
-                                Some(owner) => v.push(Item {
-                                    kind: Kind::ServiceAccount,
-                                    title: "Give the kept server folder back to its previous owner".into(),
-                                    plan: Plan::default(),
-                                    note: Some(format!("The recorded owner '{owner}' is not a plain uid:gid, so the folder's owner is left as it is.")),
-                                }),
-                                None => {}
-                            }
+                        // In the administrator service the folder goes back to the account that asked
+                        // (the service knows it from the connection; the recorded owner is a file the
+                        // person can edit), always: the person deletes their own files afterwards.
+                        // Run as root directly: back to the recorded owner, when the files are kept.
+                        let service_caller = if crate::privsvc::paths::in_service() {
+                            let id = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<u32>().ok());
+                            id("SUDO_UID").zip(id("SUDO_GID"))
+                        } else {
+                            None
+                        };
+                        let handback = match (service_caller, keep_files, c.dir_owner.as_deref()) {
+                            (Some(ids), _, _) => Some(Ok(ids)),
+                            (None, true, Some(owner)) if valid_owner(owner) => owner.split_once(':').and_then(|(u, g)| u.parse().ok().zip(g.parse().ok())).map(Ok),
+                            (None, true, Some(owner)) => Some(Err(owner.to_string())),
+                            _ => None,
+                        };
+                        match handback {
+                            Some(Ok((uid, gid))) => steps.push(SystemStep::chown_tree(
+                                format!("Give the server folder back to its previous owner ({uid}:{gid}) before the account '{name}' is deleted"),
+                                &t.dir.to_string_lossy(),
+                                uid,
+                                gid,
+                            )),
+                            Some(Err(owner)) => v.push(Item {
+                                kind: Kind::ServiceAccount,
+                                title: "Give the kept server folder back to its previous owner".into(),
+                                plan: Plan::default(),
+                                note: Some(format!("The recorded owner '{owner}' is not a plain uid:gid, so the folder's owner is left as it is.")),
+                            }),
+                            None => {}
                         }
                         steps.extend(account::delete_plan(name).map_err(err)?.steps);
                         v.push(Item { kind: Kind::ServiceAccount, title: format!("Delete the system account '{name}' that Kora created"), plan: Plan::new(steps), note: None });
@@ -277,7 +292,7 @@ mod tests {
         r.respond("id -u", 0, "998\n");
         let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, dir_owner: Some("1000:1000".into()), ..Created::default() };
         let items = items_for(&target(), &c, Platform::Linux, &r, true, false).unwrap();
-        assert_eq!(lines(&items[0]), ["chown -R -- 1000:1000 /srv/kora/my-server", "userdel kora-my-server"]);
+        assert_eq!(lines(&items[0]), ["ChownTree { path: \"/srv/kora/my-server\", uid: 1000, gid: 1000 }", "userdel kora-my-server"]);
     }
 
     #[test]
@@ -302,7 +317,7 @@ mod tests {
         // A recorded owner that chown could read as an option: no chown.
         let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, dir_owner: Some("--reference=/etc/shadow".into()), ..Created::default() };
         let items = items_for(&target(), &c, Platform::Linux, &r, true, false).unwrap();
-        assert!(!items.iter().flat_map(lines).any(|l| l.starts_with("chown")), "{items:?}");
+        assert!(!items.iter().flat_map(lines).any(|l| l.starts_with("chown") || l.starts_with("ChownTree")), "{items:?}");
         assert!(items.iter().flat_map(lines).any(|l| l == "userdel kora-my-server"));
         // A program path outside Kora's program folder: never deleted.
         for bin in ["/etc/passwd", "/usr/bin/sudo", "/opt/kora/../../etc/0.1.0-0123456789ab/kora", "/opt/kora/v/kora"] {

@@ -5,9 +5,9 @@
 #![allow(clippy::unused_async)]
 
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Extension, Json};
+use axum::Json;
 use kora_core::api::panel_updates::schedule_state_json;
 use kora_core::api::{Status, WebhookView};
 use kora_core::installer::Ports;
@@ -80,30 +80,26 @@ pub async fn schedule_get(State(st): State<AppState>, Path(s): Path<String>) -> 
 }
 
 /// The schedule change needs administrator rights: on Windows the elevated worker does it (one
-/// permission prompt), on Linux the helper when it is installed; otherwise this is the
+/// permission prompt), elsewhere the administrator service; without it this is the
 /// `needs_elevation` answer with the command to run.
-fn run_elevated(ask: crate::elevated::AdminAsk, args: Vec<String>) -> Result<(), ApiError> {
+fn run_elevated(e: &kora_core::installer::registry::ServerEntry, mut args: Vec<String>) -> Result<(), ApiError> {
+    // The service takes the server's FOLDER (it checks that it is the caller's own), never a name looked up in the
+    // caller's server list; `kora schedule ... <folder>` is understood by the command line too.
+    if args.len() > 2 {
+        args[2] = e.dir.to_string_lossy().into_owned();
+    }
     let mut command = vec!["kora".to_string()];
     command.extend(args);
-    crate::elevated::privileged_as(
-        ask,
-        "change the automatic updates",
-        "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.",
-        command,
-        vec![],
-        &mut |_| {},
-    )
-    .map(|_| ())
+    let message = "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.";
+    // An update task that runs as the system account on a folder the person controls is administrator
+    // code for them: the service never makes one, so that choice stays an administrator-terminal command.
+    if command.iter().any(|a| a == "--as-system") {
+        return Err(ApiError::needs_elevation(message, command));
+    }
+    crate::elevated::privileged_as("change the automatic updates", message, command, vec![], &mut |_| {}).map(|_| ())
 }
 
-pub async fn schedule_set(
-    State(st): State<AppState>,
-    Extension(caller): Extension<crate::remote::Caller>,
-    headers: HeaderMap,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+pub async fn schedule_set(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let cfg: ScheduleConfig = serde_json::from_value(body)
         .map_err(|_| ApiError::bad_request("The schedule needs a preset (daily, weekly or custom), a time like 04:00, a weekday for weekly, who it runs as, and whether it is on."))?;
     cfg.validate().map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -111,7 +107,7 @@ pub async fn schedule_set(
         let e = st.entry(&s)?;
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, Some(&cfg)) {
-            run_elevated(ask, args)?;
+            run_elevated(&e, args)?;
         } else {
             b.schedule_set(&e, &cfg).map_err(ApiError::core)?;
         }
@@ -121,13 +117,12 @@ pub async fn schedule_set(
     .await
 }
 
-pub async fn schedule_remove(State(st): State<AppState>, Extension(caller): Extension<crate::remote::Caller>, headers: HeaderMap, Path(s): Path<String>) -> Result<Response, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+pub async fn schedule_remove(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, None) {
-            run_elevated(ask, args)?;
+            run_elevated(&e, args)?;
         } else {
             b.schedule_remove(&e).map_err(ApiError::core)?;
         }

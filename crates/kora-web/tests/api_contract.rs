@@ -741,6 +741,7 @@ const UNVERIFIED: &[(Op, &str)] = &[
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),
     (Op::PanelRestart, "would restart the process"),
+    (Op::AdminServiceInstall, "runs the real installer on Windows (one permission prompt); elsewhere it answers needs_elevation, checked in tests/service.rs"),
     (Op::UserRemove, "204, nothing to read"),
     (Op::ServerUnregister, "204"),
     (Op::ServerDelete, "needs a managed server folder"),

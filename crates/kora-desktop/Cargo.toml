@@ -33,6 +33,11 @@ rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 # HTTP to the loopback panel only: no TLS stack at all.
 ureq = { version = "2", default-features = false }
 
+[target.'cfg(windows)'.build-dependencies]
+# File metadata (product name "Kora", version, icon): SignPath's signing configuration requires the product name, and
+# Windows shows it in the notification settings and Task Manager.
+winresource = "0.1"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_System_Console", "Win32_System_SystemInformation"] }
 

@@ -4,7 +4,7 @@
  *
  * - Pages pass handlers for the kinds that depend on where the error is shown (the install wizard
  *   handles `retry_step`, `skip_step`, `change_answers`, ...), as `<ErrorNotice actions={...}>`.
- * - Handlers that work anywhere (for example `request_admin` or `install_tool`, once those exist)
+ * - Handlers that work anywhere (for example `install_admin_service` or `install_tool`)
  *   are registered for the whole app with `<ProblemActions handlers={...}>` around it. Nested
  *   providers merge; the innermost handler for a kind wins, and a page's own prop wins over both.
  * - `show_command`, `open_link`, `open_log` and `copy_details` are drawn by ErrorNotice itself and
@@ -37,9 +37,11 @@ export type ActionHandlers = { [K in ProblemActionKind]?: (a: ActionOf<K>, ctx: 
 
 /** Kinds ErrorNotice draws by itself (a copy field, a link, the log, a copy button). */
 export const BUILT_IN: readonly ProblemActionKind[] = ['show_command', 'open_link', 'open_log', 'copy_details']
+// `install_admin_service` is a button only where a handler can launch the installer (Windows); elsewhere
+// ErrorNotice explains it and shows the command (`kora service install`).
 
 const KNOWN: readonly ProblemActionKind[] = [
-  'retry', 'retry_step', 'skip_step', 'change_answers', 'sign_in_github', 'install_tool', 'request_admin',
+  'retry', 'retry_step', 'skip_step', 'change_answers', 'sign_in_github', 'install_tool', 'install_admin_service',
   'continue_without_admin', 'show_command', 'open_link', 'open_log', 'copy_details', 'start_database', 'make_fork',
 ]
 
@@ -61,15 +63,12 @@ const SECTION_LABEL: Record<string, string> = {
 
 const TOOL_LABEL: Record<string, string> = { git: 'Git', gh: 'the GitHub CLI', mariadb: 'MariaDB' }
 
-/** Codes of "this needs administrator rights" problems (Windows asks with its permission prompt). */
+/** Codes of "this needs administrator rights" problems: the administrator service is missing or not turned on for you. */
 export function isAdminCode(code: string): boolean {
-  return code === 'needs_elevation' || code.startsWith('admin.')
+  return code === 'needs_elevation' || code.startsWith('service.')
 }
 
-/** Windows was asked already (and said no, nobody answered, ...): the button asks again. */
-const ASKED_ALREADY = ['admin.declined', 'admin.timed_out', 'admin.busy', 'admin.lost']
-
-export function actionLabel(a: ProblemAction, p?: { code: string }): string {
+export function actionLabel(a: ProblemAction): string {
   switch (a.kind) {
     case 'retry':
       return 'Try again'
@@ -83,8 +82,8 @@ export function actionLabel(a: ProblemAction, p?: { code: string }): string {
       return a.scopes?.length ? 'Sign in to GitHub again' : 'Sign in to GitHub'
     case 'install_tool':
       return `Install ${TOOL_LABEL[a.tool] ?? 'it'} for me`
-    case 'request_admin':
-      return p && ASKED_ALREADY.includes(p.code) ? 'Ask again' : 'Ask for administrator permission'
+    case 'install_admin_service':
+      return "Install Kora's administrator service"
     case 'continue_without_admin':
       return 'Continue without the administrator parts'
     case 'show_command':

@@ -90,12 +90,7 @@ impl ToolchainEnv for SystemToolchain {
     }
 
     fn admin(&self) -> AdminState {
-        use crate::helper::client::Helper as _;
-        AdminState {
-            elevated: crate::elevate::is_elevated(),
-            helper: !cfg!(windows) && crate::helper::client::SocketClient::default().available(),
-            service: crate::monitor::panel_service::service_installed(crate::service::Platform::current()),
-        }
+        AdminState { elevated: crate::elevate::is_elevated(), helper: crate::privsvc::service_ready(), service: crate::monitor::panel_service::service_installed(crate::service::Platform::current()) }
     }
 }
 
@@ -108,7 +103,7 @@ fn install_system_git(say: &mut dyn FnMut(&str, f32)) -> Result<(), String> {
     }
     if !crate::elevate::is_elevated() {
         return Err(Problem::new(codes::NEEDS_ELEVATION, "Installing Git needs administrator rights.")
-            .with_action(Action::RequestAdmin)
+            .with_action(Action::InstallAdminService)
             .with_action(Action::show_command(&["kora", "tools", "install", "git"], true))
             .into());
     }
@@ -131,7 +126,7 @@ pub fn db_state(found: &[DetectedService]) -> DbState {
 
 /// Start the first stopped database service in `found` and wait until it is running.
 /// Needs administrator rights (`elevated`); without them: the `needs_elevation` Problem (on Windows with
-/// [`Action::RequestAdmin`] for the elevated worker, on Linux also the command to run).
+/// [`Action::InstallAdminService`] (install the service), also the command to run).
 pub fn start_database_with(runner: &dyn CommandRunner, found: &[DetectedService], elevated: bool, windows: bool, wait: Duration, say: &mut dyn FnMut(&str)) -> Result<String, Problem> {
     let Some(svc) = found.iter().find(|s| !s.running) else {
         return match found.first() {
@@ -144,7 +139,7 @@ pub fn start_database_with(runner: &dyn CommandRunner, found: &[DetectedService]
     if !elevated {
         let shown: Vec<&str> = if windows { vec!["net", "start", &name] } else { vec!["systemctl", "start", &name] };
         return Err(Problem::new(codes::NEEDS_ELEVATION, format!("Starting the database server {name} needs administrator rights."))
-            .with_action(Action::RequestAdmin)
+            .with_action(Action::InstallAdminService)
             .with_action(Action::show_command(&shown, true)));
     }
     say(&format!("Starting the database server {name}"));

@@ -399,7 +399,7 @@ pub struct SelfUpdateRequest {
     pub version: Option<String>,
 }
 
-/// Result of the self-update job. `output` is what the administrator helper printed, when it ran the update.
+/// Result of the self-update job. `output` is what the administrator service printed, when it ran the update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SelfUpdateResult {
@@ -647,7 +647,7 @@ pub struct ToolInstallResult {
     pub output: Option<Value>,
 }
 
-/// Result of the start-the-database job: a plain sentence, or what the administrator helper printed.
+/// Result of the start-the-database job: a plain sentence, or what the administrator service printed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DbStartResult {

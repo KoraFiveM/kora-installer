@@ -16,15 +16,46 @@ pub struct SystemInfo {
     pub elevated: bool,
     /// Same as `elevated` (the panel reads this name).
     pub admin: bool,
-    pub helper_installed: bool,
-    /// Windows: the panel asks Windows for administrator permission itself (one prompt per install or action).
-    pub admin_prompt: bool,
+    /// Kora's administrator service for this account (no prompt when `ready`, locally or remotely).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub admin_service: Option<AdminServiceInfo>,
     pub headless: bool,
     /// The browser is on the same machine as Kora (enables "Open folder").
     pub local: bool,
     pub kora_home: String,
     /// The panel can restart itself ("Restart now" after a self-update).
     pub can_restart: bool,
+}
+
+/// Is Kora's administrator service there for this account?
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum AdminServiceState {
+    /// Installed, running and serves this account: administrator parts just happen.
+    Ready,
+    /// Not installed (a per-user install).
+    Missing,
+    /// Installed, but this account is not on its list.
+    NotAllowed,
+}
+
+/// The state of the administrator service, with the service's reason when it is not allowed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct AdminServiceInfo {
+    pub state: AdminServiceState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub reason: Option<String>,
+}
+
+/// `POST /system/admin-service/install` result (a job; the installer ran).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct AdminServiceInstallResult {
+    pub installed: bool,
 }
 
 /// `POST /panel/restart`.

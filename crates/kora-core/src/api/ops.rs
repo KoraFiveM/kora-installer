@@ -81,6 +81,9 @@ pub enum Op {
     InstallLog,
     SelfUpdateCheck,
     SelfUpdateApply,
+    /// Install Kora's administrator service (Windows: runs the installer, which asks for administrator approval on the
+    /// computer that runs Kora; elsewhere answers with the command to run). Local only.
+    AdminServiceInstall,
     AppStatus,
     AppInstall,
     AppUninstall,
@@ -284,6 +287,7 @@ impl Op {
         Op::InstallLog,
         Op::SelfUpdateCheck,
         Op::SelfUpdateApply,
+        Op::AdminServiceInstall,
         Op::AppStatus,
         Op::AppInstall,
         Op::AppUninstall,
@@ -432,6 +436,7 @@ impl Op {
             Op::InstallLog => "install_log",
             Op::SelfUpdateCheck => "self_update_check",
             Op::SelfUpdateApply => "self_update_apply",
+            Op::AdminServiceInstall => "admin_service_install",
             Op::AppStatus => "app_status",
             Op::AppInstall => "app_install",
             Op::AppUninstall => "app_uninstall",
@@ -581,6 +586,7 @@ impl Op {
             Op::InstallLog => (Method::Get, "/installs/{job}/log"),
             Op::SelfUpdateCheck => (Method::Get, "/self-update"),
             Op::SelfUpdateApply => (Method::Post, "/self-update"),
+            Op::AdminServiceInstall => (Method::Post, "/system/admin-service/install"),
             Op::AppStatus => (Method::Get, "/app"),
             Op::AppInstall => (Method::Put, "/app"),
             Op::AppUninstall => (Method::Delete, "/app"),
@@ -690,6 +696,7 @@ impl Op {
                 | Op::InstallStart
                 | Op::InstallResume
                 | Op::SelfUpdateApply
+                | Op::AdminServiceInstall
                 | Op::UninstallRun
                 | Op::NodeServerControl
                 | Op::AssetImport
@@ -843,6 +850,7 @@ mod tests {
             | Op::InstallLog
             | Op::SelfUpdateCheck
             | Op::SelfUpdateApply
+            | Op::AdminServiceInstall
             | Op::AppStatus
             | Op::AppInstall
             | Op::AppUninstall
@@ -936,7 +944,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 143);
+        assert_eq!(Op::ALL.len(), 144);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

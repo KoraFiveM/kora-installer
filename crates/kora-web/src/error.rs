@@ -83,8 +83,8 @@ impl ApiError {
     pub fn internal(m: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", m)
     }
-    /// Administrator rights are needed. Offers to ask for them ([`Action::RequestAdmin`], shown once
-    /// the panel can) and the command to run as administrator; `command` stays for older pages.
+    /// Administrator rights are needed. Offers to install the administrator service ([`Action::InstallAdminService`])
+    /// and the command to run as administrator; `command` stays for older pages.
     pub fn needs_elevation(m: impl Into<String>, command: Vec<String>) -> Self {
         Self::problem(StatusCode::FORBIDDEN, elevation_problem(m, command))
     }
@@ -117,7 +117,7 @@ impl ApiError {
 
 /// The [`Problem`] for "this needs administrator rights": ask for them, or run `command` as administrator.
 pub fn elevation_problem(m: impl Into<String>, command: Vec<String>) -> Problem {
-    Problem::new(codes::NEEDS_ELEVATION, m).with_action(Action::RequestAdmin).with_action(Action::ShowCommand { command, elevated: true })
+    Problem::new(codes::NEEDS_ELEVATION, m).with_action(Action::InstallAdminService).with_action(Action::ShowCommand { command, elevated: true })
 }
 
 impl From<Problem> for ApiError {
@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(v["error"]["code"], "needs_elevation");
         assert_eq!(v["error"]["command"], json!(["kora", "x"]));
-        assert_eq!(v["error"]["actions"], json!([{"kind": "request_admin"}, {"kind": "show_command", "command": ["kora", "x"], "elevated": true}]));
+        assert_eq!(v["error"]["actions"], json!([{"kind": "install_admin_service"}, {"kind": "show_command", "command": ["kora", "x"], "elevated": true}]));
         // A packed elevation problem from the core is a 403 with the same shape.
         let e = ApiError::core(String::from(elevation_problem("Needs admin.", vec!["kora".into(), "x".into()])));
         assert_eq!((e.status, e.command.clone()), (StatusCode::FORBIDDEN, Some(vec!["kora".to_string(), "x".to_string()])));
