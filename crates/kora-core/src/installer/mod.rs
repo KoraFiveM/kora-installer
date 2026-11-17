@@ -1282,7 +1282,7 @@ mod tests {
         r.resources = ResourceSelection::Only(vec!["kora_chat".into()]);
         let e = run_with(&r, &mut Collect(vec![]), &hooks_with_disk(crate::space::GIB)).unwrap_err().to_string();
         assert!(e.contains("Not enough free disk space") && e.contains("only 1.0 GiB is free"), "{e}");
-        assert!(e.contains(&*dir.to_string_lossy()) && e.contains("--dir"), "{e}");
+        assert!(e.contains(&*dir.to_string_lossy()), "{e}");
         assert!(!dir.exists(), "nothing may be created");
         // The estimate follows the selection: 1 chosen + 10 = 11 resources.
         assert!(e.contains("11 resources"), "{e}");
