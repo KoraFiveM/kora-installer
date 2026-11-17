@@ -106,7 +106,13 @@ step "3. txAdmin answers, directly and through the panel's gateway"
 if ! wait_for "txAdmin" 240 txadmin_up; then "$ENGINE" logs --tail 80 "$GAME" || true; fail "txAdmin does not answer on 127.0.0.1:$TX_PORT"; fi
 assert "txAdmin answers on 127.0.0.1:$TX_PORT" txadmin_up
 logfound() { grep -qiE 'Could not authenticate server license key' "$D/.kora/console.log" 2>/dev/null || "$ENGINE" logs "$GAME" 2>&1 | grep -qiE 'Could not authenticate server license key'; }
-wait_for "licence rejection logged" 180 logfound || fail "no 'licence key rejected' line: FXServer did not really run in the container"
+if ! wait_for "licence rejection logged" 180 logfound; then
+  echo "----- why FXServer did not run: the container's processes, its libraries, and its log without the relocation noise -----"
+  "$ENGINE" exec "$GAME" sh -c 'ps -o pid,args | head -n 20; echo; ls -la '"$D"'/artifacts/*/alpine/usr/lib 2>&1 | grep -iE "stdc|gcc|v8" | head; echo; for p in $(pidof FXServer); do echo "pid $p"; tr "\0" "\n" </proc/$p/environ | grep -E "^(LD_|PATH)" ; done' 2>&1 || true
+  "$ENGINE" logs "$GAME" 2>&1 | grep -v "Error relocating" | head -n 40 || true
+  "$ENGINE" logs "$GAME" 2>&1 | grep "Error relocating" | head -n 3 || true
+  fail "no 'licence key rejected' line: FXServer did not really run in the container"
+fi
 assert "FXServer ran in the container (the fake licence key was rejected, as expected)" logfound
 PANEL_PORT=47132
 GW_PORT=$((TX_PORT + 10000))
@@ -172,10 +178,11 @@ assert_eq "running after the update" running "$(state)"
 assert_eq "still every file the person's" "" "$(find "$D" \( -path "$D/resources" -prune -o -path "$D/artifacts" \) -o ! -user "$ME" -print | head -n 3)"
 
 step "7. backup and restore with the database container"
-BK="$SMOKE_ROOT/backups"
+# `--folder` is a one-off copy kept elsewhere: `latest`, verify and restore read Kora's own backups folder.
+BK="$KORA_HOME/server-backups"
 dbsql "CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(40))"
 dbsql "INSERT INTO players VALUES (1,'alice'),(2,'bob')"
-kora backup create $NAME --folder "$BK"
+kora backup create $NAME
 assert_eq "backup create exits 0 (the dump ran inside the database container)" 0 "$CODE"
 PW="$(jget "$D/database.json" password)"
 assert_not_contains "the database password is never printed" "$OUT" "$PW"
@@ -193,9 +200,9 @@ assert "the restore did not change how the server runs" test -f "$D/kora-contain
 assert "the password never travelled on any command line in this job" bash -c "! grep -r -- '$PW' '$SMOKE_ROOT'/*.log 2>/dev/null"
 
 step "8. move it: an encrypted export imported as a new container server"
-MOVE="$SMOKE_ROOT/move"
+MOVE="$KORA_HOME/server-backups"
 export KORA_BACKUP_PASSWORD='a smoke test passphrase'
-kora backup create $NAME --for-move --folder "$MOVE"
+kora backup create $NAME --for-move
 assert_eq "backup create --for-move exits 0" 0 "$CODE"
 MOVEFILE="$(ls "$MOVE"/*/*.tar.gz.age | head -n1)"
 MOVED="$SMOKE_ROOT/moved"
