@@ -20,6 +20,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { GithubSignIn } from '@/components/GithubSignIn'
+import { useRole } from '@/hooks/useRole'
 import { ProblemActions, type ActionHandlers } from '@/lib/problemActions'
 
 type Request = (
@@ -36,15 +37,18 @@ const STALE = [['github'], ['github-owners'], ['tools'], ['system-check'], ['sys
 export function ToolchainActions({ children }: { children: ReactNode }) {
   const [req, setReq] = useState<Request | null>(null)
   const seq = useRef(0)
+  // Installing tools, signing in to GitHub and starting the database need an administrator: for anyone else the
+  // buttons are not drawn (the System check says who can fix it) instead of ending in a refusal.
+  const isAdmin = useRole().can('admin')
   const handlers = useMemo<ActionHandlers>(
-    () => ({
+    () => !isAdmin ? {} : ({
       install_tool: (a, c) => {
         if (a.tool === 'git' || a.tool === 'gh') setReq({ kind: 'install', tool: a.tool, id: ++seq.current, afterFix: c.afterFix })
       },
       sign_in_github: (_, c) => setReq({ kind: 'signin', id: ++seq.current, afterFix: c.afterFix }),
       start_database: (_, c) => setReq({ kind: 'database', id: ++seq.current, afterFix: c.afterFix }),
     }),
-    [],
+    [isAdmin],
   )
   return (
     <ProblemActions handlers={handlers}>

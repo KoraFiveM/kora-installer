@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { useRole } from '@/hooks/useRole'
 
 const BADGE: Record<CheckState, { tone: 'success' | 'amber' | 'neutral'; text: string }> = {
   ok: { tone: 'success', text: 'Fine' },
@@ -36,12 +37,13 @@ export default function SystemCheckPage() {
   const tools = useQuery({ queryKey: ['tools'], queryFn: api.tools.status, staleTime: 0 })
   const items = check.data?.items ?? []
   const problems = items.filter((i) => i.state === 'problem').length
+  const role = useRole()
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-semibold">System check</h1>
-          <p className="mt-1 text-sm text-muted-foreground">What Kora needs on this computer, and a button to fix anything that is missing. Nothing here needs a terminal.</p>
+          <p className="mt-1 text-sm text-muted-foreground">What Kora needs on this computer, and a button to fix anything that is missing. Most fixes are a button; where one needs a command, it is shown to copy.</p>
         </div>
         <Button variant="secondary" onClick={() => void Promise.all([check.refetch(), tools.refetch()])} disabled={check.isFetching}>
           {check.isFetching ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}Check again
@@ -55,6 +57,10 @@ export default function SystemCheckPage() {
         <p role="status" className="text-sm">
           {problems === 0 ? <span className="text-success">Everything Kora needs is here.</span> : <span className="text-amber">{problems === 1 ? '1 thing needs fixing.' : `${problems} things need fixing.`}</span>}
         </p>
+      )}
+
+      {problems > 0 && !role.can('admin') && (
+        <p className="text-sm text-muted-foreground">Your account ({role.role}) can look at this but not fix it. Ask an administrator to open this page and use the buttons, or to run the commands shown.</p>
       )}
 
       <ul className="space-y-3">
