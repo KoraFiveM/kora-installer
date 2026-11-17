@@ -26,6 +26,8 @@ pub struct TlsConfig {
     pub key_path: Option<String>,
     /// Extra names for the self-signed certificate (`kora panel tls self-signed --name box.lan`).
     pub names: Vec<String>,
+    /// Bumped by `kora panel tls renew` so a running panel notices and fetches or makes a new certificate.
+    pub renewed: u64,
 }
 
 impl TlsConfig {
@@ -49,7 +51,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let s = Store::open(d.path()).unwrap();
         assert_eq!(TlsConfig::load(&s).unwrap().mode, TlsMode::Auto);
-        let c = TlsConfig { mode: TlsMode::Provided, cert_path: Some("/c.pem".into()), key_path: Some("/k.pem".into()), names: vec!["a".into()] };
+        let c = TlsConfig { mode: TlsMode::Provided, cert_path: Some("/c.pem".into()), key_path: Some("/k.pem".into()), names: vec!["a".into()], renewed: 0 };
         c.save(&s).unwrap();
         assert_eq!(TlsConfig::load(&s).unwrap(), c);
         assert!(serde_json::to_string(&c).unwrap().contains("\"provided\""));

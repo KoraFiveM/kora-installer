@@ -372,7 +372,12 @@ pub async fn txadmin_ticket(
     let ticket = st.txgate.mint_ticket(Ticket { server: e.name.clone(), panel_session, remote: caller.remote, gateway: port, expires: st.txgate.now() + TICKET_TTL });
     let dir = e.dir.clone();
     let username = blocking(move || Ok(saved_txadmin_username(&dir))).await.ok().flatten();
-    Ok(Json(kora_core::api::wire::TxAdminTicket { url: format!("{}://{}:{port}/__kora/enter?t={ticket}", if transport.secure { "https" } else { "http" }, host_name(host)), port, expires_in: TICKET_TTL.as_secs(), username }))
+    Ok(Json(kora_core::api::wire::TxAdminTicket {
+        url: format!("{}://{}:{port}/__kora/enter?t={ticket}", if transport.secure { "https" } else { "http" }, host_name(host)),
+        port,
+        expires_in: TICKET_TTL.as_secs(),
+        username,
+    }))
 }
 
 /// Static pages of the gateway itself (never txAdmin's).

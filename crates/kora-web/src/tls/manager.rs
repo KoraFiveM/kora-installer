@@ -334,7 +334,7 @@ mod tests {
         std::fs::write(&cp, &c1).unwrap();
         std::fs::write(&kp, &k1).unwrap();
         private(&kp);
-        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![] });
+        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![], renewed: 0 });
         let i = m.reload(false).unwrap().unwrap();
         assert_eq!(i.source, CertSource::Provided);
         assert_eq!(i.names, vec!["box.example.com"]);
@@ -361,7 +361,7 @@ mod tests {
         std::fs::write(&cp, &c1).unwrap();
         std::fs::write(&kp, &k1).unwrap();
         private(&kp);
-        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![] });
+        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![], renewed: 0 });
         m.reload(false).unwrap();
         let before = m.state.info().unwrap().fingerprint;
         std::fs::set_permissions(&kp, std::fs::Permissions::from_mode(0o644)).unwrap();
@@ -380,7 +380,7 @@ mod tests {
         std::fs::write(&cp, &c).unwrap();
         std::fs::write(&kp, &k).unwrap();
         private(&kp);
-        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![] });
+        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![], renewed: 0 });
         m.reload(false).unwrap();
         assert!(m.state.last_error().unwrap().contains("panel.lan"), "{:?}", m.state.last_error());
     }
@@ -393,7 +393,7 @@ mod tests {
         std::fs::write(&cp, &c).unwrap();
         std::fs::write(&kp, &k).unwrap();
         private(&kp);
-        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![] });
+        set(&m, TlsConfig { mode: TlsMode::Provided, cert_path: Some(cp.to_string_lossy().into()), key_path: Some(kp.to_string_lossy().into()), names: vec![], renewed: 0 });
         assert!(m.reload(false).unwrap_err().contains("expired"));
         assert!(!m.state.active());
     }
@@ -466,4 +466,47 @@ mod tests {
         assert!(m.reload(false).unwrap().is_none() && !m.state.active());
         assert!(m.report().ca_fingerprint.is_some(), "the CA is kept for next time");
     }
+}
+
+// ---- operations for the CLI and the settings screen ----------------------------------------------------------------
+
+/// Save a new setting after checking that it loads: nothing is saved when it does not.
+pub fn apply(home: &Path, whois: Arc<dyn Whois>, hints: Hints, new: TlsConfig, fetch_tailscale: bool) -> Result<(Manager, Option<CertInfo>), String> {
+    let store = Store::open(home).map_err(kora_core::store::problem_to_string)?;
+    let old = TlsConfig::load(&store)?;
+    new.save(&store)?;
+    let m = Manager::new(home.to_path_buf(), whois);
+    m.set_hints(hints);
+    match m.reload(fetch_tailscale) {
+        Ok(i) => Ok((m, i)),
+        Err(e) => {
+            old.save(&store)?;
+            Err(e)
+        }
+    }
+}
+
+/// Throw away what a renewal replaces (the Tailscale cache, the made certificate; never the CA) and note it in the
+/// setting so a running panel fetches or makes a new one.
+pub fn force_renewal(home: &Path) -> Result<(), String> {
+    let store = Store::open(home).map_err(kora_core::store::problem_to_string)?;
+    store
+        .write(|tx| {
+            tx.execute("DELETE FROM tls_tailscale", [])?;
+            tx.execute("DELETE FROM tls_local_leaf", [])?;
+            Ok(())
+        })
+        .map_err(kora_core::store::problem_to_string)?;
+    let mut c = TlsConfig::load(&store)?;
+    c.renewed += 1;
+    c.save(&store)
+}
+
+/// Write the local CA's certificate (public) where a person can pick it up to install it in a browser.
+pub fn export_ca(home: &Path, to: &Path) -> Result<String, String> {
+    let store = Store::open(home).map_err(kora_core::store::problem_to_string)?;
+    let ca = selfsigned::load_ca(&store)?.ok_or("There is no local certificate authority yet: run `kora panel tls self-signed` first.")?;
+    std::fs::write(to, ca.cert_pem.as_bytes()).map_err(|e| format!("could not write {} ({e})", to.display()))?;
+    let chain = certs::parse_chain(ca.cert_pem.as_bytes())?;
+    Ok(certs::fingerprint(&chain[0]))
 }

@@ -44,7 +44,14 @@ fn world(proxy: bool, with_hsts_cert: bool) -> W {
         let ck = kora_web::tls::certs::certified_key(chain, &kora_web::tls::certs::parse_key(leaf.key_pem.as_bytes()).unwrap()).unwrap();
         st.tls.install(
             ck,
-            kora_web::tls::CertInfo { source: kora_web::tls::CertSource::Provided, names: sum.names, not_before: sum.not_before, not_after: sum.not_after, fingerprint: sum.fingerprint, ca_fingerprint: None },
+            kora_web::tls::CertInfo {
+                source: kora_web::tls::CertSource::Provided,
+                names: sum.names,
+                not_before: sum.not_before,
+                not_after: sum.not_after,
+                fingerprint: sum.fingerprint,
+                ca_fingerprint: None,
+            },
         );
     }
     W { app: router(st), token, secret }
@@ -193,7 +200,15 @@ async fn a_proxied_visitor_is_never_the_local_owner() {
         .await;
     assert_eq!(r.status(), 401, "an invalid user token: the launch token is not a remote credential");
     // And the local-only link maker is out of reach.
-    let r = req("POST", "/api/v1/session/link").peer("127.0.0.1:5000").host("panel.example.com").h("x-kora", "1").h("x-forwarded-for", "127.0.0.2").h(SECRET_HEADER, &w.secret).h("authorization", &format!("Bearer {LAUNCH}")).send(&w.app).await;
+    let r = req("POST", "/api/v1/session/link")
+        .peer("127.0.0.1:5000")
+        .host("panel.example.com")
+        .h("x-kora", "1")
+        .h("x-forwarded-for", "127.0.0.2")
+        .h(SECRET_HEADER, &w.secret)
+        .h("authorization", &format!("Bearer {LAUNCH}"))
+        .send(&w.app)
+        .await;
     assert_ne!(r.status(), 200);
 }
 

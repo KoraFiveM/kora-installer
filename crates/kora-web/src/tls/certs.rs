@@ -97,6 +97,20 @@ pub fn days_left(not_after: i64, now: i64) -> i64 {
     (not_after - now).div_euclid(86_400)
 }
 
+/// `2027-03-09` for a unix time (UTC), by the civil-from-days method.
+pub fn format_date(unix: i64) -> String {
+    let z = unix.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    format!("{:04}-{:02}-{:02}", if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 /// A private key file must not be readable by other accounts. Pure decision on the Unix mode.
 pub fn key_mode_problem(mode: u32) -> Option<String> {
     (mode & 0o077 != 0).then(|| format!("is readable by other accounts (permissions {:03o})", mode & 0o777))
@@ -149,6 +163,13 @@ mod tests {
         assert_eq!(s.fingerprint.len(), 32 * 3 - 1);
         let k = parse_key(key.as_bytes()).unwrap();
         assert!(certified_key(chain, &k).is_ok());
+    }
+
+    #[test]
+    fn dates_are_formatted_from_unix_time() {
+        assert_eq!(format_date(0), "1970-01-01");
+        assert_eq!(format_date(951_782_400), "2000-02-29");
+        assert_eq!(format_date(1_800_000_000), "2027-01-15");
     }
 
     #[test]

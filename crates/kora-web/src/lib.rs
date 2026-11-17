@@ -334,7 +334,12 @@ pub(crate) async fn session_link(State(st): State<AppState>, Extension(caller): 
 }
 
 /// `POST /session/logout`: forget this session and clear the cookie. 204.
-pub(crate) async fn session_logout(State(st): State<AppState>, Extension(caller): Extension<remote::Caller>, Extension(transport): Extension<tls::serve::Transport>, req_headers: axum::http::HeaderMap) -> Response {
+pub(crate) async fn session_logout(
+    State(st): State<AppState>,
+    Extension(caller): Extension<remote::Caller>,
+    Extension(transport): Extension<tls::serve::Transport>,
+    req_headers: axum::http::HeaderMap,
+) -> Response {
     let name = security::cookie_name(st.addr.port());
     // Only the session this request proves (cookie and secret); a cookie on its own ends nothing.
     if let Some(id) = security::current_session(&st, &req_headers, caller.remote) {
@@ -518,7 +523,8 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
         // The real panel keeps its jobs in the store: history survives a restart, and what was running when the last panel died is
         // marked interrupted. (Tests use `AppState::system` with the in-memory registry and never touch the Kora folder.)
-        let state = AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem).with_tls(tls_mgr.state.clone());
+        let state =
+            AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem).with_tls(tls_mgr.state.clone());
         tokio::spawn(tls_mgr.clone().maintain());
         for w in &warnings {
             eprintln!("{w}");

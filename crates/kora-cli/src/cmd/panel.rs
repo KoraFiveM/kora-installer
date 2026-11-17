@@ -13,7 +13,7 @@ pub(crate) struct PanelArgs {
     /// Port to listen on. Default: 47120, or the next free one (up to 47140) when something else uses it.
     #[arg(long)]
     pub(crate) port: Option<u16>,
-    /// Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard.
+    /// Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and uses HTTPS once there is a certificate (`kora panel tls`); without one it is plain HTTP: use it only on a private network such as Tailscale or WireGuard.
     #[arg(long, default_value = "127.0.0.1")]
     pub(crate) bind: std::net::IpAddr,
     /// Allow remote access for this run (needed to listen on an address other than 127.0.0.1 unless it is already switched on in the settings).
@@ -28,7 +28,7 @@ pub(crate) struct PanelArgs {
     /// Also listen on this computer's Tailscale addresses, with the saved settings (the background service uses this; `--tailscale` sets it up).
     #[arg(long, hide = true, conflicts_with = "tailscale")]
     pub(crate) listen_tailscale: bool,
-    /// Let --bind be a public address or every interface (0.0.0.0). The panel is plain HTTP, so on the internet sign-in tokens could be read on the way: use --tailscale or an SSH tunnel instead.
+    /// Let --bind be a public address or every interface (0.0.0.0). Needs HTTPS (`kora panel tls`) or a trusted reverse proxy (`kora panel proxy trust`); --tailscale or an SSH tunnel is safer.
     #[arg(long)]
     pub(crate) allow_public: bool,
     /// Make a new sign-in token, so links shown before stop working (restarts the background panel).
@@ -67,6 +67,16 @@ pub(crate) enum PanelCmd {
     Tailscale {
         #[command(subcommand)]
         cmd: crate::cmd::panel_tailscale::TailscaleCmd,
+    },
+    /// HTTPS for the panel: use your own certificate, Tailscale's, or one made on this computer.
+    Tls {
+        #[command(subcommand)]
+        cmd: crate::cmd::panel_tls::TlsCmd,
+    },
+    /// Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name with a real certificate.
+    Proxy {
+        #[command(subcommand)]
+        cmd: crate::cmd::panel_tls::ProxyCmd,
     },
     /// Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again.
     Restart,
@@ -113,6 +123,8 @@ pub(crate) fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
     match &a.cmd {
         Some(PanelCmd::User { cmd }) => return panel_user(cmd),
         Some(PanelCmd::Tailscale { cmd }) => return crate::cmd::panel_tailscale::command(cmd, &home),
+        Some(PanelCmd::Tls { cmd }) => return crate::cmd::panel_tls::tls(cmd),
+        Some(PanelCmd::Proxy { cmd }) => return crate::cmd::panel_tls::proxy(cmd),
         Some(PanelCmd::Restart) => return panel_restart(&home),
         Some(PanelCmd::RemoteActions { cmd }) => return panel_remote_actions(*cmd, &kora_web::remote::config::default_path()),
         None => {}
