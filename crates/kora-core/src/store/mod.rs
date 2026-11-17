@@ -44,6 +44,7 @@ pub mod export;
 pub mod jobs;
 pub mod legacy;
 pub mod material;
+pub mod peek;
 pub mod privacy;
 pub mod schema;
 

@@ -6,22 +6,28 @@ use std::path::{Path, PathBuf};
 
 use super::migrate::{adoption, Candidate};
 use super::policy::{AccountId, Policy};
-use crate::installer::registry::Registry;
 use crate::privsvc::ownership::Ledger;
+
+struct Listed {
+    name: String,
+    dir: PathBuf,
+}
 
 /// What an account looks like to the migration.
 ///
-/// The server list (`registry`) is the one thing read from a person's Kora home on the privileged side, only here and only
-/// to find folders to look at (each one is then checked from the system: owner, links, what exists). A missing file (the
-/// SQLite store moved the list into `store/kora.db`) means "nothing to adopt", never an error; the migration runs when the
+/// The server list is the one thing read from a person's Kora home on the privileged side, only here and only
+/// to find folders to look at (each one is then checked from the system: owner, links, what exists). It is read with
+/// [`crate::store::peek`], which opens the person's store read-only and immutable and never creates or changes a file
+/// (root's `-wal` / `-shm` there would lock the person out). A missing list means "nothing to adopt", never an error; the migration runs when the
 /// package or the MSI is installed, before the store has converted anything.
 #[derive(Debug, Clone)]
 pub struct Person {
     pub id: AccountId,
     /// Their home folder (Windows: profile folder).
     pub home: PathBuf,
-    /// Where their server list is (`servers.json`).
-    pub registry: PathBuf,
+    /// Their Kora folder (`~/.kora`, `%LOCALAPPDATA%\Kora`): the server list is read from its store without writing, see
+    /// [`crate::store::peek`].
+    pub kora_home: PathBuf,
 }
 
 /// The candidates for adoption: for each person, each server on their list, with what is found on the system.
@@ -38,8 +44,8 @@ pub fn gather(
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     for p in people {
-        let Ok(reg) = Registry::load_from(&p.registry) else { continue };
-        for e in reg.servers {
+        for (name, dir) in crate::store::peek::registered_server_folders(&p.kora_home) {
+            let e = Listed { name, dir };
             let slug = crate::installer::slug(&e.name);
             let owner = owner_of(&e.dir);
             let owner_is_account = owner.as_ref() == Some(&p.id);
@@ -151,7 +157,7 @@ pub mod unix {
             .filter_map(|a| {
                 let acct = a.id.as_str().strip_prefix("uid:")?.parse().ok().and_then(lookup_account)?;
                 let home = PathBuf::from(&acct.home);
-                Some(Person { id: a.id.clone(), registry: home.join(".kora").join("servers.json"), home })
+                Some(Person { id: a.id.clone(), kora_home: home.join(".kora"), home })
             })
             .collect();
         let owner_of = |d: &Path| -> Option<AccountId> {
@@ -228,7 +234,7 @@ pub mod windows {
             .iter()
             .filter_map(|a| {
                 let home = PathBuf::from(crate::privsvc::winapi::profile_dir(a.id.as_str())?);
-                Some(Person { id: a.id.clone(), registry: home.join("AppData").join("Local").join("Kora").join("servers.json"), home })
+                Some(Person { id: a.id.clone(), kora_home: home.join("AppData").join("Local").join("Kora"), home })
             })
             .collect();
         let owner_of = |d: &Path| -> Option<AccountId> {
@@ -269,7 +275,7 @@ mod tests {
     #[test]
     fn a_missing_server_list_adopts_nothing_and_is_not_an_error() {
         let d = tempfile::tempdir().unwrap();
-        let person = Person { id: me(), home: d.path().to_path_buf(), registry: d.path().join(".kora").join("servers.json") };
+        let person = Person { id: me(), home: d.path().to_path_buf(), kora_home: d.path().join(".kora") };
         let none = gather(&[person], &|_| None, &|_| false, &|_, _| true, true);
         assert!(none.is_empty(), "the store may have moved servers.json away");
     }
@@ -295,11 +301,11 @@ mod tests {
             ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
             created_unix: 1,
         };
-        Registry { servers: vec![entry] }.save_to(&reg).unwrap();
+        crate::installer::registry::Registry { servers: vec![entry] }.save_to(&reg).unwrap();
         let id = me();
         let mut policy = Policy::new("t");
         policy.allow(id.clone(), "me").unwrap();
-        let people = vec![Person { id: id.clone(), home: home_path.clone(), registry: reg }];
+        let people = vec![Person { id: id.clone(), home: home_path.clone(), kora_home: reg.parent().unwrap().to_path_buf() }];
         let ledger = home_path.join("owners.json");
         let owner_of = |d: &Path| std::fs::symlink_metadata(d).ok().map(|m| AccountId::uid(m.uid()));
         let exists = |kind: &str, _: &str| kind != "service"; // the service is already gone from this machine

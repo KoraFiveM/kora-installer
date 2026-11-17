@@ -217,7 +217,14 @@ pub fn reach_open_firewall(name: &str, dir: &std::path::Path, on_line: &mut dyn 
     // What a person can run themselves, in an administrator terminal: the command that exists for it.
     let shown = vec!["kora".to_string(), "reach".into(), name.to_string(), "--open-firewall".into()];
     let command = vec!["kora".to_string(), "admin-step".into(), "run".into(), "--step".into(), "reach.firewall".into(), "--dir".into(), dir];
-    privileged_shown("open the firewall for this server's game port", "Opening the firewall for the game port needs administrator rights. Run this command as administrator:", shown, command, vec![], on_line)
+    privileged_shown(
+        "open the firewall for this server's game port",
+        "Opening the firewall for the game port needs administrator rights. Run this command as administrator:",
+        shown,
+        command,
+        vec![],
+        on_line,
+    )
 }
 
 /// [`privileged_as`] for the toolchain actions, whose sentence names no particular thing.
