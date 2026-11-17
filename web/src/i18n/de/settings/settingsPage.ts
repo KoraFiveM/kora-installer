@@ -1,0 +1,45 @@
+import { register } from '../../index'
+import type en from '../../en/settings/settingsPage'
+
+// German (beta): machine-assisted, to be checked by a native speaker before release.
+const messages = {
+  'settings.settingsPage.updatedValue': 'Aktualisiert.',
+  'settings.settingsPage.restarting': 'Startet neu…',
+  'settings.settingsPage.restartNow': 'Jetzt neu starten',
+  'settings.settingsPage.panelDidComeBack': 'Das Panel ist nicht zurückgekommen. Führe <code>kora panel</code> auf dem Server aus.',
+  'settings.settingsPage.koraVersion': 'Kora-Version',
+  'settings.settingsPage.installedStrongNode': 'Installiert: {strong, node}',
+  'settings.settingsPage.versionLatestAvailable': 'Version {latest} ist verfügbar',
+  'settings.settingsPage.upDate': 'Aktuell',
+  'settings.settingsPage.checkAgain': 'Erneut prüfen',
+  'settings.settingsPage.updateLatest': 'Auf die neueste aktualisieren',
+  'settings.settingsPage.specificVersion': 'Oder eine bestimmte Version',
+  'settings.settingsPage.choose': 'Wählen...',
+  'settings.settingsPage.installVersion': 'Diese Version installieren',
+  'settings.settingsPage.updatedPanelRunsTerminal': 'Aktualisiert. Dieses Panel läuft in einem Terminalfenster: Halte es an (Strg+C) und führe <code>kora panel</code> erneut aus, um die neue Version zu nutzen.',
+  'settings.settingsPage.uninstallKora': 'Kora deinstallieren',
+  'settings.settingsPage.removesWhatKoraAdded': 'Entfernt, was Kora zu diesem Computer hinzugefügt hat. Standardmäßig bleiben deine Serverordner und Datenbanken erhalten.',
+  'settings.settingsPage.showWhatWouldRemoved': 'Anzeigen, was entfernt würde',
+  'settings.settingsPage.removeThese': 'Diese entfernen',
+  'settings.settingsPage.deletesDataCannotUndone': 'Das löscht Daten und lässt sich nicht rückgängig machen.',
+  'settings.settingsPage.choseDeleteServerFolders': 'Du hast gewählt, Serverordner oder Datenbanken zu löschen. Alles darin geht verloren.',
+  'settings.settingsPage.typeUninstallConfirm': 'Tippe „uninstall“ zur Bestätigung',
+  'settings.settingsPage.uninstall': 'Deinstallieren',
+  'settings.settingsPage.uninstallFinished': 'Deinstallation abgeschlossen',
+  'settings.settingsPage.settings': 'Einstellungen',
+  'settings.settingsPage.githubAccount': 'GitHub-Konto',
+  'settings.settingsPage.getHelp': 'Hilfe holen',
+  'settings.settingsPage.whenSomethingGoesWrong': 'Wenn etwas schiefgeht, erstelle eine Datei, die du der Person geben kannst, die dir hilft. Sie enthält deine Kora-Version, dein System, die Systemprüfung, die Einstellungen deiner Server, letzte Jobs und Probleme sowie Logs, mit allen Geheimnissen entfernt. Du siehst genau, was darin ist, bevor sie gespeichert wird, und Kora lädt sie nie hoch.',
+  'settings.settingsPage.createSupportBundle': 'Support-Paket erstellen',
+  'settings.settingsPage.askAdministratorMakeOne': 'Bitte einen Administrator, eines zu erstellen.',
+  'settings.settingsPage.about': 'Info',
+  'settings.settingsPage.koraPanelVersionManages': 'Kora Panel {version}. Es verwaltet FiveM-Server unter {os}.',
+  'settings.settingsPage.websiteKoraframeWork': 'Webseite: koraframe.work',
+  'settings.settingsPage.documentationDocsKoraframeWork': 'Dokumentation: docs.koraframe.work/guides/installer/overview',
+  'settings.settingsPage.sourceReleasesLinkGithub': 'Quelltext und Releases: <link>github.com/KoraFiveM/kora-installer</link>',
+  'settings.settingsPage.pageMakesNoRequests': 'Diese Seite stellt keine Anfragen an andere Webseiten. Alles, was sie zeigt, kommt von Kora auf diesem Computer.',
+  'settings.settingsPage.koraPanelVersionManagesAdmin': 'Kora Panel {version}. Es verwaltet FiveM-Server unter {os}, mit für dich eingeschaltetem Administratordienst.',
+  'settings.settingsPage.updatedTo': 'Auf {version} aktualisiert.',
+} satisfies Record<keyof typeof en, string>
+
+register('de', messages)

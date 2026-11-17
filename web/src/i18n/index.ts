@@ -61,6 +61,11 @@ export function register(locale: string, messages: Table): void {
   tables.set(locale, t)
 }
 
+/** A copy of the messages registered for a language (the completeness tests and tools read this). */
+export function catalogue(locale: string): Record<string, string> {
+  return { ...(tables.get(locale) ?? {}) }
+}
+
 export function hasLocale(locale: string): boolean {
   return tables.has(locale)
 }

@@ -52,7 +52,6 @@ export interface MessageParams {
   'core.appShell.pageCannotReachKora': { code: Tag }
   'core.appShell.signedTokenSecretLink': { navLink: Tag }
   'core.backupChip.textNeedsLook': { text: string | number }
-  'core.client.baseServersEncodeuricomponentB': { BASE: string | number; encodeURIComponent: string | number; encodeURIComponent2: string | number }
   'core.client.serverAnsweredUnexpectedError': { status: string | number }
   'core.download.downloadFailedStatus': { status: string | number }
   'core.jobProgress.countSizeResourcesFinished': { count: string | number; size: string | number }

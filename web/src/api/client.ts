@@ -395,7 +395,7 @@ export const api = {
     undo: (name: string, passphrase?: string) => call('backup_undo', { params: { s: name }, body: { passphrase } }),
     remove: (name: string, id: string) => call('backup_delete', { params: { s: name, id } }),
     /** The address of the archive (a download; it holds secrets: administrators only). Fetched with the session header, see `downloadBackup`. */
-    fileUrl: (name: string, id: string) => t('core.client.baseServersEncodeuricomponentB', { BASE, encodeURIComponent: encodeURIComponent(name), encodeURIComponent2: encodeURIComponent(id) }),
+    fileUrl: (name: string, id: string) => `${BASE}/servers/${encodeURIComponent(name)}/backups/${encodeURIComponent(id)}/file`, // i18n-ignore: an API path
   },
   imports: {
     /** Upload a backup file (the file itself is the body, streamed): it waits on the computer that runs Kora. */
