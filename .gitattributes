@@ -6,3 +6,5 @@
 *.sh text eol=lf
 *.ps1 text eol=lf
 *.yml text eol=lf
+# Branches each add lines under [Unreleased]: keep both sides instead of conflicting.
+CHANGELOG.md merge=union

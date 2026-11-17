@@ -1,0 +1,121 @@
+# The panel's administrator path on Windows (the permission / UAC prompt), end to end through the panel's own code.
+# See docs/windows-uac-ci.md for what each job can and cannot prove, and how to set up the self-hosted VM.
+#
+#   hosted  windows-latest. An elevated administrator account with UAC normally off: no split token, no prompt. Runs
+#           the scenarios that are still meaningful there (an unelevated panel and a standard account must not get
+#           an administrator worker) and SKIPS, with a notice, the ones that need a real split token.
+#   vm      a self-hosted Windows VM with UAC on and an interactive desktop, label `kora-uac-vm`: approved-by-policy,
+#           the real prompt answered through UI Automation (Yes, No, nobody, standard account + credentials).
+#           Skipped unless the repository variable KORA_UAC_VM is "true" (so a missing VM never leaves a job
+#           waiting for a runner), and never for pull requests from forks (it runs repository code as an
+#           administrator on that machine).
+name: Windows UAC
+on:
+  pull_request:
+    paths:
+      - "crates/kora-core/src/helper/**"
+      - "crates/kora-core/src/installer/system_ops.rs"
+      - "crates/kora-cli/src/admin_worker.rs"
+      - "crates/kora-web/src/elevated.rs"
+      - "crates/kora-web/src/handlers/install.rs"
+      - "crates/kora-web/src/handlers/maintenance.rs"
+      - "crates/kora-web/src/handlers/settings.rs"
+      - "crates/kora-web/src/handlers/toolchain.rs"
+      - "scripts/smoke/14-uac.ps1"
+      - "scripts/smoke/lib-accounts.ps1"
+      - "scripts/smoke/uac-answer.ps1"
+      - "scripts/smoke/vm-setup-uac-runner.ps1"
+      - "scripts/smoke/common.ps1"
+      - ".github/workflows/windows-uac.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # A newer push to the same branch/PR cancels the older run instead of stacking up (runners are limited).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: "build kora.exe (shared by the jobs below)"
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: smoke
+      - name: "Build kora.exe"
+        run: |
+          cargo build --release --locked -p kora-cli
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kora-uac-exe
+          path: target/release/kora.exe
+          if-no-files-found: error
+          retention-days: 3
+
+  hosted:
+    name: "hosted: unelevated panel and standard account never get an administrator worker"
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kora-uac-exe
+          path: target/release
+      - name: "PSScriptAnalyzer on the UAC scripts (same settings as install.ps1: all rules except Write-Host)"
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $bad = 0
+          foreach ($f in 'lib-accounts', '14-uac', 'uac-answer', 'vm-setup-uac-runner') {
+            $r = Invoke-ScriptAnalyzer -Path "scripts/smoke/$f.ps1" -ExcludeRule PSAvoidUsingWriteHost
+            if ($r) { $r | Format-Table -AutoSize | Out-String -Width 200 | Write-Host; $bad += @($r).Count }
+          }
+          if ($bad) { throw "PSScriptAnalyzer: $bad finding(s)" }
+      - name: "14. UAC scenarios (hosted: what the runner allows)"
+        timeout-minutes: 25
+        run: ./scripts/smoke/14-uac.ps1 -Mode Hosted
+      - name: Collect logs
+        if: always()
+        run: |
+          foreach ($p in 'C:\kora-uac') { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.log', '.out', '.err', '.json', '.txt' } | ForEach-Object { Write-Host "-- $($_.FullName)"; Get-Content $_.FullName -Tail 40 -ErrorAction SilentlyContinue } } }
+
+  vm:
+    name: "vm: the real prompt (self-hosted Windows VM)"
+    needs: build
+    # A repository variable, not a secret: a job aimed at a label no runner has would wait for ever.
+    if: >-
+      vars.KORA_UAC_VM == 'true' &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, windows, kora-uac-vm]
+    timeout-minutes: 60
+    defaults:
+      run:
+        # Windows PowerShell 5.1: always present on the VM, and the prompt driver needs it anyway.
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kora-uac-exe
+          path: target/release
+      - name: "14. UAC scenarios (the real prompt)"
+        timeout-minutes: 50
+        run: ./scripts/smoke/14-uac.ps1 -Mode Vm -Slow
+      - name: Collect logs
+        if: always()
+        run: |
+          foreach ($p in 'C:\kora-uac') { if (Test-Path $p) { Write-Host "== $p"; Get-ChildItem $p -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.log', '.out', '.err', '.json', '.txt' } | ForEach-Object { Write-Host "-- $($_.FullName)"; Get-Content $_.FullName -Tail 40 -ErrorAction SilentlyContinue } } }
