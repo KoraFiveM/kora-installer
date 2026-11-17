@@ -805,6 +805,8 @@ pub fn rollback_with_admin(dir: &Path, opts: &RollbackOptions, db_admin_password
 }
 
 fn rollback_inner(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<&str>, sink: &mut dyn ProgressSink, hooks: &Hooks) -> Result<Vec<String>> {
+    // The router must not keep forwarding a port to a server that is going away (a no-op unless forwarding was on).
+    crate::reach::forward::release_for_dir(dir);
     rollback_known(dir, registered(dir), opts, db_admin_password, sink, hooks)
 }
 

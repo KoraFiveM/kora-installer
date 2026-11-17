@@ -8,6 +8,7 @@ pub mod remote;
 pub mod routes;
 pub mod security;
 mod static_ui;
+pub mod txgate;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -94,6 +95,8 @@ pub struct AppState {
     pub events: Arc<handlers::system::EventsHub>,
     /// The last `GET /fleet` answer, for a few seconds.
     pub fleet_cache: Arc<handlers::hub::FleetCache>,
+    /// txAdmin through the panel: tickets, sessions and the per-server gateway listeners.
+    pub txgate: Arc<txgate::Gate>,
 }
 
 impl AppState {
@@ -118,6 +121,7 @@ impl AppState {
             streams: Arc::default(),
             events: Arc::default(),
             fleet_cache: Arc::default(),
+            txgate: Arc::default(),
         }
     }
     /// A one-time code for a sign-in link: `http://127.0.0.1:<port>/#code=<code>`. Works once, for ten
@@ -410,6 +414,7 @@ async fn serve_tailnet(state: AppState, port: u16) {
                 match tokio::net::TcpListener::bind(SocketAddr::new(ip, port)).await {
                     Ok(l) => {
                         bound.push(ip);
+                        state.txgate.add_ip(&state, ip);
                         let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
                         tokio::spawn(async move {
                             let _ = axum::serve(l, app).await;

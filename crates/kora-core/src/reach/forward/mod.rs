@@ -94,6 +94,13 @@ impl Wanted {
         let clean: String = server.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ' ')).take(32).collect();
         Ok(Self { port, client, description: format!("Kora {clean} game") })
     }
+    /// For taking a mapping away: only the port matters (no address is sent).
+    pub fn for_removal(port: u16) -> Result<Self, MapError> {
+        if port < 1024 {
+            return Err(MapError::Refused(format!("port {port} is in the range Kora never forwards")));
+        }
+        Ok(Self { port, client: Ipv4Addr::UNSPECIFIED, description: String::new() })
+    }
     pub fn port(&self) -> u16 {
         self.port
     }
@@ -157,6 +164,31 @@ pub fn discover(d: &Discover) -> Vec<Box<dyn PortMapper>> {
         }
     }
     out
+}
+
+/// Take the game port of the server in `dir` off every router that answers, if the person had switched
+/// forwarding on or Kora recorded a mapping. For deleting a server, removing it from the list and
+/// turning the option off: the keeper only removes what it knows it made in its own run. Best effort,
+/// quiet when nothing was forwarded; never touches any port but the server's game port.
+pub fn release_for_dir(dir: &std::path::Path) {
+    let s = super::settings::load_server(dir);
+    if !s.forward && s.status.is_none() {
+        return;
+    }
+    if let Ok(f) = crate::installer::registry::ServerFile::load(dir) {
+        release_port(&Discover::default(), f.ports.game);
+    }
+    super::settings::record_status(dir, None);
+}
+
+/// [`release_for_dir`]'s network half.
+pub fn release_port(d: &Discover, port: u16) {
+    let Ok(w) = Wanted::for_removal(port) else { return };
+    for mut m in discover(d) {
+        for p in [Proto::Tcp, Proto::Udp] {
+            let _ = m.remove(&w, p);
+        }
+    }
 }
 
 #[cfg(test)]

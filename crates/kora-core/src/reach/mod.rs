@@ -16,6 +16,7 @@
 
 pub mod addr;
 pub mod forward;
+pub mod fw;
 pub mod probe;
 pub mod settings;
 
@@ -541,6 +542,24 @@ pub fn check(env: &dyn ReachEnv, e: &ServerEntry, consent_override: Option<Conse
     assess(&gather(env, e, consent_override))
 }
 
+/// Turn automatic port forwarding on or off for a server. Off also takes the mapping away at once
+/// (the keepers would do it within half a minute anyway).
+pub fn set_forwarding(e: &ServerEntry, on: bool) -> Result<ForwardingView, String> {
+    let mut s = settings::load_server(&e.dir);
+    if s.forward == on {
+        return Ok(ForwardingView { enabled: on, status: s.status });
+    }
+    s.forward = on;
+    if !on {
+        s.status = None;
+    }
+    settings::save_server(&e.dir, &s)?;
+    if !on {
+        forward::release_port(&forward::Discover::default(), e.ports.game);
+    }
+    Ok(ForwardingView { enabled: on, status: s.status })
+}
+
 // ------------------------------------------------------------------ the real machine
 
 pub struct SystemReach {
@@ -634,6 +653,28 @@ impl ReachEnv for SystemReach {
     }
     fn now(&self) -> u64 {
         crate::monitor::now_unix()
+    }
+}
+
+/// A plausible set of facts for tests of the front ends: running, behind a router with UPnP, nothing known outside.
+#[cfg(any(test, feature = "fake"))]
+pub fn sample_facts(server: &str, port: u16) -> Facts {
+    Facts {
+        server: server.into(),
+        game_port: port,
+        running: true,
+        tcp_local: true,
+        tcp_lan: Some(true),
+        udp_held: true,
+        lan: Some("192.168.1.50".parse().expect("literal")),
+        firewall: FirewallFacts { kind: None, opened_by_kora: false, readable: true },
+        router: RouterFacts { protocols: vec!["UPnP"], external_ip: Some("84.12.5.6".parse().expect("literal")) },
+        forwarding: ForwardingView { enabled: false, status: None },
+        join_code: None,
+        consent: Consent::default(),
+        cfx: None,
+        echo: None,
+        now: 1,
     }
 }
 

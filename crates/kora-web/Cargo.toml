@@ -11,12 +11,17 @@ build = "build.rs"
 [dependencies]
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "query"] }
 getrandom = "0.4.3"
+# The txAdmin gateway (src/txgate): an HTTP client connection and upgrades. All three are already in the
+# dependency tree through axum, so nothing new is downloaded or audited.
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 sha2 = "0.11.1"
 kora-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
 tokio-stream = { version = "0.1", default-features = false }
 
 [dev-dependencies]
