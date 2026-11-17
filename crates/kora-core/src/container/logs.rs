@@ -11,7 +11,9 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
 use super::engine;
+#[cfg(unix)]
 use super::record::ContainerRecord;
 
 pub fn pid_path(dir: &Path) -> PathBuf {

@@ -174,18 +174,18 @@ mod tests {
     use crate::container::record::tests::sample;
     use crate::service::testing::FakeRunner;
 
+    #[cfg(unix)]
     #[test]
     fn a_new_record_names_this_servers_objects_and_refuses_root_owned_folders() {
         let d = tempfile::tempdir().unwrap();
         let e = Engine::new(EngineKind::Podman, true);
         let want = ContainerRequest { bind: Some("203.0.113.9".into()), memory_mb: Some(2048), ..Default::default() };
-        let rec = new_record(d.path(), "main", &e, None, &want, true);
         #[cfg(unix)]
         {
             // the temp folder is the test user's own (not root)
             let me = unsafe { libc::getuid() };
             if me != 0 {
-                let rec = rec.unwrap();
+                let rec = new_record(d.path(), "main", &e, None, &want, true).unwrap();
                 assert_eq!((rec.container.as_str(), rec.db.as_ref().unwrap().container.as_str()), ("kora-main", "kora-main-db"));
                 assert_eq!((rec.bind.as_deref(), rec.memory_mb, rec.uid), (Some("203.0.113.9"), Some(2048), me));
                 assert!(rec.check("main").is_ok());
