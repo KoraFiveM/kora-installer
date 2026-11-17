@@ -176,7 +176,7 @@ if (-not ($NoShortcuts -or $env:KORA_NO_SHORTCUTS -eq '1')) {
 
 Write-Host ''
 if ($NoLaunch -or $env:KORA_NO_LAUNCH -eq '1') {
-    Write-Host 'Next step: run   kora panel   (opens Kora Panel in your browser)'
+    Write-Host 'Next step: run   kora   (opens Kora Panel in your browser)'
 }
 else {
     Write-Host 'Starting Kora Panel ...'

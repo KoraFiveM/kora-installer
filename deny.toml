@@ -9,7 +9,7 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-# No advisory exceptions: sevenz-rust -> sevenz-rust2 and ratatui 0.30 removed the previous ones.
+# No advisory exceptions: sevenz-rust -> sevenz-rust2 removed the previous ones (the terminal UI crates are gone too).
 ignore = []
 
 [licenses]

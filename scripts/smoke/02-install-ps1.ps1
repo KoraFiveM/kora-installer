@@ -40,7 +40,7 @@ try {
     Assert-That (@(($userPath -split ";") | Where-Object { $_ -eq $default }).Count -eq 1) 'and exactly once'
     $v = Invoke-Native "$default\kora.exe" @('--version')
     Assert-That ($v.Code -eq 0) 'the installed kora.exe runs'
-    Assert-That ($out -notmatch 'Starting Kora Panel' -and $out -match 'Next step: run   kora panel') 'KORA_NO_LAUNCH=1: the panel is not started, the next step is printed'
+    Assert-That ($out -notmatch 'Starting Kora Panel' -and $out -match 'Next step: run   kora ') 'KORA_NO_LAUNCH=1: the panel is not started, the next step is printed'
     $startLnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Kora.lnk'
     Assert-That (Test-Path $startLnk) 'the per-user Start Menu shortcut was made (no administrator rights)'
     $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($startLnk)
