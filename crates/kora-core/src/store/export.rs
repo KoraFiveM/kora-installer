@@ -40,16 +40,16 @@ pub fn export_json(s: &Store, dir: &Path) -> Result<Vec<PathBuf>, Problem> {
     crate::fsutil::create_dir_no_follow(dir).map_err(|e| failed("the folder", e))?;
     super::privacy::tighten_dir(dir);
     let mut out = Vec::new();
-    let servers = s.read(|c| crate::installer::registry::read_servers_pub(c))?;
+    let servers = s.read(crate::installer::registry::read_servers_pub)?;
     if !servers.is_empty() {
         put(dir, "servers.json", &Registry { servers }, &mut out)?;
     }
-    let keys = s.read(|c| crate::keystore::export_keys(c))?;
+    let keys = s.read(crate::keystore::export_keys)?;
     if !keys.is_empty() {
         let doc = json!({"version": 1, "keys": keys.iter().map(|(n, k, a)| json!({"name": n, "key": k, "added": a})).collect::<Vec<_>>()});
         put(dir, "secrets.json", &doc, &mut out)?;
     }
-    let profile = s.read(|c| crate::profile::read_profile_pub(c))?;
+    let profile = s.read(crate::profile::read_profile_pub)?;
     if profile != Default::default() {
         put(dir, "profile.json", &profile, &mut out)?;
     }

@@ -53,8 +53,9 @@ impl Field {
 #[derive(Debug, Clone)]
 pub struct ProfileStore {
     /// `<kora home>/profile.json`: only names the Kora home.
+    legacy: PathBuf,
+    /// The database file.
     path: PathBuf,
-    db: PathBuf,
 }
 
 impl Default for ProfileStore {
@@ -113,26 +114,26 @@ pub(crate) fn import_profile(c: &rusqlite::Connection, p: &Profile, replace: boo
 
 impl ProfileStore {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        let path = path.into();
-        let db = crate::store::db_path(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
-        Self { path, db }
+        let legacy = path.into();
+        let path = crate::store::db_path(legacy.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
+        Self { legacy, path }
     }
 
     /// Where the profile is saved: the store's database file.
     pub fn path(&self) -> &Path {
-        &self.db
+        &self.path
     }
 
     /// What is remembered. It only saves typing, so anything that goes wrong reads as "nothing remembered".
     pub fn load(&self) -> Profile {
-        let Ok(Some(s)) = Store::open_existing_beside(&self.path) else { return Profile::default() };
+        let Ok(Some(s)) = Store::open_existing_beside(&self.legacy) else { return Profile::default() };
         s.read(read).unwrap_or_default()
     }
 
     /// Change the given fields (in one transaction: two programs changing different fields keep both).
     /// Best effort for the caller: a failure to remember never blocks an install.
     pub fn update(&self, cfx_username: Field, cfx_identifier: Field, github_owner: Field) -> std::io::Result<Profile> {
-        let s = Store::open_beside(&self.path).map_err(problem_to_io)?;
+        let s = Store::open_beside(&self.legacy).map_err(problem_to_io)?;
         s.write(|tx| {
             let mut p = read(tx)?;
             cfx_username.apply(&mut p.cfx_username);
@@ -155,7 +156,7 @@ impl ProfileStore {
     }
 
     pub fn forget_all(&self) -> std::io::Result<()> {
-        let Some(s) = Store::open_existing_beside(&self.path).map_err(problem_to_io)? else { return Ok(()) };
+        let Some(s) = Store::open_existing_beside(&self.legacy).map_err(problem_to_io)? else { return Ok(()) };
         s.write(|tx| {
             tx.execute("DELETE FROM profile", [])?;
             Ok(())

@@ -59,7 +59,7 @@ enum Parsed {
     Servers(Vec<ServerEntry>),
     Keys(Vec<(String, String, u64)>),
     Profile(Profile),
-    Answers(InstallRequest),
+    Answers(Box<InstallRequest>),
     Panel(Panel),
     Hub(Vec<(String, String, String, String)>),
     Paused(Box<Stored>),
@@ -300,7 +300,7 @@ fn scan(c: &Connection, home: &Path) -> Result<Scan, Problem> {
                     "servers.json" => &|b| parse_servers(b).map(Parsed::Servers),
                     "secrets.json" => &|b| parse_keys(b).map(Parsed::Keys),
                     "profile.json" => &|b| parse_profile(b).map(Parsed::Profile),
-                    "last-install.json" => &|b| parse_answers(b).map(Parsed::Answers),
+                    "last-install.json" => &|b| parse_answers(b).map(|r| Parsed::Answers(Box::new(r))),
                     "panel.json" => &|b| parse_panel(b).map(Parsed::Panel),
                     _ => &|b| parse_hub(b).map(Parsed::Hub),
                 };
@@ -406,7 +406,7 @@ fn apply(c: &Connection, it: &Item) -> Result<(), Problem> {
         Parsed::Keys(v) => crate::keystore::import_keys(c, v, it.replace),
         Parsed::Profile(p) => crate::profile::import_profile(c, p, it.replace),
         Parsed::Answers(r) => {
-            let text = serde_json::to_string(r).map_err(|e| Problem::generic(e.to_string()))?;
+            let text = serde_json::to_string(&**r).map_err(|e| Problem::generic(e.to_string()))?;
             // Existing newer answers win unless this is a replacement.
             let sql = if it.replace {
                 "INSERT INTO saved_answers (id, req_json, saved_at) VALUES (1, ?1, ?2) ON CONFLICT(id) DO UPDATE SET req_json = excluded.req_json, saved_at = excluded.saved_at"

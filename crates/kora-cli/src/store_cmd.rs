@@ -100,7 +100,7 @@ pub fn audit(a: AuditArgs) -> i32 {
         println!("Nothing in the audit log yet (it records what is changed, from the panel and from `kora` commands).");
         return 0;
     }
-    println!("{:<20} {:<9} {:<22} {:<16} {}", "WHEN (UTC)", "RESULT", "WHAT", "SERVER", "WHO");
+    println!("{:<20} {:<9} {:<22} {:<16} WHO", "WHEN (UTC)", "RESULT", "WHAT", "SERVER");
     for r in rows {
         let who = match (r.actor_kind.as_str(), r.actor_name.as_deref(), r.provider.as_deref(), r.role.as_deref()) {
             ("remote", n, p, role) => format!("{} (remote, {}, {})", n.unwrap_or("unknown"), p.unwrap_or("?"), role.unwrap_or("?")),

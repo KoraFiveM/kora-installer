@@ -232,7 +232,7 @@ impl Store {
     }
 
     pub fn schema_version(&self) -> Result<u32, Problem> {
-        self.read(|c| current_version(c))
+        self.read(current_version)
     }
 
     /// Apply the migrations that are missing, each with a store backup before the first one when the

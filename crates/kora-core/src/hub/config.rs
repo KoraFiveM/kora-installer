@@ -112,8 +112,9 @@ pub fn check_url(raw: &str) -> Result<UrlCheck, String> {
 #[derive(Debug, Clone)]
 pub struct NodeStore {
     /// `<kora home>/hub.json`: only names the Kora home.
+    legacy: PathBuf,
+    /// The database file.
     path: PathBuf,
-    db: PathBuf,
 }
 
 fn read_nodes(c: &rusqlite::Connection) -> Result<Vec<NodeConfig>, Problem> {
@@ -142,9 +143,9 @@ fn blocked(s: &Store) -> Result<(), String> {
 
 impl NodeStore {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        let path = path.into();
-        let db = crate::store::db_path(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
-        Self { path, db }
+        let legacy = path.into();
+        let path = crate::store::db_path(legacy.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
+        Self { legacy, path }
     }
     /// The nodes of this process's Kora home.
     pub fn default_store() -> Self {
@@ -152,25 +153,25 @@ impl NodeStore {
     }
     /// Where the nodes are saved: the store's database file.
     pub fn path(&self) -> &Path {
-        &self.db
+        &self.path
     }
 
     pub fn load(&self) -> Result<Vec<NodeConfig>, String> {
-        let Some(s) = Store::open_existing_beside(&self.path).map_err(problem_to_string)? else { return Ok(vec![]) };
+        let Some(s) = Store::open_existing_beside(&self.legacy).map_err(problem_to_string)? else { return Ok(vec![]) };
         blocked(&s)?;
-        s.read(|c| read_nodes(c)).map_err(problem_to_string)
+        s.read(read_nodes).map_err(problem_to_string)
     }
 
     /// Replace the whole list (prefer [`add`](Self::add) and [`remove`](Self::remove): each is one transaction).
     pub fn save(&self, nodes: &[NodeConfig]) -> Result<(), String> {
-        let s = Store::open_beside(&self.path).map_err(problem_to_string)?;
+        let s = Store::open_beside(&self.legacy).map_err(problem_to_string)?;
         blocked(&s)?;
         s.write(|tx| write_nodes(tx, nodes)).map_err(problem_to_string)
     }
 
     /// Add a node (checked by the caller); refuses a repeated name or address.
     pub fn add(&self, name: &str, url: &str, token: &str) -> Result<NodeConfig, String> {
-        let s = Store::open_beside(&self.path).map_err(problem_to_string)?;
+        let s = Store::open_beside(&self.legacy).map_err(problem_to_string)?;
         blocked(&s)?;
         let mut refused: Option<String> = None;
         let r = s.write(|tx| {
@@ -193,7 +194,7 @@ impl NodeStore {
 
     /// `Ok(false)` when there was no such node.
     pub fn remove(&self, id: &str) -> Result<bool, String> {
-        let Some(s) = Store::open_existing_beside(&self.path).map_err(problem_to_string)? else { return Ok(false) };
+        let Some(s) = Store::open_existing_beside(&self.legacy).map_err(problem_to_string)? else { return Ok(false) };
         blocked(&s)?;
         s.write(|tx| {
             let n = tx.execute("DELETE FROM hub_nodes WHERE id = ?1", [id])?;

@@ -285,7 +285,7 @@ impl JobRegistry {
                 }
             }
         }
-        all.sort_by(|a, b| b.started.cmp(&a.started));
+        all.sort_by_key(|a| std::cmp::Reverse(a.started));
         all.truncate(limit);
         all
     }

@@ -119,7 +119,7 @@ impl RemoteConfig {
     /// The version of the saved settings now (0: none saved).
     pub fn stored_rev(path: &Path) -> Result<u64, String> {
         let Some(s) = Store::open_existing_beside(path).map_err(store::problem_to_string)? else { return Ok(0) };
-        s.read(|c| Ok(rev_of(c)?)).map_err(store::problem_to_string)
+        s.read(rev_of).map_err(store::problem_to_string)
     }
 
     /// Save these settings (replacing what is saved). Refuses, saving nothing, when the settings changed since

@@ -79,7 +79,7 @@ impl Registry {
     pub fn load_from(path: &Path) -> std::io::Result<Self> {
         let Some(s) = Store::open_existing_beside(path).map_err(problem_to_io)? else { return Ok(Self::default()) };
         blocked(&s)?;
-        s.read(|c| read_servers(c)).map(|servers| Self { servers }).map_err(problem_to_io)
+        s.read(read_servers).map(|servers| Self { servers }).map_err(problem_to_io)
     }
 
     pub fn load() -> std::io::Result<Self> {

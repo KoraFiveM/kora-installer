@@ -114,9 +114,9 @@ fn same(a: &str, b: &str) -> bool {
 #[derive(Debug, Clone)]
 pub struct KeyStore {
     /// `<kora home>/secrets.json`: only names the Kora home (see the module docs).
-    path: PathBuf,
+    legacy: PathBuf,
     /// The database file the keys are in.
-    db: PathBuf,
+    path: PathBuf,
 }
 
 impl Default for KeyStore {
@@ -187,14 +187,14 @@ pub(crate) fn import_keys(c: &rusqlite::Connection, keys: &[(String, String, u64
 
 impl KeyStore {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        let path = path.into();
-        let db = crate::store::db_path(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
-        Self { path, db }
+        let legacy = path.into();
+        let path = crate::store::db_path(legacy.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
+        Self { legacy, path }
     }
 
     /// Where the keys are saved: the store's database file.
     pub fn path(&self) -> &Path {
-        &self.db
+        &self.path
     }
 
     fn unreadable(&self, why: &str, details: String) -> Problem {
@@ -202,7 +202,7 @@ impl KeyStore {
             codes::KEYS_UNREADABLE,
             format!(
                 "Kora cannot read your saved licence keys ({why}). Nothing was changed and no key was lost: the file is still where it was. Fix or move the file {} and try again.",
-                self.path.display()
+                self.legacy.display()
             ),
         )
         .with_details(details)
@@ -219,7 +219,7 @@ impl KeyStore {
 
     /// Read-only: `None` when there is no store yet (nothing saved).
     fn open_read(&self) -> Result<Option<Store>, Problem> {
-        match Store::open_existing_beside(&self.path)? {
+        match Store::open_existing_beside(&self.legacy)? {
             Some(s) => {
                 self.blocked(&s)?;
                 Ok(Some(s))
@@ -230,14 +230,14 @@ impl KeyStore {
 
     fn read(&self) -> Result<Vec<Entry>, Problem> {
         match self.open_read()? {
-            Some(s) => s.read(|c| load_entries(c)),
+            Some(s) => s.read(load_entries),
             None => Ok(vec![]),
         }
     }
 
     /// Run `f` on the keys inside one transaction; the database is written only when `f` says it changed something.
     fn change<T>(&self, f: impl FnOnce(&mut Vec<Entry>) -> Result<(T, bool), Problem>) -> Result<T, Problem> {
-        let s = Store::open_beside(&self.path)?;
+        let s = Store::open_beside(&self.legacy)?;
         self.blocked(&s)?;
         s.write(|tx| {
             let before = load_entries(tx)?;

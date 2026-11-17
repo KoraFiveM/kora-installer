@@ -85,8 +85,10 @@ fn worker_entry() {
         }
         "write_until_killed" => {
             let keys = KeyStore::at(home.join("secrets.json"));
-            for i in 0.. {
+            let mut i = 0u64;
+            loop {
                 keys.add(&format!("k{i}"), &format!("cfxk_until_killed_{i:06}")).unwrap();
+                i += 1;
             }
         }
         "job_hang" => {
