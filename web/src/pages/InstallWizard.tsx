@@ -30,7 +30,7 @@ interface ReviewRow {
   advanced?: boolean
 }
 
-function reviewRows(f: WizardForm, req: InstallRequest, appSupported: boolean): ReviewRow[] {
+function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
   const rows: ReviewRow[] = [
     { label: 'Licence key', value: f.license.trim() ? 'Provided (hidden)' : 'Not given yet', step: 'licence' },
@@ -46,7 +46,6 @@ function reviewRows(f: WizardForm, req: InstallRequest, appSupported: boolean): 
     { label: 'Firewall', value: req.firewall ? (req.txadmin_public ? 'Open the game and txAdmin ports' : 'Open the game port') : 'Leave closed', step: 'options' },
     { label: 'Background service', value: req.service ? 'Yes' : 'No', step: 'options' },
   ]
-  if (appSupported) rows.push({ label: 'Kora app', value: req.app ? (req.app.desktop_shortcut ? 'Install, with a desktop shortcut' : 'Install') : 'Do not install', step: 'options' })
   rows.push({
     label: 'Sign in to txAdmin with your Cfx.re account',
     value: f.cfxFound ? (f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier) : 'Not set. Kora makes a local admin with a generated password.',
@@ -170,25 +169,23 @@ export default function InstallWizard() {
 function Wizard() {
   const qc = useQueryClient()
   const defaults = useQuery({ queryKey: ['install-defaults'], queryFn: api.installs.defaults, staleTime: Infinity })
-  const appQ = useQuery({ queryKey: ['app'], queryFn: api.app.status })
   const gh = useQuery({ queryKey: ['github-status'], queryFn: api.github.status })
   const [f, setF] = useState<WizardForm | null>(null)
   if (defaults.data && !f) setF(initialForm(defaults.data))
   if (defaults.isError) return <ErrorNotice error={defaults.error} />
   if (!f || !defaults.data) return <Skeleton className="h-64" />
   const set = (p: Partial<WizardForm>) => setF((x) => (x ? { ...x, ...p } : x))
-  return <WizardSteps f={f} setF={setF} set={set} defaults={defaults.data} appSupported={!!appQ.data?.supported} githubSignedIn={!!gh.data?.signed_in} onGithubSignedIn={() => void gh.refetch()} onServersChanged={() => {
+  return <WizardSteps f={f} setF={setF} set={set} defaults={defaults.data} githubSignedIn={!!gh.data?.signed_in} onGithubSignedIn={() => void gh.refetch()} onServersChanged={() => {
     void qc.invalidateQueries({ queryKey: ['servers'] })
     void qc.invalidateQueries({ queryKey: ['install-defaults'] })
   }} />
 }
 
-function WizardSteps({ f, setF, set, defaults, appSupported, githubSignedIn, onGithubSignedIn, onServersChanged }: {
+function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn, onServersChanged }: {
   f: WizardForm
   setF: (f: WizardForm) => void
   set: (p: Partial<WizardForm>) => void
   defaults: InstallDefaults
-  appSupported: boolean
   githubSignedIn: boolean
   onGithubSignedIn: () => void
   onServersChanged: () => void
@@ -210,7 +207,7 @@ function WizardSteps({ f, setF, set, defaults, appSupported, githubSignedIn, onG
   const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
 
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
-  const req = buildRequest(f, { appSupported, artifactUrl: artUrl })
+  const req = buildRequest(f, { artifactUrl: artUrl })
   const stepsOf = (mode: WizardForm['mode']) => (everyStep ? stepsFor(mode) : quickStepsFor(mode))
   const steps = stepsOf(f.mode)
   const at = Math.min(step, steps.length - 1)
@@ -307,13 +304,13 @@ function WizardSteps({ f, setF, set, defaults, appSupported, githubSignedIn, onG
           {showing === 'build' && <BuildStep {...common} />}
           {showing === 'resources' && <ResourcesStep {...common} />}
           {showing === 'database' && <DatabaseStep {...common} />}
-          {showing === 'options' && <OptionsStep {...common} appSupported={appSupported} />}
+          {showing === 'options' && <OptionsStep {...common} />}
           {showing === 'licence' && <LicenceStep {...common} />}
           {showing === 'cfx' && <CfxStep {...common} />}
           {showing === 'github' && <GithubStep {...common} signedIn={githubSignedIn} onSignedIn={onGithubSignedIn} />}
           {showing === 'review' && (
             <ReviewStep
-              rows={reviewRows(f, req, appSupported)}
+              rows={reviewRows(f, req)}
               req={req}
               problems={problems}
               waiting={waiting}

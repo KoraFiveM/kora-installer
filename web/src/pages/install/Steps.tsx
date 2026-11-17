@@ -209,18 +209,12 @@ export function DatabaseStep({ f, set }: StepProps) {
   )
 }
 
-export function OptionsStep({ f, set, advanced, appSupported }: StepProps & { appSupported: boolean }) {
+export function OptionsStep({ f, set, advanced }: StepProps) {
   return (
     <div className="space-y-4">
       <Checkbox label="Open the game port in the firewall" hint="Lets players outside this computer connect. Needs administrator rights." checked={f.firewall} onChange={(e) => set({ firewall: e.target.checked })} />
       {advanced && <Checkbox label="Also open the txAdmin port" hint="Lets you reach txAdmin from other computers. Anyone who can reach it can try to sign in, so leave this off unless you need it." checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
       <Checkbox label="Install as a background service" hint="The server starts with the computer and restarts if it crashes. Needs administrator rights." checked={f.service} onChange={(e) => set({ service: e.target.checked })} />
-      {appSupported && (
-        <div className="space-y-2">
-          <Checkbox label="Install the Kora app" hint="Adds Kora to the Start Menu so you can open the manager later." checked={f.app} onChange={(e) => set({ app: e.target.checked })} />
-          {f.app && <div className="pl-7"><Checkbox label="Also put a shortcut on the desktop" checked={f.desktopShortcut} onChange={(e) => set({ desktopShortcut: e.target.checked })} /></div>}
-        </div>
-      )}
     </div>
   )
 }

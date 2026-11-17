@@ -81,9 +81,9 @@ describe('scenarios', () => {
   it('trouble shows the command to run as administrator (with sudo on Linux)', async () => {
     installMock({ scenario: 'trouble', speed: 0 })
     renderApp(<SettingsPage />)
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Install the Kora app' }))
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Tidy up old shortcuts' }))
     const cmd = await screen.findByLabelText('Command to run')
-    await waitFor(() => expect(cmd).toHaveTextContent('sudo kora app install --yes'))
+    await waitFor(() => expect(cmd).toHaveTextContent('sudo kora app uninstall --yes'))
     expect(screen.getAllByText(/needs administrator rights/i).length).toBeGreaterThan(0)
   })
 

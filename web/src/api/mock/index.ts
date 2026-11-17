@@ -21,7 +21,7 @@ let snapshots: Record<string, T.SnapshotInfo[]> = {}
 let consoleEnabled: Record<string, boolean> = {}
 let webhooks: Record<string, string> = {}
 let schedules: Record<string, T.ScheduleConfig> = {}
-let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
+let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
 let dirtyPreviewed: Record<string, T.UpdatePreview> = {}
 let paidAssets: Record<string, T.PaidAsset[]> = {}
 let uploads = new Map<string, string>()
@@ -45,7 +45,7 @@ function init(name: ScenarioName) {
   }
   webhooks = beh.trouble && servers[0] ? { [servers[0].name]: 'https://discord.com/api/webhooks/123456789012345678/TOKEN-that-no-longer-exists' } : {}
   schedules = {}
-  prefs = { github: false, savedInstall: null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
+  prefs = { github: false, savedInstall: null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
   dirtyPreviewed = {}
   paidAssets = {}
   uploads = new Map()
@@ -806,17 +806,18 @@ route('POST', '/panel/restart', () => {
   prefs.version = p.join('.')
   return { restarting: true }
 })
-route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.version : null, path: prefs.app ? 'C:\\Users\\sam\\AppData\\Local\\Kora\\kora.exe' : null, desktop_shortcut: prefs.desktopShortcut, supported: true }) satisfies T.AppStatus)
+route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.version : null, path: prefs.app ? 'C:\\Program Files\\Kora\\kora.exe' : null, desktop_shortcut: prefs.desktopShortcut, supported: true, legacy: prefs.app || beh.trouble, legacy_items: prefs.app || beh.trouble ? ['Delete C:\\Program Files\\Kora\\kora.exe', 'Remove the shortcut Kora.lnk (it runs as administrator)'] : [], shortcuts: prefs.shortcuts }) satisfies T.AppStatus)
 route('PUT', '/app', (_m, b) => {
-  if (beh.trouble) throw elevate('Installing the Kora app', ['app', 'install', '--yes', ...(b.desktop_shortcut ? [] : ['--no-desktop-shortcut'])])
-  prefs.app = true
+  prefs.shortcuts = true
   prefs.desktopShortcut = !!b.desktop_shortcut
-  return { message: 'The Kora app is installed.' }
+  if (beh.trouble) throw elevate('Your new Kora shortcuts are ready. Removing the old copy of Kora', ['app', 'uninstall', '--yes'])
+  prefs.app = false
+  return { message: 'Done. Kora now opens from your own shortcuts. Your servers were not touched.' }
 })
 route('DELETE', '/app', () => {
-  if (beh.trouble) throw elevate('Removing the Kora app', ['uninstall', '--app', '--yes'])
+  if (beh.trouble) throw elevate('Removing the old Kora app', ['uninstall', '--app', '--yes'])
   prefs.app = false
-  return { message: 'The Kora app was removed.' }
+  return { message: 'The old Kora app was removed.' }
 })
 route('POST', '/uninstall/plan', (_m, b) => {
   const only = b.server ? find(String(b.server)) : null
