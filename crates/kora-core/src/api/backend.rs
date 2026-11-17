@@ -210,6 +210,42 @@ pub trait Backend {
     fn asset_remove(&mut self, _e: &ServerEntry, _name: &str) -> Res<Vec<String>> {
         Err(NO_PAID_ASSETS.into())
     }
+
+    // ---- backups of a server (see `crate::backup`). The defaults ARE the real thing, written over this trait
+    // (they stop and start the server through `control`); a test double overrides them.
+    /// The backups of a server, their settings and the "last backup" line.
+    fn backups_view(&mut self, e: &ServerEntry) -> Res<crate::api::wire::BackupsView> {
+        crate::backup::service::view(self, e)
+    }
+    /// Make a backup. `admin`: the caller may choose a folder.
+    fn backup_create(&mut self, e: &ServerEntry, req: &crate::api::wire::BackupCreateRequest, admin: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::BackupCreated> {
+        crate::backup::service::create_backup(self, e, req, admin, say)
+    }
+    fn backup_settings_set(&mut self, e: &ServerEntry, s: &crate::backup::BackupSettings) -> Res<crate::backup::BackupSettings> {
+        crate::backup::service::settings_set(self, e, s)
+    }
+    fn backup_verify(&mut self, e: &ServerEntry, id: &str, passphrase: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::VerifyResult> {
+        crate::backup::service::verify(self, e, id, passphrase, say)
+    }
+    fn backup_preview(&mut self, e: &ServerEntry, id: &str, passphrase: Option<&str>) -> Res<crate::backup::restore::RestorePreview> {
+        crate::backup::service::preview(self, e, id, passphrase)
+    }
+    fn backup_restore(&mut self, e: &ServerEntry, id: &str, passphrase: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::restore::RestoreReport> {
+        crate::backup::service::restore_backup(self, e, id, passphrase, say)
+    }
+    fn backup_undo(&mut self, e: &ServerEntry, passphrase: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::restore::RestoreReport> {
+        crate::backup::service::undo(self, e, passphrase, say)
+    }
+    fn backup_delete(&mut self, e: &ServerEntry, id: &str) -> Res<()> {
+        crate::backup::service::delete(self, e, id)
+    }
+    fn backup_prune(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
+        crate::backup::service::prune(self, e)
+    }
+    /// The archive file of a backup, to download it (it holds secrets: administrators only).
+    fn backup_file(&mut self, e: &ServerEntry, id: &str) -> Res<PathBuf> {
+        crate::backup::service::file(self, e, id)
+    }
 }
 
 /// What a front end without the reachability check answers.

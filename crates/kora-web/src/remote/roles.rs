@@ -113,6 +113,10 @@ pub fn min_role(op: Op) -> Role {
         | Op::ServerKeySet
         | Op::ProfileGet
         // The checklist reads the machine and (if allowed) asks the outside services the person chose.
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
         | Op::ReachCheck => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
@@ -185,6 +189,12 @@ pub fn min_role(op: Op) -> Role {
         | Op::ForwardingSet
         | Op::ReachFirewallOpen
         | Op::ReachSettingsSet
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
         | Op::TxAdminTicket => Admin,
     }
 }
@@ -208,6 +218,12 @@ pub fn destructive(op: Op) -> bool {
         | Op::ScheduleRemove
         // txAdmin is full control of the game server, including running code through resources: as serious as
         // console input.
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
         | Op::TxAdminTicket => true,
         Op::Meta
         | Op::SessionCreate
@@ -315,6 +331,10 @@ pub fn destructive(op: Op) -> bool {
         | Op::ReachSettingsGet
         | Op::ReachSettingsSet
         | Op::ForwardingSet
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
         | Op::ReachFirewallOpen => false,
     }
 }
@@ -435,6 +455,16 @@ pub fn installs(op: Op) -> bool {
         | Op::ReachSettingsSet
         | Op::ForwardingSet
         | Op::ReachFirewallOpen
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
         | Op::TxAdminTicket => false,
     }
 }
@@ -588,6 +618,16 @@ pub fn local_only(op: Op) -> bool {
         | Op::ReachSettingsSet
         | Op::ForwardingSet
         | Op::ReachFirewallOpen
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
         | Op::TxAdminTicket => false,
     }
 }

@@ -165,6 +165,26 @@ pub enum Op {
     ReachFirewallOpen,
     /// A one-time ticket to open this server's txAdmin through the panel (needs the same role as controlling the server's code).
     TxAdminTicket,
+    /// The backups of a server: the list, where they go, the schedule and the "last backup" line.
+    BackupsList,
+    /// Make a backup of a server (a job with progress).
+    BackupCreate,
+    /// Change where backups go, how many are kept and the backup schedule (administrators).
+    BackupSettingsSet,
+    /// Remove old backups under the retention rules (administrators).
+    BackupPrune,
+    /// Undo the last restore by restoring the safety copy taken before it (a job; administrators).
+    BackupUndo,
+    /// Check every file of a backup against its checksums (a job).
+    BackupVerify,
+    /// What restoring a backup would change. Reads only.
+    BackupPreview,
+    /// Restore a backup onto its server (a job; administrators).
+    BackupRestore,
+    /// Delete a backup (administrators).
+    BackupDelete,
+    /// Download the archive file: it holds secrets (administrators).
+    BackupDownload,
 }
 
 impl Op {
@@ -282,6 +302,16 @@ impl Op {
         Op::ForwardingSet,
         Op::ReachFirewallOpen,
         Op::TxAdminTicket,
+        Op::BackupsList,
+        Op::BackupCreate,
+        Op::BackupSettingsSet,
+        Op::BackupPrune,
+        Op::BackupUndo,
+        Op::BackupVerify,
+        Op::BackupPreview,
+        Op::BackupRestore,
+        Op::BackupDelete,
+        Op::BackupDownload,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -400,6 +430,16 @@ impl Op {
             Op::ForwardingSet => "forwarding_set",
             Op::ReachFirewallOpen => "reach_firewall_open",
             Op::TxAdminTicket => "txadmin_ticket",
+            Op::BackupsList => "backups_list",
+            Op::BackupCreate => "backup_create",
+            Op::BackupSettingsSet => "backup_settings_set",
+            Op::BackupPrune => "backup_prune",
+            Op::BackupUndo => "backup_undo",
+            Op::BackupVerify => "backup_verify",
+            Op::BackupPreview => "backup_preview",
+            Op::BackupRestore => "backup_restore",
+            Op::BackupDelete => "backup_delete",
+            Op::BackupDownload => "backup_download",
         }
     }
 
@@ -521,6 +561,16 @@ impl Op {
             Op::ForwardingSet => (Method::Put, "/servers/{s}/forwarding"),
             Op::ReachFirewallOpen => (Method::Post, "/servers/{s}/reach/firewall"),
             Op::TxAdminTicket => (Method::Post, "/servers/{s}/txadmin/ticket"),
+            Op::BackupsList => (Method::Get, "/servers/{s}/backups"),
+            Op::BackupCreate => (Method::Post, "/servers/{s}/backups"),
+            Op::BackupSettingsSet => (Method::Put, "/servers/{s}/backups/settings"),
+            Op::BackupPrune => (Method::Post, "/servers/{s}/backups/prune"),
+            Op::BackupUndo => (Method::Post, "/servers/{s}/backups/undo"),
+            Op::BackupVerify => (Method::Post, "/servers/{s}/backups/{id}/verify"),
+            Op::BackupPreview => (Method::Post, "/servers/{s}/backups/{id}/preview"),
+            Op::BackupRestore => (Method::Post, "/servers/{s}/backups/{id}/restore"),
+            Op::BackupDelete => (Method::Delete, "/servers/{s}/backups/{id}"),
+            Op::BackupDownload => (Method::Get, "/servers/{s}/backups/{id}/file"),
         }
     }
 
@@ -547,12 +597,16 @@ impl Op {
                 | Op::DbStart
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::BackupCreate
+                | Op::BackupUndo
+                | Op::BackupVerify
+                | Op::BackupRestore
         )
     }
 
     /// Jobs that only read: they may run next to a mutating job of the same server.
     pub fn is_read_only_job(self) -> bool {
-        matches!(self, Op::UpdatePreview | Op::ServersScan | Op::BranchBulkPreview)
+        matches!(self, Op::UpdatePreview | Op::ServersScan | Op::BranchBulkPreview | Op::BackupVerify)
     }
 
     /// True when [`super::Backend`] (or the api helpers) can serve it today.
@@ -734,13 +788,23 @@ mod tests {
             | Op::ReachSettingsSet
             | Op::ForwardingSet
             | Op::ReachFirewallOpen
-            | Op::TxAdminTicket => Op::ALL.contains(&op),
+            | Op::TxAdminTicket
+            | Op::BackupsList
+            | Op::BackupCreate
+            | Op::BackupSettingsSet
+            | Op::BackupPrune
+            | Op::BackupUndo
+            | Op::BackupVerify
+            | Op::BackupPreview
+            | Op::BackupRestore
+            | Op::BackupDelete
+            | Op::BackupDownload => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 113);
+        assert_eq!(Op::ALL.len(), 123);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

@@ -61,6 +61,7 @@ pub mod host;
 pub mod resources;
 pub mod restore;
 pub mod scheduler;
+pub mod service;
 
 use crate::db::SystemRunner;
 use serde::{Deserialize, Serialize};

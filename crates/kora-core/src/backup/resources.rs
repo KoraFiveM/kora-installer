@@ -53,7 +53,16 @@ pub fn classify(git: &dyn CommandRunner, resources_dir: &Path, rec: &ResourceRec
     if !folder.is_dir() {
         return None;
     }
-    let full = |why: &str| ResourceBackup { id: rec.id.clone(), path: rec.path.clone(), stored: StoredAs::Full, repository: strip_userinfo(&rec.repository), branch: rec.branch.clone(), commit: rec.commit.clone(), why_full: Some(why.to_string()), bytes: 0 };
+    let full = |why: &str| ResourceBackup {
+        id: rec.id.clone(),
+        path: rec.path.clone(),
+        stored: StoredAs::Full,
+        repository: strip_userinfo(&rec.repository),
+        branch: rec.branch.clone(),
+        commit: rec.commit.clone(),
+        why_full: Some(why.to_string()),
+        bytes: 0,
+    };
     if rec.is_portal() {
         return Some(full("a paid asset: it cannot be downloaded again"));
     }
@@ -258,7 +267,16 @@ mod tests {
     }
 
     fn reference() -> ResourceBackup {
-        ResourceBackup { id: "core".into(), path: "core".into(), stored: StoredAs::Reference, repository: "https://github.com/KoraFiveM/x.git".into(), branch: "main".into(), commit: Some("abcdef1234567890".into()), why_full: None, bytes: 0 }
+        ResourceBackup {
+            id: "core".into(),
+            path: "core".into(),
+            stored: StoredAs::Reference,
+            repository: "https://github.com/KoraFiveM/x.git".into(),
+            branch: "main".into(),
+            commit: Some("abcdef1234567890".into()),
+            why_full: None,
+            bytes: 0,
+        }
     }
 
     #[test]

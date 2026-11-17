@@ -385,6 +385,106 @@ impl Backend for FakeBackend {
         v.assets.retain(|a| a.name != name);
         Ok(vec![format!("{name} was removed.")])
     }
+
+    // ---- backups: canned answers; every call is recorded.
+    fn backups_view(&mut self, e: &ServerEntry) -> Res<crate::api::wire::BackupsView> {
+        self.state().calls.push(format!("backups_view {}", e.name));
+        let info = sample_backup(&e.name, "20260317-041507", false);
+        let settings = crate::backup::BackupSettings::default();
+        let summary = crate::backup::BackupSummary { last_ok_unix: Some(info.created_unix), text: "Last backup 3 days ago".into(), warning: None, scheduled: false };
+        Ok(crate::api::wire::BackupsView {
+            backups: vec![info],
+            settings,
+            summary,
+            folder: "/home/me/.kora/server-backups/prod".into(),
+            default_folder: true,
+            free_bytes: Some(50 << 30),
+            undo: None,
+            database: crate::api::wire::DatabaseNote { kind: crate::backup::DbKind::Dumped, note: "The server's own database is copied as one consistent snapshot.".into(), tool_missing: false },
+            schedule_note: "Scheduled backups run while Kora's background service is running.".into(),
+        })
+    }
+    fn backup_create(&mut self, e: &ServerEntry, req: &crate::api::wire::BackupCreateRequest, admin: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::BackupCreated> {
+        self.state().calls.push(format!("backup_create {} encrypted={} everything={} stop={} admin={admin}", e.name, req.passphrase.is_some(), req.everything, req.stop_server));
+        say(crate::backup::BackupEvent { step: "database".into(), message: "Copying the database".into(), percent: 30 });
+        let info = sample_backup(&e.name, "20260320-030000", req.passphrase.is_some());
+        Ok(crate::api::wire::BackupCreated { info, path: "/home/me/.kora/server-backups/prod/prod-20260320-030000.tar.gz".into(), notes: vec![], pruned: vec![] })
+    }
+    fn backup_settings_set(&mut self, e: &ServerEntry, s: &crate::backup::BackupSettings) -> Res<crate::backup::BackupSettings> {
+        self.state().calls.push(format!("backup_settings_set {} schedule={}", e.name, s.schedule.enabled));
+        Ok(s.clone())
+    }
+    fn backup_verify(&mut self, e: &ServerEntry, id: &str, _p: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::VerifyResult> {
+        self.state().calls.push(format!("backup_verify {} {id}", e.name));
+        say(crate::backup::BackupEvent { step: "verify".into(), message: "Checking the file".into(), percent: 50 });
+        Ok(crate::api::wire::VerifyResult { ok: true, files: 12, bytes: 4096, summary: "All 12 files match their checksums.".into() })
+    }
+    fn backup_preview(&mut self, e: &ServerEntry, id: &str, p: Option<&str>) -> Res<crate::backup::restore::RestorePreview> {
+        self.state().calls.push(format!("backup_preview {} {id} password={}", e.name, p.is_some()));
+        Ok(crate::backup::restore::RestorePreview {
+            id: id.into(),
+            created_unix: 1_773_700_000,
+            encrypted: false,
+            needs_passphrase: false,
+            server: None,
+            database: None,
+            resources: vec![],
+            stopped: false,
+            server_running: true,
+            will_change: vec!["The server's settings".into()],
+            will_keep: vec!["secrets.cfg and database.json stay as they are now".into()],
+            warnings: vec![],
+        })
+    }
+    fn backup_restore(&mut self, e: &ServerEntry, id: &str, p: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::restore::RestoreReport> {
+        self.state().calls.push(format!("backup_restore {} {id} password={}", e.name, p.is_some()));
+        say(crate::backup::BackupEvent { step: "files".into(), message: "Putting the configuration back".into(), percent: 70 });
+        Ok(crate::backup::restore::RestoreReport {
+            safety_backup: Some("20260320-040000".into()),
+            database_restored: true,
+            files_restored: 4,
+            resources_restored: vec![],
+            problems: vec![],
+            notes: vec![],
+            restarted: true,
+        })
+    }
+    fn backup_undo(&mut self, e: &ServerEntry, _p: Option<&str>, _say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::restore::RestoreReport> {
+        self.state().calls.push(format!("backup_undo {}", e.name));
+        Ok(crate::backup::restore::RestoreReport { safety_backup: None, database_restored: true, files_restored: 4, resources_restored: vec![], problems: vec![], notes: vec![], restarted: false })
+    }
+    fn backup_delete(&mut self, e: &ServerEntry, id: &str) -> Res<()> {
+        self.state().calls.push(format!("backup_delete {} {id}", e.name));
+        Ok(())
+    }
+    fn backup_prune(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
+        self.state().calls.push(format!("backup_prune {}", e.name));
+        Ok(vec!["20260101-000000".into()])
+    }
+    fn backup_file(&mut self, e: &ServerEntry, id: &str) -> Res<PathBuf> {
+        self.state().calls.push(format!("backup_file {} {id}", e.name));
+        Err("The fake has no archive files.".into())
+    }
+}
+
+/// A backup listing for the fake.
+pub fn sample_backup(server: &str, id: &str, encrypted: bool) -> crate::backup::BackupInfo {
+    crate::backup::BackupInfo {
+        id: id.into(),
+        file: format!("{server}-{id}.tar.gz{}", if encrypted { ".age" } else { "" }),
+        bytes: 12_345_678,
+        sha256: "ab".repeat(32),
+        encrypted,
+        created_unix: 1_773_700_000,
+        label: crate::backup::Label::Manual,
+        kora_version: env!("CARGO_PKG_VERSION").into(),
+        server: server.into(),
+        database: crate::backup::DbKind::Dumped,
+        by_reference: 40,
+        in_full: 2,
+        stopped: false,
+        too_new: false,
+    }
 }
 
 fn file_name(p: &Path) -> String {

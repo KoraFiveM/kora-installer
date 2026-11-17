@@ -100,7 +100,7 @@ export type AlertEmail = {
   supported: boolean,
 };
 
-export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention";
+export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention" | "backup_failed";
 
 export type AlertRules = {
   stopped: boolean,
@@ -400,6 +400,176 @@ export type AuditRow = {
 };
 
 /**
+ * `POST /servers/{s}/backups`.
+ */
+export type BackupCreateRequest = {
+  /**
+   * Protect the file with this password (age encryption). Left out: not protected.
+   */
+  passphrase?: string,
+  /**
+   * Keep every resource in full (a bigger file that needs no internet to restore).
+   */
+  everything: boolean,
+  /**
+   * Stop the server while the backup runs (a strictly consistent copy).
+   */
+  stop_server: boolean,
+  /**
+   * Keep this one somewhere else than the usual folder (administrators only).
+   */
+  folder?: string,
+  /**
+   * A copy made to move the server to another computer: needs a password, is never removed by the retention rules.
+   */
+  for_move: boolean,
+};
+
+/**
+ * The result of making a backup.
+ */
+export type BackupCreated = {
+  info: BackupInfo,
+  /**
+   * Where the file is, on the computer that runs Kora.
+   */
+  path: string,
+  notes: Array<string>,
+  /**
+   * Older backups the retention rules removed.
+   */
+  pruned: Array<string>,
+};
+
+/**
+ * One step of a backup, restore or import, as a job event.
+ */
+export type BackupEvent = {
+  /**
+   * A short stable name of the step ("database", "files", ...).
+   */
+  step: string,
+  /**
+   * Plain words for the person.
+   */
+  message: string,
+  /**
+   * 0..=100 for the whole operation.
+   */
+  percent: number,
+};
+
+/**
+ * The small file next to an archive: enough to list it without opening it.
+ */
+export type BackupInfo = {
+  id: string,
+  /**
+   * The archive's file name.
+   */
+  file: string,
+  bytes: number,
+  sha256: string,
+  encrypted: boolean,
+  created_unix: number,
+  label: Label,
+  kora_version: string,
+  server: string,
+  database: DbKind,
+  by_reference: number,
+  in_full: number,
+  stopped: boolean,
+  /**
+   * Made by a newer Kora than this one: it can be listed but not restored here.
+   */
+  too_new: boolean,
+};
+
+/**
+ * The backup schedule of one server.
+ */
+export type BackupSchedule = {
+  enabled: boolean,
+  cadence: Cadence,
+  /**
+   * `HH:MM`, 24 hours, local time.
+   */
+  time: string,
+  /**
+   * 0 = Monday .. 6 = Sunday (weekly).
+   */
+  weekday?: number,
+};
+
+/**
+ * Per-server backup settings (kept in Kora's own store, never in the server folder, so deleting the
+ * server does not delete them).
+ */
+export type BackupSettings = {
+  /**
+   * A folder to keep backups in; empty = Kora's own backups folder.
+   */
+  folder: string,
+  retention: Retention,
+  schedule: BackupSchedule,
+  resources: ResourceChoice,
+  /**
+   * Stop the server while a SCHEDULED backup runs (strictly consistent, but players are kicked).
+   */
+  stop_for_scheduled: boolean,
+};
+
+/**
+ * The "last backup" line of the Overview and the servers list.
+ */
+export type BackupSummary = {
+  last_ok_unix: number | null,
+  /**
+   * "No backup yet" / "Last backup 3 days ago".
+   */
+  text: string,
+  /**
+   * The newest backup is older than the schedule implies, or the last run failed.
+   */
+  warning: string | null,
+  scheduled: boolean,
+};
+
+/**
+ * Which backups an operation removed.
+ */
+export type BackupsRemoved = {
+  removed: Array<string>,
+};
+
+/**
+ * `GET /servers/{s}/backups`.
+ */
+export type BackupsView = {
+  /**
+   * Newest first.
+   */
+  backups: Array<BackupInfo>,
+  settings: BackupSettings,
+  summary: BackupSummary,
+  /**
+   * Where backups are kept, as a path on the computer that runs Kora.
+   */
+  folder: string,
+  /**
+   * The folder is Kora's own (the default), not one the person chose.
+   */
+  default_folder: boolean,
+  free_bytes: number | null,
+  undo: UndoInfo | null,
+  database: DatabaseNote,
+  /**
+   * What the schedule needs to run, in words.
+   */
+  schedule_note: string,
+};
+
+/**
  * The small update badge of a server (`None` on the server = not known yet).
  */
 export type Badge = {
@@ -580,6 +750,8 @@ export type BulkRow = {
 
 export type BulkStatus = "switched" | "already" | "needs_choice" | "skipped" | "failed";
 
+export type Cadence = "daily" | "weekly";
+
 /**
  * `GET /catalog`.
  */
@@ -756,6 +928,36 @@ export type Creator = {
   description?: string,
 };
 
+export type DatabaseBackup = {
+  kind: DbKind,
+  /**
+   * The database name (never a password).
+   */
+  name?: string,
+  host?: string,
+  port?: number,
+  /**
+   * Size of the dump, uncompressed.
+   */
+  dump_bytes: number,
+  /**
+   * What a person should know (honest wording for "skipped" and "external").
+   */
+  note: string,
+};
+
+/**
+ * What the backup of this server's database will do, said before anyone presses anything.
+ */
+export type DatabaseNote = {
+  kind: DbKind,
+  note: string,
+  /**
+   * The program that makes the copy (mariadb-dump / mysqldump) was not found.
+   */
+  tool_missing: boolean,
+};
+
 /**
  * The database administrator login, used once for the install. Never stored or returned.
  */
@@ -767,6 +969,8 @@ export type DbAdmin = {
 };
 
 export type DbChoice = "use_existing" | "install_if_missing" | "skip";
+
+export type DbKind = "dumped" | "none" | "external" | "failed";
 
 export type DbLoginCheck = {
   ok: boolean,
@@ -1406,6 +1610,11 @@ export type KeyUpdateRequest = {
 
 export type Kind = "kora" | "dependency" | "optional" | "internal";
 
+/**
+ * Why a backup was made. Decides what pruning may remove.
+ */
+export type Label = "manual" | "scheduled" | "before_restore" | "move";
+
 export type Layer = {
   id: LayerId,
   state: ReachState,
@@ -1649,6 +1858,13 @@ export type PanelUser = {
    * Unix seconds.
    */
   created: number,
+};
+
+/**
+ * A request that may carry the password of a protected backup.
+ */
+export type PassphraseRequest = {
+  passphrase?: string,
 };
 
 export type PlanItem =
@@ -1942,6 +2158,29 @@ export type RemoteSettingsUpdate = {
   allow_remote_destructive?: boolean,
 };
 
+export type ResourceBackup = {
+  id: string,
+  /**
+   * Relative to `<server>/resources/`.
+   */
+  path: string,
+  stored: StoredAs,
+  repository: string,
+  branch: string,
+  /**
+   * The commit the folder was on.
+   */
+  commit?: string,
+  /**
+   * Why the files had to be kept in full ("changed here", "kept-aside changes", "paid asset", ...).
+   */
+  why_full?: string,
+  /**
+   * Bytes in the archive for this resource (0 by reference).
+   */
+  bytes: number,
+};
+
 export type ResourceBranch = {
   id: string,
   /**
@@ -1992,6 +2231,11 @@ export type ResourceChange = {
 };
 
 /**
+ * How the resources are kept in the archive.
+ */
+export type ResourceChoice = "auto" | "everything";
+
+/**
  * `POST /servers/{s}/resources/{name}/control`: the same actions as a server.
  */
 export type ResourceControlRequest = {
@@ -2025,6 +2269,52 @@ export type ResourcesList = {
 export type RestartPolicy = "none" | "ensure" | "full_restart" | "when_quiet";
 
 /**
+ * What a restore would do, in words.
+ */
+export type RestorePreview = {
+  id: string,
+  created_unix: number,
+  encrypted: boolean,
+  /**
+   * The archive is password protected and no (right) password was given: nothing else is known yet.
+   */
+  needs_passphrase: boolean,
+  server: ServerInfo | null,
+  database: DatabaseBackup | null,
+  resources: Array<ResourceBackup>,
+  stopped: boolean,
+  server_running: boolean,
+  /**
+   * What will be replaced.
+   */
+  will_change: Array<string>,
+  /**
+   * What stays as it is.
+   */
+  will_keep: Array<string>,
+  warnings: Array<string>,
+};
+
+export type RestoreReport = {
+  /**
+   * The safety backup taken first (what "Undo" goes back to).
+   */
+  safety_backup: string | null,
+  database_restored: boolean,
+  files_restored: number,
+  /**
+   * One sentence per resource that was brought back.
+   */
+  resources_restored: Array<string>,
+  /**
+   * Things that did not work, one sentence each, with what was done instead.
+   */
+  problems: Array<string>,
+  notes: Array<string>,
+  restarted: boolean,
+};
+
+/**
  * A stopped install that can carry on (also after the panel was restarted).
  */
 export type Resumable = {
@@ -2045,6 +2335,20 @@ export type ResumeRequest = {
    * Carry on without the parts that need administrator rights.
    */
   without_admin?: boolean,
+};
+
+/**
+ * A line of the answer about where backups go.
+ */
+export type Retention = {
+  /**
+   * Keep this many of the newest backups (0 = no limit).
+   */
+  keep_last: number,
+  /**
+   * Also keep the newest backup of each day for this many days (0 = off).
+   */
+  keep_daily_days: number,
 };
 
 /**
@@ -2265,6 +2569,33 @@ export type ServerDetail = {
   connect: string | null,
 };
 
+export type ServerInfo = {
+  name: string,
+  /**
+   * "production" or "development" (older wording kept for the file format).
+   */
+  mode: string,
+  game_port: number,
+  txadmin_port: number,
+  game_build: number,
+  /**
+   * The FXServer build the server ran. Not in the archive: it is downloaded again.
+   */
+  artifact_build: number,
+  /**
+   * "linux" or "windows": where the backup was made.
+   */
+  os: string,
+  /**
+   * The folder it lived in (shown, and used to rewrite paths when it moves).
+   */
+  dir: string,
+  /**
+   * Where it was listed, e.g. the licence key's saved name (never the key).
+   */
+  github_owner?: string,
+};
+
 export type ServerKeyChanged = {
   server: string,
   last4: string,
@@ -2395,6 +2726,8 @@ export type StatusEvent = {
 };
 
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
+
+export type StoredAs = "reference" | "full";
 
 /**
  * What is checked out.
@@ -2589,6 +2922,15 @@ export type TxAdminTicket = {
   username: string | null,
 };
 
+/**
+ * The newest safety copy, taken by the last restore: what "Undo this restore" goes back to.
+ */
+export type UndoInfo = {
+  id: string,
+  created_unix: number,
+  encrypted: boolean,
+};
+
 export type UninstallAnswer = {
   item: string,
   remove: boolean,
@@ -2758,6 +3100,19 @@ export type UserAddRequest = {
  */
 export type UsersList = {
   users: Array<PanelUser>,
+};
+
+/**
+ * The answer to "check this backup".
+ */
+export type VerifyResult = {
+  /**
+   * Every file in the backup matches its checksum.
+   */
+  ok: boolean,
+  files: number,
+  bytes: number,
+  summary: string,
 };
 
 /**

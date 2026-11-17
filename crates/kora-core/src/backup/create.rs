@@ -87,21 +87,29 @@ pub fn is_local_host(h: &str) -> bool {
 /// file sits in a folder the server's own account can write.
 pub fn credentials_are_sane(c: &Credentials) -> bool {
     let word = |s: &str| !s.is_empty() && s.len() <= 80 && !s.starts_with('-') && s.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '-' | '.'));
-    word(&c.database) && word(&c.user) && !c.host.starts_with('-') && c.host.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | ':' | '[' | ']' | '_')) && !c.host.is_empty() && c.port != 0
+    word(&c.database)
+        && word(&c.user)
+        && !c.host.starts_with('-')
+        && c.host.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | ':' | '[' | ']' | '_'))
+        && !c.host.is_empty()
+        && c.port != 0
 }
 
 pub fn database_of(dir: &Path) -> Result<DbSource, Problem> {
     let p = dir.join("database.json");
     match std::fs::read(&p) {
         Ok(bytes) => {
-            let c: Credentials = serde_json::from_slice(&bytes).map_err(|_| Problem::new(codes::CORRUPT, "The database login file of this server (database.json) cannot be read, so its database cannot be backed up.").with_action(Action::CopyDetails))?;
+            let c: Credentials = serde_json::from_slice(&bytes).map_err(|_| {
+                Problem::new(codes::CORRUPT, "The database login file of this server (database.json) cannot be read, so its database cannot be backed up.").with_action(Action::CopyDetails)
+            })?;
             if !credentials_are_sane(&c) {
                 return Err(Problem::new(codes::CORRUPT, "The database login file of this server (database.json) has values Kora will not use, so its database cannot be backed up. Check the file."));
             }
             Ok(if is_local_host(&c.host) { DbSource::Local(c) } else { DbSource::External(c) })
         }
         Err(_) => {
-            let own = ["secrets.cfg", "server.cfg"].iter().filter_map(|f| std::fs::read_to_string(dir.join(f)).ok()).any(|t| t.lines().any(|l| l.trim_start().starts_with("set mysql_connection_string")));
+            let own =
+                ["secrets.cfg", "server.cfg"].iter().filter_map(|f| std::fs::read_to_string(dir.join(f)).ok()).any(|t| t.lines().any(|l| l.trim_start().starts_with("set mysql_connection_string")));
             Ok(DbSource::None(if own {
                 "This server uses a database you set up yourself (Kora was not told to create one). Its data is not in this backup: back that database up separately.".into()
             } else {
@@ -113,9 +121,15 @@ pub fn database_of(dir: &Path) -> Result<DbSource, Problem> {
 
 fn db_problem(f: DbFailure, what: &str) -> Problem {
     match f {
-        DbFailure::ToolMissing => Problem::new(codes::DUMP_TOOL_MISSING, format!("Kora cannot {what}: the database tools (mariadb-dump / mysqldump) were not found. Installing the MariaDB client tools fixes it.")).with_action(Action::InstallTool { tool: Tool::Mariadb }),
+        DbFailure::ToolMissing => {
+            Problem::new(codes::DUMP_TOOL_MISSING, format!("Kora cannot {what}: the database tools (mariadb-dump / mysqldump) were not found. Installing the MariaDB client tools fixes it."))
+                .with_action(Action::InstallTool { tool: Tool::Mariadb })
+        }
         DbFailure::NotRunning => Problem::new(codes::DB_STOPPED, format!("Kora cannot {what}: the database server is not running.")).with_action(Action::StartDatabase).with_action(Action::Retry),
-        DbFailure::Login => Problem::new(codes::DB_LOGIN, format!("Kora cannot {what}: the database refused this server's login (database.json no longer fits the database). Fix the login, or recreate the database.")).with_action(Action::CopyDetails),
+        DbFailure::Login => {
+            Problem::new(codes::DB_LOGIN, format!("Kora cannot {what}: the database refused this server's login (database.json no longer fits the database). Fix the login, or recreate the database."))
+                .with_action(Action::CopyDetails)
+        }
         DbFailure::NoSuchDatabase => Problem::new(codes::DB_LOGIN, format!("Kora cannot {what}: the database named for this server does not exist on the database server.")),
         DbFailure::DiskFull => disk_full(&format!("Kora cannot {what}: there is no space left on the disk.")),
         DbFailure::Other(m) => Problem::new(codes::CORRUPT, format!("Kora cannot {what}: the database tool failed.")).with_details(m).with_action(Action::CopyDetails),
@@ -132,7 +146,11 @@ pub fn disk_full(msg: &str) -> Problem {
 
 fn dest_problem(e: DestError, d: &dyn Destination) -> Problem {
     match e {
-        DestError::NotWritable(w) => Problem::new(codes::DEST_UNWRITABLE, format!("Kora cannot write to {}. Choose another folder in the backup settings, or fix its permissions (or reconnect the drive or share).", d.describe())).with_details(w),
+        DestError::NotWritable(w) => Problem::new(
+            codes::DEST_UNWRITABLE,
+            format!("Kora cannot write to {}. Choose another folder in the backup settings, or fix its permissions (or reconnect the drive or share).", d.describe()),
+        )
+        .with_details(w),
         DestError::Full(w) => disk_full(&format!("There is no space left in {}. Free some space or choose another folder.", d.describe())).with_details(w),
         DestError::Io(w) => Problem::new(codes::DEST_UNWRITABLE, format!("Kora could not save the backup in {}.", d.describe())).with_details(w).with_action(Action::CopyDetails),
     }
@@ -221,7 +239,10 @@ pub fn create_unguarded(e: &ServerEntry, o: &CreateOptions, host: &mut dyn Host,
     let destination = dest::LocalFolder::for_server(&root, &e.name);
     // Never inside the server folder: deleting the server would delete its backups.
     if destination.local_dir().is_some_and(|d| d.starts_with(&e.dir)) {
-        return Err(Problem::new(codes::DEST_UNWRITABLE, "Backups cannot be kept inside the server's own folder: deleting the server would delete them too. Choose another folder in the backup settings."));
+        return Err(Problem::new(
+            codes::DEST_UNWRITABLE,
+            "Backups cannot be kept inside the server's own folder: deleting the server would delete them too. Choose another folder in the backup settings.",
+        ));
     }
     ev("prepare", &format!("Checking {}", destination.describe()), 2);
     destination.prepare().map_err(|x| dest_problem(x, &destination))?;
@@ -333,7 +354,11 @@ fn build(
                 host: Some(c.host.clone()),
                 port: Some(c.port),
                 dump_bytes: size,
-                note: if external { format!("This server's database is on {} (another computer). It was copied over the network with the saved login.", c.host) } else { "A consistent copy of the server's own database (one snapshot, routines, triggers and events included).".into() },
+                note: if external {
+                    format!("This server's database is on {} (another computer). It was copied over the network with the saved login.", c.host)
+                } else {
+                    "A consistent copy of the server's own database (one snapshot, routines, triggers and events included).".into()
+                },
             };
         }
     }
@@ -482,7 +507,9 @@ pub(crate) mod tests {
         assert!(events.iter().any(|e| e.step == "database") && events.last().unwrap().percent == 100);
         let m = archive::scan(&r.path, None, None, 1 << 30, None).unwrap();
         let names: Vec<&str> = m.files.iter().map(|f| f.path.as_str()).collect();
-        for want in ["database/dump.sql", "server/server.cfg", "server/secrets.cfg", "server/database.json", "server/txData/default/config.json", "kora/entry.json", "resources/local-only/fxmanifest.lua"] {
+        for want in
+            ["database/dump.sql", "server/server.cfg", "server/secrets.cfg", "server/database.json", "server/txData/default/config.json", "kora/entry.json", "resources/local-only/fxmanifest.lua"]
+        {
             assert!(names.contains(&want), "{want} missing in {names:?}");
         }
         // by reference: the clean clone's files are NOT in the archive, its commit is in the manifest

@@ -77,10 +77,14 @@ pub struct RestoreReport {
 pub fn archive_problem(e: ArchiveError) -> Problem {
     match e {
         ArchiveError::Open(OpenError::NeedsPassphrase) => Problem::new(codes::NEEDS_PASSPHRASE, "This backup is password protected. Enter the password to open it."),
-        ArchiveError::Open(OpenError::WrongPassphrase) => Problem::new(codes::WRONG_PASSPHRASE, "That password does not open this backup. Check it and try again. (Kora does not keep passwords, so a lost one cannot be recovered.)"),
+        ArchiveError::Open(OpenError::WrongPassphrase) => {
+            Problem::new(codes::WRONG_PASSPHRASE, "That password does not open this backup. Check it and try again. (Kora does not keep passwords, so a lost one cannot be recovered.)")
+        }
         ArchiveError::Open(OpenError::NotAnArchive) => Problem::new(codes::CORRUPT, "This file is not a Kora backup, or it is damaged."),
         ArchiveError::Open(OpenError::Io(m)) | ArchiveError::Corrupt(m) => Problem::new(codes::CORRUPT, format!("This backup cannot be used: {m}.")).with_action(Action::CopyDetails),
-        ArchiveError::TooNew(v) => Problem::new(codes::TOO_NEW, format!("This backup was made by a newer version of Kora (backup format {v}), which this version cannot read safely. Update Kora, then try again.")),
+        ArchiveError::TooNew(v) => {
+            Problem::new(codes::TOO_NEW, format!("This backup was made by a newer version of Kora (backup format {v}), which this version cannot read safely. Update Kora, then try again."))
+        }
         ArchiveError::Io(x) => match x.kind() {
             std::io::ErrorKind::StorageFull => create::disk_full("There is no space left on the disk to unpack this backup."),
             _ => Problem::new(codes::CORRUPT, "The backup file could not be read.").with_details(x.to_string()).with_action(Action::CopyDetails),
@@ -94,10 +98,19 @@ fn same_os(m: &Manifest) -> bool {
 
 fn check_this_server(e: &ServerEntry, m: &Manifest) -> Result<(), Problem> {
     if m.server.name != e.name {
-        return Err(Problem::new(codes::CORRUPT, format!("This backup is of the server \"{}\", not \"{}\". To use it, restore it as a new server (\"Bring a server from a backup\" in the install wizard).", m.server.name, e.name)));
+        return Err(Problem::new(
+            codes::CORRUPT,
+            format!("This backup is of the server \"{}\", not \"{}\". To use it, restore it as a new server (\"Bring a server from a backup\" in the install wizard).", m.server.name, e.name),
+        ));
     }
     if !same_os(m) {
-        return Err(Problem::new(codes::CORRUPT, format!("This backup was made on {}, and this computer is different. Restore it as a new server instead: that converts the paths for this computer.", if m.server.os == "windows" { "Windows" } else { "Linux" })));
+        return Err(Problem::new(
+            codes::CORRUPT,
+            format!(
+                "This backup was made on {}, and this computer is different. Restore it as a new server instead: that converts the paths for this computer.",
+                if m.server.os == "windows" { "Windows" } else { "Linux" }
+            ),
+        ));
     }
     Ok(())
 }
@@ -130,7 +143,11 @@ pub fn preview(e: &ServerEntry, info: &BackupInfo, path: &Path, pass: Option<&Pa
     p.will_change.push("The server's settings: server.cfg, permissions and the other .cfg files".into());
     p.will_change.push("txAdmin's data (its settings, admins and player records)".into());
     match m.database.kind {
-        DbKind::Dumped | DbKind::External => p.will_change.push(format!("The database \"{}\": every table is emptied and replaced by the ones in the backup (anything saved since {} is lost, unless you undo)", m.database.name.clone().unwrap_or_default(), crate::backup::clock::utc_text(m.created_unix))),
+        DbKind::Dumped | DbKind::External => p.will_change.push(format!(
+            "The database \"{}\": every table is emptied and replaced by the ones in the backup (anything saved since {} is lost, unless you undo)",
+            m.database.name.clone().unwrap_or_default(),
+            crate::backup::clock::utc_text(m.created_unix)
+        )),
         DbKind::None => p.warnings.push(if m.database.note.is_empty() { "This backup has no database.".into() } else { m.database.note.clone() }),
         DbKind::Failed => p.warnings.push("The database could not be copied when this backup was made, so it is not in it.".into()),
     }
@@ -148,7 +165,10 @@ pub fn preview(e: &ServerEntry, info: &BackupInfo, path: &Path, pass: Option<&Pa
         p.warnings.push("The server is running. Kora will stop it for the restore and start it again afterwards.".into());
     }
     if m.server.game_port != e.ports.game || m.server.txadmin_port != e.ports.txadmin {
-        p.warnings.push(format!("The backup used ports {} and {}, this server now uses {} and {}. The backup's ports come back with its settings.", m.server.game_port, m.server.txadmin_port, e.ports.game, e.ports.txadmin));
+        p.warnings.push(format!(
+            "The backup used ports {} and {}, this server now uses {} and {}. The backup's ports come back with its settings.",
+            m.server.game_port, m.server.txadmin_port, e.ports.game, e.ports.txadmin
+        ));
     }
     p.warnings.push("A safety copy of the server as it is now is made first, so you can undo this.".into());
     p.server = Some(m.server);
@@ -256,11 +276,17 @@ pub fn restore(e: &ServerEntry, archive_path: &Path, o: &RestoreOptions, host: &
     let free = crate::space::SystemDisk.free_bytes_of(&e.dir);
     if let Some(f) = free {
         if f < head.payload_bytes.saturating_add(128 * crate::space::MIB) {
-            return Err(create::disk_full(&format!("Unpacking this backup needs about {} of room next to the server, and only {} is free.", crate::space::human(head.payload_bytes), crate::space::human(f))));
+            return Err(create::disk_full(&format!(
+                "Unpacking this backup needs about {} of room next to the server, and only {} is free.",
+                crate::space::human(head.payload_bytes),
+                crate::space::human(f)
+            )));
         }
     }
     ev("unpack", "Unpacking and checking every file (nothing is changed yet)", 10);
-    let manifest = archive::scan(archive_path, o.passphrase.as_ref(), Some((&stage.0, &Wanted { take: &|_| true })), head.payload_bytes.saturating_mul(2).saturating_add(256 * crate::space::MIB), None).map_err(archive_problem)?;
+    let manifest =
+        archive::scan(archive_path, o.passphrase.as_ref(), Some((&stage.0, &Wanted { take: &|_| true })), head.payload_bytes.saturating_mul(2).saturating_add(256 * crate::space::MIB), None)
+            .map_err(archive_problem)?;
 
     // 3. safety backup
     let mut safety: Option<String> = None;
@@ -271,7 +297,11 @@ pub fn restore(e: &ServerEntry, archive_path: &Path, o: &RestoreOptions, host: &
         match create::create_unguarded(e, &opts, host, tools, &mut quiet) {
             Ok(r) => safety = Some(r.info.id),
             Err(p) => {
-                return Err(Problem::new(p.code.as_str(), format!("The restore was not started, because the safety copy of the server as it is now could not be made: {} Nothing was changed.", p.message)).with_actions(p.actions));
+                return Err(Problem::new(
+                    p.code.as_str(),
+                    format!("The restore was not started, because the safety copy of the server as it is now could not be made: {} Nothing was changed.", p.message),
+                )
+                .with_actions(p.actions));
             }
         }
     }
@@ -293,7 +323,11 @@ pub fn restore(e: &ServerEntry, archive_path: &Path, o: &RestoreOptions, host: &
         }
     }
     if let Err(p) = result {
-        return Err(Problem::new(p.code.as_str(), format!("{}{}", p.message, safety.as_ref().map(|_| " A safety copy of the server from before is saved: \"Undo this restore\" puts it back.").unwrap_or_default())).with_actions(p.actions));
+        return Err(Problem::new(
+            p.code.as_str(),
+            format!("{}{}", p.message, safety.as_ref().map(|_| " A safety copy of the server from before is saved: \"Undo this restore\" puts it back.").unwrap_or_default()),
+        )
+        .with_actions(p.actions));
     }
     settings::update_status(&e.name, |s| {
         s.undo_id = safety.clone();
@@ -316,7 +350,9 @@ fn apply(e: &ServerEntry, m: &Manifest, stage: &Path, tools: &Tools<'_>, ev: &mu
         };
         dbdump::check_login(tools.db, &tools.db_client, &creds).map_err(|f| create::problem_for_db(f, "put the database back"))?;
         dbdump::restore(tools.db, &tools.db_client, &creds, &dump).map_err(|f| match f {
-            DbFailure::Other(_) | DbFailure::Login | DbFailure::NoSuchDatabase | DbFailure::NotRunning | DbFailure::ToolMissing | DbFailure::DiskFull => create::problem_for_db(f, "put the database back"),
+            DbFailure::Other(_) | DbFailure::Login | DbFailure::NoSuchDatabase | DbFailure::NotRunning | DbFailure::ToolMissing | DbFailure::DiskFull => {
+                create::problem_for_db(f, "put the database back")
+            }
         })?;
         report.database_restored = true;
     }
@@ -508,11 +544,13 @@ mod tests {
         write(&rig.entry.dir.join("server.cfg"), "# mine\n");
         let none = restore(&rig.entry, &path, &RestoreOptions::default(), &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap_err();
         assert_eq!(none.code, codes::NEEDS_PASSPHRASE);
-        let wrong = restore(&rig.entry, &path, &RestoreOptions { passphrase: Some(Passphrase::new("not the one!!")), ..Default::default() }, &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap_err();
+        let wrong =
+            restore(&rig.entry, &path, &RestoreOptions { passphrase: Some(Passphrase::new("not the one!!")), ..Default::default() }, &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap_err();
         assert_eq!(wrong.code, codes::WRONG_PASSPHRASE);
         let mut other = rig.entry.clone();
         other.name = "Another".into();
-        let foreign = restore(&other, &path, &RestoreOptions { passphrase: Some(Passphrase::new("a good passphrase")), ..Default::default() }, &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap_err();
+        let foreign =
+            restore(&other, &path, &RestoreOptions { passphrase: Some(Passphrase::new("a good passphrase")), ..Default::default() }, &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap_err();
         assert!(foreign.message.contains("restore it as a new server"));
         let cut = path.with_file_name("cut.tar.gz.age");
         let raw = std::fs::read(&path).unwrap();

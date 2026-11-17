@@ -5,18 +5,18 @@ use crate::api::{Backend, Status};
 use crate::installer::registry::ServerEntry;
 use crate::service::ControlAction;
 
-pub struct BackendHost<'a> {
-    backend: &'a mut dyn Backend,
+pub struct BackendHost<'a, B: Backend + ?Sized> {
+    backend: &'a mut B,
     entry: &'a ServerEntry,
 }
 
-impl<'a> BackendHost<'a> {
-    pub fn new(backend: &'a mut dyn Backend, entry: &'a ServerEntry) -> Self {
+impl<'a, B: Backend + ?Sized> BackendHost<'a, B> {
+    pub fn new(backend: &'a mut B, entry: &'a ServerEntry) -> Self {
         BackendHost { backend, entry }
     }
 }
 
-impl Host for BackendHost<'_> {
+impl<B: Backend + ?Sized> Host for BackendHost<'_, B> {
     fn running(&mut self) -> bool {
         self.backend.status(self.entry) == Status::Running
     }

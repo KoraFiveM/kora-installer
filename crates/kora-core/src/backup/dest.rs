@@ -214,7 +214,9 @@ pub fn space_needed(payload_estimate: u64) -> u64 {
 /// `Ok` when `free` covers `needed`; otherwise the words to show.
 pub fn check_space(free: Option<u64>, needed: u64, where_: &str) -> Result<(), String> {
     match free {
-        Some(f) if f < needed => Err(format!("{where_} has {} free, and this backup may need about {}. Free some space, or choose a folder on a bigger disk.", crate::space::human(f), crate::space::human(needed))),
+        Some(f) if f < needed => {
+            Err(format!("{where_} has {} free, and this backup may need about {}. Free some space, or choose a folder on a bigger disk.", crate::space::human(f), crate::space::human(needed)))
+        }
         _ => Ok(()),
     }
 }

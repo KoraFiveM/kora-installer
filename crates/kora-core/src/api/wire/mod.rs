@@ -7,6 +7,7 @@
 //! field that is left out (TypeScript gets `field?:`), a plain `Option` for a field that is sent as `null`.
 
 mod audit;
+mod backups;
 mod common;
 mod install;
 mod keys;
@@ -18,6 +19,7 @@ mod system;
 mod updates;
 
 pub use audit::*;
+pub use backups::*;
 pub use common::*;
 pub use install::*;
 pub use keys::*;

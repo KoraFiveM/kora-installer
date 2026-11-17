@@ -302,6 +302,17 @@ pub fn spec(op: Op) -> OpSpec {
         Op::ReachSettingsGet => OpSpec::get::<crate::reach::settings::Consent>(),
         Op::ReachSettingsSet => OpSpec::call::<w::ReachConsentPatch, crate::reach::settings::Consent>(),
         Op::ForwardingSet => OpSpec::call::<w::ForwardingRequest, crate::reach::ForwardingView>(),
+        Op::BackupsList => OpSpec::get::<w::BackupsView>(),
+        Op::BackupCreate => OpSpec::start_job_with::<w::BackupCreateRequest>().events::<crate::backup::BackupEvent>().result::<w::BackupCreated>(),
+        Op::BackupSettingsSet => OpSpec::call::<crate::backup::BackupSettings, crate::backup::BackupSettings>(),
+        Op::BackupPrune => OpSpec::get::<w::BackupsRemoved>(),
+        Op::BackupUndo => OpSpec::start_job_with::<w::PassphraseRequest>().events::<crate::backup::BackupEvent>().result::<crate::backup::restore::RestoreReport>(),
+        Op::BackupVerify => OpSpec::start_job_with::<w::PassphraseRequest>().events::<crate::backup::BackupEvent>().result::<w::VerifyResult>(),
+        Op::BackupPreview => OpSpec::call::<w::PassphraseRequest, crate::backup::restore::RestorePreview>(),
+        Op::BackupRestore => OpSpec::start_job_with::<w::PassphraseRequest>().events::<crate::backup::BackupEvent>().result::<crate::backup::restore::RestoreReport>(),
+        Op::BackupDelete => OpSpec::nothing(),
+        // The archive file itself (binary): not JSON, so the generated client does not call it; the panel opens it as a download.
+        Op::BackupDownload => OpSpec::nothing(),
         Op::ReachFirewallOpen => OpSpec::get::<w::Notes>(),
         Op::TxAdminTicket => OpSpec::get::<w::TxAdminTicket>(),
     }
