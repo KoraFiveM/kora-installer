@@ -84,12 +84,15 @@ step "4b. txAdmin through the panel's own address (the txAdmin gateway)"
 PANEL_PORT=47131
 GW_PORT=$((TX_PORT + 10000))
 PANEL_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-mkdir -p "$KORA_HOME"
-(umask 077; printf '%s' "$PANEL_TOKEN" > "$KORA_HOME/panel-token")
-"$KORA_BIN" panel --foreground --no-open --port "$PANEL_PORT" >"$SMOKE_ROOT/panel.log" 2>&1 &
+# The panel runs as whoever runs kora in this job (root when KORA_SUDO=1: the home was made by root).
+SUDO=""; if [ "${KORA_SUDO:-}" = "1" ]; then SUDO="sudo"; fi
+$SUDO mkdir -p "$KORA_HOME"
+printf '%s' "$PANEL_TOKEN" | $SUDO tee "$KORA_HOME/panel-token" >/dev/null
+$SUDO chmod 600 "$KORA_HOME/panel-token"
+run_kora panel --foreground --no-open --port "$PANEL_PORT" >"$SMOKE_ROOT/panel.log" 2>&1 &
 PANEL_PID=$!
 panel_up() { curl -fsS --max-time 3 "http://127.0.0.1:$PANEL_PORT/api/v1/meta" >/dev/null; }
-wait_for "panel" 40 panel_up || { cat "$SMOKE_ROOT/panel.log" || true; kill "$PANEL_PID" 2>/dev/null || true; fail "the panel did not start"; }
+wait_for "panel" 40 panel_up || { cat "$SMOKE_ROOT/panel.log" || true; $SUDO kill "$PANEL_PID" 2>/dev/null || true; fail "the panel did not start"; }
 JAR="$SMOKE_ROOT/panel.jar"; GJAR="$SMOKE_ROOT/gate.jar"; rm -f "$JAR" "$GJAR"
 SESSION="$(curl -fsS -c "$JAR" -H 'X-Kora: 1' -H 'Content-Type: application/json' -d "{\"token\":\"$PANEL_TOKEN\"}" "http://127.0.0.1:$PANEL_PORT/api/v1/session")"
 SECRET="$(sed -n 's/.*"secret":"\([^"]*\)".*/\1/p' <<<"$SESSION")"
@@ -103,8 +106,8 @@ DIRECT="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://127.0.0.
 VIA="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -b "$GJAR" "http://127.0.0.1:$GW_PORT/")"
 assert_eq "txAdmin answers through the panel like it does directly (HTTP $DIRECT)" "$DIRECT" "$VIA"
 assert_eq "the gateway answers nothing without the panel sign-in" 401 "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$GW_PORT/")"
-kill "$PANEL_PID" 2>/dev/null || true; wait "$PANEL_PID" 2>/dev/null || true
-rm -f "$KORA_HOME/panel-token" "$JAR" "$GJAR"
+$SUDO kill "$PANEL_PID" 2>/dev/null || true; wait "$PANEL_PID" 2>/dev/null || true
+$SUDO rm -f "$KORA_HOME/panel-token"; rm -f "$JAR" "$GJAR"
 sudo systemctl stop $SVC
 assert_eq "plain systemctl stop works too" inactive "$(state)"
 kora start $NAME
