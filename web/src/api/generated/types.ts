@@ -790,6 +790,10 @@ export type BackupsView = {
    * What the schedule needs to run, in words.
    */
   schedule_note: string,
+  /**
+   * The schedule is a job of the operating system (through the administrator service), not the panel's own scheduler.
+   */
+  schedule_by_os: boolean,
 };
 
 /**

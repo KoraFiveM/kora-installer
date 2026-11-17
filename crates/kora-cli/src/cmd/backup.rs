@@ -220,7 +220,15 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 Err(m) => return fail(m),
             };
             if scheduled {
-                // What an operating-system task runs: the same as the panel's schedule does.
+                // What an operating-system task runs (the job `kora-backup-<slug>`, see `kora_core::backup::osjob`): the same as the
+                // panel's schedule does, as the person, with no password. Switched off in the settings, it does nothing: a job that
+                // could not be removed (no service at the time) is harmless. The slot is marked as taken, so the panel's own
+                // scheduler never makes a second backup for it.
+                if !kora_core::backup::settings::load_settings(&e.name).schedule.enabled {
+                    println!("Scheduled backups are off for '{}': nothing to do.", e.name);
+                    return 0;
+                }
+                kora_core::backup::settings::update_status(&e.name, |s| s.last_scheduled_unix = Some(kora_core::monitor::now_unix()));
                 let (db, git) = (kora_core::db::SystemRunner, kora_core::git::SystemRunner);
                 let tools = kora_core::backup::Tools::system(&db, &git);
                 let mut host = kora_core::backup::host::BackendHost::new(&mut b, &e);
@@ -517,7 +525,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             println!("Keeping:   {}", describe_retention(&s.retention));
             println!("Stop the server during scheduled backups: {}", if s.stop_for_scheduled { "yes" } else { "no" });
             if s.schedule.enabled {
-                println!("Scheduled backups run while Kora's background service runs (kora panel --background).");
+                println!("{}", kora_core::backup::osjob::note(&e, &kora_core::backup::settings::load_status(&e.name)));
             }
             0
         }
