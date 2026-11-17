@@ -421,7 +421,7 @@ pub fn auto_update_in<H: HealthCheck>(
         Ok(l) => l,
         Err(e) => {
             append_log(dir, &format!("skipped: {e}"));
-            return Err(Problem::generic(e.to_string()));
+            return Err(Problem::from(e));
         }
     };
     let res = ServerFile::load(dir).and_then(|sf| {
@@ -763,7 +763,7 @@ mod tests {
             Some(0)
         })
         .unwrap_err();
-        assert!(update::lock::is_busy_message(&e.to_string()), "{e}");
+        assert_eq!(e.code, crate::git::branches::codes::BUSY, "{e}");
         assert!(!asked.get(), "nothing was looked at");
         let log = std::fs::read_to_string(dir.join("update.log")).unwrap();
         assert!(log.contains("skipped: Another update is running for this server"), "{log}");

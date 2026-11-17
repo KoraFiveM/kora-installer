@@ -201,7 +201,7 @@ fn snapshot_dir(server: &ServerRecord) -> std::path::PathBuf {
 
 /// Take the server's update lock (see [`lock`]); busy is a plain error.
 fn locked(server: &ServerRecord) -> Result<lock::UpdateLock> {
-    lock::acquire(&server.dir).map_err(|e| Problem::generic(e.to_string()))
+    lock::acquire(&server.dir).map_err(Problem::from)
 }
 
 fn valid_snapshot_id(id: &str) -> bool {

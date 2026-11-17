@@ -81,10 +81,7 @@ pub(crate) fn find<'a>(sf: &'a ServerFile, name: &str) -> PResult<&'a ResourceRe
 }
 
 pub(crate) fn lock_for(sf: &ServerFile) -> PResult<lock::UpdateLock> {
-    lock::acquire(&sf.dir).map_err(|e| match e {
-        lock::LockError::Busy => Problem::new(codes::BUSY, "An update is running for this server right now. Try again when it has finished.").with_action(Action::Retry),
-        other => Problem::generic(other.to_string()),
-    })
+    lock::acquire(&sf.dir).map_err(Problem::from)
 }
 
 // ---------------------------------------------------------------------------------------------

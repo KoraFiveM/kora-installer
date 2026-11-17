@@ -29,6 +29,17 @@ sentence!(
     crate::hub::remote::RemoteError,
 );
 
+/// Busy: another update holds the lock (code `branch.busy`, the one the branch and update screens
+/// already know, with "Try again"). Anything else is a file problem.
+impl From<crate::update::lock::LockError> for Problem {
+    fn from(e: crate::update::lock::LockError) -> Problem {
+        match e {
+            crate::update::lock::LockError::Busy => Problem::new(crate::git::branches::codes::BUSY, format!("{}. Try again when it has finished.", crate::update::lock::BUSY)).with_action(super::Action::Retry),
+            crate::update::lock::LockError::Io(e) => Problem::from(e).context("taking the update lock"),
+        }
+    }
+}
+
 impl From<crate::git::GitError> for Problem {
     fn from(e: crate::git::GitError) -> Problem {
         use crate::git::GitError as G;
