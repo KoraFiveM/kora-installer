@@ -51,6 +51,7 @@ export interface MessageParams {
   'core.announcer.labelMPerCent': { label: string | number; m: string | number }
   'core.appShell.pageCannotReachKora': { code: Tag }
   'core.appShell.signedTokenSecretLink': { navLink: Tag }
+  'core.backupChip.lastBackup': { ago: string | number }
   'core.backupChip.textNeedsLook': { text: string | number }
   'core.client.serverAnsweredUnexpectedError': { status: string | number }
   'core.download.downloadFailedStatus': { status: string | number }
@@ -317,6 +318,7 @@ export interface MessageParams {
   'servers.overviewTab.txadminPortTxadmin': { txadmin: string | number }
   'servers.reachCard.checkAskedWhatLearned': { what: string | number; learned: string | number }
   'servers.reachCard.contactWhat': { what: string | number }
+  'servers.scheduleTab.savedServerUpdatesDaily': { time: string | number }
   'servers.scheduleTab.savedServerUpdatesItself': { day: string | number; time: string | number }
   'servers.serverControls.playNodeStart': { play: ReactNode }
   'servers.serverControls.restartName': { name: string | number }
@@ -338,7 +340,7 @@ export interface MessageParams {
   'servers.serversPage.refreshcwNodeRefresh': { refreshCw: ReactNode }
   'servers.serversPage.runningRunning': { running: string | number }
   'servers.serversPage.stoppedStopped': { stopped: string | number }
-  'servers.versionsCard.resourcesHereValueSets': { style: string | number }
+  'servers.versionsCard.resourcesHereValueSets': { style: string }
   'settings.auditLog.entriesKeptDaysDays': { days: string | number }
   'settings.auditLog.nothingMatchesValue': { value: string | number }
   'settings.auditLog.whoChangedWhatFrom': { code: Tag; code2: Tag; code3: Tag; value: string | number }

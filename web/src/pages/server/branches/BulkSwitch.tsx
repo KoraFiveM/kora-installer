@@ -92,7 +92,7 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
               <li key={r.id} className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
                 <span className="min-w-0 flex-1 break-all font-mono text-xs">{r.id}</span>
                 {r.note ? <Badge tone="orange">{t('resources.bulkSwitch.couldCheck')}</Badge> : r.already ? <Badge tone="plain">{t('resources.bulkSwitch.alreadyOnIt')}</Badge> : r.has ? <Badge tone="success">{t('resources.bulkSwitch.hasIt')}</Badge> : <Badge tone="plain">{t('resources.bulkSwitch.doesNotHaveIt')}</Badge>}
-                {r.now.startsWith('the normal version') ? <span className="text-xs text-muted-foreground">{t('resources.bulkSwitch.nowNow', { now: r.now })}</span> : <Badge tone="amber" title={t('resources.bulkSwitch.itsNormalVersion')}>{t('resources.bulkSwitch.nowNow', { now: r.now })}</Badge>}
+                {r.now.startsWith('the normal version') /* i18n-ignore: the server's own English text, matched */ ? <span className="text-xs text-muted-foreground">{t('resources.bulkSwitch.nowNow', { now: r.now })}</span> : <Badge tone="amber" title={t('resources.bulkSwitch.itsNormalVersion')}>{t('resources.bulkSwitch.nowNow', { now: r.now })}</Badge>}
                 {r.changed_count > 0 && <Badge tone="amber">{t('resources.bulkSwitch.changedCountChangedFile', { changed_count: r.changed_count })}</Badge>}
                 {r.note && <span className="w-full text-xs text-muted-foreground">{r.note}</span>}
               </li>

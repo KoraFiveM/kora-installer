@@ -68,9 +68,9 @@ describe('languages', () => {
   it('the pseudo-language accents and lengthens every message, and keeps the arguments', async () => {
     await setLocale('en-XA', false)
     const s = t('core.status.updates', { count: 3 })
-    expect(s.startsWith('[') && s.endsWith(']')).toBe(true)
     expect(s).toMatch(/3/)
     expect(s).not.toMatch(/updates/)
+    expect(s).toMatch(/[áéíóúñç]/)
     expect(pseudo('Servers').length).toBeGreaterThan('Servers'.length)
     expect(pseudo('123')).toBe('123')
   })

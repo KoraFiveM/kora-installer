@@ -17,6 +17,12 @@ const messages = {
   'servers.serversPage.openCopy': 'Open and copy',
   'servers.serversPage.alertsCount': '{count, plural, one {# alert} other {# alerts}}',
   'servers.serversPage.alertsNeedAttention': '{count, plural, one {# alert needs attention} other {# alerts need attention}}',
+  'servers.serversPage.colName': 'Name',
+  'servers.serversPage.colMode': 'Mode',
+  'servers.serversPage.colStatus': 'Status',
+  'servers.serversPage.colTxadminPort': 'txAdmin port',
+  'servers.serversPage.colUpdates': 'Updates',
+  'servers.serversPage.colActions': 'Actions',
 } as const
 
 register('en', messages)

@@ -30,7 +30,8 @@ class Problems {
 
 interface Fixtures {
   problems: Problems
-  open: (path: string, opts?: { scenario?: Scenario; as?: Viewer }) => Promise<void>
+  /** `lang`: the panel's language for this visit (the mock build reads `?lang=`): `de`, or `en-XA` for the pseudo-language. */
+  open: (path: string, opts?: { scenario?: Scenario; as?: Viewer; lang?: string }) => Promise<void>
   scan: (label: string) => Promise<void>
 }
 
@@ -52,6 +53,7 @@ export const test = base.extend<Fixtures>({
       const u = new URL(path, 'http://x')
       u.searchParams.set('scenario', opts.scenario ?? 'default')
       u.searchParams.set('as', opts.as ?? 'local')
+      if (opts.lang) u.searchParams.set('lang', opts.lang)
       await page.goto(u.pathname + u.search + u.hash)
     })
   },

@@ -53,6 +53,12 @@ const messages = {
   'servers.fleetPage.addressNotPrivate': 'its address is not private.',
   'servers.fleetPage.nodeAdded': '{name} was added.',
   'servers.fleetPage.nodeRemoved': '{name} was removed from this list.',
+  'servers.fleetPage.colServer': 'Server',
+  'servers.fleetPage.colNode': 'Node',
+  'servers.fleetPage.colMode': 'Mode',
+  'servers.fleetPage.colStatus': 'Status',
+  'servers.fleetPage.colUpdates': 'Updates',
+  'servers.fleetPage.colActions': 'Actions',
 } as const
 
 register('en', messages)

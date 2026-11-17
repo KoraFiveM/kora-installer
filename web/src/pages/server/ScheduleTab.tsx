@@ -10,10 +10,10 @@ import { Input, Select } from '@/components/ui/input'
 import { Radio } from '@/components/ui/checkbox'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { t } from '@/i18n'
+import { t, fmt } from '@/i18n'
 import '@/i18n/en/servers/scheduleTab'
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const DAYS = [0, 1, 2, 3, 4, 5, 6] // Monday first; the name comes from Intl (fmt.weekday)
 type Kind = 'off' | 'daily' | 'weekly'
 
 export function ScheduleTab({ server: s }: { server: ServerDetail }) {
@@ -42,7 +42,7 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
       }
       const cfg: ScheduleConfig = { preset: kind, time, weekday: kind === 'weekly' ? day : null, run_as: runAs, enabled: true }
       await api.schedule.set(s.name, cfg)
-      return t('servers.scheduleTab.savedServerUpdatesItself', { day: kind === 'weekly' ? DAYS[day] : 'day', time })
+      return kind === 'weekly' ? t('servers.scheduleTab.savedServerUpdatesItself', { day: fmt.weekday(day), time }) : t('servers.scheduleTab.savedServerUpdatesDaily', { time })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schedule', s.name] }),
   })
@@ -62,7 +62,7 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
         {kind !== 'off' && (
           <>
             <div className="flex flex-wrap gap-4">
-              {kind === 'weekly' && <div className="w-44"><Field label={t('servers.scheduleTab.day')}><Select value={day} onChange={(e) => setDay(Number(e.target.value))}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field></div>}
+              {kind === 'weekly' && <div className="w-44"><Field label={t('servers.scheduleTab.day')}><Select value={day} onChange={(e) => setDay(Number(e.target.value))}>{DAYS.map((d) => <option key={d} value={d}>{fmt.weekday(d)}</option>)}</Select></Field></div>}
               <div className="w-32"><Field label={t('servers.scheduleTab.timeHours')} error={bad ? t('servers.scheduleTab.useFormHhMm') : null}><Input value={time} onChange={(e) => setTime(e.target.value)} inputMode="numeric" placeholder="04:00" /></Field></div>
             </div>
             <fieldset className="space-y-2">

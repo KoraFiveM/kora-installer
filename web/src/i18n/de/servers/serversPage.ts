@@ -19,6 +19,12 @@ const messages = {
   'servers.serversPage.openCopy': 'Öffnen und kopieren',
   'servers.serversPage.alertsCount': '{count, plural, one {# Warnung} other {# Warnungen}}',
   'servers.serversPage.alertsNeedAttention': '{count, plural, one {# Warnung braucht Aufmerksamkeit} other {# Warnungen brauchen Aufmerksamkeit}}',
+  'servers.serversPage.colName': 'Name',
+  'servers.serversPage.colMode': 'Modus',
+  'servers.serversPage.colStatus': 'Status',
+  'servers.serversPage.colTxadminPort': 'txAdmin-Port',
+  'servers.serversPage.colUpdates': 'Updates',
+  'servers.serversPage.colActions': 'Aktionen',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

@@ -32,6 +32,8 @@ export const fmt = {
   dateTime: (d: Date | number) => intlFor(current).date(d, 'datetime'),
   /** "3 days ago", "in 5 minutes". `now` (ms) defaults to the clock. */
   relative: (d: Date | number, now?: number) => intlFor(current).relative(d, now),
+  /** The name of a weekday: 0 = Monday ... 6 = Sunday. */
+  weekday: (i: number) => new Intl.DateTimeFormat(intlLocale(current), { weekday: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, 1 + i))),
   /** "1h 5m". */
   duration: (seconds: number) => intlFor(current).duration(seconds),
   list: (items: string[]) => intlFor(current).list(items),
@@ -99,7 +101,7 @@ function lookup(id: string): { nodes: Node[]; locale: string } {
     return { nodes, locale: from }
   }
   let nodes = parse(src)
-  if (current === 'en-XA') nodes = ['[', ...mapText(nodes, pseudo), ']']
+  if (current === 'en-XA') nodes = mapText(nodes, pseudo)
   parsed.set(key, nodes)
   return { nodes, locale: current }
 }

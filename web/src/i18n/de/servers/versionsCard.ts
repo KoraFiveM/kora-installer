@@ -4,7 +4,7 @@ import type en from '../../en/servers/versionsCard'
 // German (beta): machine-assisted, to be checked by a native speaker before release.
 const messages = {
   'servers.versionsCard.whichVersions': 'Welche Versionen',
-  'servers.versionsCard.resourcesHereValueSets': 'Die Resources hier sind {style}. Das legt fest, welchen Versionen der Server folgt.',
+  'servers.versionsCard.resourcesHereValueSets': 'Die Resources hier sind {style, select, clone {einfache Kopien der Originale} other {deine eigenen Kopien auf GitHub}}. Das legt fest, welchen Versionen der Server folgt.',
   'servers.versionsCard.whichVersionsServerFollows': 'Welchen Versionen der Server folgt',
   'servers.versionsCard.releasedVersionsRecommendedSta': 'Veröffentlichte Versionen (empfohlen, stabil)',
   'servers.versionsCard.eachResourcePinnedTested': 'Jede Resource ist auf ein getestetes Release festgelegt. Du entscheidest, wann du auf ein neueres wechselst.',

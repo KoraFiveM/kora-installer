@@ -25,7 +25,7 @@ export function VersionsCard({ server: s }: { server: ServerDetail }) {
     <Card>
       <CardHeader><CardTitle>{t('servers.versionsCard.whichVersions')}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">{t('servers.versionsCard.resourcesHereValueSets', { style: s.source === 'clone' ? "plain copies of the originals" : 'your own copies on GitHub' })}</p>
+        <p className="text-sm text-muted-foreground">{t('servers.versionsCard.resourcesHereValueSets', { style: s.source })}</p>
         <fieldset className="space-y-2">
           <legend className="sr-only">{t('servers.versionsCard.whichVersionsServerFollows')}</legend>
           <Radio name="versions-setting" checked={pick === 'released'} onChange={() => setPick('released')} label={t('servers.versionsCard.releasedVersionsRecommendedSta')} hint={t('servers.versionsCard.eachResourcePinnedTested')} />

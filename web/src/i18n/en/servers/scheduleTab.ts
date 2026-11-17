@@ -21,6 +21,7 @@ const messages = {
   'servers.scheduleTab.runsEvenWhenNobody': 'Runs even when nobody is signed in, but has no GitHub sign-in, so private forks cannot be fetched. Needs administrator rights to set up.',
   'servers.scheduleTab.turnScheduleOff': 'Turn schedule off',
   'servers.scheduleTab.saveSchedule': 'Save schedule',
+  'servers.scheduleTab.savedServerUpdatesDaily': 'Saved. The server updates itself every day at {time}.',
 } as const
 
 register('en', messages)

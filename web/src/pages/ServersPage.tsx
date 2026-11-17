@@ -18,7 +18,7 @@ import { BackupChip, useBackupLines } from '@/components/BackupChip'
 import { OffNormalSummary } from '@/components/OffNormalSummary'
 import { useInstallBlock } from './install/access'
 import { TidyUpBanner } from '@/components/Shortcuts'
-import { t } from '@/i18n'
+import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/servers/serversPage'
 
@@ -116,8 +116,8 @@ export default function ServersPage() {
             <caption className="sr-only">{t('servers.serversPage.yourServers')}</caption>
             <thead className="text-xs text-muted-foreground">
               <tr>
-                {['Name', 'Mode', 'Status', t('servers.serversPage.gamePort'), 'txAdmin port', 'Updates', t('servers.serversPage.lastBackup'), 'Actions', t('servers.serversPage.openCopy')].map((h) => (
-                  <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>
+                {[msg('servers.serversPage.colName'), msg('servers.serversPage.colMode'), msg('servers.serversPage.colStatus'), msg('servers.serversPage.gamePort'), msg('servers.serversPage.colTxadminPort'), msg('servers.serversPage.colUpdates'), msg('servers.serversPage.lastBackup'), msg('servers.serversPage.colActions'), msg('servers.serversPage.openCopy')].map((h) => (
+                  <th key={h.msgId} scope="col" className="px-4 py-3 font-medium">{t(h)}</th>
                 ))}
               </tr>
             </thead>

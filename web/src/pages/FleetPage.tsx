@@ -220,8 +220,8 @@ function Fleet() {
             <caption className="sr-only">{t('servers.fleetPage.serversAllNodes')}</caption>
             <thead className="text-xs text-muted-foreground">
               <tr>
-                {['Server', 'Node', 'Mode', 'Status', t('servers.fleetPage.gamePort'), 'Updates', 'Actions'].map((h) => (
-                  <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>
+                {[msg('servers.fleetPage.colServer'), msg('servers.fleetPage.colNode'), msg('servers.fleetPage.colMode'), msg('servers.fleetPage.colStatus'), msg('servers.fleetPage.gamePort'), msg('servers.fleetPage.colUpdates'), msg('servers.fleetPage.colActions')].map((h) => (
+                  <th key={h.msgId} scope="col" className="px-4 py-3 font-medium">{t(h)}</th>
                 ))}
               </tr>
             </thead>

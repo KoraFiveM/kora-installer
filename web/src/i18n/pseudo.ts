@@ -1,5 +1,5 @@
 /**
- * The pseudo-language: English with accents and more letters, in brackets (the brackets are added around the whole message). Anything that still reads as plain
+ * The pseudo-language: English with accents and more letters. (No brackets: a visible label and its aria-label must still start with the same text, WCAG 2.5.3.) Anything that still reads as plain
  * English on screen was never put in the catalogue; anything that breaks was too tight for a long language.
  */
 const MAP: Record<string, string> = {
@@ -11,10 +11,12 @@ const VOWELS = /[aeiouAEIOU]/
 export function pseudo(text: string): string {
   if (!/[A-Za-z]/.test(text)) return text
   let out = ''
+  let vowels = 0
   for (const c of text) {
     out += MAP[c] ?? c
-    // Double every second vowel: "Servers" -> "Šéŕṽéŕš" gets longer without becoming unreadable.
-    if (VOWELS.test(c) && out.length % 2 === 0) out += MAP[c] ?? c
+    // Double every second vowel (counted from the start of the text, so a label and the longer label it begins
+    // are drawn the same way): "Servers" gets longer without becoming unreadable.
+    if (VOWELS.test(c) && ++vowels % 2 === 0) out += MAP[c] ?? c
   }
   return out
 }

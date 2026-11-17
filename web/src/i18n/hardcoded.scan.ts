@@ -152,9 +152,9 @@ export function scanSource(file: string, source: string): Finding[] {
       const text = literalText(n)
       if (!skip && text !== null && !inJsx(n) && looksLikeText(text, true)) add(n, text, 'string')
       // A label in a table of labels: one capitalised word is enough ({ running: 'Running' }).
-      else if (!skip && text !== null && (endsInValuePosition(n) || (ts.isCallExpression(p) && p.arguments.includes(n as ts.Expression)) || inJsxCallArg(n)) && tableValue(text)) add(n, text, 'string')
+      else if (!skip && text !== null && (endsInValuePosition(n) || (ts.isCallExpression(p) && p.arguments.includes(n as ts.Expression)) || inJsxCallArg(n) || ts.isArrayLiteralExpression(p)) && tableValue(text)) add(n, text, 'string')
       // Lowercase fragments of a sentence ("a while ago", "was added.", " is up to date"): two or more plain words.
-      else if (!skip && text !== null && !inJsx(n) && fragment(text, ts.isTemplateExpression(n))) add(n, text, 'string')
+      else if (!skip && text !== null && (!inJsx(n) || inJsxCallArg(n)) && fragment(text, ts.isTemplateExpression(n))) add(n, text, 'string')
     }
     ts.forEachChild(n, visit)
   }

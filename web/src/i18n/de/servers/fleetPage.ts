@@ -55,6 +55,12 @@ const messages = {
   'servers.fleetPage.addressNotPrivate': 'seine Adresse ist nicht privat.',
   'servers.fleetPage.nodeAdded': '{name} wurde hinzugefügt.',
   'servers.fleetPage.nodeRemoved': '{name} wurde aus dieser Liste entfernt.',
+  'servers.fleetPage.colServer': 'Server',
+  'servers.fleetPage.colNode': 'Node',
+  'servers.fleetPage.colMode': 'Modus',
+  'servers.fleetPage.colStatus': 'Status',
+  'servers.fleetPage.colUpdates': 'Updates',
+  'servers.fleetPage.colActions': 'Aktionen',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

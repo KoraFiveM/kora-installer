@@ -108,7 +108,7 @@ export function PortsStep({ f, set, ports }: StepProps & { ports: PortsChecked }
       <p className="text-sm text-muted-foreground">{t('install.steps.playersConnectGamePort')}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         {line(t('install.steps.gamePort'), 'game', 'game')}
-        {line('txAdmin port', 'txadmin', 'tx')}
+        {line(t('install.steps.txadminPort'), 'txadmin', 'tx')}
       </div>
       {problem && <p role="alert" className="text-sm text-danger-text">{problem}</p>}
       <ErrorNotice error={ports.error} />

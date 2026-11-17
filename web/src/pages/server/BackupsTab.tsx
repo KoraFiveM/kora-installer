@@ -23,11 +23,11 @@ import { downloadFile } from '@/lib/download'
 import { browseForFolder, inShell } from '@/lib/shell'
 import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { fileSize } from './PaidAssetsTab'
-import { t, msg, type Msg, unix as unixToDate } from '@/i18n'
+import { t, msg, type Msg, unix as unixToDate, fmt } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/backups/backupsTab'
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const DAYS = [0, 1, 2, 3, 4, 5, 6] // Monday first; the name comes from Intl (fmt.weekday)
 const MIN_PASSWORD = 8
 
 /** What the backup file holds. Said before and after every backup, in plain words. */
@@ -328,7 +328,7 @@ function Settings({ server, view, canChange, why, onSaved }: { server: string; v
         {sch.enabled && (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-4">
-              {sch.cadence === 'weekly' && <div className="w-44"><Field label={t('backups.backupsTab.day')}><Select value={sch.weekday ?? 6} disabled={!canChange} onChange={(e) => setSch({ weekday: Number(e.target.value) })}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field></div>}
+              {sch.cadence === 'weekly' && <div className="w-44"><Field label={t('backups.backupsTab.day')}><Select value={sch.weekday ?? 6} disabled={!canChange} onChange={(e) => setSch({ weekday: Number(e.target.value) })}>{DAYS.map((d) => <option key={d} value={d}>{fmt.weekday(d)}</option>)}</Select></Field></div>}
               <div className="w-32"><Field label={t('backups.backupsTab.timeHours')} error={badTime ? t('backups.backupsTab.useFormHhMm') : null}><Input value={sch.time} disabled={!canChange} onChange={(e) => setSch({ time: e.target.value })} inputMode="numeric" placeholder="03:30" /></Field></div>
             </div>
             <Checkbox checked={s.stop_for_scheduled} disabled={!canChange} onChange={(e) => setS({ ...s, stop_for_scheduled: e.target.checked })} label={t('backups.backupsTab.stopServerDuringScheduled')} hint={t('backups.backupsTab.perfectlyConsistentCopyBut')} />

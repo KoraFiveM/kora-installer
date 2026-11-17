@@ -115,6 +115,7 @@ const messages = {
   'install.steps.koraCreatesNewDatabase': 'Kora erstellt für diesen Server eine neue Datenbank und einen neuen Benutzer. Deine anderen Datenbanken werden nicht angefasst. Die Installation hält an, wenn keine Datenbank gefunden wird.',
   'install.steps.skipDatabase': 'Die Datenbank überspringen',
   'install.steps.connectDatabaseYourselfLater': 'Du verbindest später selbst eine Datenbank.',
+  'install.steps.txadminPort': 'txAdmin-Port',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

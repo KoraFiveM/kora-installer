@@ -113,6 +113,7 @@ const messages = {
   'install.steps.koraCreatesNewDatabase': 'Kora creates a new database and user for this server. Your other databases are not touched. The install stops if no database is found.',
   'install.steps.skipDatabase': 'Skip the database',
   'install.steps.connectDatabaseYourselfLater': 'You will connect a database yourself later.',
+  'install.steps.txadminPort': 'txAdmin port',
 } as const
 
 register('en', messages)
