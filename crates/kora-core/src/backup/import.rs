@@ -548,7 +548,7 @@ pub struct SystemProvisioner {
 
 impl Provisioner for SystemProvisioner {
     fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, String> {
-        crate::db::provision(&crate::db::SystemRunner, &self.admin, "localhost", "127.0.0.1", state_path).map_err(|e| e.to_string())
+        crate::db::provision(&crate::db::SystemRunner, &self.admin, "127.0.0.1", "127.0.0.1", state_path).map_err(|e| e.to_string())
     }
     fn drop_made(&self, state_path: &Path) {
         if let Ok(mut st) = crate::db::ProvisionState::load(state_path) {
