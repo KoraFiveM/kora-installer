@@ -63,7 +63,7 @@ export { expect }
 
 /** Short path of the wizard: key, name, then wait for the summary to settle. Returns once Install is enabled. */
 export async function toSummary(page: Page, name?: string) {
-  await page.getByLabel('Licence key').fill(KEY)
+  await page.getByLabel('Licence key', { exact: true }).fill(KEY)
   await page.getByRole('button', { name: 'Next' }).click()
   const box = page.getByLabel('Server name')
   if (name) await box.fill(name)
