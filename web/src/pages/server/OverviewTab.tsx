@@ -9,6 +9,7 @@ import { LicenceKeyCard } from '@/components/ChangeLicenceKey'
 import { MoreAddresses, ReachCard } from '@/components/ReachCard'
 import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
+import { BackupChip, useBackupLines } from '@/components/BackupChip'
 
 function Check({ ok, yes, no }: { ok: boolean; yes: string; no: string }) {
   return <Badge tone={ok ? 'success' : 'neutral'} dot>{ok ? yes : no}</Badge>
@@ -17,6 +18,7 @@ function Check({ ok, yes, no }: { ok: boolean; yes: string; no: string }) {
 export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: ReturnType<typeof useServerControl> }) {
   const canOpen = useCanOpenFolder()
   const tx = useTxAdminLink(s.ports.txadmin)
+  const backup = useBackupLines().by.get(s.name)
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <Card>
@@ -27,6 +29,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
             <dt className="text-muted-foreground">Game port {s.ports.game}</dt><dd><Check ok={s.game_listening} yes="Listening" no="Not listening" /></dd>
             <dt className="text-muted-foreground">txAdmin port {s.ports.txadmin}</dt><dd><Check ok={s.txadmin_up} yes="Answering" no="Not answering" /></dd>
             <dt className="text-muted-foreground">Updates</dt><dd><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></dd>
+            {backup && <><dt className="text-muted-foreground">Backups</dt><dd><BackupChip server={s.name} summary={backup} /></dd></>}
           </dl>
           <ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} size="default" />
           {s.status === 'missing' && <p className="text-sm text-amber">The server folder cannot be found. It may have been moved or deleted. You can remove this entry on the Danger zone tab.</p>}

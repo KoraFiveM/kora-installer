@@ -322,6 +322,21 @@ export const api = {
     openFirewall: (name: string) => call('reach_firewall_open', { params: { s: name } }),
     txadminTicket: (name: string) => call('txadmin_ticket', { params: { s: name } }),
   },
+  backups: {
+    /** The last backup of every server (the servers list). */
+    overview: () => call('backups_overview', {}),
+    list: (name: string) => call('backups_list', { params: { s: name } }),
+    create: (name: string, body: T.BackupCreateRequest) => call('backup_create', { params: { s: name }, body }),
+    setSettings: (name: string, body: T.BackupSettings) => call('backup_settings_set', { params: { s: name }, body }),
+    prune: (name: string) => call('backup_prune', { params: { s: name } }),
+    verify: (name: string, id: string, passphrase?: string) => call('backup_verify', { params: { s: name, id }, body: { passphrase } }),
+    preview: (name: string, id: string, passphrase?: string) => call('backup_preview', { params: { s: name, id }, body: { passphrase } }),
+    restore: (name: string, id: string, passphrase?: string) => call('backup_restore', { params: { s: name, id }, body: { passphrase } }),
+    undo: (name: string, passphrase?: string) => call('backup_undo', { params: { s: name }, body: { passphrase } }),
+    remove: (name: string, id: string) => call('backup_delete', { params: { s: name, id } }),
+    /** The address of the archive (a download; it holds secrets: administrators only). Fetched with the session header, see `downloadBackup`. */
+    fileUrl: (name: string, id: string) => `${BASE}/servers/${encodeURIComponent(name)}/backups/${encodeURIComponent(id)}/file`,
+  },
   ports: {
     set: (name: string, ports: T.Ports) => call('ports_set', { params: { s: name }, body: ports }),
   },

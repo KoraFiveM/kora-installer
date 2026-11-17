@@ -20,6 +20,7 @@ const ConsoleTab = lazyTab(() => import('./server/ConsoleTab'), 'ConsoleTab')
 const LogsTab = lazyTab(() => import('./server/LogsTab'), 'LogsTab')
 const MonitoringTab = lazyTab(() => import('./server/MonitoringTab'), 'MonitoringTab')
 const ResourcesTab = lazyTab(() => import('./server/ResourcesTab'), 'ResourcesTab')
+const BackupsTab = lazyTab(() => import('./server/BackupsTab'), 'BackupsTab')
 const PaidAssetsTab = lazyTab(() => import('./server/PaidAssetsTab'), 'PaidAssetsTab')
 const ScheduleTab = lazyTab(() => import('./server/ScheduleTab'), 'ScheduleTab')
 const NotificationsTab = lazyTab(() => import('./server/NotificationsTab'), 'NotificationsTab')
@@ -65,6 +66,7 @@ export default function ServerDetailPage() {
           <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
           <TabsTrigger value="resources">Resources</TabsTrigger>
           <TabsTrigger value="assets">Paid assets</TabsTrigger>
+          <TabsTrigger value="backups">Backups</TabsTrigger>
           {dev && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="ports">Ports</TabsTrigger>
@@ -77,6 +79,7 @@ export default function ServerDetailPage() {
         <TabsContent value="monitoring"><Lazy id="monitoring"><MonitoringTab server={s} /></Lazy></TabsContent>
         <TabsContent value="resources"><Lazy id="resources"><ResourcesTab server={s} /></Lazy></TabsContent>
         <TabsContent value="assets"><Lazy id="assets"><PaidAssetsTab server={s} /></Lazy></TabsContent>
+        <TabsContent value="backups"><Lazy id="backups"><BackupsTab server={s} /></Lazy></TabsContent>
         {dev && <TabsContent value="schedule"><Lazy id="schedule"><ScheduleTab server={s} /></Lazy></TabsContent>}
         <TabsContent value="notifications"><Lazy id="notifications"><NotificationsTab server={s} /></Lazy></TabsContent>
         <TabsContent value="ports"><Lazy id="ports"><PortsTab server={s} /></Lazy></TabsContent>

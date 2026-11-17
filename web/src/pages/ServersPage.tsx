@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderPlus, Plus, RefreshCw } from 'lucide-react'
 import { api } from '@/api/client'
-import type { ServerSummary } from '@/api/types'
+import type { BackupSummary, ServerSummary } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/Skeleton'
@@ -15,13 +15,14 @@ import { CopyConnectButton, OpenFolderButton, TxAdminButton } from '@/components
 import { useServerControl } from '@/hooks/useServerControl'
 import { usePanelAlerts } from '@/hooks/usePanelAlerts'
 import { Badge } from '@/components/ui/badge'
+import { BackupChip, useBackupLines } from '@/components/BackupChip'
 import { useInstallBlock } from './install/access'
 import { TidyUpBanner } from '@/components/Shortcuts'
 
 /** Asked once per browser tab: a first visit with no servers goes straight to the install wizard. */
 const FIRST_RUN_KEY = 'kora.firstRunShown'
 
-function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
+function Row({ s, alerts, backup }: { s: ServerSummary; alerts: number; backup?: BackupSummary }) {
   const ctl = useServerControl(s.name)
   return (
     <tr className="border-t border-border align-middle">
@@ -35,6 +36,7 @@ function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
       <td className="px-4 py-3 font-mono text-xs">{s.ports.game}</td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.txadmin}</td>
       <td className="px-4 py-3"><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></td>
+      <td className="px-4 py-3"><BackupChip server={s.name} summary={backup} /></td>
       <td className="px-4 py-3"><ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} /></td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-2">
@@ -69,6 +71,7 @@ export default function ServersPage() {
     nav('/install', { replace: true })
   }, [empty, installBlock, nav, params])
   const { open: openAlerts } = usePanelAlerts()
+  const backups = useBackupLines()
   const running = servers.filter((x) => x.status === 'running').length
   const stopped = servers.filter((x) => x.status === 'stopped').length
   return (
@@ -102,16 +105,16 @@ export default function ServersPage() {
       )}
       {servers.length > 0 && (
         <Card className="overflow-x-auto">
-          <table className="w-full min-w-[64rem] text-left text-sm">
+          <table className="w-full min-w-[72rem] text-left text-sm">
             <caption className="sr-only">Your servers</caption>
             <thead className="text-xs text-muted-foreground">
               <tr>
-                {['Name', 'Mode', 'Status', 'Game port', 'txAdmin port', 'Updates', 'Actions', 'Open and copy'].map((h) => (
+                {['Name', 'Mode', 'Status', 'Game port', 'txAdmin port', 'Updates', 'Last backup', 'Actions', 'Open and copy'].map((h) => (
                   <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody>{servers.map((s) => <Row key={s.name} s={s} alerts={openAlerts.filter((a) => a.server === s.name).length} />)}</tbody>
+            <tbody>{servers.map((s) => <Row key={s.name} s={s} alerts={openAlerts.filter((a) => a.server === s.name).length} backup={backups.by.get(s.name)} />)}</tbody>
           </table>
         </Card>
       )}

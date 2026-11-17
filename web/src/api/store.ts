@@ -52,6 +52,14 @@ const LABELS: Record<string, string> = {
   github_login: 'Signed in to GitHub',
   issue_report: 'Reported an issue',
   pr_open: 'Opened a pull request',
+  backup_create: 'Made a backup',
+  backup_restore: 'Restored a backup',
+  backup_undo: 'Undid a restore',
+  backup_verify: 'Checked a backup',
+  backup_delete: 'Deleted a backup',
+  backup_settings_set: 'Changed backup settings',
+  backup_prune: 'Removed old backups',
+  backup_download: 'Downloaded a backup',
 }
 
 export function opLabel(op: string): string {

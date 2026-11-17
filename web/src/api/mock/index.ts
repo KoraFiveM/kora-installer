@@ -9,6 +9,7 @@ import { installKeysMock } from './keys'
 import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
 import { installReachMock } from './reach'
+import { installBackupsMock } from './backups'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
@@ -63,6 +64,7 @@ function init(name: ScenarioName) {
   paused.clear()
   keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
   reachMock.reset()
+  backupsMock.reset(name)
   storeMock.reset(name === 'restarted')
   if (name === 'restarted') {
     // The install that was running when the panel stopped, written down with its (saved) licence key by name.
@@ -414,6 +416,7 @@ const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const reachMock = installReachMock(route, () => servers)
+const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep)
 const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 

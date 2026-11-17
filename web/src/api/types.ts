@@ -293,3 +293,31 @@ export type UpdatePreview = Omit<UpdatePreviewResult, 'badge' | 'notes'> & Parti
 /** The answers of a stopped install, as saved (every field may be missing from an older panel). */
 export type SavedInstall = Partial<GeneratedSavedInstall>
 export type SchedulePreset = Preset
+
+// Backups of a server (generated from the Rust types in kora_core::backup and api::wire::backups).
+export type {
+  BackupCreateRequest,
+  BackupCreated,
+  BackupEvent,
+  BackupInfo,
+  BackupSchedule,
+  BackupSettings,
+  BackupSummary,
+  BackupsOverview,
+  BackupsRemoved,
+  BackupsView,
+  Cadence,
+  DatabaseBackup,
+  DatabaseNote,
+  DbKind,
+  PassphraseRequest,
+  ResourceBackup,
+  ResourceChoice,
+  RestorePreview,
+  RestoreReport,
+  Retention,
+  ServerBackupLine,
+  UndoInfo,
+  VerifyResult,
+  Label as BackupLabel,
+} from './generated/types'
