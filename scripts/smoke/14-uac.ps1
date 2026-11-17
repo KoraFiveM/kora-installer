@@ -50,6 +50,13 @@ function Invoke-Scenario([string]$Name, [scriptblock]$Body, [string]$SkipReason 
         $results.Add([pscustomobject]@{ Name = $Name; Outcome = 'passed'; Note = '' })
         Write-Host "PASSED: $Name"
     }
+    elseif ($Mode -eq 'Hosted' -and $err.Exception.Message -like 'RUNNER-LIMIT:*') {
+        # The hosted runner cannot provide this scenario's starting point (see docs/windows-uac-ci.md): say so, loudly, and
+        # do not call it a pass. On the self-hosted VM (-Mode Vm) the same condition stays a failure.
+        $reason = $err.Exception.Message -replace '^RUNNER-LIMIT:\s*', ''
+        $results.Add([pscustomobject]@{ Name = $Name; Outcome = 'skipped'; Note = $reason })
+        Write-Host "::notice title=UAC scenario skipped (hosted runner limit)::${Name}: $reason"
+    }
     else {
         $msg = $err.Exception.Message
         $results.Add([pscustomobject]@{ Name = $Name; Outcome = 'FAILED'; Note = $msg })

@@ -537,12 +537,16 @@ function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kin
     $argText = "-NoProfile -ExecutionPolicy Bypass -File `"$($w.Script)`""
     switch ($Kind) {
         'Self' { $proc = Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden; $wrapperPid = $proc.Id }
-        'Filtered' { $wrapperPid = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
+        'Filtered' {
+            try { $wrapperPid = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
+            catch { throw "RUNNER-LIMIT: this runner does not let a job start a process with a filtered administrator token ($($_.Exception.Message))" }
+        }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
             $svc = Get-Service seclogon -ErrorAction SilentlyContinue
             if ($svc -and $svc.Status -ne 'Running') { Start-Service seclogon }
-            $proc = Start-Process -FilePath $ps -ArgumentList $argText -Credential $Credential -LoadUserProfile -WorkingDirectory $Dir -PassThru -WindowStyle Hidden
+            try { $proc = Start-Process -FilePath $ps -ArgumentList $argText -Credential $Credential -LoadUserProfile -WorkingDirectory $Dir -PassThru -WindowStyle Hidden }
+            catch { throw "RUNNER-LIMIT: this runner does not let a job start a process as another account ($($_.Exception.Message))" }
             $wrapperPid = $proc.Id
         }
     }
@@ -550,7 +554,10 @@ function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kin
     while (-not (Test-Path $w.Info) -and $sw.Elapsed.TotalSeconds -lt $TimeoutSec) { Start-Sleep -Milliseconds 500 }
     if (-not (Test-Path $w.Info)) {
         foreach ($f in $w.Log, $w.Out, $w.Err) { if (Test-Path $f) { Write-Host "== $f"; Get-Content $f -Tail 40 } }
-        throw "the panel ($Tag) did not start within $TimeoutSec s"
+        # Started as another account or with a filtered token, nothing of the wrapper ever ran: the hosted runner's
+        # window station / secondary logon does not allow it. Invoke-Scenario skips this in Hosted mode, with the reason.
+        $limit = if ($Kind -ne 'Self') { 'RUNNER-LIMIT: ' } else { '' }
+        throw "${limit}the panel ($Tag) did not start within $TimeoutSec s ($Kind)"
     }
     $rec = Get-Content $w.Info -Raw | ConvertFrom-Json
     $panelPid = [int]$rec.pid
