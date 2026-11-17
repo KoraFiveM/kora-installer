@@ -63,6 +63,19 @@ pub(crate) enum ProxyCmd {
     Status,
 }
 
+/// `https` when the panel has a Tailscale (or other) certificate it can serve on the tailnet, else `http` (inside Tailscale either is
+/// encrypted). Reads what the running panel saved; fetches nothing.
+pub(crate) fn tailnet_scheme(home: &Path) -> &'static str {
+    // The cached Tailscale certificate is read without fetching; its name comes from Tailscale's status.
+    let m = Manager::new(home.to_path_buf(), Arc::new(SystemWhois));
+    m.set_hints(Hints { names: vec![], tailnet: true });
+    if m.reload(false).ok().flatten().is_some() {
+        "https"
+    } else {
+        "http"
+    }
+}
+
 fn home() -> std::path::PathBuf {
     kora_core::monitor::panel_service::home()
 }
