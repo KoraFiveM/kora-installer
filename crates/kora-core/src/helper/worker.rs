@@ -430,6 +430,33 @@ pub fn elevated_child_env(sys: &SystemDirs, user: &super::winpipe::PanelUser, pr
     v
 }
 
+/// The worker itself (elevated by the prompt, started with the person's environment): forget
+/// [`OVERRIDE_VARS`] and take the system folders from Windows before anything else runs. Its
+/// children get their own environment built from nothing anyway ([`elevated_child_env`]).
+pub fn sanitize_worker_env(sys: &SystemDirs) {
+    let (remove, set) = worker_env_changes(sys);
+    for k in remove {
+        std::env::remove_var(k);
+    }
+    for (k, v) in set {
+        std::env::set_var(k, v);
+    }
+}
+
+/// What [`sanitize_worker_env`] removes and sets.
+pub fn worker_env_changes(sys: &SystemDirs) -> (Vec<&'static str>, Vec<(&'static str, String)>) {
+    let mut set = Vec::new();
+    if !sys.system_root.is_empty() {
+        let root = sys.system_root.trim_end_matches(['\\', '/']);
+        for (k, v) in [("SystemRoot", root.to_string()), ("windir", root.to_string()), ("SystemDrive", root.chars().take(2).collect()), ("ProgramFiles", sys.program_files.clone()), ("ProgramData", sys.program_data.clone()), ("TEMP", format!("{root}\\Temp")), ("TMP", format!("{root}\\Temp"))] {
+            if !v.is_empty() {
+                set.push((k, v));
+            }
+        }
+    }
+    (OVERRIDE_VARS.to_vec(), set)
+}
+
 /// In an elevated child of the worker or the helper (`KORA_HELPER=1`): forget [`OVERRIDE_VARS`]
 /// before anything reads them. Call first thing in `main`, before any thread starts.
 pub fn scrub_overrides() {

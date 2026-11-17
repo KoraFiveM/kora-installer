@@ -112,6 +112,8 @@ pub fn admin_worker(a: &AdminWorkerArgs) -> i32 {
             }
         };
     }
+    // Started by the prompt with the person's environment: nothing in it may steer us.
+    kora_core::helper::worker::sanitize_worker_env(&kora_core::helper::winpipe::system_dirs());
     let args = vec!["--pipe".to_string(), a.pipe.clone().unwrap_or_default(), "--parent".to_string(), a.parent.unwrap_or(0).to_string()];
     match kora_core::helper::winpipe::run_worker(&args, std::sync::Arc::new(worker_validate)) {
         Ok(()) => 0,

@@ -345,3 +345,15 @@ fn elevated_children_get_system_folders_from_windows_and_the_panel_users_profile
     let e = elevated_child_env(&sys, &u, None, None);
     assert!(!e.iter().any(|(k, _)| k == "USERPROFILE" || k == "KORA_HOME"));
 }
+
+#[test]
+fn the_worker_forgets_override_variables_at_start() {
+    let sys = SystemDirs { system_root: r"C:\Windows".into(), program_files: r"C:\Program Files".into(), program_files_x86: String::new(), program_data: r"C:\ProgramData".into() };
+    let (remove, set) = worker_env_changes(&sys);
+    for k in ["KORA_MARIADB_HOME", "KORA_SELF_UPDATE_API", "KORA_TEST_ARTIFACT_MIRROR", "KORA_CATALOG", "KORA_SERVICE_USER", "KORA_DB_HOST"] {
+        assert!(remove.contains(&k), "{k}");
+    }
+    assert!(set.contains(&("ProgramFiles", r"C:\Program Files".to_string())) && set.contains(&("TEMP", r"C:\Windows\Temp".to_string())));
+    let (_, none) = worker_env_changes(&SystemDirs::default());
+    assert!(none.is_empty(), "nothing invented when Windows did not answer");
+}
