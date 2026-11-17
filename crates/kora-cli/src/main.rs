@@ -4,9 +4,6 @@ use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::helper::{helper, HelperCmd};
 use crate::cmd::install::{install, InstallArgs};
-use crate::cmd::panel::{PanelArgs, PanelCmd, PanelStart, ROOT_ONLY_HELP};
-use crate::cmd::panel_background::{PanelRestart, SETUP_WAIT};
-use crate::cmd::panel_remote::{PanelUserCmd, RemoteActionsCmd};
 use crate::cmd::resources::{add_asset, add_resources, AddAssetArgs, AddResourcesArgs};
 use crate::cmd::schedule::{schedule, ScheduleCmd};
 use crate::cmd::server::{control, delete, status};
@@ -1157,9 +1154,6 @@ mod parity;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::panel::{may_reuse_running, panel, panel_start_mode};
-    use crate::cmd::panel_background::panel_restart_mode;
-    use crate::cmd::panel_remote::{panel_remote_actions, remote_actions_message};
 
     #[test]
     fn bare_kora_and_the_panel_aliases_never_elevate_but_install_with_options_still_may() {
