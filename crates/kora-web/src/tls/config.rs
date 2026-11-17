@@ -32,13 +32,13 @@ pub struct TlsConfig {
 
 impl TlsConfig {
     pub fn load(s: &Store) -> Result<Self, String> {
-        match documents::get(s, DOC).map_err(kora_core::store::problem_to_string)? {
+        match documents::get(s, DOC).map_err(crate::error::store_text)? {
             None => Ok(Self::default()),
             Some(v) => serde_json::from_value(v).map_err(|e| format!("the saved HTTPS settings cannot be read ({e}); they were left as they were")),
         }
     }
     pub fn save(&self, s: &Store) -> Result<(), String> {
-        documents::put(s, DOC, &serde_json::to_value(self).map_err(|e| e.to_string())?).map_err(kora_core::store::problem_to_string)
+        documents::put(s, DOC, &serde_json::to_value(self).map_err(|e| e.to_string())?).map_err(crate::error::store_text)
     }
 }
 

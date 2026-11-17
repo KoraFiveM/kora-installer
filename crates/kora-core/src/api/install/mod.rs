@@ -26,12 +26,12 @@ pub trait InstallEnv: Send + Sync {
     fn prober(&self) -> &dyn PortProber;
     fn disk(&self) -> &dyn DiskInfo;
     /// Try a database admin login (`None` = automatic: environment / root socket).
-    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), String>;
+    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), Problem>;
     /// The FiveM server builds that can be installed.
-    fn artifacts(&self) -> Result<artifacts::ArtifactList, String>;
+    fn artifacts(&self) -> Result<artifacts::ArtifactList, Problem>;
     /// Look a Cfx.re username up on forum.cfx.re (the real lookup unless a test replaces it).
-    fn cfx_lookup(&self, name: &str) -> Result<crate::cfx::CfxAccount, String> {
-        crate::cfx::lookup(name)
+    fn cfx_lookup(&self, name: &str) -> Result<crate::cfx::CfxAccount, Problem> {
+        crate::cfx::lookup(name).map_err(Problem::from)
     }
     /// Does this process have administrator / root rights?
     fn is_elevated(&self) -> bool;
@@ -45,12 +45,11 @@ pub trait InstallEnv: Send + Sync {
     fn skip_step(&self, req: &InstallRequest, step: &str) -> Result<(), Problem> {
         installer::skip_step(req, step)
     }
-    /// Run the installer (a dry run when `req.dry_run`). The error text may be a packed
-    /// [`Problem`] ([`Problem::decode`] reads both).
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String>;
+    /// Run the installer (a dry run when `req.dry_run`). A failure is a [`Problem`].
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, Problem>;
     /// [`InstallEnv::run`] with an administrator helper for the steps that need one (the Windows
     /// panel's worker, see `installer::system_ops`). Fakes may ignore it.
-    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, String> {
+    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, Problem> {
         let _ = admin;
         self.run(req, sink)
     }
@@ -66,12 +65,12 @@ impl InstallEnv for SystemInstallEnv {
     fn disk(&self) -> &dyn DiskInfo {
         &SystemDisk
     }
-    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), Problem> {
         installer::check_db_admin(admin)
     }
-    fn artifacts(&self) -> Result<artifacts::ArtifactList, String> {
+    fn artifacts(&self) -> Result<artifacts::ArtifactList, Problem> {
         let http = installer::Hooks::from_env().http;
-        artifacts::list_artifacts(&http, Platform::current()).map_err(|e| e.to_string())
+        artifacts::list_artifacts(&http, Platform::current()).map_err(Problem::from)
     }
     fn is_elevated(&self) -> bool {
         installer::is_admin()
@@ -88,13 +87,13 @@ impl InstallEnv for SystemInstallEnv {
     fn saved_clear(&self) {
         installer::saved::clear();
     }
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
-        // The raw text: it may be a packed Problem (see `installer::InstallError`).
-        installer::run(req, sink).map_err(|e| e.0)
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, Problem> {
+        // The raw text: it may be a packed Problem (see `installer::Problem`).
+        installer::run(req, sink)
     }
-    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, String> {
+    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, Problem> {
         let hooks = installer::Hooks { admin, ..installer::Hooks::from_env() };
-        installer::run_with(req, sink, &hooks).map_err(|e| e.0)
+        installer::run_with(req, sink, &hooks)
     }
 }
 
@@ -221,7 +220,7 @@ pub fn default_dir(name: &str) -> String {
 }
 
 /// The wizard's name rules.
-pub fn validate_name(name: &str) -> Result<(), String> {
+pub fn validate_name(name: &str) -> Result<(), Problem> {
     let n = name.trim();
     if n.is_empty() {
         return Err("Please give your server a name.".into());
@@ -246,7 +245,7 @@ fn valid_resource_id(s: &str) -> bool {
 /// Check the UI's request and turn it into an [`InstallRequest`]: the CLI's `into_request`
 /// defaults (folder, hostname, catalogue from `KORA_CATALOG`, no app on a dry run) plus the
 /// installer's own validation, so a bad request is refused before anything starts.
-pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
+pub fn build_request(w: &WireInstall) -> Result<InstallRequest, Problem> {
     validate_name(&w.name)?;
     let name = w.name.trim().to_string();
     let dir_text = w.dir.trim();
@@ -258,7 +257,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
     let ports = w.ports.as_ref().map_or(defaults, |p| Ports { game: p.game, txadmin: p.txadmin });
     for (label, p) in [("game", ports.game), ("txAdmin", ports.txadmin)] {
         if p < 1024 {
-            return Err(format!("The {label} port must be a number between 1024 and 65535."));
+            return Err(format!("The {label} port must be a number between 1024 and 65535.").into());
         }
     }
     PortRequest { server: slug(&name), game_port: ports.game, txadmin_port: ports.txadmin, expose_txadmin: w.txadmin_public }.validate().map_err(|e| e.to_string())?;
@@ -279,7 +278,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         Some(WireResources::Only(ids)) => {
             let ids: Vec<String> = ids.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             if let Some(bad) = ids.iter().find(|i| !valid_resource_id(i)) {
-                return Err(format!("'{bad}' is not a resource name (letters, digits, _ . - only)."));
+                return Err(format!("'{bad}' is not a resource name (letters, digits, _ . - only).").into());
             }
             ResourceSelection::Only(ids)
         }
@@ -417,7 +416,7 @@ pub fn port_lines(game: u16, txadmin: u16, servers: &[ServerEntry], prober: &dyn
 /// Check the requested ports against this machine (and the other servers). With `auto`, move
 /// taken ports to the next free ones and return what changed; without, a taken port is an error
 /// naming the port and the next free one. (The CLI's `settle_ports_avoiding`.)
-pub fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber, avoid: &[u16]) -> Result<Vec<String>, String> {
+pub fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber, avoid: &[u16]) -> Result<Vec<String>, Problem> {
     let (game, tx) = (req.ports.game, req.ports.txadmin);
     let report = ports::check_ports(game, tx, avoid, prober);
     if report.all_free() {
@@ -437,7 +436,7 @@ pub fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProbe
         req.ports.txadmin = t;
         return Ok(changes);
     }
-    Err(ports::conflict_messages(game, tx, &report, avoid).join(" "))
+    Err(ports::conflict_messages(game, tx, &report, avoid).join(" ").into())
 }
 
 /// A finished server (resume/reinstall of the same folder) keeps its ports.
@@ -702,8 +701,8 @@ impl<F: FnMut(&ProgressEvent) + Send> ProgressSink for FnSink<F> {
 
 /// How a finished run ended, ready for the job result / error.
 pub struct Finished {
-    /// The outcome, or the installer's error text when it failed (may be a packed [`Problem`]).
-    pub outcome: Result<InstallOutcome, String>,
+    /// The outcome, or the installer's problem when it failed.
+    pub outcome: Result<InstallOutcome, Problem>,
     /// The log file (when one could be written).
     pub log_path: Option<PathBuf>,
     /// After a failure: what was kept on disk (folder, saved answers) and how to carry on.
@@ -751,7 +750,7 @@ pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Optio
             done(Ok(out), log_path)
         }
         Err(msg) => {
-            let log_path = write_install_log(req, &log, Some(&crate::problem::plain_text(&msg)));
+            let log_path = write_install_log(req, &log, Some(&msg.one_line()));
             let saved = env.saved_save(req);
             let mut kept = Vec::new();
             if req.dir.join(".kora").is_dir() {
@@ -760,7 +759,7 @@ pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Optio
             if saved {
                 kept.push("Your answers (not the licence key or database password)".to_string());
             }
-            let problem = failure_problem(req, &msg, failed_step.as_deref());
+            let problem = failure_problem(req, msg.clone(), failed_step.as_deref());
             Finished { outcome: Err(msg), log_path, kept, next: failure_next_steps(req, saved), failed_step, problem: Some(problem) }
         }
     }
@@ -770,8 +769,8 @@ pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Optio
 /// text as a generic one) followed by the ways on: retry the failed step (or the whole install when
 /// it stopped before the first step), skip the step when it is safe to ([`installer::SKIPPABLE`]),
 /// and change the answers.
-pub fn failure_problem(req: &InstallRequest, error: &str, failed_step: Option<&str>) -> Problem {
-    let mut p = Problem::decode(error);
+pub fn failure_problem(req: &InstallRequest, error: Problem, failed_step: Option<&str>) -> Problem {
+    let mut p = error;
     match failed_step {
         Some(step) => {
             if p.code == codes::FAILED {
@@ -937,22 +936,22 @@ mod tests {
         w.firewall = true;
         let req = build_request(&w).unwrap();
         // A plain error in a step that must not be skipped: retry it, or change the answers.
-        let p = failure_problem(&req, "download failed", Some("build.artifact"));
+        let p = failure_problem(&req, "download failed".into(), Some("build.artifact"));
         assert_eq!((p.code.as_str(), p.message.as_str()), (codes::INSTALL_STEP_FAILED, "download failed"));
         assert_eq!(p.actions, vec![Action::RetryStep { step: "build.artifact".into() }, Action::ChangeAnswers { section: None }]);
         // A step that is safe to skip also offers that.
-        let p = failure_problem(&req, "no firewall", Some("system.firewall"));
+        let p = failure_problem(&req, "no firewall".into(), Some("system.firewall"));
         assert!(p.actions.contains(&Action::SkipStep { step: "system.firewall".into() }));
         // The step's own problem keeps its code and actions first; its own "change answers" is kept.
         let own = Problem::new(codes::INSTALL_DB_LOGIN, "login refused").with_action(Action::change_answers("database"));
-        let p = failure_problem(&req, &own.encode(), Some("prepare.tools"));
+        let p = failure_problem(&req, own.clone(), Some("prepare.tools"));
         assert_eq!(p.code, codes::INSTALL_DB_LOGIN);
         assert_eq!(p.actions, vec![Action::change_answers("database"), Action::RetryStep { step: "prepare.tools".into() }]);
         // Stopped before the first step: try the whole install again.
-        let p = failure_problem(&req, "ports taken", None);
+        let p = failure_problem(&req, "ports taken".into(), None);
         assert_eq!((p.code.as_str(), p.actions[0].clone()), (codes::FAILED, Action::Retry));
         // A full disk points at the folder first: retrying cannot help.
-        let p = failure_problem(&req, "Not enough free disk space on the disk holding /srv/a: Kora needs about 4.6 GiB.", None);
+        let p = failure_problem(&req, "Not enough free disk space on the disk holding /srv/a: Kora needs about 4.6 GiB.".into(), None);
         assert_eq!(p.actions[0], Action::change_answers("name"), "{:?}", p.actions);
     }
 

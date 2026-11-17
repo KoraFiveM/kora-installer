@@ -19,6 +19,58 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ops::Op;
+use crate::problem::Problem;
+
+/// Why a job failed: a [`Problem`] plus the extra fields some failures add (an install adds `kept`,
+/// `log_path`, `failed_step`, `resume`). A job body returns `Err(JobFailure)`; a plain [`Problem`],
+/// `String` or `&str` converts into one. It is kept (and stored, see [`crate::store::jobs`]) as the
+/// JSON text of one flat object: the Problem's fields, then the extras.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobFailure {
+    pub problem: Problem,
+    pub extra: serde_json::Map<String, Value>,
+}
+
+impl JobFailure {
+    pub fn new(problem: Problem) -> Self {
+        Self { problem, extra: serde_json::Map::new() }
+    }
+    /// Add an extra field (never overrides the Problem's own fields).
+    pub fn with(mut self, key: &str, value: Value) -> Self {
+        if !matches!(key, "code" | "message" | "details" | "actions") {
+            self.extra.insert(key.to_string(), value);
+        }
+        self
+    }
+    /// The flat JSON object the panel and the store use.
+    pub fn to_json(&self) -> Value {
+        let mut v = self.problem.to_json();
+        if let Value::Object(m) = &mut v {
+            // The wire shape leaves `actions` out when there are none (as job errors always did).
+            if self.problem.actions.is_empty() {
+                m.remove("actions");
+            }
+            for (k, x) in &self.extra {
+                m.insert(k.clone(), x.clone());
+            }
+        }
+        v
+    }
+    /// The text kept in `JobSnapshot::error` and the store.
+    pub fn to_text(&self) -> String {
+        self.to_json().to_string()
+    }
+}
+
+/// Anything that becomes a [`Problem`] (a Problem, a sentence, an io or JSON error) becomes a failure.
+impl<E: Into<Problem>> From<E> for JobFailure {
+    fn from(e: E) -> Self {
+        Self::new(e.into())
+    }
+}
+
+/// What a job body returns.
+pub type JobResult = Result<Value, JobFailure>;
 
 /// Finished jobs kept at most this many (oldest dropped first).
 pub const MAX_FINISHED: usize = 200;
@@ -298,7 +350,7 @@ impl JobRegistry {
     /// op is refused while another mutating job of the same server is running.
     pub fn spawn<F>(&self, op: Op, server: Option<String>, f: F) -> Result<JobId, Conflict>
     where
-        F: FnOnce(&JobHandle) -> Result<Value, String> + Send + 'static,
+        F: FnOnce(&JobHandle) -> JobResult + Send + 'static,
     {
         self.spawn_with(op, server, !op.is_read_only_job(), f)
     }
@@ -306,7 +358,7 @@ impl JobRegistry {
     /// Like [`spawn`](Self::spawn) with the "mutating" decision made by the caller.
     pub fn spawn_with<F>(&self, op: Op, server: Option<String>, mutating: bool, f: F) -> Result<JobId, Conflict>
     where
-        F: FnOnce(&JobHandle) -> Result<Value, String> + Send + 'static,
+        F: FnOnce(&JobHandle) -> JobResult + Send + 'static,
     {
         let id = JobId(new_id());
         {
@@ -334,17 +386,18 @@ impl JobRegistry {
         let spawned = std::thread::Builder::new().name(format!("job-{}", op.name())).spawn(move || {
             let out = match catch_unwind(AssertUnwindSafe(|| f(&handle))) {
                 Ok(r) => r,
-                Err(p) => Err(panic_text(p)),
+                Err(p) => Err(panic_text(p).into()),
             };
             reg.finish(&handle.id, out);
         });
         if let Err(e) = spawned {
-            self.finish(&id, Err(format!("could not start the operation: {e}")));
+            self.finish(&id, Err(format!("could not start the operation: {e}").into()));
         }
         Ok(id)
     }
 
-    fn finish(&self, id: &JobId, out: Result<Value, String>) {
+    fn finish(&self, id: &JobId, out: JobResult) {
+        let out = out.map_err(|f| f.to_text());
         // Written down BEFORE anyone is told it ended, so whoever sees "done" can rely on the store having it.
         if let Some(journal) = &self.journal {
             match &out {
@@ -448,7 +501,7 @@ mod tests {
     const T: Duration = Duration::from_secs(5);
 
     /// A job body that blocks until `gate` is sent to.
-    fn gated() -> (Sender<()>, impl FnOnce(&JobHandle) -> Result<Value, String> + Send + 'static) {
+    fn gated() -> (Sender<()>, impl FnOnce(&JobHandle) -> JobResult + Send + 'static) {
         let (tx, rx) = channel::<()>();
         (tx, move |_h: &JobHandle| {
             let _ = rx.recv_timeout(T);
@@ -491,7 +544,7 @@ mod tests {
         let reg = JobRegistry::new();
         let id = reg.spawn(Op::ServerControl, Some("a".into()), |_| Err("nope".into())).unwrap();
         let s = wait_done(&reg, &id);
-        assert_eq!((s.state, s.error.as_deref(), s.result), (JobState::Failed, Some("nope"), None));
+        assert_eq!((s.state, s.error.as_deref(), s.result), (JobState::Failed, Some(r#"{"code":"failed","message":"nope"}"#), None));
     }
 
     #[test]
@@ -541,7 +594,7 @@ mod tests {
         let id = reg.spawn(Op::ServerDelete, Some("a".into()), move |h| body(h).and(Err("bad".into()))).unwrap();
         let (_, rx) = reg.subscribe(&id.0).unwrap();
         gate.send(()).unwrap();
-        assert_eq!(rx.recv_timeout(T).unwrap(), JobMessage::Failed("bad".into()));
+        assert_eq!(rx.recv_timeout(T).unwrap(), JobMessage::Failed(r#"{"code":"failed","message":"bad"}"#.into()));
     }
 
     #[test]
@@ -637,7 +690,7 @@ mod tests {
         assert_eq!(s.result, Some(json!({"updated": 2})));
         assert!(s.started > 0 && s.ended.is_some());
         let b = after.get(&bad.0).unwrap();
-        assert_eq!((b.state, b.error.as_deref()), (JobState::Failed, Some("the server did not start")));
+        assert_eq!((b.state, b.error.as_deref()), (JobState::Failed, Some(r#"{"code":"failed","message":"the server did not start"}"#)));
         // the event stream of an old job replays and ends
         let (past, rx) = after.subscribe(&ok.0).unwrap();
         assert_eq!(past.len(), 2);

@@ -10,7 +10,7 @@ use kora_core::api::wire::BackupCreateRequest;
 use kora_core::api::{Backend, SystemBackend};
 use kora_core::backup::{BackupEvent, BackupInfo, BackupSchedule, Cadence};
 use kora_core::installer::registry::{self, ServerEntry};
-use kora_core::problem::plain_text;
+use kora_core::problem::Problem;
 use kora_core::space::human;
 
 #[derive(Args, Debug, Clone, Default)]
@@ -157,9 +157,8 @@ pub(crate) enum BackupCmd {
     },
 }
 
-fn fail(m: String) -> i32 {
-    eprintln!("error: {m}");
-    1
+fn fail(m: impl Into<kora_core::problem::Problem>) -> i32 {
+    crate::ui::fail(m)
 }
 
 fn find(server: &str) -> Result<ServerEntry, String> {
@@ -185,12 +184,12 @@ fn password(pw: &PasswordArgs, required: bool) -> Result<Option<String>, String>
 }
 
 /// A backup number or `latest`.
-fn resolve(b: &mut SystemBackend, e: &ServerEntry, id: &str) -> Result<BackupInfo, String> {
-    let view = b.backups_view(e).map_err(|m| plain_text(&m))?;
+fn resolve(b: &mut SystemBackend, e: &ServerEntry, id: &str) -> Result<BackupInfo, Problem> {
+    let view = b.backups_view(e)?;
     if id == "latest" {
         return view.backups.into_iter().next().ok_or_else(|| "this server has no backups yet".into());
     }
-    view.backups.into_iter().find(|x| x.id == id).ok_or_else(|| format!("there is no backup numbered {id} (see `kora backup list {}`)", e.name))
+    view.backups.into_iter().find(|x| x.id == id).ok_or_else(|| Problem::generic(format!("there is no backup numbered {id} (see `kora backup list {}`)", e.name)))
 }
 
 fn show(e: &BackupEvent) {
@@ -261,7 +260,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     }
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::List { server } => {
@@ -284,7 +283,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     }
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Archived => match b.backups_archived() {
@@ -300,7 +299,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 println!("Restore one as a new server: kora backup import <file> (the files are in the backups folder).");
                 0
             }
-            Err(m) => fail(plain_text(&m)),
+            Err(m) => fail(m),
         },
         BackupCmd::Verify { server, id, pw } => {
             let e = match find(&server) {
@@ -320,7 +319,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     println!("{}", v.summary);
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Restore { server, id, pw, yes } => {
@@ -343,7 +342,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     p.will_keep.iter().for_each(|l| println!("  keep:   {l}"));
                     p.warnings.iter().for_each(|l| println!("  note:   {l}"));
                 }
-                Err(m) => return fail(plain_text(&m)),
+                Err(m) => return fail(m),
             }
             if !yes && !crate::ui::confirm("Restore this backup now?") {
                 println!("Nothing was changed.");
@@ -360,7 +359,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     }
                     i32::from(!r.problems.is_empty())
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Undo { server, pw, yes } => {
@@ -379,7 +378,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     r.problems.iter().for_each(|l| println!("  Problem: {l}"));
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Delete { server, id, yes } => {
@@ -400,7 +399,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     println!("Deleted backup {}.", info.id);
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Prune { server } => {
@@ -417,7 +416,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     println!("Removed {} old backup{}: {}", gone.len(), if gone.len() == 1 { "" } else { "s" }, gone.join(", "));
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, fork_choice, start, start_over, yes } => {
@@ -429,12 +428,12 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             let source = ImportSource { path: Some(file.clone()), upload: None, archived: None };
             let mut preview = match b.import_inspect(&source, passphrase.as_deref(), true) {
                 Ok(p) => p,
-                Err(m) => return fail(plain_text(&m)),
+                Err(m) => return fail(m),
             };
             if preview.needs_passphrase {
-                return fail("this backup is password protected: give the password with --password-stdin (or KORA_BACKUP_PASSWORD)".into());
+                return fail("this backup is password protected: give the password with --password-stdin (or KORA_BACKUP_PASSWORD)");
             }
-            let (Some(info), Some(sug)) = (preview.server.take(), preview.suggested.take()) else { return fail("this file is not a server backup".into()) };
+            let (Some(info), Some(sug)) = (preview.server.take(), preview.suggested.take()) else { return fail("this file is not a server backup") };
             println!(
                 "This is the server \"{}\", made on {} ({} resources by reference, {} in full).",
                 info.name,
@@ -478,7 +477,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     r.old_machine_steps.iter().for_each(|l| println!("  - {l}"));
                     i32::from(!r.problems.is_empty())
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Schedule { server, daily, weekly, off, keep_last, keep_days, folder, default_folder, stop } => {
@@ -516,7 +515,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             if s != before {
                 match b.backup_settings_set(&e, &s) {
                     Ok(saved) => s = saved,
-                    Err(m) => return fail(plain_text(&m)),
+                    Err(m) => return fail(m),
                 }
                 println!("Saved.");
             }

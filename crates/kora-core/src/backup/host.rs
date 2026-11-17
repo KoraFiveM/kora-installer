@@ -3,6 +3,7 @@
 use super::Host;
 use crate::api::{Backend, Status};
 use crate::installer::registry::ServerEntry;
+use crate::problem::Problem;
 use crate::service::ControlAction;
 
 pub struct BackendHost<'a, B: Backend + ?Sized> {
@@ -21,13 +22,13 @@ impl<B: Backend + ?Sized> Host for BackendHost<'_, B> {
         self.backend.status(self.entry) == Status::Running
     }
 
-    fn stop(&mut self) -> Result<(), String> {
+    fn stop(&mut self) -> Result<(), Problem> {
         // A stop that was asked for is not a crash: the monitor must not raise an alert.
         crate::monitor::mark_stop_intent(&self.entry.dir);
-        self.backend.control(self.entry, ControlAction::Stop).map_err(|m| crate::problem::plain_text(&m))
+        self.backend.control(self.entry, ControlAction::Stop)
     }
 
-    fn start(&mut self) -> Result<(), String> {
-        self.backend.control(self.entry, ControlAction::Start).map_err(|m| crate::problem::plain_text(&m))
+    fn start(&mut self) -> Result<(), Problem> {
+        self.backend.control(self.entry, ControlAction::Start)
     }
 }

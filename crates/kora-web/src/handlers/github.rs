@@ -38,11 +38,11 @@ const SIGN_IN_FIRST: &str = "Sign in to GitHub first.";
 const MAX_TITLE: usize = 256;
 const MAX_TEXT: usize = 60_000;
 
-fn bad_gateway(m: String) -> ApiError {
-    if Problem::is_encoded(&m) {
-        return ApiError::problem(StatusCode::BAD_GATEWAY, Problem::decode(&m));
+fn bad_gateway(p: Problem) -> ApiError {
+    if p.code == kora_core::problem::codes::FAILED && p.details.is_none() && p.actions.is_empty() {
+        return ApiError::new(StatusCode::BAD_GATEWAY, "internal", p.message);
     }
-    ApiError::new(StatusCode::BAD_GATEWAY, "internal", m)
+    ApiError::problem(StatusCode::BAD_GATEWAY, p)
 }
 
 /// 403 "sign in first", as a Problem with the sign-in action (the message stays the same).
@@ -89,7 +89,7 @@ pub async fn github_login(State(st): State<AppState>) -> Result<Response, ApiErr
         .registry
         .spawn(Op::GithubLogin, None, move |_h| {
             let _guard = guard;
-            wait().map(|user| json!({"user": user}))
+            wait().map(|user| json!({"user": user})).map_err(Into::into)
         })
         .map_err(|c| ApiError::conflict(crate::conflict_message(&c)))?;
     Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0, "code": code, "url": url}))).into_response())

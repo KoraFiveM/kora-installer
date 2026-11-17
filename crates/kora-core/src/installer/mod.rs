@@ -48,48 +48,12 @@ pub use steps::check_db_admin;
 pub(crate) use steps::db_override;
 pub(crate) use steps::{admin_conn_for, db_client};
 
-/// Installer error: plain-language message, safe to show (never contains secrets).
-///
-/// The string is either plain text or a packed [`Problem`] (`InstallError::from(problem)`), so a
-/// step can say what the user can do about it. `Display` always gives readable text (for the CLI
-/// and logs); [`InstallError::problem`] gives the structured form (for the panel).
-#[derive(Debug)]
-pub struct InstallError(pub String);
-
-impl std::fmt::Display for InstallError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&crate::problem::plain_text(&self.0))
-    }
-}
-
-impl std::error::Error for InstallError {}
-
-impl InstallError {
-    /// The structured form (a generic problem for plain text).
-    pub fn problem(&self) -> Problem {
-        Problem::decode(&self.0)
-    }
-}
-
-impl From<Problem> for InstallError {
-    fn from(p: Problem) -> Self {
-        InstallError(p.encode())
-    }
-}
-
-pub type Result<T> = std::result::Result<T, InstallError>;
+/// Installer errors are [`Problem`]s: plain-language message, safe to show (never contains secrets),
+/// with the actions the person can take.
+pub type Result<T> = std::result::Result<T, Problem>;
 
 pub(crate) fn err<T>(m: impl Into<String>) -> Result<T> {
-    Err(InstallError(m.into()))
-}
-
-impl From<StepError> for InstallError {
-    fn from(e: StepError) -> Self {
-        match e {
-            StepError::Failed(m) => InstallError(m),
-            other => InstallError(other.to_string()),
-        }
-    }
+    Err(Problem::generic(m))
 }
 
 /// Environment hooks (network client, admin override). Defaults come from the environment.
@@ -218,15 +182,15 @@ pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection, dev: bool
 pub fn load_catalog(req: &InstallRequest, hooks: &Hooks) -> Result<(Catalog, Option<String>)> {
     match req.catalog.as_deref() {
         Some(src) if src.starts_with("http://") || src.starts_with("https://") => {
-            let text = catalog::CatalogSource::fetch(&hooks.http, src).map_err(|e| InstallError(format!("could not fetch catalog {src}: {e}")))?;
-            Ok((Catalog::parse_validated(&text).map_err(|e| InstallError(e.to_string()))?, None))
+            let text = catalog::CatalogSource::fetch(&hooks.http, src).map_err(|e| Problem::generic(format!("could not fetch catalog {src}: {e}")))?;
+            Ok((Catalog::parse_validated(&text).map_err(|e| Problem::generic(e.to_string()))?, None))
         }
         Some(path) => {
-            let text = std::fs::read_to_string(path).map_err(|e| InstallError(format!("could not read catalog {path}: {e}")))?;
-            Ok((Catalog::parse_validated(&text).map_err(|e| InstallError(e.to_string()))?, None))
+            let text = std::fs::read_to_string(path).map_err(|e| Problem::generic(format!("could not read catalog {path}: {e}")))?;
+            Ok((Catalog::parse_validated(&text).map_err(|e| Problem::generic(e.to_string()))?, None))
         }
         None => {
-            let (c, origin) = catalog::load(&hooks.http, catalog::CATALOG_URL).map_err(|e| InstallError(e.to_string()))?;
+            let (c, origin) = catalog::load(&hooks.http, catalog::CATALOG_URL).map_err(|e| Problem::generic(e.to_string()))?;
             let note = match origin {
                 catalog::CatalogOrigin::Remote => None,
                 catalog::CatalogOrigin::Embedded(why) => Some(format!("Used the catalog bundled with this installer ({why}).")),
@@ -446,8 +410,8 @@ pub fn load_request_from(dir: &Path) -> Option<InstallRequest> {
 /// Root writes this into a folder other accounts can change, so never through a planted link
 /// (a fresh temporary file renamed into place; see `fsutil::write_no_follow`).
 pub(crate) fn save_created_to(dir: &Path, c: &Created) -> Result<()> {
-    let bytes = serde_json::to_vec_pretty(c).map_err(|e| InstallError(e.to_string()))?;
-    crate::fsutil::write_no_follow(&meta_dir(dir).join("created.json"), &bytes, 0o644).map_err(|e| InstallError(format!("cannot write install state: {e}")))
+    let bytes = serde_json::to_vec_pretty(c).map_err(|e| Problem::generic(e.to_string()))?;
+    crate::fsutil::write_no_follow(&meta_dir(dir).join("created.json"), &bytes, 0o644).map_err(|e| Problem::generic(format!("cannot write install state: {e}")))
 }
 
 fn new_ctx(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<ProgressEvent>, keep_db: bool, keep_files: bool) -> Arc<Ctx> {
@@ -531,8 +495,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     if req.license_key.as_deref().map(str::trim).unwrap_or("").is_empty() {
         return Err(Problem::new(codes::INSTALL_LICENCE_MISSING, "a Cfx.re license key is required (get one at https://portal.cfx.re/servers/registration-keys)")
             .with_action(Action::change_answers("licence"))
-            .with_action(Action::open_link(LICENCE_URL))
-            .into());
+            .with_action(Action::open_link(LICENCE_URL)));
     }
     check_dir_links(&req.dir)?;
     preflight(req, hooks, admin)?;
@@ -540,7 +503,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     if !req.dir.join("kora-server.json").is_file() {
         let c = crate::firewall::ports::install_conflicts(&req.name, &req.dir, req.ports.game, req.ports.txadmin, &crate::firewall::ports::SystemProber);
         if !c.is_empty() {
-            return Err(ports_busy(&c).into());
+            return Err(ports_busy(&c));
         }
     }
     let (tx, rx) = mpsc::channel();
@@ -556,7 +519,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
         }
         // The state dir must exist before the first persist; remember if the folder is ours.
         if std::fs::metadata(&ctx.req.dir).is_err() {
-            crate::fsutil::create_dir_no_follow(&ctx.req.dir).map_err(|e| InstallError(format!("cannot create {}: {e}", ctx.req.dir.display())))?;
+            crate::fsutil::create_dir_no_follow(&ctx.req.dir).map_err(|e| Problem::generic(format!("cannot create {}: {e}", ctx.req.dir.display())))?;
             ctx.update_created(|c| c.created_dir = true)?;
         }
         // Again now that it exists: a part could have been swapped for a link meanwhile.
@@ -564,7 +527,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
         if kora_user {
             // Folders made just now belong to `kora` (and so does the folder a deleted service gives back).
             let plan = crate::userhome::chown_to_kora_plan(&crate::userhome::kora_owned_paths(&ctx.req.dir), false);
-            crate::service::apply_plan(&plan, &crate::service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+            crate::service::apply_plan(&plan, &crate::service::SystemRunner).map_err(|e| Problem::generic(e.to_string()))?;
         }
         save_request(&ctx)?;
         let state = run_plan(&mut list, &state_path)?;
@@ -581,7 +544,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     for ev in rx {
         sink.event(ev);
     }
-    let (notes, launch) = handle.join().map_err(|_| InstallError("installer worker panicked".into()))??;
+    let (notes, launch) = handle.join().map_err(|_| Problem::generic("installer worker panicked"))??;
     let sf = ServerFile::load(&req.dir).ok();
     let build = sf.as_ref().map(|s| s.artifact_build);
     let mut notes = notes;
@@ -635,7 +598,7 @@ pub fn preflight(req: &InstallRequest, hooks: &Hooks, admin: bool) -> Result<()>
             needs.push(crate::space::Need::new("the kora program the background service runs", root, size + 64 * crate::space::MIB));
         }
     }
-    crate::space::check(hooks.disk(), &needs).map_err(InstallError)?;
+    crate::space::check(hooks.disk(), &needs).map_err(Problem::generic)?;
     if req.service && admin {
         let blocked = service_blocking_dirs(&req.dir);
         if !blocked.is_empty() && !hooks.fix_permissions {
@@ -657,7 +620,7 @@ pub(crate) fn check_dir_links(dir: &Path) -> Result<()> {
 }
 
 fn check_dir_links_with(dir: &Path, trust: &dyn Fn(u32, u32) -> bool) -> Result<()> {
-    crate::fsutil::check_links_with(dir, trust).map_err(|e| InstallError(format!("Kora will not work in {}: {e}. Nothing more was changed.", dir.display())))
+    crate::fsutil::check_links_with(dir, trust).map_err(|e| Problem::generic(format!("Kora will not work in {}: {e}. Nothing more was changed.", dir.display())))
 }
 
 /// Folders the service account cannot pass through on the way to the server folder `dir`.
@@ -672,8 +635,8 @@ fn save_request(ctx: &Ctx) -> Result<()> {
     let mut r = ctx.req.clone();
     r.license_key = None;
     r.dry_run = false;
-    let bytes = serde_json::to_vec_pretty(&r).map_err(|e| InstallError(e.to_string()))?;
-    crate::fsutil::write_no_follow(&ctx.meta_dir().join("request.json"), &bytes, 0o644).map_err(|e| InstallError(format!("cannot write install state: {e}")))
+    let bytes = serde_json::to_vec_pretty(&r).map_err(|e| Problem::generic(e.to_string()))?;
+    crate::fsutil::write_no_follow(&ctx.meta_dir().join("request.json"), &bytes, 0o644).map_err(|e| Problem::generic(format!("cannot write install state: {e}")))
 }
 
 fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, admin: bool) -> Result<InstallOutcome> {
@@ -683,7 +646,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
     let (cat, cnote) = match load_catalog(req, hooks) {
         Ok(x) => x,
         Err(e) => {
-            notes.push(format!("Catalog could not be loaded ({e}); resource list unavailable."));
+            notes.push(format!("Catalog could not be loaded ({}); resource list unavailable.", e.one_line()));
             (Catalog { schema_version: 3, resources: vec![], creators: vec![] }, None)
         }
     };
@@ -691,7 +654,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
     let selected = select_resources(&cat, &req.resources, req.versions() == Versions::Latest).unwrap_or_default();
     match preflight(req, hooks, admin) {
         Ok(()) => notes.push("Free disk space and service-account access look fine.".into()),
-        Err(e) => notes.push(format!("WARNING, a real install would stop here: {e}")),
+        Err(e) => notes.push(format!("WARNING, a real install would stop here: {}", e.one_line())),
     }
     if req.service && admin && hooks.fix_permissions {
         let blocked = service_blocking_dirs(&req.dir);
@@ -827,8 +790,8 @@ fn rollback_known(
     sink: &mut dyn ProgressSink,
     hooks: &Hooks,
 ) -> Result<Vec<String>> {
-    let bytes = std::fs::read(meta_dir(dir).join("request.json")).map_err(|_| InstallError(format!("{} has no Kora install record (.kora/request.json): nothing to roll back", dir.display())))?;
-    let mut req: InstallRequest = serde_json::from_slice(&bytes).map_err(|e| InstallError(format!("corrupt install record: {e}")))?;
+    let bytes = std::fs::read(meta_dir(dir).join("request.json")).map_err(|_| Problem::generic(format!("{} has no Kora install record (.kora/request.json): nothing to roll back", dir.display())))?;
+    let mut req: InstallRequest = serde_json::from_slice(&bytes).map_err(|e| Problem::generic(format!("corrupt install record: {e}")))?;
     req.dir = dir.to_path_buf();
     // `request.json` is in the server folder, which the server's own account can change: a forged
     // name would make root remove ANOTHER server's service, account and firewall rules. The
@@ -860,7 +823,7 @@ fn rollback_known(
     for ev in rx {
         sink.event(ev);
     }
-    handle.join().map_err(|_| InstallError("rollback worker panicked".into()))?
+    handle.join().map_err(|_| Problem::generic("rollback worker panicked"))?
 }
 
 /// An install request for tests in other modules (the install record a server folder holds).

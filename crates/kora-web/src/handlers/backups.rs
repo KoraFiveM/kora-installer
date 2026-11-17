@@ -106,7 +106,7 @@ pub async fn backup_create(State(st): State<AppState>, Extension(caller): Extens
     let name = e.name.clone();
     st.spawn_job(Op::BackupCreate, Some(name), move |h| {
         let r = make().backup_create(&e, &body, admin, &mut |ev| h.event(json!(ev)))?;
-        serde_json::to_value(&r).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&r)?)
     })
 }
 
@@ -135,7 +135,7 @@ pub async fn backup_undo(State(st): State<AppState>, Path(s): Path<String>, Json
     let name = e.name.clone();
     st.spawn_job(Op::BackupUndo, Some(name), move |h| {
         let r = make().backup_undo(&e, body.passphrase.as_deref(), &mut |ev| h.event(json!(ev)))?;
-        serde_json::to_value(&r).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&r)?)
     })
 }
 
@@ -147,7 +147,7 @@ pub async fn backup_verify(State(st): State<AppState>, Path((s, id)): Path<(Stri
     let name = e.name.clone();
     st.spawn_job(Op::BackupVerify, Some(name), move |h| {
         let r = make().backup_verify(&e, &id, body.passphrase.as_deref(), &mut |ev| h.event(json!(ev)))?;
-        serde_json::to_value(&r).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&r)?)
     })
 }
 
@@ -169,7 +169,7 @@ pub async fn backup_restore(State(st): State<AppState>, Path((s, id)): Path<(Str
     let name = e.name.clone();
     st.spawn_job(Op::BackupRestore, Some(name), move |h| {
         let r = make().backup_restore(&e, &id, body.passphrase.as_deref(), &mut |ev| h.event(json!(ev)))?;
-        serde_json::to_value(&r).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&r)?)
     })
 }
 
@@ -330,7 +330,7 @@ pub async fn backup_import_start(State(st): State<AppState>, Extension(caller): 
     let name = body.choices.name.clone();
     st.spawn_job(Op::BackupImportStart, Some(name), move |h| {
         let r = make().import_run(&body, local, &mut |ev| h.event(json!(ev)))?;
-        serde_json::to_value(&r).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&r)?)
     })
 }
 

@@ -7,7 +7,7 @@
 
 use super::registry::kora_home;
 use super::InstallRequest;
-use crate::store::{problem_to_io, Store};
+use crate::store::Store;
 use std::path::PathBuf;
 
 /// Which Kora home the answers belong to (`<home>/last-install.json` was the file before v0.8; they are
@@ -17,19 +17,19 @@ pub fn path() -> PathBuf {
 }
 
 /// Remember `req` (without secrets). Best effort: a failure to save never hides the real error.
-pub fn save(req: &InstallRequest) -> std::io::Result<PathBuf> {
+pub fn save(req: &InstallRequest) -> crate::problem::Res<PathBuf> {
     let p = path();
     save_beside(&p, req)?;
     Ok(p)
 }
 
-pub(crate) fn save_beside(file: &std::path::Path, req: &InstallRequest) -> std::io::Result<()> {
+pub(crate) fn save_beside(file: &std::path::Path, req: &InstallRequest) -> crate::problem::Res<()> {
     let mut r = req.clone();
     r.license_key = None;
     r.catalog = None;
     r.dry_run = false;
-    let text = serde_json::to_string(&r).map_err(std::io::Error::other)?;
-    let s = Store::open_beside(file).map_err(problem_to_io)?;
+    let text = serde_json::to_string(&r)?;
+    let s = Store::open_beside(file)?;
     s.write(|tx| {
         tx.execute(
             "INSERT INTO saved_answers (id, req_json, saved_at) VALUES (1, ?1, ?2) ON CONFLICT(id) DO UPDATE SET req_json = excluded.req_json, saved_at = excluded.saved_at",
@@ -37,7 +37,6 @@ pub(crate) fn save_beside(file: &std::path::Path, req: &InstallRequest) -> std::
         )?;
         Ok(())
     })
-    .map_err(problem_to_io)
 }
 
 /// The saved answers in the Kora home beside `file`, if there are any and they can be read.

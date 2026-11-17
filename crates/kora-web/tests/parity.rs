@@ -131,10 +131,10 @@ mod offline {
         fn disk(&self) -> &dyn DiskInfo {
             self
         }
-        fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+        fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
             Ok(())
         }
-        fn artifacts(&self) -> Result<ArtifactList, String> {
+        fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
             Err("offline".into())
         }
         fn is_elevated(&self) -> bool {
@@ -150,7 +150,7 @@ mod offline {
             true
         }
         fn saved_clear(&self) {}
-        fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+        fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
             Err("offline".into())
         }
     }
@@ -158,13 +158,13 @@ mod offline {
         fn auth(&self) -> GithubUser {
             GithubUser::signed_out()
         }
-        fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+        fn owners(&self) -> Result<Vec<OwnerChoice>, kora_core::problem::Problem> {
             Ok(vec![])
         }
-        fn begin_login(&self) -> Result<LoginFlow, String> {
+        fn begin_login(&self) -> Result<LoginFlow, kora_core::problem::Problem> {
             Err("offline".into())
         }
-        fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
+        fn resolve_owner(&self, _: Option<&str>) -> Result<String, kora_core::problem::Problem> {
             Err("offline".into())
         }
     }
@@ -173,13 +173,13 @@ mod offline {
         fn tools(&self) -> Vec<kora_core::tools::ToolStatus> {
             vec![]
         }
-        fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, String> {
+        fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, kora_core::problem::Problem> {
             Err("offline".into())
         }
         fn database(&self) -> kora_core::api::toolchain::DbState {
             Default::default()
         }
-        fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, String> {
+        fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, kora_core::problem::Problem> {
             Err("offline".into())
         }
         fn admin(&self) -> kora_core::api::toolchain::AdminState {

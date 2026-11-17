@@ -1,7 +1,7 @@
 //! The nodes: in the Kora home's private database (`hub_nodes`, see `store::privacy` for who can read it;
 //! `<kora home>/hub.json` before v0.8). The token lives only here and is never returned by the API.
 use crate::problem::Problem;
-use crate::store::{problem_to_string, Store};
+use crate::store::Store;
 use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
@@ -62,7 +62,7 @@ fn host_is_private(host: &str) -> bool {
 }
 
 /// Accept only `http://` or `https://` addresses with a host, no login part, query or fragment.
-pub fn check_url(raw: &str) -> Result<UrlCheck, String> {
+pub fn check_url(raw: &str) -> Result<UrlCheck, Problem> {
     let raw = raw.trim();
     let (https, rest) = if let Some(r) = raw.strip_prefix("https://") {
         (true, r)
@@ -134,9 +134,9 @@ fn write_nodes(c: &rusqlite::Connection, nodes: &[NodeConfig]) -> Result<(), Pro
     Ok(())
 }
 
-fn blocked(s: &Store) -> Result<(), String> {
+fn blocked(s: &Store) -> Result<(), Problem> {
     match s.blocked("hub") {
-        Some(b) => Err(format!("The nodes file ({}) could not be read ({}); it was left exactly as it was. Fix or move it and try again.", b.file.display(), b.why)),
+        Some(b) => Err(format!("The nodes file ({}) could not be read ({}); it was left exactly as it was. Fix or move it and try again.", b.file.display(), b.why).into()),
         None => Ok(()),
     }
 }
@@ -156,54 +156,49 @@ impl NodeStore {
         &self.path
     }
 
-    pub fn load(&self) -> Result<Vec<NodeConfig>, String> {
-        let Some(s) = Store::open_existing_beside(&self.legacy).map_err(problem_to_string)? else { return Ok(vec![]) };
+    pub fn load(&self) -> Result<Vec<NodeConfig>, Problem> {
+        let Some(s) = Store::open_existing_beside(&self.legacy)? else { return Ok(vec![]) };
         blocked(&s)?;
-        s.read(read_nodes).map_err(problem_to_string)
+        s.read(read_nodes)
     }
 
     /// Replace the whole list (prefer [`add`](Self::add) and [`remove`](Self::remove): each is one transaction).
-    pub fn save(&self, nodes: &[NodeConfig]) -> Result<(), String> {
-        let s = Store::open_beside(&self.legacy).map_err(problem_to_string)?;
+    pub fn save(&self, nodes: &[NodeConfig]) -> Result<(), Problem> {
+        let s = Store::open_beside(&self.legacy)?;
         blocked(&s)?;
-        s.write(|tx| write_nodes(tx, nodes)).map_err(problem_to_string)
+        s.write(|tx| write_nodes(tx, nodes))
     }
 
     /// Add a node (checked by the caller); refuses a repeated name or address.
-    pub fn add(&self, name: &str, url: &str, token: &str) -> Result<NodeConfig, String> {
-        let s = Store::open_beside(&self.legacy).map_err(problem_to_string)?;
+    pub fn add(&self, name: &str, url: &str, token: &str) -> Result<NodeConfig, Problem> {
+        let s = Store::open_beside(&self.legacy)?;
         blocked(&s)?;
-        let mut refused: Option<String> = None;
-        let r = s.write(|tx| {
+        s.write(|tx| {
             let mut nodes = read_nodes(tx)?;
             if nodes.iter().any(|n| n.name.eq_ignore_ascii_case(name)) {
-                refused = Some(format!("There is already a node called '{name}'."));
-                return Err(Problem::generic("refused"));
+                return Err(Problem::generic(format!("There is already a node called '{name}'.")));
             }
             if nodes.iter().any(|n| n.url == url) {
-                refused = Some("That node is already in the list.".into());
-                return Err(Problem::generic("refused"));
+                return Err(Problem::generic("That node is already in the list."));
             }
             let node = NodeConfig { id: new_id(&nodes), name: name.into(), url: url.into(), token: token.into() };
             nodes.push(node.clone());
             write_nodes(tx, &nodes)?;
             Ok(node)
-        });
-        r.map_err(|p| refused.unwrap_or_else(|| problem_to_string(p)))
+        })
     }
 
     /// `Ok(false)` when there was no such node.
-    pub fn remove(&self, id: &str) -> Result<bool, String> {
-        let Some(s) = Store::open_existing_beside(&self.legacy).map_err(problem_to_string)? else { return Ok(false) };
+    pub fn remove(&self, id: &str) -> Result<bool, Problem> {
+        let Some(s) = Store::open_existing_beside(&self.legacy)? else { return Ok(false) };
         blocked(&s)?;
         s.write(|tx| {
             let n = tx.execute("DELETE FROM hub_nodes WHERE id = ?1", [id])?;
             Ok(n > 0)
         })
-        .map_err(problem_to_string)
     }
 
-    pub fn get(&self, id: &str) -> Result<Option<NodeConfig>, String> {
+    pub fn get(&self, id: &str) -> Result<Option<NodeConfig>, Problem> {
         Ok(self.load()?.into_iter().find(|n| n.id == id))
     }
 }

@@ -20,6 +20,7 @@ pub mod fw;
 pub mod probe;
 pub mod settings;
 
+use crate::problem::Problem;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::time::Duration;
@@ -593,7 +594,7 @@ pub fn check(env: &dyn ReachEnv, e: &ServerEntry, consent_override: Option<Conse
 
 /// Turn automatic port forwarding on or off for a server. Off also takes the mapping away at once
 /// (the keepers would do it within half a minute anyway).
-pub fn set_forwarding(e: &ServerEntry, on: bool) -> Result<ForwardingView, String> {
+pub fn set_forwarding(e: &ServerEntry, on: bool) -> Result<ForwardingView, Problem> {
     let mut s = settings::load_server(&e.dir);
     if s.forward == on {
         return Ok(ForwardingView { enabled: on, status: s.status });

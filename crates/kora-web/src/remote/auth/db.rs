@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::security::ct_eq;
 
 fn err(p: kora_core::problem::Problem) -> String {
-    kora_core::store::problem_to_string(p)
+    crate::error::store_text(p)
 }
 
 pub fn now() -> i64 {

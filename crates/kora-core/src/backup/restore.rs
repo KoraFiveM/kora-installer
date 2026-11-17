@@ -310,7 +310,7 @@ pub fn restore(e: &ServerEntry, archive_path: &Path, o: &RestoreOptions, host: &
     let was_running = host.running();
     if was_running {
         ev("stop", "Stopping the server", 45);
-        host.stop().map_err(|m| Problem::generic(format!("The server could not be stopped for the restore: {m}. Nothing was changed.")))?;
+        host.stop().map_err(|m| m.lead("The server could not be stopped for the restore").and_say("Nothing was changed."))?;
     }
     let mut report = RestoreReport { safety_backup: safety.clone(), database_restored: false, files_restored: 0, resources_restored: vec![], problems: vec![], notes: vec![], restarted: false };
     let result = apply(e, &manifest, &stage.0, tools, &mut ev, &mut report);
@@ -325,7 +325,7 @@ pub fn restore(e: &ServerEntry, archive_path: &Path, o: &RestoreOptions, host: &
         ev("start", "Starting the server again", 95);
         match host.start() {
             Ok(()) => report.restarted = true,
-            Err(m) => report.problems.push(format!("The server was stopped for the restore and did not start again ({m}). Start it from the server page.")),
+            Err(m) => report.problems.push(format!("The server was stopped for the restore and did not start again ({}). Start it from the server page.", m.one_line())),
         }
     }
     if let Err(p) = result {
@@ -451,7 +451,7 @@ fn apply(e: &ServerEntry, m: &Manifest, stage: &Path, tools: &Tools<'_>, ev: &mu
         ev("resources", &format!("Fetching {} ({}/{})", rb.id, i + 1, refs.len()), (80 + (i * 14 / refs.len().max(1))) as u8);
         match super::resources::ensure_at_commit(tools.git, &resources_dir, rb) {
             Ok(msg) => report.resources_restored.push(msg),
-            Err(msg) => report.problems.push(format!("{msg}. It was left as it is.")),
+            Err(msg) => report.problems.push(format!("{}. It was left as it is.", msg.one_line())),
         }
     }
     super::resources::finish_resource_state(&e.dir, &m.resources);

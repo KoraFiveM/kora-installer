@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use crate::{blocking, ApiError, AppState};
 
 /// What `kora update --auto <server>` does. Tests replace it so the real updater never runs.
-pub type AutoRunner = Arc<dyn Fn(&str) -> Result<UpdateReport, String> + Send + Sync>;
+pub type AutoRunner = Arc<dyn Fn(&str) -> Result<UpdateReport, kora_core::problem::Problem> + Send + Sync>;
 
 static AUTO_RUNNER: RwLock<Option<AutoRunner>> = RwLock::new(None);
 
@@ -30,11 +30,11 @@ pub fn set_auto_runner(r: Option<AutoRunner>) {
     *AUTO_RUNNER.write().unwrap_or_else(|e| e.into_inner()) = r;
 }
 
-fn run_auto(server: &str) -> Result<UpdateReport, String> {
+fn run_auto(server: &str) -> Result<UpdateReport, kora_core::problem::Problem> {
     let custom = AUTO_RUNNER.read().unwrap_or_else(|e| e.into_inner()).clone();
     match custom {
         Some(f) => f(server),
-        None => kora_core::installer::gitops::auto_update(server).map_err(|e| e.to_string()),
+        None => kora_core::installer::gitops::auto_update(server),
     }
 }
 
@@ -134,7 +134,7 @@ pub async fn update_apply(State(st): State<AppState>, Path(s): Path<String>, bod
 pub async fn update_auto(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     let e = known(&st, s.clone()).await?;
     not_busy(&e).await?;
-    st.spawn_job(Op::UpdateAuto, Some(s), move |_h| run_auto(&e.name).map(|r| report_json(&r)))
+    st.spawn_job(Op::UpdateAuto, Some(s), move |_h| run_auto(&e.name).map(|r| report_json(&r)).map_err(Into::into))
 }
 
 fn snapshot_json(s: &SnapshotInfo) -> Value {

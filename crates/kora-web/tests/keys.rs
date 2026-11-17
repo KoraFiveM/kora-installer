@@ -74,13 +74,13 @@ impl InstallEnv for Env {
     fn disk(&self) -> &dyn DiskInfo {
         &self.d
     }
-    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
         Ok(())
     }
-    fn artifacts(&self) -> Result<ArtifactList, String> {
+    fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
         Err("offline".into())
     }
-    fn cfx_lookup(&self, name: &str) -> Result<kora_core::cfx::CfxAccount, String> {
+    fn cfx_lookup(&self, name: &str) -> Result<kora_core::cfx::CfxAccount, kora_core::problem::Problem> {
         Ok(kora_core::cfx::CfxAccount { id: 4242, username: name.to_string() })
     }
     fn is_elevated(&self) -> bool {
@@ -101,13 +101,13 @@ impl InstallEnv for Env {
     fn saved_clear(&self) {
         self.st().saved = None;
     }
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
         self.st().runs.push(req.clone());
         let ev = |step: &str, status, pct| ProgressEvent { step: step.into(), title: format!("Title of {step}"), status, detail: "detail".into(), percent: pct };
         sink.event(ev("prepare.dir", StepStatus::Done, 30));
         if let Some(m) = self.st().fail.clone() {
             sink.event(ev("build.db", StepStatus::Failed, 50));
-            return Err(m);
+            return Err(m.into());
         }
         sink.event(ev("finalize", StepStatus::Done, 100));
         Ok(InstallOutcome { dir: req.dir.clone(), name: req.name.clone(), ..Default::default() })

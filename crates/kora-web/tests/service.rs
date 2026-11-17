@@ -118,10 +118,10 @@ impl InstallEnv for Env {
     fn disk(&self) -> &dyn DiskInfo {
         &Disk
     }
-    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
         Ok(())
     }
-    fn artifacts(&self) -> Result<ArtifactList, String> {
+    fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
         Err("offline".into())
     }
     fn is_elevated(&self) -> bool {
@@ -141,7 +141,7 @@ impl InstallEnv for Env {
         true
     }
     fn saved_clear(&self) {}
-    fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+    fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
         *self.runs.lock().unwrap() += 1;
         Err("the real installer must not run in this test".into())
     }

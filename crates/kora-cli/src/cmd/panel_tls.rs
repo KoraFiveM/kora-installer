@@ -133,7 +133,7 @@ pub(crate) fn tls(cmd: &TlsCmd) -> i32 {
 fn run_tls(cmd: &TlsCmd, home: &Path) -> Result<(), String> {
     let whois = || -> Arc<dyn remote::Whois> { Arc::new(SystemWhois) };
     let save = |c: TlsConfig, fetch: bool| manager::apply(home, whois(), hints_from_settings(home), c, fetch);
-    let store = || kora_core::store::Store::open(home).map_err(kora_core::store::problem_to_string);
+    let store = || kora_core::store::Store::open(home).map_err(|p| p.one_line());
     match cmd {
         TlsCmd::Status => {
             let m = Manager::new(home.to_path_buf(), whois());

@@ -27,6 +27,6 @@ pub mod wire;
 
 pub use backend::{badge_of, Backend, Res, Status, StatusDetail, UpdateBadge};
 pub use dto::WebhookView;
-pub use jobs::{Conflict, JobHandle, JobId, JobMessage, JobRegistry, JobSnapshot, JobState};
+pub use jobs::{Conflict, JobFailure, JobHandle, JobId, JobMessage, JobRegistry, JobResult, JobSnapshot, JobState};
 pub use ops::{Method, Op};
 pub use system::{read_badge, valid_resource_name, with_ensure, SystemBackend};

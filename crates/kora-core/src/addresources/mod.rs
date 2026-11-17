@@ -16,7 +16,8 @@ use crate::catalog::{self, Catalog, Picker};
 use crate::git::{self, CommandRunner};
 use crate::installer::registry::{ResourceRecord, ServerFile};
 use crate::installer::{layout, pinned};
-use crate::installer::{repo_slug, InstallError, Result, Source, Versions};
+use crate::installer::{repo_slug, Result, Source, Versions};
+use crate::problem::Problem;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -63,7 +64,7 @@ pub fn installed_ids(server: &ServerFile) -> Vec<String> {
 /// Load the catalog (remote, with the embedded snapshot as fallback). The note says when the
 /// bundled copy was used.
 pub fn load_catalog() -> Result<(Catalog, Option<String>)> {
-    let (c, origin) = catalog::load(&crate::installer::HttpClient::default(), catalog::CATALOG_URL).map_err(|e| InstallError(e.to_string()))?;
+    let (c, origin) = catalog::load(&crate::installer::HttpClient::default(), catalog::CATALOG_URL).map_err(|e| Problem::generic(e.to_string()))?;
     let note = match origin {
         catalog::CatalogOrigin::Remote => None,
         catalog::CatalogOrigin::Embedded(why) => Some(format!("Used the catalog bundled with this installer ({why}).")),
@@ -73,7 +74,7 @@ pub fn load_catalog() -> Result<(Catalog, Option<String>)> {
 
 /// What to install for `ids` (plus dependencies) on `server`.
 pub fn plan(cat: &Catalog, server: &ServerFile, ids: &[String]) -> Result<AddPlan> {
-    let picker = Picker::with_ids(cat, installed_ids(server), server.versions() == Versions::Latest, ids).map_err(|e| InstallError(e.to_string()))?;
+    let picker = Picker::with_ids(cat, installed_ids(server), server.versions() == Versions::Latest, ids).map_err(|e| Problem::generic(e.to_string()))?;
     plan_from_picker(&picker, server, ids)
 }
 
@@ -114,29 +115,29 @@ pub trait Cloner {
     /// Make sure forks of `repos` (`owner/name`) exist under `owner` (development servers),
     /// reusing the forks already there whatever they are called. The returned state has the real
     /// fork of every repo ([`git::ForkState::fork_of`]) and how many were created or reused.
-    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<git::ForkState, String>;
+    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<git::ForkState, Problem>;
     /// Clone `item` into `partial` (a fresh path that does not exist yet). `fork` is the
     /// `owner/name` of the user's fork for items that come from a fork.
-    fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), String>;
+    fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), Problem>;
 }
 
 pub struct GitCloner<'a>(pub &'a dyn CommandRunner);
 
 impl GitCloner<'_> {
-    fn forks_with(&self, owner: &str, repos: &[String], cfg: &git::ForkConfig) -> std::result::Result<git::ForkState, String> {
+    fn forks_with(&self, owner: &str, repos: &[String], cfg: &git::ForkConfig) -> std::result::Result<git::ForkState, Problem> {
         let is_org = git::org_exists(self.0, owner).map_err(|e| e.to_string())?;
         let mut state = git::ForkState::new(owner, is_org, repos);
         let out = git::run_forks(self.0, &mut state, cfg, &mut |_| {}).map_err(|e| e.to_string())?;
         match out {
             git::ForkOutcome::Paused => Err("GitHub rate limit reached while forking. Try again later.".into()),
-            git::ForkOutcome::Finished if !state.failed.is_empty() => Err(format!("could not fork {} ({})", state.failed[0].repo, state.failed[0].error)),
+            git::ForkOutcome::Finished if !state.failed.is_empty() => Err(format!("could not fork {} ({})", state.failed[0].repo, state.failed[0].error).into()),
             git::ForkOutcome::Finished => Ok(state),
         }
     }
 }
 
 impl Cloner for GitCloner<'_> {
-    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<git::ForkState, String> {
+    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<git::ForkState, Problem> {
         if repos.is_empty() {
             return Ok(git::ForkState::new(owner, false, &[]));
         }
@@ -144,14 +145,14 @@ impl Cloner for GitCloner<'_> {
         self.forks_with(owner, repos, &cfg)
     }
 
-    fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), String> {
+    fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), Problem> {
         let res = match (item.fork, fork, &item.commit) {
             (true, Some(fork), _) => git::clone_from_fork(self.0, fork, &item.repo, partial, Some(&item.branch)),
             (true, None, _) => return Err("this development server has no GitHub fork recorded for this resource".into()),
             (false, _, Some(c)) => git::clone_pinned(self.0, &item.repo, c, partial),
             (false, _, None) => git::clone_default_head(self.0, &item.repo, partial),
         };
-        res.map_err(|e| e.to_string())
+        res.map_err(Problem::from)
     }
 }
 
@@ -193,16 +194,16 @@ fn inside_another_clone(resources: &Path, dest: &Path) -> Option<PathBuf> {
 pub fn execute(cloner: &dyn Cloner, server: &mut ServerFile, plan: &AddPlan, say: &mut dyn FnMut(&str)) -> Result<AddOutcome> {
     let mut out = AddOutcome::default();
     let resources = server.dir.join("resources");
-    std::fs::create_dir_all(&resources).map_err(|e| InstallError(format!("cannot create the resources folder: {e}")))?;
+    std::fs::create_dir_all(&resources).map_err(|e| Problem::generic(format!("cannot create the resources folder: {e}")))?;
     let owner = server.github_owner.clone();
     let fork_repos: Vec<String> = plan.items.iter().filter(|i| i.fork).map(|i| i.repo.clone()).collect();
     let mut forks: Option<git::ForkState> = None;
     if !fork_repos.is_empty() {
         let Some(o) = &owner else {
-            return Err(InstallError("this development server has no GitHub account recorded, so its resources cannot be forked".into()));
+            return Err(Problem::generic("this development server has no GitHub account recorded, so its resources cannot be forked"));
         };
         say(&format!("Looking for your forks in {o} and forking what is missing (this can take a while)"));
-        let st = cloner.prepare_forks(o, &fork_repos).map_err(InstallError)?;
+        let st = cloner.prepare_forks(o, &fork_repos)?;
         let text = st.counts_text();
         say(&format!("Forks in {o}: {text}"));
         out.notes.push(format!("GitHub forks in {o}: {text}."));
@@ -211,17 +212,17 @@ pub fn execute(cloner: &dyn Cloner, server: &mut ServerFile, plan: &AddPlan, say
     let mut done_rels: Vec<String> = Vec::new();
     for item in &plan.items {
         say(&format!("Getting {}", item.id));
-        let step = (|| -> std::result::Result<bool, String> {
+        let step = (|| -> std::result::Result<bool, Problem> {
             let dest = dest_of(&server.dir, &item.rel).ok_or_else(|| format!("unsafe folder '{}'", item.rel))?;
             let present = if item.subpath.is_some() { item.commit.as_deref().is_some_and(|c| pinned::marker_matches(&dest, c)) } else { dest.join(".git").exists() };
             if present {
                 return Ok(false);
             }
             if let Some(parent) = inside_another_clone(&resources, &dest) {
-                return Err(format!("its folder is inside the resource at {}", parent.display()));
+                return Err(format!("its folder is inside the resource at {}", parent.display()).into());
             }
             if dest.exists() && std::fs::read_dir(&dest).map(|mut d| d.next().is_some()).unwrap_or(true) {
-                return Err(format!("{} already exists and was not created by Kora; move it away first", dest.display()));
+                return Err(format!("{} already exists and was not created by Kora; move it away first", dest.display()).into());
             }
             let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let partial = dest.with_file_name(format!("{name}.kora-partial"));
@@ -260,21 +261,21 @@ pub fn execute(cloner: &dyn Cloner, server: &mut ServerFile, plan: &AddPlan, say
                 }
                 done_rels.push(item.rel.clone());
             }
-            Err(e) => out.failed.push((item.id.clone(), e)),
+            Err(e) => out.failed.push((item.id.clone(), e.one_line())),
         }
     }
-    server.save().map_err(|e| InstallError(format!("cannot write kora-server.json: {e}")))?;
+    server.save().map_err(|e| e.lead("cannot write kora-server.json"))?;
     // Only folders that now really hold something new.
     let folders = layout::folders_for(done_rels.iter().map(String::as_str));
     match append_ensures_to_cfg(&server.dir.join("server.cfg"), &folders) {
         Ok(added) => out.ensured = added,
-        Err(e) => out.notes.push(e),
+        Err(e) => out.notes.push(e.one_line()),
     }
     Ok(out)
 }
 
 /// Append the missing `ensure [folder]` lines to `server.cfg`. Returns the folders added.
-pub fn append_ensures_to_cfg(cfg_path: &Path, folders: &[String]) -> std::result::Result<Vec<String>, String> {
+pub fn append_ensures_to_cfg(cfg_path: &Path, folders: &[String]) -> std::result::Result<Vec<String>, Problem> {
     if folders.is_empty() {
         return Ok(vec![]);
     }

@@ -66,7 +66,7 @@ pub async fn reach_firewall_open(State(st): State<AppState>, Path(s): Path<Strin
             Ok(n) => n,
             // The computer's own answer is "run this as administrator": the panel adds the way through the service
             // (install it, or ask an administrator to turn it on for this account) and names the command that exists.
-            Err(m) if kora_core::problem::Problem::decode(&m).code == kora_core::problem::codes::NEEDS_ELEVATION => {
+            Err(m) if m.code == kora_core::problem::codes::NEEDS_ELEVATION => {
                 let shown = vec!["kora".to_string(), "reach".into(), e.name.clone(), "--open-firewall".into()];
                 let ctx = kora_core::privsvc::problems::Context { what: "open the firewall for this server's game port".into(), command: shown, can_skip_admin: false };
                 crate::elevated::precheck(&ctx, "Changing the firewall needs administrator rights. Run this command as administrator, then check again:")?;

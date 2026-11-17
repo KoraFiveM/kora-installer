@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use super::registry::{now_unix, Registry, ServerFile};
 use super::types::Versions;
-use super::{slug, InstallError, Result};
+use super::{slug, Problem, Result};
 use crate::firewall;
 use crate::git::{self, CommandRunner, SystemRunner};
 use crate::service::{self, ManagedServer, ServiceManager};
@@ -364,11 +364,11 @@ impl HealthCheck for ServiceHealth {
 pub fn auto_update(server: &str) -> Result<UpdateReport> {
     let as_dir = Path::new(server);
     let (name, dir) = if as_dir.is_absolute() && as_dir.join("kora-server.json").is_file() {
-        let sf = ServerFile::load(as_dir).map_err(|e| InstallError(format!("cannot read {}: {e}", as_dir.join("kora-server.json").display())))?;
+        let sf = ServerFile::load(as_dir)?;
         (sf.name, as_dir.to_path_buf())
     } else {
-        let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
-        let entry = reg.find(server).ok_or_else(|| InstallError(format!("no registered server named '{server}' (see `kora status`)")))?;
+        let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
+        let entry = reg.find(server).ok_or_else(|| Problem::generic(format!("no registered server named '{server}' (see `kora status`)")))?;
         (entry.name.clone(), entry.dir.clone())
     };
     // A server on released versions moves between releases (the catalogue decides), through the same engine as the
@@ -403,7 +403,7 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
 /// put on a branch or a pull request is left alone by the engine and reported, never a failure.
 pub(crate) fn auto_update_released(sf: &ServerFile, run: &dyn Fn(&ServerFile) -> Result<UpdateReport>) -> Result<UpdateReport> {
     let res = run(sf);
-    append_log(&sf.dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {e}")));
+    append_log(&sf.dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {}", e.one_line())));
     res
 }
 
@@ -421,10 +421,10 @@ pub fn auto_update_in<H: HealthCheck>(
         Ok(l) => l,
         Err(e) => {
             append_log(dir, &format!("skipped: {e}"));
-            return Err(InstallError(e.to_string()));
+            return Err(Problem::from(e));
         }
     };
-    let res = ServerFile::load(dir).map_err(|e| InstallError(format!("cannot read {}: {e}", dir.join("kora-server.json").display()))).and_then(|sf| {
+    let res = ServerFile::load(dir).and_then(|sf| {
         let h = health(&sf);
         // Running server: ask it for its player count (restart-needing updates wait for 0 players);
         // a server that is not running has none. Asked after the fork sync, which can take minutes.
@@ -432,7 +432,7 @@ pub fn auto_update_in<H: HealthCheck>(
     });
     let line = match &res {
         Ok((r, _)) => r.summary(),
-        Err(e) => format!("update failed: {e}"),
+        Err(e) => format!("update failed: {}", e.one_line()),
     };
     append_log(dir, &line);
     if let Ok((report, _)) = &res {
@@ -506,7 +506,7 @@ pub fn update_server(name: &str, dir: &Path, sf: &ServerFile, git: &dyn GitOps, 
     let snapshot = snap_dir.join(format!("{}.json", update::new_snapshot_id(&snap_dir, now)));
     let restart: RestartDecision = update::decide_restart(players(), 0, &QuietConfig { window: None, max_players: 0 });
     let opts = RunOptions { server: name, snapshot_file: &snapshot, now_unix: now, restart };
-    let mut report = update::run_update(git, health, &NoMigrations, &plan, &opts).map_err(|e| InstallError(e.to_string()))?;
+    let mut report = update::run_update(git, health, &NoMigrations, &plan, &opts).map_err(|e| Problem::generic(e.to_string()))?;
     update::add_fork_sync(&mut report, fork_sync);
     report.held = held.iter().map(|(id, c)| (id.clone(), update::held_text(c))).collect();
     update::record_holds(dir, &plan, &report);
@@ -515,7 +515,7 @@ pub fn update_server(name: &str, dir: &Path, sf: &ServerFile, git: &dyn GitOps, 
 }
 
 fn err_msg<T>(m: &str) -> Result<T> {
-    Err(InstallError(m.into()))
+    Err(Problem::generic(m))
 }
 
 #[cfg(test)]
@@ -763,7 +763,7 @@ mod tests {
             Some(0)
         })
         .unwrap_err();
-        assert!(update::lock::is_busy_message(&e.to_string()), "{e}");
+        assert_eq!(e.code, crate::git::branches::codes::BUSY, "{e}");
         assert!(!asked.get(), "nothing was looked at");
         let log = std::fs::read_to_string(dir.join("update.log")).unwrap();
         assert!(log.contains("skipped: Another update is running for this server"), "{log}");

@@ -181,7 +181,7 @@ fn no_fxmanifest_is_refused_and_extra_folders_are_skipped() {
     assert!(!p.can_import);
     assert_eq!(kinds(&p), vec![ProblemKind::NoFxmanifest]);
     assert!(p.problems[0].blocking);
-    assert!(import(&dir, &z, &ImportOpts::default(), &mut quiet()).unwrap_err().contains("fxmanifest"));
+    assert!(import(&dir, &z, &ImportOpts::default(), &mut quiet()).unwrap_err().to_string().contains("fxmanifest"));
 
     let mut files = asset("good/");
     files.push(("docs/manual.pdf".into(), b"pdf"));
@@ -306,7 +306,7 @@ fn replacing_keeps_a_backup_and_records_the_new_version() {
     let (_t, dir, z2) = replace_setup();
     let p = inspect(&dir, &z2);
     assert!(p.can_import && p.resources[0].replaces, "{:?}", p.problems);
-    assert!(import(&dir, &z2, &ImportOpts { replace: false }, &mut quiet()).unwrap_err().contains("already imported"));
+    assert!(import(&dir, &z2, &ImportOpts { replace: false }, &mut quiet()).unwrap_err().to_string().contains("already imported"));
     let rep = import(&dir, &z2, &ImportOpts::default(), &mut quiet()).unwrap();
     assert!(rep.imported[0].replaced);
     let backup = dir.join(rep.imported[0].backup.as_ref().unwrap());
@@ -337,7 +337,7 @@ fn a_failed_replace_restores_the_old_copy() {
     FAIL_AFTER.with(|f| f.set(Some(1)));
     let e = import(&dir, &z2, &ImportOpts::default(), &mut quiet()).unwrap_err();
     FAIL_AFTER.with(|f| f.set(None));
-    assert!(e.contains("put back"), "{e}");
+    assert!(e.to_string().contains("put back"), "{e}");
     assert_eq!(fs::read_to_string(dir.join("resources/[paid]/qs-housing/config.lua")).unwrap(), "Config = { mine = true }\n", "the old copy is back");
     assert!(backups_of(&dir, "qs-housing").is_empty(), "the backup was moved back, not left behind");
     assert_eq!(fs::read(server_file_path(&dir)).unwrap(), before, "record unchanged");
@@ -381,7 +381,7 @@ fn remove_moves_the_folder_away_and_drops_ensure_and_record() {
     assert!(!fs::read_to_string(dir.join("server.cfg")).unwrap().contains("qs-housing"));
     assert!(list(&dir).unwrap().is_empty());
     assert!(ServerFile::load(&dir).unwrap().resources.iter().any(|r| r.id == "kora-core"), "other records kept");
-    assert!(remove(&dir, "qs-housing").unwrap_err().contains("not found"));
+    assert!(remove(&dir, "qs-housing").unwrap_err().to_string().contains("not found"));
     assert!(remove(&dir, "kora-core").is_err(), "only paid assets can be removed here");
 }
 

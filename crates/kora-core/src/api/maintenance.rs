@@ -4,6 +4,7 @@
 //! The logic is the same as `kora self-update`, `kora app ...` and `kora uninstall`; this module only
 //! reshapes it into values an HTTP handler can return.
 
+use crate::problem::Problem;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -72,26 +73,26 @@ pub struct UninstallOutcome {
 
 pub trait Maintenance: Send + Sync {
     fn is_admin(&self) -> bool;
-    fn self_update_info(&self) -> Result<SelfUpdateInfo, String>;
+    fn self_update_info(&self) -> Result<SelfUpdateInfo, Problem>;
     /// The program would be replaced in a folder this user cannot write to.
     fn self_update_needs_admin(&self) -> bool;
     /// Download, verify and swap the program. Returns the new version.
-    fn self_update_apply(&self, version: Option<&str>, status: &mut dyn FnMut(&str)) -> Result<String, String>;
+    fn self_update_apply(&self, version: Option<&str>, status: &mut dyn FnMut(&str)) -> Result<String, Problem>;
     fn app_status(&self) -> AppStatusView;
     /// Make the per-user shortcuts (no administrator rights; `force` is ignored). Lines describing the
     /// changes made (or, with `dry_run`, that would be).
-    fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, String>;
-    fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, String>;
-    fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, String>;
-    fn uninstall_run(&self, req: &UninstallRequest, status: &mut dyn FnMut(&str)) -> Result<UninstallOutcome, String>;
+    fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, Problem>;
+    fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, Problem>;
+    fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, Problem>;
+    fn uninstall_run(&self, req: &UninstallRequest, status: &mut dyn FnMut(&str)) -> Result<UninstallOutcome, Problem>;
     /// The server folders an uninstall `req` would delete: `(name, folder)`.
     fn uninstall_folders(&self, req: &UninstallRequest) -> Vec<(String, PathBuf)> {
         folders_to_delete(&Registry::load().unwrap_or_default(), req)
     }
     /// Delete what Kora put in a server folder, as the person (never elevated: the folder is
     /// theirs, and an elevated delete in a folder others can change is a risk). Notes.
-    fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, String> {
-        installer::rollback(dir, &RollbackOptions { keep_files: false, keep_db: true }, &mut NullSink).map_err(|e| e.0)
+    fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, Problem> {
+        installer::rollback(dir, &RollbackOptions { keep_files: false, keep_db: true }, &mut NullSink)
     }
 }
 
@@ -154,13 +155,13 @@ fn question_of(title: &str) -> String {
 }
 
 /// The system items for one server, as `(plan item, the question `uninstall::run` asks for it)`.
-fn server_system_items(reg: &Registry, name: &str, dir: &Path, keep_files: bool) -> Result<Vec<(PlanItem, String)>, String> {
+fn server_system_items(reg: &Registry, name: &str, dir: &Path, keep_files: bool) -> Result<Vec<(PlanItem, String)>, Problem> {
     let (Some(req), Some(created)) = (load_request_from(dir), load_created_from(dir)) else {
         return Ok(vec![]);
     };
     let target = Target::from_request(&req);
     let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(reg, b, &[dir]));
-    let mut items = system::items_for(&target, &created, Platform::current(), &SystemRunner, keep_files, used).map_err(|e| format!("{name}: {e}"))?;
+    let mut items = system::items_for(&target, &created, Platform::current(), &SystemRunner, keep_files, used).map_err(|e| e.lead(name))?;
     items.extend(system::backup_job_item(&target, Platform::current(), &SystemRunner));
     Ok(items
         .into_iter()
@@ -204,7 +205,7 @@ impl Maintenance for SystemMaintenance {
         installer::is_admin()
     }
 
-    fn self_update_info(&self) -> Result<SelfUpdateInfo, String> {
+    fn self_update_info(&self) -> Result<SelfUpdateInfo, Problem> {
         let cur = su::running_version();
         let releases = su::fetch_releases(&Source::from_env()).map_err(|e| e.to_string())?;
         let (latest, available) = match su::decide(&cur, &releases, None).map_err(|e| e.to_string())? {
@@ -226,7 +227,7 @@ impl Maintenance for SystemMaintenance {
         !su::dir_writable(&dir) && !crate::elevate::is_elevated()
     }
 
-    fn self_update_apply(&self, version: Option<&str>, status: &mut dyn FnMut(&str)) -> Result<String, String> {
+    fn self_update_apply(&self, version: Option<&str>, status: &mut dyn FnMut(&str)) -> Result<String, Problem> {
         let cur = su::running_version();
         let src = Source::from_env();
         status("Looking for the release");
@@ -264,19 +265,19 @@ impl Maintenance for SystemMaintenance {
         }
     }
 
-    fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, String> {
+    fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, Problem> {
         let out = app::user::install_user(&app::user::UserOptions { desktop_shortcut: opts.desktop_shortcut, dry_run: opts.dry_run }).map_err(|e| e.to_string())?;
         let mut lines = out.changes.clone();
         lines.extend(out.notes.iter().map(|n| format!("note: {n}")));
         Ok(lines)
     }
 
-    fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, String> {
-        app::uninstall_app_opts(dry_run).map_err(|e| e.to_string())
+    fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, Problem> {
+        app::uninstall_app_opts(dry_run).map_err(Problem::from)
     }
 
-    fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, String> {
-        let reg = Registry::load().map_err(|e| format!("cannot read the server list: {e}"))?;
+    fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, Problem> {
+        let reg = Registry::load().map_err(|e| e.lead("cannot read the server list"))?;
         let mut out = Vec::new();
         for s in reg.servers.iter().filter(|s| only.is_none_or(|o| matches_only(s, o))) {
             let recorded = load_request_from(&s.dir).is_some() && load_created_from(&s.dir).is_some();
@@ -314,8 +315,8 @@ impl Maintenance for SystemMaintenance {
         Ok(out)
     }
 
-    fn uninstall_run(&self, req: &UninstallRequest, status: &mut dyn FnMut(&str)) -> Result<UninstallOutcome, String> {
-        let mut reg = Registry::load().map_err(|e| format!("cannot read the server list: {e}"))?;
+    fn uninstall_run(&self, req: &UninstallRequest, status: &mut dyn FnMut(&str)) -> Result<UninstallOutcome, Problem> {
+        let mut reg = Registry::load().map_err(|e| e.lead("cannot read the server list"))?;
         let answers: HashMap<String, bool> = req.answers.iter().cloned().collect();
         let admin = installer::is_admin();
         let runner = SystemRunner;
@@ -409,11 +410,11 @@ pub mod fake {
 
     pub struct FakeMaintenance {
         pub admin: bool,
-        pub update: Mutex<Result<SelfUpdateInfo, String>>,
+        pub update: Mutex<Result<SelfUpdateInfo, Problem>>,
         pub needs_admin: bool,
         pub app: Mutex<AppStatusView>,
         pub plan: Mutex<Vec<PlanItem>>,
-        pub outcome: Mutex<Result<UninstallOutcome, String>>,
+        pub outcome: Mutex<Result<UninstallOutcome, Problem>>,
         pub calls: Mutex<Vec<String>>,
     }
 
@@ -444,13 +445,13 @@ pub mod fake {
         fn is_admin(&self) -> bool {
             self.admin
         }
-        fn self_update_info(&self) -> Result<SelfUpdateInfo, String> {
+        fn self_update_info(&self) -> Result<SelfUpdateInfo, Problem> {
             self.update.lock().unwrap().clone()
         }
         fn self_update_needs_admin(&self) -> bool {
             self.needs_admin
         }
-        fn self_update_apply(&self, version: Option<&str>, status: &mut dyn FnMut(&str)) -> Result<String, String> {
+        fn self_update_apply(&self, version: Option<&str>, status: &mut dyn FnMut(&str)) -> Result<String, Problem> {
             self.log(format!("self_update_apply {}", version.unwrap_or("-")));
             status("Downloading");
             Ok(version.unwrap_or("0.4.1").to_string())
@@ -458,19 +459,19 @@ pub mod fake {
         fn app_status(&self) -> AppStatusView {
             self.app.lock().unwrap().clone()
         }
-        fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, String> {
+        fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, Problem> {
             self.log(format!("app_install shortcut={} force={} dry={}", opts.desktop_shortcut, opts.force, opts.dry_run));
             Ok(vec!["copy the program".into()])
         }
-        fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, String> {
+        fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, Problem> {
             self.log(format!("app_uninstall dry={dry_run}"));
             Ok(vec!["remove the program".into()])
         }
-        fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, String> {
+        fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, Problem> {
             self.log(format!("uninstall_plan {}", only.unwrap_or("-")));
             Ok(self.plan.lock().unwrap().clone())
         }
-        fn uninstall_run(&self, req: &UninstallRequest, status: &mut dyn FnMut(&str)) -> Result<UninstallOutcome, String> {
+        fn uninstall_run(&self, req: &UninstallRequest, status: &mut dyn FnMut(&str)) -> Result<UninstallOutcome, Problem> {
             self.log(format!("uninstall_run answers={:?} files={} db={} only={:?}", req.answers, req.delete_files, req.delete_databases, req.only));
             status("Removing");
             self.outcome.lock().unwrap().clone()
@@ -483,7 +484,7 @@ pub mod fake {
                 .map(|n| (n.to_string(), PathBuf::from(format!("/srv/{n}"))))
                 .collect()
         }
-        fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, String> {
+        fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, Problem> {
             self.log(format!("delete_server_files {}", dir.display()));
             Ok(vec![])
         }
