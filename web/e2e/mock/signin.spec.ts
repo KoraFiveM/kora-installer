@@ -157,7 +157,7 @@ test.describe('on this computer', () => {
 })
 
 test.describe('saved licence keys and the keychain', () => {
-  test('Settings says where each key is kept and the keychain can be turned on and off', async ({ page, open, scan }) => {
+  test('Settings says where each key is kept and the keychain can be turned on and off', async ({ page, open }) => {
     await open('/settings', { as: 'local', scenario: 'keylost' })
     await expect(page.getByText(/Kept in Kora's private file \(no system keychain on this computer\)/)).toBeVisible()
     await page.getByRole('button', { name: 'Use the system keychain' }).click()
