@@ -50,11 +50,9 @@ impl InstallStep {
         let s = slug(&ctx.req.name);
         let rec = container::setup::new_record(&ctx.req.dir, &s, &engine, status.as_ref(), &want, ctx.req.db == DbChoice::Container).map_err(Problem::from)?;
         io(rec.save(&ctx.req.dir), "cannot write kora-container.json")?;
-        ctx.update_created(|c| {
-            if !c.files.iter().any(|f| f == container::record::FILE) {
-                c.files.push(container::record::FILE.into());
-            }
-        })?;
+        // The record is NOT listed in `created.files`: the config step's roll-back removes those files, and it runs before the
+        // database and engine steps' roll-back, which read this record to know what to remove (the database container, the
+        // network and the volume stayed behind). The engine step's own undo removes the record, last.
         for n in status.iter().flat_map(|s| s.notes.iter()) {
             ctx.note(n.clone());
         }
