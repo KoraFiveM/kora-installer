@@ -22,6 +22,7 @@ import { STATUS_INFO, UpdatesPanel } from './UpdatesPanel'
 import { useBranches } from './branches/useBranches'
 import { VersionBadge } from './branches/VersionBadge'
 import { useUpdates, type Updates } from './useUpdates'
+import { VersionsCard } from './VersionsCard'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
   const [name, setName] = useState('')
@@ -262,10 +263,13 @@ export function ResourcesTab({ server: s }: { server: ServerDetail }) {
             <CardContent><EnsureForm server={s} installed={installed} /></CardContent>
           </Card>
         </div>
-        <Card>
-          <CardHeader><CardTitle>Add resources</CardTitle></CardHeader>
-          <CardContent><AddResources server={s} /></CardContent>
-        </Card>
+        <div className="space-y-5">
+          <VersionsCard server={s} />
+          <Card>
+            <CardHeader><CardTitle>Add resources</CardTitle></CardHeader>
+            <CardContent><AddResources server={s} /></CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

@@ -11,6 +11,7 @@ export interface ResourceDeps {
   consoleEnabled: (server: string) => boolean
   /** The git state of a resource (what the branches mock says). */
   branchRow: (server: string, id: string) => T.ResourceBranch
+  repos: (server: string, id: string) => T.Repos
 }
 
 const NOTICE = 'Restart needed: the running server still has the old version.'
@@ -34,6 +35,7 @@ export function installResourceMock(route: Route, Fail: FailCtor, d: ResourceDep
       pinned_commit: s.mode === 'production' ? 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678' : undefined,
       third_party: false,
       branch: d.branchRow(s.name, id),
+      repos: id.startsWith('kora_') ? d.repos(s.name, id) : null,
       restart: why !== undefined && running ? { needed: true, why, changed_unix: Math.floor(Date.now() / 1000), notice: NOTICE } : { needed: false },
       server: { name: s.name, mode: s.mode, source: s.source, versions: s.versions, running, console_enabled: d.consoleEnabled(s.name), console_waiting_for_restart: false },
     }

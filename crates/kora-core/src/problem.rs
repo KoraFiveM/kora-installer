@@ -10,7 +10,7 @@
 //! let p = Problem::new(codes::GH_MISSING, "The GitHub CLI (gh) is not installed. Kora needs it for development servers.")
 //!     .with_details("`gh --version` could not be run")
 //!     .with_action(Action::InstallTool { tool: Tool::Gh })
-//!     .with_action(Action::ChangeAnswers { section: Some("mode".into()) });
+//!     .with_action(Action::ChangeAnswers { section: Some("source".into()) });
 //! assert_eq!(p.actions.len(), 2);
 //! ```
 //!
@@ -200,7 +200,7 @@ pub enum Action {
     /// skip (`installer::PlannedStep::skippable`).
     SkipStep { step: String },
     /// Go back to the install answers; `section` names the wizard page to open (`licence`,
-    /// `mode`, `name`, `ports`, `database`, `options`, `github`, ...), `None` = the summary.
+    /// `source`, `name`, `ports`, `database`, `options`, `github`, ...), `None` = the summary.
     ChangeAnswers {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]

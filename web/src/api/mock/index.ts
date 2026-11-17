@@ -8,6 +8,7 @@ import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMiss
 import { installKeysMock } from './keys'
 import { installBranchesMock } from './branches'
 import { installResourceMock } from './resource'
+import { installCollabMock } from './collab'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
@@ -60,6 +61,7 @@ function init(name: ScenarioName) {
   uploads = new Map()
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
   branchesMock?.()
+  collabMock?.reset()
   resourceMock?.reset()
   jobs.clear()
   busy.clear()
@@ -404,7 +406,15 @@ const resourceMock = installResourceMock(route, Fail, {
   find: (n) => find(n),
   installed: (n) => installed[n] ?? [],
   consoleEnabled: (n) => !!consoleEnabled[n],
+  repos: (n, id) => collabMock.repos(id, find(n)),
   branchRow: (n, id): T.ResourceBranch => (id.startsWith('kora_') ? branchesMock.row(n, id) : { id, folder: id, state: 'pinned', default_branch: 'dev', label: 'fixed version', changed_count: 0, stashes: 0 }),
+})
+const collabMock = installCollabMock(route, startJob, Fail, {
+  find: (n) => find(n),
+  installed: (n) => installed[n] ?? [],
+  signedIn: () => prefs.github,
+  onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why),
+  onServerChanged: (s) => pushServer(s),
 })
 const branchesMock = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github, onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why) })
 

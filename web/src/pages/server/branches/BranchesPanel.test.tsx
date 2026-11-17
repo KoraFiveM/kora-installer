@@ -23,7 +23,7 @@ afterEach(() => {
 const dev = { name: 'kora-dev', mode: 'development', status: 'stopped', running: false, console_enabled: false, game_listening: false, txadmin_up: false, dir: '/srv/fivem/kora-dev', ports: { game: 30121, txadmin: 40121 }, created_unix: 0, badge: null, managed: true } as unknown as ServerDetail
 
 // A dialog on top hides the page from the accessibility tree, so look at the list the way a mouse would.
-const row = (id: string) => within(screen.getByRole('list', { name: 'Resources and their branches', hidden: true })).getByText(id, { selector: 'span' }).closest('li') as HTMLElement
+const row = (id: string) => within(screen.getByRole('list', { name: 'Resources and their branches', hidden: true })).getByText(id, { selector: 'a' }).closest('li') as HTMLElement
 /** The list is on screen as soon as the page is; its rows arrive with the answer. */
 const loaded = () => screen.findByRole('button', { name: 'Change the branch of kora_core' })
 async function signIn() {
@@ -105,7 +105,7 @@ describe('BranchesPanel', () => {
     await waitFor(() => expect(within(row('kora_jobs')).queryByText('2 changed files')).not.toBeInTheDocument())
   })
 
-  it('lists pull requests from both places, labelled, and tries one', async () => {
+  it('points to the resource page for the list of pull requests, and still says whose code it is', async () => {
     const user = userEvent.setup()
     renderApp(<BranchesPanel server={dev} />)
     await loaded()
@@ -113,20 +113,7 @@ describe('BranchesPanel', () => {
     const dialog = await screen.findByRole('dialog', { name: /Branch of kora_core/ })
     // A pull request is someone else's code: said before anyone tries one.
     expect(within(dialog).getByRole('note')).toHaveTextContent(/someone else's code.*runs on your server.*people you trust/)
-    // Not signed in: a plain message, not a git error.
-    await user.click(within(dialog).getByRole('button', { name: 'Show open pull requests' }))
-    expect(await within(dialog).findByText('You are not signed in to GitHub.')).toBeInTheDocument()
-    await signIn()
-    await user.click(within(dialog).getByRole('button', { name: 'Try again' }))
-    const prs = await within(dialog).findByRole('list', { name: 'Open pull requests' })
-    expect(within(prs).getAllByText('Original repository')).toHaveLength(2)
-    expect(within(prs).getByText('Your fork')).toBeInTheDocument()
-    expect(within(prs).getByText('Draft')).toBeInTheDocument()
-    expect(within(prs).getByText('by jo-dev')).toBeInTheDocument()
-    await user.click(within(prs).getByRole('button', { name: 'Try pull request #41' }))
-    expect(await within(dialog).findByText(/Now on pull request #41/)).toBeInTheDocument()
-    await waitFor(() => expect(within(row('kora_core')).getByText('Trying pull request #41')).toBeInTheDocument())
-    expect(within(dialog).getByRole('button', { name: 'Back to the normal version' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'page of kora_core' })).toHaveAttribute('href', '/servers/kora-dev/resources/kora_core')
   })
 
   it('explains a merged pull request, an unknown one and nonsense, without leaving the dialog', async () => {

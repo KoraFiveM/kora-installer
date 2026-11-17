@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,7 +38,7 @@ export function BranchesPanel({ server: s }: { server: ServerDetail }) {
             {rows.map((r) => {
               return (
                 <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
-                  <span className="min-w-0 flex-1 break-all font-mono text-sm">{r.id}</span>
+                  <Link className="min-w-0 flex-1 break-all font-mono text-sm underline-offset-2 hover:underline" to={`/servers/${encodeURIComponent(s.name)}/resources/${encodeURIComponent(r.id)}`} aria-label={`Open the page of ${r.id}`}>{r.id}</Link>
                   <VersionBadge branch={r} />
                   {r.changed_count > 0 && <Badge tone="amber">{r.changed_count} changed file{r.changed_count === 1 ? '' : 's'}</Badge>}
                   {r.stashes > 0 && <Badge tone="plain">{r.stashes} kept aside</Badge>}

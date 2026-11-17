@@ -785,7 +785,7 @@ impl InstallStep {
             if tools.gh.is_none() {
                 return Err(Problem::new(codes::GH_MISSING, "Development servers need the GitHub CLI (gh), and it is not installed.")
                     .with_actions(known::gh_missing().actions)
-                    .with_action(Action::change_answers("mode"))
+                    .with_action(Action::change_answers("source"))
                     .into());
             }
             let mut st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;

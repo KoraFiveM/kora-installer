@@ -172,6 +172,8 @@ export function withoutAdmin(f: WizardForm): WizardForm {
 /** The wizard page a `change_answers` action names, when this kind of server has it. */
 export function sectionStep(section: string | undefined, source: Source): StepId | null {
   const all = stepsFor(source)
+  // The old name of the first page.
+  if (section === 'mode') section = 'source'
   return section && (all as string[]).includes(section) && section !== 'review' ? (section as StepId) : null
 }
 

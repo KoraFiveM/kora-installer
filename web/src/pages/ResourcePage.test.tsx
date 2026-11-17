@@ -13,6 +13,7 @@ const base = (over: Partial<Page> = {}): Page => ({
   default_branch: 'dev',
   third_party: false,
   branch: { id: 'kora_hud', folder: 'kora_hud', state: 'default', default_branch: 'dev', label: 'the normal version (dev)', changed_count: 0, stashes: 0 },
+  repos: { original: 'KoraFiveM/kora_hud', fork: 'sam/kora_hud' },
   restart: { needed: false },
   server: { name: 'live', mode: 'development', source: 'fork', versions: 'latest', running: true, console_enabled: true, console_waiting_for_restart: false },
   ...over,
@@ -28,6 +29,12 @@ function install() {
     calls.push(`${method} ${url.replace(/^.*\/api\/v1/, '')}`)
     if (url.endsWith('/servers/live/resources/kora_hud') && method === 'GET') return jsonResponse(200, page)
     if (url.endsWith('/resources/kora_hud/branches')) return jsonResponse(200, { resource: page.branch, branches: { current: 'dev', default_branch: 'dev', local: ['dev'], fork: [], upstream: [] }, stashes: [], notes: [] })
+    if (url.endsWith('/resources/kora_hud/changes')) return jsonResponse(200, { branch: 'dev', files: [], count: 0, diff: '', diff_truncated: false, ahead: 0, behind: 0, repos: { original: 'KoraFiveM/kora_hud', fork: 'sam/kora_hud' } })
+    if (url.endsWith('/resources/kora_hud/log')) return jsonResponse(200, { branch: 'dev', commits: [] })
+    if (url.endsWith('/resources/kora_hud/prs')) return jsonResponse(200, { prs: [], notes: [] })
+    if (/\/resources\/kora_hud\/prs\/12/.test(url)) return jsonResponse(200, { number: 12, title: 'Fix the HUD', body: '', author: 'sam', state: 'OPEN', draft: false, url: 'https://github.com/KoraFiveM/kora_hud/pull/12', repo: 'KoraFiveM/kora_hud', base: 'dev', head: 'fix', created: '', updated: '', review: '', checks: 'none', check_list: [], mergeable: 'MERGEABLE', files: [], comments: [], merge_methods: ['squash'], can_merge: false, acting_as: 'sam', trying: { branch: 'pr/12', behind: 0, ahead: 0 } })
+    if (url.endsWith('/resources/kora_hud/issues')) return jsonResponse(200, { repo: 'KoraFiveM/kora_hud', issues: [], new_issue_url: 'https://github.com/KoraFiveM/kora_hud/issues/new' })
+    if (url.endsWith('/resources/kora_hud/releases')) return jsonResponse(200, { repo: 'KoraFiveM/kora_hud', pinned_commit: null, releases: [] })
     if (url.endsWith('/resources/kora_hud/control')) {
       // A restart of the resource loads the new files: the notice goes.
       page = { ...page, restart: { needed: false } }
@@ -51,7 +58,7 @@ describe('resource page', () => {
     show()
     expect(await screen.findByRole('heading', { name: 'kora_hud' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Resources of live/ })).toHaveAttribute('href', '/servers/live?tab=resources')
-    expect(screen.getByText(/KoraFiveM\/kora_hud/)).toBeInTheDocument()
+    expect(screen.getAllByText(/KoraFiveM\/kora_hud/).length).toBeGreaterThan(0)
     expect(screen.queryByText(/Restart needed/)).toBeNull()
   })
 
@@ -82,12 +89,12 @@ describe('resource page', () => {
     })
     const user = userEvent.setup()
     show()
-    expect(await screen.findByText('This server follows released versions')).toBeInTheDocument()
+    expect((await screen.findAllByText('This server follows released versions')).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Back to the released version' })).toBeEnabled()
     const tryIt = await screen.findByRole('button', { name: 'Try it' })
     await user.type(screen.getByLabelText('Pull request number or address'), '12')
     expect(tryIt).toBeDisabled()
-    await user.click(screen.getByLabelText(/I understand: this resource will run unreleased code/))
+    await user.click(screen.getAllByLabelText(/I understand: this resource will run unreleased code/)[0])
     expect(tryIt).toBeEnabled()
   })
 

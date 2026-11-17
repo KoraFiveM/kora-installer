@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { api } from '@/api/client'
-import type { BranchChoices, ChangesChoice, PullRequest, ResourceBranch, ServerDetail, SwitchRequest, SwitchResult, Versions } from '@/api/types'
+import type { BranchChoices, ChangesChoice, ResourceBranch, ServerDetail, SwitchRequest, SwitchResult, Versions } from '@/api/types'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -37,8 +38,6 @@ export function RestartHint({ server: s, resource, note }: { server: Pick<Server
   )
 }
 
-const prWhere = (p: PullRequest) => (p.source === 'upstream' ? 'Original repository' : 'Your fork')
-
 /** The Branches dialog: the same controls as on the resource page, in a box. */
 export function ResourceDialog({ server: s, resource, onClose }: { server: BranchServer; resource: ResourceBranch; onClose: () => void }) {
   return (
@@ -59,11 +58,9 @@ export function BranchControls({ server: s, resource }: { server: BranchServer; 
   const id = resource.id
   const choices = useQuery({ queryKey: ['branch-choices', s.name, id], queryFn: () => api.branches.choices(s.name, id) })
   const [pick, setPick] = useState('')
-  const [showPrs, setShowPrs] = useState(false)
   const [prText, setPrText] = useState('')
   const [result, setResult] = useState<SwitchResult | null>(null)
   const [ask, setAsk] = useState<{ req: SwitchRequest; files: string[] } | null>(null)
-  const prs = useQuery({ queryKey: ['branch-prs', s.name, id], queryFn: () => api.branches.prs(s.name, id), enabled: showPrs, retry: false })
 
   const reload = useMutation({
     mutationFn: () => api.branches.choices(s.name, id, true),
@@ -168,32 +165,7 @@ export function BranchControls({ server: s, resource }: { server: BranchServer; 
               <div className="min-w-56 flex-1"><Field label="Pull request number or address"><Input value={prText} onChange={(e) => setPrText(e.target.value)} placeholder="12 or https://github.com/owner/name/pull/12" autoComplete="off" /></Field></div>
               <Button type="submit" variant="default" disabled={!prText.trim() || working || leaving}>Try it</Button>
             </form>
-            {!showPrs ? (
-              <Button size="sm" onClick={() => setShowPrs(true)}>Show open pull requests</Button>
-            ) : (
-              <div className="space-y-2">
-                {prs.isLoading && <p className="text-sm text-muted-foreground" role="status">Asking GitHub...</p>}
-                <ErrorNotice error={prs.error} onRetry={() => void prs.refetch()} />
-                {(prs.data?.notes ?? []).map((n) => <p key={n} className="text-xs text-amber">{n}</p>)}
-                {prs.data && prs.data.prs.length === 0 && <p className="text-sm text-muted-foreground">There are no open pull requests.</p>}
-                <ul className="divide-y divide-border rounded-md border border-border" aria-label="Open pull requests">
-                  {(prs.data?.prs ?? []).map((p) => (
-                    <li key={`${p.source}${p.number}`} className="flex flex-wrap items-center gap-2 p-3 text-sm">
-                      <div className="min-w-0 flex-1">
-                        <div><span className="font-mono text-xs text-muted-foreground">#{p.number}</span> {p.title}{p.draft && <> <Badge tone="plain">Draft</Badge></>}</div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge tone={p.source === 'upstream' ? 'info' : 'amber'}>{prWhere(p)}</Badge>
-                          <span>by {p.author}</span>
-                          <span className="font-mono">{p.repo}</span>
-                          {p.from === null && <span className="text-orange">its fork was deleted</span>}
-                        </div>
-                      </div>
-                      <Button size="sm" disabled={working || leaving} aria-label={`Try pull request #${p.number}`} onClick={() => send({ action: 'pr', pr: p.number, source: p.source })}>Try it</Button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <p className="text-xs text-muted-foreground">To pick one from the open pull requests, with their checks and reviews, use the <Link className="text-info underline" to={`/servers/${encodeURIComponent(s.name)}/resources/${encodeURIComponent(id)}`}>page of {id}</Link>.</p>
           </section>
 
           {(c?.stashes.length ?? 0) > 0 && (

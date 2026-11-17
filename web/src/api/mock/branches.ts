@@ -27,9 +27,9 @@ const DEFAULT = 'dev'
 const FORK = ['dev', 'feature/new-ui', 'fix-contacts']
 const UPSTREAM = ['dev', 'feature/new-ui', 'release']
 const PRS: T.PullRequest[] = [
-  { number: 41, title: 'Fix the payroll rounding', author: 'sam-rp', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'fix-payroll', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/KoraFiveM/kora_core/pull/41', updated: '2026-03-02T10:00:00Z' },
-  { number: 38, title: 'New inventory layout', author: 'jo-dev', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'new-layout', from: 'jo-dev/kora_core', draft: true, url: 'https://github.com/KoraFiveM/kora_core/pull/38', updated: '2026-02-20T10:00:00Z' },
-  { number: 3, title: 'My experiment', author: 'sam-rp', source: 'fork', repo: 'sam-rp/kora_core', branch: 'experiment', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/sam-rp/kora_core/pull/3', updated: '2026-03-01T10:00:00Z' },
+  { number: 41, title: 'Fix the payroll rounding', author: 'sam-rp', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'fix-payroll', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/KoraFiveM/kora_core/pull/41', updated: '2026-03-02T10:00:00Z', created: '2026-02-20T10:00:00Z', review: 'CHANGES_REQUESTED', checks: 'failing' },
+  { number: 38, title: 'New inventory layout', author: 'jo-dev', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'new-layout', from: 'jo-dev/kora_core', draft: true, url: 'https://github.com/KoraFiveM/kora_core/pull/38', updated: '2026-02-20T10:00:00Z', created: '2026-02-10T10:00:00Z', review: '', checks: 'pending' },
+  { number: 3, title: 'My experiment', author: 'sam-rp', source: 'fork', repo: 'sam-rp/kora_core', branch: 'experiment', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/sam-rp/kora_core/pull/3', updated: '2026-03-01T10:00:00Z', created: '2026-03-01T09:00:00Z', review: 'APPROVED', checks: 'passing' },
 ]
 const MERGED = 12
 const RESTART = 'The files changed, but a running server still has the old version loaded. Restart the resource (or the server) to load the new one.'

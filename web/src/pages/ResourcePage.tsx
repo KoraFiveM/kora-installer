@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
@@ -14,6 +14,12 @@ import { StatusChip } from '@/components/Status'
 import NotFound from '@/pages/NotFound'
 import { VersionBadge } from './server/branches/VersionBadge'
 import { BranchControls } from './server/branches/ResourceDialog'
+import { ProblemActions } from '@/lib/problemActions'
+import { ChangesPanel } from './server/resource/ChangesPanel'
+import { CopyPanel } from './server/resource/CopyPanel'
+import { IssuesPanel } from './server/resource/IssuesPanel'
+import { PullRequestsPanel } from './server/resource/PullRequestsPanel'
+import { ReleasesPanel } from './server/resource/ReleasesPanel'
 import { useUpdates } from './server/useUpdates'
 import { RestartNotice } from './server/resource/RestartNotice'
 import { controlBlock, ResourceActions } from './server/resource/ResourceActions'
@@ -38,12 +44,16 @@ export default function ResourcePage() {
     onSettled: () => void qc.invalidateQueries({ queryKey: key }),
   })
 
+  // "Make my own copy" offered by an error somewhere on the page: take the person to the place where it is done.
+  const handlers = useMemo(() => ({ make_fork: () => document.getElementById('own-copy')?.scrollIntoView({ behavior: 'smooth' }) }), [])
+
   if (q.isLoading) return <Skeleton className="h-64" />
   if (q.error instanceof ApiError && q.error.status === 404) return <NotFound />
   if (q.isError || !q.data) return <ErrorNotice error={q.error} onRetry={() => void q.refetch()} />
   const page = q.data
   const block = controlBlock(page, noOperator)
   return (
+    <ProblemActions handlers={handlers}>
     <div className="space-y-5">
       <Link to={`/servers/${encodeURIComponent(name)}?tab=resources`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> Resources of {name}</Link>
       <div className="flex flex-wrap items-center gap-3">
@@ -79,11 +89,20 @@ export default function ResourcePage() {
           />
         </CardContent>
       </Card>
+      {page.repos && <CopyPanel page={page} />}
       {page.branch.state !== 'pinned' && page.branch.state !== 'unavailable' && (
         <Card>
           <CardHeader><CardTitle>Which version of the code</CardTitle></CardHeader>
           <CardContent><BranchControls server={page.server} resource={page.branch} /></CardContent>
         </Card>
+      )}
+      {page.repos && page.branch.state !== 'unavailable' && (
+        <>
+          <PullRequestsPanel page={page} />
+          <ChangesPanel page={page} />
+          <IssuesPanel page={page} />
+          <ReleasesPanel page={page} />
+        </>
       )}
       <ConfirmDialog
         open={ask !== null}
@@ -101,5 +120,6 @@ export default function ResourcePage() {
       />
       {page.branch.note && <p className="text-sm text-muted-foreground">{page.branch.note}</p>}
     </div>
+    </ProblemActions>
   )
 }

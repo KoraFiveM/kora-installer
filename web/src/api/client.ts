@@ -281,6 +281,28 @@ export const api = {
     plan: (name: string, ids: string[]) => call('resources_plan', { params: { s: name }, body: { ids } }),
     add: (name: string, ids: string[]) => call('resources_add', { params: { s: name }, body: { ids } }),
     catalog: (name: string) => call('catalog_for_server', { params: { s: name } }),
+    /** What changed in the folder, with a read-only diff. */
+    changes: (name: string, resource: string) => call('resource_changes', { params: { s: name, name: resource } }),
+    /** The latest commits of the branch it is on. */
+    log: (name: string, resource: string) => call('resource_log', { params: { s: name, name: resource } }),
+    /** Save everything that changed, with a message. */
+    commit: (name: string, resource: string, message: string) => call('resource_commit', { params: { s: name, name: resource }, body: { message } }),
+    /** Push the branch to your own copy on GitHub (never forced). Acts as the GitHub account the computer is signed in as. */
+    push: (name: string, resource: string) => call('resource_push', { params: { s: name, name: resource } }),
+    /** A new branch from where it is now. */
+    newBranch: (name: string, resource: string, branch: string) => call('resource_new_branch', { params: { s: name, name: resource }, body: { name: branch } }),
+    issues: (name: string, resource: string) => call('issues_list', { params: { s: name, name: resource } }),
+    issueComment: (name: string, resource: string, number: number, body: string) => call('issue_comment', { params: { s: name, name: resource, number: String(number) }, body: { body } }),
+    releases: (name: string, resource: string) => call('resource_releases', { params: { s: name, name: resource } }),
+  },
+  /** One pull request: details, checks, conversation and (for people with the rights) review and merge. */
+  pulls: {
+    view: (name: string, resource: string, number: number, source?: T.PrSource) => call('pr_view', { params: { s: name, name: resource, number: String(number) }, query: source === 'fork' ? { source: 'fork' } : undefined }),
+    comment: (name: string, resource: string, number: number, body: string, source?: T.PrSource) => call('pr_comment', { params: { s: name, name: resource, number: String(number) }, body: { body, source: source === 'fork' ? 'fork' : undefined } }),
+    review: (name: string, resource: string, number: number, action: 'approve' | 'request_changes' | 'comment', body?: string, source?: T.PrSource) =>
+      call('pr_review', { params: { s: name, name: resource, number: String(number) }, body: { action, body, source: source === 'fork' ? 'fork' : undefined } }),
+    merge: (name: string, resource: string, number: number, method?: string, source?: T.PrSource) =>
+      call('pr_merge', { params: { s: name, name: resource, number: String(number) }, body: { method, source: source === 'fork' ? 'fork' : undefined } }),
   },
   assets: {
     list: (name: string) => call('assets_list', { params: { s: name } }),
@@ -339,6 +361,11 @@ export const api = {
     /** Switch every resource that has the branch, or all back to the normal version (a job; result is a `BulkResult`). */
     bulkApply: (name: string, body: { action: 'branch'; branch: string; resources?: string[]; changes?: T.ChangesChoice } | { action: 'default'; resources?: string[]; changes?: T.ChangesChoice }) =>
       call('branch_bulk_apply', { params: { s: name }, body }),
+  },
+  /** Make your own copy (a fork) of resources that are plain clones (a job), and the "which versions" setting. */
+  copies: {
+    fork: (name: string, body: { owner?: string; resources?: string[] } = {}) => call('resources_fork', { params: { s: name }, body }),
+    setVersions: (name: string, versions: T.Versions) => call('versions_set', { params: { s: name }, body: { versions } }),
   },
   github: {
     status: () => call('github_status', {}),
