@@ -3,13 +3,14 @@
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::helper::{helper, HelperCmd};
-use crate::cmd::install::{install, InstallArgs, Printer};
+use crate::cmd::install::{install, InstallArgs};
 use crate::cmd::resources::{add_asset, add_resources, AddAssetArgs, AddResourcesArgs};
 use crate::cmd::schedule::{schedule, ScheduleCmd};
 use crate::cmd::server::{control, delete, status};
+use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
 use crate::cmd::webhook::{webhook, WebhookCmd};
-use crate::ui::{ask_yes_no, print_lines, Terminal};
+use crate::ui::ask_yes_no;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
@@ -291,116 +292,6 @@ enum ToolsCmd {
         #[arg(value_name = "TOOL")]
         tool: Option<String>,
     },
-}
-
-fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: bool, delete_databases: bool) -> i32 {
-    use installer::uninstall as un;
-    if !yes && !dry_run && !std::io::stdin().is_terminal() {
-        eprintln!("error: `kora uninstall` asks before each removal and needs a terminal. Use --dry-run to preview, or --yes to remove the system changes without questions (folders and databases are kept).");
-        return 2;
-    }
-    let all_servers = server.is_none();
-    let mut reg = match registry::Registry::load() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: cannot read the server registry: {e}");
-            return 1;
-        }
-    };
-    let admin = installer::is_admin();
-    if !admin && !dry_run {
-        eprintln!("note: not running as administrator/root: removing services, firewall rules and accounts will be refused. Re-run with sudo / as Administrator.");
-    }
-    let runner = kora_core::service::SystemRunner;
-    let env = un::Env { platform: kora_core::service::Platform::current(), runner: &runner, admin };
-    let opts = un::Options { dry_run, only: server, delete_files, delete_databases };
-    let mut say = |s: &str| println!("{s}");
-    let mut delete = |dir: &std::path::Path, o: &RollbackOptions| {
-        // In the elevated worker: only folders that are the panel person's (checked here, in the
-        // child, right before anything is removed).
-        installer::system_ops::check_panel_dir(dir)?;
-        installer::rollback(dir, o, &mut Printer { last: None })
-    };
-    let mut save = |r: &registry::Registry| r.save_or_clean_to(&registry::registry_path());
-    let summary =
-        if yes { un::run(&mut reg, &opts, &env, &mut un::Defaults, &mut say, &mut delete, &mut save) } else { un::run(&mut reg, &opts, &env, &mut Terminal, &mut say, &mut delete, &mut save) };
-    let mut summary = summary;
-    {
-        let base = installer::windows_db::base_dir();
-        let record = base.as_ref().and_then(|b| installer::windows_db::load_record(b).map(|r| (r, b.clone())));
-        let mut say = |s: &str| println!("{s}");
-        let mut remove = |r: &installer::windows_db::Record, b: &std::path::Path| installer::windows_db::remove(r, b, &mut |m| println!("  {m}"));
-        if yes {
-            un::mariadb_cleanup(&reg, &opts, admin, record, &mut un::Defaults, &mut say, &mut remove, &mut summary);
-        } else {
-            un::mariadb_cleanup(&reg, &opts, admin, record, &mut Terminal, &mut say, &mut remove, &mut summary);
-        }
-    }
-    // Kora's own shortcuts (per user). Under `sudo` they belong to the person who typed it, not to root.
-    let under_sudo = cfg!(unix) && kora_core::userhome::sudo_account().is_some();
-    if under_sudo {
-        if kora_core::app_install::user::user_status().any() || kora_core::app_install::user::legacy_present().present() {
-            println!("\nKora's shortcuts belong to your own account: run `kora app uninstall` without sudo to remove them.");
-        }
-    } else {
-        match kora_core::app_install::user::uninstall_user(dry_run) {
-            Ok(lines) if !lines.is_empty() => {
-                println!("\n{}", if dry_run { "Kora's shortcuts would be removed:" } else { "Kora's shortcuts were removed:" });
-                print_lines("  - ", &lines);
-            }
-            Ok(_) => {}
-            Err(e) => summary.failed.push(format!("Kora's shortcuts: {e}")),
-        }
-    }
-    // Kora's own Git and GitHub CLI copies live in Kora's folder; they go with a full uninstall.
-    if opts.only.is_none() {
-        let present = kora_core::tools::private_present();
-        if !present.is_empty() {
-            let what = present.join(" and ");
-            if dry_run {
-                println!("Would remove Kora's own copies of {what}.");
-            } else {
-                let q = format!("Remove Kora's own copies of {what}?");
-                let go = if yes { un::Asker::ask(&mut un::Defaults, &q, true) } else { un::Asker::ask(&mut Terminal, &q, true) };
-                if go {
-                    match kora_core::tools::remove_private() {
-                        Ok(_) => {
-                            println!("Removed Kora's own copies of {what}.");
-                            summary.removed.push(format!("Kora's own copies of {what}"));
-                        }
-                        Err(e) => summary.failed.push(format!("Kora's own copies of {what}: {e}")),
-                    }
-                } else {
-                    summary.kept.push(format!("Kora's own copies of {what}"));
-                }
-            }
-        }
-    }
-    if all_servers {
-        println!();
-        if dry_run {
-            keys_cmd::uninstall_note(true, None);
-        } else if yes {
-            keys_cmd::uninstall_note(false, None);
-        } else {
-            keys_cmd::uninstall_note(false, Some(&mut Terminal));
-        }
-    }
-    if dry_run {
-        println!("\nDry run: nothing was changed.");
-        if kora_core::app_install::status().installed {
-            println!("The Kora app would stay installed (remove it with `kora uninstall --app`).");
-        }
-        return 0;
-    }
-    println!("\nRemoved: {}. Kept: {}. Failed: {}.", summary.removed.len(), summary.kept.len(), summary.failed.len());
-    if kora_core::app_install::status().installed {
-        println!("The Kora app itself (the `kora` command and its shortcuts) is still installed. Remove it with `kora uninstall --app`.");
-    }
-    for f in &summary.failed {
-        eprintln!("  failed: {f}");
-    }
-    i32::from(!summary.ok())
 }
 
 /// Printed on Linux when `kora panel` is run as root: many rented servers only have the root account.
