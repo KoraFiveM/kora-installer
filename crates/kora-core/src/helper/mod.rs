@@ -71,6 +71,7 @@ pub mod client;
 pub mod dirs;
 pub mod install;
 pub mod server;
+pub mod winhelper;
 pub mod winpipe;
 pub mod worker;
 
