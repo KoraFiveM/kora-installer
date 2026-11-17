@@ -1,4 +1,4 @@
-//! Shared installer contract between the orchestrator (kora-core) and front ends (CLI/TUI).
+//! Shared installer contract between the orchestrator (kora-core) and front ends (CLI, panel).
 //! Keep this file stable; both sides code against it.
 
 use serde::{Deserialize, Serialize};
@@ -145,7 +145,7 @@ pub struct ProgressEvent {
     pub percent: u8,
 }
 
-/// Sink the orchestrator reports to (TUI channel, CLI printer, test collector).
+/// Sink the orchestrator reports to (CLI printer, panel job, test collector).
 pub trait ProgressSink: Send {
     fn event(&mut self, ev: ProgressEvent);
 }

@@ -1,3 +1,6 @@
+> **Note (0.7.0):** the terminal screens (`kora-tui`) described below were removed in 0.7.0; the panel is the only
+> interface. This plan is kept as history.
+
 # Kora Panel plan (0.4.0)
 
 Turn the installer into a local web panel that installs, manages and monitors FiveM servers on

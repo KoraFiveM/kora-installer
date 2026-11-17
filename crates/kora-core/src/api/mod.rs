@@ -1,4 +1,4 @@
-//! The one way front ends (TUI, CLI, web panel) reach the engine.
+//! The one way front ends (CLI, web panel) reach the engine.
 //!
 //! * [`backend`]: the [`Backend`] trait, [`Status`], [`UpdateBadge`], [`badge_of`].
 //! * [`system`]: [`SystemBackend`], the real implementation, plus `with_ensure`, `valid_resource_name`, `read_badge`.

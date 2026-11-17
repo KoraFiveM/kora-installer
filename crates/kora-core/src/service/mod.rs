@@ -1,7 +1,7 @@
 //! OS service layer: systemd units / Windows services and the auto-update scheduler.
 //!
 //! Nothing here touches the OS directly. Every function either *generates* a
-//! [`Plan`] (a list of described [`SystemStep`]s the TUI can show on the
+//! [`Plan`] (a list of described [`SystemStep`]s a front end can show on the
 //! elevation screen before anything happens) or runs commands through a
 //! [`CommandRunner`], which tests replace with a fake.
 //! Windows plans are plain command data (`sc.exe`, `schtasks`) and are

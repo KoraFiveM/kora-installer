@@ -1,4 +1,4 @@
-//! How a front-end feature relates to the shared operation list ([`super::Op`]). The TUI and CLI
+//! How a front-end feature relates to the shared operation list ([`super::Op`]). The CLI and the web panel
 //! parity tests use this so a feature cannot exist in one front end without the panel knowing.
 
 use super::Op;
