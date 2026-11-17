@@ -322,6 +322,8 @@ fn quoting_of_launcher_exec_and_uninstall_string() {
     assert_eq!(desktop_exec_arg(Path::new("/opt/kora/bin/kora")), "/opt/kora/bin/kora");
     assert_eq!(desktop_exec_arg(Path::new("/opt/my kora/bin/kora")), "\"/opt/my kora/bin/kora\"");
     assert_eq!(desktop_exec_arg(Path::new("/opt/we\"ird$/kora")), "\"/opt/we\\\"ird\\$/kora\"");
+    // A literal `%` would otherwise be read as a field code (`%f`, `%U`) by the desktop.
+    assert_eq!(desktop_exec_arg(Path::new("/opt/100%/kora")), "\"/opt/100%%/kora\"");
     assert_eq!(uninstall_string(Path::new(r"C:\Program Files\Kora\kora.exe")), r#""C:\Program Files\Kora\kora.exe" uninstall --app"#);
     assert_eq!(uninstall_string(Path::new(r"C:\Prögramme (x86)\Kora\kora.exe")), "\"C:\\Prögramme (x86)\\Kora\\kora.exe\" uninstall --app");
 }

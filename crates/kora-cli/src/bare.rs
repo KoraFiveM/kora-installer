@@ -123,7 +123,8 @@ pub fn elevated_explanation(windows: bool) -> Vec<String> {
 /// home and runtime folder are set, so their background panel and settings are the ones used; the desktop
 /// variables are kept so the browser can open on their screen.
 pub fn runuser_command(name: &str, uid: u32, home: &std::path::Path, exe: &std::path::Path, args: &[OsString], env: &dyn Fn(&str) -> Option<String>) -> Vec<OsString> {
-    let mut v: Vec<OsString> = vec!["-u".into(), name.into(), "--".into(), "env".into()];
+    // `/usr/bin/env` by full path: root must not look `env` up on whatever `PATH` it was started with.
+    let mut v: Vec<OsString> = vec!["-u".into(), name.into(), "--".into(), "/usr/bin/env".into()];
     let mut set = |k: &str, val: String| v.push(format!("{k}={val}").into());
     set("HOME", home.display().to_string());
     set("USER", name.to_string());
@@ -257,7 +258,9 @@ fn run_as_user(name: &str, landing: Landing) -> i32 {
     };
     println!("Kora Panel does not run as administrator, so Kora is opening it as {name} instead.");
     let args = runuser_command(name, acct.uid, &acct.home, &exe, &landing.rerun_args(), &launch::real_env);
-    match std::process::Command::new("runuser").args(args).status() {
+    // From root-owned folders only (not whatever `PATH` this root process was started with).
+    let runuser = kora_core::git::unix_runuser().unwrap_or_else(|| "runuser".into());
+    match std::process::Command::new(runuser).args(args).status() {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
             eprintln!("Could not switch to {name} ({e}). Run `kora` from your normal account, without sudo.");
@@ -270,7 +273,8 @@ fn run_as_user(name: &str, landing: Landing) -> i32 {
 fn start_as_normal_user(landing: Landing, no_open: bool, home: &std::path::Path, ports: &dyn PortCheck) -> i32 {
     let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
     println!("Kora Panel does not run as administrator, so Kora is starting it as your normal user.");
-    let started = std::process::Command::new("explorer.exe").arg(svc::startup_script_path()).spawn().is_ok();
+    // Through `sysexe`: a bare name would be looked for next to kora.exe first, and this window is elevated.
+    let started = kora_core::sysexe::command("explorer.exe").arg(svc::startup_script_path()).spawn().is_ok();
     if started && launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), ports) {
         if let Ok(link) = svc::link(home) {
             present(landing, port, &link, no_open);
@@ -358,7 +362,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(a[..4], ["-u", "sam", "--", "env"]);
+        assert_eq!(a[..4], ["-u", "sam", "--", "/usr/bin/env"], "env by full path: root does not search its PATH");
         for want in ["HOME=/home/sam", "USER=sam", "XDG_RUNTIME_DIR=/run/user/1000", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "DISPLAY=:0", "KORA_HOME=/srv/kora-home"] {
             assert!(a.iter().any(|x| x == want), "missing {want}: {a:?}");
         }

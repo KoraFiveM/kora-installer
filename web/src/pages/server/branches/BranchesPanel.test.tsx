@@ -111,6 +111,8 @@ describe('BranchesPanel', () => {
     await loaded()
     await user.click(screen.getByRole('button', { name: 'Change the branch of kora_core' }))
     const dialog = await screen.findByRole('dialog', { name: /Branch of kora_core/ })
+    // A pull request is someone else's code: said before anyone tries one.
+    expect(within(dialog).getByRole('note')).toHaveTextContent(/someone else's code.*runs on your server.*people you trust/)
     // Not signed in: a plain message, not a git error.
     await user.click(within(dialog).getByRole('button', { name: 'Show open pull requests' }))
     expect(await within(dialog).findByText('You are not signed in to GitHub.')).toBeInTheDocument()

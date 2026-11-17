@@ -138,6 +138,7 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
           <section className="space-y-2">
             <h3 className="text-sm font-semibold">Try a pull request</h3>
             <p className="text-xs text-muted-foreground">A pull request is a change someone has proposed. Kora downloads it so you can try it on your server before it is accepted. Paste its number or address, or pick one.</p>
+            <p className="text-xs text-amber" role="note">A pull request is someone else&apos;s code. Once you try it, it runs on your server like any of its resources, before anyone has accepted it. Only try pull requests from people you trust, and look at what they change on GitHub first.</p>
             <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (prText.trim() && !blocked) send({ action: 'pr', pr: prText.trim() }) }}>
               <div className="min-w-56 flex-1"><Field label="Pull request number or address"><Input value={prText} onChange={(e) => setPrText(e.target.value)} placeholder="12 or https://github.com/owner/name/pull/12" autoComplete="off" /></Field></div>
               <Button type="submit" variant="default" disabled={!prText.trim() || working || !!blocked}>Try it</Button>

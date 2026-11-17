@@ -332,3 +332,17 @@ fn status_reports_a_missing_tool_as_not_installed_and_installable_where_kora_has
     assert_eq!(s.can_install, pins::pin_here(Tool::Gh).is_some());
     assert_eq!(status(&Runs(None), Tool::Git).can_install, cfg!(windows));
 }
+
+#[test]
+fn git_and_gh_are_started_by_full_path_never_by_name() {
+    // A system copy is started by its full path too: by name the operating system would search the PATH
+    // (and an empty or relative entry in it is the current folder, which is a pull request's files).
+    let sys = Found { source: Source::System, path: PathBuf::from("/usr/bin/git") };
+    assert_eq!(exec_program_from("git", Some(sys)), "/usr/bin/git");
+    let own = Found { source: Source::Private, path: PathBuf::from("/h/.kora/tools/gh/bin/gh") };
+    assert_eq!(exec_program_from("gh", Some(own)), "/h/.kora/tools/gh/bin/gh");
+    // Nothing found: the name, so the failure says which program is missing. Other programs are never rewritten.
+    assert_eq!(exec_program_from("git", None), "git");
+    let other = Found { source: Source::System, path: PathBuf::from("/usr/bin/sudo") };
+    assert_eq!(exec_program_from("runuser", Some(other)), "runuser");
+}
