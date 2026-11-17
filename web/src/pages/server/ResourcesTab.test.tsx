@@ -238,7 +238,7 @@ describe('start, stop and restart a resource', () => {
 })
 
 const sha = (c: string) => c.repeat(40).slice(0, 40)
-const report = (over: Partial<UpdateReport> = {}): UpdateReport => ({ server: 'dev', updated: [{ id: 'kora_core', from: sha('a'), to: sha('b') }], skipped: [], deferred: [], rolled_back: [], sql_flagged: [], needs_attention: [], forks_synced: [], forks_left_alone: [], ...over })
+const report = (over: Partial<UpdateReport> = {}): UpdateReport => ({ server: 'dev', updated: [{ id: 'kora_core', from: sha('a'), to: sha('b') }], skipped: [], deferred: [], rolled_back: [], sql_flagged: [], needs_attention: [], forks_synced: [], forks_left_alone: [], not_attempted: [], held: [], notes: [], ...over })
 
 describe('update results', () => {
   it('short commit ids and what counts as a problem', () => {

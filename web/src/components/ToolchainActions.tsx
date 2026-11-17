@@ -132,7 +132,8 @@ function RunJob({ start, working, done, afterFix, onClose }: { start: () => Prom
     )
   }
   const last = [...job.events].reverse().find((e) => typeof e.message === 'string')
-  const fraction = [...job.events].reverse().find((e) => typeof e.fraction === 'number')?.fraction
+  const progress = [...job.events].reverse().find((e) => e.type === 'progress' && typeof e.fraction === 'number')
+  const fraction = progress?.type === 'progress' ? progress.fraction : undefined
   return (
     <div className="space-y-3" aria-live="polite">
       <p className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin text-info" aria-hidden />{last?.message ?? working}</p>

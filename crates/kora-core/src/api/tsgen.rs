@@ -346,7 +346,7 @@ pub fn generate() -> Generated {
     let words: HashSet<&str> = ops.split(|ch: char| !(ch.is_alphanumeric() || ch == '_')).collect();
     let used: Vec<&String> = c.decls.keys().filter(|k| words.contains(k.as_str())).collect();
     let mut routes_ts = String::from(HEADER);
-    let names: Vec<&str> = std::iter::once("Untyped").chain(used.iter().map(|s| s.as_str())).collect();
+    let names: Vec<&str> = words.contains("Untyped").then_some("Untyped").into_iter().chain(used.iter().map(|s| s.as_str())).collect();
     let _ = writeln!(routes_ts, "\nimport type {{ {} }} from './types'\n", names.join(", "));
     routes_ts.push_str("/** One entry per operation: what goes in and what comes out. `Untyped` = not described by the Rust side yet. */\nexport interface OpTypes {\n");
     routes_ts.push_str(&ops);

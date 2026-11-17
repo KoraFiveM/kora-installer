@@ -131,6 +131,6 @@ describe('ErrorNotice with a Problem', () => {
   })
 
   it('copies the message, the details and the code', () => {
-    expect(detailsText({ code: 'github.gh_missing', message: 'No gh.', details: 'which gh: not found' })).toBe('No gh.\n\nwhich gh: not found\n\n(code: github.gh_missing)')
+    expect(detailsText({ code: 'github.gh_missing', message: 'No gh.', details: 'which gh: not found', actions: [] })).toBe('No gh.\n\nwhich gh: not found\n\n(code: github.gh_missing)')
   })
 })

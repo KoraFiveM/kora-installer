@@ -1,70 +1,19 @@
 // TypeScript mirror of the Kora Panel API (docs/panel-plan.md section 2). JSON is snake_case and
 // enums are snake_case strings. Where the plan was ambiguous, the assumption is noted in web/README.md.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ---- jobs -----------------------------------------------------------------------------------
-
 
 // ---- problems -------------------------------------------------------------------------------
 
-
-
-
-
-
-
 // ---- install --------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
 
 // ---- catalog --------------------------------------------------------------------------------
 
-
-
-
 // ---- updates --------------------------------------------------------------------------------
-
-export interface UpdatePreview {
-  resources: ResourceChange[]
-  new_release: string | null
-  /** Warnings about the check as a whole (built-in release list used, resources no longer in the catalog). */
-  notes?: string[]
-}
-
-
 
 // ---- schedule / notify / github -------------------------------------------------------------
 
-export type SchedulePreset = 'daily' | 'weekly' | 'custom'
-
-
-
 // ---- logs / console / misc ------------------------------------------------------------------
-
-
-
-
 
 export interface ServerEvent {
   name: string
@@ -76,39 +25,13 @@ export interface ServerEvent {
 
 export type MetricsRange = '1h' | '6h' | '24h'
 
-
-
-
 // ---- hub (fleet) ----------------------------------------------------------------------------
-
-
-
 
 // ---- paid assets (Cfx.re Portal) -------------------------------------------------------------
 
-
-
-
-
-
 export type AssetSource = { upload: string } | { download: string }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ---- saved licence keys and the remembered profile --------------------------------------------
-
 
 // ---- branches and pull requests (Development servers) ---------------------------------------
 
@@ -275,7 +198,6 @@ export type {
   RollbackRequest,
   RunAs,
   SampleBadge,
-  SavedInstall,
   SavedKey,
   SavedKeyInfo,
   SavedKeys,
@@ -333,7 +255,7 @@ export type {
   WebhookSetRequest,
   WebhookState,
 } from './generated/types'
-import type { Action, JobRecord, Status, Problem as GeneratedProblem, JobState as GeneratedJobState, UpdatePreviewResult, Preset } from './generated/types'
+import type { Badge, Action, JobRecord, Status, SavedInstall as GeneratedSavedInstall, Problem as GeneratedProblem, JobState as GeneratedJobState, UpdatePreviewResult, Preset } from './generated/types'
 export type JobState = GeneratedJobState
 /** `running`, `stopped` or `missing` (the folder is gone). */
 export type ServerStatus = Status
@@ -344,13 +266,12 @@ export type ServerStatus = Status
  */
 export type ProblemAction = Action
 export type ProblemActionKind = ProblemAction['kind']
-/**
- * An error a person can act on (`kora_core::problem::Problem`). `actions` may be missing: an API error answer
- * leaves it out when empty, and the page then offers its generic choices.
- */
-export type Problem = Omit<GeneratedProblem, 'actions'> & { actions?: Action[] }
+/** An error a person can act on (`kora_core::problem::Problem`). */
+export type Problem = GeneratedProblem
 /** `GET /jobs/{id}`; `R` is the job's result type and `E` its event type. */
 export type Job<R = unknown, E = unknown> = JobRecord<R, E>
-/** The result of the update preview job. */
-export type UpdatePreview = UpdatePreviewResult
+/** The result of the update preview job (`badge` and `notes` may be missing from an older panel). */
+export type UpdatePreview = Omit<UpdatePreviewResult, 'badge' | 'notes'> & Partial<Pick<UpdatePreviewResult, 'badge' | 'notes'>>
+/** The answers of a stopped install, as saved (every field may be missing from an older panel). */
+export type SavedInstall = Partial<GeneratedSavedInstall>
 export type SchedulePreset = Preset

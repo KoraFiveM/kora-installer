@@ -223,11 +223,9 @@ export function streamOf<K extends OpName>(op: K, params?: Params<K>): string {
 }
 
 async function signInWith(body: { token?: string; code?: string }): Promise<void> {
-  const r = await call('session_create', { body } as never, { quiet401: true })
+  const r = await call('session_create', { body }, { quiet401: true })
   setSessionSecret((r as T.SessionCreated | undefined)?.secret)
 }
-
-const L = legacy
 
 /** One function per operation (the route table is generated: `generated/routes.ts`). */
 export const api = {
@@ -327,7 +325,7 @@ export const api = {
     /** Where each resource is (nothing is downloaded). Development servers only. */
     list: (name: string) => call('branches_list', { params: { s: name } }).then((r) => r.resources),
     /** Branches and kept-aside changes of one resource; `refresh` downloads the newest lists from GitHub first. */
-    choices: (name: string, resource: string, refresh = false) => call('branch_choices', { params: { s: name, name: resource }, query: refresh ? { refresh: 1 } : undefined } as never),
+    choices: (name: string, resource: string, refresh = false) => call('branch_choices', { params: { s: name, name: resource }, query: refresh ? { refresh: '1' } : undefined }),
     /** Open pull requests of the original repository and of the person's fork. */
     prs: (name: string, resource: string) => call('pr_list', { params: { s: name, name: resource } }),
     /** Switch one resource: another branch, a pull request, or back to the normal version. */
@@ -342,7 +340,7 @@ export const api = {
   },
   github: {
     status: () => call('github_status', {}),
-    login: () => call('github_login', {}) as unknown as Promise<T.GithubLoginStart>,
+    login: () => call('github_login', {}),
     owners: () => call('github_owners', {}).then((r) => r.owners),
   },
   /** Git and the GitHub CLI, the System check, and starting the database. */
@@ -406,12 +404,12 @@ export const api = {
     run: (body: { answers: { item: string; remove: boolean }[]; delete_files: boolean; delete_databases: boolean; only: string[] }) => call('uninstall_run', { body }),
   },
   jobs: {
-    get: <R = unknown, E = unknown>(id: string) => call('jobs_get', { params: { id } }),
+    get: <R = unknown, E = unknown>(id: string) => call('jobs_get', { params: { id } }) as Promise<T.Job<R, E>>,
     eventsUrl: (id: string) => streamOf('job_events', { id }),
   },
   eventsUrl: () => streamOf('events'),
   metrics: {
-    get: (name: string, range: T.MetricsRange) => call('metrics_get', { params: { s: name }, query: { range } } as never),
+    get: (name: string, range: T.MetricsRange) => call('metrics_get', { params: { s: name }, query: { range } }),
   },
   alerts: {
     list: () => call('alerts_list', {}).then((r) => r.alerts),

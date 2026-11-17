@@ -552,7 +552,7 @@ pub enum SwitchRequest {
     },
     Pr {
         /// A pull request number or its address.
-        pr: String,
+        pr: PrRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         source: Option<PrSource>,
@@ -560,6 +560,15 @@ pub enum SwitchRequest {
         #[cfg_attr(feature = "ts", ts(optional))]
         changes: Option<ChangesChoice>,
     },
+}
+
+/// A pull request: its number or its address (`https://github.com/owner/repo/pull/12`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(untagged)]
+pub enum PrRef {
+    Number(u32),
+    Text(String),
 }
 
 /// `POST /servers/{s}/resources/{name}/stash/restore`.

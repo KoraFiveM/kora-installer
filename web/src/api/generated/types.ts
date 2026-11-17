@@ -1527,6 +1527,11 @@ export type PrPlanRequest = {
   resource: string,
 };
 
+/**
+ * A pull request: its number or its address (`https://github.com/owner/repo/pull/12`).
+ */
+export type PrRef = number | string;
+
 export type PrSource = "upstream" | "fork";
 
 export type Preset = "daily" | "weekly" | "custom";
@@ -2165,7 +2170,7 @@ export type SwitchRequest =
     /**
      * A pull request number or its address.
      */
-    pr: string,
+    pr: PrRef,
     source?: PrSource,
     changes?: ChangesChoice,
   };
