@@ -397,8 +397,12 @@ mod tests {
     #[test]
     fn dump_program_follows_the_client() {
         let has = |set: &'static [&'static str]| move |p: &str| set.contains(&p);
-        assert_eq!(dump_program("/usr/bin/mariadb", &has(&["/usr/bin/mariadb-dump", "/usr/bin/mysqldump"])).as_deref(), Some("/usr/bin/mariadb-dump"));
-        assert_eq!(dump_program("/opt/my/bin/mysql", &has(&["/opt/my/bin/mysqldump", "/opt/my/bin/mariadb-dump"])).as_deref(), Some("/opt/my/bin/mysqldump"));
+        // Slash paths joined with Windows' separator and ".exe" would not match the same strings: Unix only.
+        #[cfg(unix)]
+        {
+            assert_eq!(dump_program("/usr/bin/mariadb", &has(&["/usr/bin/mariadb-dump", "/usr/bin/mysqldump"])).as_deref(), Some("/usr/bin/mariadb-dump"));
+            assert_eq!(dump_program("/opt/my/bin/mysql", &has(&["/opt/my/bin/mysqldump", "/opt/my/bin/mariadb-dump"])).as_deref(), Some("/opt/my/bin/mysqldump"));
+        }
         assert_eq!(dump_program("mysql", &has(&["mysqldump"])).as_deref(), Some("mysqldump"));
         assert_eq!(dump_program("mariadb", &has(&["mariadb-dump", "mysqldump"])).as_deref(), Some("mariadb-dump"));
         assert_eq!(dump_program("mariadb", &has(&[])), None);
