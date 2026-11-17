@@ -215,7 +215,7 @@ impl App {
         }
         let window = wb.build(target).map_err(|e| e.to_string())?;
         let port = self.port;
-        let (nav_proxy, ipc_proxy, load_proxy) = (self.proxy.clone(), self.proxy.clone(), self.proxy.clone());
+        let (ipc_proxy, load_proxy) = (self.proxy.clone(), self.proxy.clone());
         let ctx = self.web_context.get_or_insert_with(|| WebContext::new(Some(self.opts.state_dir.join("webview"))));
         let builder = WebViewBuilder::new_with_web_context(ctx)
             .with_url(url)
@@ -234,7 +234,6 @@ impl App {
                 if let Nav::External(external) = nav::decide(&u, port) {
                     os::open_in_browser(&external);
                 }
-                let _ = &nav_proxy;
                 NewWindowResponse::Deny
             })
             .with_ipc_handler(move |req| {
@@ -258,13 +257,14 @@ impl App {
         Ok(Win { window, webview })
     }
 
+    #[cfg(windows)]
     fn hwnd(&self) -> isize {
-        #[cfg(windows)]
-        {
-            use tao::platform::windows::WindowExtWindows;
-            return self.win.as_ref().map(|w| w.window.hwnd()).unwrap_or(0);
-        }
-        #[cfg(not(windows))]
+        use tao::platform::windows::WindowExtWindows;
+        self.win.as_ref().map(|w| w.window.hwnd()).unwrap_or(0)
+    }
+
+    #[cfg(not(windows))]
+    fn hwnd(&self) -> isize {
         0
     }
 

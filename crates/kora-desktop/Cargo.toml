@@ -28,8 +28,8 @@ tao = "0.37"
 tray-icon = "0.26"
 # Native notifications (Windows toasts, freedesktop notifications) with click callbacks.
 notify-rust = "4.19"
-# Native "choose a file/folder" dialogs. GTK3 on Linux (already there for the window); Win32 on Windows.
-rfd = { version = "0.18", default-features = false, features = ["gtk3"] }
+# Native "choose a file/folder" dialogs: Win32 on Windows; the XDG desktop portal on Linux (rfd's own GTK3 feature wants gtk-sys 0.19, which clashes with the gtk 0.18 that wry and tray-icon use).
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 # HTTP to the loopback panel only: no TLS stack at all.
 ureq = { version = "2", default-features = false }
 
