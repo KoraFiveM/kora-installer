@@ -21,7 +21,7 @@ const MAX_ENV_VALUE: usize = 2048;
 /// The only environment variables a request may set for the child.
 pub const SECRET_ENV: &[&str] = &["CFX_LICENSE_KEY", "KORA_DB_ADMIN_PASSWORD"];
 /// The wire verbs the service takes (what [`parse`] accepts at all).
-pub const VERBS: &[&str] = &["admin-step", "admin-db", "check", "tools", "schedule", "self-update"];
+pub const VERBS: &[&str] = &["admin-step", "admin-db", "check", "tools", "schedule", "self-update", "backup-job", "chown-server"];
 /// Ports are opened only from here up.
 pub const FIRST_PORT: u16 = 1024;
 /// Never opened, even above 1023: remote administration and database ports.
@@ -121,6 +121,23 @@ pub enum Op {
     ScheduleOff {
         dir: String,
     },
+    /// Create or replace the recurring BACKUP job of the server in `dir`: `kora-backup-<slug>` runs
+    /// `kora backup create <dir> --scheduled` as the calling account (never root, never the server's account).
+    /// `when` is always given (never [`When::Default`]).
+    BackupJobSet {
+        dir: String,
+        when: When,
+    },
+    /// Remove the backup job of the server in `dir` (on a server delete, or when scheduled backups are switched off).
+    BackupJobOff {
+        dir: String,
+    },
+    /// Hand the files in the server folder `dir` to the account the server runs as (after a restore or an import wrote
+    /// them as the person). The account comes from the server's own install record read on the service side, never
+    /// from the request.
+    ChownServer {
+        dir: String,
+    },
     /// Install Git from the system package manager (Linux only).
     InstallGit,
     /// Apply a verified Kora update (see the self-update slice). `version` only to a newer release.
@@ -139,6 +156,9 @@ impl Op {
             Op::StartDatabase => "start-database".into(),
             Op::ScheduleSet { .. } => "schedule set".into(),
             Op::ScheduleOff { .. } => "schedule off".into(),
+            Op::BackupJobSet { .. } => "backup job set".into(),
+            Op::BackupJobOff { .. } => "backup job off".into(),
+            Op::ChownServer { .. } => "chown server".into(),
             Op::InstallGit => "install git".into(),
             Op::UpdateApply { .. } => "update".into(),
         }
@@ -149,7 +169,8 @@ impl Op {
         let mins = match self {
             Op::Step { step: StepId::PrepareDb, .. } | Op::DbServer(DbAction::Install) => 30,
             Op::Step { step: StepId::BuildDb, .. } => 10,
-            Op::Step { .. } | Op::ScheduleSet { .. } | Op::ScheduleOff { .. } => 3,
+            Op::Step { .. } | Op::ScheduleSet { .. } | Op::ScheduleOff { .. } | Op::BackupJobSet { .. } | Op::BackupJobOff { .. } => 3,
+            Op::ChownServer { .. } => 30,
             Op::DbServer(DbAction::Start) | Op::StartDatabase => 5,
             Op::InstallGit => 15,
             Op::UpdateApply { .. } => 20,
@@ -185,6 +206,16 @@ impl Op {
                 }
             }
             Op::ScheduleOff { dir } => v.extend([s("schedule"), s("off"), dir.clone()]),
+            Op::BackupJobSet { dir, when } => {
+                v.extend([s("backup-job"), s("set"), dir.clone()]);
+                match when {
+                    When::Daily { hour, minute } => v.extend([s("--daily"), format!("{hour:02}:{minute:02}")]),
+                    When::Weekly { day, hour, minute } => v.extend([s("--weekly"), s(day), format!("{hour:02}:{minute:02}")]),
+                    When::Default => {}
+                }
+            }
+            Op::BackupJobOff { dir } => v.extend([s("backup-job"), s("off"), dir.clone()]),
+            Op::ChownServer { dir } => v.extend([s("chown-server"), dir.clone()]),
             Op::InstallGit => v.extend([s("tools"), s("install"), s("git")]),
             Op::UpdateApply { version } => {
                 v.extend([s("self-update"), s("--yes")]);
@@ -199,7 +230,7 @@ impl Op {
     /// The server folder this operation works on, if any (the service checks it on its side).
     pub fn dir(&self) -> Option<&str> {
         match self {
-            Op::Step { dir, .. } | Op::ScheduleSet { dir, .. } | Op::ScheduleOff { dir } => Some(dir),
+            Op::Step { dir, .. } | Op::ScheduleSet { dir, .. } | Op::ScheduleOff { dir } | Op::BackupJobSet { dir, .. } | Op::BackupJobOff { dir } | Op::ChownServer { dir } => Some(dir),
             _ => None,
         }
     }
@@ -292,6 +323,11 @@ pub fn parse(verb: &str, args: &[String], env: &BTreeMap<String, String>) -> Res
             _ => return no("The Kora service installs only Git."),
         },
         "schedule" => parse_schedule(&mut w)?,
+        "backup-job" => parse_backup_job(&mut w)?,
+        "chown-server" => match (w.next(), w.done()) {
+            (Some(d), true) if dir_shape_ok(d) => Op::ChownServer { dir: d.to_string() },
+            _ => return no("The Kora service needs the server's full folder path."),
+        },
         "self-update" => parse_update(&mut w)?,
         _ => return no("The Kora service does not run that."),
     };
@@ -365,6 +401,35 @@ fn parse_schedule(w: &mut Walk) -> Result<Op, Rejected> {
             Ok(Op::ScheduleSet { dir, when })
         }
         _ => no("The Kora service does not do that with update schedules."),
+    }
+}
+
+/// `backup-job set <dir> --daily HH:MM | --weekly DAY HH:MM` or `backup-job off <dir>`. A time is required: the job
+/// has no default, and there is no way to ask for another account or program.
+fn parse_backup_job(w: &mut Walk) -> Result<Op, Rejected> {
+    let action = w.next();
+    let Some(dir) = w.next().filter(|d| dir_shape_ok(d)).map(str::to_string) else {
+        return no("The Kora service needs the server's full folder path for its backup schedule.");
+    };
+    match action {
+        Some("off") => Ok(Op::BackupJobOff { dir }),
+        Some("set") => {
+            let when = match w.next() {
+                Some("--daily") => {
+                    let Some((hour, minute)) = w.next().and_then(hhmm) else { return no("The backup time must look like 03:30.") };
+                    When::Daily { hour, minute }
+                }
+                Some("--weekly") => {
+                    let given = w.next();
+                    let day = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].into_iter().find(|d| Some(*d) == given);
+                    let (Some(day), Some((hour, minute))) = (day, w.next().and_then(hhmm)) else { return no("The weekly backup time must look like: sun 03:30.") };
+                    When::Weekly { day, hour, minute }
+                }
+                _ => return no("Say when the backup runs: --daily 03:30 or --weekly sun 03:30."),
+            };
+            Ok(Op::BackupJobSet { dir, when })
+        }
+        _ => no("The Kora service does not do that with backup jobs."),
     }
 }
 
@@ -563,5 +628,54 @@ mod tests {
         assert!(check_context(&op, "0.8.0", Some((3389, 40120))).unwrap_err().0.contains("3389"));
         assert!(check_context(&op, "0.8.0", Some((80, 40120))).is_err());
         assert!(check_context(&op, "0.8.0", None).is_err());
+    }
+
+    #[test]
+    fn backup_jobs_are_typed_and_round_trip_through_the_childs_arguments() {
+        assert_eq!(p("backup-job", &["set", DIR, "--daily", "03:30"]), Ok(Op::BackupJobSet { dir: DIR.into(), when: When::Daily { hour: 3, minute: 30 } }));
+        assert_eq!(p("backup-job", &["set", DIR, "--weekly", "sun", "04:00"]), Ok(Op::BackupJobSet { dir: DIR.into(), when: When::Weekly { day: "sun", hour: 4, minute: 0 } }));
+        assert_eq!(p("backup-job", &["off", DIR]), Ok(Op::BackupJobOff { dir: DIR.into() }));
+        for op in [
+            Op::BackupJobSet { dir: DIR.into(), when: When::Daily { hour: 0, minute: 5 } },
+            Op::BackupJobSet { dir: DIR.into(), when: When::Weekly { day: "wed", hour: 23, minute: 59 } },
+            Op::BackupJobOff { dir: DIR.into() },
+        ] {
+            let a = op.child_args();
+            assert_eq!((a[0].as_str(), a[1].as_str()), ("--no-elevate", "backup-job"));
+            assert_eq!(parse(&a[1], &a[2..], &BTreeMap::new()), Ok(op.clone()), "{a:?}");
+            assert_eq!(op.dir(), Some(DIR));
+            assert!(!op.label().contains('/'));
+        }
+        assert_eq!(Op::BackupJobOff { dir: DIR.into() }.time_limit(), std::time::Duration::from_secs(180));
+    }
+
+    #[test]
+    fn a_backup_job_cannot_be_asked_to_be_anything_else() {
+        for args in [
+            vec!["set", DIR], // no time: there is no default
+            vec!["set", DIR, "--daily", "25:00"],
+            vec!["set", DIR, "--daily", "03:30", "--as-system"],
+            vec!["set", DIR, "--daily", "03:30", "--user", "root"],
+            vec!["set", DIR, "--daily", "03:30", "--passphrase", "x"],
+            vec!["set", DIR, "--daily", "03:30", "--weekly", "mon", "04:00"],
+            vec!["set", "my-server", "--daily", "03:30"], // a name is not a folder
+            vec!["set", "relative/dir", "--daily", "03:30"],
+            vec!["off", DIR, "--now"],
+            vec!["off"],
+            vec!["show", DIR],
+        ] {
+            assert!(p("backup-job", &args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn handing_a_server_folder_over_takes_only_a_full_folder_path() {
+        assert_eq!(p("chown-server", &[DIR]), Ok(Op::ChownServer { dir: DIR.into() }));
+        for args in [vec![], vec!["relative"], vec![DIR, "--to", "root"], vec!["/a/../b"]] {
+            assert!(p("chown-server", &args).is_err(), "{args:?}");
+        }
+        let op = Op::ChownServer { dir: DIR.into() };
+        assert_eq!(op.child_args(), ["--no-elevate", "chown-server", DIR]);
+        assert_eq!(parse("chown-server", &op.child_args()[2..], &BTreeMap::new()), Ok(op));
     }
 }

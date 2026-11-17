@@ -140,7 +140,7 @@ pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller,
 
 fn verb_label(verb: &str) -> &str {
     // Only a verb from our own list may appear in the log; anything else is not echoed.
-    ["admin-step", "admin-db", "check", "tools", "schedule", "self-update"].into_iter().find(|v| *v == verb).unwrap_or("(unknown)")
+    super::op::VERBS.iter().copied().find(|v| *v == verb).unwrap_or("(unknown)")
 }
 
 /// What the checks found out, for the ledger update after the child ran.
@@ -159,6 +159,9 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
         Op::Step { undo, step, dir, known, .. } => (*undo, *step, Some(dir), known.as_ref()),
         Op::ScheduleSet { dir, .. } => (false, StepId::Schedule, Some(dir), None),
         Op::ScheduleOff { dir } => (true, StepId::Schedule, Some(dir), None),
+        // The backup job is a separate thing from the update task: its own ledger key, below.
+        Op::BackupJobSet { dir, .. } | Op::ChownServer { dir } => (false, StepId::Schedule, Some(dir), None),
+        Op::BackupJobOff { dir } => (true, StepId::Schedule, Some(dir), None),
         _ => (false, StepId::Schedule, None, None),
     };
     if let Some(dir) = dir {
@@ -183,7 +186,11 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
             ports = rec.map(|r| (r.game_port, r.txadmin_port));
             p.slug = crate::installer::slug(&name);
             let db = host.db_name(dir);
-            p.keys = ownership::keys_for(step, &p.slug, db.as_deref());
+            p.keys = match operation {
+                Op::BackupJobSet { .. } | Op::BackupJobOff { .. } => vec![ownership::backup_key(&p.slug)],
+                Op::ChownServer { .. } => vec![],
+                _ => ownership::keys_for(step, &p.slug, db.as_deref()),
+            };
             // A folder handed to the server's own account (a root-run install, or this service's earlier
             // run) is the caller's only when the ledger says the server's service is theirs.
             if by_server_account && !is_root {
@@ -198,7 +205,7 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
     op::check_context(operation, &host.own_version(), ports)?;
     if !p.keys.is_empty() && !is_root {
         let ledger = host.load_ledger().map_err(|e| Rejected(format!("Kora's service cannot read its ownership records: {e}")))?;
-        let undo = matches!(operation, Op::Step { undo: true, .. } | Op::ScheduleOff { .. });
+        let undo = matches!(operation, Op::Step { undo: true, .. } | Op::ScheduleOff { .. } | Op::BackupJobOff { .. });
         ownership::allow(&ledger, &p.keys, me, undo)?;
     }
     Ok(p)
@@ -209,6 +216,8 @@ fn commit(host: &dyn Host, me: &AccountId, operation: &Op, p: &Prepared, data: O
         Op::Step { undo, step, .. } => (!undo, Some(*step)),
         Op::ScheduleSet { .. } => (true, Some(StepId::Schedule)),
         Op::ScheduleOff { .. } => (false, Some(StepId::Schedule)),
+        Op::BackupJobSet { .. } => (true, Some(StepId::Schedule)),
+        Op::BackupJobOff { .. } => (false, Some(StepId::Schedule)),
         _ => return Ok(()),
     };
     let Some(step) = step else { return Ok(()) };
@@ -467,5 +476,38 @@ mod tests {
         bad.record = Some(InstallRecord { name: "Main".into(), game_port: 3389, txadmin_port: 40120 });
         assert!(matches!(go(&bad, me()), Reply::Refused(m) if m.0.contains("3389")));
         assert!(bad.ledger.borrow().owners.is_empty());
+    }
+
+    #[test]
+    fn a_backup_job_is_the_callers_own_has_its_own_ledger_key_and_is_removed_with_it() {
+        let h = fake();
+        let set = |h: &Fake, who: AccountId| handle(h, &policy(), &caller(who), "backup-job", &s(&["set", DIR, "--daily", "03:30"]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(set(&h, me()), Reply::Ran(Ran { code: 0, .. })));
+        assert_eq!(h.ledger.borrow().owner("backup:main"), Some("uid:1000"));
+        assert_eq!(h.ledger.borrow().owner("task:main"), None, "not the update task's record");
+        assert!(h.log.borrow()[0].contains("backup job set | done") && !h.log.borrow()[0].contains("/home"));
+        // someone else's folder, or a job someone else made
+        assert!(matches!(set(&h, AccountId::uid(1001)), Reply::Refused(_)));
+        let mut h2 = fake();
+        h2.owner = Some(AccountId::uid(1001));
+        h2.ledger.borrow_mut().record("backup:main".into(), "uid:1000");
+        assert!(matches!(set(&h2, AccountId::uid(1001)), Reply::Refused(m) if m.0.contains("another account")));
+        // removing: only what is recorded as mine; the record goes
+        let off = |h: &Fake| handle(h, &policy(), &caller(me()), "backup-job", &s(&["off", DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(off(&h), Reply::Ran(_)));
+        assert!(h.ledger.borrow().owners.is_empty());
+        assert!(matches!(off(&fake()), Reply::Refused(m) if m.0.contains("do not show")), "an unrecorded job is not removed through the service");
+    }
+
+    #[test]
+    fn handing_over_files_checks_the_folder_and_records_nothing() {
+        let h = fake();
+        let go = |h: &Fake, who: AccountId| handle(h, &policy(), &caller(who), "chown-server", &s(&[DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(go(&h, me()), Reply::Ran(Ran { code: 0, .. })));
+        assert!(h.ledger.borrow().owners.is_empty());
+        assert!(matches!(go(&h, AccountId::uid(1001)), Reply::Refused(m) if m.0.contains("does not belong")));
+        let mut none = fake();
+        none.record = None;
+        assert!(matches!(go(&none, me()), Reply::Refused(m) if m.0.contains("no Kora install record")));
     }
 }
