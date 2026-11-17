@@ -43,6 +43,8 @@ pub struct BackupsView {
     pub database: DatabaseNote,
     /// What the schedule needs to run, in words.
     pub schedule_note: String,
+    /// The schedule is a job of the operating system (through the administrator service), not the panel's own scheduler.
+    pub schedule_by_os: bool,
 }
 
 /// `POST /servers/{s}/backups`.

@@ -60,6 +60,7 @@ pub mod create;
 pub mod handover;
 pub mod host;
 pub mod import;
+pub mod osjob;
 pub mod resources;
 pub mod restore;
 pub mod scheduler;

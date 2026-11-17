@@ -1,21 +1,15 @@
 //! Scheduled backups, run by the panel's background process.
 //!
-//! **Why not the operating system's scheduler?** Kora's update schedule is a systemd timer or a Windows task,
-//! and creating one needs administrator rights, through a path that is being rewritten (the privileged
-//! service). Until a backup task can be created through it, scheduled backups run from the long-lived
+//! **When is this the one that runs?** When Kora's administrator service is not installed for this account. With it, a
+//! server's schedule is a job of the operating system instead ([`super::osjob`], created through the service) and this
+//! scheduler stands down for that server ([`stands_down`]). Without the service, scheduled backups run from the long-lived
 //! panel process: **they only run while the panel's background service runs** (`kora panel
 //! --background`, or the panel kept open). A slot missed because the panel was not running is made up once,
 //! when the panel next starts. The Overview says "Backups are scheduled, but none has been made yet" and
 //! warns when the newest backup is older than the schedule implies, so a service that is not running is
 //! noticed.
 //!
-//! The administrator operation that would replace this (for the privileged service's author): "create,
-//! replace and remove a per-server recurring job named `kora-backup-<slug>` that runs
-//! `<kora> backup create <dir> --scheduled` as the account that owns the Kora home (never root, never the
-//! service account), at a given daily/weekly local time, with catch-up after downtime", the same shape as
-//! the update timer but with a different command line and its own name; the same `ScheduleConfig` parsing
-//! ([`crate::service::parse_time`]) validates its input. `kora backup create --scheduled` already exists and
-//! does everything this module does for one server.
+//! The operating-system job runs `kora backup create <dir> --scheduled`, which is [`run_scheduled`] for one server.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -42,11 +36,17 @@ pub enum Outcome {
 pub fn run_if_due(e: &ServerEntry, host: &mut dyn Host, tools: &Tools<'_>) -> Outcome {
     let cfg = settings::load_settings(&e.name);
     let status = settings::load_status(&e.name);
-    if !settings::is_due(&cfg.schedule, &status, tools.now) {
+    if stands_down(&status) || !settings::is_due(&cfg.schedule, &status, tools.now) {
         return Outcome::NotDue;
     }
     settings::update_status(&e.name, |s| s.last_scheduled_unix = Some(tools.now));
     run_scheduled(e, host, tools)
+}
+
+/// The schedule is a job of the operating system (see [`super::osjob`]): this scheduler does not run it, so a backup never
+/// runs twice.
+pub fn stands_down(status: &super::types::BackupStatus) -> bool {
+    status.os_job
 }
 
 /// A scheduled backup of `e` now (what `kora backup create --scheduled` does).
@@ -105,8 +105,13 @@ fn look(make: &(dyn Fn() -> Box<dyn crate::api::Backend + Send> + Send + Sync), 
         if !cfg.schedule.enabled || !e.dir.is_dir() {
             continue;
         }
-        let status = settings::load_status(&e.name);
-        if !settings::is_due(&cfg.schedule, &status, now) {
+        let mut status = settings::load_status(&e.name);
+        // (Windows asks Task Scheduler: that is left to the Backups tab, not done every minute.)
+        if status.os_job && cfg!(not(windows)) {
+            super::osjob::verify(&e);
+            status = settings::load_status(&e.name);
+        }
+        if stands_down(&status) || !settings::is_due(&cfg.schedule, &status, now) {
             continue;
         }
         let mut tools = Tools::system(&db, &git);

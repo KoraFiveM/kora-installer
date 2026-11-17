@@ -342,6 +342,14 @@ pub struct BackupStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub last_scheduled_unix: Option<u64>,
+    /// The schedule is a job of the operating system (made through the administrator service), so the panel's own scheduler
+    /// stands down for this server. Set by Kora, never by a request.
+    #[serde(default)]
+    pub os_job: bool,
+    /// Why the operating-system job could not be made or removed, in plain words (the panel's scheduler is used then).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub os_job_error: Option<String>,
 }
 
 /// The "last backup" line of the Overview and the servers list.

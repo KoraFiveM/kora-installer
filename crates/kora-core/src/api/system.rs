@@ -90,6 +90,16 @@ fn record(e: &ServerEntry) -> Res<manual::ServerRecord> {
     manual::load_server(&e.dir.to_string_lossy()).map_err(err)
 }
 
+/// A server was deleted: take its scheduled-backup job away (through the administrator service; a sentence is added to the
+/// notes when that could not be done), then forget its backup settings and archive its backups.
+fn after_delete(e: &ServerEntry, r: Res<Vec<String>>) -> Res<Vec<String>> {
+    r.map(|mut notes| {
+        notes.extend(crate::backup::osjob::remove_for_delete(e));
+        crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix());
+        notes
+    })
+}
+
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
@@ -247,19 +257,15 @@ impl Backend for SystemBackend {
     }
 
     fn delete(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool) -> Res<Vec<String>> {
-        installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet).map_err(err).inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
+        after_delete(e, installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet).map_err(err))
     }
 
     fn delete_with_db_password(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>) -> Res<Vec<String>> {
-        installer::rollback_with_db_password(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, &mut Quiet)
-            .map_err(err)
-            .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
+        after_delete(e, installer::rollback_with_db_password(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, &mut Quiet).map_err(err))
     }
 
     fn delete_with_admin(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>, admin: Option<installer::system_ops::SharedAdmin>) -> Res<Vec<String>> {
-        installer::rollback_with_admin(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, admin, &mut Quiet)
-            .map_err(err)
-            .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
+        after_delete(e, installer::rollback_with_admin(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, admin, &mut Quiet).map_err(err))
     }
 
     fn unregister(&mut self, e: &ServerEntry) -> Res<()> {
