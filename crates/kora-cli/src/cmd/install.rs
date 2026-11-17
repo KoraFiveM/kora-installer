@@ -237,6 +237,7 @@ impl InstallArgs {
             db_admin,
             // Headless installs start nothing unless asked (CI and scripts keep their behaviour).
             start: self.start && !self.no_start,
+            container: None,
             // Retired in 0.7.0: the install no longer adds a machine-wide app.
             app: None,
         })

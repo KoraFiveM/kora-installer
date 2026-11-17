@@ -109,6 +109,8 @@ pub enum WireDb {
     UseExisting,
     InstallIfMissing,
     Skip,
+    /// Container mode: a MariaDB container next to the server (the default there).
+    Container,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -197,6 +199,12 @@ pub struct WireInstall {
     pub app: Option<WireApp>,
     #[serde(default)]
     pub cfx_identifier: Option<String>,
+    /// `service` (default) or `container` (Linux, needs a container engine).
+    #[serde(default)]
+    pub run_mode: Option<crate::container::RunMode>,
+    /// What container mode asks for (engine, address, limits); only read with `run_mode: container`.
+    #[serde(default)]
+    pub container: Option<crate::container::ContainerRequest>,
 }
 
 impl WireDbAdmin {
@@ -284,6 +292,24 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
             ResourceSelection::Only(ids)
         }
     };
+    let container = match w.run_mode.unwrap_or_default() {
+        crate::container::RunMode::Service => None,
+        crate::container::RunMode::Container => {
+            if !cfg!(target_os = "linux") {
+                return Err("Container mode is only available on Linux.".into());
+            }
+            let c = w.container.clone().unwrap_or_default();
+            if let Some(b) = c.bind.as_deref() {
+                if b.parse::<std::net::IpAddr>().is_err() {
+                    return Err("The address to publish the game port on must be an IP address (or left empty for all addresses).".into());
+                }
+            }
+            if c.memory_mb.is_some_and(|m| m < 512) {
+                return Err("A memory limit under 512 MiB is too small for FXServer.".into());
+            }
+            Some(c)
+        }
+    };
     let db_admin = match &w.db_admin {
         None => None,
         Some(a) => {
@@ -307,12 +333,19 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         artifact_url,
         game_build: w.game_build,
         resources,
-        db: match w.db.unwrap_or_default() {
-            WireDb::UseExisting => DbChoice::UseExisting,
-            WireDb::InstallIfMissing => DbChoice::InstallIfMissing,
-            WireDb::Skip => DbChoice::Skip,
+        db: match (w.db, container.is_some()) {
+            // In a container the managed database container is the default; on a host it never exists.
+            (None, true) => DbChoice::Container,
+            (Some(WireDb::Container), true) => DbChoice::Container,
+            (Some(WireDb::Container), false) => return Err("A database container needs container mode: choose 'In a container' for how the server runs.".into()),
+            (d, _) => match d.unwrap_or_default() {
+                WireDb::UseExisting | WireDb::Container => DbChoice::UseExisting,
+                WireDb::InstallIfMissing => DbChoice::InstallIfMissing,
+                WireDb::Skip => DbChoice::Skip,
+            },
         },
-        service: w.service,
+        // A container server has no service: no unit, no service account, no administrator rights.
+        service: w.service && container.is_none(),
         firewall: w.firewall,
         github_owner,
         catalog: std::env::var("KORA_CATALOG").ok().filter(|c| !c.is_empty()),
@@ -321,6 +354,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         start: w.start,
         // Retired in 0.7.0: an old client may still send `app`; it is ignored.
         app: None,
+        container,
     })
 }
 
@@ -345,7 +379,10 @@ pub fn request_json(r: &InstallRequest) -> Value {
             DbChoice::UseExisting => "use_existing",
             DbChoice::InstallIfMissing => "install_if_missing",
             DbChoice::Skip => "skip",
+            DbChoice::Container => "container",
         },
+        "run_mode": if r.container.is_some() { "container" } else { "service" },
+        "container": r.container,
         "service": r.service,
         "firewall": r.firewall,
         "github_owner": r.github_owner,
@@ -613,9 +650,16 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
             DbChoice::UseExisting => "existing",
             DbChoice::InstallIfMissing => "install",
             DbChoice::Skip => "skip",
+            DbChoice::Container => "container",
         }
         .to_string(),
     ]);
+    if let Some(c) = &req.container {
+        v.extend(["--run-mode".to_string(), "container".to_string()]);
+        if let Some(e) = c.engine {
+            v.extend(["--engine".to_string(), e.program().to_string()]);
+        }
+    }
     if let Some(a) = &req.db_admin {
         v.extend(["--db-admin-user".to_string(), a.user.clone(), "--db-admin-host".to_string(), a.host.clone(), "--db-admin-port".to_string(), a.port.to_string()]);
     }

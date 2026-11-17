@@ -461,6 +461,7 @@ mod fork_sync_tests {
             dry_run: true,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         };
         let ctx = new_ctx(&req, &Hooks::default(), false, std::sync::mpsc::channel().0, false, false);
@@ -1952,6 +1953,7 @@ mod problem_tests {
             dry_run: true,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         };
         new_ctx(&req, &Hooks::default(), false, std::sync::mpsc::channel().0, false, false)

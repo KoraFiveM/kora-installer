@@ -890,6 +890,7 @@ mod tests {
             dry_run: true,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         }
     }
