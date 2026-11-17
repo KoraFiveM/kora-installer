@@ -105,6 +105,10 @@ pub struct AppState {
     pub audit_home: Option<std::path::PathBuf>,
     /// The certificate in use (inactive until the panel loads one: plain HTTP).
     pub tls: tls::TlsState,
+    /// Loads and renews the certificate (the real panel; `None` in tests and for embedders).
+    pub tls_manager: Option<Arc<tls::manager::Manager>>,
+    /// Sign-in ceremonies in flight (passkeys, one-time-code set-ups).
+    pub auth: Arc<remote::auth::AuthState>,
 }
 
 impl AppState {
@@ -132,11 +136,19 @@ impl AppState {
             txgate: Arc::default(),
             audit_home: None,
             tls: tls::TlsState::new(),
+            tls_manager: None,
+            auth: Arc::default(),
         }
     }
     /// Serve with this certificate state (the panel's own, shared with its [`tls::manager::Manager`]).
     pub fn with_tls(mut self, t: tls::TlsState) -> Self {
         self.tls = t;
+        self
+    }
+    /// Serve with this manager's certificate, and let Settings renew it.
+    pub fn with_tls_manager(mut self, m: Arc<tls::manager::Manager>) -> Self {
+        self.tls = m.state.clone();
+        self.tls_manager = Some(m);
         self
     }
     /// Record state-changing requests in the audit log of the store in this Kora folder.
@@ -253,6 +265,12 @@ pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st)
         // May this remote session use the destructive actions? A Tailscale identity always may; a token
         // session only once `kora panel remote-actions on` has been run. (Installing needs neither.)
         allow_remote_destructive: caller.remote && caller.identity.as_ref().is_some_and(|i| i.provider == remote::Provider::Tailscale || st.remote.config().allow_remote_destructive),
+        // A token sign-in of someone with no passkey or one-time codes yet: the page suggests setting one up.
+        auth_upgrade: caller.remote
+            && caller
+                .identity
+                .as_ref()
+                .is_some_and(|i| i.provider == remote::Provider::Token && st.remote.auth_store().ok().and_then(|s| remote::auth::db::state(&s, &i.name).ok()).is_some_and(|s| !s.strong())),
     })
 }
 
@@ -365,10 +383,31 @@ async fn remote_sign_in(st: &AppState, caller: &remote::Caller, token: Option<&s
     }
     let identity = match token {
         Some(t) => {
+            // Only an old per-user token link signs a person in. An API token (for scripts) is a different kind and
+            // never makes a session; it is refused here as any other unknown value.
             let found = r.identity_for_token(t);
-            if found.is_none() {
+            let Some(id) = found.as_ref() else {
                 r.limiter.failure(ip);
                 return Err(ApiError::unauthorized("invalid token"));
+            };
+            let strong = r.auth_store().ok().and_then(|s| remote::auth::db::state(&s, &id.name).ok()).is_some_and(|s| s.strong());
+            if let remote::auth::state::TokenSignIn::Refused(why) = remote::auth::state::token_sign_in(r.config().require_strong_auth, strong) {
+                if let Some(home) = &st.audit_home {
+                    kora_core::store::audit::record_quiet(
+                        home,
+                        &kora_core::store::audit::New {
+                            op: "session_create".into(),
+                            actor_kind: kora_core::store::audit::actor::REMOTE.into(),
+                            actor_name: Some(id.name.clone()),
+                            provider: Some("token".into()),
+                            role: Some(id.role.as_str().into()),
+                            result: kora_core::store::audit::result::REFUSED.into(),
+                            detail: Some("token sign-in refused: a passkey or one-time codes are required".into()),
+                            ..Default::default()
+                        },
+                    );
+                }
+                return Err(ApiError::forbidden(why));
             }
             found
         }
@@ -524,7 +563,7 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         // The real panel keeps its jobs in the store: history survives a restart, and what was running when the last panel died is
         // marked interrupted. (Tests use `AppState::system` with the in-memory registry and never touch the Kora folder.)
         let state =
-            AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem).with_tls(tls_mgr.state.clone());
+            AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem).with_tls_manager(tls_mgr.clone());
         tokio::spawn(tls_mgr.clone().maintain());
         for w in &warnings {
             eprintln!("{w}");

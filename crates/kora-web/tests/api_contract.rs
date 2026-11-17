@@ -462,6 +462,10 @@ fn cases() -> Vec<Case> {
         case(Op::RemoteSet, &[], Some(json!({"allow_remote_destructive": false}))),
         case(Op::UsersList, &[], None),
         case(Op::UserAdd, &[], Some(json!({"name": "sam", "role": "operator"}))),
+        case(Op::AuthOptions, &[], None),
+        case(Op::TlsStatus, &[], None),
+        case(Op::ApiTokensList, &[], None),
+        case(Op::ApiTokenCreate, &[], Some(json!({"name": "backup-script", "role": "operator", "days": 30}))),
         case(Op::ServersList, &[], None),
         case(Op::ServerGet, s, None),
         case(Op::ServerControl, s, Some(json!({"action": "restart"}))),
@@ -536,6 +540,16 @@ fn cases() -> Vec<Case> {
 
 /// Operations the contract test does not run yet, and why. Shrinks as cases are added.
 const UNVERIFIED: &[(Op, &str)] = &[
+    (Op::AuthLogin, "the sign-in ceremonies need a remote peer and a passkey or code; covered end to end by tests/remote_auth.rs"),
+    (Op::AuthEnrol, "needs an enrolment link and a remote peer; covered by tests/remote_auth.rs"),
+    (Op::AuthReauth, "needs a remote session; covered by tests/remote_auth.rs"),
+    (Op::AuthAccount, "needs a remote session; covered by tests/remote_auth.rs"),
+    (Op::AuthAccountChange, "needs a remote session; covered by tests/remote_auth.rs"),
+    (Op::UserCredentials, "needs a user with a store row; covered by tests/remote_auth.rs"),
+    (Op::UserReset, "needs a user; covered by tests/remote_auth.rs"),
+    (Op::ApiTokenRevoke, "204"),
+    (Op::TlsRenew, "needs the panel's certificate manager"),
+    (Op::TlsCa, "needs a local certificate authority; covered by the tls tests"),
     (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),
@@ -583,7 +597,9 @@ fn app_for(setup: Option<Setup>) -> axum::Router {
     if let Some(f) = setup {
         f(&fake);
     }
-    let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(Arc::new(Remote::memory()));
+    let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap())
+        .with_backend(Arc::new(move || Box::new(fake.clone())))
+        .with_remote(Arc::new(Remote::from_file(kora_core::installer::registry::kora_home().join("panel.json")).unwrap()));
     router(st)
 }
 

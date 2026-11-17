@@ -31,7 +31,14 @@ pub enum Provider {
     /// The launch token, from the computer itself.
     Local,
     Tailscale,
+    /// The old per-user token link (kept working, and for scripts).
     Token,
+    /// A passkey (WebAuthn).
+    Passkey,
+    /// A password and a one-time code.
+    Code,
+    /// A token made for a script (`Authorization: Bearer` only, never a session).
+    ApiToken,
 }
 
 impl Provider {
@@ -40,7 +47,7 @@ impl Provider {
     pub fn via(self) -> roles::Via {
         match self {
             Provider::Tailscale => roles::Via::Tailscale,
-            Provider::Local | Provider::Token => roles::Via::Token,
+            Provider::Local | Provider::Token | Provider::Passkey | Provider::Code | Provider::ApiToken => roles::Via::Token,
         }
     }
 }
@@ -256,11 +263,13 @@ impl Remote {
     pub fn resolve(&self, provider: Provider, name: &str) -> Option<Identity> {
         match provider {
             Provider::Local => Some(Identity::local()),
-            Provider::Token => {
+            Provider::Token | Provider::Passkey | Provider::Code => {
                 let g = self.lock();
                 let u = g.cfg.user(name)?;
                 Some(Identity { name: u.name.clone(), provider, role: u.role })
             }
+            // Never a session: an API token is looked up on every request ([`identity_for_bearer`](Self::identity_for_bearer)).
+            Provider::ApiToken => None,
             Provider::Tailscale => {
                 let g = self.lock();
                 if !g.cfg.tailscale {
@@ -270,6 +279,22 @@ impl Remote {
                 Some(Identity { name: name.to_string(), provider, role })
             }
         }
+    }
+
+    /// The settings store of this panel, for the sign-in tables. `Err` when the panel keeps its settings in memory only.
+    pub fn auth_store(&self) -> Result<kora_core::store::Store, String> {
+        let path = self.path().ok_or_else(|| "Remote sign-in needs the panel's saved settings; this panel keeps none.".to_string())?;
+        kora_core::store::Store::open_beside(&path).map_err(kora_core::store::problem_to_string)
+    }
+
+    /// Who an `Authorization: Bearer` token is: an old per-user token link, or an API token. Never a session.
+    pub fn identity_for_bearer(&self, token: &str) -> Option<Identity> {
+        if let Some(i) = self.identity_for_token(token) {
+            return Some(i);
+        }
+        let store = self.auth_store().ok()?;
+        let t = auth::db::api_token_for(&store, token).ok().flatten()?;
+        Some(Identity { name: t.name, provider: Provider::ApiToken, role: t.role })
     }
 
     pub fn identity_for_token(&self, token: &str) -> Option<Identity> {

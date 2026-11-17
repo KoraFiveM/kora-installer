@@ -68,7 +68,10 @@ pub fn webauthn_id(s: &Store, user: &str) -> Result<Uuid, String> {
             }
         }
         let id = Uuid::new_v4();
-        tx.execute("INSERT INTO remote_user_auth (user, webauthn_id) VALUES (?1, ?2) ON CONFLICT(user) DO UPDATE SET webauthn_id = excluded.webauthn_id", rusqlite::params![key, id.as_bytes().as_slice()])?;
+        tx.execute(
+            "INSERT INTO remote_user_auth (user, webauthn_id) VALUES (?1, ?2) ON CONFLICT(user) DO UPDATE SET webauthn_id = excluded.webauthn_id",
+            rusqlite::params![key, id.as_bytes().as_slice()],
+        )?;
         Ok(id)
     })
     .map_err(err)
@@ -78,8 +81,11 @@ pub fn state(s: &Store, user: &str) -> Result<UserState, String> {
     let key = fold(user);
     s.read(|c| {
         let mut st = UserState::default();
-        let row: Option<(Option<String>, Option<Vec<u8>>, i64, String, i64)> =
-            c.query_row("SELECT password_hash, totp_secret, totp_confirmed, recovery_hashes, locked_until FROM remote_user_auth WHERE user = ?1", [&key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).optional()?;
+        let row: Option<(Option<String>, Option<Vec<u8>>, i64, String, i64)> = c
+            .query_row("SELECT password_hash, totp_secret, totp_confirmed, recovery_hashes, locked_until FROM remote_user_auth WHERE user = ?1", [&key], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .optional()?;
         if let Some((pw, secret, confirmed, rec, locked)) = row {
             st.password = pw.is_some_and(|p| !p.is_empty());
             st.totp = secret.is_some() && confirmed == 1;
@@ -142,7 +148,10 @@ pub fn remove_passkey(s: &Store, user: &str, id: i64) -> Result<bool, String> {
 pub fn touch_passkey(s: &Store, id: i64, updated: Option<&webauthn_rs::prelude::Passkey>) -> Result<(), String> {
     s.write(|tx| {
         match updated {
-            Some(p) => tx.execute("UPDATE remote_passkeys SET passkey_json = ?1, last_used = ?2 WHERE id = ?3", rusqlite::params![serde_json::to_string(p).map_err(|e| kora_core::problem::Problem::generic(e.to_string()))?, now(), id])?,
+            Some(p) => tx.execute(
+                "UPDATE remote_passkeys SET passkey_json = ?1, last_used = ?2 WHERE id = ?3",
+                rusqlite::params![serde_json::to_string(p).map_err(|e| kora_core::problem::Problem::generic(e.to_string()))?, now(), id],
+            )?,
             None => tx.execute("UPDATE remote_passkeys SET last_used = ?1 WHERE id = ?2", rusqlite::params![now(), id])?,
         };
         Ok(())
@@ -169,13 +178,18 @@ pub fn set_password_and_totp(s: &Store, user: &str, password_hash: &str, secret:
 
 pub fn set_password(s: &Store, user: &str, password_hash: &str) -> Result<(), String> {
     let key = fold(user);
-    s.write(|tx| Ok(tx.execute("UPDATE remote_user_auth SET password_hash = ?1, failures = 0, locked_until = 0 WHERE user = ?2", rusqlite::params![password_hash, key])? > 0)).map_err(err).and_then(|ok| if ok { Ok(()) } else { Err("That user has no one-time-code sign-in to change the password of.".into()) })
+    s.write(|tx| Ok(tx.execute("UPDATE remote_user_auth SET password_hash = ?1, failures = 0, locked_until = 0 WHERE user = ?2", rusqlite::params![password_hash, key])? > 0))
+        .map_err(err)
+        .and_then(|ok| if ok { Ok(()) } else { Err("That user has no one-time-code sign-in to change the password of.".into()) })
 }
 
 pub fn replace_recovery(s: &Store, user: &str, recovery: &[String]) -> Result<(), String> {
     let key = fold(user);
     s.write(|tx| {
-        tx.execute("UPDATE remote_user_auth SET recovery_hashes = ?1 WHERE user = ?2", rusqlite::params![serde_json::to_string(recovery).map_err(|e| kora_core::problem::Problem::generic(e.to_string()))?, key])?;
+        tx.execute(
+            "UPDATE remote_user_auth SET recovery_hashes = ?1 WHERE user = ?2",
+            rusqlite::params![serde_json::to_string(recovery).map_err(|e| kora_core::problem::Problem::generic(e.to_string()))?, key],
+        )?;
         Ok(())
     })
     .map_err(err)
@@ -185,7 +199,10 @@ pub fn replace_recovery(s: &Store, user: &str, recovery: &[String]) -> Result<()
 pub fn clear_totp(s: &Store, user: &str) -> Result<(), String> {
     let key = fold(user);
     s.write(|tx| {
-        tx.execute("UPDATE remote_user_auth SET password_hash = NULL, totp_secret = NULL, totp_confirmed = 0, totp_last_step = 0, recovery_hashes = '[]', failures = 0, locked_until = 0 WHERE user = ?1", [&key])?;
+        tx.execute(
+            "UPDATE remote_user_auth SET password_hash = NULL, totp_secret = NULL, totp_confirmed = 0, totp_last_step = 0, recovery_hashes = '[]', failures = 0, locked_until = 0 WHERE user = ?1",
+            [&key],
+        )?;
         Ok(())
     })
     .map_err(err)
@@ -207,9 +224,11 @@ pub struct CodeSecrets {
 pub fn code_secrets(s: &Store, user: &str) -> Result<Option<CodeSecrets>, String> {
     let key = fold(user);
     s.read(|c| {
-        Ok(c.query_row("SELECT password_hash, totp_secret, totp_last_step, locked_until FROM remote_user_auth WHERE user = ?1 AND totp_confirmed = 1 AND password_hash IS NOT NULL AND totp_secret IS NOT NULL", [&key], |r| {
-            Ok(CodeSecrets { password_hash: r.get(0)?, totp_secret: r.get(1)?, last_step: r.get::<_, i64>(2)? as u64, locked_until: r.get(3)? })
-        })
+        Ok(c.query_row(
+            "SELECT password_hash, totp_secret, totp_last_step, locked_until FROM remote_user_auth WHERE user = ?1 AND totp_confirmed = 1 AND password_hash IS NOT NULL AND totp_secret IS NOT NULL",
+            [&key],
+            |r| Ok(CodeSecrets { password_hash: r.get(0)?, totp_secret: r.get(1)?, last_step: r.get::<_, i64>(2)? as u64, locked_until: r.get(3)? }),
+        )
         .optional()?)
     })
     .map_err(err)
@@ -231,7 +250,10 @@ pub fn use_recovery_code(s: &Store, user: &str, given: &str) -> Result<bool, Str
         match super::recovery::find(&list, given) {
             Some(i) => {
                 list.remove(i);
-                tx.execute("UPDATE remote_user_auth SET recovery_hashes = ?1 WHERE user = ?2", rusqlite::params![serde_json::to_string(&list).map_err(|e| kora_core::problem::Problem::generic(e.to_string()))?, key])?;
+                tx.execute(
+                    "UPDATE remote_user_auth SET recovery_hashes = ?1 WHERE user = ?2",
+                    rusqlite::params![serde_json::to_string(&list).map_err(|e| kora_core::problem::Problem::generic(e.to_string()))?, key],
+                )?;
                 Ok(true)
             }
             None => Ok(false),
@@ -313,7 +335,10 @@ pub fn mint_link(s: &Store, user: &str, purpose: Purpose, created_by: &str) -> R
             let oldest = have.remove(0);
             tx.execute("DELETE FROM remote_enrolments WHERE hash = ?1", [&oldest])?;
         }
-        tx.execute("INSERT INTO remote_enrolments (hash, user, purpose, created_by, expires) VALUES (?1, ?2, ?3, ?4, ?5)", rusqlite::params![link_hash(&secret), key, purpose.text(), created_by, t + LINK_TTL])?;
+        tx.execute(
+            "INSERT INTO remote_enrolments (hash, user, purpose, created_by, expires) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![link_hash(&secret), key, purpose.text(), created_by, t + LINK_TTL],
+        )?;
         Ok(())
     })
     .map_err(err)?;
@@ -376,7 +401,10 @@ pub fn create_api_token(s: &Store, name: &str, role: crate::remote::Role, days: 
     let hash = crate::remote::config::hash_token(&salt, &token);
     let expires = days.map_or(0, |d| now() + i64::from(d) * 86_400);
     s.write(|tx| {
-        tx.execute("INSERT INTO remote_api_tokens (name, role, salt, hash, created, expires, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", rusqlite::params![name.trim(), role.as_str(), salt, hash, now(), expires, created_by])?;
+        tx.execute(
+            "INSERT INTO remote_api_tokens (name, role, salt, hash, created, expires, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![name.trim(), role.as_str(), salt, hash, now(), expires, created_by],
+        )?;
         Ok(())
     })
     .map_err(|p| {

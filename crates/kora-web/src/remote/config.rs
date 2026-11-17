@@ -31,6 +31,13 @@ pub struct TokenUser {
     pub created: u64,
 }
 
+impl TokenUser {
+    /// The old token link still works for this user.
+    pub fn has_token(&self) -> bool {
+        !self.hash.is_empty()
+    }
+}
+
 /// Which version of the stored settings a [`RemoteConfig`] was loaded from (0: none). Not part of the
 /// settings: ignored by comparisons, copies and serialisation.
 #[derive(Debug, Default)]
@@ -194,6 +201,17 @@ impl RemoteConfig {
         Ok(token)
     }
 
+    /// Add a user with NO token: they sign in with a passkey or one-time codes, set up through an enrolment link.
+    pub fn add_invited_user(&mut self, name: &str, role: Role) -> Result<(), String> {
+        let name = name.trim();
+        valid_user_name(name)?;
+        if self.user(name).is_some() {
+            return Err(format!("There is already a user named '{name}'."));
+        }
+        self.users.push(TokenUser { name: name.to_string(), role, salt: String::new(), hash: String::new(), created: now() });
+        Ok(())
+    }
+
     pub fn remove_user(&mut self, name: &str) -> bool {
         let before = self.users.len();
         self.users.retain(|u| !u.name.eq_ignore_ascii_case(name));
@@ -205,6 +223,10 @@ impl RemoteConfig {
     pub fn user_for_token(&self, token: &str) -> Option<&TokenUser> {
         let mut found = None;
         for u in &self.users {
+            // A user without a token (invited, or the token was ended) has an empty hash: never a match.
+            if !u.has_token() {
+                continue;
+            }
             if ct_eq(&hash_token(&u.salt, token), &u.hash) {
                 found = Some(u);
             }
@@ -299,6 +321,10 @@ fn write_cfg(c: &rusqlite::Connection, cfg: &RemoteConfig) -> Result<u64, kora_c
             "INSERT INTO remote_users (name, name_folded, role, salt, hash, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(name_folded) DO UPDATE SET name = excluded.name, role = excluded.role, salt = excluded.salt, hash = excluded.hash, created = excluded.created",
             rusqlite::params![u.name, u.name.to_lowercase(), role_text(u.role), u.salt, u.hash, u.created as i64],
         )?;
+    }
+    // Whoever is no longer a user loses every credential, enrolment link and passkey with the name.
+    for t in ["remote_user_auth", "remote_passkeys", "remote_enrolments"] {
+        c.execute(&format!("DELETE FROM {t} WHERE user NOT IN (SELECT name_folded FROM remote_users)"), [])?;
     }
     c.execute("DELETE FROM remote_hosts", [])?;
     for h in &cfg.allowed_hosts {

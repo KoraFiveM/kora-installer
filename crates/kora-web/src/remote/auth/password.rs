@@ -39,8 +39,33 @@ pub fn verify_dummy(password: &str) {
 }
 
 const COMMON: &[&str] = &[
-    "password", "passw0rd", "123456789", "1234567890", "qwertyuiop", "iloveyou", "letmein", "welcome", "administrator", "changeme", "admin", "football", "monkey", "dragon", "master", "sunshine", "princess", "trustno1",
-    "baseball", "superman", "password1", "qwerty", "abc123", "fivem", "kora", "txadmin", "gameserver",
+    "password",
+    "passw0rd",
+    "123456789",
+    "1234567890",
+    "qwertyuiop",
+    "iloveyou",
+    "letmein",
+    "welcome",
+    "administrator",
+    "changeme",
+    "admin",
+    "football",
+    "monkey",
+    "dragon",
+    "master",
+    "sunshine",
+    "princess",
+    "trustno1",
+    "baseball",
+    "superman",
+    "password1",
+    "qwerty",
+    "abc123",
+    "fivem",
+    "kora",
+    "txadmin",
+    "gameserver",
 ];
 
 /// Is `password` good enough? The messages say what to do. Length matters most; this is not a composition

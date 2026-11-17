@@ -165,6 +165,34 @@ pub enum Op {
     ReachFirewallOpen,
     /// A one-time ticket to open this server's txAdmin through the panel (needs the same role as controlling the server's code).
     TxAdminTicket,
+    /// Which ways of signing in this address offers (no sign-in needed).
+    AuthOptions,
+    /// Sign in with a passkey or a password and one-time code (no sign-in needed).
+    AuthLogin,
+    /// Set up a first passkey or one-time codes with an enrolment link (no sign-in needed; the link is the credential).
+    AuthEnrol,
+    /// A fresh passkey or code check for the most sensitive actions.
+    AuthReauth,
+    /// Your own credentials and signed-in devices.
+    AuthAccount,
+    /// Change your own sign-in: passkeys, one-time codes, password, devices.
+    AuthAccountChange,
+    /// What a user can sign in with (on the computer that runs Kora).
+    UserCredentials,
+    /// Take credentials away from a user and give them a new enrolment link (on the computer that runs Kora).
+    UserReset,
+    /// The API tokens for scripts (never their secrets).
+    ApiTokensList,
+    /// Make an API token for a script; the secret is shown once.
+    ApiTokenCreate,
+    /// Revoke an API token.
+    ApiTokenRevoke,
+    /// The HTTPS state of the panel: which certificate, until when, its fingerprint.
+    TlsStatus,
+    /// Fetch or make the panel's certificate again now.
+    TlsRenew,
+    /// The local certificate authority's certificate (public), to trust it once.
+    TlsCa,
 }
 
 impl Op {
@@ -282,6 +310,20 @@ impl Op {
         Op::ForwardingSet,
         Op::ReachFirewallOpen,
         Op::TxAdminTicket,
+        Op::AuthOptions,
+        Op::AuthLogin,
+        Op::AuthEnrol,
+        Op::AuthReauth,
+        Op::AuthAccount,
+        Op::AuthAccountChange,
+        Op::UserCredentials,
+        Op::UserReset,
+        Op::ApiTokensList,
+        Op::ApiTokenCreate,
+        Op::ApiTokenRevoke,
+        Op::TlsStatus,
+        Op::TlsRenew,
+        Op::TlsCa,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -400,6 +442,20 @@ impl Op {
             Op::ForwardingSet => "forwarding_set",
             Op::ReachFirewallOpen => "reach_firewall_open",
             Op::TxAdminTicket => "txadmin_ticket",
+            Op::AuthOptions => "auth_options",
+            Op::AuthLogin => "auth_login",
+            Op::AuthEnrol => "auth_enrol",
+            Op::AuthReauth => "auth_reauth",
+            Op::AuthAccount => "auth_account",
+            Op::AuthAccountChange => "auth_account_change",
+            Op::UserCredentials => "user_credentials",
+            Op::UserReset => "user_reset",
+            Op::ApiTokensList => "api_tokens_list",
+            Op::ApiTokenCreate => "api_token_create",
+            Op::ApiTokenRevoke => "api_token_revoke",
+            Op::TlsStatus => "tls_status",
+            Op::TlsRenew => "tls_renew",
+            Op::TlsCa => "tls_ca",
         }
     }
 
@@ -521,6 +577,20 @@ impl Op {
             Op::ForwardingSet => (Method::Put, "/servers/{s}/forwarding"),
             Op::ReachFirewallOpen => (Method::Post, "/servers/{s}/reach/firewall"),
             Op::TxAdminTicket => (Method::Post, "/servers/{s}/txadmin/ticket"),
+            Op::AuthOptions => (Method::Get, "/auth/options"),
+            Op::AuthLogin => (Method::Post, "/auth/login"),
+            Op::AuthEnrol => (Method::Post, "/auth/enrol"),
+            Op::AuthReauth => (Method::Post, "/auth/reauth"),
+            Op::AuthAccount => (Method::Get, "/auth/account"),
+            Op::AuthAccountChange => (Method::Post, "/auth/account"),
+            Op::UserCredentials => (Method::Get, "/users/{name}/credentials"),
+            Op::UserReset => (Method::Post, "/users/{name}/reset"),
+            Op::ApiTokensList => (Method::Get, "/api-tokens"),
+            Op::ApiTokenCreate => (Method::Post, "/api-tokens"),
+            Op::ApiTokenRevoke => (Method::Delete, "/api-tokens/{id}"),
+            Op::TlsStatus => (Method::Get, "/tls"),
+            Op::TlsRenew => (Method::Post, "/tls/renew"),
+            Op::TlsCa => (Method::Get, "/tls/ca"),
         }
     }
 
@@ -734,13 +804,27 @@ mod tests {
             | Op::ReachSettingsSet
             | Op::ForwardingSet
             | Op::ReachFirewallOpen
-            | Op::TxAdminTicket => Op::ALL.contains(&op),
+            | Op::TxAdminTicket
+            | Op::AuthOptions
+            | Op::AuthLogin
+            | Op::AuthEnrol
+            | Op::AuthReauth
+            | Op::AuthAccount
+            | Op::AuthAccountChange
+            | Op::UserCredentials
+            | Op::UserReset
+            | Op::ApiTokensList
+            | Op::ApiTokenCreate
+            | Op::ApiTokenRevoke
+            | Op::TlsStatus
+            | Op::TlsRenew
+            | Op::TlsCa => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 113);
+        assert_eq!(Op::ALL.len(), 127);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

@@ -12,7 +12,8 @@ pub enum Role {
     Admin,
 }
 
-/// How a session proved who it is: the launch link, Tailscale, or a user token.
+/// How a session proved who it is: the launch link, Tailscale, a passkey, a password with a one-time code, the old
+/// user token, or (requests only) an API token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
@@ -20,6 +21,9 @@ pub enum Provider {
     Local,
     Tailscale,
     Token,
+    Passkey,
+    Code,
+    ApiToken,
 }
 
 /// Who is signed in.
@@ -55,6 +59,8 @@ pub struct Meta {
     pub remote: bool,
     /// Remote sessions may use the destructive actions (delete, uninstall, console input, ...).
     pub allow_remote_destructive: bool,
+    /// A token sign-in of a user without a passkey or one-time codes: the page should suggest setting one up.
+    pub auth_upgrade: bool,
 }
 
 /// `POST /session`: local `{token}` or `{code}`; remote `{token}` or `{}` (Tailscale).

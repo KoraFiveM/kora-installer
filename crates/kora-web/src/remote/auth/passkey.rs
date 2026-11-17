@@ -88,7 +88,11 @@ pub fn rp_for(host: &str, secure: bool) -> Result<Rp, RpError> {
 }
 
 fn webauthn(rp: &Rp) -> Result<Webauthn, String> {
-    WebauthnBuilder::new(&rp.id, &rp.origin).map_err(|e| format!("this address cannot be used for passkeys ({e})"))?.rp_name("Kora Panel").build().map_err(|e| format!("passkeys are not available here ({e})"))
+    WebauthnBuilder::new(&rp.id, &rp.origin)
+        .map_err(|e| format!("this address cannot be used for passkeys ({e})"))?
+        .rp_name("Kora Panel")
+        .build()
+        .map_err(|e| format!("passkeys are not available here ({e})"))
 }
 
 enum Pending {
@@ -151,7 +155,8 @@ impl Ceremonies {
         let w = webauthn(rp)?;
         let id = db::webauthn_id(s, user)?;
         let exclude: Vec<_> = db::passkeys(s, user)?.iter().map(|p| p.passkey.cred_id().clone()).collect();
-        let (challenge, state) = w.start_passkey_registration(id, user, display, if exclude.is_empty() { None } else { Some(exclude) }).map_err(|e| format!("could not start the passkey set-up ({e})"))?;
+        let (challenge, state) =
+            w.start_passkey_registration(id, user, display, if exclude.is_empty() { None } else { Some(exclude) }).map_err(|e| format!("could not start the passkey set-up ({e})"))?;
         let handle = self.put(Pending::Register { user: db::fold(user), rp: rp.clone(), state: Box::new(state) });
         Ok((handle, challenge))
     }

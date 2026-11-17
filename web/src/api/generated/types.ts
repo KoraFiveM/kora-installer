@@ -7,6 +7,103 @@
 export type Untyped = unknown
 
 /**
+ * `POST /auth/account`: changes to your own sign-in (each needs a recent passkey or code check, except adding the first
+ * credential).
+ */
+export type AccountChange =
+  | {
+    "step": "passkey_begin"
+  }
+  | {
+    "step": "passkey_finish",
+    handle: string,
+    label: string,
+    credential: unknown,
+  }
+  | {
+    "step": "passkey_remove",
+    id: number,
+  }
+  | {
+    "step": "code_begin"
+  }
+  | {
+    "step": "code_finish",
+    password: string,
+    code: string,
+  }
+  | {
+    "step": "password_change",
+    current: string,
+    password: string,
+  }
+  | {
+    "step": "recovery_new"
+  }
+  | {
+    "step": "device_revoke",
+    handle: string,
+  }
+  | {
+    "step": "devices_revoke_others"
+  }
+  | {
+    "step": "token_revoke"
+  };
+
+export type AccountChanged =
+  | {
+    "step": "done"
+  }
+  | {
+    "step": "challenge",
+    handle: string,
+    options: unknown,
+  }
+  | {
+    "step": "code_setup",
+    secret: string,
+    otpauth: string,
+    qr_svg: string,
+  }
+  | {
+    "step": "recovery",
+    codes: Array<string>,
+  };
+
+/**
+ * `GET /auth/account` (signed-in remote user): their own credentials and devices.
+ */
+export type AccountView = {
+  user: string,
+  provider: Provider,
+  role: Role,
+  passkeys: Array<PasskeyView>,
+  /**
+   * A password and one-time codes are set up.
+   */
+  code: boolean,
+  recovery_left: number,
+  /**
+   * The old token link still works for this user.
+   */
+  legacy_token: boolean,
+  /**
+   * The user has a passkey or one-time codes (so the token link is not accepted for sign-in).
+   */
+  strong: boolean,
+  /**
+   * Passkeys can be added from this address; when not, why.
+   */
+  passkey_problem: string | null,
+  /**
+   * Suggest setting up a passkey or one-time codes now (a token sign-in without them).
+   */
+  upgrade_suggested: boolean,
+  devices: Array<DeviceView>,
+};
+
+/**
  * Something the user can do about a [`Problem`]. Plain data: the front end decides what each
  * one does (the panel's handler registry; a terminal prints a hint). Never put secrets in here.
  *
@@ -166,6 +263,40 @@ export type AlertWebhook = {
  */
 export type AlertsList = {
   alerts: Array<PanelAlert>,
+};
+
+/**
+ * `POST /api-tokens`: a token for a script.
+ */
+export type ApiTokenRequest = {
+  name: string,
+  role: Role,
+  /**
+   * Valid for this many days; left out: never expires.
+   */
+  days?: number,
+};
+
+/**
+ * One API token (never its secret).
+ */
+export type ApiTokenView = {
+  id: number,
+  name: string,
+  role: Role,
+  created: number,
+  /**
+   * 0: never.
+   */
+  expires: number,
+  /**
+   * 0: never used.
+   */
+  last_used: number,
+};
+
+export type ApiTokensList = {
+  tokens: Array<ApiTokenView>,
 };
 
 /**
@@ -397,6 +528,36 @@ export type AuditRow = {
    * A short note Kora wrote (a job id, an error code).
    */
   detail: string | null,
+};
+
+/**
+ * `GET /auth/options` (no sign-in needed): which ways of signing in this address offers.
+ */
+export type AuthOptions = {
+  /**
+   * A passkey can be used on this address.
+   */
+  passkey: boolean,
+  /**
+   * When not: why, in words for the person (a bare IP address, plain HTTP).
+   */
+  passkey_problem: string | null,
+  /**
+   * A password with a one-time code.
+   */
+  code: boolean,
+  /**
+   * The old token link may still be used to sign in.
+   */
+  token: boolean,
+  /**
+   * This visit can use its Tailscale account.
+   */
+  tailscale: boolean,
+  /**
+   * An administrator requires a passkey or one-time codes: the token is refused.
+   */
+  strong_required: boolean,
 };
 
 /**
@@ -809,6 +970,21 @@ export type DeleteRequest = {
 };
 
 /**
+ * A signed-in browser.
+ */
+export type DeviceView = {
+  handle: string,
+  device: string,
+  address: string,
+  signed_in: number,
+  last_seen: number,
+  /**
+   * The one making this request.
+   */
+  current: boolean,
+};
+
+/**
  * `POST /checks/disk` `{dir}`.
  */
 export type DirRequest = {
@@ -830,6 +1006,62 @@ export type DownloadZip = {
   size: number,
   modified_unix: number,
 };
+
+/**
+ * `POST /auth/enrol` (no sign-in needed; the link is the credential): the steps of the first set-up.
+ */
+export type EnrolRequest =
+  | {
+    "step": "check",
+    link: string,
+  }
+  | {
+    "step": "passkey_begin",
+    link: string,
+  }
+  | {
+    "step": "passkey_finish",
+    link: string,
+    handle: string,
+    label: string,
+    credential: unknown,
+  }
+  | {
+    "step": "code_begin",
+    link: string,
+  }
+  | {
+    "step": "code_finish",
+    link: string,
+    password: string,
+    code: string,
+  };
+
+export type EnrolResponse =
+  | {
+    "step": "who",
+    user: string,
+    role: Role,
+    passkey: boolean,
+    passkey_problem: string | null,
+  }
+  | {
+    "step": "challenge",
+    handle: string,
+    options: unknown,
+  }
+  | {
+    "step": "code_setup",
+    secret: string,
+    otpauth: string,
+    qr_svg: string,
+  }
+  | {
+    "step": "done",
+    identity: Identity,
+    secret: string,
+    recovery_codes: Array<string>,
+  };
 
 /**
  * `POST /servers/{s}/ensure`.
@@ -1439,6 +1671,42 @@ export type LogTailQuery = {
 };
 
 /**
+ * `POST /auth/login` (no sign-in needed): the steps of signing in.
+ */
+export type LoginRequest =
+  | {
+    "step": "passkey_begin",
+    user: string,
+  }
+  | {
+    "step": "passkey_finish",
+    handle: string,
+    credential: unknown,
+  }
+  | {
+    "step": "code",
+    user: string,
+    password: string,
+    code: string,
+  };
+
+export type LoginResponse =
+  | {
+    "step": "challenge",
+    handle: string,
+    options: unknown,
+  }
+  | {
+    "step": "signed_in",
+    identity: Identity,
+    secret: string,
+    /**
+     * A friendly note for the next screen (a recovery code was used; the token link should be replaced).
+     */
+    notice: string | null,
+  };
+
+/**
  * `GET /servers/{s}/logs`.
  */
 export type LogsList = {
@@ -1476,6 +1744,10 @@ export type Meta = {
    * Remote sessions may use the destructive actions (delete, uninstall, console input, ...).
    */
   allow_remote_destructive: boolean,
+  /**
+   * A token sign-in of a user without a passkey or one-time codes: the page should suggest setting one up.
+   */
+  auth_upgrade: boolean,
 };
 
 /**
@@ -1529,12 +1801,24 @@ export type MetricsQuery = {
 export type Mode = "production" | "development";
 
 /**
- * `POST /users` answer: the token is shown this once.
+ * Shown once. Send it as `Authorization: Bearer <token>`; it is never accepted in an address.
+ */
+export type NewApiToken = {
+  id: number,
+  name: string,
+  role: Role,
+  token: string,
+};
+
+/**
+ * `POST /users` answer: the new user has no password, passkey or token yet; `link` is the one-time enrolment link
+ * (the page is `<panel address>/#enrol=<link>`), shown this once. It works for 30 minutes and once.
  */
 export type NewUser = {
   name: string,
   role: Role,
-  token: string,
+  link: string,
+  expires_in: number,
 };
 
 /**
@@ -1649,6 +1933,29 @@ export type PanelUser = {
    * Unix seconds.
    */
   created: number,
+  /**
+   * How this person signs in: passkeys, a one-time-code set-up, the old token link, and whether they are waiting to set up.
+   */
+  passkeys: number,
+  code: boolean,
+  legacy_token: boolean,
+};
+
+/**
+ * One passkey of an account.
+ */
+export type PasskeyView = {
+  id: number,
+  label: string,
+  /**
+   * The name the passkey was registered for.
+   */
+  rp_id: string,
+  /**
+   * Unix seconds.
+   */
+  created: number,
+  last_used: number,
 };
 
 export type PlanItem =
@@ -1825,9 +2132,10 @@ export type ProgressEvent = {
 };
 
 /**
- * How a session proved who it is: the launch link, Tailscale, or a user token.
+ * How a session proved who it is: the launch link, Tailscale, a passkey, a password with a one-time code, the old
+ * user token, or (requests only) an API token.
  */
-export type Provider = "local" | "tailscale" | "token";
+export type Provider = "local" | "tailscale" | "token" | "passkey" | "code" | "apitoken";
 
 export type PublicSource = "router" | "cfx" | "ip_echo";
 
@@ -1894,6 +2202,35 @@ export type ReachReport = {
 export type ReachState = "ok" | "likely" | "problem" | "unknown";
 
 /**
+ * `POST /auth/reauth`: a fresh check before the most sensitive actions.
+ */
+export type ReauthRequest =
+  | {
+    "step": "passkey_begin"
+  }
+  | {
+    "step": "passkey_finish",
+    handle: string,
+    credential: unknown,
+  }
+  | {
+    "step": "code",
+    password: string,
+    code: string,
+  };
+
+export type ReauthResponse =
+  | {
+    "step": "challenge",
+    handle: string,
+    options: unknown,
+  }
+  | {
+    "step": "fresh",
+    valid_for: number,
+  };
+
+/**
  * `GET /assets/downloads`.
  */
 export type RecentDownloads = {
@@ -1927,6 +2264,10 @@ export type RemoteSettings = {
   allow_remote_destructive: boolean,
   users: Array<PanelUser>,
   saved_to: string | null,
+  /**
+   * Interactive remote users must use a passkey or one-time codes (the token link is refused for sign-in).
+   */
+  require_strong_auth: boolean,
 };
 
 /**
@@ -1940,7 +2281,29 @@ export type RemoteSettingsUpdate = {
   },
   allowed_hosts?: Array<string>,
   allow_remote_destructive?: boolean,
+  require_strong_auth?: boolean,
 };
+
+/**
+ * `POST /users/{name}/reset` answer: their sessions have ended; the link lets them set up again. Shown once.
+ */
+export type ResetDone = {
+  name: string,
+  /**
+   * The secret part of the enrolment link; the page is `<panel address>/#enrol=<secret>`. `null` for a token-only reset.
+   */
+  link: string | null,
+  expires_in: number,
+};
+
+export type ResetRequest = {
+  what: ResetWhat,
+};
+
+/**
+ * `POST /users/{name}/reset`: what to take away, and give the person a new link to set up again.
+ */
+export type ResetWhat = "passkeys" | "code" | "all" | "legacy_token";
 
 export type ResourceBranch = {
   id: string,
@@ -2518,6 +2881,56 @@ export type SystemInfo = {
 };
 
 /**
+ * `GET /tls/ca`: the local authority's certificate (public), to install in a browser or on a phone.
+ */
+export type TlsCa = {
+  pem: string,
+  fingerprint: string,
+};
+
+/**
+ * `GET /tls`: the HTTPS state of the panel.
+ */
+export type TlsStatus = {
+  /**
+   * `auto`, `provided`, `tailscale`, `self-signed` or `off`.
+   */
+  mode: string,
+  /**
+   * This panel's own connection is HTTPS.
+   */
+  this_connection_secure: boolean,
+  active: boolean,
+  /**
+   * `provided`, `tailscale` or `self-signed` while a certificate is in use.
+   */
+  source: string | null,
+  names: Array<string>,
+  /**
+   * Unix seconds; 0 with no certificate.
+   */
+  not_after: number,
+  days_left: number | null,
+  /**
+   * SHA-256 of the certificate in use, to compare with what a browser shows.
+   */
+  fingerprint: string | null,
+  /**
+   * For a self-signed certificate: the local authority's fingerprint, and whether it is available to download.
+   */
+  ca_fingerprint: string | null,
+  error: string | null,
+  /**
+   * The certificate and key files of a provided certificate (paths, not contents).
+   */
+  cert_path: string | null,
+  /**
+   * A reverse proxy is trusted (`kora panel proxy trust`).
+   */
+  proxy_trusted: boolean,
+};
+
+/**
  * A tool Kora can install or point to. `#[non_exhaustive]`: new tools may be added.
  */
 export type Tool = "git" | "gh" | "mariadb" | "unknown";
@@ -2751,6 +3164,19 @@ export type UpdatedResource = {
 export type UserAddRequest = {
   name: string,
   role: Role,
+};
+
+/**
+ * `GET /users/{name}/credentials` (on the computer that runs Kora).
+ */
+export type UserCredentials = {
+  name: string,
+  role: Role,
+  passkeys: Array<PasskeyView>,
+  code: boolean,
+  recovery_left: number,
+  legacy_token: boolean,
+  signed_in_devices: number,
 };
 
 /**
