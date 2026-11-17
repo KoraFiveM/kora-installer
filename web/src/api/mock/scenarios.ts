@@ -14,7 +14,7 @@ export const SCENARIO_INFO: Record<ScenarioName, string> = {
   down: 'Every request fails with a network error (Kora is not answering).',
   service: "Not an administrator, with Kora's administrator service installed and turned on for you: the administrator parts of an install just happen (no prompt).",
   noservice: "A per-user install without Kora's administrator service: the administrator parts offer the choices (install the service, continue without them, the command).",
-  windows: 'Windows: Kora asks Windows for permission itself. Install names starting with "decline" (No at the prompt), "nobody" (no answer) or "remote" (signed in from another device) show the choices.',
+  windows: "Windows, a per-user install without Kora's administrator service: the administrator parts offer 'Install Kora's administrator service', which runs the installer (one permission prompt) and then works.",
 }
 
 export const STORAGE_KEY = 'kora-mock-scenario'
@@ -49,7 +49,7 @@ export interface Behaviour {
   auth: 'ok' | 'expired' | 'down'
   /** Everything fails in realistic ways. */
   trouble: boolean
-  /** Windows: the panel asks Windows for administrator permission itself (`admin_prompt`). */
+  /** The Windows panel (paths, wording). The windows scenario is also a per-user install without the service. */
   windows: boolean
   /** Not an administrator: Kora's administrator service is `ready` or `missing` (`admin_service`). `none` = the scenario does not say. */
   service: 'none' | 'ready' | 'missing'
@@ -67,7 +67,7 @@ export function behaviourOf(n: ScenarioName): Behaviour {
     case 'trouble':
       return { ...base, trouble: true }
     case 'windows':
-      return { ...base, windows: true }
+      return { ...base, windows: true, service: 'missing' }
     case 'service':
       return { ...base, service: 'ready' }
     case 'noservice':

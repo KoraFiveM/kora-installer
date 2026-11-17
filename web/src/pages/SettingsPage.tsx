@@ -140,7 +140,7 @@ export default function SettingsPage() {
       <Card>
         <CardHeader><CardTitle>About</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p>Kora Panel {meta.data?.version}. It manages FiveM servers on {meta.data?.platform === 'windows' ? 'Windows' : 'Linux'}{sys.data?.helper_installed ? ', with the administrator helper installed' : ''}.</p>
+          <p>Kora Panel {meta.data?.version}. It manages FiveM servers on {meta.data?.platform === 'windows' ? 'Windows' : 'Linux'}{sys.data?.helper_installed ? ', with the administrator service turned on for you' : ''}.</p>
           <p className="text-muted-foreground">Website: koraframe.work</p>
           <p className="text-muted-foreground">Documentation: docs.koraframe.work/guides/installer/overview</p>
           <p className="text-muted-foreground">Source and releases: <a className="text-info underline" href="https://github.com/KoraFiveM/kora-installer" target="_blank" rel="noopener noreferrer">github.com/KoraFiveM/kora-installer</a></p>

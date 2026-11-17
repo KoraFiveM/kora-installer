@@ -16,8 +16,6 @@ interface Hooks {
   github: () => T.GithubStatus
   /** The `trouble` scenario: things are broken in realistic ways. */
   trouble: () => boolean
-  /** The `windows` scenario: the panel asks Windows for administrator permission itself. */
-  windows?: () => boolean
 }
 
 const ghMissing = { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] } satisfies T.Problem
@@ -50,7 +48,7 @@ const tool = (t: 'git' | 'gh'): T.ToolStatus => ({
   can_install: true,
 })
 
-export function installToolchainMock({ route, startJob, Fail, sleep, github, trouble, windows }: Hooks): void {
+export function installToolchainMock({ route, startJob, Fail, sleep, github, trouble }: Hooks): void {
   route('GET', '/tools', () => ({ tools: [tool('git'), tool('gh')] }))
 
   route('POST', '/tools/{tool}/install', (m) => {
@@ -100,7 +98,7 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
       toolItem('gh', 'GitHub CLI', ghMissing),
       github_,
       db,
-      { id: 'admin', label: 'Administrator rights', state: 'info', summary: windows?.() ? 'Kora runs with your normal rights. When something needs administrator rights, Windows asks you for administrator permission on this computer: once for a whole install, once for other actions.' : 'Kora runs with your normal rights. For the steps that need root it shows you the command to run.', problem: null },
+      { id: 'admin', label: 'Administrator rights', state: 'info', summary: 'Kora runs with your normal rights. For the parts that need administrator rights it uses its administrator service when that is installed, and otherwise offers to install it or shows you the command to run.', problem: null },
       { id: 'service', label: 'Background service', state: 'info', summary: 'Not set up: the panel runs only while it is open.', problem: null },
     ]
     return { items, ok: items.every((i) => i.state !== 'problem') } satisfies T.SystemCheck
@@ -110,11 +108,10 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
     if (state.dbRunning) throw new Fail(409, 'conflict', 'The database server is already running.')
     if (trouble()) {
       throw new Fail(403, 'needs_elevation', 'Starting the database server mariadb needs administrator rights. Run this command as administrator:', ['kora', 'check', '--start-database'], {
-        actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', 'check', '--start-database'], elevated: true }],
+        actions: [{ kind: 'show_command', command: ['kora', 'check', '--start-database'], elevated: true }],
       })
     }
     return startJob('db_start', null, async (emit) => {
-      if (windows?.()) emit({ type: 'status', message: 'Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on.' })
       emit({ type: 'status', message: 'Starting the database server mariadb' })
       await sleep(400)
       state.dbRunning = true

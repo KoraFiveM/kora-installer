@@ -49,15 +49,6 @@ function WithCode({ text }: { text: string }) {
 /** The heading of an administrator-rights problem. */
 function adminTitle(code: string): string {
   switch (code) {
-    case 'admin.declined':
-      return 'Windows did not get permission'
-    case 'admin.timed_out':
-      return 'Nobody answered the permission prompt'
-    case 'admin.remote':
-      return 'Windows has to ask on the computer that runs Kora'
-    case 'admin.busy':
-      return 'Windows is still asking'
-    case 'admin.lost':
     case 'service.lost':
       return 'The administrator part stopped'
     case 'service.not_allowed':
@@ -123,8 +114,8 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   const links = p.actions.filter((a): a is Extract<ProblemAction, { kind: 'open_link' }> => a.kind === 'open_link' && a.url.startsWith('https://'))
   const log = p.actions.find((a): a is Extract<ProblemAction, { kind: 'open_log' }> => a.kind === 'open_log')
   const buttons = buttonActions(p, handlers)
-  // Windows can be asked (a "request_admin" button): the command is the last resort, folded away.
-  const canAsk = buttons.some((a) => a.kind === 'request_admin' || a.kind === 'install_admin_service')
+  // The installer can be launched from here (an "install_admin_service" button): the command is the last resort, folded away.
+  const canAsk = buttons.some((a) => a.kind === 'install_admin_service')
   // Without a handler that can launch the installer, say how to install the service (one administrator approval).
   const explainInstall = p.actions.some((a) => a.kind === 'install_admin_service') && !buttons.some((a) => a.kind === 'install_admin_service')
   const fallback = buttons.length === 0 && (!!onRetry || isFailure(p))
@@ -182,7 +173,7 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
           {buttons.map((a, i) => (
             <Button key={`${a.kind}-${i}`} size="sm" variant={i === 0 ? 'default' : 'secondary'} disabled={busy !== null} aria-busy={busy === a} onClick={() => void run(a)}>
               {busy === a && <Loader2 className="animate-spin" aria-hidden />}
-              {actionLabel(a, p)}
+              {actionLabel(a)}
             </Button>
           ))}
           {fallback && onRetry && <Button size="sm" variant="default" onClick={onRetry}>Try again</Button>}

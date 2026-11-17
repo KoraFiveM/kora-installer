@@ -78,8 +78,6 @@ export interface SystemInfo {
   kora_home?: string
   /** True when the panel can restart itself ("Restart now" after a self-update). */
   can_restart?: boolean
-  /** Windows: the panel asks Windows for administrator permission itself (one prompt per install or action). */
-  admin_prompt?: boolean
   /** Kora's administrator service for this account (no prompt when `ready`, locally or remotely). */
   admin_service?: { state: 'ready' | 'missing' | 'not_allowed'; reason?: string }
 }
@@ -139,7 +137,6 @@ export type ProblemAction =
   | { kind: 'change_answers'; section?: string }
   | { kind: 'sign_in_github'; scopes?: string[] }
   | { kind: 'install_tool'; tool: 'git' | 'gh' | 'mariadb' | 'unknown' }
-  | { kind: 'request_admin' }
   | { kind: 'install_admin_service' }
   | { kind: 'continue_without_admin' }
   | { kind: 'show_command'; command: string[]; elevated?: boolean }
@@ -302,8 +299,6 @@ export interface InstallPlan {
   /** Plain-language list of what needs administrator rights. */
   needs_admin: string[]
   notes: string[]
-  /** Windows: these parts are done after ONE permission prompt when the install starts. */
-  admin_prompt?: boolean
   /** Kora's administrator service: `ready` = it does the `needs_admin` parts by itself. */
   admin_service?: 'ready' | 'missing' | 'not_allowed'
 }
