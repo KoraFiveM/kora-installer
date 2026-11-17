@@ -5,7 +5,8 @@ import { ExternalLink, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { InstallDefaults, InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
-import { useServerControl } from '@/hooks/useServerControl'
+import { OpenFolderButton, useTxAdminLink } from '@/components/ServerLinks'
+import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -111,16 +112,25 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk }: {
 }
 
 export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin: number }; cfx?: string | null }) {
-  const ctl = useServerControl(o.name)
-  const tx = `http://${window.location.hostname}:${ports.txadmin}`
+  // The same address, hint and note the server's Overview page gives (right for local, tunnelled and remote visits).
+  const link = useTxAdminLink(ports.txadmin)
+  const tx = link.url
   return (
     <div className="space-y-4">
       <Alert tone={o.running ? 'success' : 'warning'} title={o.running ? 'Your server is installed and running' : 'Your server is installed'}>
         {o.running ? 'Players can connect now.' : o.launch_problem ?? 'It was not started. Start it from the server page.'}
       </Alert>
       {!o.running && o.log_tail.length > 0 && <pre className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{o.log_tail.join('\n')}</pre>}
-      <div className="space-y-1.5"><div className="text-sm text-muted-foreground">Connect address</div><CopyField value={o.connect} label="Connect address" /></div>
-      <div className="space-y-1.5"><div className="text-sm text-muted-foreground">txAdmin</div><CopyField value={tx} label="txAdmin address" /></div>
+      <div className="space-y-1.5">
+        <div className="text-sm text-muted-foreground">Connect address (players type this in the FiveM console, or use direct connect)</div>
+        <CopyField value={o.connect} label="Connect address" />
+        <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
+      </div>
+      <div className="space-y-1.5">
+        <div className="text-sm text-muted-foreground">txAdmin</div>
+        <CopyField value={tx} label="txAdmin address" />
+        {link.hint && <p className="text-xs text-muted-foreground">{link.hint}</p>}
+      </div>
       {!o.admin_user && cfx && (
         <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
       )}
@@ -131,7 +141,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="default"><a href={tx} target="_blank" rel="noopener noreferrer"><ExternalLink /> Open txAdmin</a></Button>
         <CopyButton text={o.connect} label="Copy connect address" size="default" />
-        <Button disabled={ctl.busy} onClick={() => ctl.run('stop')}>Stop server</Button>
+        <OpenFolderButton name={o.name} dir={o.dir} size="default" />
         <Button asChild><Link to={`/servers/${encodeURIComponent(o.name)}`}>Go to the server</Link></Button>
       </div>
     </div>

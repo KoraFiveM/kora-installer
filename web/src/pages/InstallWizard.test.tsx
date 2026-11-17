@@ -365,6 +365,10 @@ describe('Install wizard: when a step fails', () => {
     expect(await heading('All done')).toBeInTheDocument()
     expect(resume).toHaveBeenCalledTimes(1)
     expect(resume.mock.calls[0][1]).toBeUndefined() // no step skipped
+    // The finished page says the same things as the server's Overview page (note about the address, folder button), and has no "Stop server".
+    expect(screen.getByText(/address on your own network/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Copy path|Open folder/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop server' })).not.toBeInTheDocument()
   })
 
   it('offers to skip a step that is safe to skip, and finishes without it', async () => {
