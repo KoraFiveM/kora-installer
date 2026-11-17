@@ -318,5 +318,6 @@ pub fn spec(op: Op) -> OpSpec {
         Op::TlsStatus => OpSpec::get::<w::TlsStatus>(),
         Op::TlsRenew => OpSpec::get::<w::TlsStatus>(),
         Op::TlsCa => OpSpec::get::<w::TlsCa>(),
+        Op::KeychainSet => OpSpec::call::<w::KeychainSet, w::KeychainChanged>(),
     }
 }

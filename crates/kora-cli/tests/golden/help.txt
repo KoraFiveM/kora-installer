@@ -1281,12 +1281,13 @@ Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a serv
 Usage: kora keys [OPTIONS] <COMMAND>
 
 Commands:
-  list     List the saved keys (name and the last 4 characters only) and which servers use them
-  add      Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
-  replace  Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
-  rename   Give a saved key another name
-  remove   Forget a saved key. Servers installed with it keep working: they have their own copy
-  use      Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
+  list      List the saved keys (name and the last 4 characters only) and which servers use them
+  add       Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
+  replace   Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
+  rename    Give a saved key another name
+  remove    Forget a saved key. Servers installed with it keep working: they have their own copy
+  keychain  Where the saved keys are kept: Kora's private file, or the system keychain (Windows: protected for your account; Linux: GNOME Keyring, KWallet)
+  use       Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
 
 Options:
       --no-elevate
@@ -1371,6 +1372,59 @@ Options:
   -y, --yes
           Do not ask for confirmation
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain =====
+Where the saved keys are kept: Kora's private file, or the system keychain (Windows: protected for your account; Linux: GNOME Keyring, KWallet)
+
+Usage: kora keys keychain [OPTIONS] <COMMAND>
+
+Commands:
+  status  Show where each saved key is kept, and where new ones go
+  on      Use the system keychain (when this computer has one) and move the saved keys into it
+  off     Keep every key in Kora's private file: moves them back out of the keychain. The way back to Kora 0.7 is `kora store export-json`, which carries every key
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain status =====
+Show where each saved key is kept, and where new ones go
+
+Usage: kora keys keychain status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain on =====
+Use the system keychain (when this computer has one) and move the saved keys into it
+
+Usage: kora keys keychain on [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain off =====
+Keep every key in Kora's private file: moves them back out of the keychain. The way back to Kora 0.7 is `kora store export-json`, which carries every key
+
+Usage: kora keys keychain off [OPTIONS]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

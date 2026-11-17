@@ -199,7 +199,8 @@ pub fn min_role(op: Op) -> Role {
         | Op::ApiTokenRevoke
         | Op::TlsStatus
         | Op::TlsRenew
-        | Op::TlsCa => Admin,
+        | Op::TlsCa
+        | Op::KeychainSet => Admin,
     }
 }
 
@@ -343,7 +344,8 @@ pub fn destructive(op: Op) -> bool {
         | Op::ApiTokenRevoke
         | Op::TlsStatus
         | Op::TlsRenew
-        | Op::TlsCa => false,
+        | Op::TlsCa
+        | Op::KeychainSet => false,
     }
 }
 
@@ -477,7 +479,8 @@ pub fn installs(op: Op) -> bool {
         | Op::ApiTokenRevoke
         | Op::TlsStatus
         | Op::TlsRenew
-        | Op::TlsCa => false,
+        | Op::TlsCa
+        | Op::KeychainSet => false,
     }
 }
 
@@ -536,7 +539,8 @@ pub fn local_only(op: Op) -> bool {
         | Op::ApiTokensList
         | Op::ApiTokenCreate
         | Op::ApiTokenRevoke
-        | Op::TlsRenew => true,
+        | Op::TlsRenew
+        | Op::KeychainSet => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo

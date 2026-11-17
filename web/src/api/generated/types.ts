@@ -1636,6 +1636,50 @@ export type KeyUpdateRequest = {
   license_key?: string,
 };
 
+/**
+ * `PUT /keys/keychain` answer.
+ */
+export type KeychainChanged = {
+  keychain: KeychainView,
+  moved: number,
+  /**
+   * Keys that could not be moved (they stay where they are): name and why.
+   */
+  left: Array<string>,
+};
+
+/**
+ * `PUT /keys/keychain`.
+ */
+export type KeychainSet = {
+  /**
+   * `on`: use the keychain and move the saved keys in; `off`: move them back into Kora's private file.
+   */
+  use_keychain: boolean,
+};
+
+/**
+ * Where saved keys are kept and what happens to new ones.
+ */
+export type KeychainView = {
+  /**
+   * `auto` (use the system keychain when there is one) or `off` (Kora's private file only).
+   */
+  mode: string,
+  /**
+   * A sentence for Settings: where new keys go and why.
+   */
+  line: string,
+  /**
+   * Where new keys go now: `store`, `dpapi` or `secret-service`.
+   */
+  active: string,
+  /**
+   * A system keychain can be used from here right now.
+   */
+  available: boolean,
+};
+
 export type Kind = "kora" | "dependency" | "optional" | "internal";
 
 export type Layer = {
@@ -2477,6 +2521,15 @@ export type SavedKey = {
    * Unfinished installs (and saved answers) that use it.
    */
   stopped_installs: number,
+  /**
+   * Where the value is kept, in words ("Kora's private file", "your system keychain").
+   */
+  kept: string,
+  /**
+   * The value cannot be read from here right now (the keychain is locked, this session cannot reach it, the entry was deleted):
+   * why and what to do. The key then needs entering again.
+   */
+  problem: string | null,
 };
 
 /**
@@ -2504,6 +2557,7 @@ export type SavedKeys = {
    * Where the file is (only told to the computer that runs Kora).
    */
   path: string | null,
+  keychain: KeychainView,
 };
 
 /**

@@ -550,6 +550,7 @@ const UNVERIFIED: &[(Op, &str)] = &[
     (Op::ApiTokenRevoke, "204"),
     (Op::TlsRenew, "needs the panel's certificate manager"),
     (Op::TlsCa, "needs a local certificate authority; covered by the tls tests"),
+    (Op::KeychainSet, "moves the keys of the Kora home; covered by the keychain tests in kora-core and tests/keys.rs"),
     (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),

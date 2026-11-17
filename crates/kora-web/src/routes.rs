@@ -137,6 +137,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::TlsStatus => on_op(op, handlers::tls_api::tls_status),
         Op::TlsRenew => on_op(op, handlers::tls_api::tls_renew),
         Op::TlsCa => on_op(op, handlers::tls_api::tls_ca),
+        Op::KeychainSet => on_op(op, handlers::keys::keychain_set),
         // The zip is the request body: streamed to a file, so the panel-wide 1 MiB limit does not apply.
         Op::AssetInspect => on_op(op, handlers::assets::asset_inspect).layer(DefaultBodyLimit::max(handlers::assets::UPLOAD_LIMIT as usize)),
         Op::AssetImport => on_op(op, handlers::assets::asset_import),

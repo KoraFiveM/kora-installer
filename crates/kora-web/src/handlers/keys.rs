@@ -72,9 +72,35 @@ pub async fn keys_list(State(st): State<AppState>, Extension(c): Extension<Calle
                 added: k.added,
                 servers: used.clone(),
                 stopped_installs: u32::try_from(pending.count_key_with_saved(&saved, &k.name)).unwrap_or(u32::MAX),
+                kept: k.kept.clone(),
+                problem: k.problem.clone(),
             })
             .collect();
-        Ok(Json(wire::SavedKeys { keys, can_manage, path: (!remote).then(|| store.path().display().to_string()) }))
+        Ok(Json(wire::SavedKeys { keys, can_manage, path: (!remote).then(|| store.path().display().to_string()), keychain: keychain_view(&store)? }))
+    })
+    .await
+}
+
+fn keychain_view(store: &KeyStore) -> Result<wire::KeychainView, ApiError> {
+    let st = store.keychain_status().map_err(api)?;
+    Ok(wire::KeychainView {
+        mode: if st.mode == kora_core::store::keychain::Mode::Off { "off".into() } else { "auto".into() },
+        line: st.line,
+        active: st.active.as_str().into(),
+        available: st.active != kora_core::store::keychain::Place::Store,
+    })
+}
+
+/// `PUT /keys/keychain` `{use_keychain}` (the computer that runs Kora): turn the keychain on and move the saved keys in, or
+/// off and move them back into Kora's private file. A key that cannot be moved stays where it is and is listed.
+pub async fn keychain_set(Extension(c): Extension<Caller>, Json(body): Json<wire::KeychainSet>) -> Result<Json<wire::KeychainChanged>, ApiError> {
+    if c.remote {
+        return Err(ApiError::forbidden("This can only be done on the computer that runs Kora, not over remote access."));
+    }
+    blocking(move || {
+        let store = KeyStore::default();
+        let moved = if body.use_keychain { store.keychain_on() } else { store.keychain_off() }.map_err(api)?;
+        Ok(Json(wire::KeychainChanged { keychain: keychain_view(&store)?, moved: moved.moved as u32, left: moved.left.into_iter().map(|(n, why)| format!("{n}: {why}")).collect() }))
     })
     .await
 }

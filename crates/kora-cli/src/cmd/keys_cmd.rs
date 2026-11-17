@@ -35,6 +35,11 @@ pub enum KeysCmd {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+    /// Where the saved keys are kept: Kora's private file, or the system keychain (Windows: protected for your account; Linux: GNOME Keyring, KWallet).
+    Keychain {
+        #[command(subcommand)]
+        cmd: KeychainCmd,
+    },
     /// Change the licence key of an installed server to a saved key (restart the server afterwards if it is running).
     Use {
         /// Registry name of the server.
@@ -42,6 +47,16 @@ pub enum KeysCmd {
         /// The saved key to use.
         name: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum KeychainCmd {
+    /// Show where each saved key is kept, and where new ones go.
+    Status,
+    /// Use the system keychain (when this computer has one) and move the saved keys into it.
+    On,
+    /// Keep every key in Kora's private file: moves them back out of the keychain. The way back to Kora 0.7 is `kora store export-json`, which carries every key.
+    Off,
 }
 
 #[derive(Subcommand)]
@@ -92,7 +107,8 @@ pub fn keys(cmd: KeysCmd) -> i32 {
                 Ok(list) => {
                     for (k, used) in list {
                         let used = if used.is_empty() { String::new() } else { format!("  used by: {}", used.join(", ")) };
-                        println!("{}  (key ending {}){used}", k.name, k.last4);
+                        let problem = k.problem.as_ref().map(|p| format!("\n    PROBLEM: {p}")).unwrap_or_default();
+                        println!("{}  (key ending {}, kept in {}){used}{problem}", k.name, k.last4, k.kept);
                     }
                     0
                 }
@@ -156,6 +172,7 @@ pub fn keys(cmd: KeysCmd) -> i32 {
                 Err(p) => say(p),
             }
         }
+        KeysCmd::Keychain { cmd } => keychain(&store, cmd),
         KeysCmd::Use { server, name } => {
             let reg = match registry::Registry::load() {
                 Ok(r) => r,
@@ -184,6 +201,45 @@ pub fn keys(cmd: KeysCmd) -> i32 {
             }
             0
         }
+    }
+}
+
+fn keychain(store: &KeyStore, cmd: KeychainCmd) -> i32 {
+    let report = |moved: kora_core::store::keychain::Moved| {
+        for (n, why) in &moved.left {
+            println!("  could not move \"{n}\": {why} (it stays where it is)");
+        }
+    };
+    match cmd {
+        KeychainCmd::Status => match store.keychain_status() {
+            Ok(st) => {
+                println!("{}", st.line);
+                if st.keys.is_empty() {
+                    println!("No saved licence keys yet.");
+                }
+                for k in &st.keys {
+                    println!("  {:<24} kept in {}{}", k.name, k.place.label(), k.problem.as_ref().map(|p| format!("\n    PROBLEM: {p}")).unwrap_or_default());
+                }
+                0
+            }
+            Err(p) => say(p),
+        },
+        KeychainCmd::On => match store.keychain_on() {
+            Ok(m) => {
+                println!("Moved {} into the system keychain. New keys go there too.", plural(m.moved, "key", "keys"));
+                report(m);
+                0
+            }
+            Err(p) => say(p),
+        },
+        KeychainCmd::Off => match store.keychain_off() {
+            Ok(m) => {
+                println!("Moved {} back into Kora's private file. New keys stay there too.", plural(m.moved, "key", "keys"));
+                report(m);
+                0
+            }
+            Err(p) => say(p),
+        },
     }
 }
 
@@ -287,7 +343,7 @@ mod tests {
             assert!(sub.get_arguments().all(|a| !a.get_id().as_str().contains("key") || a.get_id() == "name"), "{}", sub.get_name());
         }
         let names: Vec<_> = keys.get_subcommands().map(|s| s.get_name().to_string()).collect();
-        assert_eq!(names, ["list", "add", "replace", "rename", "remove", "use"]);
+        assert_eq!(names, ["list", "add", "replace", "rename", "remove", "keychain", "use"]);
     }
 
     #[test]

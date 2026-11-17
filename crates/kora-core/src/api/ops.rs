@@ -193,6 +193,8 @@ pub enum Op {
     TlsRenew,
     /// The local certificate authority's certificate (public), to trust it once.
     TlsCa,
+    /// Use the system keychain for saved licence keys (and move them in), or keep them all in Kora's private file.
+    KeychainSet,
 }
 
 impl Op {
@@ -324,6 +326,7 @@ impl Op {
         Op::TlsStatus,
         Op::TlsRenew,
         Op::TlsCa,
+        Op::KeychainSet,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -456,6 +459,7 @@ impl Op {
             Op::TlsStatus => "tls_status",
             Op::TlsRenew => "tls_renew",
             Op::TlsCa => "tls_ca",
+            Op::KeychainSet => "keychain_set",
         }
     }
 
@@ -591,6 +595,7 @@ impl Op {
             Op::TlsStatus => (Method::Get, "/tls"),
             Op::TlsRenew => (Method::Post, "/tls/renew"),
             Op::TlsCa => (Method::Get, "/tls/ca"),
+            Op::KeychainSet => (Method::Put, "/keys/keychain"),
         }
     }
 
@@ -818,13 +823,14 @@ mod tests {
             | Op::ApiTokenRevoke
             | Op::TlsStatus
             | Op::TlsRenew
-            | Op::TlsCa => Op::ALL.contains(&op),
+            | Op::TlsCa
+            | Op::KeychainSet => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 127);
+        assert_eq!(Op::ALL.len(), 128);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

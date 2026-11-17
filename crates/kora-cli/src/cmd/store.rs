@@ -219,6 +219,7 @@ fn op_of(path: &[&str]) -> Option<Op> {
         ["keys", "replace"] | ["keys", "rename"] => Op::KeyUpdate,
         ["keys", "remove"] => Op::KeyRemove,
         ["keys", "use"] => Op::ServerKeySet,
+        ["keys", "keychain", "on"] | ["keys", "keychain", "off"] => Op::KeychainSet,
         ["profile", "forget"] => Op::ProfileSet,
         ["branch", "switch"] | ["branch", "default"] | ["pr", "checkout"] => Op::BranchSwitch,
         ["branch", "all"] => Op::BranchBulkApply,
