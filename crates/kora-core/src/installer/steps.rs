@@ -285,7 +285,7 @@ fn db_stopped(name: &str, start: &[&str]) -> Problem {
 fn db_needs_admin(req: &InstallRequest, why: String) -> Problem {
     Problem::new(codes::NEEDS_ELEVATION, "Installing the database server needs administrator rights.")
         .with_details(why)
-        .with_action(Action::RequestAdmin)
+        .with_action(Action::InstallAdminService)
         .with_action(Action::show_command(&crate::api::install::install_command(req), true))
         .with_action(Action::change_answers("database"))
 }
@@ -293,7 +293,7 @@ fn db_needs_admin(req: &InstallRequest, why: String) -> Problem {
 /// Git is missing, and the system package manager (administrator rights) is the way to get it.
 fn git_needs_admin() -> Problem {
     Problem::new(codes::INSTALL_TOOL_MISSING, "Git is not installed, and installing it here needs administrator rights.")
-        .with_action(Action::RequestAdmin)
+        .with_action(Action::InstallAdminService)
         .with_action(Action::open_link(known::GIT_URL))
 }
 
@@ -1963,7 +1963,7 @@ mod problem_tests {
     fn tool_and_database_problems_offer_fitting_actions() {
         let p = git_needs_admin();
         assert_eq!(p.code, codes::INSTALL_TOOL_MISSING);
-        assert_eq!(p.actions[0], Action::RequestAdmin);
+        assert_eq!(p.actions[0], Action::InstallAdminService);
         assert!(!p.actions.contains(&Action::InstallTool { tool: Tool::Gh }), "gh is never installed by the system package manager");
 
         let p = db_stopped("mariadb", &["systemctl", "start", "mariadb"]);
