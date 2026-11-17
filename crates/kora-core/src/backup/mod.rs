@@ -58,6 +58,7 @@ pub mod codes {
 
 pub mod create;
 pub mod host;
+pub mod import;
 pub mod resources;
 pub mod restore;
 pub mod scheduler;

@@ -124,7 +124,7 @@ fn prune_uploads(dir: &FsPath) {
 }
 
 /// Stream `body` into `path` (a new file), at most `limit` bytes. The file is removed on failure.
-async fn save_body(body: Body, path: PathBuf, limit: u64) -> Result<u64, ApiError> {
+pub(crate) async fn save_body(body: Body, path: PathBuf, limit: u64) -> Result<u64, ApiError> {
     use tokio_stream::StreamExt;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Bytes>(8);
     let p = path.clone();

@@ -216,3 +216,43 @@ pub fn overview<B: Backend + ?Sized>(b: &mut B) -> Res<crate::api::wire::Backups
         .collect();
     Ok(crate::api::wire::BackupsOverview { servers })
 }
+
+// ---- importing a server from a backup (see `super::import`)
+
+fn open_source(src: &super::import::ImportSource, allow_path: bool) -> Result<PathBuf, String> {
+    super::import::resolve_source(src, allow_path).map_err(pack)
+}
+
+pub fn import_inspect(src: &super::import::ImportSource, passphrase: Option<&str>, allow_path: bool, servers: &[ServerEntry]) -> Res<super::import::ImportPreview> {
+    let file = open_source(src, allow_path)?;
+    let keys: Vec<String> = crate::keystore::KeyStore::default().list().map(|l| l.into_iter().map(|k| k.name).collect()).unwrap_or_default();
+    super::import::inspect(&file, passphrase, servers, &keys, &super::import::SystemPorts, &crate::api::install::default_dir).map_err(pack)
+}
+
+pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(BackupEvent)) -> Res<super::import::ImportResult> {
+    let file = open_source(&req.source, allow_path)?;
+    let servers = b.list()?;
+    let (db, git) = (SystemRunner, crate::git::SystemRunner);
+    let tools = tools_for(&db, &git);
+    let admin = crate::installer::admin_conn_for(None);
+    let prov = super::import::SystemProvisioner { admin };
+    let keys = crate::keystore::KeyStore::default();
+    let saved = |n: &str| keys.get(n).ok();
+    let env = super::import::Env { tools: &tools, fetcher: &super::import::SystemFetcher, provisioner: Some(&prov), saved_key: &saved, ports: &super::import::SystemPorts, servers };
+    let result = super::import::run(req, &file, &env, say).map_err(pack)?;
+    // the upload has done its job
+    if let Some(id) = req.source.upload.as_deref() {
+        let _ = std::fs::remove_dir_all(super::import::imports_dir().join(id));
+    }
+    if req.start {
+        if let Some(e) = b.list()?.into_iter().find(|e| e.name == req.choices.name) {
+            let mut r = result;
+            r.started = b.control(&e, crate::service::ControlAction::Start).is_ok();
+            if !r.started {
+                r.problems.push("The server was imported but did not start. Start it from its page to see why.".into());
+            }
+            return Ok(r);
+        }
+    }
+    Ok(result)
+}

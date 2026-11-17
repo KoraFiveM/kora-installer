@@ -902,6 +902,21 @@ export type CheckItem = {
 export type CheckState = "ok" | "problem" | "info";
 
 /**
+ * A thing in the way, and what to do about it.
+ */
+export type Clash = {
+  /**
+   * `name`, `game_port`, `txadmin_port`, `folder`.
+   */
+  kind: string,
+  message: string,
+  /**
+   * What Kora suggests instead (a name, a port number, a folder), when it has one.
+   */
+  suggestion?: string,
+};
+
+/**
  * The addresses to give people, each for who it works for.
  */
 export type Connect = {
@@ -1364,6 +1379,115 @@ export type Identity = {
  */
 export type IdsRequest = {
   ids: Array<string>,
+};
+
+export type ImportChoices = {
+  name: string,
+  dir: string,
+  game_port: number,
+  txadmin_port: number,
+};
+
+/**
+ * `POST /backups/import/inspect`.
+ */
+export type ImportInspectRequest = {
+  source: ImportSource,
+  passphrase?: string,
+};
+
+export type ImportPreview = {
+  file_name: string,
+  encrypted: boolean,
+  /**
+   * A password is needed (and was not given or was wrong): nothing else is known yet.
+   */
+  needs_passphrase: boolean,
+  created_unix: number,
+  server: ServerInfo | null,
+  database: DatabaseBackup | null,
+  by_reference: number,
+  in_full: number,
+  /**
+   * What Kora suggests for this computer.
+   */
+  suggested: ImportChoices | null,
+  clashes: Array<Clash>,
+  /**
+   * What will be created, in words.
+   */
+  will_create: Array<string>,
+  /**
+   * What does not come along, in words.
+   */
+  wont_carry: Array<string>,
+  warnings: Array<string>,
+  /**
+   * The saved licence keys (names only) that could be used instead of the one in the file.
+   */
+  saved_keys: Array<string>,
+  /**
+   * The licence-key warning, always shown.
+   */
+  licence_note: string,
+};
+
+export type ImportRequest = {
+  source: ImportSource,
+  passphrase?: string,
+  choices: ImportChoices,
+  /**
+   * Use a saved licence key instead of the one in the file.
+   */
+  licence_key_name?: string,
+  /**
+   * Start the server when it is imported.
+   */
+  start: boolean,
+  /**
+   * Remove what an earlier, failed import of this server made, and begin again.
+   */
+  start_over: boolean,
+};
+
+export type ImportResult = {
+  name: string,
+  dir: string,
+  resources_fetched: Array<string>,
+  /**
+   * Things that did not work, one sentence each (the import still completed).
+   */
+  problems: Array<string>,
+  notes: Array<string>,
+  started: boolean,
+  /**
+   * Steps to do next on THIS computer, in words (open the firewall, set up the service...).
+   */
+  next_steps: Array<string>,
+  /**
+   * How to remove the server from the OLD computer, as instructions (Kora never reaches into another machine).
+   */
+  old_machine_steps: Array<string>,
+};
+
+/**
+ * Where the file is: uploaded through the panel, or a path on this computer (local sessions only).
+ */
+export type ImportSource = {
+  upload?: string,
+  path?: string,
+};
+
+/**
+ * `POST /backups/import/upload` answers this: the file is on this computer, waiting.
+ */
+export type ImportUploaded = {
+  /**
+   * The id to give `inspect` and `import` as `source.upload`.
+   */
+  upload: string,
+  file_name: string,
+  bytes: number,
 };
 
 export type ImportedAsset = {

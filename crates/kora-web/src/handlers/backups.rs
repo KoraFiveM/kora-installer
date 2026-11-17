@@ -228,3 +228,96 @@ mod tests {
         assert!(!valid_id("../etc") && !valid_id("") && !valid_id("a b"));
     }
 }
+
+// ---- bringing a server from a backup (Part "move a server")
+
+/// The largest backup file accepted as an upload.
+pub const IMPORT_UPLOAD_LIMIT: u64 = 20 << 30;
+
+/// A safe file name for an uploaded backup: letters, digits, `-`, `_`, `.`; ends like a backup (`.tar.gz`, `.tar.gz.age`, `.age`, `.gz`).
+fn import_name(h: &axum::http::HeaderMap) -> String {
+    let raw = h.get("x-file-name").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let decoded: String = {
+        let b = raw.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'%' && i + 2 < b.len() {
+                if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|x| u8::from_str_radix(x, 16).ok()) {
+                    out.push(v);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(b[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    let base = decoded.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let clean: String = base.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')).take(120).collect();
+    let clean = clean.trim_start_matches('.').to_string();
+    if clean.is_empty() || clean.contains("..") || !(clean.ends_with(".age") || clean.ends_with(".gz")) {
+        "backup.tar.gz.age".into()
+    } else {
+        clean
+    }
+}
+
+/// `POST /backups/import/upload`: the file is the request body, streamed to the Kora home's `imports/<id>/` (never held
+/// in memory), up to [`IMPORT_UPLOAD_LIMIT`]. Old uploads (a day) are cleared away.
+pub async fn backup_import_upload(Extension(caller): Extension<Caller>, headers: axum::http::HeaderMap, body: Body) -> Result<Json<Value>, ApiError> {
+    let _ = &caller;
+    let declared = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+    if declared.is_some_and(|n| n > IMPORT_UPLOAD_LIMIT) {
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "too_large", format!("That file is larger than {}, too big for a server backup.", kora_core::space::human(IMPORT_UPLOAD_LIMIT))));
+    }
+    let id = crate::security::random_hex();
+    let root = kora_core::backup::import::imports_dir();
+    let dir = root.join(&id);
+    let (r2, d2) = (root.clone(), dir.clone());
+    blocking(move || {
+        // a day-old upload is cleared away
+        let now = std::time::SystemTime::now();
+        for e in std::fs::read_dir(&r2).into_iter().flatten().flatten() {
+            if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).is_some_and(|d| d.as_secs() > 24 * 3600) {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+        std::fs::create_dir_all(&d2).map_err(|x| ApiError::internal(format!("Can't save the upload: {x}")))?;
+        kora_core::store::privacy::tighten_dir(&r2);
+        kora_core::store::privacy::tighten_dir(&d2);
+        Ok(())
+    })
+    .await?;
+    let name = import_name(&headers);
+    let path = dir.join(&name);
+    let bytes = match super::assets::save_body(body, path, IMPORT_UPLOAD_LIMIT).await {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+    };
+    Ok(Json(json!(kora_core::api::wire::ImportUploaded { upload: id, file_name: name, bytes })))
+}
+
+pub async fn backup_import_inspect(State(st): State<AppState>, Extension(caller): Extension<Caller>, Json(body): Json<kora_core::api::wire::ImportInspectRequest>) -> Result<Json<Value>, ApiError> {
+    let local = !caller.remote;
+    blocking(move || {
+        let v = st.backend().import_inspect(&body.source, body.passphrase.as_deref(), local).map_err(ApiError::core)?;
+        Ok(Json(to_json(&v)?))
+    })
+    .await
+}
+
+pub async fn backup_import_start(State(st): State<AppState>, Extension(caller): Extension<Caller>, Json(body): Json<kora_core::backup::import::ImportRequest>) -> Result<Response, ApiError> {
+    let local = !caller.remote;
+    let make = st.backend.clone();
+    // The job belongs to the new server's name: two imports of the same name cannot run at once.
+    let name = body.choices.name.clone();
+    st.spawn_job(Op::BackupImportStart, Some(name), move |h| {
+        let r = make().import_run(&body, local, &mut |ev| h.event(json!(ev)))?;
+        serde_json::to_value(&r).map_err(|x| x.to_string())
+    })
+}

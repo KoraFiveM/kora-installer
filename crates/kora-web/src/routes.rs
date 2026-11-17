@@ -134,6 +134,10 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::BackupDelete => on_op(op, handlers::backups::backup_delete),
         Op::BackupDownload => on_op(op, handlers::backups::backup_download),
         Op::BackupsOverview => on_op(op, handlers::backups::backups_overview),
+        // The backup file is the request body: streamed to disk, so the panel-wide 1 MiB limit does not apply.
+        Op::BackupImportUpload => on_op(op, handlers::backups::backup_import_upload).layer(DefaultBodyLimit::max(handlers::backups::IMPORT_UPLOAD_LIMIT as usize)),
+        Op::BackupImportInspect => on_op(op, handlers::backups::backup_import_inspect),
+        Op::BackupImportStart => on_op(op, handlers::backups::backup_import_start),
         Op::SupportBundlePreview => on_op(op, handlers::support::support_bundle_preview),
         Op::SupportBundleFile => on_op(op, handlers::support::support_bundle_file),
         Op::SupportBundleCreate => on_op(op, handlers::support::support_bundle_create),

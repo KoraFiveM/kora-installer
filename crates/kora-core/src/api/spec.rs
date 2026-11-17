@@ -317,6 +317,10 @@ pub fn spec(op: Op) -> OpSpec {
         // The saved zip itself (binary): downloaded by the panel, not called through the generated client.
         Op::SupportBundleDownload => OpSpec::nothing(),
         Op::SupportSummary => OpSpec::call::<w::SupportRequest, w::SupportSummary>(),
+        // The backup file is the request body (streamed to disk); the answer says where it is.
+        Op::BackupImportUpload => OpSpec { query: None, body: Body::Raw("application/octet-stream"), response: Resp::Json(Ty::of::<w::ImportUploaded>()), job: None },
+        Op::BackupImportInspect => OpSpec::call::<w::ImportInspectRequest, crate::backup::import::ImportPreview>(),
+        Op::BackupImportStart => OpSpec::start_job_with::<crate::backup::import::ImportRequest>().events::<crate::backup::BackupEvent>().result::<crate::backup::import::ImportResult>(),
         Op::BackupDelete => OpSpec::nothing(),
         // The archive file itself (binary): not JSON, so the generated client does not call it; the panel opens it as a download.
         Op::BackupDownload => OpSpec::nothing(),

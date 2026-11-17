@@ -197,6 +197,12 @@ pub enum Op {
     SupportBundleDownload,
     /// The short cleaned text a bug report may attach.
     SupportSummary,
+    /// Upload a backup file to this computer, to bring its server in (administrators).
+    BackupImportUpload,
+    /// Look at a backup file: the server in it, what would be created, what is in the way. Reads only.
+    BackupImportInspect,
+    /// Bring the server in a backup onto this computer as a new server (a job; administrators).
+    BackupImportStart,
 }
 
 impl Op {
@@ -330,6 +336,9 @@ impl Op {
         Op::SupportBundleCreate,
         Op::SupportBundleDownload,
         Op::SupportSummary,
+        Op::BackupImportUpload,
+        Op::BackupImportInspect,
+        Op::BackupImportStart,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -464,6 +473,9 @@ impl Op {
             Op::SupportBundleCreate => "support_bundle_create",
             Op::SupportBundleDownload => "support_bundle_download",
             Op::SupportSummary => "support_summary",
+            Op::BackupImportUpload => "backup_import_upload",
+            Op::BackupImportInspect => "backup_import_inspect",
+            Op::BackupImportStart => "backup_import_start",
         }
     }
 
@@ -601,6 +613,9 @@ impl Op {
             Op::SupportBundleCreate => (Method::Post, "/support/bundle"),
             Op::SupportBundleDownload => (Method::Get, "/support/bundle/{file}"),
             Op::SupportSummary => (Method::Post, "/support/summary"),
+            Op::BackupImportUpload => (Method::Post, "/backups/import/upload"),
+            Op::BackupImportInspect => (Method::Post, "/backups/import/inspect"),
+            Op::BackupImportStart => (Method::Post, "/backups/import"),
         }
     }
 
@@ -631,6 +646,7 @@ impl Op {
                 | Op::BackupUndo
                 | Op::BackupVerify
                 | Op::BackupRestore
+                | Op::BackupImportStart
         )
     }
 
@@ -834,13 +850,16 @@ mod tests {
             | Op::SupportBundleFile
             | Op::SupportBundleCreate
             | Op::SupportBundleDownload
-            | Op::SupportSummary => Op::ALL.contains(&op),
+            | Op::SupportSummary
+            | Op::BackupImportUpload
+            | Op::BackupImportInspect
+            | Op::BackupImportStart => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 129);
+        assert_eq!(Op::ALL.len(), 132);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

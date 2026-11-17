@@ -473,6 +473,57 @@ impl Backend for FakeBackend {
         self.state().calls.push(format!("backup_prune {}", e.name));
         Ok(vec!["20260101-000000".into()])
     }
+    fn import_inspect(&mut self, src: &crate::backup::import::ImportSource, passphrase: Option<&str>, allow_path: bool) -> Res<crate::backup::import::ImportPreview> {
+        self.state().calls.push(format!("import_inspect path={} upload={} password={} local={allow_path}", src.path.is_some(), src.upload.is_some(), passphrase.is_some()));
+        Ok(crate::backup::import::ImportPreview {
+            file_name: "prod-20260320-030000.tar.gz.age".into(),
+            encrypted: true,
+            needs_passphrase: false,
+            created_unix: 1_773_700_000,
+            server: Some(crate::backup::ServerInfo {
+                name: "Old server".into(),
+                mode: "production".into(),
+                game_port: 30120,
+                txadmin_port: 40120,
+                game_build: 3258,
+                artifact_build: 17000,
+                os: "windows".into(),
+                dir: "C:\\Servers\\old".into(),
+                github_owner: None,
+            }),
+            database: Some(crate::backup::DatabaseBackup {
+                kind: crate::backup::DbKind::Dumped,
+                name: Some("kora_ab12".into()),
+                host: Some("127.0.0.1".into()),
+                port: Some(3306),
+                dump_bytes: 9_000_000,
+                note: String::new(),
+            }),
+            by_reference: 40,
+            in_full: 2,
+            suggested: Some(crate::backup::import::ImportChoices { name: "Old server".into(), dir: "/home/me/kora/old-server".into(), game_port: 30121, txadmin_port: 40121 }),
+            clashes: vec![crate::backup::import::Clash { kind: "game_port".into(), message: "The game port 30120 is already used on this computer.".into(), suggestion: Some("30121".into()) }],
+            will_create: vec!["A new server \"Old server\"".into()],
+            wont_carry: vec!["The operating-system service".into()],
+            warnings: vec!["This server was made on a different operating system.".into()],
+            saved_keys: vec!["Main".into()],
+            licence_note: crate::backup::import::LICENCE_NOTE.into(),
+        })
+    }
+    fn import_run(&mut self, req: &crate::backup::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::import::ImportResult> {
+        self.state().calls.push(format!("import_run {} dir={} local={allow_path}", req.choices.name, req.choices.dir));
+        say(crate::backup::BackupEvent { step: "database".into(), message: "Creating a new database and login".into(), percent: 50 });
+        Ok(crate::backup::import::ImportResult {
+            name: req.choices.name.clone(),
+            dir: req.choices.dir.clone(),
+            resources_fetched: vec![],
+            problems: vec![],
+            notes: vec![],
+            started: false,
+            next_steps: vec!["Open the ports".into()],
+            old_machine_steps: vec!["Remove it from the OLD computer".into()],
+        })
+    }
     fn support_preview(&mut self, server: Option<&str>) -> Res<crate::api::wire::BundleListing> {
         self.state().calls.push(format!("support_preview {}", server.unwrap_or("-")));
         let mut b = crate::support::bundle::tests_bundle_for_fake();

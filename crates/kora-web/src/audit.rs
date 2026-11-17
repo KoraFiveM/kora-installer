@@ -61,6 +61,7 @@ pub fn audited(op: Op, method: &Method) -> bool {
             | Op::SupportBundlePreview
             | Op::SupportBundleFile
             | Op::SupportSummary
+            | Op::BackupImportInspect
     )
 }
 

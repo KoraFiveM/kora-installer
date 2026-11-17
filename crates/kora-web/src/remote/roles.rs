@@ -201,6 +201,9 @@ pub fn min_role(op: Op) -> Role {
         | Op::SupportBundleFile
         | Op::SupportBundleCreate
         | Op::SupportBundleDownload
+        | Op::BackupImportUpload
+        | Op::BackupImportInspect
+        | Op::BackupImportStart
         | Op::TxAdminTicket => Admin,
     }
 }
@@ -347,6 +350,9 @@ pub fn destructive(op: Op) -> bool {
         | Op::SupportBundleFile
         | Op::SupportBundleCreate
         | Op::SupportBundleDownload
+        | Op::BackupImportUpload
+        | Op::BackupImportInspect
+        | Op::BackupImportStart
         | Op::ReachFirewallOpen => false,
     }
 }
@@ -356,7 +362,7 @@ pub fn destructive(op: Op) -> bool {
 /// undone by removing the server it made; removing is what token sessions cannot do until the switch is on.
 pub fn installs(op: Op) -> bool {
     match op {
-        Op::InstallStart | Op::InstallResume => true,
+        Op::InstallStart | Op::InstallResume | Op::BackupImportUpload | Op::BackupImportInspect | Op::BackupImportStart => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -652,6 +658,9 @@ pub fn local_only(op: Op) -> bool {
         | Op::SupportBundleFile
         | Op::SupportBundleCreate
         | Op::SupportBundleDownload
+        | Op::BackupImportUpload
+        | Op::BackupImportInspect
+        | Op::BackupImportStart
         | Op::TxAdminTicket => false,
     }
 }
@@ -782,6 +791,17 @@ mod tests {
         assert_eq!(min_role(Op::SupportSummary), Role::Operator);
     }
 
+    /// Bringing a server in is installing: an administrator's, never held back by the remote-destructive switch.
+    #[test]
+    fn importing_is_an_install_class_operation() {
+        for op in [Op::BackupImportUpload, Op::BackupImportInspect, Op::BackupImportStart] {
+            assert!(installs(op) && !destructive(op) && !local_only(op), "{op:?}");
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(remote_allowed(op, Role::Admin, Via::Token, false), "{op:?}");
+            assert!(!remote_allowed(op, Role::Operator, Via::Tailscale, true), "{op:?}");
+        }
+    }
+
     #[test]
     fn viewer_ops_are_reads() {
         for op in Op::ALL {
@@ -819,7 +839,7 @@ mod tests {
     #[test]
     fn installing_is_its_own_class_and_not_destructive() {
         for op in Op::ALL {
-            assert_eq!(installs(*op), matches!(op, Op::InstallStart | Op::InstallResume), "{op:?}");
+            assert_eq!(installs(*op), matches!(op, Op::InstallStart | Op::InstallResume | Op::BackupImportUpload | Op::BackupImportInspect | Op::BackupImportStart), "{op:?}");
             if installs(*op) {
                 assert!(!destructive(*op), "{op:?}: the switch must not hold an install back");
                 assert_eq!(min_role(*op), Role::Admin, "{op:?}");

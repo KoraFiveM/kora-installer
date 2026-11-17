@@ -9,6 +9,7 @@
 mod audit;
 mod backups;
 mod common;
+mod imports;
 mod install;
 mod keys;
 mod more;
@@ -22,6 +23,7 @@ mod updates;
 pub use audit::*;
 pub use backups::*;
 pub use common::*;
+pub use imports::*;
 pub use install::*;
 pub use keys::*;
 pub use more::*;

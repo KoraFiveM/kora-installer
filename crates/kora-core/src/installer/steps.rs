@@ -207,7 +207,7 @@ fn admin_conn(req: &InstallRequest) -> AdminConn {
     admin_conn_for(req.db_admin.as_ref())
 }
 
-fn admin_conn_for(db_admin: Option<&DbAdmin>) -> AdminConn {
+pub(crate) fn admin_conn_for(db_admin: Option<&DbAdmin>) -> AdminConn {
     let client = db_client();
     let env_pw = std::env::var("KORA_DB_ADMIN_PASSWORD").ok().filter(|s| !s.is_empty());
     if let Some(a) = db_admin {

@@ -29,6 +29,8 @@ pub fn write(p: &Path, text: &str) {
 impl Rig {
     pub fn new() -> Rig {
         let _ = crate::installer::registry::use_test_home();
+        // encrypting with the full scrypt cost takes seconds in a debug build
+        super::crypt::set_work_factor_for_tests(8);
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("srv");
         let name = unique("Srv ");

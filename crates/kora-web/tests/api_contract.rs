@@ -533,6 +533,14 @@ fn cases() -> Vec<Case> {
         case(Op::ReachFirewallOpen, s, None),
         case(Op::BackupsList, s, None),
         case(Op::BackupsOverview, &[], None),
+        case(Op::BackupImportInspect, &[], Some(json!({"source": {"path": "/tmp/old.tar.gz.age"}, "passphrase": "x"}))),
+        case(
+            Op::BackupImportStart,
+            &[],
+            Some(
+                json!({"source": {"path": "/tmp/old.tar.gz.age"}, "passphrase": "x", "choices": {"name": "Old server", "dir": "/home/me/kora/old", "game_port": 30121, "txadmin_port": 40121}, "start": false, "start_over": false}),
+            ),
+        ),
         case(Op::SupportBundlePreview, &[], Some(json!({}))),
         case(Op::SupportSummary, &[], Some(json!({"server": "prod"}))),
         case(Op::BackupCreate, s, Some(json!({"passphrase": "a long passphrase", "everything": false, "stop_server": false}))),
@@ -555,6 +563,7 @@ fn cases() -> Vec<Case> {
 const UNVERIFIED: &[(Op, &str)] = &[
     (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
     (Op::BackupDelete, "204"),
+    (Op::BackupImportUpload, "the backup file itself is the request body (binary); covered by tests/import.rs"),
     (Op::SupportBundleFile, "needs the id of a bundle prepared moments before; covered by tests/support.rs"),
     (Op::SupportBundleCreate, "needs the id of a bundle prepared moments before; covered by tests/support.rs"),
     (Op::SupportBundleDownload, "the saved zip itself (binary), not JSON"),

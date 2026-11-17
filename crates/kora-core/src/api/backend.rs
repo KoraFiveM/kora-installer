@@ -246,6 +246,16 @@ pub trait Backend {
     fn backup_prune(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
         crate::backup::service::prune(self, e)
     }
+    // ---- bringing a server from a backup (see `crate::backup::import`). `allow_path`: a file on this computer may be named
+    // (a local session); a remote one must upload.
+    fn import_inspect(&mut self, src: &crate::backup::import::ImportSource, passphrase: Option<&str>, allow_path: bool) -> Res<crate::backup::import::ImportPreview> {
+        let servers = self.list()?;
+        crate::backup::service::import_inspect(src, passphrase, allow_path, &servers)
+    }
+    fn import_run(&mut self, req: &crate::backup::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::import::ImportResult> {
+        crate::backup::service::import_run(self, req, allow_path, say)
+    }
+
     // ---- the support bundle (see `crate::support`)
     fn support_preview(&mut self, server: Option<&str>) -> Res<crate::api::wire::BundleListing> {
         crate::support::service::preview(self, server)
