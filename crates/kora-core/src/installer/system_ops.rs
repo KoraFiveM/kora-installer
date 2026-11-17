@@ -1,5 +1,5 @@
 //! Administrator steps done for a process that is not elevated (the Windows panel), by an elevated
-//! helper (`helper::worker`). The install's plan, its state and every file in the server folder
+//! administrator service (`privsvc`). The install's plan, its state and every file in the server folder
 //! stay with the person's own process; only these steps run elevated, as
 //! `kora admin-step run|undo --step <id> --dir <folder>` ([`step_args`]):
 //!
@@ -13,7 +13,7 @@
 //!
 //! The elevated child never writes into the server folder: it reads the install record, works on a
 //! copy of `created.json` in memory (`Ctx::shadow`) and prints one [`StepResult`] line
-//! (`helper::worker::RESULT_PREFIX`), which the person's process applies (it writes the record, the
+//! (`privsvc::exec::RESULT_PREFIX`), which the person's process applies (it writes the record, the
 //! database login file, ...). So files stay theirs, a failed step can be retried with a new prompt or
 //! skipped, and the plan state never belongs to an administrator account.
 //!
@@ -99,7 +99,7 @@ pub struct DbResult {
 }
 
 impl StepResult {
-    /// The child's last output line (`helper::worker::RESULT_PREFIX` + JSON).
+    /// The child's last output line (`privsvc::exec::RESULT_PREFIX` + JSON).
     pub fn to_line(&self) -> std::result::Result<String, String> {
         serde_json::to_string(self).map(|j| format!("{}{j}", crate::privsvc::exec::RESULT_PREFIX)).map_err(|e| e.to_string())
     }
@@ -147,7 +147,7 @@ pub const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
 /// `kora install` from an administrator terminal). `owner` = the folder's owner SID. A standard
 /// account never gets a folder of the administrators', even when an administrator typed the password.
 pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record: bool, admin_member: bool) -> std::result::Result<(), String> {
-    let no = |why: &str| Err(format!("Kora's administrator helper will not work on {}: {why}.", dir.display()));
+    let no = |why: &str| Err(format!("Kora's administrator service will not work on {}: {why}.", dir.display()));
     if !dir.is_absolute() || dir.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return no("it is not a full folder path");
     }
@@ -162,15 +162,13 @@ pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record
     }
 }
 
-/// Who an elevated child of the Windows worker or helper works for (`KORA_WORKER_USER_SID` and
-/// `KORA_WORKER_ADMIN_MEMBER`, set by the worker or helper from the panel's token; the child's
-/// environment is built by them, so the person cannot set these). `None` elsewhere (an
+/// Who an elevated child of the Windows service works for (`KORA_WORKER_USER_SID`, set by the service
+/// from the caller's token; the child's environment is built by the service, so the person cannot set it). `None` elsewhere (an
 /// administrator terminal, Linux).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PanelUser {
     pub sid: String,
-    /// May work on folders owned by the Administrators group (an elevated Kora made them). Never in
-    /// the opt-in helper.
+    /// May work on folders owned by the Administrators group (an elevated Kora made them). Never for a child of the service.
     pub admin_folders: bool,
 }
 
@@ -197,7 +195,7 @@ pub fn check_panel_dir(dir: &Path) -> Result<()> {
 
 /// The request of an `admin-step` must be a sane one, and an elevated step done for Kora Panel
 /// (`for_panel`: the worker; the record in the folder could have been written by any program
-/// running as the person) opens only ports `helper::winhelper::port_allowed` accepts: never the
+/// running as the person) opens only ports `privsvc::op::port_ok` accepts: never the
 /// privileged range, remote desktop, remote management or database ports.
 pub fn check_step_request(req: &super::InstallRequest, step: &str, undo: bool, for_panel: bool) -> Result<()> {
     if undo {
@@ -235,7 +233,7 @@ pub fn delete_needs_admin_at(dir: &Path, keep_db: bool, password_given: bool) ->
 
 /// `kora admin-db start|install`: Kora's own MariaDB on Windows, outside an install (the panel's
 /// "Start database for me"). `start` starts its service and waits until it takes logins; `install`
-/// sets it up when it is not there yet. Run by the administrator helper.
+/// sets it up when it is not there yet. Run by the administrator service.
 pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
     use super::windows_db;
     if crate::db::Os::current() != crate::db::Os::Windows {
@@ -258,7 +256,7 @@ pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
             let rec = windows_db::install(&Hooks::from_env().http, say)?;
             Ok(format!("Kora installed its own MariaDB {} as the Windows service '{}'", rec.version, rec.service))
         }
-        other => Err(InstallError(format!("'{other}' is not something Kora's administrator helper does with the database server"))),
+        other => Err(InstallError(format!("'{other}' is not something Kora's administrator service does with the database server"))),
     }
 }
 
@@ -267,7 +265,7 @@ pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
 pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: bool, known: Known, say: &mut dyn FnMut(&str)) -> Result<StepResult> {
     let allowed = if undo { UNDO_STEPS } else { RUN_STEPS };
     if !allowed.contains(&step) {
-        return Err(InstallError(format!("'{step}' is not a step Kora's administrator helper does")));
+        return Err(InstallError(format!("'{step}' is not a step Kora's administrator service does")));
     }
     check_dir_links(dir)?;
     check_panel_dir(dir)?;

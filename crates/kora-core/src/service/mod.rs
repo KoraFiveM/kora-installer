@@ -591,7 +591,7 @@ pub const SERVICE_PRIVILEGES: &str = "SeChangeNotifyPrivilege/SeIncreaseWorkingS
 
 /// Windows: let the service account into the server folder. The folder's owner can do this
 /// without administrator rights (owners may always change a folder's permissions), so the opt-in
-/// helper leaves it to the person's own process (see `helper::winhelper`).
+/// the administrator service leaves it to the person's own process.
 pub fn windows_grant_plan(server: &ManagedServer) -> Plan {
     let svc = server.service_name();
     let dir = server.dir.trim_end_matches(['\\', '/']).to_string();

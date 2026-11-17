@@ -33,87 +33,24 @@ reasonable time to release a fix before you disclose publicly.
   removed on Windows, atomic writes, never replaced when unreadable); the API shows only a key's name and last four characters.
   A stopped install or the saved answers refer to a saved key by name and never contain the key. Only admins and this
   computer can add, rename, replace or delete keys.
-- The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, a
-  helper (`kora helper`, Linux) that accepts only Kora's fixed list of privileged actions and checks the calling user, or on
-  Windows a short-lived administrator worker started through the normal Windows permission prompt (see below).
-- **Windows administrator worker.** For an install (one prompt for all its administrator steps) or one administrator action,
-  the panel starts its own `kora.exe` elevated with the Windows prompt (`runas`) and talks to it over a named pipe:
-  - The pipe has a random name, is created as the first and only instance, refuses network clients, and its security descriptor
-    lets only elevated administrators and SYSTEM open it (the panel's own account cannot loosen it). Another local account, or a
-    program running as you without elevation, cannot connect.
-  - Both ends check each other before anything is sent: the worker serves only the panel process whose id it was given AND that
-    runs the same program file; the panel serves only the process Windows started for it. The worker opens the pipe for
-    identification only, so the panel can never act with the worker's rights.
-  - The worker runs only Kora's fixed list (the Linux helper's checks, then the `kora` command line's own definition): the
-    update schedule, Kora's self-update to a newer version, removing the old app or Kora's system changes, and one administrator
-    step of an install or delete (`kora admin-step`), never a whole install, never any other program, never through a shell.
-    Install steps only work on a server folder that holds a Kora install record and belongs to you (or, for an administrator, a
-    folder an elevated Kora made). The install's plan, state and files stay yours; the elevated side writes nothing into the
-    server folder and hands back what to record.
-  - Secrets never go on a command line: the licence key is not needed by the worker; Kora's own MariaDB administrator login stays
-    on the elevated side, and only the new server's database login comes back (into `database.json`, as before).
-  - The worker exits when its batch is done, when the panel goes away (the pipe breaks), or after 90 minutes without work.
-  - When a remote session (another device, Tailscale, a token) needs administrator rights, the panel does not make Windows ask on a
-    desktop nobody may be watching unless the person asks for it.
-  - What it does not protect against: malware already running as you can show its own permission prompt or tamper with the panel,
-    as it could with any program you run; Windows does not treat the permission prompt as a boundary against your own account.
-    When a standard account's prompt is answered with an administrator's password, that administrator lets this account's server
-    run as a Windows service and its firewall rule be opened, exactly as typing the shown command into an administrator terminal
-    would; files and settings stay the standard account's.
-- Remote access (`--bind <ip> --remote`) is off by default and uses plain HTTP: use Tailscale, WireGuard or an SSH tunnel, never
-  the open internet. Roles are viewer / operator / admin. Remote administrators can install and manage servers.
-  Tailscale administrators can also delete, uninstall and send console input; for token sessions those stay off until `kora panel remote-actions on`
-  is run on the machine, and deleting always needs the server name typed. Reasoning: a Tailscale identity is checked by the local Tailscale
-  service (a person on a device they signed in), never from request headers; a token is a bearer secret that can leak, and a leaked token that
-  can only install can be undone by removing the new server, while one that can delete cannot be undone.
-- The old machine-wide "Kora app" (administrator shortcuts, a copy in `Program Files` or `/opt/kora`) is no longer installed. The
-  per-user shortcuts that replace it never need administrator rights and are not "Run as administrator"; "Tidy up old shortcuts"
-  removes the old copy, which needs administrator rights through the helper or a command shown to you.
-- Hub nodes authenticate with bearer tokens; treat them like passwords.
-- Kora's own Git (MinGit, Windows) and GitHub CLI are downloaded only from `https://github.com/` release assets at a version
-  and SHA-256 pinned in the source (`crates/kora-core/src/tools/pins.rs`, updated with `scripts/update-tool-pins.sh`).
-  The file is verified before anything is unpacked, unpacked without links or paths that leave the folder, and moved into
-  place in one step. They live in the user's own Kora folder and need no administrator rights. A Git or GitHub CLI already on
-  the computer is preferred: Kora looks for it on the `PATH` (absolute entries only, never the current folder) and then in the usual
-  install folders on Windows, and starts the copy it found by its full path. On Windows the folder Kora itself runs from is never
-  searched. On Linux it is searched if you put it on your `PATH` (`~/.local/bin` often is), like any other program there.
-- Switching a Development resource to another branch or a pull request (`kora branch`, `kora pr`, the GitHub tab) runs `git` and `gh` as the installing user, only inside the server's `resources` folder (a folder that points elsewhere is refused), and only with checked values: branch names and pull request numbers are validated before they reach a command line, and an address is only accepted when it is the resource's own repository or your fork. It never pushes, never forces, never deletes a branch or a stash, and never touches changes you have not saved without your explicit choice. A pull request is other people's code that then runs on your server (the pull request dialog says so): trying one needs the admin role, like other changes to the server (adding resources, rolling back), and that includes a remote administrator signed in with a token, who can therefore make the server run code from any open pull request of that resource's repository or your fork. Kora itself runs nothing from a resource's files: `git` only uses the hooks and settings in the folder's own `.git`, which a checkout does not change, and credentials are only offered to github.com. Production servers cannot be switched.
-- Remote operators can list the saved licence keys (name and last four characters, and which servers use them) and point a server at one of them by name; they cannot see, paste, add or change a key. Remote administrators (token or Tailscale) can also choose the folder of a new server, anywhere the panel's user can write.
-- A stopped install is kept in memory for six hours, with its licence key and database password. When it used a saved key it is also written to `paused-installs/` in the Kora folder for three days without any secret, so it can carry on after a restart.
-- `kora panel` and a bare `kora` print a sign-in link with a one-time code. If the running panel cannot give one (an older version, or it does not answer), the link carries the panel's own token instead: do not paste that link into chats or tickets.
+- The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Administrator work goes to **Kora's administrator service** (below), or, where it is not installed, to a command shown to you.
+
+### Kora's administrator service
+
+One small service per machine does a fixed list of validated administrator operations for the unprivileged per-user panel: Windows service `KoraService` (LocalSystem) and systemd unit `kora.service` (root). It is installed with the program, by the MSI (Windows) or the `.deb` / `kora service install` (Linux), into a folder only administrators can change (`%ProgramFiles%\Kora`, `/usr/lib/kora`), with ONE administrator approval at install time; after that nothing asks again, locally or from another device. It replaced the earlier Linux helper and the Windows UAC worker (which elevated a `kora.exe` in a user-writable folder); neither exists any more. The design and threat model are in `crates/kora-core/src/privsvc/mod.rs`; decisions and the migration are in `docs/privileged-service.md`.
+
+- **Who may use it.** An explicit list of accounts (`kora service list|allow|deny`, administrators only; the installing account is on it). Identity is taken from the connection itself on every connection: the client's token (SID, integrity level) on the Windows named pipe, `SO_PEERCRED` on the Linux Unix socket. Nothing in a request can name an identity. Unreadable settings, a settings file other users can write, a remote client or a low-integrity (sandboxed) program are refused.
+- **What may be asked.** A typed allow-list (`privsvc::op::Op`), parsed strictly: one administrator step of an install or delete (`prepare.db`, `build.db`, `system.firewall`, `system.service`, `system.schedule`), start or install Kora's own MariaDB, start the installed database, set or remove an unattended-update task (always as the owning user, unelevated), install Git (Linux), and apply a Kora update to a newer version. Not on the list: a whole install, uninstall, removing Kora, update tasks as the system account, downgrades, any other program. The service never forwards the caller's text: it rebuilds the arguments from the typed value (a test checks every one is understood by the real command line).
+- **Never trusts what the caller controls.** The folder is re-checked on the privileged side without following links, must belong to the caller and hold a Kora install record; ports come from the record read there (never below 1024, never remote-administration or database ports); the name used to undo comes from the person's server list. Steps never write into the folder; the Linux hand-over of a server folder to its own account uses open folder handles, never `chown -R <path>`.
+- **Ownership.** `owners.json` (administrators only) records which account every service, firewall rule set, update task and database was made for. Making something needs "not owned by someone else", removing needs "owned by the caller"; things Kora made before the records existed are only changed after an administrator finishes the upgrade (`kora service migrate`, run by the package and the MSI), which records them only for accounts that can be shown to own them.
+- **Clean child.** Operations run the protected program with an environment built from nothing (system-only `PATH`, no `KORA_*` override, no `GIT_*`, the caller's own profile folders looked up by the service), one at a time, with a time limit per operation, cancelled when the caller goes away. The service refuses to start unless its program is in the protected folder and not writable by others. Windows pipe: owner SYSTEM (the panel checks it before sending anything), first instance (a squatter makes the service refuse to start), remote clients rejected, network logons denied, and the listed accounts get only read data, write data and read attributes, not "create pipe instance", so an allowed account cannot make a look-alike pipe.
+- **Audit.** One line per operation, allowed or refused (when, which account, what, the result), in `%ProgramFiles%\Kora\data\audit.log` and `/var/log/kora/audit.log` (also the journal). Never a path, an argument value or a secret.
+- **Updates.** The service applies a Kora update itself (same release feed and checksum check as `kora self-update`), keeps the running program, checks that the new one starts (else puts the old one back at once), restarts, and rolls back after three starts that do not stay up. Provenance (`gh attestation verify`) is checked by the release job, not by the service.
+- **Secrets** (licence key, database password) travel only in a request's environment, never on a command line, are masked in output and never logged; Kora's own MariaDB administrator login stays on the privileged side.
+- **What it does not protect against.** An allowed account (and any program running as it) can do the allow-listed things without a prompt: open firewall ports of 1024 and above for its own servers, register its own servers' services, create its own databases, start Kora's database, apply an official Kora update. Each is limited to that account's own items. Remove the account (`kora service deny`) or uninstall the service to take that away. An administrator who answers a prompt for someone else's account is not part of this design any more: there is no prompt except the one for the installer itself.
 
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
 as any other (see above). Include the version, your platform, and whether the panel was local or remote.
-
-### Windows administrator worker
-
-On Windows the panel (never elevated) gets administrator work done through a short-lived elevated copy of Kora that it
-starts with the normal Windows permission prompt (design and threat model: `crates/kora-core/src/helper/worker.rs`).
-What it guarantees, and what it does not:
-
-- **Who it obeys.** It talks only over a private named pipe that only elevated administrators and SYSTEM may open
-  (random name, first instance, remote clients refused), only to the panel process that started it, and only when that
-  process runs the very same program file (compared by volume and file identity). It runs only Kora's fixed list of
-  administrator steps, each checked against Kora's own command-line definition.
-- **What it runs.** From the prompt until the session ends, nobody can replace or rename Kora's program file, so the
-  prompt and every elevated step start the file the panel runs. Each step runs as a child with an environment built
-  from nothing: system folders from Windows itself, a `PATH` of system folders only, the panel user's own profile, and
-  only the licence key and database password variables the step needs. Override and test variables are ignored when
-  elevated. It never takes a database client from `PATH`. One session and one elevated step at a time; a step is
-  stopped when the panel goes away or after 45 minutes.
-- **What it works on.** A server folder must hold a Kora install record and belong to the person the panel runs as
-  (re-checked in the elevated step itself, no links on the way); servers are named from the person's own list, never by
-  folder path. A record in `%ProgramFiles%\Kora\owners.json` (administrators only) says which Windows account each
-  service, firewall rule set, update task and database was made for, and another account's are never changed. The
-  firewall step opens no port below 1024 and no remote-desktop, remote-management or database port. The elevated
-  uninstall never deletes folders (the panel deletes them as the person). Server services keep only an ordinary user's
-  privileges (no "impersonate a client"), and the update task runs without elevation.
-- **What it does not protect against.** UAC is not a boundary between a person and their own programs. A harmful program
-  already running as the person can replace `kora.exe` in the person's folder before the panel starts, or inject into the
-  running panel and use a session the person approved until it ends; approving the prompt is like typing the shown
-  command into an administrator terminal. On an upgraded 0.6.x machine the old update task runs with full rights until
-  the schedule is changed once (an elevated Kora hardens `git` meanwhile). The pipe has no read time-out: a worker that
-  hangs without exiting holds the panel's administrator session until the panel restarts.
 
 ## Supported versions
 

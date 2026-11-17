@@ -13,9 +13,10 @@ Documentation: <https://docs.koraframe.work/guides/installer/overview>
 The panel is Kora's only interface, and it is what "the Kora app" is: a page in your browser, plus a Start Menu / desktop
 shortcut (a launcher in the applications menu on Linux) that opens it. Run `kora` (or double-click the shortcut): Kora
 makes sure the panel is running in the background and opens your browser at it. With no servers yet it opens straight into
-the install wizard. Nothing asks for administrator rights; `kora` never elevates, and the panel runs as you. When an
-action does need them (services, firewall rules, installing MariaDB) the panel shows the exact command to run as
-administrator.
+the install wizard. `kora` never elevates, and the panel runs as you. The parts that need administrator rights (services,
+firewall rules, installing MariaDB, updating Kora) are done by Kora's small administrator service, which the installer
+(`.msi` on Windows, `.deb` on Debian/Ubuntu, `sudo kora service install` elsewhere) sets up with one approval; without it
+the panel offers to install it, to carry on without those parts, or shows the command to run.
 
 The panel installs servers, starts, stops and updates them, shows the console and logs, and handles resources, schedules
 and notifications. It listens on `127.0.0.1` only (port 47120, or the next free one up to 47140; `--port` changes it) and
@@ -43,6 +44,14 @@ Windows 10/11 or Server 2019+ (PowerShell):
 ```powershell
 irm https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.ps1 | iex
 ```
+
+Both scripts first offer the **system install** (asked once; answer n to skip): the `.msi` on Windows (one Windows
+permission prompt), the `.deb` on Debian/Ubuntu (your password once, or `sudo kora service install` on other
+systems). It puts Kora in a protected folder together with Kora's administrator service, so installing servers,
+firewall rules and databases later needs no password and no terminal (`KORA_SYSTEM=1` / `-System` does it without
+asking, `KORA_SYSTEM=0` / `-PerUser` installs just for you). The per-user install below needs no administrator rights;
+the parts of a server that need them are then a button, a command or skipped. You can also download
+`kora-windows-x86_64.msi` / `kora-linux-x86_64.deb` from the release page yourself.
 
 The script also makes a Start Menu and Desktop shortcut on Windows (a launcher in the applications menu on Linux
 desktops); they are yours only, no administrator rights, and open the panel. `KORA_NO_SHORTCUTS=1` (or `-NoShortcuts`)

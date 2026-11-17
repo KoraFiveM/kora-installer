@@ -1,5 +1,5 @@
 //! The service's allow-list as a type: [`Op`], parsed strictly by [`parse`] from a wire request
-//! (`verb` + `args`, the framing of [`crate::helper::Request`]) and turned back into arguments for
+//! (`verb` + `args`, the framing of [`super::wire::Request`]) and turned back into arguments for
 //! the child by [`Op::child_args`]. The service never forwards the caller's text.
 //!
 //! What is NOT in the list, on purpose: `install` (the install runs as the person, only its

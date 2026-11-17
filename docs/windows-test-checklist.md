@@ -194,84 +194,57 @@ Do steps 16 and 18 first (the tools and the GitHub sign-in).
 34. [ ] **"Several resources at once".** Type a branch name that exists in only some resources, press **Check which
     resources have it** before anything moves, switch those, then put them all back.
 
-## Administrator prompt (UAC)
+## Kora's administrator service and the MSI (replaces the old UAC / worker checks)
 
-Do these on a normal administrator account unless a step says otherwise. The prompt can appear as a flashing shield in
-the taskbar instead of on screen: note where it showed.
+There is no permission prompt any more except the one for the installer itself. Do these on a Windows 10/11 or Server
+2019+ machine with a normal administrator account and at least one standard (non-administrator) account. CI
+(`windows-smoke.yml`, job `msi`) installs the MSI and drives the service from standard test accounts through the Task
+Scheduler; this list is what a real desktop adds (prompts, shortcuts, Apps & features, upgrade over what you have).
 
-A1. [ ] **One prompt.** Default wizard (service, firewall, "set up the database for me"), press Install: exactly **one**
-    Windows prompt; the install carries on in the browser; the service, the firewall rule and MariaDB exist; the files in
-    the server folder are owned by you.
-    *If not, copy back:* how many prompts, the Show details text, the install log.
-A2. [ ] **Say No.** Same install, press **No**: "Windows did not get permission" with **Ask again**, **Continue without
-    the administrator parts** and **Show me the command**. Ask again, then Yes: it finishes. Repeat and pick Continue
-    without: it finishes with no service and no firewall change.
-A3. [ ] **Leave it unanswered** for 5 minutes: "Nobody answered". Answering the stale prompt afterwards starts nothing,
-    and no `kora.exe admin-worker` is left in Task Manager.
-A4. [ ] **Worker killed.** End `kora.exe admin-worker` in Task Manager during the service step: the step fails with
-    "stopped"; **Try this step again** asks again and finishes. During the firewall step, **Skip** works.
-A5. [ ] **Standard (non-administrator) account.** Windows asks for an administrator's password; the install completes;
-    the scheduled task runs as the standard user; the server folder belongs to the standard user.
-A6. [ ] **Folder with spaces and non-English characters** in the server path.
-A7. [ ] **Remote session** (Tailscale or token): install says you are signed in from another device; **no** prompt
-    appears on the desktop until **Ask for administrator permission** is pressed.
-A8. [ ] **One prompt each** for: a schedule change, "Tidy up old shortcuts", Uninstall, deleting a server that has a
-    service, and System check, "Start it for me".
-A9. [ ] **Windows Server 2022** with a normal administrator account. (The built-in Administrator account runs everything
-    elevated, so the panel refuses to start there, as before.)
-A10. [ ] **Restart the panel mid-install** with a saved key: Carry on asks again only when an administrator step runs.
-A11. [ ] **Task Manager:** the worker never shows a window and exits after each action.
-
-## Elevated worker safety (things only a real Windows run can settle)
-
-These check the hardening of the administrator worker. Each says what a harmful program running as you might try and
-what must happen now. Use a normal administrator account unless the step says otherwise.
-
-W1. [ ] **Environment variables cannot steer the elevated side.** In a normal PowerShell run
-    `[Environment]::SetEnvironmentVariable('KORA_MARIADB_HOME','C:\Users\Public\evil','User')` and the same for
-    `KORA_SELF_UPDATE_API` (`http://127.0.0.1:9`), `ProgramFiles` (`C:\Users\Public\pf`) and `TEMP`
-    (`C:\Users\Public\t`). Sign out and in, open the panel, and do System check > "Start it for me" and an install
-    with "set up the database for me". *Should happen:* everything works as without the variables; nothing is created
-    under `C:\Users\Public`; Kora's MariaDB stays in `C:\ProgramData\Kora\mariadb`. Remove the four variables afterwards.
-    *If not, copy back:* what appeared under `C:\Users\Public`, and the install log.
-W2. [ ] **A planted database client is never run elevated.** Put any `mysql.exe` and `mariadb.exe` (for example a copy
-    of `notepad.exe` renamed) in a folder on your **user** PATH. Install with "set up the database for me". *Should
-    happen:* no Notepad window and no `mysql.exe` from that folder in Task Manager (Details > Command line); the database
-    is created. Remove the files.
-W3. [ ] **The program cannot be swapped after the prompt.** Start an install; when the prompt shows, try in a normal
-    PowerShell: `Rename-Item "$env:LOCALAPPDATA\Kora\bin\kora.exe" kora-old.exe`. *Should happen:* it fails ("being
-    used by another process") until the install's administrator steps are finished. Answer Yes; the install finishes.
-W4. [ ] **8.3 and subst paths.** `subst K: "$env:LOCALAPPDATA\Kora\bin"`, run `K:\kora.exe` and install from that
-    panel; also start it once through its short name (`dir /x` shows it, for example `KORA~1.EXE`). *Should happen:*
-    one prompt, the install finishes (no "process ... runs ..., which is not this program"). `subst K: /d` afterwards.
-W5. [ ] **Standard account, another administrator's password.** On a standard account, install from the panel and type
-    an administrator's password at the prompt. *Should happen:* the install finishes; Settings > Uninstall and "Tidy up
-    old shortcuts" act on **your** shortcuts and server list, not the administrator's (check that the administrator's
-    own Kora shortcuts, if any, are untouched).
-W6. [ ] **Connecting to the worker's pipe unelevated.** While an install's prompt has been answered, in a normal
-    PowerShell: `[System.IO.Directory]::GetFiles('\\.\pipe\') | Select-String kora-admin` shows the pipe; then
-    `$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '<name without \\.\pipe\>', 'InOut'); $p.Connect(2000)`.
-    *Should happen:* "Access to the path is denied" (or a timeout); the install is not disturbed.
-W7. [ ] **The update task runs without elevation.** After a Development install, Task Scheduler > `Kora` task >
-    General: "Run with highest privileges" is **not** ticked; it runs as you. Run it (right click > Run): it finishes,
-    and if it restarts the server, the restart works. *Also on an upgraded 0.6.x machine:* an old task still has the
-    tick until the schedule is changed once (Settings or `kora schedule set`); after that it is gone.
-W8. [ ] **Server services keep no "impersonate" right.** `sc.exe qprivs kora-<name>` lists only
-    `SeChangeNotifyPrivilege` and `SeIncreaseWorkingSetPrivilege`; the server starts and txAdmin answers;
-    `sc.exe sdshow kora-<name>` ends with an entry for your SID (you may start and stop it): from a normal window
-    `sc.exe stop kora-<name>` and `sc.exe start kora-<name>` work.
-W9. [ ] **Two administrator actions at once.** During an install's administrator steps, press System check > "Start it
-    for me". *Should happen:* "Kora is already doing administrator work for something else", no second prompt; it works
-    when the install has finished.
-W10. [ ] **Closing the panel mid-step.** During the database or service step, end the panel's `kora.exe` (not the
-    worker) in Task Manager. *Should happen:* within a few seconds no `kora.exe admin-worker` and no `kora.exe
-    admin-step` is left. Start the panel again and **Try this step again**: it finishes (a service made just before is
-    used again, no "already exists").
-W11. [ ] **Uninstall with "delete the server folders".** Settings > Uninstall, tick a server folder. *Should happen:* one
-    prompt; services and rules go; the folder is deleted afterwards **without** a second prompt (by the panel, as you).
-W12. [ ] **Unusual ports.** Make a server with game port `3389` (wizard, advanced ports). *Should happen:* the firewall step
-    stops with "Kora does not open port 3389 in the firewall from the panel" and offers to skip that step; no
-    firewall rule for 3389 exists (`Get-NetFirewallRule -DisplayName "*kora*"`).
+S1. [ ] **Install the MSI** (double-click `kora-windows-x86_64.msi`, or the one-liner `irm ... | iex` and answer Y).
+    *Should happen:* exactly one Windows permission prompt; `C:\Program Files\Kora\kora.exe` exists; Services shows
+    "Kora administrator service" running, startup Automatic, log on as Local System; `kora` works in a new terminal (machine
+    PATH); a Start Menu "Kora" shortcut (and a Desktop one) opens the panel; Settings > Apps lists Kora with Uninstall.
+    *If not, copy back:* what the prompt said (publisher), the MSI log (`msiexec /i ... /l*v log.txt`).
+S2. [ ] **Install a Production server** (service + firewall + "set up the database for me") as the account that
+    installed Kora. *Should happen:* **no** prompt at all; the server's service, the firewall rule and MariaDB exist; the
+    server folder and its files belong to you (not to Administrators or SYSTEM); `kora service status` says "serves this
+    account: yes".
+S3. [ ] **Standard account.** Sign in as a standard user an administrator added with
+    `kora service allow <user>` (run in an administrator terminal). Install a server from that user's panel: no
+    password, no prompt; everything is theirs. A second standard account that was **not** added gets "Kora's
+    administrator service is not turned on for your account" with the command `kora service allow <account>`.
+S4. [ ] **Two accounts, one machine.** As account A install server `alpha`; as account B (also allowed) try to delete,
+    change the ports or the schedule of `alpha` (a folder they cannot write is refused by Windows; for a folder B *can*
+    write, the service refuses: "does not belong to you"). Settings of B never list A's servers.
+S5. [ ] **Nothing runs from a user-writable place.** Delete `%LOCALAPPDATA%\Kora\bin` if it exists, put a renamed
+    `notepad.exe` as `kora.exe` there and on your user PATH ahead of Program Files: install a server with a service.
+    *Should happen:* no Notepad window; the install works (the service ran `C:\Program Files\Kora\kora.exe` only).
+S6. [ ] **Environment cannot steer the service.** Set user variables `KORA_MARIADB_HOME`, `KORA_SELF_UPDATE_API`
+    (`http://127.0.0.1:9`), `ProgramFiles`, `TEMP` as in the old W1, sign out and in, install with "set up the database
+    for me" and update Kora. *Should happen:* as without the variables; nothing under `C:\Users\Public`. Remove them.
+S7. [ ] **Remote session.** From another device (Tailscale or token) install a server: no prompt on the desktop, it
+    finishes; the audit log (`C:\Program Files\Kora\data\audit.log`, administrators can read it) has one line per
+    operation with your account and no paths.
+S8. [ ] **Without the service.** On a second machine use the per-user one-liner (answer **n**). Install with a service
+    and firewall: the panel says the service is not installed and offers **Install Kora's administrator service**,
+    **Continue without the administrator parts**, **Show me the command**. The first runs the MSI (one prompt, a checksum
+    check first) and the install then works without asking again; the second finishes the install without a service.
+S9. [ ] **Update through the service.** With an older MSI installed, Settings > Update Kora (or `kora self-update`):
+    *Should happen:* no prompt; the service restarts on the new version; `kora --version` and `kora service status`
+    show it; `kora.previous.exe` is in `C:\Program Files\Kora\data` until the next update.
+S10. [ ] **A broken update rolls back.** (Developer check.) Replace the update source with a program that exits
+    immediately: *Should happen:* "The new program did not work ... the previous one was put back"; the service keeps
+    running the old version.
+S11. [ ] **Upgrade from 0.7.0 / 0.6.x** (see section 7): run the MSI over a machine with the old per-user program, the
+    old machine-wide app and existing servers. *Should happen:* servers, services, firewall rules and databases are
+    untouched and still manageable from the panel; "Tidy up old shortcuts" sets your own old `kora.exe` aside; an old
+    update task that had "Run with highest privileges" no longer has the tick (Task Scheduler > Kora > Update ...).
+S12. [ ] **Uninstall** in Settings > Apps: the service, `C:\Program Files\Kora` (including `data` and `owners.json`),
+    the PATH entry and the shortcuts are gone; your servers, their services and your saved keys are not touched.
+S13. [ ] **Service account narrowing (owner decision).** The service runs as LocalSystem. Review whether a virtual
+    account with only the privileges it uses is worth it (service control, firewall, folder ACL changes, task creation
+    for other users) and write down what failed if you try one.
 
 ## 7. Upgrade delta: a machine that has 0.6.x with the old machine-wide app
 

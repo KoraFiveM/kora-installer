@@ -2,12 +2,10 @@
 //! Linux: systemd unit `kora.service`) that does a fixed list of administrator operations for the
 //! unprivileged per-user panel, with no prompt, after one administrator approval at install time.
 //!
-//! This module is the DESIGN and the pure decision code (everything here is tested on every OS; the
-//! thin OS layers, the socket or named pipe and the process spawning, call into it). It replaces
-//! three mechanisms: the optional Linux helper (`helper::server`), the Windows UAC worker
-//! (`helper::worker`, `helper::winpipe`) and the inert persistent-helper groundwork
-//! (`helper::winhelper`). Until the slices that wire it in have landed those still work; the plan is
-//! in `docs/privileged-service.md`.
+//! This module is the DESIGN and the decision code (everything here is tested on every OS; the thin OS
+//! layers, the socket or named pipe and the process spawning, call into it). It replaced three
+//! mechanisms that no longer exist: the optional Linux helper, the Windows UAC worker and the inert
+//! persistent-helper groundwork. `docs/privileged-service.md` has the decisions and the migration.
 //!
 //! # Shape
 //!
@@ -21,7 +19,7 @@
 //!   (Windows: the client's token on the named pipe, SID; Linux: `SO_PEERCRED` on the Unix socket,
 //!   uid) and checked by [`policy::authorise`]. Nothing the caller sends can name its own identity.
 //! * **What may be asked.** [`op::Op`] is the whole allow-list: a typed value parsed by [`op::parse`]
-//!   from the wire request (`verb` + `args`, the framing of `helper::Request`). The parser is strict
+//!   from the wire request (`verb` + `args`, the framing of [`wire::Request`]). The parser is strict
 //!   (exact flags, exact value shapes); anything else is refused. The service then does not forward
 //!   the caller's argument text anywhere: it re-creates the arguments from the typed value
 //!   ([`op::Op::child_args`]), so whatever the parser did not understand cannot travel on.
