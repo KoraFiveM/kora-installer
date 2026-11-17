@@ -2927,6 +2927,7 @@ mod tests {
             txadmin_port: Some(41120),
             artifact_url: Some("https://runtime.fivem.net/x".into()),
             game_build: Some(3258),
+            license_key_name: None,
             cfx_identifier: Some("fivem:1".into()),
             ..Default::default()
         };

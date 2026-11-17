@@ -75,6 +75,11 @@ pub struct InstallRequest {
     pub dir: PathBuf,
     pub hostname: String,
     pub license_key: Option<String>,
+    /// The saved key (see `keystore`) the licence key comes from, when it came from there. A name is
+    /// not a secret: it is kept in the saved answers and in a stopped install, so they can carry on
+    /// without the key being written anywhere else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_key_name: Option<String>,
     /// Linked Cfx identifier for the txAdmin master (e.g. "fivem:123456"), if known.
     pub cfx_identifier: Option<String>,
     pub ports: Ports,
@@ -116,6 +121,7 @@ impl std::fmt::Debug for InstallRequest {
             .field("name", &self.name)
             .field("dir", &self.dir)
             .field("license_key", &self.license_key.as_ref().map(|_| "<redacted>"))
+            .field("license_key_name", &self.license_key_name)
             .field("ports", &self.ports)
             .field("db_admin", &self.db_admin)
             .finish_non_exhaustive()

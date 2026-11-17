@@ -426,6 +426,7 @@ mod tests {
             dir: "d".into(),
             hostname: String::new(),
             license_key: None,
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports::default(),
             txadmin_public: false,

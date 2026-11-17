@@ -159,6 +159,12 @@ pub struct WireInstall {
     pub hostname: String,
     #[serde(default)]
     pub license_key: Option<String>,
+    /// Use the saved key with this name instead of carrying a key.
+    #[serde(default)]
+    pub license_key_name: Option<String>,
+    /// With a pasted `license_key`: save it under this name (the wizard's default), so the next install can pick it.
+    #[serde(default)]
+    pub save_license_key_as: Option<String>,
     #[serde(default)]
     pub ports: Option<WirePorts>,
     #[serde(default)]
@@ -332,6 +338,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         name,
         dir,
         license_key: non_empty(&w.license_key),
+        license_key_name: non_empty(&w.license_key_name),
         cfx_identifier: non_empty(&w.cfx_identifier),
         ports,
         txadmin_public: w.txadmin_public,
@@ -379,6 +386,7 @@ pub fn request_json(r: &InstallRequest) -> Value {
         "firewall": r.firewall,
         "github_owner": r.github_owner,
         "start": r.start,
+        "license_key_name": r.license_key_name,
     })
 }
 
@@ -1061,7 +1069,7 @@ mod tests {
         assert!(
             !v.contains("SECRET")
                 && !v.contains("\"pw\"")
-                && !v.contains("license")
+                && !v.contains("\"license_key\"")
                 && !v.contains("db_admin"),
             "{v}"
         );
