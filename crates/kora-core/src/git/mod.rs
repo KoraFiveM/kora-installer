@@ -546,82 +546,21 @@ fn step(desc: &str, admin: bool, program: &str, args: &[&str]) -> PlanStep {
     }
 }
 
-const GH_KEYRING: &str = "/etc/apt/keyrings/githubcli-archive-keyring.gpg";
-
-/// Plan what is needed to get missing tools installed. Empty when nothing is missing.
+/// Plan what the system package manager has to do for a missing tool. Empty when nothing is missing or when
+/// Kora gets the tool itself: the GitHub CLI always comes from Kora's own private copy (`crate::tools`), and
+/// so does Git on Windows (MinGit), so only Git on Linux is planned here (`apt-get`, administrator rights).
 /// Returns `Err(Invalid)` for unsupported OSes.
 pub fn plan_bootstrap(os: Os, tools: &Tools) -> Result<Vec<PlanStep>> {
-    let need_git = tools.git.is_none();
-    let need_gh = tools.gh.is_none();
     let mut steps = Vec::new();
-    if !need_git && !need_gh {
+    if tools.git.is_some() {
         return Ok(steps);
     }
     match os {
         Os::DebianLike => {
-            if need_gh {
-                steps.push(step(
-                    "Install wget and certificates (needed to fetch the GitHub CLI package key)",
-                    true,
-                    "apt-get",
-                    &["install", "-y", "wget", "ca-certificates"],
-                ));
-                steps.push(step(
-                    "Create the folder for package signing keys",
-                    true,
-                    "mkdir",
-                    &["-p", "-m", "755", "/etc/apt/keyrings"],
-                ));
-                steps.push(step(
-                    "Download GitHub's official package signing key",
-                    true,
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "wget -nv -O {GH_KEYRING} https://cli.github.com/packages/githubcli-archive-keyring.gpg && chmod go+r {GH_KEYRING}"
-                        ),
-                    ],
-                ));
-                steps.push(step(
-                    "Add GitHub's official package source for the GitHub CLI",
-                    true,
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "echo \"deb [arch=$(dpkg --print-architecture) signed-by={GH_KEYRING}] https://cli.github.com/packages stable main\" > /etc/apt/sources.list.d/github-cli.list"
-                        ),
-                    ],
-                ));
-            }
             steps.push(step("Refresh the package list", true, "apt-get", &["update"]));
-            let mut args = vec!["install", "-y"];
-            let mut names = Vec::new();
-            if need_git {
-                args.push("git");
-                names.push("git");
-            }
-            if need_gh {
-                args.push("gh");
-                names.push("the GitHub CLI (gh)");
-            }
-            steps.push(step(&format!("Install {}", names.join(" and ")), true, "apt-get", &args));
+            steps.push(step("Install git", true, "apt-get", &["install", "-y", "git"]));
         }
-        Os::Windows => {
-            // winget ships with Windows 10 1809+/11 and Server 2025; no Chocolatey needed.
-            let common = ["--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements"];
-            if need_git {
-                let mut a = vec!["install", "--id", "Git.Git"];
-                a.extend(common);
-                steps.push(step("Install Git for Windows using winget", true, "winget", &a));
-            }
-            if need_gh {
-                let mut a = vec!["install", "--id", "GitHub.cli"];
-                a.extend(common);
-                steps.push(step("Install the GitHub CLI (gh) using winget", true, "winget", &a));
-            }
-        }
+        Os::Windows => {}
         Os::Unsupported => {
             return Err(GitError::Invalid("operating system (not supported yet)", format!("{os:?}")))
         }
@@ -2371,13 +2310,28 @@ mod tests {
         assert!(plan_bootstrap(Os::DebianLike, &both).unwrap().is_empty());
         let deb = plan_bootstrap(Os::DebianLike, &none).unwrap();
         assert!(deb.iter().all(|s| s.needs_admin && !s.description.is_empty()));
-        assert!(deb.iter().any(|s| s.args.join(" ").contains("cli.github.com/packages")));
-        assert_eq!(deb.last().unwrap().args, vec!["install", "-y", "git", "gh"]);
-        let only_git = Tools { git: None, gh: both.gh.clone() };
-        let w = plan_bootstrap(Os::Windows, &only_git).unwrap();
-        assert_eq!(w.len(), 1);
-        assert!(w[0].args.contains(&"Git.Git".to_string()));
+        assert_eq!(deb.last().unwrap().args, vec!["install", "-y", "git"]);
+        // gh never comes from apt: Kora downloads its own copy.
+        assert!(!deb.iter().any(|s| s.args.join(" ").contains("gh") || s.args.join(" ").contains("cli.github.com")));
+        let only_gh = Tools { git: both.git.clone(), gh: None };
+        assert!(plan_bootstrap(Os::DebianLike, &only_gh).unwrap().is_empty());
+        // Windows: nothing for the system to do (Kora's own MinGit and gh).
+        assert!(plan_bootstrap(Os::Windows, &none).unwrap().is_empty());
         assert!(plan_bootstrap(Os::Unsupported, &none).is_err());
+    }
+
+    #[test]
+    fn git_config_env_carries_the_private_gh_credential_helper_unless_the_caller_has_their_own_config() {
+        let kv = |v: Vec<(String, String)>| v.into_iter().collect::<std::collections::BTreeMap<_, _>>();
+        assert!(git_config_env(false, None, None).is_empty());
+        let w = kv(git_config_env(true, None, None));
+        assert_eq!((w["GIT_CONFIG_COUNT"].as_str(), w["GIT_CONFIG_KEY_0"].as_str()), ("1", "core.longpaths"));
+        let c = kv(git_config_env(true, None, Some("!'/k/gh' auth git-credential")));
+        assert_eq!(c["GIT_CONFIG_COUNT"], "3");
+        // The empty value clears any helper listed before it; the next one is gh's.
+        assert_eq!((c["GIT_CONFIG_KEY_1"].as_str(), c["GIT_CONFIG_VALUE_1"].as_str()), ("credential.https://github.com.helper", ""));
+        assert_eq!(c["GIT_CONFIG_VALUE_2"], "!'/k/gh' auth git-credential");
+        assert!(git_config_env(true, Some("2"), Some("x")).is_empty(), "the caller's own GIT_CONFIG_COUNT is left alone");
     }
 
     #[test]
