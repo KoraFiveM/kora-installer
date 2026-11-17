@@ -85,6 +85,36 @@ reasonable time to release a fix before you disclose publicly.
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
 as any other (see above). Include the version, your platform, and whether the panel was local or remote.
 
+### Windows administrator worker
+
+On Windows the panel (never elevated) gets administrator work done through a short-lived elevated copy of Kora that it
+starts with the normal Windows permission prompt (design and threat model: `crates/kora-core/src/helper/worker.rs`).
+What it guarantees, and what it does not:
+
+- **Who it obeys.** It talks only over a private named pipe that only elevated administrators and SYSTEM may open
+  (random name, first instance, remote clients refused), only to the panel process that started it, and only when that
+  process runs the very same program file (compared by volume and file identity). It runs only Kora's fixed list of
+  administrator steps, each checked against Kora's own command-line definition.
+- **What it runs.** From the prompt until the session ends, nobody can replace or rename Kora's program file, so the
+  prompt and every elevated step start the file the panel runs. Each step runs as a child with an environment built
+  from nothing: system folders from Windows itself, a `PATH` of system folders only, the panel user's own profile, and
+  only the licence key and database password variables the step needs. Override and test variables are ignored when
+  elevated. It never takes a database client from `PATH`. One session and one elevated step at a time; a step is
+  stopped when the panel goes away or after 45 minutes.
+- **What it works on.** A server folder must hold a Kora install record and belong to the person the panel runs as
+  (re-checked in the elevated step itself, no links on the way); servers are named from the person's own list, never by
+  folder path. A record in `%ProgramFiles%\Kora\owners.json` (administrators only) says which Windows account each
+  service, firewall rule set, update task and database was made for, and another account's are never changed. The
+  firewall step opens no port below 1024 and no remote-desktop, remote-management or database port. The elevated
+  uninstall never deletes folders (the panel deletes them as the person). Server services keep only an ordinary user's
+  privileges (no "impersonate a client"), and the update task runs without elevation.
+- **What it does not protect against.** UAC is not a boundary between a person and their own programs. A harmful program
+  already running as the person can replace `kora.exe` in the person's folder before the panel starts, or inject into the
+  running panel and use a session the person approved until it ends; approving the prompt is like typing the shown
+  command into an administrator terminal. On an upgraded 0.6.x machine the old update task runs with full rights until
+  the schedule is changed once (an elevated Kora hardens `git` meanwhile). The pipe has no read time-out: a worker that
+  hangs without exiting holds the panel's administrator session until the panel restarts.
+
 ## Supported versions
 
 Kora Installer is pre-release software. Only the newest release receives security fixes.
