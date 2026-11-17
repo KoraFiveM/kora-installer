@@ -166,6 +166,6 @@ fn a_done_step_is_never_marked_skipped() {
 #[test]
 fn a_failed_step_keeps_a_packed_problem_and_shows_text() {
     let p = crate::problem::Problem::new("x", "Readable.").with_action(crate::problem::Action::Retry);
-    let e = StepError::Failed(p.encode());
+    let e = StepError::Failed(p.clone());
     assert_eq!(e.to_string(), "step failed: Readable.");
 }

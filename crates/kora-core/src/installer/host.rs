@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::registry::{Registry, ServerFile};
-use super::{InstallError, Result};
+use super::{Problem, Result};
 use crate::artifacts::{ArtifactStore, Platform};
 use crate::txadmin;
 
@@ -28,20 +28,20 @@ pub(crate) fn resolve_dir(name_or_dir: &str) -> Result<PathBuf> {
     if p.is_absolute() && p.join("kora-server.json").is_file() {
         return Ok(p.to_path_buf());
     }
-    let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
-    let entry = reg.find(name_or_dir).ok_or_else(|| InstallError(format!("no registered server named '{name_or_dir}'")))?;
+    let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
+    let entry = reg.find(name_or_dir).ok_or_else(|| Problem::generic(format!("no registered server named '{name_or_dir}'")))?;
     Ok(entry.dir.clone())
 }
 
 /// The command that starts a server (exposed for tests and `kora status`).
 pub fn build_command(name_or_dir: &str) -> Result<Command> {
     let dir = resolve_dir(name_or_dir)?;
-    let sf = ServerFile::load(&dir).map_err(|e| InstallError(format!("cannot read kora-server.json: {e}")))?;
+    let sf = ServerFile::load(&dir).map_err(|e| e.lead("cannot read kora-server.json"))?;
     let store = ArtifactStore::new(dir.join("artifacts"));
-    let build_dir: PathBuf = store.current_dir().map_err(|e| InstallError(e.to_string()))?.ok_or_else(|| InstallError("this server has no FXServer build installed".into()))?;
+    let build_dir: PathBuf = store.current_dir().map_err(|e| Problem::generic(e.to_string()))?.ok_or_else(|| Problem::generic("this server has no FXServer build installed"))?;
     let exe = build_dir.join(Platform::current().executable());
     if !exe.is_file() {
-        return Err(InstallError(format!("{} is missing", exe.display())));
+        return Err(Problem::generic(format!("{} is missing", exe.display())));
     }
     let mut c = Command::new(exe);
     c.current_dir(&dir);
@@ -155,18 +155,18 @@ pub fn service_host(name_or_dir: &str) -> Result<i32> {
         use std::sync::Arc;
         let stop = Arc::new(AtomicBool::new(false));
         for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
-            signal_hook::flag::register(sig, Arc::clone(&stop)).map_err(|e| InstallError(format!("cannot install signal handlers: {e}")))?;
+            signal_hook::flag::register(sig, Arc::clone(&stop)).map_err(|e| Problem::generic(format!("cannot install signal handlers: {e}")))?;
         }
         let dir = resolve_dir(name_or_dir)?;
         cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
+        let mut child = cmd.spawn().map_err(|e| Problem::generic(format!("could not start FXServer: {e}")))?;
         let _console = ConsoleTee::start(&dir, &mut child, true, None);
         // Keeps the game port forwarded on the router (if the person turned that on) for exactly as long as FXServer runs.
         let _port_forward = crate::reach::forward::keeper::ServerGuard::start(dir.clone());
         let pid = child.id() as i32;
         let mut forwarded = false;
         loop {
-            if let Some(st) = child.try_wait().map_err(|e| InstallError(format!("waiting for FXServer failed: {e}")))? {
+            if let Some(st) = child.try_wait().map_err(|e| Problem::generic(format!("waiting for FXServer failed: {e}")))? {
                 let stop_requested = stop.load(Ordering::SeqCst);
                 if stop_requested && st.signal() == Some(11) {
                     eprintln!("kora: FXServer segfaulted while shutting down after a stop request (known artifact behaviour); treating the stop as clean");
@@ -185,7 +185,7 @@ pub fn service_host(name_or_dir: &str) -> Result<i32> {
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let status = build_command(name_or_dir)?.status().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
+        let status = build_command(name_or_dir)?.status().map_err(|e| Problem::generic(format!("could not start FXServer: {e}")))?;
         Ok(status.code().unwrap_or(1))
     }
 }
@@ -251,14 +251,14 @@ mod scm {
             Ok(()) => Ok(EXIT.load(Ordering::SeqCst) as i32),
             Err(windows_service::Error::Winapi(e)) if e.raw_os_error() == Some(NOT_A_SERVICE) => {
                 let mut cmd = build_command(target)?;
-                let st = cmd.status().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
+                let st = cmd.status().map_err(|e| Problem::generic(format!("could not start FXServer: {e}")))?;
                 Ok(st.code().unwrap_or(1))
             }
-            Err(e) => Err(InstallError(format!("cannot talk to the Windows service manager: {e}"))),
+            Err(e) => Err(Problem::generic(format!("cannot talk to the Windows service manager: {e}"))),
         }
     }
 
-    fn run() -> std::result::Result<u32, String> {
+    fn run() -> std::result::Result<u32, Problem> {
         let target = TARGET.get().cloned().unwrap_or_default();
         let (tx, rx) = mpsc::channel::<()>();
         let handler = move |ev: ServiceControl| match ev {
@@ -285,14 +285,14 @@ mod scm {
         let log = open_service_log(&target);
         log_line(&log, &format!("kora service-host: starting FXServer for {target}"));
         let started = std::time::Instant::now();
-        let mut child = match build_command(&target).map_err(|e| e.to_string()).and_then(|mut c| {
+        let mut child = match build_command(&target).and_then(|mut c| {
             c.stdin(std::process::Stdio::null());
             c.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-            c.spawn().map_err(|e| format!("could not start FXServer: {e}"))
+            c.spawn().map_err(|e| Problem::from(e).lead("could not start FXServer"))
         }) {
             Ok(c) => c,
             Err(e) => {
-                log_line(&log, &format!("kora service-host: {e}"));
+                log_line(&log, &format!("kora service-host: {}", e.one_line()));
                 report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, 1, 0);
                 return Err(e);
             }
@@ -322,14 +322,14 @@ mod scm {
 
 /// Name of the OS service Kora registered for a registered server (`kora-<slug>`).
 pub fn service_name_of(name: &str) -> Result<String> {
-    let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
-    let entry = reg.find(name).ok_or_else(|| InstallError(format!("no registered server named '{name}'")))?;
+    let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
+    let entry = reg.find(name).ok_or_else(|| Problem::generic(format!("no registered server named '{name}'")))?;
     Ok(format!("kora-{}", super::slug(&entry.name)))
 }
 
 fn service_for(name: &str) -> Result<crate::service::ManagedServer> {
-    let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
-    let entry = reg.find(name).ok_or_else(|| InstallError(format!("no registered server named '{name}'")))?;
+    let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
+    let entry = reg.find(name).ok_or_else(|| Problem::generic(format!("no registered server named '{name}'")))?;
     // Control verbs only use the service name; the other fields satisfy validation.
     Ok(crate::service::ManagedServer {
         name: super::slug(&entry.name),
@@ -346,14 +346,14 @@ fn service_for(name: &str) -> Result<crate::service::ManagedServer> {
 pub fn service_state(name: &str) -> Result<crate::service::ServiceState> {
     let server = service_for(name)?;
     let rn = crate::service::SystemRunner;
-    crate::service::ServiceManager::new(crate::service::Platform::current(), &rn).status(&server).map_err(|e| InstallError(e.to_string()))
+    crate::service::ServiceManager::new(crate::service::Platform::current(), &rn).status(&server).map_err(|e| Problem::generic(e.to_string()))
 }
 
 /// start / stop / restart the server's OS service.
 pub fn service_control(name: &str, action: crate::service::ControlAction) -> Result<()> {
     use crate::service::ServiceState;
     if service_state(name)? == ServiceState::NotInstalled {
-        return Err(InstallError(format!("'{name}' has no background service. Install with --service (as administrator), or run `kora service-host {name}` in a terminal.")));
+        return Err(Problem::generic(format!("'{name}' has no background service. Install with --service (as administrator), or run `kora service-host {name}` in a terminal.")));
     }
     let server = service_for(name)?;
     let rn = crate::service::SystemRunner;
@@ -363,7 +363,7 @@ pub fn service_control(name: &str, action: crate::service::ControlAction) -> Res
         crate::service::ControlAction::Stop => m.stop(&server),
         crate::service::ControlAction::Restart => m.restart(&server),
     }
-    .map_err(|e| InstallError(e.to_string()))
+    .map_err(|e| Problem::generic(e.to_string()))
 }
 
 #[cfg(test)]

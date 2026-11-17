@@ -294,7 +294,7 @@ pub async fn admin_service_install(State(st): State<AppState>) -> Result<axum::r
         let stderr = t.join().unwrap_or_default();
         if !status.success() {
             let why = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("the installer stopped").trim_start_matches("error: ").to_string();
-            return Err(format!("Kora's administrator service was not installed: {why}"));
+            return Err(format!("Kora's administrator service was not installed: {why}").into());
         }
         Ok(json!({"installed": crate::elevated::service_ready()}))
     })

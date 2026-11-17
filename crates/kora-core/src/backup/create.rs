@@ -281,7 +281,7 @@ pub fn create_unguarded(e: &ServerEntry, o: &CreateOptions, host: &mut dyn Host,
     let mut stopped_by_us = false;
     if stop {
         ev("stop", "Stopping the server for a strictly consistent copy", 8);
-        host.stop().map_err(|m| Problem::generic(format!("The server could not be stopped for the backup: {m}")))?;
+        host.stop().map_err(|m| m.lead("The server could not be stopped for the backup"))?;
         stopped_by_us = true;
     }
     let outcome = build(e, o, tools, &destination, &mut ev, server_file.as_ref(), dbsrc, resources, &skip_resources, resource_bytes + server_bytes + db_bytes, stop || !was_running);
@@ -291,7 +291,7 @@ pub fn create_unguarded(e: &ServerEntry, o: &CreateOptions, host: &mut dyn Host,
             // The backup itself may have worked; the person must know the server is down.
             return match outcome {
                 Ok(mut r) => {
-                    r.notes.push(format!("The server was stopped for the backup and could not be started again ({m}). Start it from the server page."));
+                    r.notes.push(format!("The server was stopped for the backup and could not be started again ({}). Start it from the server page.", m.one_line()));
                     Ok(r)
                 }
                 Err(p) => Err(p),

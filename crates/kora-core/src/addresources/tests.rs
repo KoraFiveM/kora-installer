@@ -2,6 +2,7 @@ use super::*;
 use crate::installer::registry::PortsRecord;
 #[allow(unused_imports)]
 use crate::installer::{Mode, Source, Versions};
+use crate::problem::Problem;
 use std::cell::RefCell;
 
 const SHA: &str = "0123456789012345678901234567890123456789";
@@ -55,13 +56,13 @@ struct Fake {
 }
 
 impl Cloner for Fake {
-    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<git::ForkState, String> {
+    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<git::ForkState, Problem> {
         self.forked.borrow_mut().extend(repos.iter().map(|r| format!("{owner}<-{r}")));
         let mut st = git::ForkState::new(owner, false, &[]);
         st.done = repos.to_vec();
         Ok(st)
     }
-    fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), String> {
+    fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), Problem> {
         let fork_owner = fork.map(|f| f.split('/').next().unwrap());
         if self.fail == Some(item.id.as_str()) {
             std::fs::create_dir_all(partial).unwrap(); // a half-made clone must be cleaned up
@@ -206,10 +207,10 @@ fn development_add_reuses_an_existing_fork_and_clones_it_under_its_real_name() {
     // execute() with a cloner that hands back this state and clones through the fake gh
     struct Prepared<'a>(GitCloner<'a>, git::ForkState);
     impl Cloner for Prepared<'_> {
-        fn prepare_forks(&self, _o: &str, _r: &[String]) -> std::result::Result<git::ForkState, String> {
+        fn prepare_forks(&self, _o: &str, _r: &[String]) -> std::result::Result<git::ForkState, Problem> {
             Ok(self.1.clone())
         }
-        fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), String> {
+        fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), Problem> {
             self.0.clone_item(item, fork, partial)
         }
     }

@@ -199,6 +199,29 @@ pub fn interrupted_problem(op: &str, server: Option<&str>, resumable: bool) -> P
     Problem::new(CODE_INTERRUPTED, message)
 }
 
+/// The Problem behind the `error` column of a job row.
+///
+/// New rows hold the Problem as JSON (`{code, message, details?, actions?, ...}`). Older rows may hold
+/// plain text, or the packed form v0.7.0 wrote for a Problem. Reading those is the ONLY thing
+/// [`read_legacy_packed`] is for.
+pub fn problem_of_row(raw: &str) -> Problem {
+    if let Some(p) = read_legacy_packed(raw) {
+        return p;
+    }
+    match serde_json::from_str::<Value>(raw) {
+        Ok(v) => Problem::from_json(&v).unwrap_or_else(|| Problem::generic(raw)),
+        Err(_) => Problem::generic(raw),
+    }
+}
+
+/// COMPATIBILITY, read only, never written: v0.7.0 stored a job's [`Problem`] packed into the error
+/// text as `\u{1}kora-problem:<json>`. Rows written by it (and by builds of this branch before the
+/// typed-errors change) can still be in a person's database, so they are read here. This is the only
+/// place in the tree that knows the marker (a test in `problem.rs` keeps it that way).
+pub fn read_legacy_packed(raw: &str) -> Option<Problem> {
+    serde_json::from_str(raw.strip_prefix("\u{1}kora-problem:")?).ok()
+}
+
 /// The error text stored and shown for an interrupted job (the Problem as JSON, with `resume` when it can carry on).
 pub fn interrupted_error(op: &str, server: Option<&str>, resumable: bool) -> String {
     let mut v = interrupted_problem(op, server, resumable).to_json();
@@ -229,4 +252,29 @@ pub fn recover(s: &Store, alive: &dyn Fn(u32) -> bool, my_pid: u32, my_instance:
         }
         Ok(done)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::problem::{codes, Action};
+
+    #[test]
+    fn rows_written_by_v0_7_0_with_a_packed_problem_still_read() {
+        let p = Problem::new(codes::GH_SIGNED_OUT, "Sign in.").with_action(Action::SignInGithub { scopes: vec![] });
+        // The form v0.7.0 wrote.
+        let old = format!("\u{1}kora-problem:{}", serde_json::to_string(&p).unwrap());
+        assert_eq!(read_legacy_packed(&old), Some(p.clone()));
+        assert_eq!(problem_of_row(&old), p);
+        // Broken packed text is shown as it is, not lost.
+        assert_eq!(problem_of_row("\u{1}kora-problem:{oops").message, "\u{1}kora-problem:{oops");
+    }
+
+    #[test]
+    fn plain_and_json_rows_read() {
+        assert_eq!(problem_of_row("disk full"), Problem::generic("disk full"));
+        let j = crate::api::JobFailure::new(Problem::generic("m").with_details("d")).with("kept", serde_json::json!(["x"])).to_text();
+        let p = problem_of_row(&j);
+        assert_eq!((p.message.as_str(), p.details.as_deref()), ("m", Some("d")));
+    }
 }

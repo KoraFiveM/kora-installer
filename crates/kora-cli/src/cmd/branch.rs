@@ -6,7 +6,7 @@
 use clap::{Args, Subcommand};
 use kora_core::branches::{self as br, BulkStatus, Changes, PrSource, Reply, Request, ResourceBranch, State, Target};
 use kora_core::git::branches::Status;
-use kora_core::problem::{plain_text, Problem};
+use kora_core::problem::Problem;
 
 #[derive(Args, Clone, Default)]
 pub struct ChangeArgs {
@@ -151,8 +151,7 @@ fn changes_of(a: &ChangeArgs) -> Option<Changes> {
 }
 
 fn fail(p: &Problem) -> i32 {
-    eprintln!("error: {}", plain_text(&p.encode()));
-    1
+    crate::ui::fail(p.clone())
 }
 
 fn ask(server: &str, req: &Request) -> Result<Reply, Problem> {

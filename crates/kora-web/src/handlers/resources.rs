@@ -20,7 +20,7 @@ use crate::{blocking, ApiError, AppState};
 
 /// Loads the catalog and says when the bundled copy was used. Tests replace it so nothing
 /// touches the network.
-pub type CatalogLoader = Arc<dyn Fn() -> Result<(Catalog, Option<String>), String> + Send + Sync>;
+pub type CatalogLoader = Arc<dyn Fn() -> Result<(Catalog, Option<String>), kora_core::problem::Problem> + Send + Sync>;
 
 static CATALOG_LOADER: RwLock<Option<CatalogLoader>> = RwLock::new(None);
 
@@ -29,11 +29,11 @@ pub fn set_catalog_loader(l: Option<CatalogLoader>) {
     *CATALOG_LOADER.write().unwrap_or_else(|e| e.into_inner()) = l;
 }
 
-fn load_catalog() -> Result<(Catalog, Option<String>), String> {
+fn load_catalog() -> Result<(Catalog, Option<String>), kora_core::problem::Problem> {
     let custom = CATALOG_LOADER.read().unwrap_or_else(|e| e.into_inner()).clone();
     match custom {
         Some(f) => f(),
-        None => kora_core::addresources::load_catalog().map_err(|e| e.to_string()),
+        None => kora_core::addresources::load_catalog(),
     }
 }
 
@@ -168,7 +168,7 @@ pub async fn resources_add(State(st): State<AppState>, Path(s): Path<String>, Js
         for id in &out.installed {
             h.event(json!({"type": "resource", "id": id, "state": "installed"}));
         }
-        serde_json::to_value(&out).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&out)?)
     })
 }
 

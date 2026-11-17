@@ -5,7 +5,6 @@ use clap::{Args, Subcommand};
 use kora_core::branches::{self as br, Reply, Request, State};
 use kora_core::collab::{self, Checks, Reply as CReply, Request as CRequest};
 use kora_core::installer::Versions;
-use kora_core::problem::plain_text;
 
 #[derive(Args, Clone)]
 pub struct Target {
@@ -204,7 +203,7 @@ pub fn resource(cmd: ResourceCmd) -> i32 {
                         println!("skipped: {s}");
                     }
                     for f in &o.failed {
-                        eprintln!("{}: {}", f.resource, plain_text(&f.problem.encode()));
+                        eprintln!("{}: {}", f.resource, f.problem);
                     }
                     if o.server_is_fork {
                         println!("This server now uses your own copies (in {}).", o.owner);
@@ -233,8 +232,7 @@ pub fn resource(cmd: ResourceCmd) -> i32 {
 }
 
 fn fail(p: &kora_core::problem::Problem) -> i32 {
-    eprintln!("error: {}", plain_text(&p.encode()));
-    1
+    crate::ui::fail(p.clone())
 }
 
 fn unreachable_reply() {
@@ -273,7 +271,7 @@ fn show(server: &str, resource: &str) -> i32 {
         Ok(Reply::Page(p)) => p,
         Ok(_) => return 1,
         Err(p) => {
-            eprintln!("error: {}", plain_text(&p.encode()));
+            crate::ui::print_error(&p);
             return 1;
         }
     };

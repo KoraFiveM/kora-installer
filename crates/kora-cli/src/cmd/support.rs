@@ -4,7 +4,6 @@
 
 use clap::Subcommand;
 use kora_core::api::{Backend, SystemBackend};
-use kora_core::problem::plain_text;
 use kora_core::space::human;
 use kora_core::support::service;
 
@@ -39,7 +38,7 @@ pub(crate) fn run(cmd: SupportCmd) -> i32 {
     let listing = match b.support_preview(name.as_deref()) {
         Ok(l) => l,
         Err(m) => {
-            eprintln!("error: {}", plain_text(&m));
+            crate::ui::print_error(&m);
             return 1;
         }
     };
@@ -50,7 +49,7 @@ pub(crate) fn run(cmd: SupportCmd) -> i32 {
                 0
             }
             Err(m) => {
-                eprintln!("error: {}", plain_text(&m));
+                crate::ui::print_error(&m);
                 1
             }
         };
@@ -79,7 +78,7 @@ pub(crate) fn run(cmd: SupportCmd) -> i32 {
             0
         }
         Err(m) => {
-            eprintln!("error: {}", plain_text(&m));
+            crate::ui::print_error(&m);
             1
         }
     }
