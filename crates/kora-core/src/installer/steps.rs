@@ -1097,8 +1097,12 @@ impl InstallStep {
             db::rollback(&db::SystemRunner, &admin, &mut old).map_err(|e| InstallError(e.to_string()))?;
             res.clear_old_state = true;
         }
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let tmp = std::env::temp_dir().join(format!("kora-db-state-{}-{nanos}.json", std::process::id()));
+        // A scratch file only administrators can touch (the person's TEMP is theirs to change
+        // between the write and the read): Kora's MariaDB folder, under an unguessable name.
+        let mut rnd = [0u8; 16];
+        getrandom::fill(&mut rnd).map_err(|e| InstallError(format!("no random numbers: {e}")))?;
+        let scratch = windows_db::base_dir().filter(|b| b.is_dir()).unwrap_or_else(std::env::temp_dir);
+        let tmp = scratch.join(format!("kora-db-state-{}.json", hex::encode(rnd)));
         ctx.emit(self.id, StepStatus::Running, "Creating database and user", 0.4);
         let made = db::provision(&db::SystemRunner, &admin, "127.0.0.1", "127.0.0.1", &tmp);
         let state = ProvisionState::load(&tmp).ok();

@@ -90,7 +90,7 @@ mod imp {
     use std::os::windows::io::{FromRawHandle, RawHandle};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use std::time::Instant;
 
     type Handle = *mut c_void;
     const INVALID: Handle = -1isize as Handle;
@@ -303,14 +303,11 @@ mod imp {
     /// An earlier prompt is still on screen (its thread has not returned yet).
     static PROMPT_OPEN: AtomicBool = AtomicBool::new(false);
 
-    fn random16() -> [u8; 16] {
+    /// 128 random bits for the pipe name; no fallback (a predictable name is refused, not used).
+    fn random16() -> Result<[u8; 16], OpenError> {
         let mut b = [0u8; 16];
-        if getrandom::fill(&mut b).is_err() {
-            // Never expected; the name is not the protection (the DACL and the peer checks are).
-            let t = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-            b = t.to_le_bytes();
-        }
-        b
+        getrandom::fill(&mut b).map_err(|e| OpenError::Failed(format!("Windows gave Kora no random numbers for the connection ({e})")))?;
+        Ok(b)
     }
 
     fn create_pipe(name: &str) -> std::io::Result<Owned> {
@@ -439,7 +436,14 @@ mod imp {
             }
         };
         let me = std::process::id();
-        let name = pipe_name(me, &random16());
+        let rnd = match random16() {
+            Ok(r) => r,
+            Err(e) => {
+                PROMPT_OPEN.store(false, Ordering::SeqCst);
+                return Err(e);
+            }
+        };
+        let name = pipe_name(me, &rnd);
         let pipe = match create_pipe(&name) {
             Ok(p) => p,
             Err(e) => {
@@ -489,7 +493,9 @@ mod imp {
         }
         let wait = PIPE_WAIT;
         // SAFETY: our pipe handle; back to blocking reads and writes.
-        unsafe { SetNamedPipeHandleState(pipe.0, &wait, std::ptr::null(), std::ptr::null()) };
+        if unsafe { SetNamedPipeHandleState(pipe.0, &wait, std::ptr::null(), std::ptr::null()) } == 0 {
+            return Err(OpenError::Failed(format!("cannot set up the connection to the administrator helper: {}", std::io::Error::last_os_error())));
+        }
         // SAFETY: the handle is ours and handed over to `File`, which closes it.
         let file = unsafe { File::from_raw_handle(pipe.0 as RawHandle) };
         std::mem::forget(pipe);
