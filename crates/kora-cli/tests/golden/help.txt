@@ -150,7 +150,7 @@ Commands:
   user            Manage the people who may sign in to the panel remotely (each has a token and a role)
   tailscale       Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
   restart         Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
-  remote-actions  Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default
+  remote-actions  Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
 
 Options:
       --port <PORT>
@@ -359,13 +359,13 @@ Options:
           Print help
 
 ===== kora panel remote-actions =====
-Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default
+Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
 
 Usage: kora panel remote-actions [OPTIONS] <COMMAND>
 
 Commands:
-  on      Allow these actions for remote administrators
-  off     Refuse these actions for everyone who signs in remotely (the default)
+  on      Allow these actions for administrators who sign in with a token
+  off     Refuse these actions for token sign-ins from other computers (the default)
   status  Show whether they are on or off
 
 Options:
@@ -376,7 +376,7 @@ Options:
           Print help
 
 ===== kora panel remote-actions on =====
-Allow these actions for remote administrators
+Allow these actions for administrators who sign in with a token
 
 Usage: kora panel remote-actions on [OPTIONS]
 
@@ -388,7 +388,7 @@ Options:
           Print help
 
 ===== kora panel remote-actions off =====
-Refuse these actions for everyone who signs in remotely (the default)
+Refuse these actions for token sign-ins from other computers (the default)
 
 Usage: kora panel remote-actions off [OPTIONS]
 
@@ -749,7 +749,7 @@ Usage: kora app [OPTIONS] <COMMAND>
 Commands:
   install    Make the Kora shortcuts that open the panel (per user, no administrator rights; idempotent)
   status     Show the shortcuts and whether the old machine-wide app is still here (`key: value` lines)
-  uninstall  Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights only when there is something to remove. Servers and databases are never touched
+  uninstall  Remove Kora's shortcuts (Start Menu / Desktop on Windows, the applications-menu launcher on Linux). If the OLD machine-wide app is also installed it is removed too when you run this as administrator; otherwise `kora uninstall --app` (as administrator) does that. Servers and databases are never touched
 
 Options:
       --no-elevate
@@ -792,7 +792,7 @@ Options:
           Print help
 
 ===== kora app uninstall =====
-Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights only when there is something to remove. Servers and databases are never touched
+Remove Kora's shortcuts (Start Menu / Desktop on Windows, the applications-menu launcher on Linux). If the OLD machine-wide app is also installed it is removed too when you run this as administrator; otherwise `kora uninstall --app` (as administrator) does that. Servers and databases are never touched
 
 Usage: kora app uninstall [OPTIONS]
 
@@ -923,7 +923,7 @@ Options:
           Also drop the databases and database users Kora created
 
       --app
-          Remove only the Kora app (shortcuts, PATH entry, the installed copy); servers and databases are never touched
+          Remove only the OLD machine-wide Kora app (its shortcuts, PATH entry, the installed copy); servers and databases are never touched. (`kora app uninstall` removes Kora's own shortcuts.)
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

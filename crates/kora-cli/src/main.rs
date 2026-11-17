@@ -3117,7 +3117,8 @@ mod tests {
         assert_eq!(panel_remote_actions(RemoteActionsCmd::On, &path), 1);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
 
-        assert!(remote_actions_message(RemoteActionsCmd::On, true).starts_with("Remote administrators can now install, delete and uninstall servers"));
+        assert!(remote_actions_message(RemoteActionsCmd::On, true).starts_with("Administrators who sign in with a token from another computer can now delete and unregister servers"));
+        assert!(remote_actions_message(RemoteActionsCmd::Status, false).contains("can install and manage servers") && remote_actions_message(RemoteActionsCmd::Status, false).contains("Tailscale administrators are not held back"));
         assert!(remote_actions_message(RemoteActionsCmd::Off, false).starts_with("Remote actions are turned off."));
         assert!(remote_actions_message(RemoteActionsCmd::Status, true).contains("kora panel remote-actions off"));
         assert!(remote_actions_message(RemoteActionsCmd::Status, false).contains("kora panel remote-actions on"));
