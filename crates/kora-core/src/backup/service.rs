@@ -226,7 +226,7 @@ fn open_source(src: &super::import::ImportSource, allow_path: bool) -> Result<Pa
 pub fn import_inspect(src: &super::import::ImportSource, passphrase: Option<&str>, allow_path: bool, servers: &[ServerEntry]) -> Res<super::import::ImportPreview> {
     let file = open_source(src, allow_path)?;
     let keys: Vec<String> = crate::keystore::KeyStore::default().list().map(|l| l.into_iter().map(|k| k.name).collect()).unwrap_or_default();
-    super::import::inspect(&file, passphrase, servers, &keys, &super::import::SystemPorts, &super::import::SystemForks, &crate::api::install::default_dir).map_err(pack)
+    super::import::inspect(&file, passphrase, servers, &keys, &super::import::SystemPorts, &super::import::SystemForks, &|| crate::installer::check_db_admin(None), &crate::api::install::default_dir).map_err(pack)
 }
 
 pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(BackupEvent)) -> Res<super::import::ImportResult> {
@@ -234,7 +234,8 @@ pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportReq
     let servers = b.list()?;
     let (db, git) = (SystemRunner, crate::git::SystemRunner);
     let tools = tools_for(&db, &git);
-    let admin = crate::installer::admin_conn_for(None);
+    let given = req.db_admin.as_ref().map(|a| crate::installer::DbAdmin { host: a.host.clone(), port: a.port, user: a.user.clone(), password: a.password.clone() });
+    let admin = crate::installer::admin_conn_for(given.as_ref());
     let prov = super::import::SystemProvisioner { admin };
     let keys = crate::keystore::KeyStore::default();
     let saved = |n: &str| keys.get(n).ok();
@@ -255,4 +256,9 @@ pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportReq
         }
     }
     Ok(result)
+}
+
+/// The backups of servers that were deleted (kept, listed apart, restorable as a new server).
+pub fn archived_view() -> crate::api::wire::ArchivedBackups {
+    crate::api::wire::ArchivedBackups { servers: settings::archived().into_iter().map(|a| crate::api::wire::ArchivedServer { name: a.name, deleted_unix: a.deleted_unix, backups: a.backups }).collect() }
 }

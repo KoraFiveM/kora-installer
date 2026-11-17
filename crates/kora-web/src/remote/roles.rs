@@ -220,6 +220,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::BackupImportUpload
         | Op::BackupImportInspect
         | Op::BackupImportStart
+        | Op::BackupsArchived
         | Op::TxAdminTicket => Admin,
     }
 }
@@ -385,6 +386,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::BackupImportUpload
         | Op::BackupImportInspect
         | Op::BackupImportStart
+        | Op::BackupsArchived
         | Op::ReachFirewallOpen => false,
     }
 }
@@ -536,6 +538,7 @@ pub fn installs(op: Op) -> bool {
         | Op::SupportBundleFile
         | Op::SupportBundleCreate
         | Op::SupportBundleDownload
+        | Op::BackupsArchived
         | Op::TxAdminTicket => false,
     }
 }
@@ -723,6 +726,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::BackupImportUpload
         | Op::BackupImportInspect
         | Op::BackupImportStart
+        | Op::BackupsArchived
         | Op::TxAdminTicket => false,
     }
 }

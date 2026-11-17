@@ -719,6 +719,7 @@ fn cases() -> Vec<Case> {
         case(Op::ReachFirewallOpen, s, None),
         case(Op::BackupsList, s, None),
         case(Op::BackupsOverview, &[], None),
+        case(Op::BackupsArchived, &[], None),
         case(Op::BackupImportInspect, &[], Some(json!({"source": {"path": "/tmp/old.tar.gz.age"}, "passphrase": "x"}))),
         case(
             Op::BackupImportStart,

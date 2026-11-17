@@ -47,6 +47,7 @@ pub enum AlertKind {
     DiskLow,
     RamHigh,
     UpdateAttention,
+    BackupFailed,
     #[default]
     #[serde(other)]
     Other,

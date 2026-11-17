@@ -250,6 +250,11 @@ pub trait Backend {
     fn backup_prune(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
         crate::backup::service::prune(self, e)
     }
+    /// Backups of deleted servers.
+    fn backups_archived(&mut self) -> Res<crate::api::wire::ArchivedBackups> {
+        Ok(crate::backup::service::archived_view())
+    }
+
     // ---- bringing a server from a backup (see `crate::backup::import`). `allow_path`: a file on this computer may be named
     // (a local session); a remote one must upload.
     fn import_inspect(&mut self, src: &crate::backup::import::ImportSource, passphrase: Option<&str>, allow_path: bool) -> Res<crate::backup::import::ImportPreview> {

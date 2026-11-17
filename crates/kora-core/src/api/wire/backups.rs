@@ -121,3 +121,19 @@ pub struct ServerBackupLine {
 pub struct BackupsOverview {
     pub servers: Vec<ServerBackupLine>,
 }
+
+/// One deleted server and the backups Kora kept of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ArchivedServer {
+    pub name: String,
+    pub deleted_unix: u64,
+    pub backups: Vec<BackupInfo>,
+}
+
+/// `GET /backups/archived`: "Backups of servers that no longer exist".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ArchivedBackups {
+    pub servers: Vec<ArchivedServer>,
+}

@@ -53,6 +53,19 @@ pub struct ImportSource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub path: Option<String>,
+    /// A backup Kora already holds of a server that was deleted (see `settings::archived`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub archived: Option<ArchivedRef>,
+}
+
+/// One backup of a deleted server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ArchivedRef {
+    pub name: String,
+    pub deleted_unix: u64,
+    pub backup: String,
 }
 
 /// A thing in the way, and what to do about it.
@@ -173,9 +186,19 @@ pub struct ImportPreview {
     pub licence_note: String,
     /// A fork server whose owner cannot be used here: the guided choice (see [`ForkChoice`]).
     pub fork: Option<ForkNote>,
+    /// The database administrator login Kora would use, tried now (only when the backup has a database). `ok: false` means the
+    /// page should ask for one (host, port, user, password: used once, never stored).
+    pub db_login: Option<DbLoginNote>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DbLoginNote {
+    pub ok: bool,
+    pub message: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ImportRequest {
     pub source: ImportSource,
@@ -187,6 +210,11 @@ pub struct ImportRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub licence_key_name: Option<String>,
+    /// The database administrator login to use when the automatic one does not work. Used once to create the new
+    /// database, never stored, never in a log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub db_admin: Option<crate::api::wire::DbAdmin>,
     /// What to do when the fork owner cannot be used on this computer.
     #[serde(default)]
     pub fork_choice: ForkChoice,
@@ -196,6 +224,12 @@ pub struct ImportRequest {
     /// Remove what an earlier, failed import of this server made, and begin again.
     #[serde(default)]
     pub start_over: bool,
+}
+
+impl std::fmt::Debug for ImportRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportRequest").field("source", &self.source).field("choices", &self.choices).field("passphrase", &self.passphrase.as_ref().map(|_| "<redacted>")).field("db_admin", &self.db_admin.as_ref().map(|a| format!("{}@{}:{}", a.user, a.host, a.port))).finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,6 +277,9 @@ pub fn resolve_source(s: &ImportSource, allow_path: bool) -> Result<PathBuf, Pro
             .and_then(|mut d| d.find_map(|x| x.ok().map(|x| x.path()).filter(|p| p.is_file())))
             .ok_or_else(|| Problem::new(codes::NOT_FOUND, "That upload is gone. Upload the file again."));
     }
+    if let Some(a) = &s.archived {
+        return super::settings::archived_file(&a.name, a.deleted_unix, &a.backup).ok_or_else(|| Problem::new(codes::NOT_FOUND, "That backup of a deleted server is not there any more."));
+    }
     if let Some(p) = s.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
         if !allow_path {
             return Err(Problem::new(codes::NOT_FOUND, "A file on the computer that runs Kora can only be chosen from that computer's own screen. Upload the file instead."));
@@ -288,7 +325,7 @@ fn free_name(base: &str, used: &[String]) -> String {
 }
 
 /// Look at a file. Reads only its start. `servers`: the servers already registered here.
-pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], saved_keys: &[String], ports: &dyn PortCheck, forks: &dyn ForkTools, default_dir: &dyn Fn(&str) -> String) -> Result<ImportPreview, Problem> {
+pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], saved_keys: &[String], ports: &dyn PortCheck, forks: &dyn ForkTools, db_check: &dyn Fn() -> Result<(), String>, default_dir: &dyn Fn(&str) -> String) -> Result<ImportPreview, Problem> {
     let file_name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut p = ImportPreview {
         file_name,
@@ -307,6 +344,7 @@ pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], s
         saved_keys: saved_keys.to_vec(),
         licence_note: LICENCE_NOTE.into(),
         fork: None,
+        db_login: None,
     };
     let head = match archive::read_head(file, pass(passphrase).as_ref()) {
         Ok(m) => m,
@@ -386,6 +424,12 @@ pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], s
             };
             p.fork = Some(ForkNote { owner, usable, signed_in_as: me, message });
         }
+    }
+    if matches!(head.database.kind, DbKind::Dumped | DbKind::External) {
+        p.db_login = Some(match db_check() {
+            Ok(()) => DbLoginNote { ok: true, message: "Kora can log in to this computer's database server automatically.".into() },
+            Err(m) => DbLoginNote { ok: false, message: m },
+        });
     }
     p.server = Some(head.server);
     p.database = Some(head.database);
@@ -952,6 +996,7 @@ mod tests {
             choices: ImportChoices { name: name.into(), dir: dir.display().to_string(), game_port: 31120, txadmin_port: 41120 },
             licence_key_name: None,
             fork_choice: ForkChoice::Keep,
+            db_admin: None,
             start: false,
             start_over: false,
         }
@@ -963,14 +1008,14 @@ mod tests {
         let git = rig.clean_git();
         let path = make_backup(&rig, &git, "a good passphrase");
         // no password: says so and nothing else
-        let p = inspect(&path, None, &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|_| "/srv/new".into()).unwrap();
+        let p = inspect(&path, None, &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| "/srv/new".into()).unwrap();
         assert!(p.needs_passphrase && p.server.is_none());
         // wrong password
-        assert_eq!(inspect(&path, Some("wrong wrong wrong"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|_| "/srv/new".into()).unwrap_err().code, codes::WRONG_PASSPHRASE);
+        assert_eq!(inspect(&path, Some("wrong wrong wrong"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| "/srv/new".into()).unwrap_err().code, codes::WRONG_PASSPHRASE);
         // right: this machine already has a server with that name and those ports
         let here =
             vec![ServerEntry { name: rig.entry.name.clone(), dir: "/srv/other".into(), mode: crate::installer::Mode::Production, source: None, versions: None, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 }];
-        let p = inspect(&path, Some("a good passphrase"), &here, &["Main".into()], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|n| format!("/srv/{}", crate::installer::slug(n))).unwrap();
+        let p = inspect(&path, Some("a good passphrase"), &here, &["Main".into()], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|n| format!("/srv/{}", crate::installer::slug(n))).unwrap();
         let kinds: Vec<&str> = p.clashes.iter().map(|c| c.kind.as_str()).collect();
         assert_eq!(kinds, ["name", "game_port", "txadmin_port"]);
         let s = p.suggested.unwrap();
@@ -982,7 +1027,7 @@ mod tests {
         // a busy folder is a clash too
         let busy = tempfile::tempdir().unwrap();
         std::fs::write(busy.path().join("x"), b"1").unwrap();
-        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|_| busy.path().display().to_string()).unwrap();
+        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| busy.path().display().to_string()).unwrap();
         assert!(p.clashes.iter().any(|c| c.kind == "folder"));
     }
 
@@ -1146,14 +1191,14 @@ mod tests {
         let path = make_backup(&rig, &git, "a good passphrase");
         // the preview names the owner and says it cannot be used here
         let other = FakeForks { me: Some("someone-else"), made: Default::default() };
-        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &other, &|_| "/srv/n".into()).unwrap();
+        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &other, &|| Ok(()), &|_| "/srv/n".into()).unwrap();
         let note = p.fork.unwrap();
         assert_eq!((note.owner.as_str(), note.usable, note.signed_in_as.as_deref()), ("old-owner", false, Some("someone-else")));
         assert!(note.message.contains("cannot use"));
         let same = FakeForks { me: Some("old-owner"), made: Default::default() };
-        assert!(inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &same, &|_| "/srv/n".into()).unwrap().fork.unwrap().usable);
+        assert!(inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &same, &|| Ok(()), &|_| "/srv/n".into()).unwrap().fork.unwrap().usable);
         let out = FakeForks { me: None, made: Default::default() };
-        assert!(inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &out, &|_| "/srv/n".into()).unwrap().fork.unwrap().message.contains("not signed in"));
+        assert!(inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &out, &|| Ok(()), &|_| "/srv/n".into()).unwrap().fork.unwrap().message.contains("not signed in"));
 
         // keep: the remotes stay as recorded; the server is still a fork server of the old owner
         let (t, _, log) = moved(&rig, ForkChoice::Keep, &other, "keep");

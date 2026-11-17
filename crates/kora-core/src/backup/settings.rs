@@ -77,6 +77,63 @@ pub fn forget(server: &str) {
     }
 }
 
+const ARCHIVE_DOC: &str = "backup-archived";
+
+/// A deleted server's backups, kept in a folder of their own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Archived {
+    pub name: String,
+    pub deleted_unix: u64,
+    pub dir: std::path::PathBuf,
+    pub backups: Vec<BackupInfo>,
+}
+
+/// A server was deleted: its settings and "last backup" state go, so a new server with the same name does not inherit
+/// them, and its backups are KEPT: their folder is renamed `<name>-deleted-<when>` (so a new server of that name starts with an
+/// empty folder) and listed under "Backups of servers that no longer exist".
+pub fn archive_server(server: &str, now: u64) {
+    use super::dest::Destination;
+    let cfg = load_settings(server);
+    let dir = super::dest::folder_for(&cfg.folder, server);
+    forget(server);
+    if super::dest::LocalFolder::new(&dir).list().is_empty() {
+        return;
+    }
+    let target = dir.with_file_name(format!("{}-deleted-{now}", dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+    let kept = if std::fs::rename(&dir, &target).is_ok() { target } else { dir };
+    if let Ok(s) = Store::open_home() {
+        let _ = documents::update(&s, ARCHIVE_DOC, |d| {
+            if !d.is_array() {
+                *d = Value::Array(vec![]);
+            }
+            d.as_array_mut().map(|a| a.push(serde_json::json!({"name": server, "deleted_unix": now, "dir": kept.display().to_string()})));
+            Ok(())
+        });
+    }
+}
+
+/// The archived backups that still exist, newest deletion first.
+pub fn archived() -> Vec<Archived> {
+    use super::dest::Destination;
+    let Some(Value::Array(list)) = Store::open_home().ok().and_then(|s| documents::get(&s, ARCHIVE_DOC).ok().flatten()) else { return vec![] };
+    let mut out: Vec<Archived> = list
+        .iter()
+        .filter_map(|v| {
+            let dir = std::path::PathBuf::from(v.get("dir")?.as_str()?);
+            let backups = super::dest::LocalFolder::new(&dir).list();
+            (!backups.is_empty()).then(|| Archived { name: v.get("name").and_then(Value::as_str).unwrap_or_default().to_string(), deleted_unix: v.get("deleted_unix").and_then(Value::as_u64).unwrap_or(0), dir, backups })
+        })
+        .collect();
+    out.sort_by(|a, b| b.deleted_unix.cmp(&a.deleted_unix));
+    out
+}
+
+/// The archive file of backup `id` of the server `name` deleted at `deleted_unix`.
+pub fn archived_file(name: &str, deleted_unix: u64, id: &str) -> Option<std::path::PathBuf> {
+    use super::dest::Destination;
+    archived().into_iter().find(|a| a.name == name && a.deleted_unix == deleted_unix).and_then(|a| super::dest::LocalFolder::new(a.dir).open(id))
+}
+
 /// A schedule that is acceptable: a real time, a weekday for weekly.
 pub fn validate_schedule(s: &BackupSchedule) -> Result<(), String> {
     crate::service::parse_time(&s.time).map_err(|e| e.to_string())?;
@@ -179,6 +236,35 @@ mod tests {
         assert_eq!(load_settings("alpha"), BackupSettings::default());
         assert_eq!(load_status("alpha"), BackupStatus::default());
         assert!(all_settings().contains_key("beta"));
+    }
+
+    #[test]
+    fn a_deleted_servers_settings_go_and_its_backups_are_archived_apart() {
+        use crate::backup::dest::Destination;
+        let _ = crate::installer::registry::use_test_home();
+        let name = format!("Gone {}", crate::monitor::now_unix());
+        save_settings(&name, &BackupSettings { folder: String::new(), ..Default::default() }).unwrap();
+        update_status(&name, |s| s.last_ok_unix = Some(5));
+        let dest = crate::backup::dest::LocalFolder::for_server("", &name);
+        dest.prepare().unwrap();
+        let file = crate::backup::dest::archive_name(&name, "20240101-000000", false);
+        std::fs::write(dest.staging(&file), b"x").unwrap();
+        let mut i = b(100);
+        i.file = file.clone();
+        i.id = "20240101-000000".into();
+        dest.commit(&dest.staging(&file), &i).unwrap();
+        archive_server(&name, 777);
+        // nothing is inherited by a new server of that name
+        assert_eq!(load_settings(&name), BackupSettings::default());
+        assert_eq!(load_status(&name), BackupStatus::default());
+        assert!(crate::backup::dest::LocalFolder::for_server("", &name).list().is_empty(), "the new server's folder is empty");
+        // the backups are listed apart and can be found again
+        let a = archived().into_iter().find(|a| a.name == name).unwrap();
+        assert_eq!((a.deleted_unix, a.backups.len()), (777, 1));
+        assert!(archived_file(&name, 777, "20240101-000000").unwrap().is_file());
+        // a server with no backups leaves nothing behind
+        archive_server("Never backed up", 1);
+        assert!(!archived().iter().any(|a| a.name == "Never backed up"));
     }
 
     #[test]

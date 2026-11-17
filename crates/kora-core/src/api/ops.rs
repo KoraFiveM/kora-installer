@@ -233,6 +233,8 @@ pub enum Op {
     BackupImportInspect,
     /// Bring the server in a backup onto this computer as a new server (a job; administrators).
     BackupImportStart,
+    /// Backups of servers that were deleted (kept, restorable as a new server; administrators).
+    BackupsArchived,
 }
 
 impl Op {
@@ -384,6 +386,7 @@ impl Op {
         Op::BackupImportUpload,
         Op::BackupImportInspect,
         Op::BackupImportStart,
+        Op::BackupsArchived,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -536,6 +539,7 @@ impl Op {
             Op::BackupImportUpload => "backup_import_upload",
             Op::BackupImportInspect => "backup_import_inspect",
             Op::BackupImportStart => "backup_import_start",
+            Op::BackupsArchived => "backups_archived",
         }
     }
 
@@ -691,6 +695,7 @@ impl Op {
             Op::BackupImportUpload => (Method::Post, "/backups/import/upload"),
             Op::BackupImportInspect => (Method::Post, "/backups/import/inspect"),
             Op::BackupImportStart => (Method::Post, "/backups/import"),
+            Op::BackupsArchived => (Method::Get, "/backups/archived"),
         }
     }
 
@@ -959,13 +964,14 @@ mod tests {
             | Op::SupportSummary
             | Op::BackupImportUpload
             | Op::BackupImportInspect
-            | Op::BackupImportStart => Op::ALL.contains(&op),
+            | Op::BackupImportStart
+            | Op::BackupsArchived => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 147);
+        assert_eq!(Op::ALL.len(), 148);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

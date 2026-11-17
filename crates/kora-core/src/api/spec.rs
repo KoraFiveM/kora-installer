@@ -334,6 +334,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::SupportSummary => OpSpec::call::<w::SupportRequest, w::SupportSummary>(),
         // The backup file is the request body (streamed to disk); the answer says where it is.
         Op::BackupImportUpload => OpSpec { query: None, body: Body::Raw("application/octet-stream"), response: Resp::Json(Ty::of::<w::ImportUploaded>()), job: None },
+        Op::BackupsArchived => OpSpec::get::<w::ArchivedBackups>(),
         Op::BackupImportInspect => OpSpec::call::<w::ImportInspectRequest, crate::backup::import::ImportPreview>(),
         Op::BackupImportStart => OpSpec::start_job_with::<crate::backup::import::ImportRequest>().events::<crate::backup::BackupEvent>().result::<crate::backup::import::ImportResult>(),
         Op::BackupDelete => OpSpec::nothing(),
