@@ -546,6 +546,8 @@ mod imp {
         let dir = std::env::temp_dir().join(format!("kora-worker-selftest-{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".kora")).map_err(|e| e.to_string())?;
         let req = crate::installer::InstallRequest {
+            source: None,
+            versions: None,
             mode: crate::installer::Mode::Production,
             name: "selftest".into(),
             dir: dir.clone(),
