@@ -89,6 +89,12 @@ test.describe('enrolment', () => {
 })
 
 test.describe('Your sign-in', () => {
+  test('a token sign-in is nudged to something stronger on every page, and the nudge goes once it is done', async ({ page, open }) => {
+    await open('/', { as: 'remote-admin' })
+    await expect(page.getByText('Replace your token link').first()).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Set up a passkey or one-time codes' })).toBeVisible()
+  })
+
   test('a token user is told to replace the link, and adds a passkey', async ({ page, open, scan }) => {
     await page.goto(`${NAMED}/settings?scenario=default&as=remote-admin`)
     await virtualAuthenticator(page)
