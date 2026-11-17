@@ -491,7 +491,7 @@ fn new_ctx_trusted(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<
     })
 }
 
-fn validate_request(req: &InstallRequest) -> Result<()> {
+pub(crate) fn validate_request(req: &InstallRequest) -> Result<()> {
     if req.name.trim().is_empty() {
         return err("server name must not be empty");
     }

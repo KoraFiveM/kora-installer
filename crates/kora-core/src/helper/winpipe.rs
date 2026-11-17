@@ -37,6 +37,7 @@ pub fn child_env(u: &PanelUser) -> Vec<(String, String)> {
         ("USERNAME".into(), u.name.clone()),
         ("USERDOMAIN".into(), u.domain.clone()),
         ("KORA_WORKER_USER_SID".into(), u.sid.clone()),
+        ("KORA_WORKER_ADMIN_MEMBER".into(), if u.admin_member { "1" } else { "0" }.into()),
         ("KORA_HELPER".into(), "1".into()),
     ]
 }
