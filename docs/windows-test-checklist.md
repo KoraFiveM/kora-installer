@@ -344,6 +344,22 @@ run `kora app install` (this is how 0.6.x made the machine-wide app, with its ad
 45. [ ] **Tidy the test machine**: delete the test forks on GitHub, run `kora uninstall` in a terminal and answer **yes**
     to removing saved keys and Kora's own tools; the folder `%LOCALAPPDATA%\Kora` is gone or empty apart from the program.
 
+## Backups, moving a server and the support bundle (unverified on Windows: the owner's pass)
+
+Needs a Windows machine with a Production server that has Kora's MariaDB (or MySQL) database and `mariadb-dump.exe` / `mysqldump.exe` next to its client. Use a throw-away server and a fake licence key.
+
+- [ ] **Backups tab, first backup** (no password): it finishes with a path under `%LOCALAPPDATA%\Kora\server-backups\<name>`. The file's **Security** tab shows only your account (no `Users`, `Everyone`, `Authenticated Users`). The database password does not appear in Task Manager's command-line column or in Process Explorer while it runs.
+- [ ] **Check** on that backup says every file matches. **Back up now** with "Stop the server while the backup runs" stops a running server and starts it again.
+- [ ] **A password-protected backup**: the file ends in `.tar.gz.age`; opening **Restore…** asks for the password and a wrong one says it does not open the backup. (Optional: `age -d` opens it.)
+- [ ] **Restore**: change `server.cfg`, delete a row in the game database, restore: the preview lists what changes and what stays, a safety copy appears in the list, the row and `server.cfg` come back, and `secrets.cfg` is still the current one. **Undo this restore** puts the changed `server.cfg` back.
+- [ ] **A chosen folder** on another drive or a mapped network share: the backup lands there and the file has no inherited access for other users (`icacls <file>`); a folder that cannot be written gives a message, not a crash.
+- [ ] **Retention**: set "newest 2", make three backups: only two stay; the safety copy of a restore stays.
+- [ ] **Schedule**: set a time two minutes ahead with `kora panel --background` running: a backup appears by itself, labelled Scheduled, and the Overview says "Last backup just now". Stop the panel, wait past another slot, start it: one backup is made up.
+- [ ] **Failure alert**: stop the database service, run a scheduled backup (or press Back up now): the error offers **Start the database**; a scheduled failure shows in the panel's alerts and in your Discord webhook.
+- [ ] **Move this server out, then in** (same machine is fine, with a different name and ports, after deleting the first server): the export asks for a password; **Bring a server from a backup** shows the preview with the licence-key warning, a clash for the name/ports if the first server is still there (with the "Use ..." fix), and the list of what does not carry over; the import creates a **new** `kora_` database, the row is in it, and `secrets.cfg` holds the new connection string. Break the import (stop the database service in the middle) and run it again: it carries on from the last finished step; **Start over** removes the half-made folder and database.
+- [ ] **From Linux to Windows** (if you have a Linux export): the imported `server.cfg` has no `/home/...` paths and txAdmin's `config.json` points at the new folder; a resource that needs a Linux-only program is the one thing that fails.
+- [ ] **Support bundle** (Settings, and the link under "Show details" of an error): the list shows `about.txt`, `servers/<name>/server.cfg`, `jobs.txt` and so on; **secrets.cfg**, **database.json** and **txData** are listed as left out; `server.cfg` shows `sv_licenseKey "<hidden: licence key>"`; the saved zip contains no part of your licence key, database password or Discord webhook address (search it); nothing was sent anywhere.
+
 ## 9. Report back
 
 Paste into the release issue: the Kora version, Windows version (`winver`), whether each numbered step passed, the UAC
