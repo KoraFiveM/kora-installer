@@ -350,6 +350,12 @@ fn resumable() -> Vec<Value> {
     out.into_iter().map(|(job, name, step)| json!({"job": job, "name": name, "failed_step": step})).collect()
 }
 
+/// Tests: forget the stopped installs held in memory, as a panel restart does (what was written down stays).
+#[doc(hidden)]
+pub fn forget_paused_in_memory() {
+    with_paused(|m| m.clear());
+}
+
 fn pause(job: &str, p: Paused) {
     persist(job, &p);
     with_paused(|m| {
