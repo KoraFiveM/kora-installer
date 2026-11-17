@@ -71,3 +71,15 @@ export async function toSummary(page: Page, name?: string) {
   await expect(page.getByRole('heading', { name: 'Check and install' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Install the server' })).toBeEnabled()
 }
+
+/** Settings > Licence keys: the "save a new key" form (Settings has other fields called "Name"). */
+export function keyForm(page: Page) {
+  return page.locator('form').filter({ has: page.getByRole('button', { name: 'Save key' }) })
+}
+
+export async function saveKey(page: Page, name: string, key: string) {
+  const form = keyForm(page)
+  await form.getByLabel('Name', { exact: true }).fill(name)
+  await form.getByLabel('Licence key', { exact: true }).fill(key)
+  await form.getByRole('button', { name: 'Save key' }).click()
+}
