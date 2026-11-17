@@ -162,6 +162,39 @@ pub fn parse_status(z: &str) -> Vec<ChangedFile> {
     out
 }
 
+/// Files whose contents are never shown in a diff.
+const SECRET_FILES: &[&str] = &["**/secrets.cfg", "**/server.cfg", "**/.env", "**/.env.*", "**/*.env", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/*secret*", "**/*credential*", "**/*password*", "**/*.p12", "**/*.pfx"];
+
+fn is_secret_file(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    ["secrets.cfg", "server.cfg", ".env", "id_rsa", "id_ed25519"].iter().any(|n| name == *n || name.starts_with(&format!("{n}.")))
+        || [".env", ".pem", ".key", ".p12", ".pfx"].iter().any(|e| name.ends_with(e))
+        || ["secret", "credential", "password"].iter().any(|w| name.contains(w))
+}
+
+/// Hide what looks like a secret in diff text: `cfxk_` licence keys anywhere, and the value after `=` or `:` on a line whose
+/// name says key, token, password, secret or licence.
+pub fn hide_secrets(diff: &str) -> String {
+    const WORDS: &[&str] = &["password", "passwd", "secret", "token", "api_key", "apikey", "api-key", "licen", "private_key", "webhook", "authorization", "bearer", "connection_string", "mysql_connection"];
+    let cleaned = crate::store::jobs::redact_text(diff);
+    cleaned
+        .lines()
+        .map(|l| {
+            let low = l.to_ascii_lowercase();
+            let body = l.get(1..).unwrap_or("");
+            let changed_line = l.starts_with('+') || l.starts_with('-') || l.starts_with(' ');
+            if changed_line && WORDS.iter().any(|w| low.contains(w)) {
+                if let Some(i) = body.find(['=', ':']) {
+                    return format!("{}{}{} <hidden>", &l[..1], &body[..i], &body[i..=i]);
+                }
+            }
+            l.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if diff.ends_with('\n') { "\n" } else { "" }
+}
+
 pub fn local_changes(r: &dyn CommandRunner, dir: &Path, default_branch: &str) -> PResult<LocalChanges> {
     let here = gb::locate(r, dir, default_branch)?;
     let st = pr(run_ok(r, "git", &["status", "--porcelain=v1", "-z", "--untracked-files=normal"], Some(dir)))?;
@@ -171,8 +204,17 @@ pub fn local_changes(r: &dyn CommandRunner, dir: &Path, default_branch: &str) ->
     let head_ok = pr(run(r, "git", &["rev-parse", "--verify", "-q", "HEAD"], Some(dir)))?.ok();
     let mut diff = String::new();
     if head_ok && count > 0 {
-        let d = pr(run_ok(r, "git", &["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "HEAD", "--"], Some(dir)))?;
-        diff = d.stdout;
+        // Files that usually hold secrets are left out of the diff entirely (their names are still listed above), and the
+        // rest has secret-looking values hidden: a diff is shown in the panel and must never leak a key or a password.
+        let mut args: Vec<String> = ["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "HEAD", "--", "."].iter().map(|x| x.to_string()).collect();
+        args.extend(SECRET_FILES.iter().map(|g| format!(":(exclude,glob){g}")));
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let d = pr(run_ok(r, "git", &args, Some(dir)))?;
+        diff = hide_secrets(&d.stdout);
+        let hidden: Vec<&str> = all.iter().filter(|f| is_secret_file(&f.path)).map(|f| f.path.as_str()).collect();
+        for h in hidden {
+            diff.push_str(&format!("\n# {h}: its contents are not shown here because it may hold secrets\n"));
+        }
     }
     let diff_truncated = diff.chars().count() > MAX_DIFF;
     let diff = cut(&diff, MAX_DIFF);
@@ -937,12 +979,13 @@ pub fn fork_resources(r: &dyn CommandRunner, sf: &ServerFile, owner: Option<&str
 
 /// Keep the registry entry (what the servers list reads) in step with the server file.
 fn sync_entry(sf: &ServerFile) {
-    if let Ok(mut reg) = Registry::load() {
+    // One transaction: a `kora` command and the panel changing the list at the same moment cannot lose each other's change.
+    let _ = Registry::update(|reg| {
         if let Some(e) = reg.servers.iter().find(|e| e.name == sf.name || e.dir == sf.dir).cloned() {
             reg.upsert(ServerEntry { source: Some(sf.source()), versions: Some(sf.versions()), mode: crate::installer::compat_mode(sf.versions()), ..e });
-            let _ = reg.save();
         }
-    }
+        Ok(())
+    });
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

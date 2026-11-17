@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use axum::extract::{Path, Query, State};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use kora_core::api::{valid_resource_name, Op};
 use kora_core::collab::{Reply, Request};
@@ -39,6 +39,16 @@ fn side(s: Option<&str>) -> Result<Option<String>, ApiError> {
         Some("fork") => Ok(Some("fork".into())),
         Some(_) => Err(ApiError::bad_request("The side must be \"upstream\" (the original) or \"fork\" (your own copy).")),
     }
+}
+
+/// The answer, marked with the GitHub account that acted (when the answer names one) for the audit log.
+fn acted(v: Value) -> Response {
+    let login = v.get("acting_as").and_then(Value::as_str).filter(|l| !l.is_empty() && l.len() <= 64).map(str::to_string);
+    let mut r = Json(v).into_response();
+    if let Some(l) = login {
+        r.extensions_mut().insert(crate::audit::GithubActor(l));
+    }
+    r
 }
 
 async fn ask(st: &AppState, e: ServerEntry, req: Request) -> Result<Reply, ApiError> {
@@ -78,10 +88,10 @@ pub async fn commit(State(st): State<AppState>, Path((s, name)): Path<(String, S
 }
 
 /// `POST .../push` → where it went and as whom. Never forced.
-pub async fn push(State(st): State<AppState>, Path((s, name)): Path<(String, String)>) -> Result<Json<Value>, ApiError> {
+pub async fn push(State(st): State<AppState>, Path((s, name)): Path<(String, String)>) -> Result<Response, ApiError> {
     resource(&name)?;
     let e = entry(&st, s).await?;
-    Ok(Json(ask(&st, e, Request::Push { resource: name }).await?.json()))
+    Ok(acted(ask(&st, e, Request::Push { resource: name }).await?.json()))
 }
 
 #[derive(Deserialize)]
@@ -114,20 +124,20 @@ pub struct CommentBody {
     source: Option<String>,
 }
 
-async fn comment_on(st: AppState, s: String, name: String, n: String, kind: &str, b: CommentBody) -> Result<Json<Value>, ApiError> {
+async fn comment_on(st: AppState, s: String, name: String, n: String, kind: &str, b: CommentBody) -> Result<Response, ApiError> {
     resource(&name)?;
     let (number, source) = (number(&n)?, side(b.source.as_deref())?);
     let e = entry(&st, s).await?;
-    Ok(Json(ask(&st, e, Request::Comment { resource: name, kind: kind.into(), number, body: b.body, source }).await?.json()))
+    Ok(acted(ask(&st, e, Request::Comment { resource: name, kind: kind.into(), number, body: b.body, source }).await?.json()))
 }
 
 /// `POST .../prs/{number}/comment` `{body, source?}`.
-pub async fn pr_comment(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<CommentBody>) -> Result<Json<Value>, ApiError> {
+pub async fn pr_comment(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<CommentBody>) -> Result<Response, ApiError> {
     comment_on(st, s, name, n, "pr", b).await
 }
 
 /// `POST .../issues/{number}/comment` `{body}`.
-pub async fn issue_comment(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<CommentBody>) -> Result<Json<Value>, ApiError> {
+pub async fn issue_comment(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<CommentBody>) -> Result<Response, ApiError> {
     comment_on(st, s, name, n, "issue", b).await
 }
 
@@ -141,14 +151,14 @@ pub struct ReviewBody {
 }
 
 /// `POST .../prs/{number}/review` `{action: approve|request_changes|comment, body?, source?}`.
-pub async fn pr_review(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<ReviewBody>) -> Result<Json<Value>, ApiError> {
+pub async fn pr_review(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<ReviewBody>) -> Result<Response, ApiError> {
     resource(&name)?;
     if !["approve", "request_changes", "comment"].contains(&b.action.as_str()) {
         return Err(ApiError::bad_request("A review is \"approve\", \"request_changes\" or \"comment\"."));
     }
     let (number, source) = (number(&n)?, side(b.source.as_deref())?);
     let e = entry(&st, s).await?;
-    Ok(Json(ask(&st, e, Request::Review { resource: name, number, action: b.action, body: b.body.unwrap_or_default(), source }).await?.json()))
+    Ok(acted(ask(&st, e, Request::Review { resource: name, number, action: b.action, body: b.body.unwrap_or_default(), source }).await?.json()))
 }
 
 #[derive(Deserialize)]
@@ -160,14 +170,14 @@ pub struct MergeBody {
 }
 
 /// `POST .../prs/{number}/merge` `{method?, source?}`.
-pub async fn pr_merge(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<MergeBody>) -> Result<Json<Value>, ApiError> {
+pub async fn pr_merge(State(st): State<AppState>, Path((s, name, n)): Path<(String, String, String)>, Json(b): Json<MergeBody>) -> Result<Response, ApiError> {
     resource(&name)?;
     if b.method.as_deref().is_some_and(|m| !["merge", "squash", "rebase"].contains(&m)) {
         return Err(ApiError::bad_request("A merge is \"merge\", \"squash\" or \"rebase\"."));
     }
     let (number, source) = (number(&n)?, side(b.source.as_deref())?);
     let e = entry(&st, s).await?;
-    Ok(Json(ask(&st, e, Request::Merge { resource: name, number, method: b.method, source }).await?.json()))
+    Ok(acted(ask(&st, e, Request::Merge { resource: name, number, method: b.method, source }).await?.json()))
 }
 
 /// `GET .../issues` → open issues of the resource's repository.

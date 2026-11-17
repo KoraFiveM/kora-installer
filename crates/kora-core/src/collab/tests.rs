@@ -392,6 +392,7 @@ fn the_fork_owner_is_you_or_an_organisation_you_may_create_repositories_in() {
 #[test]
 fn changing_the_versions_writes_both_spellings_and_moves_nothing() {
     use crate::installer::registry::PortsRecord;
+    let home = crate::installer::registry::use_test_home();
     let d = tempfile::tempdir().unwrap();
     let sf = ServerFile {
         name: "s".into(),
@@ -413,4 +414,31 @@ fn changing_the_versions_writes_both_spellings_and_moves_nothing() {
     let back = ServerFile::load(d.path()).unwrap();
     assert_eq!((back.source(), back.versions(), back.mode), (Source::Clone, Versions::Latest, crate::installer::Mode::Development));
     assert!(v.message.contains("nothing has changed yet"));
+    // The registry entry follows, in the store.
+    crate::installer::registry::Registry::update(|r| {
+        r.upsert(crate::installer::registry::ServerEntry { source: None, versions: None, name: "s".into(), dir: d.path().to_path_buf(), mode: crate::installer::Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 });
+        Ok(())
+    })
+    .unwrap();
+    set_versions(&sf, Versions::Released).unwrap();
+    let e = crate::installer::registry::Registry::load().unwrap().servers.into_iter().next().unwrap();
+    assert_eq!((e.versions(), e.mode), (Versions::Released, crate::installer::Mode::Production));
+    let _ = home;
+}
+
+#[test]
+fn a_diff_never_shows_a_secret() {
+    let t = repo();
+    let r = Fake::new();
+    std::fs::write(t.dir.join("a.lua"), "one\nConfig.ApiKey = 'abc123SECRET'\nConfig.Pay = 120\nlicense = cfxk_0123456789abcdef_ab12\n").unwrap();
+    std::fs::write(t.dir.join("secrets.cfg"), "set mysql_connection_string \"user:hunter2@host\"\n").unwrap();
+    sh(&t.dir, &["add", "-N", "secrets.cfg"]);
+    let c = local_changes(&r, &t.dir, "dev").unwrap();
+    assert!(c.files.iter().any(|f| f.path == "secrets.cfg"), "the name is listed");
+    for secret in ["abc123SECRET", "hunter2", "cfxk_0123456789abcdef_ab12"] {
+        assert!(!c.diff.contains(secret), "{secret} leaked: {}", c.diff);
+    }
+    assert!(c.diff.contains("Config.Pay = 120"), "ordinary lines stay: {}", c.diff);
+    assert!(c.diff.contains("secrets.cfg: its contents are not shown"));
+    assert!(hide_secrets("+password = hunter2\n bearer: xyz\n").lines().all(|l| l.ends_with("<hidden>")));
 }

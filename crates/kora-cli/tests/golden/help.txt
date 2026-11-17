@@ -23,6 +23,7 @@ Commands:
   profile        What Kora remembers between installs (your Cfx.re name and GitHub owner)
   branch         Development servers: see and change which branch each resource is on, and go back to the normal version
   pr             Development servers: list and try pull requests on a resource
+  resource       One resource: what it is, which version it is on, and whether a restart is needed
   github         GitHub helpers for development mode
   tools          Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
   check          Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
@@ -55,9 +56,19 @@ Options:
           Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: C:\Kora\<name>, the same as in the panel)
 
       --mode <MODE>
-          prod = pinned release clones, dev = forks on your GitHub account
+          The old spelling of --source and --versions: prod = clone + released, dev = fork + latest. Still works
           
           [possible values: prod, dev]
+
+      --source <SOURCE>
+          Where the resources come from: clone = plain clones of the originals (no GitHub account needed), fork = your own copies on GitHub
+          
+          [possible values: clone, fork]
+
+      --versions <VERSIONS>
+          Which versions the server follows: released = pinned to released versions (the default for clone), latest = the latest changes of the main branch (the default for fork)
+          
+          [possible values: released, latest]
 
       --license-key <LICENSE_KEY>
           Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable)
@@ -102,8 +113,8 @@ Options:
       --firewall
           Open the game port in the OS firewall (needs admin)
 
-      --github-owner <GITHUB_OWNER>
-          Dev mode: GitHub user or organisation to fork into (`list` shows the choices)
+      --fork-owner <LOGIN_OR_ORG>
+          With --source fork: the GitHub user or organisation to fork into (`list` shows the choices; default: your own account). The old name --github-owner still works
 
       --db-admin-user <DB_ADMIN_USER>
           Database admin user used once to create the new database + user (password: KORA_DB_ADMIN_PASSWORD)
@@ -1314,10 +1325,129 @@ Development servers: list and try pull requests on a resource
 Usage: kora pr [OPTIONS] <COMMAND>
 
 Commands:
+  view      A pull request in full: checks, reviews, files, conversation, and whether you may merge it
+  comment   Comment on a pull request, as the GitHub account `gh` is signed in as
+  review    Approve, ask for changes or comment on a pull request (as the signed-in GitHub account)
+  merge     Merge a pull request, if your GitHub account may (the way the repository allows)
   list      List the open pull requests of the original repository and your fork, for one resource
   checkout  Try a pull request on one resource: its number or its GitHub address
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr view =====
+A pull request in full: checks, reviews, files, conversation, and whether you may merge it
+
+Usage: kora pr view [OPTIONS] <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr comment =====
+Comment on a pull request, as the GitHub account `gh` is signed in as
+
+Usage: kora pr comment [OPTIONS] --message <MESSAGE> <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+  -m, --message <MESSAGE>
+          
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr review =====
+Approve, ask for changes or comment on a pull request (as the signed-in GitHub account)
+
+Usage: kora pr review [OPTIONS] --action <approve|request-changes|comment> <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+      --action <approve|request-changes|comment>
+          approve, request-changes or comment
+
+  -m, --message <MESSAGE>
+          
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr merge =====
+Merge a pull request, if your GitHub account may (the way the repository allows)
+
+Usage: kora pr merge [OPTIONS] <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+      --method <METHOD>
+          merge, squash or rebase (default: the first the repository allows)
+
+  -y, --yes
+          Do not ask first
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -1371,6 +1501,258 @@ Options:
   -y, --yes
           Do not ask before discarding
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource =====
+One resource: what it is, which version it is on, and whether a restart is needed
+
+Usage: kora resource [OPTIONS] <COMMAND>
+
+Commands:
+  show           Show one resource: its repository, which version it is on, and whether a restart is needed
+  changes        Show what changed in a resource's folder (files, and a readable diff with --diff)
+  log            The latest commits of the branch the resource is on
+  commit         Commit everything that changed in the resource
+  push           Push the branch the resource is on to your own copy on GitHub (never forced). Acts as the GitHub account `gh` is signed in as
+  new-branch     Make a new branch from where the resource is now (your changes come along)
+  issues         Open issues of the resource's repository
+  issue-comment  Comment on an issue, as the GitHub account `gh` is signed in as
+  releases       Releases of the resource's repository, and which one this server is pinned to
+  fork           Make your own copy (a fork) of resources that are plain clones: all of them, or the ones named
+  versions       Follow released versions or the latest changes. Nothing moves until you check for updates
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource show =====
+Show one resource: its repository, which version it is on, and whether a restart is needed
+
+Usage: kora resource show [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource changes =====
+Show what changed in a resource's folder (files, and a readable diff with --diff)
+
+Usage: kora resource changes [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --diff
+          Also print the diff
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource log =====
+The latest commits of the branch the resource is on
+
+Usage: kora resource log [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource commit =====
+Commit everything that changed in the resource
+
+Usage: kora resource commit [OPTIONS] --message <MESSAGE> <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+  -m, --message <MESSAGE>
+          The text to send (a message or a comment)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource push =====
+Push the branch the resource is on to your own copy on GitHub (never forced). Acts as the GitHub account `gh` is signed in as
+
+Usage: kora resource push [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource new-branch =====
+Make a new branch from where the resource is now (your changes come along)
+
+Usage: kora resource new-branch [OPTIONS] <SERVER> <RESOURCE> <NAME>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NAME>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource issues =====
+Open issues of the resource's repository
+
+Usage: kora resource issues [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource issue-comment =====
+Comment on an issue, as the GitHub account `gh` is signed in as
+
+Usage: kora resource issue-comment [OPTIONS] --message <MESSAGE> <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          
+
+Options:
+  -m, --message <MESSAGE>
+          The text to send (a message or a comment)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource releases =====
+Releases of the resource's repository, and which one this server is pinned to
+
+Usage: kora resource releases [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource fork =====
+Make your own copy (a fork) of resources that are plain clones: all of them, or the ones named
+
+Usage: kora resource fork [OPTIONS] <SERVER> [RESOURCES]...
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  [RESOURCES]...
+          Only these resources
+
+Options:
+      --owner <LOGIN_OR_ORG>
+          The GitHub user or organisation to fork into (default: the account `gh` is signed in as)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource versions =====
+Follow released versions or the latest changes. Nothing moves until you check for updates
+
+Usage: kora resource versions [OPTIONS] <SERVER> <VERSIONS>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <VERSIONS>
+          [possible values: released, latest]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
