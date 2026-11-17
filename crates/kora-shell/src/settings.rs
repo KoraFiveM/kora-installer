@@ -113,6 +113,12 @@ mod tests {
         assert_eq!(state_dir(true, &win), Some(PathBuf::from(r"C:\Users\Sam\AppData\Local\Kora\desktop")));
         let profile = |k: &str| (k == "USERPROFILE").then(|| r"C:\Users\Sam".to_string());
         assert_eq!(state_dir(true, &profile), Some(PathBuf::from(r"C:\Users\Sam\AppData\Local\Kora\desktop")));
+    }
+
+    // "/home/sam" is a relative path on Windows, so the Linux rules are checked on Unix only.
+    #[cfg(unix)]
+    #[test]
+    fn the_linux_state_folder_follows_xdg() {
         let lin = |k: &str| (k == "HOME").then(|| "/home/sam".to_string());
         assert_eq!(state_dir(false, &lin), Some(PathBuf::from("/home/sam/.local/state/kora/desktop")));
         let xdg = |k: &str| match k {

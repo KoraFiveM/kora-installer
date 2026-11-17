@@ -151,6 +151,8 @@ mod tests {
         assert!(t.contains("Exec=\"/home/a b/100%%/kora-desktop\" --background"), "{t}");
     }
 
+    // Linux path rules use the host's notion of an absolute path ("/home/sam" is relative on Windows), so this runs on Unix only.
+    #[cfg(unix)]
     #[test]
     fn the_linux_path_follows_xdg() {
         let env = |k: &str| match k {

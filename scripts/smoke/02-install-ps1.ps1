@@ -79,7 +79,7 @@ try {
     }
     Assert-That ($out -match 'Sign in to Kora Panel' -and $out -match 'http://127\.0\.0\.1:\d+/#(code|token)=[0-9a-f]+') 'the background panel answers and the sign-in link is printed'
     Assert-That ($out -match 'ssh -L \d+:127\.0\.0\.1:\d+ \S+@198\.51\.100\.2') 'with no screen the SSH tunnel command is printed'
-    Assert-That ($sw.Elapsed.TotalSeconds -lt 60) 'the launch returns instead of keeping the shell busy'
+    Assert-That ($sw.Elapsed.TotalSeconds -lt 60) "the launch returns instead of keeping the shell busy (took $([int]$sw.Elapsed.TotalSeconds) s)"
     $link = Invoke-Native "$default\kora.exe" @('panel', '--print-link')
     Assert-That ($link.Code -eq 0) 'kora panel --print-link works after the install'
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

@@ -25,9 +25,22 @@ const SECRET_URL: &str = "https://discord.com/api/webhooks/123456/SECRETTOKEN";
 
 static AUTO_CALLS: AtomicUsize = AtomicUsize::new(0);
 
+/// These tests describe the "no way to elevate: give the command" answer. Whatever service
+/// this machine has must not be asked (and a real one would need a real Kora home), so it is absent through the broker seam.
+struct NoWorker;
+impl kora_web::elevated::Broker for NoWorker {
+    fn availability(&self) -> kora_core::privsvc::problems::Availability {
+        kora_core::privsvc::problems::Availability::Missing
+    }
+    fn call(&self, _: &str, _: &[String], _: &[(String, String)], _: &mut dyn FnMut(&str)) -> Result<kora_web::elevated::StepOutcome, kora_core::privsvc::conn::ClientError> {
+        unreachable!("the administrator service is absent in this test file")
+    }
+}
+
 fn seams() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
+        kora_web::elevated::set_broker_override(Some(Arc::new(NoWorker)));
         set_auto_runner(Some(Arc::new(|server: &str| {
             AUTO_CALLS.fetch_add(1, Ordering::SeqCst);
             Ok(UpdateReport { server: server.into(), ..UpdateReport::default() })

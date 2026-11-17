@@ -34,7 +34,11 @@ pub enum UserEvent {
     /// A click on the tray icon itself.
     TrayOpen,
     /// A signed-in panel: its port, a one-time sign-in link and how to call its API.
-    Session { port: u16, link: String, creds: Creds },
+    Session {
+        port: u16,
+        link: String,
+        creds: Creds,
+    },
     SessionFailed(String),
     Connected(bool),
     Servers(Vec<ServerRow>),
@@ -45,7 +49,10 @@ pub enum UserEvent {
     /// A notification was clicked, or the page is to be shown on this route.
     OpenRoute(String),
     /// A message from the page (the bridge). `trusted` = it came from the panel's own origin.
-    Bridge { raw: String, trusted: bool },
+    Bridge {
+        raw: String,
+        trusted: bool,
+    },
     /// The answer to a bridge request that needed a dialog.
     Reply(Reply),
     /// A notification the app wants shown (errors of tray actions, update results).
@@ -166,6 +173,7 @@ impl App {
     fn open_window(&mut self, target: &Target, route: &str) {
         let route = nav::route_or_home(Some(route));
         let Some(creds) = self.creds.clone() else {
+            crate::smoke::note("the window waits for the panel's session");
             self.want_open = Some(route);
             self.say("Kora is starting", "The window opens as soon as Kora's panel is ready.", "/");
             return;
@@ -198,7 +206,7 @@ impl App {
 
     /// No web view: open the browser instead (everything works there) and say why, once.
     fn fall_back_to_browser(&mut self, url: &str, why: &str) {
-        eprintln!("kora-desktop: no window ({why}); opening the browser instead");
+        crate::smoke::note(format!("no window ({why}); opening the browser instead"));
         os::open_in_browser(url);
         if !self.warned_webview {
             self.warned_webview = true;
@@ -417,7 +425,11 @@ impl App {
         }
         if !self.settings.close_hint_shown {
             self.settings.close_hint_shown = true;
-            let how = if cfg!(windows) { "Kora is still running in the notification area (the little arrow by the clock). Right-click its icon for options, including \"Start with Windows\"." } else { "Kora is still running in your system tray. Use its menu to quit." };
+            let how = if cfg!(windows) {
+                "Kora is still running in the notification area (the little arrow by the clock). Right-click its icon for options, including \"Start with Windows\"."
+            } else {
+                "Kora is still running in your system tray. Use its menu to quit."
+            };
             self.say("Kora is still running", how, "/");
         }
         let _ = self.settings.save(&self.opts.state_dir);
@@ -534,6 +546,7 @@ impl App {
                 }
             }
             UserEvent::SessionFailed(why) => {
+                crate::smoke::note(format!("session failed (shown to the user): {why}"));
                 if self.want_open.take().is_some() {
                     self.say("Kora could not start", &why, "/");
                 }
@@ -572,6 +585,7 @@ impl App {
             UserEvent::Reply(r) => self.reply(r),
             UserEvent::Toast(t) => toasts::show(t, self.proxy.clone()),
             UserEvent::PageLoaded(url) => {
+                crate::smoke::note(format!("page loaded: {}", url.split(['#', '?']).next().unwrap_or("")));
                 if let Some(s) = &mut self.smoke {
                     s.page_loaded(&url);
                 }

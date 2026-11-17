@@ -31,7 +31,7 @@ $reg = Get-RegistryText
 Assert-That (-not $reg -or $reg -notmatch '"smoke"') 'kora delete removed the registry entry'
 
 # --- fresh install with the service + firewall ---------------------------------------------
-$r = Invoke-Native $kora @('install', '--mode', 'prod', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '--service', '--firewall', '--txadmin-public', '-y')
+$r = Invoke-Native $kora @('install', '--source', 'clone', '--versions', 'released', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '--service', '--firewall', '--txadmin-public', '-y')
 Show 'kora install --service --firewall' $r
 Assert-That ($r.Code -eq 0) 'kora install --service --firewall exits 0'
 Assert-That ((Wait-SvcState 'STOPPED' 10) -eq 'STOPPED') "service $svc is registered and stopped"
@@ -74,7 +74,7 @@ Assert-That ($gw.Anonymous -eq 401) 'the gateway answers nothing to a browser wi
 $fx = @(Get-Process FXServer -ErrorAction SilentlyContinue)
 Assert-That ($fx.Count -ge 1) 'an FXServer.exe process is running'
 $st = Invoke-Native $kora @('status'); Show 'kora status' $st
-Assert-That ($st.Output -match 'smoke\s+prod\s+31120\s+41120\s+running') 'kora status shows running'
+Assert-That ($st.Output -match 'smoke\s+clone, released\s+31120\s+41120\s+running') 'kora status shows running'
 
 # The service keeps only ordinary-user privileges (no SeImpersonatePrivilege) and still serves txAdmin (above).
 $q = (& sc.exe qprivs $svc 2>&1 | Out-String); Write-Host $q

@@ -57,7 +57,7 @@ public static class KoraTok
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr buf, int len, out int ret);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int cls, IntPtr buf, int len);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertStringSidToSid(string s, out IntPtr sid);
     [DllImport("advapi32.dll")] static extern int GetLengthSid(IntPtr sid);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -443,8 +443,10 @@ function Get-SecretText([System.Security.SecureString]$Secret) {
 # in PowerShell 7 without the compatibility layer.
 function Initialize-TestAccount([Parameter(Mandatory)][string]$Name, [switch]$Administrator) {
     if ($Name.Length -gt 20 -or $Name -notmatch '^[A-Za-z][A-Za-z0-9_-]*$') { throw "bad test account name '$Name'" }
-    $plain = Get-RandomSecret
     $null = Invoke-Native 'net.exe' @('user', $Name, '/delete')   # a leftover from an earlier run (an error here is fine)
+    # 14 characters at most: a longer password makes `net user` ask a Y/N question about pre-Windows 2000 computers, on the
+    # console (not on stdin), which cannot be answered from a script.
+    $plain = Get-RandomSecret -Length 14
     $r = Invoke-Native 'net.exe' @('user', $Name, $plain, '/add', '/expires:never', '/passwordchg:no', '/comment:Kora CI test account')
     if ($r.Code -ne 0) { throw "net user /add $Name failed: $($r.Output)" }
     if ($Administrator) {
@@ -535,12 +537,16 @@ function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kin
     $argText = "-NoProfile -ExecutionPolicy Bypass -File `"$($w.Script)`""
     switch ($Kind) {
         'Self' { $proc = Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden; $wrapperPid = $proc.Id }
-        'Filtered' { $wrapperPid = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
+        'Filtered' {
+            try { $wrapperPid = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
+            catch { throw "RUNNER-LIMIT: this runner does not let a job start a process with a filtered administrator token ($($_.Exception.Message))" }
+        }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
             $svc = Get-Service seclogon -ErrorAction SilentlyContinue
             if ($svc -and $svc.Status -ne 'Running') { Start-Service seclogon }
-            $proc = Start-Process -FilePath $ps -ArgumentList $argText -Credential $Credential -LoadUserProfile -WorkingDirectory $Dir -PassThru -WindowStyle Hidden
+            try { $proc = Start-Process -FilePath $ps -ArgumentList $argText -Credential $Credential -LoadUserProfile -WorkingDirectory $Dir -PassThru -WindowStyle Hidden }
+            catch { throw "RUNNER-LIMIT: this runner does not let a job start a process as another account ($($_.Exception.Message))" }
             $wrapperPid = $proc.Id
         }
     }
@@ -548,7 +554,10 @@ function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kin
     while (-not (Test-Path $w.Info) -and $sw.Elapsed.TotalSeconds -lt $TimeoutSec) { Start-Sleep -Milliseconds 500 }
     if (-not (Test-Path $w.Info)) {
         foreach ($f in $w.Log, $w.Out, $w.Err) { if (Test-Path $f) { Write-Host "== $f"; Get-Content $f -Tail 40 } }
-        throw "the panel ($Tag) did not start within $TimeoutSec s"
+        # Started as another account or with a filtered token, nothing of the wrapper ever ran: the hosted runner's
+        # window station / secondary logon does not allow it. Invoke-Scenario skips this in Hosted mode, with the reason.
+        $limit = if ($Kind -ne 'Self') { 'RUNNER-LIMIT: ' } else { '' }
+        throw "${limit}the panel ($Tag) did not start within $TimeoutSec s ($Kind)"
     }
     $rec = Get-Content $w.Info -Raw | ConvertFrom-Json
     $panelPid = [int]$rec.pid

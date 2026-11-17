@@ -46,7 +46,10 @@ function Test-TxAdminThroughPanel([string]$Kora, [string]$ServerName, [int]$TxPo
     $token = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
     Set-Content -Path $tokenPath -Value $token -NoNewline
     $out = Join-Path $env:TEMP 'kora-panel-smoke.out'; $err = Join-Path $env:TEMP 'kora-panel-smoke.err'
+    # The runner is an elevated administrator and the panel refuses to run that way on purpose: this test opts in.
+    $env:KORA_ALLOW_ROOT_PANEL = '1'
     $p = Start-Process -FilePath $Kora -ArgumentList @('panel', '--foreground', '--no-open', '--port', "$PanelPort") -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err
+    Remove-Item Env:KORA_ALLOW_ROOT_PANEL -ErrorAction SilentlyContinue
     try {
         $up = $false
         $end = (Get-Date).AddSeconds(40)
@@ -61,11 +64,16 @@ function Test-TxAdminThroughPanel([string]$Kora, [string]$ServerName, [int]$TxPo
         $t = Invoke-RestMethod -Method Post -Uri "$base/servers/$ServerName/txadmin/ticket" -Headers $headers -WebSession $panelWeb
         $gw = [uri]$t.url
         $gate = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-        $enter = Invoke-WebRequest -UseBasicParsing -Uri $t.url -WebSession $gate -MaximumRedirection 0 -SkipHttpErrorCheck -TimeoutSec 15
-        $via = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$($gw.Port)/" -WebSession $gate -MaximumRedirection 0 -SkipHttpErrorCheck -TimeoutSec 20
-        $direct = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$TxPort/" -MaximumRedirection 0 -SkipHttpErrorCheck -TimeoutSec 20
-        $anon = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$($gw.Port)/" -MaximumRedirection 0 -SkipHttpErrorCheck -TimeoutSec 15
-        [pscustomobject]@{ Url = $t.url; Port = $gw.Port; Enter = [int]$enter.StatusCode; Via = [int]$via.StatusCode; Direct = [int]$direct.StatusCode; Anonymous = [int]$anon.StatusCode }
+        # HttpClient without redirects: PowerShell 7's Invoke-WebRequest throws on a 3xx when redirects are off, and the
+        # redirect of the ticket entry (303) is exactly what this checks. One client keeps the gateway cookie.
+        $newClient = { $h = New-Object System.Net.Http.HttpClientHandler; $h.AllowAutoRedirect = $false; $h.UseCookies = $true; $c = New-Object System.Net.Http.HttpClient($h); $c.Timeout = [TimeSpan]::FromSeconds(30); $c }
+        $status = { param($client, $url) [int]($client.GetAsync($url).GetAwaiter().GetResult().StatusCode) }
+        $gateClient = & $newClient
+        $enterStatus = & $status $gateClient $t.url
+        $viaStatus = & $status $gateClient "http://127.0.0.1:$($gw.Port)/"
+        $directStatus = & $status (& $newClient) "http://127.0.0.1:$TxPort/"
+        $anonStatus = & $status (& $newClient) "http://127.0.0.1:$($gw.Port)/"
+        [pscustomobject]@{ Url = $t.url; Port = $gw.Port; Enter = $enterStatus; Via = $viaStatus; Direct = $directStatus; Anonymous = $anonStatus }
     }
     finally {
         if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
