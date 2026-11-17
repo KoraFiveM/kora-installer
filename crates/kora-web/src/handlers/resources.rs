@@ -123,6 +123,10 @@ pub async fn resource_control(State(st): State<AppState>, Path((s, name)): Path<
             return Err(ApiError::conflict(console::NEEDS_RESTART));
         }
         console::send(&e.dir, &format!("{verb} {folder}")).map_err(ApiError::internal)?;
+        if verb != "stop" {
+            // The resource is loaded again from the files on disk.
+            kora_core::resourcestate::mark_resource_restarted(&e.dir, &name);
+        }
         Ok(Json(json!({
             "message": format!("Asked the server to {said} {folder}. The Console tab shows what happened.")
         })))

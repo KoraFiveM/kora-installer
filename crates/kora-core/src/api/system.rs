@@ -203,7 +203,12 @@ impl Backend for SystemBackend {
             // So the monitor does not report this stop as a crash.
             crate::monitor::mark_stop_intent(&e.dir);
         }
-        control_with(&SystemControl, &e.name, a)
+        control_with(&SystemControl, &e.name, a)?;
+        if a != ControlAction::Stop {
+            // Everything is loaded fresh: no resource still needs a restart.
+            crate::resourcestate::mark_server_restarted(&e.dir);
+        }
+        Ok(())
     }
 
     fn resources(&mut self, e: &ServerEntry) -> Vec<String> {

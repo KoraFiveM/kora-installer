@@ -242,6 +242,45 @@ pub fn choices(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, refresh: 
     Ok(Choices { resource: row_of(r, sf, rec), branches: gb::branches(r, &dir, &rec.branch)?, stashes: gb::stashes(r, &dir)?, notes })
 }
 
+/// Everything the resource page shows about one resource that is on disk (nothing is downloaded).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Page {
+    pub id: String,
+    /// The folder, relative to `resources/`.
+    pub folder: String,
+    pub repository: String,
+    /// The branch it normally follows.
+    pub default_branch: String,
+    /// The release it is pinned to (a commit), when the server uses released versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_commit: Option<String>,
+    /// Somebody else's resource kept on a fixed version.
+    pub third_party: bool,
+    /// `portal` for a paid asset imported from a zip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Where the files are on disk, in words (the git state), when it is a git clone Kora can read.
+    pub branch: ResourceBranch,
+}
+
+/// What the resource page shows for one resource.
+pub fn page(r: &dyn CommandRunner, sf: &ServerFile, resource: &str) -> PResult<Page> {
+    let rec = find(sf, resource)?;
+    Ok(Page {
+        id: rec.id.clone(),
+        folder: rec.path.clone(),
+        repository: rec.repository.clone(),
+        default_branch: rec.branch.clone(),
+        pinned_commit: rec.commit.clone(),
+        third_party: rec.third_party,
+        source: rec.source.clone(),
+        version: rec.version.clone(),
+        branch: row_of(r, sf, rec),
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrChoices {
     pub prs: Vec<PullRequest>,
@@ -295,6 +334,9 @@ pub fn switch(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, target: &T
     let _lock = lock_for(sf)?;
     let outcome = go(r, &dir, &rec.branch, target, changes)?;
     let moved = outcome.status == Status::Switched;
+    if moved {
+        crate::resourcestate::mark_changed(&sf.dir, &[rec.id.clone()], &format!("moved to {}", outcome.now.label(&rec.branch)));
+    }
     Ok(SwitchResult { resource: rec.id.clone(), needs_restart: moved, restart_note: moved.then(|| RESTART_NOTE.to_string()), outcome })
 }
 
@@ -305,6 +347,7 @@ pub fn restore_stash(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, ind
     let dir = folder(sf, rec)?;
     let _lock = lock_for(sf)?;
     let outcome = gb::restore_stash(r, &dir, &rec.branch, index)?;
+    crate::resourcestate::mark_changed(&sf.dir, &[rec.id.clone()], "kept-aside changes brought back");
     Ok(SwitchResult { resource: rec.id.clone(), needs_restart: true, restart_note: Some(RESTART_NOTE.to_string()), outcome })
 }
 
@@ -454,6 +497,8 @@ pub fn bulk_apply(r: &dyn CommandRunner, sf: &ServerFile, target: &Target, only:
         progress(n + 1, total, &rec.id);
         items.push(item);
     }
+    let moved: Vec<String> = items.iter().filter(|i| i.status == BulkStatus::Switched).map(|i| i.id.clone()).collect();
+    crate::resourcestate::mark_changed(&sf.dir, &moved, "moved to another branch");
     let count = |s: BulkStatus| items.iter().filter(|i| i.status == s).count();
     let switched = count(BulkStatus::Switched);
     Ok(BulkResult {
@@ -504,17 +549,41 @@ fn bulk_one(r: &dyn CommandRunner, sf: &ServerFile, rec: &ResourceRecord, target
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Overview,
-    Choices { resource: String, refresh: bool },
-    Prs { resource: String },
-    Switch { resource: String, target: Target, changes: Changes },
-    RestoreStash { resource: String, index: u32 },
-    BulkPreview { branch: String, fetch: bool },
-    BulkApply { target: Target, only: Option<Vec<String>>, changes: Changes },
+    /// One resource's page (any mode).
+    Page {
+        resource: String,
+    },
+    Choices {
+        resource: String,
+        refresh: bool,
+    },
+    Prs {
+        resource: String,
+    },
+    Switch {
+        resource: String,
+        target: Target,
+        changes: Changes,
+    },
+    RestoreStash {
+        resource: String,
+        index: u32,
+    },
+    BulkPreview {
+        branch: String,
+        fetch: bool,
+    },
+    BulkApply {
+        target: Target,
+        only: Option<Vec<String>>,
+        changes: Changes,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     Overview(Vec<ResourceBranch>),
+    Page(Box<Page>),
     Choices(Box<Choices>),
     Prs(PrChoices),
     Switched(Box<SwitchResult>),
@@ -526,6 +595,7 @@ pub enum Reply {
 pub fn run(r: &dyn CommandRunner, sf: &ServerFile, req: &Request, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<Reply> {
     Ok(match req {
         Request::Overview => Reply::Overview(overview(r, sf)?),
+        Request::Page { resource } => Reply::Page(Box::new(page(r, sf, resource)?)),
         Request::Choices { resource, refresh } => Reply::Choices(Box::new(choices(r, sf, resource, *refresh)?)),
         Request::Prs { resource } => Reply::Prs(prs(r, sf, resource)?),
         Request::Switch { resource, target, changes } => Reply::Switched(Box::new(switch(r, sf, resource, target, *changes)?)),
@@ -547,6 +617,7 @@ impl Reply {
         use serde_json::json;
         match self {
             Reply::Overview(rows) => json!({"resources": rows}),
+            Reply::Page(p) => serde_json::to_value(p).unwrap_or_default(),
             Reply::Choices(c) => serde_json::to_value(c).unwrap_or_default(),
             Reply::Prs(p) => serde_json::to_value(p).unwrap_or_default(),
             Reply::Switched(s) => serde_json::to_value(s).unwrap_or_default(),

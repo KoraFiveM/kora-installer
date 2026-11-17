@@ -40,6 +40,8 @@ pub enum Op {
     ConsoleSend,
     ConsoleEnable,
     ResourcesList,
+    /// One resource's page: what it is, where its files are, whether a restart is needed.
+    ResourceGet,
     ResourceEnsure,
     /// Start, stop or restart one resource on a running server (through the console helper).
     ResourceControl,
@@ -170,6 +172,7 @@ impl Op {
         Op::ConsoleSend,
         Op::ConsoleEnable,
         Op::ResourcesList,
+        Op::ResourceGet,
         Op::ResourceEnsure,
         Op::ResourceControl,
         Op::UpdatePreview,
@@ -280,6 +283,7 @@ impl Op {
             Op::ConsoleSend => "console_send",
             Op::ConsoleEnable => "console_enable",
             Op::ResourcesList => "resources_list",
+            Op::ResourceGet => "resource_get",
             Op::ResourceEnsure => "resource_ensure",
             Op::ResourceControl => "resource_control",
             Op::UpdatePreview => "update_preview",
@@ -391,6 +395,7 @@ impl Op {
             Op::ConsoleSend => (Method::Post, "/servers/{s}/console"),
             Op::ConsoleEnable => (Method::Put, "/servers/{s}/console/enabled"),
             Op::ResourcesList => (Method::Get, "/servers/{s}/resources"),
+            Op::ResourceGet => (Method::Get, "/servers/{s}/resources/{name}"),
             Op::ResourceEnsure => (Method::Post, "/servers/{s}/ensure"),
             Op::ResourceControl => (Method::Post, "/servers/{s}/resources/{name}/control"),
             Op::UpdatePreview => (Method::Post, "/servers/{s}/update/preview"),
@@ -531,6 +536,7 @@ impl Op {
                 | Op::ConsoleSend
                 | Op::ConsoleEnable
                 | Op::ResourcesList
+                | Op::ResourceGet
                 | Op::ResourceEnsure
                 | Op::ResourceControl
                 | Op::UpdatePreview
@@ -599,6 +605,7 @@ mod tests {
             | Op::ConsoleSend
             | Op::ConsoleEnable
             | Op::ResourcesList
+            | Op::ResourceGet
             | Op::ResourceEnsure
             | Op::ResourceControl
             | Op::UpdatePreview
@@ -692,7 +699,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 105);
+        assert_eq!(Op::ALL.len(), 106);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

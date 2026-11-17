@@ -706,6 +706,8 @@ pub fn apply_with_hints(
     };
 
     super::add_fork_sync(&mut report, fork_sync);
+    let changed: Vec<String> = report.updated.iter().map(|u| u.id.clone()).collect();
+    crate::resourcestate::mark_changed(&server.dir, &changed, "updated");
     report.notes = selection_notes(&sel, catalog_note);
     if server.mode == Mode::Production && !report.updated.is_empty() {
         let moved: Vec<(String, String)> = report.updated.iter().map(|u| (u.id.clone(), u.to.clone())).collect();
@@ -852,6 +854,8 @@ fn rollback_locked(server: &ServerRecord, snapshot_id: &str, git: &dyn GitOps, f
     let failed: Vec<String> = results.iter().filter_map(|(id, r)| r.as_ref().err().map(|e| format!("{id}: {e}"))).collect();
     let restored: Vec<(String, String)> = snap.entries.iter().filter(|e| results.iter().any(|(id, r)| *id == e.id && r.is_ok())).map(|e| (e.id.clone(), e.commit.clone())).collect();
     hold_undone(&server.dir, &undone, &restored);
+    let restored_ids: Vec<String> = restored.iter().map(|(id, _)| id.clone()).collect();
+    crate::resourcestate::mark_changed(&server.dir, &restored_ids, "rolled back");
     if server.mode == Mode::Production {
         if let Err(m) = record_commits(server, &restored) {
             return err(m);

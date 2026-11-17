@@ -297,3 +297,28 @@ mod updates {
         assert!(!serde_json::to_string(&snap).unwrap().contains("branch"));
     }
 }
+
+#[test]
+fn the_page_of_a_resource_works_in_both_modes() {
+    for mode in [Mode::Development, Mode::Production] {
+        let s = server(mode);
+        let p = page(&SystemRunner, &s.sf, "kora-a").unwrap();
+        assert_eq!((p.id.as_str(), p.default_branch.as_str(), p.branch.state), ("kora-a", "dev", State::Default));
+        assert!(page(&SystemRunner, &s.sf, "nope").is_err());
+    }
+}
+
+#[test]
+fn changing_the_files_is_remembered_until_a_restart() {
+    use crate::resourcestate as rs;
+    let s = server(Mode::Development);
+    assert!(!rs::info(&s.sf.dir, "kora-a", true).needed);
+    switch(&SystemRunner, &s.sf, "kora-a", &Target::Branch { name: "feature".into(), remote: None }, Changes::Ask).unwrap();
+    let i = rs::info(&s.sf.dir, "kora-a", true);
+    assert!(i.needed, "{i:?}");
+    assert!(i.why.unwrap().contains("feature"));
+    // Another resource is not affected, and a restart of the server clears it.
+    assert!(!rs::info(&s.sf.dir, "kora-b", true).needed);
+    rs::mark_server_restarted(&s.sf.dir);
+    assert!(!rs::info(&s.sf.dir, "kora-a", true).needed);
+}

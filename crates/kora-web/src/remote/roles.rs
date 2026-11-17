@@ -56,6 +56,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::ServersList
         | Op::ServerGet
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::BranchesList
         | Op::SnapshotsList
         | Op::CatalogForServer
@@ -206,6 +207,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::ConsoleStream
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::BranchesList
@@ -318,6 +320,7 @@ pub fn installs(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::UpdatePreview
@@ -473,6 +476,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::BranchesList

@@ -10,6 +10,7 @@ pub mod keys;
 pub mod maintenance;
 pub mod monitor;
 pub mod remote;
+pub mod resource_page;
 pub mod resources;
 pub mod servers;
 pub mod settings;
