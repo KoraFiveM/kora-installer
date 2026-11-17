@@ -378,3 +378,36 @@ fn a_fresh_home_without_old_files_creates_nothing_extra() {
     assert!(!aside_dir(h.path()).exists());
     assert!(!any_legacy_files(h.path()));
 }
+
+#[test]
+fn the_way_back_export_gives_the_old_files_again_with_every_field() {
+    let h = v070_home();
+    // what the old Kora had, parsed (whitespace and key order do not matter)
+    let load = |p: &Path| serde_json::from_slice::<serde_json::Value>(&std::fs::read(p).unwrap()).unwrap();
+    let originals: Vec<(&str, serde_json::Value)> = ["servers.json", "secrets.json", "profile.json", "last-install.json", "panel.json", "hub.json", "paused-installs/0123456789abcdef.json"]
+        .iter()
+        .map(|n| (*n, load(&h.path().join(n))))
+        .collect();
+    let s = Store::open(h.path()).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let files = crate::store::export::export_json(&s, &out.path().join("back")).unwrap();
+    assert_eq!(files.len(), 7, "{files:?}");
+    for (name, original) in originals {
+        assert_eq!(load(&out.path().join("back").join(name)), original, "{name}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for f in &files {
+            assert_eq!(std::fs::metadata(f).unwrap().permissions().mode() & 0o777, 0o600, "{}", f.display());
+        }
+    }
+    // and the exported folder, put in a home, is imported to the same state (round trip both ways)
+    let again = tempfile::tempdir().unwrap();
+    for f in &files {
+        let rel = f.strip_prefix(out.path().join("back")).unwrap();
+        std::fs::create_dir_all(again.path().join(rel).parent().unwrap()).unwrap();
+        std::fs::copy(f, again.path().join(rel)).unwrap();
+    }
+    assert_everything_imported_after_open(again.path());
+}

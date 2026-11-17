@@ -39,6 +39,7 @@
 
 pub mod audit;
 pub mod backup;
+pub mod export;
 pub mod jobs;
 pub mod legacy;
 pub mod material;

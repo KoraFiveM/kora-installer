@@ -17,6 +17,8 @@ Commands:
   schedule       Show or change when a development server updates itself
   app            The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
   keys           Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
+  audit          Who changed what (from the panel and from `kora` commands), newest first
+  store          Kora's own data file: where it is, a backup of it, and the way back to the old JSON files
   profile        What Kora remembers between installs (your Cfx.re name and GitHub owner)
   branch         Development servers: see and change which branch each resource is on, and go back to the normal version
   pr             Development servers: list and try pull requests on a resource
@@ -126,14 +128,14 @@ Options:
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
   -y, --yes
           Do not ask anything (implied by any other option)
@@ -936,6 +938,100 @@ Arguments:
           The saved key to use
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora audit =====
+Who changed what (from the panel and from `kora` commands), newest first
+
+Usage: kora audit [OPTIONS]
+
+Options:
+      --server <SERVER>
+          Only this server
+
+      --op <OP>
+          Only this operation (for example server_control, key_add, update_apply)
+
+      --actor <ACTOR>
+          Only whose name contains this (a Tailscale login, a user name, an account name)
+
+      --result <RESULT>
+          Only this result: ok, failed, refused or started
+
+      --days <DAYS>
+          Only the last this many days
+
+      --limit <LIMIT>
+          How many rows to show (the newest first)
+          
+          [default: 50]
+
+      --json
+          Print JSON, one row per line
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store =====
+Kora's own data file: where it is, a backup of it, and the way back to the old JSON files
+
+Usage: kora store [OPTIONS] <COMMAND>
+
+Commands:
+  status       Show where Kora's data file is, its version, what is in it and what backups there are
+  backup       Make a consistent copy of Kora's data file (saved licence keys included: keep it private)
+  export-json  Write the old JSON files (the way back to Kora 0.7): everything changed since the upgrade comes with you
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store status =====
+Show where Kora's data file is, its version, what is in it and what backups there are
+
+Usage: kora store status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store backup =====
+Make a consistent copy of Kora's data file (saved licence keys included: keep it private)
+
+Usage: kora store backup [OPTIONS]
+
+Options:
+      --to <TO>
+          Where to put the copy (default: the store's backups folder)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store export-json =====
+Write the old JSON files (the way back to Kora 0.7): everything changed since the upgrade comes with you
+
+Usage: kora store export-json [OPTIONS]
+
+Options:
+      --to <TO>
+          The folder to write them in (default: inside the private store folder)
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

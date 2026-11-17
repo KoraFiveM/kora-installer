@@ -472,6 +472,13 @@ enum Command {
         #[command(subcommand)]
         cmd: keys_cmd::KeysCmd,
     },
+    /// Who changed what (from the panel and from `kora` commands), newest first.
+    Audit(store_cmd::AuditArgs),
+    /// Kora's own data file: where it is, a backup of it, and the way back to the old JSON files.
+    Store {
+        #[command(subcommand)]
+        cmd: store_cmd::StoreCmd,
+    },
     /// What Kora remembers between installs (your Cfx.re name and GitHub owner).
     Profile {
         #[command(subcommand)]
@@ -2584,6 +2591,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Check { .. }
             | Command::Keys { .. }
             | Command::Profile { .. }
+            | Command::Audit(_)
+            | Command::Store { .. }
             | Command::Branch { .. }
             | Command::Pr { .. }
             | Command::Webhook { .. }
@@ -2729,6 +2738,7 @@ fn main() {
     // Bare `kora` opens the panel (see `bare`); it never asks for administrator rights.
     let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     elevate_if_needed(&cli, &cli.command);
+    let audit = store_cmd::audit_start::<Cli>();
     let command = cli.command;
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
@@ -2787,6 +2797,8 @@ fn main() {
         Some(Command::Check { start_database }) => toolchain::run_check(start_database),
         Some(Command::Keys { cmd }) => keys_cmd::keys(cmd),
         Some(Command::Profile { cmd }) => keys_cmd::profile(cmd),
+        Some(Command::Audit(a)) => store_cmd::audit(a),
+        Some(Command::Store { cmd }) => store_cmd::store(cmd),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {
             Ok(c) => c,
@@ -2811,6 +2823,7 @@ fn main() {
     if let Some(line) = pending.and_then(|p| p.finish(std::time::Duration::from_secs(2))) {
         println!("\n{line}");
     }
+    audit.finish(code);
     finish(code);
 }
 
@@ -2819,6 +2832,7 @@ mod bare;
 mod branch;
 mod keys_cmd;
 mod panel_tailscale;
+mod store_cmd;
 mod toolchain;
 
 #[cfg(test)]

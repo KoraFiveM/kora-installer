@@ -142,6 +142,22 @@ impl PausedStore {
         self.all()
     }
 
+    /// Every stopped install in an open store (the export of the old-format files).
+    pub(crate) fn list_in(s: &Store) -> Vec<Stored> {
+        let rows: Vec<(String, bool, Option<String>, String, String, i64)> = s
+            .read(|c| {
+                let mut st = c.prepare("SELECT job, via_helper, failed_step, req_json, finished_json, saved_at FROM paused_installs ORDER BY saved_at, job")?;
+                let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?.collect::<Result<Vec<_>, _>>()?;
+                Ok(v)
+            })
+            .unwrap_or_default();
+        rows.into_iter()
+            .filter_map(|(job, via_helper, failed_step, req, finished, saved_at)| {
+                Some(Stored { job, req: serde_json::from_str(&req).ok()?, via_helper, failed_step, finished: serde_json::from_str(&finished).ok()?, saved_at: saved_at as u64 })
+            })
+            .collect()
+    }
+
     fn all(&self) -> Vec<Stored> {
         let Ok(Some(s)) = Store::open_existing(self.home()) else { return vec![] };
         let cutoff = now().saturating_sub(KEEP_SECS) as i64;
