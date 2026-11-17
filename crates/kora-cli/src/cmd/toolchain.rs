@@ -2,6 +2,7 @@
 //! (`Op::ToolsStatus`, `Op::ToolInstall`, `Op::SystemCheck`, `Op::DbStart`). The logic lives in
 //! `kora_core::api::toolchain`; this only prints.
 
+use clap::Subcommand;
 use kora_core::api::install::github::{GithubEnv, SystemGithub};
 use kora_core::api::toolchain::{system_check, CheckState, SystemToolchain, ToolchainEnv};
 use kora_core::problem::{plain_text, Tool};
@@ -122,6 +123,18 @@ pub fn run_tools_install(which: Option<&str>) -> i32 {
 }
 pub fn run_check(start_database: bool) -> i32 {
     check(&SystemToolchain, &SystemGithub, start_database)
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ToolsCmd {
+    /// Show which Git and GitHub CLI Kora uses (the one on this computer, or its own copy).
+    Status,
+    /// Download Kora's own copy of Git (Windows) and the GitHub CLI, checked against a pinned checksum. No administrator rights, nothing else on the computer changes.
+    Install {
+        /// `git`, `gh` or `all` (the default: whatever is missing).
+        #[arg(value_name = "TOOL")]
+        tool: Option<String>,
+    },
 }
 
 #[cfg(test)]

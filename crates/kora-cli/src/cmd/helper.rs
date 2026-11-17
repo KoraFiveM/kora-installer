@@ -2,7 +2,8 @@
 
 use crate::cmd::app::AppCmd;
 use crate::cmd::schedule::ScheduleCmd;
-use crate::{Cli, Command, ToolsCmd};
+use crate::cmd::toolchain::ToolsCmd;
+use crate::{Cli, Command};
 use clap::{Parser, Subcommand};
 use kora_core::elevate;
 use kora_core::installer::host;
