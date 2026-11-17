@@ -88,7 +88,7 @@ pub fn read_badge(dir: &Path) -> Option<UpdateBadge> {
 
 /// The record the manual update engine wants (it reads `kora-server.json`).
 fn record(e: &ServerEntry) -> Res<manual::ServerRecord> {
-    manual::load_server(&e.dir.to_string_lossy()).map_err(Problem::from)
+    manual::load_server(&e.dir.to_string_lossy())
 }
 
 struct Quiet;
@@ -165,7 +165,7 @@ fn folder_of(sf: &ServerFile, id: &str) -> Option<String> {
 
 impl Backend for SystemBackend {
     fn list(&mut self) -> Res<Vec<ServerEntry>> {
-        Registry::load().map(|r| r.servers).map_err(|e| Problem::from(e).lead(&format!("Can't read the server list ({})", registry::registry_path().display())))
+        Registry::load().map(|r| r.servers).map_err(|e| e.lead(&format!("Can't read the server list ({})", registry::registry_path().display())))
     }
 
     fn status(&mut self, e: &ServerEntry) -> Status {
@@ -244,20 +244,16 @@ impl Backend for SystemBackend {
     }
 
     fn delete(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool) -> Res<Vec<String>> {
-        installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet)
-            .map_err(Problem::from)
-            .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
+        installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet).inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
     }
 
     fn delete_with_db_password(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>) -> Res<Vec<String>> {
         installer::rollback_with_db_password(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, &mut Quiet)
-            .map_err(Problem::from)
             .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
     }
 
     fn delete_with_admin(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>, admin: Option<installer::system_ops::SharedAdmin>) -> Res<Vec<String>> {
         installer::rollback_with_admin(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, admin, &mut Quiet)
-            .map_err(Problem::from)
             .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
     }
 
@@ -267,7 +263,6 @@ impl Backend for SystemBackend {
             r.remove(&e.name);
             Ok(())
         })
-        .map_err(Problem::from)
     }
 
     fn register(&mut self, e: ServerEntry) -> Res<()> {
@@ -275,7 +270,6 @@ impl Backend for SystemBackend {
             r.upsert(e);
             Ok(())
         })
-        .map_err(Problem::from)
     }
 
     fn scan_roots(&self) -> Vec<PathBuf> {
@@ -293,20 +287,20 @@ impl Backend for SystemBackend {
     }
 
     fn preview(&mut self, e: &ServerEntry, scope: Scope) -> Res<UpdatePreview> {
-        manual::preview(&record(e)?, scope).map_err(Problem::from)
+        manual::preview(&record(e)?, scope)
     }
 
     fn preview_events(&mut self, e: &ServerEntry, scope: Scope, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdatePreview> {
-        manual::preview_events(&record(e)?, scope, on).map_err(Problem::from)
+        manual::preview_events(&record(e)?, scope, on)
     }
 
     fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
         // `manual::apply` sends the Discord notification itself: not a second time here.
-        manual::apply(&record(e)?, scope, o, on).map_err(Problem::from)
+        manual::apply(&record(e)?, scope, o, on)
     }
 
     fn rollback(&mut self, e: &ServerEntry, snapshot: &str, force: bool) -> Res<()> {
-        manual::rollback(&record(e)?, snapshot, force).map_err(Problem::from)
+        manual::rollback(&record(e)?, snapshot, force)
     }
 
     fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo> {
@@ -314,25 +308,25 @@ impl Backend for SystemBackend {
     }
 
     fn add_catalog(&mut self, e: &ServerEntry) -> Res<(Catalog, Vec<String>, Option<String>)> {
-        let sf = ServerFile::load(&e.dir).map_err(|x| Problem::from(x).lead(&format!("Can't read {}", e.dir.join("kora-server.json").display())))?;
-        let (cat, note) = add::load_catalog().map_err(Problem::from)?;
+        let sf = ServerFile::load(&e.dir).map_err(|x| x.lead(&format!("Can't read {}", e.dir.join("kora-server.json").display())))?;
+        let (cat, note) = add::load_catalog()?;
         Ok((cat, add::installed_ids(&sf), note))
     }
 
     fn add_plan(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddPlan> {
-        let sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
-        let (cat, _) = add::load_catalog().map_err(Problem::from)?;
-        add::plan(&cat, &sf, ids).map_err(Problem::from)
+        let sf = ServerFile::load(&e.dir)?;
+        let (cat, _) = add::load_catalog()?;
+        add::plan(&cat, &sf, ids)
     }
 
     fn add_install(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddOutcome> {
-        let mut sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
-        let (cat, _) = add::load_catalog().map_err(Problem::from)?;
-        let plan = add::plan(&cat, &sf, ids).map_err(Problem::from)?;
+        let mut sf = ServerFile::load(&e.dir)?;
+        let (cat, _) = add::load_catalog()?;
+        let plan = add::plan(&cat, &sf, ids)?;
         if plan.items.iter().any(|i| i.fork) {
-            feedback::require_sign_in(&SystemRunner).map_err(Problem::from)?;
+            feedback::require_sign_in(&SystemRunner)?;
         }
-        add::execute(&add::GitCloner(&SystemRunner), &mut sf, &plan, &mut |_| {}).map_err(Problem::from)
+        add::execute(&add::GitCloner(&SystemRunner), &mut sf, &plan, &mut |_| {})
     }
 
     fn github_signed_in(&mut self) -> bool {
@@ -340,17 +334,17 @@ impl Backend for SystemBackend {
     }
 
     fn report_issue(&mut self, e: &ServerEntry, resource: &str, title: &str, text: &str) -> Res<String> {
-        let sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
-        feedback::report_issue(&SystemRunner, &sf, resource, title, text).map_err(Problem::from)
+        let sf = ServerFile::load(&e.dir)?;
+        feedback::report_issue(&SystemRunner, &sf, resource, title, text)
     }
 
     fn pr_plan(&mut self, e: &ServerEntry, resource: &str) -> Res<PrPlan> {
-        let sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
-        feedback::plan_pr(&SystemRunner, &sf, resource).map_err(Problem::from)
+        let sf = ServerFile::load(&e.dir)?;
+        feedback::plan_pr(&SystemRunner, &sf, resource)
     }
 
     fn pr_open(&mut self, plan: &PrPlan, title: &str, text: &str) -> Res<String> {
-        feedback::open_pr(&SystemRunner, plan, title, text).map_err(Problem::from)
+        feedback::open_pr(&SystemRunner, plan, title, text)
     }
 
     fn notify_load(&mut self, e: &ServerEntry) -> NotifyConfig {
@@ -382,7 +376,7 @@ impl Backend for SystemBackend {
         if self.status(e) != Status::Stopped {
             return Err(Problem::generic("Stop the server first, then change its ports."));
         }
-        crate::installer::change_ports::change_ports(&e.dir, &e.name, p, &SystemProber).map(|c| c.notes).map_err(Problem::from)
+        crate::installer::change_ports::change_ports(&e.dir, &e.name, p, &SystemProber).map(|c| c.notes)
     }
 
     fn schedule_elevation(&mut self, e: &ServerEntry, set: Option<&ScheduleConfig>) -> Option<Vec<String>> {
@@ -432,12 +426,12 @@ impl Backend for SystemBackend {
     }
 
     fn collab(&mut self, e: &ServerEntry, req: &crate::collab::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
-        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| Problem::from(err).lead(&format!("cannot read {}", e.dir.join("kora-server.json").display())))?;
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| err.lead(&format!("cannot read {}", e.dir.join("kora-server.json").display())))?;
         crate::installer::gitops::with_runner(&e.dir, |r| crate::collab::run_on(r, &sf, req, say))
     }
 
     fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
-        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| Problem::from(err).lead(&format!("cannot read {}", e.dir.join("kora-server.json").display())))?;
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| err.lead(&format!("cannot read {}", e.dir.join("kora-server.json").display())))?;
         crate::installer::gitops::with_runner(&e.dir, |r| crate::branches::run(r, &sf, req, say))
     }
 }

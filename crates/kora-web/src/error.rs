@@ -80,7 +80,7 @@ impl ApiError {
     pub fn conflict(m: impl Into<Problem>) -> Self {
         Self::plain_or_problem(StatusCode::CONFLICT, "conflict", m.into())
     }
-    /// 500. A plain message (or a generic [`Problem`]) gets the code `internal`; a Problem that has a
+    /// Status 500. A plain message (or a generic [`Problem`]) gets the code `internal`; a Problem that has a
     /// code of its own keeps it, with its details and actions.
     pub fn internal(m: impl Into<Problem>) -> Self {
         Self::plain_or_problem(StatusCode::INTERNAL_SERVER_ERROR, "internal", m.into())

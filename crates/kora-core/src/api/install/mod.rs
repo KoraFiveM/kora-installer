@@ -66,7 +66,7 @@ impl InstallEnv for SystemInstallEnv {
         &SystemDisk
     }
     fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), Problem> {
-        installer::check_db_admin(admin).map_err(Problem::from)
+        installer::check_db_admin(admin)
     }
     fn artifacts(&self) -> Result<artifacts::ArtifactList, Problem> {
         let http = installer::Hooks::from_env().http;

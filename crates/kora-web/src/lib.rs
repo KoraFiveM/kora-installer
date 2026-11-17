@@ -26,7 +26,7 @@ use axum::Extension;
 use axum::{middleware, Json, Router};
 use kora_core::api::{wire, Backend, JobRegistry, Op};
 use kora_core::installer::registry::ServerEntry;
-use serde_json::{json, Value};
+use serde_json::json;
 
 pub use error::{blocking, ApiError};
 pub use jobs::{JobMessage, Jobs, MemoryJobs, NoJobs};

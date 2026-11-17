@@ -65,14 +65,13 @@ impl ToolchainEnv for SystemToolchain {
         } else if tool == Tool::Git || tool == Tool::Gh {
             tools::install_real(tool, say)?;
         } else {
-            return Err(Problem::new(codes::TOOLS_UNSUPPORTED, format!("Kora cannot install {} from here.", tool.label())).into());
+            return Err(Problem::new(codes::TOOLS_UNSUPPORTED, format!("Kora cannot install {} from here.", tool.label())));
         }
         let st = tools::status(&crate::git::SystemRunner, tool);
         if !st.installed {
             return Err(Problem::new(codes::INSTALL_TOOL_MISSING, format!("{} was installed but does not start. Try again, or install it yourself.", tool.label()))
                 .with_action(Action::Retry)
-                .with_action(Action::open_link(if tool == Tool::Git { known::GIT_URL } else { known::GH_URL }))
-                .into());
+                .with_action(Action::open_link(if tool == Tool::Git { known::GIT_URL } else { known::GH_URL })));
         }
         Ok(st)
     }
@@ -99,20 +98,19 @@ fn install_system_git(say: &mut dyn FnMut(&str, f32)) -> Result<(), Problem> {
     let tools = crate::git::Tools { git: None, gh: None };
     let plan = crate::git::plan_bootstrap(crate::git::Os::current(), &tools).map_err(|e| e.to_string())?;
     if plan.is_empty() {
-        return Err(Problem::new(codes::TOOLS_UNSUPPORTED, "Git comes from your system's package manager on this computer.").with_action(Action::open_link(known::GIT_URL)).into());
+        return Err(Problem::new(codes::TOOLS_UNSUPPORTED, "Git comes from your system's package manager on this computer.").with_action(Action::open_link(known::GIT_URL)));
     }
     if !crate::elevate::is_elevated() {
         return Err(Problem::new(codes::NEEDS_ELEVATION, "Installing Git needs administrator rights.")
             .with_action(Action::InstallAdminService)
-            .with_action(Action::show_command(&["kora", "tools", "install", "git"], true))
-            .into());
+            .with_action(Action::show_command(&["kora", "tools", "install", "git"], true)));
     }
     for (i, s) in plan.iter().enumerate() {
         say(&s.description, i as f32 / plan.len() as f32);
         let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
         let o = crate::git::CommandRunner::run(&crate::git::SystemRunner, &s.program, &args, None).map_err(|e| e.to_string())?;
         if !o.ok() {
-            return Err(Problem::new(codes::INSTALL_TOOL_MISSING, format!("This did not work: {}.", s.description)).with_details(o.stderr.trim()).with_action(Action::Retry).into());
+            return Err(Problem::new(codes::INSTALL_TOOL_MISSING, format!("This did not work: {}.", s.description)).with_details(o.stderr.trim()).with_action(Action::Retry));
         }
     }
     Ok(())

@@ -286,8 +286,7 @@ fn check_admin_login(admin: &AdminConn) -> Result<()> {
     };
     Err(Problem::new(codes::INSTALL_DB_LOGIN, format!("Could not log in to the database server as '{}'. Kora needs an administrator account to create a NEW database and user. {advice}", admin.user))
         .with_details(why)
-        .with_action(Action::change_answers("database"))
-        .into())
+        .with_action(Action::change_answers("database")))
 }
 
 /// No database server, and Kora will not install one with the current answers.
@@ -337,18 +336,15 @@ fn forks_path(ctx: &Ctx) -> PathBuf {
 /// or signed out could not check it up front). Nothing is created on failure.
 fn verify_requested_owner(r: &dyn git::CommandRunner, requested: Option<&str>) -> Result<()> {
     let Some(want) = requested.map(str::trim).filter(|o| !o.is_empty()) else { return Ok(()) };
-    git::owners::check_login_syntax(want).map_err(|m| Problem::from(Problem::new(codes::GH_OWNER_INVALID, m).with_action(Action::change_answers("github"))))?;
+    git::owners::check_login_syntax(want).map_err(|m| Problem::new(codes::GH_OWNER_INVALID, m).with_action(Action::change_answers("github")))?;
     let all = git::owners::list_owners(r).map_err(|e| {
-        Problem::from(
-            Problem::new(codes::GH_UNAVAILABLE, "Kora could not read your GitHub accounts. Nothing was forked.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }),
-        )
+        Problem::new(codes::GH_UNAVAILABLE, "Kora could not read your GitHub accounts. Nothing was forked.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] })
     })?;
     match git::owners::choose_owner(&all, Some(want)) {
         Ok(_) => Ok(()),
         Err(m) => Err(Problem::new(codes::GH_OWNER_INVALID, format!("{m}\nNothing was forked. Choose another GitHub account to fork into."))
             .with_details("From a terminal: `kora github owners` lists the accounts; pass one with --github-owner.")
-            .with_action(Action::change_answers("github"))
-            .into()),
+            .with_action(Action::change_answers("github"))),
     }
 }
 
@@ -356,8 +352,8 @@ fn fork_owner(ctx: &Ctx, r: &dyn git::CommandRunner) -> Result<(String, bool)> {
     use git::owners::{check_org, gh_auth, GhAuth};
     let login = match gh_auth(r) {
         GhAuth::LoggedIn { login } => login,
-        GhAuth::Missing => return Err(known::gh_missing().into()),
-        GhAuth::LoggedOut => return Err(known::github_signed_out().into()),
+        GhAuth::Missing => return Err(known::gh_missing()),
+        GhAuth::LoggedOut => return Err(known::github_signed_out()),
     };
     match ctx.req.github_owner.as_deref() {
         None => Ok((login, false)),
@@ -369,8 +365,7 @@ fn fork_owner(ctx: &Ctx, r: &dyn git::CommandRunner) -> Result<(String, bool)> {
             } else {
                 Err(Problem::new(codes::GH_OWNER_INVALID, format!("You cannot fork into '{o}': {}. Choose another GitHub account to fork into.", org.reason.as_deref().unwrap_or("not allowed")))
                     .with_details(format!("From a terminal: `kora github owners` lists the accounts, or leave out --github-owner to fork into {login}."))
-                    .with_action(Action::change_answers("github"))
-                    .into())
+                    .with_action(Action::change_answers("github")))
             }
         }
     }
@@ -668,7 +663,7 @@ impl InstallStep {
             ctx.note(n.clone());
         }
         if let Some(p) = r.error.clone() {
-            return Err(p.into());
+            return Err(p);
         }
         if !out.ok {
             return err("Kora's administrator helper could not do this step.");
@@ -740,9 +735,8 @@ impl InstallStep {
         use git::owners::{begin_login, GhAuth, SystemLogin};
         let ctx = &*self.ctx;
         ctx.emit(self.id, StepStatus::Running, "Starting the GitHub sign-in...", 0.2);
-        let session = begin_login(&SystemLogin, false).map_err(|e| {
-            Problem::from(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))
-        })?;
+        let session = begin_login(&SystemLogin, false)
+            .map_err(|e| Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))?;
         let opened = open_github_page(&session.url);
         let msg = format!("Sign in to GitHub: {} {} and enter this code: {}  (waiting for you, up to 15 minutes)", if opened { "your browser is opening" } else { "open" }, session.url, session.code);
         ctx.note(format!("GitHub sign-in code {} at {}", session.code, session.url));
@@ -753,10 +747,8 @@ impl InstallStep {
                 ctx.emit(self.id, StepStatus::Running, format!("Signed in to GitHub as {login}"), 0.8);
                 Ok(())
             }
-            Ok(_) => {
-                Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).").with_action(Action::SignInGithub { scopes: vec![] }).into())
-            }
-            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }).into()),
+            Ok(_) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).").with_action(Action::SignInGithub { scopes: vec![] })),
+            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] })),
         }
     }
 
@@ -788,12 +780,12 @@ impl InstallStep {
                 for s in &plan {
                     p.push_action(Action::ShowCommand { command: std::iter::once(s.program.clone()).chain(s.args.iter().cloned()).collect(), elevated: true });
                 }
-                return Err(p.into());
+                return Err(p);
             }
             for s in &plan {
                 ctx.emit(self.id, StepStatus::Running, s.description.clone(), 0.1);
                 let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
-                let failed = |why: String| Problem::from(Problem::new(codes::INSTALL_TOOL_MISSING, format!("This did not work: {}.", s.description)).with_details(why));
+                let failed = |why: String| Problem::new(codes::INSTALL_TOOL_MISSING, format!("This did not work: {}.", s.description)).with_details(why);
                 let o = git::CommandRunner::run(&r, &s.program, &args, None).map_err(|e| failed(e.to_string()))?;
                 if !o.ok() {
                     return Err(failed(o.stderr.trim().to_string()));
@@ -801,15 +793,14 @@ impl InstallStep {
             }
             tools = git::detect(&r);
             if tools.git.is_none() {
-                return Err(known::git_missing().into());
+                return Err(known::git_missing());
             }
         }
         if dev {
             if tools.gh.is_none() {
                 return Err(Problem::new(codes::GH_MISSING, "Development servers need the GitHub CLI (gh), and it is not installed.")
                     .with_actions(known::gh_missing().actions)
-                    .with_action(Action::change_answers("source"))
-                    .into());
+                    .with_action(Action::change_answers("source")));
             }
             let mut st = git::auth_status(&r).map_err(|e| Problem::generic(e.to_string()))?;
             if !st.logged_in {
@@ -817,12 +808,12 @@ impl InstallStep {
                 self.sign_in_to_github()?;
                 st = git::auth_status(&r).map_err(|e| Problem::generic(e.to_string()))?;
                 if !st.logged_in {
-                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_action(Action::SignInGithub { scopes: vec![] }).into());
+                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_action(Action::SignInGithub { scopes: vec![] }));
                 }
             }
             let missing = st.missing_scopes(false);
             if !missing.is_empty() {
-                return Err(known::github_missing_scopes(&missing).into());
+                return Err(known::github_missing_scopes(&missing));
             }
             verify_requested_owner(&r, ctx.req.github_owner.as_deref())?;
         }
@@ -833,7 +824,7 @@ impl InstallStep {
             preq.validate().map_err(|e| Problem::generic(e.to_string()))?;
             let conflicts = firewall::ports::install_conflicts(&ctx.req.name, &ctx.req.dir, preq.game_port, preq.txadmin_port, &firewall::ports::SystemProber);
             if !conflicts.is_empty() {
-                return Err(super::ports_busy(&conflicts).into());
+                return Err(super::ports_busy(&conflicts));
             }
         }
         // Database server.
@@ -859,7 +850,7 @@ impl InstallStep {
                 if found.is_empty() {
                     match ctx.req.db {
                         DbChoice::InstallIfMissing => self.install_db_server()?,
-                        _ => return Err(db_missing("Choose \"Set up for me\" to let Kora install one, or skip the database.").into()),
+                        _ => return Err(db_missing("Choose \"Set up for me\" to let Kora install one, or skip the database.")),
                     }
                 } else if !found.iter().any(|s| s.running) {
                     self.start_stopped_db(&found[0].name)?;
@@ -887,9 +878,9 @@ impl InstallStep {
                 }
                 return Ok(());
             }
-            return Err(db_stopped(name, &["net", "start", name]).into());
+            return Err(db_stopped(name, &["net", "start", name]));
         }
-        Err(db_stopped(name, &["systemctl", "start", name]).into())
+        Err(db_stopped(name, &["systemctl", "start", name]))
     }
 
     fn install_db_server(&self) -> Result<()> {
@@ -900,7 +891,7 @@ impl InstallStep {
                     windows_db::MARIADB_VERSION,
                     &windows_db::base_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "%ProgramData%\\Kora\\mariadb".into()),
                 );
-                return Err(db_needs_admin(&ctx.req, why).into());
+                return Err(db_needs_admin(&ctx.req, why));
             }
             let mut say = |m: &str| ctx.emit(self.id, StepStatus::Running, m.to_string(), 0.5);
             let rec = windows_db::install(&ctx.hooks.http, &mut say)?;
@@ -915,11 +906,11 @@ impl InstallStep {
         }
         let plan = match db::plan_install(db::Os::current(), &ctx.req.dir, "", 3306, &[]) {
             Ok(p) if db::Os::current() == db::Os::Linux => p,
-            _ => return Err(db_missing("Kora cannot install MariaDB on this system: install it yourself, then choose to use the existing database.").into()),
+            _ => return Err(db_missing("Kora cannot install MariaDB on this system: install it yourself, then choose to use the existing database.")),
         };
         if !ctx.admin {
             let what: Vec<String> = plan.steps.iter().map(|s| format!("- {}", s.description)).collect();
-            return Err(db_needs_admin(&ctx.req, format!("MariaDB is not installed, and installing it needs administrator rights. Kora would:\n{}", what.join("\n"))).into());
+            return Err(db_needs_admin(&ctx.req, format!("MariaDB is not installed, and installing it needs administrator rights. Kora would:\n{}", what.join("\n"))));
         }
         for s in &plan.steps {
             ctx.emit(self.id, StepStatus::Running, s.description.clone(), 0.5);
@@ -970,15 +961,12 @@ impl InstallStep {
         let cfg = git::ForkConfig { sync_existing: true, cache_path: Some(git::forkfind::default_cache_path()), ..git::ForkConfig::default() };
         let out = git::run_forks(&r, &mut state, &cfg, &mut on_progress).map_err(|e| Problem::generic(e.to_string()))?;
         match out {
-            git::ForkOutcome::Paused => {
-                Err(Problem::new(codes::GH_RATE_LIMITED, "GitHub asked Kora to slow down. The forks made so far are kept: wait a few minutes, then try this step again.").into())
-            }
+            git::ForkOutcome::Paused => Err(Problem::new(codes::GH_RATE_LIMITED, "GitHub asked Kora to slow down. The forks made so far are kept: wait a few minutes, then try this step again.")),
             git::ForkOutcome::Finished if !state.failed.is_empty() => Err(Problem::new(
                 codes::INSTALL_FORKS_FAILED,
                 format!("{} of your forks could not be made. The others are kept; trying this step again only retries the missing ones.", state.failed.len()),
             )
-            .with_details(state.failed.iter().map(|f| format!("{}: {}", f.repo, f.error)).collect::<Vec<_>>().join("\n"))
-            .into()),
+            .with_details(state.failed.iter().map(|f| format!("{}: {}", f.repo, f.error)).collect::<Vec<_>>().join("\n"))),
             git::ForkOutcome::Finished => {
                 let rel_of = |repo: &str| sel.iter().find(|(r, _, _)| r == repo).map(|(_, _, rel)| format!("resources/{rel}")).unwrap_or_else(|| repo.to_string());
                 let (headline, lines) = fork_sync_report(&state, &rel_of);
@@ -2013,7 +2001,7 @@ mod problem_tests {
 
     #[test]
     fn a_problem_reads_as_plain_text_in_a_terminal() {
-        let e = Problem::from(known::github_missing_scopes(&["read:org".to_string()]));
+        let e = known::github_missing_scopes(&["read:org".to_string()]);
         let t = e.to_string();
         assert!(t.starts_with("Your GitHub sign-in does not give Kora") && t.contains("gh auth refresh -h github.com -s read:org"), "{t}");
         assert!(!t.contains("kora-problem"));

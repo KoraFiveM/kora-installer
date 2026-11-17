@@ -173,7 +173,7 @@ impl InstallEnv for Env {
                 Ok(_) => return Err("failed".into()),
                 Err(p) => {
                     sink.event(ev(step, StepStatus::Failed, &p.message));
-                    return Err(p.into());
+                    return Err(p);
                 }
             }
         }

@@ -34,7 +34,9 @@ sentence!(
 impl From<crate::update::lock::LockError> for Problem {
     fn from(e: crate::update::lock::LockError) -> Problem {
         match e {
-            crate::update::lock::LockError::Busy => Problem::new(crate::git::branches::codes::BUSY, format!("{}. Try again when it has finished.", crate::update::lock::BUSY)).with_action(super::Action::Retry),
+            crate::update::lock::LockError::Busy => {
+                Problem::new(crate::git::branches::codes::BUSY, format!("{}. Try again when it has finished.", crate::update::lock::BUSY)).with_action(super::Action::Retry)
+            }
             crate::update::lock::LockError::Io(e) => Problem::from(e).context("taking the update lock"),
         }
     }

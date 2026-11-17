@@ -70,7 +70,7 @@ impl ToolchainEnv for Fake {
         self.install_calls.lock().unwrap().push(tool);
         say("Downloading the GitHub CLI", 0.5);
         if let Some(p) = self.install_error.lock().unwrap().clone() {
-            return Err(p.into());
+            return Err(p);
         }
         self.installed.lock().unwrap().push(tool);
         Ok(status(tool, true, Some(Source::Private)))

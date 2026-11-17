@@ -23,7 +23,7 @@ use crate::git::branches::{self as gb, codes, Branches, Kind, Outcome, PullReque
 use crate::git::CommandRunner;
 use crate::installer::registry::{ResourceRecord, ServerFile};
 use crate::installer::types::Versions;
-use crate::problem::{Action, Problem};
+use crate::problem::Problem;
 use crate::update::{lock, par_map, FETCH_PARALLEL};
 
 pub use crate::git::branches::{parse_pr_input, valid_branch, Changes, PrSource};

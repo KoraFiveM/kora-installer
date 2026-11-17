@@ -15,7 +15,7 @@ use kora_core::api::{adopt, logs, wire, Backend, Op, Status, UpdateBadge};
 use kora_core::installer::registry::{self, ServerEntry};
 use kora_core::service::ControlAction;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::{blocking, ApiError, AppState};
 

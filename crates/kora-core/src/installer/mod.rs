@@ -494,8 +494,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     if req.license_key.as_deref().map(str::trim).unwrap_or("").is_empty() {
         return Err(Problem::new(codes::INSTALL_LICENCE_MISSING, "a Cfx.re license key is required (get one at https://portal.cfx.re/servers/registration-keys)")
             .with_action(Action::change_answers("licence"))
-            .with_action(Action::open_link(LICENCE_URL))
-            .into());
+            .with_action(Action::open_link(LICENCE_URL)));
     }
     check_dir_links(&req.dir)?;
     preflight(req, hooks, admin)?;
@@ -503,7 +502,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     if !req.dir.join("kora-server.json").is_file() {
         let c = crate::firewall::ports::install_conflicts(&req.name, &req.dir, req.ports.game, req.ports.txadmin, &crate::firewall::ports::SystemProber);
         if !c.is_empty() {
-            return Err(ports_busy(&c).into());
+            return Err(ports_busy(&c));
         }
     }
     let (tx, rx) = mpsc::channel();

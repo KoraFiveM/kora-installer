@@ -904,9 +904,7 @@ fn rollback_locked(server: &ServerRecord, snapshot_id: &str, git: &dyn GitOps, f
     let restored_ids: Vec<String> = restored.iter().map(|(id, _)| id.clone()).collect();
     crate::resourcestate::mark_changed(&server.dir, &restored_ids, "rolled back");
     if server.versions() == Versions::Released {
-        if let Err(m) = record_commits(server, &restored) {
-            return Err(m);
-        }
+        record_commits(server, &restored)?;
     }
     if failed.is_empty() {
         Ok(())

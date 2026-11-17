@@ -157,6 +157,10 @@ pub mod codes {
     pub const TOOLS_CHECKSUM: &str = "tools.checksum_mismatch";
     /// A server was removed but its database could not be dropped: the database administrator's password is needed.
     pub const DB_NEEDS_PASSWORD: &str = "needs_db_password";
+    /// The panel can be reached from other computers over plain HTTP.
+    pub const TLS_MISSING: &str = "tls.missing";
+    /// The panel's HTTPS certificate expires soon or has expired.
+    pub const TLS_EXPIRING: &str = "tls.expiring";
     /// Starting the database server did not work.
     pub const DB_START_FAILED: &str = "db.start_failed";
 }

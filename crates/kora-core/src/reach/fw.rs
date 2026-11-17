@@ -23,8 +23,7 @@ pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, Problem> {
         // The command to run as administrator (the panel goes through the administrator service instead).
         let command = vec!["kora".to_string(), "reach".into(), e.name.clone(), "--open-firewall".into()];
         return Err(Problem::new(codes::NEEDS_ELEVATION, "Changing the firewall needs administrator rights. Run this command as administrator, then check again:")
-            .with_action(Action::ShowCommand { command, elevated: true })
-            .into());
+            .with_action(Action::ShowCommand { command, elevated: true }));
     }
     // Recorded first (like the install does), so deleting the server removes these rules again.
     let mut created = crate::installer::load_created_from(&e.dir).unwrap_or_default();
