@@ -25,11 +25,12 @@ pub fn load(path: &Path) -> Result<Ledger, String> {
 }
 
 /// May `caller` use the server folder `dir`? `owner` = the folder's owner as the OS says (`None`:
-/// could not be read), `has_record` = it holds Kora's install record, `extra_owners` = accounts
-/// that legitimately own a Kora server folder besides the person (Linux: the `kora` service
-/// account a server runs as). The folder must belong to the caller; there is no "administrators
-/// group" exception (an administrator uses an elevated terminal for folders an elevated Kora made).
-pub fn folder_ok(dir: &str, caller: &AccountId, owner: Option<&AccountId>, has_record: bool, extra_owners: &[AccountId]) -> Result<(), Rejected> {
+/// could not be read), `has_record` = it holds Kora's install record, `server_account` = the owner is
+/// one of the dedicated accounts a server runs as (Linux `kora`, `kora-<name>`); the dispatcher then
+/// also requires the ledger to show the server's service as the caller's. The folder must belong to
+/// the caller; there is no "administrators group" exception (an administrator uses an elevated
+/// terminal for folders an elevated Kora made).
+pub fn folder_ok(dir: &str, caller: &AccountId, owner: Option<&AccountId>, has_record: bool, server_account: bool) -> Result<(), Rejected> {
     let no = |why: &str| Err(Rejected(format!("Kora's service will not work on {dir}: {why}.")));
     if !super::op::dir_shape_ok(dir) {
         return no("it is not a full folder path");
@@ -38,7 +39,7 @@ pub fn folder_ok(dir: &str, caller: &AccountId, owner: Option<&AccountId>, has_r
         return no("it has no Kora install record");
     }
     match owner {
-        Some(o) if o == caller || extra_owners.contains(o) => Ok(()),
+        Some(o) if o == caller || server_account => Ok(()),
         Some(_) => no("the folder does not belong to you"),
         None => no("cannot see who owns the folder"),
     }
@@ -120,17 +121,17 @@ mod tests {
     #[test]
     fn folders_must_belong_to_the_caller_and_hold_a_record() {
         let d = "/home/jo/kora/a";
-        assert!(folder_ok(d, &me(), Some(&me()), true, &[]).is_ok());
-        assert!(folder_ok(d, &me(), Some(&you()), true, &[]).unwrap_err().0.contains("does not belong"));
-        assert!(folder_ok(d, &me(), Some(&AccountId::uid(0)), true, &[]).is_err(), "root-owned is not the person's");
-        assert!(folder_ok(d, &me(), Some(&AccountId::uid(998)), true, &[AccountId::uid(998)]).is_ok(), "the server's own kora account");
-        assert!(folder_ok(d, &me(), None, true, &[]).is_err());
-        assert!(folder_ok(d, &me(), Some(&me()), false, &[]).unwrap_err().0.contains("no Kora install record"));
-        assert!(folder_ok("rel/a", &me(), Some(&me()), true, &[]).is_err());
-        assert!(folder_ok("/home/jo/../root", &me(), Some(&me()), true, &[]).is_err());
+        assert!(folder_ok(d, &me(), Some(&me()), true, false).is_ok());
+        assert!(folder_ok(d, &me(), Some(&you()), true, false).unwrap_err().0.contains("does not belong"));
+        assert!(folder_ok(d, &me(), Some(&AccountId::uid(0)), true, false).is_err(), "root-owned is not the person's");
+        assert!(folder_ok(d, &me(), Some(&AccountId::uid(998)), true, true).is_ok(), "the server's own kora account (the ledger is checked by the dispatcher)");
+        assert!(folder_ok(d, &me(), None, true, false).is_err());
+        assert!(folder_ok(d, &me(), Some(&me()), false, false).unwrap_err().0.contains("no Kora install record"));
+        assert!(folder_ok("rel/a", &me(), Some(&me()), true, false).is_err());
+        assert!(folder_ok("/home/jo/../root", &me(), Some(&me()), true, false).is_err());
         let sid = AccountId::sid("S-1-5-21-1-2-3-1001").unwrap();
-        assert!(folder_ok(r"C:\Users\jo\kora\a", &sid, Some(&sid), true, &[]).is_ok());
-        assert!(folder_ok(r"C:\Users\jo\kora\a", &sid, Some(&AccountId::sid("S-1-5-21-1-2-3-1002").unwrap()), true, &[]).is_err());
+        assert!(folder_ok(r"C:\Users\jo\kora\a", &sid, Some(&sid), true, false).is_ok());
+        assert!(folder_ok(r"C:\Users\jo\kora\a", &sid, Some(&AccountId::sid("S-1-5-21-1-2-3-1002").unwrap()), true, false).is_err());
     }
 
     #[test]

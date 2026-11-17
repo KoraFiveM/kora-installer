@@ -70,3 +70,5 @@ pub mod op;
 pub mod ownership;
 pub mod paths;
 pub mod policy;
+#[cfg(unix)]
+pub mod unixsvc;

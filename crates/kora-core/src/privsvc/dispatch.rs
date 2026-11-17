@@ -30,8 +30,10 @@ pub trait Host {
     fn account_name(&self, id: &AccountId) -> String;
     /// Owner of the folder; `Err` when a link is on the way or it cannot be read.
     fn folder_owner(&self, dir: &str) -> Result<Option<AccountId>, String>;
-    /// Accounts that may own a Kora server folder besides the person (Linux: the `kora` account).
-    fn extra_folder_owners(&self) -> Vec<AccountId>;
+    /// Is this one of the dedicated accounts Kora makes for a server to run as (Linux: `kora`,
+    /// `kora-<name>`; made by root, so a user cannot create one)? A folder owned by such an account
+    /// is the caller's only when the ledger says the server's service is theirs.
+    fn is_server_account(&self, id: &AccountId) -> bool;
     /// The folder's install record: the server's name and ports.
     fn install_record(&self, dir: &str) -> Option<InstallRecord>;
     /// The name of the database Kora made for this server, if it did.
@@ -58,8 +60,18 @@ pub struct Ran {
     pub data: Option<Value>,
 }
 
-/// Runs the child: `(argv, secret env, time limit)`.
-pub type Run<'a> = &'a dyn Fn(&[String], &BTreeMap<String, String>, std::time::Duration) -> std::io::Result<Ran>;
+/// What to run: the typed operation's arguments, the request's secret environment, the time limit.
+pub struct RunSpec<'a> {
+    pub argv: &'a [String],
+    pub env: &'a BTreeMap<String, String>,
+    pub limit: std::time::Duration,
+}
+
+/// Progress callback: `(stream, line)`.
+pub type Progress<'a> = &'a mut dyn FnMut(&str, &str);
+
+/// Runs the child, streaming its output lines to the progress callback.
+pub type Run<'a> = &'a dyn Fn(&RunSpec<'_>, Progress<'_>) -> std::io::Result<Ran>;
 
 /// How the request ended.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +83,7 @@ pub enum Reply {
 }
 
 /// Handle one request. See the module documentation.
-pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller, verb: &str, args: &[String], env: &BTreeMap<String, String>, run: Run<'_>) -> Reply {
+pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller, verb: &str, args: &[String], env: &BTreeMap<String, String>, run: Run<'_>, progress: Progress<'_>) -> Reply {
     let who = caller.id.clone().or_else(|| caller.is_root.then(|| AccountId::uid(0)));
     let name = who.as_ref().map(|i| host.account_name(i)).unwrap_or_default();
     let log = |what: &str, o: Outcome| host.audit(&audit::line(host.now(), who.as_ref(), &name, what, &o));
@@ -96,7 +108,8 @@ pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller,
             return Reply::Refused(r);
         }
     };
-    match run(&operation.child_args(), env, operation.time_limit()) {
+    let argv = operation.child_args();
+    match run(&RunSpec { argv: &argv, env, limit: operation.time_limit() }, progress) {
         Err(e) => {
             log(&label, Outcome::Failed(-1));
             Reply::CouldNotRun(e.to_string())
@@ -144,12 +157,13 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
             let owner = host.folder_owner(dir).map_err(|e| Rejected(format!("Kora's service will not work on {dir}: {e}.")))?;
             let rec = host.install_record(dir);
             // root may work on any folder with a record (root could do it all anyway); everyone else on their own.
+            let by_server_account = owner.as_ref().is_some_and(|o| o != me && host.is_server_account(o));
             if is_root {
                 if rec.is_none() {
                     return Err(Rejected(format!("Kora's service will not work on {dir}: it has no Kora install record.")));
                 }
             } else {
-                ownership::folder_ok(dir, me, owner.as_ref(), rec.is_some(), &host.extra_folder_owners())?;
+                ownership::folder_ok(dir, me, owner.as_ref(), rec.is_some(), by_server_account)?;
             }
             // Undoing: the name comes from the person's server list (`known`), not from the folder's record.
             let name = match (undo, known) {
@@ -161,6 +175,15 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
             p.slug = crate::installer::slug(&name);
             let db = host.db_name(dir);
             p.keys = ownership::keys_for(*step, &p.slug, db.as_deref());
+            // A folder handed to the server's own account (a root-run install, or this service's earlier
+            // run) is the caller's only when the ledger says the server's service is theirs.
+            if by_server_account && !is_root {
+                let ledger = host.load_ledger().map_err(|e| Rejected(format!("Kora's service cannot read its ownership records: {e}")))?;
+                let key = format!("service:kora-{}", p.slug);
+                if ledger.owner(&key).is_none_or(|o| !o.eq_ignore_ascii_case(me.as_str())) {
+                    return Err(Rejected(format!("Kora's service will not work on {dir}: it belongs to the server's own account and Kora's records do not show it as yours. An administrator can finish upgrading Kora to fix that.")));
+                }
+            }
         }
         Op::ScheduleSet { server, .. } | Op::ScheduleOff { server } => {
             p.slug = crate::installer::slug(server);
@@ -228,8 +251,8 @@ mod tests {
             }
             Ok(self.owner.clone())
         }
-        fn extra_folder_owners(&self) -> Vec<AccountId> {
-            vec![]
+        fn is_server_account(&self, id: &AccountId) -> bool {
+            *id == AccountId::uid(998)
         }
         fn install_record(&self, _: &str) -> Option<InstallRecord> {
             self.record.clone()
@@ -264,10 +287,10 @@ mod tests {
     fn s(a: &[&str]) -> Vec<String> {
         a.iter().map(|x| x.to_string()).collect()
     }
-    fn ok_run(data: Option<Value>) -> impl Fn(&[String], &BTreeMap<String, String>, std::time::Duration) -> std::io::Result<Ran> {
-        move |_, _, _| Ok(Ran { code: 0, timed_out: false, data: data.clone() })
+    fn ok_run(data: Option<Value>) -> impl Fn(&RunSpec<'_>, Progress<'_>) -> std::io::Result<Ran> {
+        move |_, _| Ok(Ran { code: 0, timed_out: false, data: data.clone() })
     }
-    fn never(_: &[String], _: &BTreeMap<String, String>, _: std::time::Duration) -> std::io::Result<Ran> {
+    fn never(_: &RunSpec<'_>, _: Progress<'_>) -> std::io::Result<Ran> {
         panic!("the child must not run")
     }
     const DIR: &str = "/home/jo/kora/main";
@@ -275,7 +298,7 @@ mod tests {
     #[test]
     fn a_service_made_for_me_is_recorded_and_logged() {
         let h = fake();
-        let r = handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &ok_run(None));
+        let r = handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
         assert!(matches!(r, Reply::Ran(Ran { code: 0, .. })));
         assert_eq!(h.ledger.borrow().owner("service:kora-main"), Some("uid:1000"));
         let log = h.log.borrow();
@@ -289,13 +312,13 @@ mod tests {
         let h = fake();
         h.ledger.borrow_mut().record("service:kora-main".into(), "uid:1000");
         // sam is allowed to use the service, but the folder is jo's
-        let r = handle(&h, &policy(), &caller(AccountId::uid(1001)), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &never);
+        let r = handle(&h, &policy(), &caller(AccountId::uid(1001)), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &never, &mut |_, _| {});
         assert!(matches!(&r, Reply::Refused(m) if m.0.contains("does not belong")), "{r:?}");
         // ...and even with a folder of his own, the service of that name is jo's
         let mut h2 = fake();
         h2.owner = Some(AccountId::uid(1001));
         h2.ledger.borrow_mut().record("service:kora-main".into(), "uid:1000");
-        let r = handle(&h2, &policy(), &caller(AccountId::uid(1001)), "admin-step", &s(&["undo", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &never);
+        let r = handle(&h2, &policy(), &caller(AccountId::uid(1001)), "admin-step", &s(&["undo", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &never, &mut |_, _| {});
         assert!(matches!(&r, Reply::Refused(m) if m.0.contains("another account")), "{r:?}");
         assert!(h2.log.borrow()[0].contains("refused"));
     }
@@ -303,10 +326,10 @@ mod tests {
     #[test]
     fn an_unlisted_account_is_refused_before_anything_is_parsed() {
         let h = fake();
-        let r = handle(&h, &policy(), &caller(AccountId::uid(2000)), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &never);
+        let r = handle(&h, &policy(), &caller(AccountId::uid(2000)), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &never, &mut |_, _| {});
         assert!(matches!(r, Reply::Refused(_)));
         assert!(h.log.borrow()[0].contains("account not allowed"));
-        let r = handle(&h, &Err("bad".into()), &caller(me()), "check", &s(&["--start-database"]), &BTreeMap::new(), &never);
+        let r = handle(&h, &Err("bad".into()), &caller(me()), "check", &s(&["--start-database"]), &BTreeMap::new(), &never, &mut |_, _| {});
         assert!(matches!(r, Reply::Refused(_)), "unreadable settings fail closed");
     }
 
@@ -314,7 +337,7 @@ mod tests {
     fn the_ports_come_from_the_record_read_here() {
         let mut h = fake();
         h.record.as_mut().unwrap().game_port = 3389;
-        let r = handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.firewall", "--dir", DIR]), &BTreeMap::new(), &never);
+        let r = handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.firewall", "--dir", DIR]), &BTreeMap::new(), &never, &mut |_, _| {});
         assert!(matches!(&r, Reply::Refused(m) if m.0.contains("3389")), "{r:?}");
         // closing is fine whatever the record says
         let r = handle(
@@ -325,6 +348,7 @@ mod tests {
             &s(&["undo", "--step", "system.firewall", "--dir", DIR, "--name", "Main", "--game-port", "30120", "--txadmin-port", "40120"]),
             &BTreeMap::new(),
             &ok_run(None),
+            &mut |_, _| {},
         );
         assert!(matches!(&r, Reply::Refused(m) if m.0.contains("not show")), "unrecorded rules are not removed through the service: {r:?}");
     }
@@ -332,13 +356,13 @@ mod tests {
     #[test]
     fn links_missing_records_and_junk_requests_are_refused() {
         let h = fake();
-        let run = |dir: &str, h: &Fake| handle(h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", dir]), &BTreeMap::new(), &never);
+        let run = |dir: &str, h: &Fake| handle(h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", dir]), &BTreeMap::new(), &never, &mut |_, _| {});
         assert!(matches!(run("/home/jo/link/main", &h), Reply::Refused(m) if m.0.contains("link")));
         let mut none = fake();
         none.record = None;
         assert!(matches!(run(DIR, &none), Reply::Refused(m) if m.0.contains("no Kora install record")));
         for (v, a) in [("install", s(&["--dir", DIR])), ("uninstall", s(&[])), ("schedule", s(&["set", "a", "--as-system"])), ("self-update", s(&["--version", "v0.1.0"]))] {
-            let r = handle(&h, &policy(), &caller(me()), v, &a, &BTreeMap::new(), &never);
+            let r = handle(&h, &policy(), &caller(me()), v, &a, &BTreeMap::new(), &never, &mut |_, _| {});
             assert!(matches!(r, Reply::Refused(_)), "{v}");
         }
         assert!(h.log.borrow().iter().all(|l| !l.contains("--as-system") && !l.contains("/home")));
@@ -348,12 +372,12 @@ mod tests {
     fn deleting_removes_the_record_and_a_new_database_is_recorded_under_its_name() {
         let h = fake();
         let data = serde_json::json!({"db": {"state": {"database": "kora_ab12"}}});
-        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "build.db", "--dir", DIR]), &BTreeMap::new(), &ok_run(Some(data)));
+        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "build.db", "--dir", DIR]), &BTreeMap::new(), &ok_run(Some(data)), &mut |_, _| {});
         assert_eq!(h.ledger.borrow().owner("db:kora_ab12"), Some("uid:1000"));
         // a name the child made up that is not Kora's own prefix is not recorded
         let h = fake();
         let evil = serde_json::json!({"db": {"state": {"database": "mysql"}}});
-        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "build.db", "--dir", DIR]), &BTreeMap::new(), &ok_run(Some(evil)));
+        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "build.db", "--dir", DIR]), &BTreeMap::new(), &ok_run(Some(evil)), &mut |_, _| {});
         assert!(h.ledger.borrow().owners.is_empty());
         // delete: the server's firewall rules made for me go away from the ledger
         let h = fake();
@@ -366,6 +390,7 @@ mod tests {
             &s(&["undo", "--step", "system.firewall", "--dir", DIR, "--name", "Main", "--game-port", "30120", "--txadmin-port", "40120"]),
             &BTreeMap::new(),
             &ok_run(None),
+            &mut |_, _| {},
         );
         assert!(matches!(r, Reply::Ran(_)));
         assert!(h.ledger.borrow().owners.is_empty());
@@ -374,10 +399,10 @@ mod tests {
     #[test]
     fn a_failed_or_timed_out_child_changes_no_records() {
         let h = fake();
-        let fail = |_: &[String], _: &BTreeMap<String, String>, _: std::time::Duration| Ok(Ran { code: 1, timed_out: false, data: None });
-        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &fail);
-        let late = |_: &[String], _: &BTreeMap<String, String>, _: std::time::Duration| Ok(Ran { code: 0, timed_out: true, data: None });
-        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &late);
+        let fail = |_: &RunSpec<'_>, _: Progress<'_>| Ok(Ran { code: 1, timed_out: false, data: None });
+        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &fail, &mut |_, _| {});
+        let late = |_: &RunSpec<'_>, _: Progress<'_>| Ok(Ran { code: 0, timed_out: true, data: None });
+        handle(&h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.service", "--dir", DIR]), &BTreeMap::new(), &late, &mut |_, _| {});
         assert!(h.ledger.borrow().owners.is_empty());
         let log = h.log.borrow();
         assert!(log[0].ends_with("failed (code 1)") && log[1].ends_with("stopped (time limit)"), "{log:?}");
@@ -387,13 +412,13 @@ mod tests {
     fn the_child_gets_the_checked_arguments_the_limit_and_only_the_secrets() {
         let h = fake();
         let seen = RefCell::new(None);
-        let spy = |a: &[String], e: &BTreeMap<String, String>, t: std::time::Duration| {
-            *seen.borrow_mut() = Some((a.to_vec(), e.clone(), t));
+        let spy = |r: &RunSpec<'_>, _: Progress<'_>| {
+            *seen.borrow_mut() = Some((r.argv.to_vec(), r.env.clone(), r.limit));
             Ok(Ran { code: 0, timed_out: false, data: None })
         };
         let mut env = BTreeMap::new();
         env.insert("CFX_LICENSE_KEY".to_string(), "cfxk_x".to_string());
-        handle(&h, &policy(), &caller(me()), "schedule", &s(&["set", "Main", "--daily", "03:00"]), &env, &spy);
+        handle(&h, &policy(), &caller(me()), "schedule", &s(&["set", "Main", "--daily", "03:00"]), &env, &spy, &mut |_, _| {});
         let (a, e, t) = seen.borrow().clone().unwrap();
         assert_eq!(a, ["--no-elevate", "schedule", "set", "Main", "--as-user", "--daily", "03:00"]);
         assert_eq!(e.len(), 1);
@@ -406,9 +431,21 @@ mod tests {
         let mut h = fake();
         h.owner = Some(AccountId::uid(1001));
         let root = Caller { id: Some(AccountId::uid(0)), integrity: None, is_root: true, remote: false };
-        let r = handle(&h, &Err("no file".into()), &root, "admin-step", &s(&["run", "--step", "system.firewall", "--dir", DIR]), &BTreeMap::new(), &ok_run(None));
+        let r = handle(&h, &Err("no file".into()), &root, "admin-step", &s(&["run", "--step", "system.firewall", "--dir", DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
         assert!(matches!(r, Reply::Ran(_)), "{r:?}");
         h.record = None;
-        assert!(matches!(handle(&h, &Err("x".into()), &root, "admin-step", &s(&["run", "--step", "system.firewall", "--dir", DIR]), &BTreeMap::new(), &never), Reply::Refused(_)));
+        assert!(matches!(handle(&h, &Err("x".into()), &root, "admin-step", &s(&["run", "--step", "system.firewall", "--dir", DIR]), &BTreeMap::new(), &never, &mut |_, _| {}), Reply::Refused(_)));
+    }
+
+    #[test]
+    fn a_folder_handed_to_the_servers_own_account_needs_the_ledger() {
+        let mut h = fake();
+        h.owner = Some(AccountId::uid(998)); // a root-run install: the folder belongs to `kora`
+        let go = |h: &Fake| handle(h, &policy(), &caller(me()), "admin-step", &s(&["run", "--step", "system.firewall", "--dir", DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(go(&h), Reply::Refused(m) if m.0.contains("finish upgrading")), "not adopted yet");
+        h.ledger.borrow_mut().record("service:kora-main".into(), "uid:1001");
+        assert!(matches!(go(&h), Reply::Refused(_)), "someone else's server");
+        h.ledger.borrow_mut().record("service:kora-main".into(), "uid:1000");
+        assert!(matches!(go(&h), Reply::Ran(_)), "adopted: stays manageable");
     }
 }
