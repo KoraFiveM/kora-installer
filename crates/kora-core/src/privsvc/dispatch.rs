@@ -83,6 +83,7 @@ pub enum Reply {
 }
 
 /// Handle one request. See the module documentation.
+#[allow(clippy::too_many_arguments)]
 pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller, verb: &str, args: &[String], env: &BTreeMap<String, String>, run: Run<'_>, progress: Progress<'_>) -> Reply {
     let who = caller.id.clone().or_else(|| caller.is_root.then(|| AccountId::uid(0)));
     let name = who.as_ref().map(|i| host.account_name(i)).unwrap_or_default();
