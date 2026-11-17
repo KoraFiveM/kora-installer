@@ -77,7 +77,7 @@ function Wait-UacDriver([string]$ResultFile, [int]$TimeoutSec = 90) {
 }
 
 # ---- a local release folder for install.ps1 (it accepts http only for localhost) -------------------------------------
-function Start-ReleaseServer([string]$Dir, [int]$Port) {
+function Open-ReleaseServer([string]$Dir, [int]$Port) {
     $py = (Get-Command python -ErrorAction SilentlyContinue)
     if (-not $py) { $py = Get-Command python3 -ErrorAction Stop }
     Start-Process -FilePath $py.Source -ArgumentList @('-m', 'http.server', "$Port", '--bind', '127.0.0.1', '--directory', $Dir) -PassThru -WindowStyle Hidden
@@ -88,7 +88,7 @@ function Assert-ServiceGone {
     Assert-That (-not (Test-Path $koraSvc)) 'nothing was put in Program Files\Kora'
 }
 
-function Remove-KoraMsi {
+function Invoke-KoraMsiRemoval {
     $p = Start-Process msiexec.exe -ArgumentList "/x `"$Msi`" /qn" -Wait -PassThru
     Write-Host "msiexec /x -> $($p.ExitCode)"
 }
@@ -118,7 +118,7 @@ foreach ($f in 'kora-windows-x86_64.exe', 'kora-windows-x86_64.msi') {
     [IO.File]::WriteAllText((Join-Path $rel "$f.sha256"), "$h  $f`n")
 }
 $port = 47411
-$server = Start-ReleaseServer -Dir $rel -Port $port
+$server = Open-ReleaseServer -Dir $rel -Port $port
 Start-Sleep -Seconds 2
 $base = "http://127.0.0.1:$port"
 $installPs1 = (Resolve-Path "$PSScriptRoot/../install.ps1").Path
@@ -135,7 +135,7 @@ try {
             $before = Initialize-UacPolicy -ConsentPromptBehaviorAdmin 5 -PromptOnSecureDesktop 0
             try {
                 $script:drv = $null
-                $job = Start-Job -ScriptBlock { param($sh, $ps1, $b) & $sh -NoProfile -ExecutionPolicy Bypass -File $ps1 -Base $b -System -NoLaunch -NoShortcuts 2>&1; $LASTEXITCODE } -ArgumentList $shell, $installPs1, $base
+                $job = Start-Job -ScriptBlock { & $using:shell -NoProfile -ExecutionPolicy Bypass -File $using:installPs1 -Base $using:base -System -NoLaunch -NoShortcuts 2>&1; $LASTEXITCODE }
                 Start-Sleep -Seconds 8
                 $script:drv = Invoke-UacDriver -Answer 'No' -TimeoutSec 90
                 $null = Wait-Job $job -Timeout 180
@@ -149,7 +149,7 @@ try {
         Invoke-Scenario 'P2 the installer asks ONCE, the answer is Yes: the service is installed (S1)' {
             $before = Initialize-UacPolicy -ConsentPromptBehaviorAdmin 5 -PromptOnSecureDesktop 0
             try {
-                $job = Start-Job -ScriptBlock { param($sh, $ps1, $b) & $sh -NoProfile -ExecutionPolicy Bypass -File $ps1 -Base $b -System -NoLaunch -NoShortcuts 2>&1; $LASTEXITCODE } -ArgumentList $shell, $installPs1, $base
+                $job = Start-Job -ScriptBlock { & $using:shell -NoProfile -ExecutionPolicy Bypass -File $using:installPs1 -Base $using:base -System -NoLaunch -NoShortcuts 2>&1; $LASTEXITCODE }
                 Start-Sleep -Seconds 8
                 $script:drv = Invoke-UacDriver -Answer 'Yes' -TimeoutSec 90
                 $null = Wait-Job $job -Timeout 300
@@ -219,7 +219,7 @@ try {
 }
 finally {
     if ($server) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
-    Remove-KoraMsi
+    Invoke-KoraMsiRemoval
     Restore-UacPolicy $policyBefore
     if ($adm) { Clear-TestAccount -Name $adm.Name }
     if ($std) { Clear-TestAccount -Name $std.Name }
