@@ -135,11 +135,11 @@ Options:
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
   -y, --yes
           Do not ask anything (implied by any other option)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
   -h, --help
           Print help
@@ -1678,6 +1678,36 @@ Options:
 
       --keep-db
           
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora desktop =====
+What the Kora desktop app (tray icon and window) asks of kora. Run by the app, never by a person
+
+Usage: kora desktop [OPTIONS] <COMMAND>
+
+Commands:
+  session  Make sure the panel runs and print one line of JSON: its port, a one-time sign-in link and its token
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora desktop session =====
+Make sure the panel runs and print one line of JSON: its port, a one-time sign-in link and its token
+
+Usage: kora desktop session [OPTIONS]
+
+Options:
+      --no-background
+          Never set up or start a background service (the app runs the panel itself instead)
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

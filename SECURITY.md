@@ -112,6 +112,18 @@ reasonable time to release a fix before you disclose publicly.
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
 as any other (see above). Include the version, your platform, and whether the panel was local or remote.
 
+### The desktop app (tray icon and window)
+
+The optional `kora-desktop` program is a client of the panel, not a new server: it opens nothing to the network and the panel's
+rules are unchanged. Its window shows only the panel's own origin (`http://127.0.0.1:<port>`); every other web address opens in
+the default browser and every other kind of address is refused, so no remote page ever runs inside the window or sees the
+app's small bridge. The bridge is an allow-list (choose a file or folder, open a web link in the browser, show a notification
+that can only open a panel page, and one fixed administrator action by name) and cannot run a program or read or write a
+file. The panel's token is handed from `kora` to the app over a pipe, kept in memory and only sent to the panel over loopback in
+a header; it is never logged or written down. The app never runs with administrator rights and the page cannot choose
+what is elevated. The full threat model is in [docs/desktop-app.md](docs/desktop-app.md). Its GUI toolkit is built only into
+that separate program, from a separate locked dependency list that has its own supply-chain check.
+
 ### Windows administrator worker
 
 On Windows the panel (never elevated) gets administrator work done through a short-lived elevated copy of Kora that it

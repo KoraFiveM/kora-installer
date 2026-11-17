@@ -4,6 +4,7 @@ pub(crate) mod admin_worker;
 pub(crate) mod app;
 pub(crate) mod bare;
 pub(crate) mod branch;
+pub(crate) mod desktop;
 pub(crate) mod github;
 pub(crate) mod helper;
 pub(crate) mod install;
