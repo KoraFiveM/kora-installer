@@ -348,7 +348,7 @@ pub(crate) fn install(args: InstallArgs) -> i32 {
         if args.catalog.is_some() {
             eprintln!("note: --catalog only applies to an install with options; the panel uses the catalogue it knows (or KORA_CATALOG).");
         }
-        return crate::bare::open_panel(crate::bare::Landing::Install, false);
+        return crate::cmd::bare::open_panel(crate::cmd::bare::Landing::Install, false);
     }
     if let Some(name) = args.cfx_user.take() {
         match kora_core::cfx::lookup(&name) {
@@ -364,7 +364,7 @@ pub(crate) fn install(args: InstallArgs) -> i32 {
         }
     }
     // A saved key by name, or a pasted one to save: the request then names it (a name is not a secret).
-    match crate::keys_cmd::resolve_install_key(args.license_key.take(), args.license_key_name.as_deref(), args.save_license_key.as_deref()) {
+    match crate::cmd::keys_cmd::resolve_install_key(args.license_key.take(), args.license_key_name.as_deref(), args.save_license_key.as_deref()) {
         Ok((key, name)) => {
             if args.save_license_key.is_some() && args.license_key_name.is_none() {
                 println!("Saved the licence key as \"{}\" for next time.", name.as_deref().unwrap_or_default());

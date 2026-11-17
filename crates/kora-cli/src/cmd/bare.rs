@@ -16,7 +16,7 @@ use kora_core::elevate;
 use kora_core::monitor::panel_service as svc;
 use kora_web::launch::{self, PortCheck, SystemPorts};
 
-use super::{
+use crate::{
     background_port_for, headless_session, one_time_link, panel_tailscale, panel_with, running_panel, start_background_service, svc_tailscale, user_services_available, Running, ROOT_ONLY_HELP,
     SETUP_WAIT,
 };
@@ -226,13 +226,13 @@ pub fn open_panel(landing: Landing, no_open: bool) -> i32 {
     }
 }
 
-fn foreground_args(no_open: bool) -> super::PanelArgs {
+fn foreground_args(no_open: bool) -> crate::PanelArgs {
     let mut argv = vec!["kora", "panel", "--foreground"];
     if no_open {
         argv.push("--no-open");
     }
-    match <super::Cli as clap::Parser>::try_parse_from(argv).map(|c| c.command) {
-        Ok(Some(super::Command::Panel(a))) => a,
+    match <crate::Cli as clap::Parser>::try_parse_from(argv).map(|c| c.command) {
+        Ok(Some(crate::Command::Panel(a))) => a,
         _ => unreachable!("`kora panel --foreground` always parses"),
     }
 }

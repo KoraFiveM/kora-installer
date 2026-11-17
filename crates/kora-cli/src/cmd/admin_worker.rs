@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use kora_core::installer::system_ops;
 
-use crate::{AppCmd, Cli, Command, ScheduleCmd};
+use crate::cmd::app::AppCmd;
+use crate::cmd::schedule::ScheduleCmd;
+use crate::{Cli, Command};
 
 #[derive(Args, Debug, Clone)]
 pub struct AdminStepArgs {

@@ -92,11 +92,11 @@ pub(crate) fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete
     if all_servers {
         println!();
         if dry_run {
-            crate::keys_cmd::uninstall_note(true, None);
+            crate::cmd::keys_cmd::uninstall_note(true, None);
         } else if yes {
-            crate::keys_cmd::uninstall_note(false, None);
+            crate::cmd::keys_cmd::uninstall_note(false, None);
         } else {
-            crate::keys_cmd::uninstall_note(false, Some(&mut Terminal));
+            crate::cmd::keys_cmd::uninstall_note(false, Some(&mut Terminal));
         }
     }
     if dry_run {

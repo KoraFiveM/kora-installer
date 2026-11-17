@@ -10,6 +10,7 @@ use crate::cmd::server::{control, delete, status};
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
 use crate::cmd::webhook::{webhook, WebhookCmd};
+use crate::cmd::{admin_worker, bare, branch, keys_cmd, panel_tailscale, toolchain};
 use crate::ui::ask_yes_no;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -1155,13 +1156,7 @@ fn main() {
     finish(code);
 }
 
-mod admin_worker;
-mod bare;
-mod branch;
 mod cmd;
-mod keys_cmd;
-mod panel_tailscale;
-mod toolchain;
 mod ui;
 
 #[cfg(test)]
