@@ -46,3 +46,20 @@ describe('ChangeRow per-resource check bar', () => {
     expect(screen.queryByRole('progressbar')).toBeNull()
   })
 })
+
+describe('ChangeRow for a resource on another branch', () => {
+  const base = { selected: false, onToggle: vi.fn(), onCheck: vi.fn(), disabled: false, now: 0 }
+  const other: ResourceChange = { id: 'kora_phone', from: 'aaaaaaa', to: 'aaaaaaa', behind: 0, changelog: [], needs_restart: false, status: 'other_branch', note: 'trying pull request #12; not updated' }
+
+  it('says it was left alone on purpose, is not a problem and cannot be ticked', () => {
+    render(<ul><ChangeRow {...base} r={other} checking={false} /></ul>)
+    const item = screen.getByRole('listitem')
+    expect(within(item).getByText('Not updated: on another branch')).toBeInTheDocument()
+    expect(within(item).getByText(/trying pull request #12; not updated/)).toBeInTheDocument()
+    expect(within(item).getByText(/Go back to the normal version in the GitHub tab/)).toBeInTheDocument()
+    expect(within(item).getByRole('checkbox')).toBeDisabled()
+    // Not drawn as "needs attention", and no from-to line for something that does not move.
+    expect(within(item).queryByText('Needs attention')).toBeNull()
+    expect(item.querySelector('code')).toBeNull()
+  })
+})

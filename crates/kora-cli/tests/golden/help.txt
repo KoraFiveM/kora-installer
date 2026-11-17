@@ -16,7 +16,13 @@ Commands:
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
   app            The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
+  keys           Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
+  profile        What Kora remembers between installs (your Cfx.re name and GitHub owner)
+  branch         Development servers: see and change which branch each resource is on, and go back to the normal version
+  pr             Development servers: list and try pull requests on a resource
   github         GitHub helpers for development mode
+  tools          Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
+  check          Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
   start          Start a server's background service
   stop           Stop a server's background service
   restart        Restart a server's background service
@@ -54,6 +60,12 @@ Options:
           Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable)
           
           [env: CFX_LICENSE_KEY]
+
+      --license-key-name <NAME>
+          Use the saved licence key with this name (see `kora keys list`) instead of passing a key
+
+      --save-license-key <NAME>
+          Also save the key from CFX_LICENSE_KEY under this name, so the next install can pick it with --license-key-name
 
       --game-port <GAME_PORT>
           
@@ -108,14 +120,14 @@ Options:
       --dry-run
           Show the full plan and change nothing
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --auto-ports
           If a port is in use, silently use the next free one and say what changed
 
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
@@ -150,7 +162,7 @@ Commands:
   user            Manage the people who may sign in to the panel remotely (each has a token and a role)
   tailscale       Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
   restart         Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
-  remote-actions  Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default
+  remote-actions  Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
 
 Options:
       --port <PORT>
@@ -359,13 +371,13 @@ Options:
           Print help
 
 ===== kora panel remote-actions =====
-Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default
+Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
 
 Usage: kora panel remote-actions [OPTIONS] <COMMAND>
 
 Commands:
-  on      Allow these actions for remote administrators
-  off     Refuse these actions for everyone who signs in remotely (the default)
+  on      Allow these actions for administrators who sign in with a token
+  off     Refuse these actions for token sign-ins from other computers (the default)
   status  Show whether they are on or off
 
 Options:
@@ -376,7 +388,7 @@ Options:
           Print help
 
 ===== kora panel remote-actions on =====
-Allow these actions for remote administrators
+Allow these actions for administrators who sign in with a token
 
 Usage: kora panel remote-actions on [OPTIONS]
 
@@ -388,7 +400,7 @@ Options:
           Print help
 
 ===== kora panel remote-actions off =====
-Refuse these actions for everyone who signs in remotely (the default)
+Refuse these actions for token sign-ins from other computers (the default)
 
 Usage: kora panel remote-actions off [OPTIONS]
 
@@ -749,7 +761,7 @@ Usage: kora app [OPTIONS] <COMMAND>
 Commands:
   install    Make the Kora shortcuts that open the panel (per user, no administrator rights; idempotent)
   status     Show the shortcuts and whether the old machine-wide app is still here (`key: value` lines)
-  uninstall  Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights only when there is something to remove. Servers and databases are never touched
+  uninstall  Remove Kora's shortcuts (Start Menu / Desktop on Windows, the applications-menu launcher on Linux). If the OLD machine-wide app is also installed it is removed too when you run this as administrator; otherwise `kora uninstall --app` (as administrator) does that. Servers and databases are never touched
 
 Options:
       --no-elevate
@@ -792,7 +804,7 @@ Options:
           Print help
 
 ===== kora app uninstall =====
-Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights only when there is something to remove. Servers and databases are never touched
+Remove Kora's shortcuts (Start Menu / Desktop on Windows, the applications-menu launcher on Linux). If the OLD machine-wide app is also installed it is removed too when you run this as administrator; otherwise `kora uninstall --app` (as administrator) does that. Servers and databases are never touched
 
 Usage: kora app uninstall [OPTIONS]
 
@@ -802,6 +814,412 @@ Options:
 
       --dry-run
           
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys =====
+Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
+
+Usage: kora keys [OPTIONS] <COMMAND>
+
+Commands:
+  list     List the saved keys (name and the last 4 characters only) and which servers use them
+  add      Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
+  replace  Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
+  rename   Give a saved key another name
+  remove   Forget a saved key. Servers installed with it keep working: they have their own copy
+  use      Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys list =====
+List the saved keys (name and the last 4 characters only) and which servers use them
+
+Usage: kora keys list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys add =====
+Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
+
+Usage: kora keys add [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          A name you will recognise, e.g. "Main" or "Test server"
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys replace =====
+Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
+
+Usage: kora keys replace [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys rename =====
+Give a saved key another name
+
+Usage: kora keys rename [OPTIONS] <NAME> <NEW_NAME>
+
+Arguments:
+  <NAME>
+          
+
+  <NEW_NAME>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys remove =====
+Forget a saved key. Servers installed with it keep working: they have their own copy
+
+Usage: kora keys remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          
+
+Options:
+  -y, --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys use =====
+Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
+
+Usage: kora keys use [OPTIONS] <SERVER> <NAME>
+
+Arguments:
+  <SERVER>
+          Registry name of the server
+
+  <NAME>
+          The saved key to use
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora profile =====
+What Kora remembers between installs (your Cfx.re name and GitHub owner)
+
+Usage: kora profile [OPTIONS] <COMMAND>
+
+Commands:
+  show    Show what Kora remembers between installs (Cfx.re name, its identifier, GitHub owner). Nothing secret
+  forget  Forget it all: the next install asks again
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora profile show =====
+Show what Kora remembers between installs (Cfx.re name, its identifier, GitHub owner). Nothing secret
+
+Usage: kora profile show [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora profile forget =====
+Forget it all: the next install asks again
+
+Usage: kora profile forget [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch =====
+Development servers: see and change which branch each resource is on, and go back to the normal version
+
+Usage: kora branch [OPTIONS] <COMMAND>
+
+Commands:
+  list     Show which branch each resource of a Development server is on
+  show     Show the branches of one resource, and changes you kept aside
+  switch   Put one resource on another branch
+  default  Back to the normal version: one resource, or all of them when none is named
+  all      Put every resource that has a branch on it (`--preview` only shows which ones have it)
+  restore  Bring changes you kept aside back (see `kora branch show`)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch list =====
+Show which branch each resource of a Development server is on
+
+Usage: kora branch list [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch show =====
+Show the branches of one resource, and changes you kept aside
+
+Usage: kora branch show [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+Options:
+      --refresh
+          Download the newest branch lists from GitHub first
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch switch =====
+Put one resource on another branch
+
+Usage: kora branch switch [OPTIONS] <SERVER> <RESOURCE> <BRANCH>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+  <BRANCH>
+          
+
+Options:
+      --from <origin|upstream>
+          Where to take the branch from if the resource does not have it yet: origin (your fork) or upstream (the original)
+
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch default =====
+Back to the normal version: one resource, or all of them when none is named
+
+Usage: kora branch default [OPTIONS] <SERVER> [RESOURCE]
+
+Arguments:
+  <SERVER>
+          
+
+  [RESOURCE]
+          
+
+Options:
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch all =====
+Put every resource that has a branch on it (`--preview` only shows which ones have it)
+
+Usage: kora branch all [OPTIONS] <SERVER> <BRANCH>
+
+Arguments:
+  <SERVER>
+          
+
+  <BRANCH>
+          
+
+Options:
+      --preview
+          Only show which resources have the branch
+
+      --no-fetch
+          Do not download the newest branch lists first
+
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch restore =====
+Bring changes you kept aside back (see `kora branch show`)
+
+Usage: kora branch restore [OPTIONS] <SERVER> <RESOURCE> <INDEX>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+  <INDEX>
+          The number shown by `kora branch show`
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr =====
+Development servers: list and try pull requests on a resource
+
+Usage: kora pr [OPTIONS] <COMMAND>
+
+Commands:
+  list      List the open pull requests of the original repository and your fork, for one resource
+  checkout  Try a pull request on one resource: its number or its GitHub address
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr list =====
+List the open pull requests of the original repository and your fork, for one resource
+
+Usage: kora pr list [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr checkout =====
+Try a pull request on one resource: its number or its GitHub address
+
+Usage: kora pr checkout [OPTIONS] <SERVER> <RESOURCE> <PR>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+  <PR>
+          The pull request's number (12) or address (https://github.com/owner/name/pull/12)
+
+Options:
+      --source <upstream|fork>
+          Which repository a bare number is on: upstream (the original, the default) or fork (yours)
+
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
@@ -830,6 +1248,65 @@ List the GitHub accounts and organisations your forks can go into
 Usage: kora github owners [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora tools =====
+Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
+
+Usage: kora tools [OPTIONS] <COMMAND>
+
+Commands:
+  status   Show which Git and GitHub CLI Kora uses (the one on this computer, or its own copy)
+  install  Download Kora's own copy of Git (Windows) and the GitHub CLI, checked against a pinned checksum. No administrator rights, nothing else on the computer changes
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora tools status =====
+Show which Git and GitHub CLI Kora uses (the one on this computer, or its own copy)
+
+Usage: kora tools status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora tools install =====
+Download Kora's own copy of Git (Windows) and the GitHub CLI, checked against a pinned checksum. No administrator rights, nothing else on the computer changes
+
+Usage: kora tools install [OPTIONS] [TOOL]
+
+Arguments:
+  [TOOL]
+          `git`, `gh` or `all` (the default: whatever is missing)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora check =====
+Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
+
+Usage: kora check [OPTIONS]
+
+Options:
+      --start-database
+          Start the database server if it is installed but not running (needs administrator rights)
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -923,7 +1400,7 @@ Options:
           Also drop the databases and database users Kora created
 
       --app
-          Remove only the Kora app (shortcuts, PATH entry, the installed copy); servers and databases are never touched
+          Remove only the OLD machine-wide Kora app (its shortcuts, PATH entry, the installed copy); servers and databases are never touched. (`kora app uninstall` removes Kora's own shortcuts.)
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

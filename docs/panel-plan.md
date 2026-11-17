@@ -87,6 +87,13 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | issue_report | POST /servers/{s}/issues | `{resource, title, text}` |
 | pr_plan | POST /servers/{s}/pr/plan | `{resource}` |
 | pr_open | POST /servers/{s}/pr | `{plan, title, text}` |
+| branches_list | GET /servers/{s}/branches | Development only: where each resource is (local, no network) |
+| branch_choices | GET /servers/{s}/resources/{name}/branches | `?refresh=1` downloads the lists; branches and kept-aside changes |
+| pr_list | GET /servers/{s}/resources/{name}/prs | open pull requests of the original and the fork, via `gh` |
+| branch_switch | POST /servers/{s}/resources/{name}/branch | `{action: branch\|pr\|default, branch?, remote?, pr?, source?, changes?: ask\|stash\|discard}` |
+| stash_restore | POST /servers/{s}/resources/{name}/stash/restore | `{index}`: brings kept-aside changes back (the stash is kept) |
+| branch_bulk_preview | POST /servers/{s}/branches/preview | job; `{branch, fetch?}`: which resources have the branch |
+| branch_bulk_apply | POST /servers/{s}/branches/apply | job; `{action: branch\|default, branch?, resources?, changes?}` |
 | github_status | GET /github/status | |
 | github_login | POST /github/login | device flow: `{code, url}`; job completes on approval |
 | github_owners | GET /github/owners | |
@@ -101,6 +108,13 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | install_start | POST /installs | body = `InstallRequest`; job with `ProgressEvent`s |
 | install_resume | POST /installs/{job}/resume | `{skip?}`: carry on with a stopped install (retry the failed step, or skip it when safe); job |
 | install_log | GET /installs/{job}/log | |
+| keys_list | GET /keys | saved licence keys: name, last 4, servers using it; never a full key; `can_manage` |
+| key_add | POST /keys | `{name, license_key}`; admins |
+| key_update | PUT /keys/{name} | `{new_name?, license_key?}`; admins |
+| key_remove | DELETE /keys/{name} | admins; installed servers are untouched |
+| server_key_set | PUT /servers/{s}/licence-key | `{name}` (a saved key) or `{license_key, save_as?}` (admins); answers whether a restart is needed |
+| profile_get | GET /profile | remembered Cfx.re name / identifier / GitHub owner (not secret) |
+| profile_set | PUT /profile | `null` forgets a field; admins |
 | self_update_check | GET /self-update | |
 | self_update_apply | POST /self-update | `{version?}`; job |
 | app_status | GET /app | |
@@ -192,10 +206,11 @@ Off by default: nothing above changes for `kora panel` as it is today.
   - *admin*: everything else, subject to the next two rules.
   - *local-only* (refused remotely for every role): `remote_get/set`, `users_list/add/remove`,
     `server_open_folder`.
-  - *remote-destructive* (refused remotely, even for admins, unless `allow_remote_destructive` is on):
-    `server_delete`, `server_unregister`, `uninstall_run`, `app_uninstall`, `console_send`,
-    `install_start`, `self_update_apply`, `schedule_set`, `schedule_remove`. Turning it on does not
-    skip the typed-name confirmation the handlers enforce.
+  - *remote-destructive* (refused for **token** sessions, even admins, unless `allow_remote_destructive` is on;
+    Tailscale admins are not held back): `server_delete`, `server_unregister`, `uninstall_run`,
+    `app_uninstall`, `console_send`, `self_update_apply`, `schedule_set`, `schedule_remove`. Turning it on
+    does not skip the typed-name confirmation. *Install* (`install_start`, `install_resume`) is admin-only
+    and allowed for every remote admin (v0.7.0; it used to be remote-destructive).
 - **Sessions.** Same cookie flow for local and remote. A session records provider, name and (remote) the
   role it was made with; every request looks the user up again, so a removed user, a changed role, or
   Tailscale being switched off ends the session (401, the UI shows its sign-in screen). A cookie made for a
@@ -204,7 +219,7 @@ Off by default: nothing above changes for `kora panel` as it is today.
   cannot lock the owner out of the local one.
 - **Who am I?** `GET /meta` carries `identity` (`null` when not signed in, else `{name, provider:
   local|tailscale|token, role}`), `remote` (this request came from another computer) and
-  `allow_remote_destructive`. The UI's `useRole()` reads them to hide or disable what the role cannot do.
+  `allow_remote_destructive` (true for a Tailscale identity, else the setting). The UI's `useRole()` reads them to hide or disable what the role cannot do.
 - **Settings file.** `<kora home>/panel.json`, mode 0600 on Unix, written atomically. The panel notices
   changes made by `kora panel user ...` while it runs.
 - **Threat model.** See the remote access section of the wave-3 report: a viewer sees status only;

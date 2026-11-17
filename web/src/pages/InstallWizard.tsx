@@ -17,7 +17,7 @@ import type { ActionHandlers } from '@/lib/problemActions'
 import { StepProgress } from '@/components/JobProgress'
 import { Skeleton } from '@/components/Skeleton'
 import { formatBytes, validatePorts } from '@/lib/utils'
-import { REMOTE_ACTIONS_COMMAND, useInstallBlock } from './install/access'
+import { useInstallBlock } from './install/access'
 import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
 import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
@@ -35,7 +35,7 @@ interface ReviewRow {
 function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
   const rows: ReviewRow[] = [
-    { label: 'Licence key', value: f.license.trim() ? 'Provided (hidden)' : 'Not given yet', step: 'licence' },
+    { label: 'Licence key', value: f.licenceChoice === 'saved' ? (f.licenceName ? `Your saved key "${f.licenceName}"` : 'Not picked yet') : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? `Provided (hidden). It will be saved as "${f.saveKeyName.trim()}".` : 'Provided (hidden). It will not be saved.') : 'Not given yet', step: 'licence' },
     { label: 'Kind of server', value: f.mode === 'production' ? 'Production (a server for players)' : 'Development (for building and changing resources)', step: 'mode' },
     { label: 'Name', value: req.name || 'Not given yet', step: 'name' },
     { label: 'Folder', value: req.dir || 'Not given yet', step: 'name' },
@@ -50,7 +50,7 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   ]
   rows.push({
     label: 'Sign in to txAdmin with your Cfx.re account',
-    value: f.cfxFound ? (f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier) : 'Not set. Kora makes a local admin with a generated password.',
+    value: f.cfxFound ? `${f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier}${f.cfxRemembered ? '. Remembered from your last install.' : ''}` : 'Not set. Kora makes a local admin with a generated password.',
     step: 'cfx',
   })
   if (f.mode === 'development') rows.push({ label: 'GitHub forks go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
@@ -156,7 +156,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
 }
 
 /**
- * Installing is admin-only and, for remote sign-ins, off unless switched on. Say so before step 1
+ * Installing is admin-only (remote administrators included). Say so before step 1
  * instead of after the last one. The steps (and their admin-only page-load requests) only mount
  * once the sign-in is known and allowed.
  */
@@ -170,13 +170,7 @@ export default function InstallWizard() {
       <div className="mx-auto max-w-2xl space-y-5">
         <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
         <Alert tone="warning" title="You cannot install a server from here">
-          {block.kind === 'remote' ? (
-            <>
-              <p>Installing a server is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora (over SSH is fine):</p>
-              <p className="my-2"><code className="rounded bg-ink px-2 py-1 font-mono text-xs">{REMOTE_ACTIONS_COMMAND}</code></p>
-              <p>Then reload this page.</p>
-            </>
-          ) : block.reason}
+          {block.reason}
         </Alert>
         <Button asChild><Link to="/">Back to your servers</Link></Button>
       </div>
@@ -190,7 +184,9 @@ function Wizard() {
   const defaults = useQuery({ queryKey: ['install-defaults'], queryFn: api.installs.defaults, staleTime: Infinity })
   const gh = useQuery({ queryKey: ['github-status'], queryFn: api.github.status })
   const [f, setF] = useState<WizardForm | null>(null)
-  if (defaults.data && !f) setF(initialForm(defaults.data))
+  // The saved keys decide which licence answer is pre-selected; if they cannot be read the wizard still opens (paste a key).
+  const keys = useQuery({ queryKey: ['keys'], queryFn: api.keys.list, retry: false })
+  if (defaults.data && !keys.isPending && !f) setF(initialForm(defaults.data, keys.data?.keys))
   if (defaults.isError) return <ErrorNotice error={defaults.error} />
   if (!f || !defaults.data) return <Skeleton className="h-64" />
   const set = (p: Partial<WizardForm>) => setF((x) => (x ? { ...x, ...p } : x))
@@ -223,6 +219,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const [diskOk, setDiskOk] = useState(true)
   /** Carrying on with a stopped install did not work (for example: the panel was restarted). */
   const [resumeErr, setResumeErr] = useState<unknown>(null)
+  /** "Carry on" on an install that stopped earlier did not work (for example: its saved key was deleted). */
+  const [carryErr, setCarryErr] = useState<unknown>(null)
   /** A failure offered "Sign in to GitHub": the sign-in is shown under it. */
   const [githubAsked, setGithubAsked] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
@@ -363,13 +361,28 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
         <Checkbox label="Show advanced options" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
       </div>
+      {at === 0 && !editing && (
+        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline-offset-4 hover:underline">Add an existing server</Link> instead.</p>
+      )}
       {saved && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
-          <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers (not your licence key).</p>
+          <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
+          {defaults.saved_key_missing && <p className="mt-1">The saved key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
           <div className="mt-2 flex gap-2">
             <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
             <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>
           </div>
+        </Alert>
+      )}
+      {defaults.resumable && defaults.resumable.length > 0 && at === 0 && !editing && (
+        <Alert tone="info" title="An install stopped and can carry on">
+          {defaults.resumable.map((r) => (
+            <div key={r.job} className="mt-1 flex flex-wrap items-center gap-2">
+              <span>&quot;{r.name}&quot; stopped{r.failed_step ? ` at the step ${r.failed_step}` : ''}. Its answers and licence key are kept.</span>
+              <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>Carry on</Button>
+            </div>
+          ))}
+          <ErrorNotice error={carryErr} actions={startActions} />
         </Alert>
       )}
       <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Steps">

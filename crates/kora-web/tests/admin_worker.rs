@@ -414,6 +414,6 @@ async fn tidy_up_and_uninstall_use_the_worker() {
     let (_, j) = r.job(a).await;
     assert_eq!(j["state"], "done", "{j}");
     let calls = b.log().calls.clone();
-    assert_eq!(calls[0], ("app".to_string(), vec!["uninstall".to_string(), "--yes".into()]));
+    assert_eq!(calls[0], ("uninstall".to_string(), vec!["--app".to_string(), "--yes".into()]));
     assert_eq!(calls[1], ("uninstall".to_string(), vec!["--yes".to_string(), "prod".into()]));
 }

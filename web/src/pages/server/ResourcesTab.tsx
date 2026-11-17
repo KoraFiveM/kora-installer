@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Play, RefreshCw, RotateCw, Square } from 'lucide-react'
 import { api } from '@/api/client'
-import type { AddOutcome, AddPlan, ControlAction, ServerDetail } from '@/api/types'
+import type { AddOutcome, AddPlan, ControlAction, ResourceBranch, ServerDetail } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { useKept } from '@/lib/kept'
@@ -18,6 +18,7 @@ import { Field } from '@/components/Field'
 import { ResourceProgress } from '@/components/JobProgress'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { STATUS_INFO, UpdatesPanel } from './UpdatesPanel'
+import { branchBadge, useBranches } from './branches/useBranches'
 import { useUpdates, type Updates } from './useUpdates'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
@@ -130,8 +131,10 @@ const CONTROL: Record<ControlAction, { label: string; Icon: typeof Play }> = {
 const CONSOLE_RESOURCE = 'kora_console'
 
 /** One installed resource: its name, what the last check found, and the buttons to check, start, stop and restart it. */
-function InstalledResource({ id, updates: u, noCheck, noControl, pending, said, onControl }: {
+function InstalledResource({ id, updates: u, branch, noCheck, noControl, pending, said, onControl }: {
   id: string
+  /** Development: the branch it is on. */
+  branch?: ResourceBranch
   updates: Updates
   /** Why checking is off (null = allowed). */
   noCheck: string | null
@@ -150,6 +153,7 @@ function InstalledResource({ id, updates: u, noCheck, noControl, pending, said, 
     <li className="py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="min-w-0 flex-1 break-all font-mono text-sm">{id}</span>
+        {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <Badge tone={branchBadge(branch).tone} title="Change it in the GitHub tab">{branchBadge(branch).text}</Badge>}
         {checking ? <span className="text-xs text-muted-foreground" role="status">Checking...</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
         <div className="flex items-center gap-1">
           <Button size="icon" variant="ghost" className="size-8" disabled={u.busy || noCheck !== null} aria-busy={checking} aria-label={`Check ${id} for updates`} title={noCheck ?? 'Check for updates'} onClick={() => void u.checkOne(id)}>
@@ -172,6 +176,7 @@ function InstalledResource({ id, updates: u, noCheck, noControl, pending, said, 
 }
 
 function InstalledList({ server: s, installed, updates: u }: { server: ServerDetail; installed: string[]; updates: Updates }) {
+  const branches = useBranches(s.name, s.mode === 'development')
   const role = useRole()
   const noOperator = whyNot(role, 'operator')
   const noControl = noOperator
@@ -202,6 +207,7 @@ function InstalledList({ server: s, installed, updates: u }: { server: ServerDet
             key={r}
             id={r}
             updates={u}
+            branch={branches.byId.get(r)}
             noCheck={noOperator}
             noControl={noControl}
             pending={control.isPending && control.variables?.id === r ? control.variables.action : undefined}

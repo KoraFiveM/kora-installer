@@ -1,8 +1,8 @@
 //! GitHub for the panel: who is signed in, the fork targets, and the sign-in (device flow) as
 //! plain functions behind a trait, so the web server can be tested without `gh` or the network.
 //!
-//! The logic is the same as the wizard's GitHub screens (`kora-tui`) and `kora github owners`
-//! (`kora-cli`); it is duplicated here because those live in front-end crates.
+//! The logic is the same as `kora github owners` (`kora-cli`); it is kept here because that
+//! lives in a front-end crate.
 
 use serde::Serialize;
 

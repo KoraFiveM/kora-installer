@@ -223,7 +223,7 @@ async fn without_a_helper_everything_still_answers_needs_elevation() {
     r.maint.app.lock().unwrap().legacy = true;
     let (s, j) = r.call("PUT", "/app", Some(json!({"desktop_shortcut": false}))).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
-    assert_eq!(j["error"]["command"], json!(["kora", "app", "uninstall", "--yes"]));
+    assert_eq!(j["error"]["command"], json!(["kora", "uninstall", "--app", "--yes"]));
     assert!(j["error"]["message"].as_str().unwrap().contains("old copy of Kora"));
 
     let (s, j) = r.call("DELETE", "/app", None).await;
@@ -268,7 +268,7 @@ async fn app_install_and_removal_run_through_the_helper() {
     let (s, j) = r.call("DELETE", "/app", None).await;
     assert_eq!(s, 200, "{j}");
     let calls = h.calls();
-    assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("app", vec!["uninstall".to_string(), "--yes".into()]));
+    assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("uninstall", vec!["--app".to_string(), "--yes".into()]));
     assert_eq!((calls[1].0.as_str(), calls[1].1.clone()), ("uninstall", vec!["--app".to_string(), "--yes".into()]));
     assert_eq!(r.maint.calls(), ["app_install shortcut=false force=false dry=false"], "the panel only made the per-user shortcuts; the helper removed the old copy");
     set_helper_override(None);

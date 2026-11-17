@@ -54,6 +54,7 @@ mod tests {
             dir: "/tmp/dev-den".into(),
             hostname: "Dev Den".into(),
             license_key: Some("cfxk_SECRETKEY".into()),
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports { game: 30120, txadmin: 40120 },
             txadmin_public: false,

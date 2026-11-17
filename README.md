@@ -24,7 +24,7 @@ On a server without a screen (over SSH), `kora` prints the sign-in link and an `
 computer first. `kora panel --tailscale` instead opens it to your own devices over [Tailscale](https://tailscale.com)
 (you sign in with your Tailscale account: no link or tunnel).
 
-`kora manager` and `kora install` (with no options) are the same as `kora`; `kora install` opens the install page.
+`kora install` (with no options) opens the install page. (The old name `kora manager` still works and is the same as `kora`.)
 `kora install` with options stays the scriptable, non-interactive installer. The terminal screens (TUI) of earlier
 versions are gone: everything they did is in the panel.
 
@@ -97,7 +97,8 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 ## Everyday commands
 
 `kora status`, `kora start|stop|restart`, `kora schedule show|set|off <server>`, `kora delete <server>`,
-`kora panel` (web panel), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise).
+`kora keys list|add|replace|rename|remove|use` (saved licence keys; a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line; `kora install --license-key-name <name>` uses one), `kora profile show|forget` (the remembered Cfx.re name and GitHub owner),
+`kora panel` (web panel), `kora branch list|show|switch|default|all|restore <server> ...` and `kora pr list|checkout <server> <resource> ...` (Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise; your saved keys are kept unless you say yes).
 
 ## Status and limits
 
@@ -159,7 +160,7 @@ gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer
 
 Details: [CODE_SIGNING.md](CODE_SIGNING.md).
 
-- **Privacy:** Kora contacts nothing unless you ask it to: GitHub releases (self-update), the public resource catalog, runtime.fivem.net (FXServer downloads) and GitHub through `gh` (development mode forks).
+- **Privacy:** Kora contacts nothing unless you ask it to: GitHub releases (self-update), the public resource catalog, runtime.fivem.net (FXServer downloads) and GitHub through `gh` (development mode forks). Development mode needs Git and the GitHub CLI: if they are not on the computer Kora downloads its own copies (MinGit and `gh`) from the official GitHub releases when you press *Install it for me* (or during the install), verified against checksums pinned in the source, into its own folder, with no administrator rights (see the System check in [docs/panel.md](docs/panel.md#the-system-check)).
 
 ## License
 

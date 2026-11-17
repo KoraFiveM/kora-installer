@@ -27,7 +27,6 @@ allow = [
   "Zlib",
   "CC0-1.0",
   "CDLA-Permissive-2.0",   # webpki-roots data (permissive)
-  "BSL-1.0",   # clipboard-win (Boost license, permissive)
   "bzip2-1.0.6",   # libbz2-rs-sys via sevenz-rust2 (BSD-style, permissive)
 ]
 confidence-threshold = 0.9

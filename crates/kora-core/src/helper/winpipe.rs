@@ -418,6 +418,7 @@ mod imp {
             dir: dir.clone(),
             hostname: String::new(),
             license_key: None,
+            license_key_name: None,
             cfx_identifier: None,
             ports: crate::installer::Ports::default(),
             txadmin_public: false,

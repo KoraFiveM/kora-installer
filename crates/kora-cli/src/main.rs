@@ -53,6 +53,12 @@ struct InstallArgs {
     /// Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable).
     #[arg(long, env = "CFX_LICENSE_KEY", hide_env_values = true)]
     license_key: Option<String>,
+    /// Use the saved licence key with this name (see `kora keys list`) instead of passing a key.
+    #[arg(long, alias = "licence-key-name", value_name = "NAME")]
+    license_key_name: Option<String>,
+    /// Also save the key from CFX_LICENSE_KEY under this name, so the next install can pick it with --license-key-name.
+    #[arg(long, alias = "save-licence-key", value_name = "NAME")]
+    save_license_key: Option<String>,
     #[arg(long)]
     game_port: Option<u16>,
     #[arg(long)]
@@ -138,6 +144,8 @@ impl InstallArgs {
             || self.game_build.is_some()
             || self.mode.is_some()
             || self.license_key.is_some()
+            || self.license_key_name.is_some()
+            || self.save_license_key.is_some()
             || self.game_port.is_some()
             || self.txadmin_port.is_some()
             || self.txadmin_public
@@ -191,6 +199,7 @@ impl InstallArgs {
             name,
             dir,
             license_key: self.license_key,
+            license_key_name: self.license_key_name,
             cfx_identifier: self.cfx_identifier,
             txadmin_public: self.txadmin_public,
             ports: Ports { game: self.game_port.unwrap_or(defaults.game), txadmin: self.txadmin_port.unwrap_or(defaults.txadmin) },
@@ -365,7 +374,7 @@ enum PanelCmd {
     },
     /// Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again.
     Restart,
-    /// Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default.
+    /// Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
     RemoteActions {
         #[command(subcommand)]
         cmd: RemoteActionsCmd,
@@ -374,9 +383,9 @@ enum PanelCmd {
 
 #[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
 enum RemoteActionsCmd {
-    /// Allow these actions for remote administrators.
+    /// Allow these actions for administrators who sign in with a token.
     On,
-    /// Refuse these actions for everyone who signs in remotely (the default).
+    /// Refuse these actions for token sign-ins from other computers (the default).
     Off,
     /// Show whether they are on or off.
     Status,
@@ -459,10 +468,41 @@ enum Command {
         #[command(subcommand)]
         cmd: AppCmd,
     },
+    /// Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key.
+    Keys {
+        #[command(subcommand)]
+        cmd: keys_cmd::KeysCmd,
+    },
+    /// What Kora remembers between installs (your Cfx.re name and GitHub owner).
+    Profile {
+        #[command(subcommand)]
+        cmd: keys_cmd::ProfileCmd,
+    },
+    /// Development servers: see and change which branch each resource is on, and go back to the normal version.
+    Branch {
+        #[command(subcommand)]
+        cmd: branch::BranchCmd,
+    },
+    /// Development servers: list and try pull requests on a resource.
+    Pr {
+        #[command(subcommand)]
+        cmd: branch::PrCmd,
+    },
     /// GitHub helpers for development mode.
     Github {
         #[command(subcommand)]
         cmd: GithubCmd,
+    },
+    /// Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed).
+    Tools {
+        #[command(subcommand)]
+        cmd: ToolsCmd,
+    },
+    /// Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it.
+    Check {
+        /// Start the database server if it is installed but not running (needs administrator rights).
+        #[arg(long)]
+        start_database: bool,
     },
     /// Run a server's FXServer (used by the Windows service and supervisors).
     #[command(hide = true)]
@@ -502,7 +542,7 @@ enum Command {
         /// Also drop the databases and database users Kora created.
         #[arg(long)]
         delete_databases: bool,
-        /// Remove only the Kora app (shortcuts, PATH entry, the installed copy); servers and databases are never touched.
+        /// Remove only the OLD machine-wide Kora app (its shortcuts, PATH entry, the installed copy); servers and databases are never touched. (`kora app uninstall` removes Kora's own shortcuts.)
         #[arg(long)]
         app: bool,
     },
@@ -575,6 +615,9 @@ fn helper_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&std::pat
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
         Some(Command::App { cmd: AppCmd::Install { .. } | AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
         Some(Command::Uninstall { .. }) if verb == "uninstall" => Ok(()),
+        // Git on Linux (the system package) and starting the database: the only privileged parts of these two.
+        Some(Command::Tools { cmd: ToolsCmd::Install { tool: Some(t) } }) if verb == "tools" && t == "git" => Ok(()),
+        Some(Command::Check { start_database: true }) if verb == "check" => Ok(()),
         _ => deny(),
     }
 }
@@ -788,8 +831,9 @@ enum AppCmd {
     },
     /// Show the shortcuts and whether the old machine-wide app is still here (`key: value` lines).
     Status,
-    /// Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights
-    /// only when there is something to remove. Servers and databases are never touched.
+    /// Remove Kora's shortcuts (Start Menu / Desktop on Windows, the applications-menu launcher on Linux). If the
+    /// OLD machine-wide app is also installed it is removed too when you run this as administrator; otherwise
+    /// `kora uninstall --app` (as administrator) does that. Servers and databases are never touched.
     Uninstall {
         #[arg(long, short = 'y')]
         yes: bool,
@@ -819,7 +863,7 @@ fn app_install(no_desktop_shortcut: bool, dry_run: bool) -> i32 {
             print_lines("  - ", &out.changes);
             print_lines("  note: ", &out.notes);
             if user::legacy_present().present() {
-                println!("The old machine-wide Kora app is still installed. Remove it with `kora app uninstall` (as administrator), or use \"Tidy up old shortcuts\" in the panel.");
+                println!("The old machine-wide Kora app is still installed. Remove it with `kora uninstall --app` (as administrator), or use \"Tidy up old shortcuts\" in the panel.");
             }
             0
         }
@@ -844,38 +888,83 @@ fn app_status() -> i32 {
     0
 }
 
-fn app_uninstall(yes: bool, dry_run: bool) -> i32 {
+/// `kora app uninstall` (`shortcuts`: also Kora's own per-user shortcuts, no administrator rights) and
+/// `kora uninstall --app` (only the OLD machine-wide app, which is what "Tidy up old shortcuts" runs as administrator).
+fn app_uninstall(yes: bool, dry_run: bool, shortcuts: bool) -> i32 {
     use kora_core::app_install as app;
-    if !app::user::legacy_present().present() {
-        println!("The old machine-wide Kora app is not installed: nothing to remove. Your servers and databases were not touched.");
+    let legacy = app::user::legacy_present().present();
+    let mine = shortcuts && app::user::user_status().any();
+    if !legacy && !mine {
+        println!(
+            "{} Your servers and databases were not touched.",
+            if shortcuts { "There are no Kora shortcuts and no old machine-wide Kora app: nothing to remove." } else { "The old machine-wide Kora app is not installed: nothing to remove." }
+        );
         return 0;
     }
-    if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
+    let admin = installer::is_admin() || std::env::var_os("KORA_APP_PREFIX").is_some();
+    // The old app can only go with administrator rights. With `--app` that is the whole job; otherwise the
+    // shortcuts are still removed and the old app is explained.
+    if legacy && !admin && !dry_run && !shortcuts {
         eprintln!("error: removing the old Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
         return 1;
     }
+    let remove_legacy = legacy && (admin || dry_run);
     if !yes && !dry_run {
         if !std::io::stdin().is_terminal() {
-            eprintln!("error: pass --yes to remove the old Kora app without a terminal to ask in (or --dry-run to preview).");
+            eprintln!("error: pass --yes to remove Kora's shortcuts or the old Kora app without a terminal to ask in (or --dry-run to preview).");
             return 2;
         }
-        if !installer::uninstall::Asker::ask(&mut Terminal, "Remove the old Kora app (its shortcuts, PATH entry and installed program)? Your servers and databases are not touched.", true) {
+        let what = match (mine, remove_legacy) {
+            (true, true) => "Remove Kora's shortcuts and the old Kora app (its PATH entry and installed program)?",
+            (true, false) => "Remove Kora's shortcuts?",
+            _ => "Remove the old Kora app (its shortcuts, PATH entry and installed program)?",
+        };
+        if !installer::uninstall::Asker::ask(&mut Terminal, &format!("{what} Your servers and databases are not touched."), true) {
             println!("Cancelled. Nothing was changed.");
             return 0;
         }
     }
-    match app::uninstall_app_opts(dry_run) {
-        Ok(lines) => {
-            println!("{}", if dry_run { "Dry run: nothing was changed. Removing the old Kora app would:" } else { "The old Kora app was removed:" });
-            print_lines("  - ", &lines);
-            println!("Your servers and databases were not touched.");
-            0
-        }
-        Err(e) => {
-            eprintln!("error: {e}");
-            1
+    let mut code = 0;
+    if mine {
+        match app::user::uninstall_user(dry_run) {
+            Ok(lines) => {
+                println!("{}", if dry_run { "Dry run: nothing was changed. Removing Kora's shortcuts would:" } else { "Kora's shortcuts were removed:" });
+                print_lines("  - ", &lines);
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                code = 1;
+            }
         }
     }
+    if remove_legacy {
+        match app::uninstall_app_opts(dry_run) {
+            Ok(lines) => {
+                println!("{}", if dry_run { "Dry run: nothing was changed. Removing the old Kora app would:" } else { "The old Kora app was removed:" });
+                print_lines("  - ", &lines);
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                code = 1;
+            }
+        }
+    } else if legacy {
+        println!("The old machine-wide Kora app is still installed. Remove it with `kora uninstall --app`, run as Administrator (Windows) or with sudo (Linux).");
+    }
+    println!("Your servers and databases were not touched.");
+    code
+}
+
+#[derive(Subcommand)]
+enum ToolsCmd {
+    /// Show which Git and GitHub CLI Kora uses (the one on this computer, or its own copy).
+    Status,
+    /// Download Kora's own copy of Git (Windows) and the GitHub CLI, checked against a pinned checksum. No administrator rights, nothing else on the computer changes.
+    Install {
+        /// `git`, `gh` or `all` (the default: whatever is missing).
+        #[arg(value_name = "TOOL")]
+        tool: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1058,6 +1147,7 @@ fn install(args: InstallArgs) -> i32 {
         match kora_core::cfx::lookup(&name) {
             Ok(a) => {
                 println!("Cfx.re account {} is {}: it will be the txAdmin admin.", a.username, a.identifier());
+                kora_core::profile::ProfileStore::default().remember_cfx(&a.username, &a.identifier());
                 args.cfx_identifier = Some(a.identifier());
             }
             Err(e) => {
@@ -1066,12 +1156,29 @@ fn install(args: InstallArgs) -> i32 {
             }
         }
     }
+    // A saved key by name, or a pasted one to save: the request then names it (a name is not a secret).
+    match keys_cmd::resolve_install_key(args.license_key.take(), args.license_key_name.as_deref(), args.save_license_key.as_deref()) {
+        Ok((key, name)) => {
+            if args.save_license_key.is_some() && args.license_key_name.is_none() {
+                println!("Saved the licence key as \"{}\" for next time.", name.as_deref().unwrap_or_default());
+            }
+            args.license_key = key;
+            args.license_key_name = name;
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    }
     let args_auto_ports = args.auto_ports;
     let fix_permissions = args.fix_permissions;
     let dev_mode = matches!(args.mode, Some(ModeArg::Dev));
     if dev_mode && !args.dry_run {
         match resolve_github_owner(args.github_owner.as_deref()) {
-            Ok(l) => args.github_owner = Some(l),
+            Ok(l) => {
+                kora_core::profile::ProfileStore::default().remember_github_owner(&l);
+                args.github_owner = Some(l);
+            }
             Err(e) => {
                 eprintln!("error: {e}");
                 return 2;
@@ -1538,7 +1645,7 @@ fn add_asset(a: &AddAssetArgs) -> i32 {
 }
 
 /// `kora add-resources <server> --resource ID...`. Browsing the catalog sections
-/// (with per-creator drill-in) is in the manager: `kora manager` > Add resources.
+/// (with per-creator drill-in) is in the panel: a server's Resources tab.
 fn add_resources(a: AddResourcesArgs) -> i32 {
     if a.code.is_some() {
         eprintln!("{CODE_REMOVED}");
@@ -1554,7 +1661,7 @@ fn add_resources(a: AddResourcesArgs) -> i32 {
         }
     };
     let ids: Vec<String> = if a.resource.is_empty() {
-        eprintln!("error: say what to add: --resource <ID> (repeatable). To browse the catalog, open `kora manager` and choose Add resources, or use `kora panel`.");
+        eprintln!("error: say what to add: --resource <ID> (repeatable). To browse the catalog, run `kora` and use the server's Resources tab.");
         return 2;
     } else {
         a.resource.clone()
@@ -1693,6 +1800,7 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
         eprintln!("error: `kora uninstall` asks before each removal and needs a terminal. Use --dry-run to preview, or --yes to remove the system changes without questions (folders and databases are kept).");
         return 2;
     }
+    let all_servers = server.is_none();
     let mut reg = match registry::Registry::load() {
         Ok(r) => r,
         Err(e) => {
@@ -1725,6 +1833,56 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
             un::mariadb_cleanup(&reg, &opts, admin, record, &mut un::Defaults, &mut say, &mut remove, &mut summary);
         } else {
             un::mariadb_cleanup(&reg, &opts, admin, record, &mut Terminal, &mut say, &mut remove, &mut summary);
+        }
+    }
+    // Kora's own shortcuts (per user). Under `sudo` they belong to the person who typed it, not to root.
+    let under_sudo = cfg!(unix) && kora_core::userhome::sudo_account().is_some();
+    if under_sudo {
+        if kora_core::app_install::user::user_status().any() || kora_core::app_install::user::legacy_present().present() {
+            println!("\nKora's shortcuts belong to your own account: run `kora app uninstall` without sudo to remove them.");
+        }
+    } else {
+        match kora_core::app_install::user::uninstall_user(dry_run) {
+            Ok(lines) if !lines.is_empty() => {
+                println!("\n{}", if dry_run { "Kora's shortcuts would be removed:" } else { "Kora's shortcuts were removed:" });
+                print_lines("  - ", &lines);
+            }
+            Ok(_) => {}
+            Err(e) => summary.failed.push(format!("Kora's shortcuts: {e}")),
+        }
+    }
+    // Kora's own Git and GitHub CLI copies live in Kora's folder; they go with a full uninstall.
+    if opts.only.is_none() {
+        let present = kora_core::tools::private_present();
+        if !present.is_empty() {
+            let what = present.join(" and ");
+            if dry_run {
+                println!("Would remove Kora's own copies of {what}.");
+            } else {
+                let q = format!("Remove Kora's own copies of {what}?");
+                let go = if yes { un::Asker::ask(&mut un::Defaults, &q, true) } else { un::Asker::ask(&mut Terminal, &q, true) };
+                if go {
+                    match kora_core::tools::remove_private() {
+                        Ok(_) => {
+                            println!("Removed Kora's own copies of {what}.");
+                            summary.removed.push(format!("Kora's own copies of {what}"));
+                        }
+                        Err(e) => summary.failed.push(format!("Kora's own copies of {what}: {e}")),
+                    }
+                } else {
+                    summary.kept.push(format!("Kora's own copies of {what}"));
+                }
+            }
+        }
+    }
+    if all_servers {
+        println!();
+        if dry_run {
+            keys_cmd::uninstall_note(true, None);
+        } else if yes {
+            keys_cmd::uninstall_note(false, None);
+        } else {
+            keys_cmd::uninstall_note(false, Some(&mut Terminal));
         }
     }
     if dry_run {
@@ -1768,7 +1926,7 @@ fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
     // SECURITY.md: the panel runs as the installing user, never as administrator/root. A root panel
     // would keep its token and state in root's home and run every action with full rights.
     if kora_core::elevate::is_elevated() && std::env::var_os("KORA_ALLOW_ROOT_PANEL").is_none_or(|v| v != "1") {
-        eprintln!("error: Kora Panel does not run as administrator/root. Run `kora panel` from your normal account (without sudo). It asks for administrator rights only when an action needs them.");
+        eprintln!("error: Kora Panel does not run as administrator/root: it keeps your servers and your sign-in safe. Run `kora` from your normal account, without sudo. It asks for administrator rights only when an action needs them.");
         if cfg!(target_os = "linux") {
             for line in ROOT_ONLY_HELP {
                 eprintln!("{line}");
@@ -2291,10 +2449,10 @@ fn print_setup_fallback(why: &str) {
 /// What `kora panel remote-actions on|off|status` prints.
 fn remote_actions_message(cmd: RemoteActionsCmd, on: bool) -> &'static str {
     match (cmd, on) {
-        (RemoteActionsCmd::Status, true) => "Remote actions are on: remote administrators can install, delete and uninstall servers, send console commands, change schedules and update Kora. Turn them off with `kora panel remote-actions off`.",
-        (RemoteActionsCmd::Status, false) => "Remote actions are off: nobody who signs in from another computer can install, delete or uninstall servers, send console commands, change schedules or update Kora. Turn them on with `kora panel remote-actions on`.",
-        (_, true) => "Remote administrators can now install, delete and uninstall servers, send console commands, change schedules and update Kora. Deleting still asks for the server's name. Only people with the admin role can do this, so only give that role to people you trust.",
-        (_, false) => "Remote actions are turned off. Nobody who signs in from another computer can install, delete or uninstall servers, send console commands, change schedules or update Kora. These still work on this computer.",
+        (RemoteActionsCmd::Status, true) => "Remote actions are on: administrators who sign in with a token from another computer can delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Turn them off with `kora panel remote-actions off`.",
+        (RemoteActionsCmd::Status, false) => "Remote actions are off: administrators who sign in with a token from another computer can install and manage servers, but cannot delete or unregister them, uninstall Kora, send console commands, change schedules or update Kora. Tailscale administrators are not held back by this setting. Turn it on with `kora panel remote-actions on`.",
+        (_, true) => "Administrators who sign in with a token from another computer can now delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Deleting still asks for the server's name. Only give the admin role to people you trust.",
+        (_, false) => "Remote actions are turned off. Token sign-ins from other computers cannot delete or unregister servers, uninstall Kora, send console commands, change schedules or update Kora (they can still install and manage servers). These all still work on this computer, and for Tailscale administrators.",
     }
 }
 
@@ -2387,7 +2545,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
         // The panel runs as the user; privileged actions report the command to run instead.
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Tools { .. } | Command::Check { .. } | Command::Keys { .. } | Command::Profile { .. } | Command::Branch { .. } | Command::Pr { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
         // Already elevated (the worker) or run by it: never relaunched.
         Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
@@ -2400,9 +2558,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Restart { .. }) => K::Restart,
         Some(Command::Uninstall { dry_run, .. }) => K::Uninstall { dry_run: *dry_run },
         Some(Command::App { cmd }) => match cmd {
-            AppCmd::Uninstall { dry_run, .. } => K::Uninstall { dry_run: *dry_run },
-            // The per-user shortcuts need no administrator rights.
-            AppCmd::Install { .. } | AppCmd::Status => K::Status,
+            // The per-user shortcuts need no administrator rights; the old machine-wide app, if there, is
+            // removed only when this is already run as administrator (`kora uninstall --app` asks for it).
+            AppCmd::Install { .. } | AppCmd::Uninstall { .. } | AppCmd::Status => K::Status,
         },
     }
 }
@@ -2436,7 +2594,6 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) => one("change the automatic-update schedule"),
         Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
-        Some(Command::App { cmd: AppCmd::Uninstall { dry_run: false, .. } }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
         _ => vec![],
     }
@@ -2565,8 +2722,15 @@ fn main() {
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
+        Some(Command::Branch { cmd }) => branch::branch(cmd),
+        Some(Command::Pr { cmd }) => branch::pr(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
+        Some(Command::Tools { cmd: ToolsCmd::Status }) => toolchain::run_tools_status(),
+        Some(Command::Tools { cmd: ToolsCmd::Install { tool } }) => toolchain::run_tools_install(tool.as_deref()),
+        Some(Command::Check { start_database }) => toolchain::run_check(start_database),
+        Some(Command::Keys { cmd }) => keys_cmd::keys(cmd),
+        Some(Command::Profile { cmd }) => keys_cmd::profile(cmd),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {
             Ok(c) => c,
@@ -2580,12 +2744,12 @@ fn main() {
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
         Some(Command::Helper { cmd }) => helper(cmd),
         Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => unreachable!("handled above"),
-        Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run),
+        Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run, false),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
             AppCmd::Install { no_desktop_shortcut, dry_run, .. } => app_install(no_desktop_shortcut, dry_run),
             AppCmd::Status => app_status(),
-            AppCmd::Uninstall { yes, dry_run } => app_uninstall(yes, dry_run),
+            AppCmd::Uninstall { yes, dry_run } => app_uninstall(yes, dry_run, true),
         },
     };
     if let Some(line) = pending.and_then(|p| p.finish(std::time::Duration::from_secs(2))) {
@@ -2596,7 +2760,10 @@ fn main() {
 
 mod admin_worker;
 mod bare;
+mod keys_cmd;
+mod branch;
 mod panel_tailscale;
+mod toolchain;
 
 #[cfg(test)]
 mod parity;
@@ -2780,8 +2947,9 @@ mod tests {
         use elevate::CmdKind as K;
         let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
         assert_eq!(command_kind(&parse(&["app", "install", "--yes"])), K::Status, "per-user shortcuts: no administrator rights");
-        assert_eq!(command_kind(&parse(&["app", "uninstall", "--yes"])), K::Uninstall { dry_run: false });
-        assert_eq!(command_kind(&parse(&["app", "uninstall", "--dry-run"])), K::Uninstall { dry_run: true });
+        assert_eq!(command_kind(&parse(&["app", "uninstall", "--yes"])), K::Status, "Kora's own shortcuts: no administrator rights, and never run as root's home");
+        assert_eq!(command_kind(&parse(&["app", "uninstall", "--dry-run"])), K::Status);
+        assert_eq!(command_kind(&parse(&["uninstall", "--app", "--yes"])), K::Uninstall { dry_run: false }, "the old machine-wide app needs them");
         assert_eq!(command_kind(&parse(&["app", "status"])), K::Status);
         assert!(matches!(parse(&["uninstall", "--app", "-y"]), Some(Command::Uninstall { app: true, yes: true, .. })));
     }
@@ -2947,6 +3115,7 @@ mod tests {
             txadmin_port: Some(41120),
             artifact_url: Some("https://runtime.fivem.net/x".into()),
             game_build: Some(3258),
+            license_key_name: None,
             cfx_identifier: Some("fivem:1".into()),
             ..Default::default()
         };
@@ -3087,7 +3256,8 @@ mod tests {
         assert_eq!(panel_remote_actions(RemoteActionsCmd::On, &path), 1);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
 
-        assert!(remote_actions_message(RemoteActionsCmd::On, true).starts_with("Remote administrators can now install, delete and uninstall servers"));
+        assert!(remote_actions_message(RemoteActionsCmd::On, true).starts_with("Administrators who sign in with a token from another computer can now delete and unregister servers"));
+        assert!(remote_actions_message(RemoteActionsCmd::Status, false).contains("can install and manage servers") && remote_actions_message(RemoteActionsCmd::Status, false).contains("Tailscale administrators are not held back"));
         assert!(remote_actions_message(RemoteActionsCmd::Off, false).starts_with("Remote actions are turned off."));
         assert!(remote_actions_message(RemoteActionsCmd::Status, true).contains("kora panel remote-actions off"));
         assert!(remote_actions_message(RemoteActionsCmd::Status, false).contains("kora panel remote-actions on"));

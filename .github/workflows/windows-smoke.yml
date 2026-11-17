@@ -55,12 +55,18 @@ jobs:
       - name: "6. Dev mode dry run"
         timeout-minutes: 10
         run: ./scripts/smoke/06-dev-dry-run.ps1
+      - name: "11. Kora's own git and gh (download, checksum, run without PATH, uninstall)"
+        timeout-minutes: 15
+        run: ./scripts/smoke/11-tools.ps1
+      - name: "12. Saved licence keys (secrets.json permissions, masking, named install)"
+        timeout-minutes: 10
+        run: ./scripts/smoke/11-keys.ps1
       - name: "10. kora self-update (local fake release: replace while running, checksum mismatch, no asset, offline, .old cleanup)"
         run: ./scripts/smoke/10-selfupdate.ps1
-      - name: "11. Panel's administrator worker without the prompt (pipe security, peer checks, protocol, allow-list, a step child)"
+      - name: "13. Panel's administrator worker without the prompt (pipe security, peer checks, protocol, allow-list, a step child)"
         timeout-minutes: 10
-        run: ./scripts/smoke/11-admin-worker.ps1
-      - name: "11b. Worker unit tests on Windows (pipe names, peer checks, protocol helpers)"
+        run: ./scripts/smoke/13-admin-worker.ps1
+      - name: "13b. Worker unit tests on Windows (pipe names, peer checks, protocol helpers)"
         timeout-minutes: 15
         run: |
           cargo test --locked -p kora-core -- helper:: system_ops
@@ -157,6 +163,6 @@ jobs:
         run: |
           cargo build --release --locked -p kora-cli
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
-      - name: "9. The Kora app: install, status, shortcuts (Run as administrator), PATH, Apps & features, uninstall"
+      - name: "9. Kora shortcuts: per-user install, status, uninstall; tidying up the old machine-wide app"
         timeout-minutes: 10
         run: ./scripts/smoke/09-app.ps1

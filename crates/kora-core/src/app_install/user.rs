@@ -250,6 +250,67 @@ fn dummy_layout(ul: &UserLayout) -> Layout {
     }
 }
 
+/// Is this one of the shortcuts [`shortcut_spec`] makes: a bare `kora`, no arguments? (The old machine-wide
+/// shortcut at the same path ran `kora manager` and is left to the old app's removal.)
+fn is_kora_shortcut(s: &ShortcutSpec) -> bool {
+    split_last(&s.target).1.to_ascii_lowercase().starts_with("kora") && s.args.trim().is_empty()
+}
+
+/// What removing the per-user shortcuts would change: the Start Menu and Desktop shortcuts (Windows), the
+/// launcher and its icon (Linux). Only what [`plan_user_install`] makes is listed; a file with the same
+/// name that Kora did not make is left alone with a note. Reads only.
+pub fn plan_user_uninstall(sys: &dyn Sys, ul: &UserLayout) -> Plan {
+    let mut plan = Plan::default();
+    if ul.windows {
+        for p in [&ul.start_menu, &ul.desktop].into_iter().flatten() {
+            match sys.read_shortcut(p) {
+                Some(s) if is_kora_shortcut(&s) => plan.actions.push(Action::RemoveShortcut(p.clone())),
+                Some(_) => plan.notes.push(format!("{} is not one of the shortcuts Kora made; left alone.", p.display())),
+                None => {}
+            }
+        }
+    } else {
+        if let Some(path) = &ul.desktop_entry {
+            if let Some(cur) = sys.read(path) {
+                if String::from_utf8_lossy(&cur).contains(DESKTOP_MARKER) {
+                    plan.actions.push(Action::RemoveFile(path.clone()));
+                } else {
+                    plan.notes.push(format!("{} was not made by Kora; left alone.", path.display()));
+                }
+            }
+        }
+        if let Some(icon) = &ul.icon_png {
+            // Only the picture Kora wrote itself.
+            if sys.read(icon).as_deref() == Some(LOGO_PNG) {
+                plan.actions.push(Action::RemoveFile(icon.clone()));
+            }
+        }
+    }
+    plan
+}
+
+/// Remove the per-user shortcuts through `sys`. Returns one plain sentence per change made (or, in a dry
+/// run, that would be made) and then the notes. Nothing else is touched: not the program, not the servers.
+pub fn uninstall_user_with(sys: &mut dyn Sys, ul: &UserLayout, dry_run: bool) -> Result<Vec<String>> {
+    let plan = plan_user_uninstall(sys, ul);
+    let dummy = dummy_layout(ul);
+    let mut out = Vec::new();
+    for a in &plan.actions {
+        if !dry_run {
+            super::apply(sys, &dummy, a).map_err(|e| AppError(format!("{} failed: {e}", a.describe())))?;
+        }
+        out.push(a.describe());
+    }
+    out.extend(plan.notes);
+    Ok(out)
+}
+
+/// [`uninstall_user_with`] on the real system.
+pub fn uninstall_user(dry_run: bool) -> Result<Vec<String>> {
+    let ul = UserLayout::from_env()?;
+    uninstall_user_with(&mut RealSys::new(), &ul, dry_run)
+}
+
 /// Per-user shortcuts that are in place (`None` = not applicable on this system).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct UserStatus {
@@ -263,14 +324,15 @@ impl UserStatus {
     pub fn in_place(&self) -> bool {
         self.start_menu.or(self.launcher).unwrap_or(false)
     }
+
+    /// Any of the shortcuts exists (what removing them would remove).
+    pub fn any(&self) -> bool {
+        [self.start_menu, self.desktop, self.launcher].into_iter().any(|v| v == Some(true))
+    }
 }
 
 pub fn user_status_with(sys: &dyn Sys, ul: &UserLayout) -> UserStatus {
-    let is_kora = |p: &Option<PathBuf>| {
-        p.as_ref().map(|p| {
-            sys.read_shortcut(p).is_some_and(|s| split_last(&s.target).1.to_ascii_lowercase().starts_with("kora") && s.args.trim().is_empty())
-        })
-    };
+    let is_kora = |p: &Option<PathBuf>| p.as_ref().map(|p| sys.read_shortcut(p).is_some_and(|s| is_kora_shortcut(&s)));
     UserStatus {
         start_menu: is_kora(&ul.start_menu),
         desktop: is_kora(&ul.desktop),

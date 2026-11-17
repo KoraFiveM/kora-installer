@@ -149,6 +149,7 @@ pub fn worker_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&Path
             check_dir(&a.dir)
         }
         Some(Command::AdminDb(_)) if verb == "admin-db" => Ok(()),
+        Some(Command::Check { start_database: true }) if verb == "check" => Ok(()),
         Some(Command::SelfUpdate { version: Some(v), .. })
             if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) =>
         {
@@ -184,6 +185,7 @@ mod tests {
             ("self-update", vec!["--yes"]),
             ("admin-db", vec!["start"]),
             ("admin-db", vec!["install"]),
+            ("check", vec!["--start-database"]),
         ] {
             assert!(v(verb, &args).is_ok(), "{verb} {args:?}");
         }
@@ -205,6 +207,8 @@ mod tests {
             ("cmd.exe", vec!["/c", "whoami"]),
             ("admin-db", vec!["drop"]),
             ("admin-db", vec!["start", "--other"]),
+            ("check", vec![]),
+            ("tools", vec!["install", "git"]),
         ] {
             assert!(v(verb, &args).is_err(), "{verb} {args:?}");
         }

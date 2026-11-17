@@ -10,6 +10,7 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
+import { BranchesPanel } from './branches/BranchesPanel'
 
 function UrlResult({ url, text }: { url: string; text: string }) {
   return <Alert tone="success" title={text}><a className="break-all text-info underline" href={url} target="_blank" rel="noopener noreferrer">{url}</a></Alert>
@@ -68,6 +69,7 @@ export function GithubTab({ server: s }: { server: ServerDetail }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <Card className="lg:col-span-2"><CardHeader><CardTitle>GitHub account</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>
+      <div className="lg:col-span-2"><BranchesPanel server={s} /></div>
       {status.data?.signed_in && (
         <>
           <Card><CardHeader><CardTitle>Report an issue</CardTitle></CardHeader><CardContent><ReportIssue server={s} resources={resources} /></CardContent></Card>

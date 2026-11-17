@@ -97,7 +97,7 @@ const MAX_ENV_BYTES: usize = 2048;
 /// The only environment variables a request may set for the child.
 pub const SECRET_ENV: &[&str] = &["CFX_LICENSE_KEY", "KORA_DB_ADMIN_PASSWORD"];
 /// The top-level `kora` subcommands the helper will run (see the module documentation).
-pub const ALLOWED_VERBS: &[&str] = &["install", "self-update", "schedule", "app", "uninstall"];
+pub const ALLOWED_VERBS: &[&str] = &["install", "self-update", "schedule", "app", "uninstall", "tools", "check"];
 /// Answered directly with the version; runs nothing.
 pub const PING: &str = "ping";
 

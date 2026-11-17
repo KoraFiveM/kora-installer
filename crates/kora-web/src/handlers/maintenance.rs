@@ -171,7 +171,7 @@ pub async fn app_install(Extension(caller): Extension<Caller>, headers: HeaderMa
         }
         if maint::tidy_needs_admin(m.as_ref(), false) {
             let msg = "Your new Kora shortcuts are ready, and the old ones keep working. Removing the old copy of Kora needs administrator rights. Run this command as administrator:";
-            crate::elevated::privileged_as(ask, "remove the old copy of Kora", msg, cmd(&["app", "uninstall", "--yes"]), vec![], &mut |_| {})?;
+            crate::elevated::privileged_as(ask, "remove the old copy of Kora", msg, cmd(&["uninstall", "--app", "--yes"]), vec![], &mut |_| {})?;
         } else {
             m.app_uninstall(false).map_err(ApiError::core)?;
         }

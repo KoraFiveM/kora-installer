@@ -19,8 +19,11 @@ use kora_core::api::install::{
     self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall,
 };
 use kora_core::api::Op;
+use kora_core::installer::paused::PausedStore;
 use kora_core::installer::{slug, InstallRequest, Mode};
+use kora_core::keystore::KeyStore;
 use kora_core::problem::{codes, Action, Problem};
+use kora_core::profile::ProfileStore;
 use serde_json::{json, Value};
 
 use crate::elevated::{AdminAsk, WorkerAdmin};
@@ -78,7 +81,20 @@ pub async fn install_defaults(State(st): State<AppState>) -> Result<Json<Value>,
     let e = env();
     let v = blocking(move || {
         let servers = st.backend().list().map_err(ApiError::internal)?;
-        Ok(core::defaults(&*e, &servers))
+        let mut v = core::defaults(&*e, &servers);
+        // What Kora remembers (never secret): the wizard pre-fills these, still editable.
+        let p = ProfileStore::default().load();
+        v["profile"] = json!({"cfx_username": p.cfx_username, "cfx_identifier": p.cfx_identifier, "github_owner": p.github_owner});
+        // Saved answers that name a saved key which is gone: say so instead of silently picking nothing.
+        if let Some(n) = v["saved"]["license_key_name"].as_str().map(String::from) {
+            if !KeyStore::default().exists(&n).unwrap_or(true) {
+                v["saved"]["license_key_name"] = Value::Null;
+                v["saved_key_missing"] = json!(n);
+            }
+        }
+        // Installs that stopped and can carry on (also after the panel was restarted).
+        v["resumable"] = json!(resumable());
+        Ok(v)
     })
     .await?;
     Ok(Json(v))
@@ -148,10 +164,17 @@ pub async fn check_db_login(Json(body): Json<Value>) -> Result<Json<Value>, ApiE
     }
     let e = env();
     let automatic = admin.is_none();
+    let local = admin.as_ref().is_none_or(|a| matches!(a.host.as_str(), "127.0.0.1" | "localhost" | "::1"));
     let v = blocking(move || {
         Ok(match e.db_login(admin.as_ref()) {
             Ok(()) => json!({"ok": true, "message": if automatic { "Kora can log in to the database automatically." } else { "Logged in to the database." }}),
-            Err(m) => json!({"ok": false, "message": m}),
+            Err(m) => {
+                // A failed login is often just "the database is installed but not running": say so, with the
+                // "start it for me" button (`problem`, shown by the wizard).
+                let db = if local { super::toolchain::env().database() } else { Default::default() };
+                let problem = (db.installed && !db.running).then(|| kora_core::problem::known::db_stopped(db.name.as_deref().unwrap_or("the database")).to_json());
+                json!({"ok": false, "message": m, "problem": problem})
+            }
         })
     })
     .await?;
@@ -168,10 +191,12 @@ pub async fn check_cfx(Json(body): Json<Value>) -> Result<Json<Value>, ApiError>
     let e = env();
     let v = blocking(move || {
         Ok(match e.cfx_lookup(&name) {
-            Ok(a) => json!({
+            Ok(a) => {
+                ProfileStore::default().remember_cfx(&a.username, &a.identifier());
+                json!({
                 "ok": true, "id": a.id, "username": a.username, "identifier": a.identifier(),
                 "message": format!("Found {} (fivem:{}). This account will be the txAdmin admin.", a.username, a.id),
-            }),
+            })},
             Err(m) => json!({"ok": false, "id": null, "username": null, "identifier": null, "message": m}),
         })
     })
@@ -189,6 +214,12 @@ pub async fn install_plan(
     let e = env();
     let v = blocking(move || {
         let req = core::build_request(&wire).map_err(ApiError::bad_request)?;
+        if let Some(n) = &req.license_key_name {
+            // Fail now, at the licence page, rather than after the person has answered everything.
+            if !KeyStore::default().exists(n).map_err(super::keys::api)? {
+                return Err(super::keys::api(KeyStore::default().get(n).unwrap_err()));
+            }
+        }
         let servers = st.backend().list().map_err(ApiError::internal)?;
         Ok(with_admin_prompt(core::plan(&*e, &req, &servers), crate::elevated::worker_supported()))
     })
@@ -308,8 +339,11 @@ const KEEP_PAUSED: Duration = Duration::from_secs(6 * 3600);
 const MAX_PAUSED: usize = 10;
 
 /// An install that stopped at a failed step. The request still holds the licence key and the
-/// database password: they live here, in this process's memory only (never written anywhere), so
-/// "Try this step again" works without typing them again. Gone when the panel restarts.
+/// database password: they live here, in this process's memory (never written anywhere with a secret
+/// in it), so "Try this step again" works without typing them again. When the key is a SAVED one
+/// (`license_key_name`), the same stopped install is also written down without any secret
+/// (`PausedStore`) and carries on after a panel restart, the key being looked up by name; a pasted key
+/// that was not saved is gone when the panel restarts.
 struct Paused {
     req: InstallRequest,
     via_helper: bool,
@@ -331,7 +365,33 @@ fn with_paused<T>(f: impl FnOnce(&mut HashMap<String, Paused>) -> T) -> T {
     f(m)
 }
 
+/// Write the stopped install down when it uses a SAVED key (so it survives a panel restart). The file has
+/// no secret (see `kora_core::installer::paused`). A pasted key that was not saved stays in memory only.
+fn persist(job: &str, p: &Paused) {
+    let store = PausedStore::default();
+    store.remove_for_dir(&p.req.dir);
+    let _ = store.save(job, &p.req, p.via_helper, p.failed_step.as_deref(), &p.finished);
+}
+
+/// Stopped installs that can carry on: `[{job, name, failed_step}]`, in memory or written down.
+fn resumable() -> Vec<Value> {
+    let mut out: Vec<(String, String, Option<String>)> = with_paused(|m| m.iter().map(|(j, p)| (j.clone(), p.req.name.clone(), p.failed_step.clone())).collect());
+    for s in PausedStore::default().list() {
+        if !out.iter().any(|(j, _, _)| *j == s.job) {
+            out.push((s.job, s.req.name, s.failed_step));
+        }
+    }
+    out.into_iter().map(|(job, name, step)| json!({"job": job, "name": name, "failed_step": step})).collect()
+}
+
+/// Tests: forget the stopped installs held in memory, as a panel restart does (what was written down stays).
+#[doc(hidden)]
+pub fn forget_paused_in_memory() {
+    with_paused(|m| m.clear());
+}
+
 fn pause(job: &str, p: Paused) {
+    persist(job, &p);
     with_paused(|m| {
         // One stopped install per folder: a newer one replaces it.
         m.retain(|_, old| old.req.dir != p.req.dir);
@@ -506,6 +566,11 @@ pub async fn install_start(
 ) -> Result<Response, ApiError> {
     let ask = AdminAsk::of(&caller, &headers);
     let wire: WireInstall = parse(body)?;
+    // Pasting a new key (or saving one) is for admins; every role that may install can pick a saved key.
+    if wire.license_key.as_deref().is_some_and(|k| !k.trim().is_empty()) || wire.save_license_key_as.is_some() {
+        super::keys::require_manage(&caller)?;
+    }
+    let save_as = wire.save_license_key_as.clone().filter(|n| !n.trim().is_empty());
     let e = env();
     let e2 = e.clone();
     let st2 = st.clone();
@@ -513,6 +578,13 @@ pub async fn install_start(
         let mut req = core::build_request(&wire).map_err(ApiError::bad_request)?;
         if req.dry_run {
             return Ok((req, AdminMode::None));
+        }
+        // A saved key is looked up by name here, so the request that is kept and logged never carries it.
+        if let Some(n) = req.license_key_name.clone() {
+            if req.license_key.is_some() {
+                return Err(ApiError::bad_request("Pick one of the saved keys, or paste a new key (not both).").with_action(Action::change_answers("licence")));
+            }
+            req.license_key = Some(KeyStore::default().get(&n).map_err(super::keys::api)?);
         }
         if req.license_key.is_none() {
             return Err(ApiError::problem(
@@ -535,12 +607,26 @@ pub async fn install_start(
                     ApiError::bad_request(m).with_action(Action::change_answers("github"))
                 }
             })?;
+            ProfileStore::default().remember_github_owner(&owner);
             req.github_owner = Some(owner);
         }
         if !core::already_installed(&req) {
             let avoid = core::avoid_ports(&servers, &req.name, Some(&req.dir));
             core::settle_ports(&mut req, false, e2.prober(), &avoid)
                 .map_err(|m| ApiError::conflict(format!("{m} Go back and pick other ports.")).with_action(Action::change_answers("ports")))?;
+        }
+        // The person chose to save a pasted key: it is kept under that name (an already saved key is just
+        // reused, saying nothing twice). From here on the install can be written down without the key.
+        if let (Some(k), Some(n)) = (req.license_key.clone(), &save_as) {
+            let store = KeyStore::default();
+            let name = match store.name_of(&k).map_err(super::keys::api)? {
+                Some(existing) => existing,
+                None => {
+                    kora_core::keystore::check_key(&k).map_err(super::keys::api)?;
+                    store.add(n, &k).map_err(super::keys::api)?.name
+                }
+            };
+            req.license_key_name = Some(name);
         }
         let reasons = e2.admin_reasons(&req);
         if !reasons.is_empty() && !e2.is_elevated() {
@@ -558,6 +644,7 @@ pub async fn install_start(
     let (req, mode) = req;
     // A new start for this folder replaces any stopped install of it.
     with_paused(|m| m.retain(|_, p| p.req.dir != req.dir));
+    PausedStore::default().remove_for_dir(&req.dir);
     spawn_install(&st, e, req, mode, vec![])
 }
 
@@ -584,7 +671,27 @@ pub async fn install_resume(
         Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
         Some(_) => return Err(ApiError::bad_request("That request was not understood. Reload the page and try again.")),
     };
-    let Some(paused) = with_paused(|m| m.remove(&job)) else {
+    let in_memory = with_paused(|m| m.remove(&job));
+    let paused = match in_memory {
+        Some(p) => Some(p),
+        // After a restart: only an install that used a saved key was written down. Its key is looked up
+        // by name now; a key that was renamed or deleted since is said plainly (the file is kept).
+        None => {
+            let id = job.clone();
+            blocking(move || {
+                let Some(s) = PausedStore::default().load(&id) else { return Ok(None) };
+                let mut req = s.req;
+                if let Some(n) = req.license_key_name.clone() {
+                    req.license_key = Some(KeyStore::default().get(&n).map_err(super::keys::api)?);
+                }
+                // Not written down: on Windows its administrator steps go to the worker again (asked when needed).
+                let windows_admin = crate::elevated::worker_supported() && !s.via_helper;
+                Ok(Some(Paused { req, via_helper: s.via_helper, windows_admin, failed_step: s.failed_step, finished: s.finished, at: Instant::now() }))
+            })
+            .await?
+        }
+    };
+    let Some(paused) = paused else {
         return Err(ApiError::problem(
             StatusCode::NOT_FOUND,
             Problem::new(
@@ -600,13 +707,13 @@ pub async fn install_resume(
         if without_admin && paused.via_helper {
             let p = Problem::new(codes::INSTALL_CANNOT_RESUME, "This install runs with administrator rights, so it cannot carry on without them from here. Change your answers instead.")
                 .with_action(Action::ChangeAnswers { section: None });
-            with_paused(|m| m.insert(id, paused));
+            pause(&id, paused);
             return Err(ApiError::problem(StatusCode::CONFLICT, p));
         }
         // A remote session does not make Windows ask on a desktop nobody may be watching.
         if paused.windows_admin && !without_admin && !crate::elevated::may_prompt(ask) {
             let p = kora_core::helper::worker::remote_problem(&admin_context(&paused.req, &e.admin_reasons(&paused.req)));
-            with_paused(|m| m.insert(id, paused));
+            pause(&id, paused);
             return Err(crate::elevated::admin_error(p));
         }
         if let Some(step) = &skip {
@@ -622,7 +729,7 @@ pub async fn install_resume(
             };
             if let Some(p) = refused {
                 // Nothing changed: the install can still be retried.
-                with_paused(|m| m.insert(id, paused));
+                pause(&id, paused);
                 return Err(ApiError::problem(StatusCode::CONFLICT, p));
             }
         }
@@ -644,6 +751,8 @@ pub async fn install_resume(
     if r.is_err() {
         // Not started (another job runs for this server): it can still be continued later.
         pause(&job, again);
+    } else {
+        PausedStore::default().remove(&job);
     }
     r
 }

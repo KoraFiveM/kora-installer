@@ -159,12 +159,6 @@ fn db_client() -> String {
     "mysql".into()
 }
 
-/// winget exits non-zero for "already installed" (0x8A150061) and "no newer version" (0x8A15010D):
-/// for our purpose (the tool is there) both are success.
-pub(crate) fn winget_code_is_fine(code: i32) -> bool {
-    matches!(code as u32, 0 | 0x8A15_0061 | 0x8A15_010D)
-}
-
 /// Open GitHub's device-login page in the default browser. Only ever a github.com address, never a shell.
 fn open_github_page(url: &str) -> bool {
     if !url.starts_with("https://github.com/") || url.contains(|c: char| c.is_whitespace() || c.is_control() || c == '"') {
@@ -178,10 +172,6 @@ fn open_github_page(url: &str) -> bool {
         .stderr(std::process::Stdio::null())
         .spawn()
         .is_ok()
-}
-
-fn winget_available() -> bool {
-    crate::sysexe::command("winget").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// Where the MariaDB / MySQL installers put their command line client (Windows).
@@ -293,6 +283,7 @@ fn db_missing(what_to_do: &str) -> Problem {
 /// A database service that is installed but stopped: the command that starts it.
 fn db_stopped(name: &str, start: &[&str]) -> Problem {
     Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running. Start it, then try this step again."))
+        .with_action(Action::StartDatabase)
         .with_action(Action::show_command(start, true))
 }
 
@@ -305,31 +296,11 @@ fn db_needs_admin(req: &InstallRequest, why: String) -> Problem {
         .with_action(Action::change_answers("database"))
 }
 
-/// git (and for development servers gh) is missing and installing it needs administrator rights.
-fn tools_need_admin(tools: &git::Tools, dev: bool) -> Problem {
-    let need_gh = dev && tools.gh.is_none();
-    let need_git = tools.git.is_none();
-    let what = match (need_git, need_gh) {
-        (true, true) => "Git and the GitHub CLI are not installed",
-        (false, true) => "The GitHub CLI is not installed",
-        _ => "Git is not installed",
-    };
-    let mut p = Problem::new(codes::INSTALL_TOOL_MISSING, format!("{what}, and installing it here needs administrator rights.")).with_action(Action::RequestAdmin);
-    if need_git {
-        p.push_action(Action::InstallTool { tool: Tool::Git });
-        p.push_action(Action::open_link("https://git-scm.com/downloads"));
-    }
-    if need_gh {
-        p.push_action(Action::InstallTool { tool: Tool::Gh });
-        p.push_action(Action::open_link(known::GH_URL));
-    }
-    p
-}
-
-/// A tool was just installed but this process does not see it yet.
-fn tool_not_found_yet() -> Problem {
-    Problem::new(codes::INSTALL_TOOL_NOT_FOUND_YET, "Git was installed, but Kora cannot find it yet. Try this step again in a moment.")
-        .with_details("Windows tells running programs about a newly installed tool only when they start. If trying again does not help, restart Kora (`kora panel restart`).")
+/// Git is missing, and the system package manager (administrator rights) is the way to get it.
+fn git_needs_admin() -> Problem {
+    Problem::new(codes::INSTALL_TOOL_MISSING, "Git is not installed, and installing it here needs administrator rights.")
+        .with_action(Action::RequestAdmin)
+        .with_action(Action::open_link(known::GIT_URL))
 }
 
 fn windows_user() -> Option<String> {
@@ -471,6 +442,7 @@ mod fork_sync_tests {
             dir: d.path().to_path_buf(),
             hostname: "s".into(),
             license_key: None,
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports::default(),
             txadmin_public: false,
@@ -803,65 +775,43 @@ impl InstallStep {
         let r = git::SystemRunner;
         let dev = ctx.req.mode == Mode::Development;
         let mut tools = git::detect(&r);
-        if tools.git.is_none() || (dev && tools.gh.is_none()) {
+        // Kora's own copies (no administrator rights, no PATH change): the GitHub CLI wherever it is missing and
+        // Git on Windows. They are checked against pinned checksums before anything is unpacked.
+        let mut wanted = Vec::new();
+        if tools.git.is_none() && crate::tools::pins::pin_here(Tool::Git).is_some() {
+            wanted.push(Tool::Git);
+        }
+        if dev && tools.gh.is_none() {
+            wanted.push(Tool::Gh);
+        }
+        for t in wanted {
+            let mut say = |m: &str, f: f32| ctx.emit(self.id, StepStatus::Running, m.to_string(), 0.05 + 0.1 * f);
+            crate::tools::install(t, &crate::tools::HttpFetcher(ctx.hooks.http.clone()), &mut say)?;
+        }
+        tools = git::detect(&r);
+        // Linux Git: the system package, which needs administrator rights.
+        if tools.git.is_none() {
             let plan = git::plan_bootstrap(git::Os::current(), &tools).map_err(|e| InstallError(e.to_string()))?;
-            let no_winget = cfg!(windows) && !plan.is_empty() && !winget_available();
-            if no_winget && !ctx.admin {
-                return Err(tools_need_admin(&tools, dev)
-                    .with_details("This Windows has no winget (Windows Package Manager), so Kora downloads the official installers itself, which needs administrator rights.")
-                    .into());
-            }
-            if no_winget {
-                // No winget: the vendors' own installers, downloaded over HTTPS and run only if their SHA-256 matches.
-                let tmp = windows_tools::private_tmp_dir()?;
-                let mut say = |m: &str| ctx.emit(self.id, StepStatus::Running, m.to_string(), 0.1);
-                let mut wanted = Vec::new();
-                if tools.git.is_none() {
-                    wanted.push(windows_tools::Tool::Git);
-                }
-                if dev && tools.gh.is_none() {
-                    wanted.push(windows_tools::Tool::Gh);
-                }
-                for t in wanted {
-                    windows_tools::install(t, &ctx.hooks.http, &tmp, &mut say).map_err(|e| {
-                        let tool = match t {
-                            windows_tools::Tool::Git => Tool::Git,
-                            windows_tools::Tool::Gh => Tool::Gh,
-                        };
-                        InstallError::from(
-                            Problem::new(codes::INSTALL_TOOL_MISSING, format!("Kora could not install {}. You can also install it yourself.", t.label()))
-                                .with_details(e.to_string())
-                                .with_action(Action::InstallTool { tool })
-                                .with_action(Action::open_link(t.manual_url())),
-                        )
-                    })?;
-                }
-                let _ = std::fs::remove_dir_all(&tmp);
-                tools = git::detect(&r);
-                if tools.git.is_none() {
-                    return Err(tool_not_found_yet().into());
-                }
-            }
-            if !no_winget && !ctx.admin {
+            if !ctx.admin {
                 let what: Vec<String> = plan.iter().map(|s| format!("- {}", s.description)).collect();
-                let mut p = tools_need_admin(&tools, dev).with_details(format!("Kora would:\n{}", what.join("\n")));
+                let mut p = git_needs_admin().with_details(format!("Kora would:\n{}", what.join("\n")));
                 for s in &plan {
                     p.push_action(Action::ShowCommand { command: std::iter::once(s.program.clone()).chain(s.args.iter().cloned()).collect(), elevated: true });
                 }
                 return Err(p.into());
             }
-            for s in plan.iter().filter(|_| !no_winget) {
+            for s in &plan {
                 ctx.emit(self.id, StepStatus::Running, s.description.clone(), 0.1);
                 let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
                 let failed = |why: String| InstallError::from(Problem::new(codes::INSTALL_TOOL_MISSING, format!("This did not work: {}.", s.description)).with_details(why));
                 let o = git::CommandRunner::run(&r, &s.program, &args, None).map_err(|e| failed(e.to_string()))?;
-                if !(o.ok() || (s.program == "winget" && winget_code_is_fine(o.code))) {
+                if !o.ok() {
                     return Err(failed(o.stderr.trim().to_string()));
                 }
             }
             tools = git::detect(&r);
             if tools.git.is_none() {
-                return Err(tool_not_found_yet().into());
+                return Err(known::git_missing().into());
             }
         }
         if dev {
@@ -1928,15 +1878,6 @@ mod db_admin_tests {
         r.respond("id -u kora-srv", 0, "0\n");
         assert!(linux_service_account(None, "kora-srv", &r, 1000).unwrap_err().to_string().contains("root account"));
     }
-
-    #[test]
-    fn winget_already_installed_codes_count_as_success() {
-        assert!(winget_code_is_fine(0));
-        assert!(winget_code_is_fine(0x8A15_0061_u32 as i32), "already installed");
-        assert!(winget_code_is_fine(0x8A15_010D_u32 as i32), "no applicable upgrade");
-        assert!(!winget_code_is_fine(1));
-        assert!(!winget_code_is_fine(0x8A15_0003_u32 as i32));
-    }
 }
 
 /// The install's failures say what happened and what the user can do, never "close this window".
@@ -1965,6 +1906,7 @@ mod problem_tests {
             dir: d,
             hostname: "s".into(),
             license_key: None,
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports::default(),
             txadmin_public: false,
@@ -2017,20 +1959,13 @@ mod problem_tests {
 
     #[test]
     fn tool_and_database_problems_offer_fitting_actions() {
-        let none = git::Tools { git: None, gh: None };
-        let p = tools_need_admin(&none, true);
+        let p = git_needs_admin();
         assert_eq!(p.code, codes::INSTALL_TOOL_MISSING);
-        assert!(p.message.starts_with("Git and the GitHub CLI are not installed"));
         assert_eq!(p.actions[0], Action::RequestAdmin);
-        assert!(p.actions.contains(&Action::InstallTool { tool: Tool::Git }) && p.actions.contains(&Action::InstallTool { tool: Tool::Gh }));
-        let p = tools_need_admin(&none, false);
-        assert!(!p.actions.contains(&Action::InstallTool { tool: Tool::Gh }));
-
-        let p = tool_not_found_yet();
-        assert!(!p.message.contains("Close this window") && !p.message.contains("run the install again"), "{}", p.message);
+        assert!(!p.actions.contains(&Action::InstallTool { tool: Tool::Gh }), "gh is never installed by the system package manager");
 
         let p = db_stopped("mariadb", &["systemctl", "start", "mariadb"]);
-        assert_eq!(p.actions, vec![Action::show_command(&["systemctl", "start", "mariadb"], true)]);
+        assert_eq!(p.actions, vec![Action::StartDatabase, Action::show_command(&["systemctl", "start", "mariadb"], true)]);
         let p = db_missing("Choose another option.");
         assert_eq!((p.code.as_str(), p.actions.clone()), (codes::INSTALL_DB_MISSING, vec![Action::change_answers("database")]));
         let p = db_needs_admin(&dev_ctx(None).req, "why".into());

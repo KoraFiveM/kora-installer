@@ -149,9 +149,9 @@ export function RemoteAccessCard() {
             </div>
 
             <div className="space-y-2">
-              <Checkbox label="Let remote administrators do destructive things" checked={s.allow_remote_destructive} disabled={save.isPending} onChange={(e) => save.mutate({ allow_remote_destructive: e.target.checked })}
-                hint="Deleting or removing servers, uninstalling, sending console commands, installing, changing schedules and updating Kora. Off by default. Even when on, deleting still asks for the server's name." />
-              {s.allow_remote_destructive && <Alert tone="warning">Anyone with an admin role can now delete servers from afar. Only turn this on if you trust every admin.</Alert>}
+              <Checkbox label="Let token administrators do destructive things" checked={s.allow_remote_destructive} disabled={save.isPending} onChange={(e) => save.mutate({ allow_remote_destructive: e.target.checked })}
+                hint="Deleting or removing servers, uninstalling Kora, sending console commands, changing schedules and updating Kora, for administrators who sign in with a token. Off by default. Administrators signed in through Tailscale can always do these, and every remote administrator can install servers. Even when on, deleting still asks for the server's name." />
+              {s.allow_remote_destructive && <Alert tone="warning">Anyone who holds an admin token can now delete servers from afar. Only turn this on if you trust every admin and keep their tokens safe.</Alert>}
             </div>
             {s.saved_to && <p className="text-xs text-muted-foreground">Saved in {s.saved_to}</p>}
           </>
@@ -188,7 +188,7 @@ export function SignedInCard() {
       <CardContent className="space-y-3 text-sm">
         <p>Signed in as <strong>{r.identity.name}</strong> (<Badge tone="plain">{r.role}</Badge>){r.remote ? ', from another computer' : ''}.</p>
         <p className="text-muted-foreground">{ROLE_TEXT[r.role]}.</p>
-        {r.remote && !r.destructiveAllowed && <p className="text-muted-foreground">Installing, deleting, uninstalling, console commands, schedules and updating Kora are turned off for remote sign-ins.</p>}
+        {r.remote && !r.destructiveAllowed && <p className="text-muted-foreground">Deleting servers, uninstalling, console commands, schedules and updating Kora are turned off for sign-ins made with a token. Installing and managing servers still work.</p>}
         <Button onClick={() => out.mutate()} disabled={out.isPending}>Sign out</Button>
         <ErrorNotice error={out.error} />
       </CardContent>

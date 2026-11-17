@@ -18,6 +18,7 @@ the hub); you can skip them. Everything else describes the base panel.
 4. [A server's tabs](#4-a-servers-tabs)
 5. [Installing a server (the wizard)](#5-installing-a-server-the-wizard)
 6. [Settings](#6-settings)
+   (and the [System check](#the-system-check))
 7. [Actions that need administrator rights](#7-actions-that-need-administrator-rights)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Optional: monitoring and alerts](#9-optional-monitoring-and-alerts)
@@ -37,7 +38,7 @@ kora
 
 Kora makes sure the panel runs in the background (so monitoring and alerts keep working), then opens your browser at it.
 It never asks for administrator rights. With no servers yet the panel opens straight into the install wizard.
-`kora manager` does the same, and `kora install` (with no options) opens the install page.
+`kora install` (with no options) opens the install page. (The old name `kora manager` still works and does the same as `kora`.)
 
 What `kora` does when things are not simple:
 
@@ -144,19 +145,48 @@ waiting, and buttons to start, stop and restart. From here you can:
 
 If a server's folder has gone missing, the list says so rather than hiding it.
 
+Each server in the list (and its Overview) has three buttons:
+
+- **Open txAdmin:** opens txAdmin in a new tab. From the computer that runs Kora it uses `localhost`; from another
+  computer it uses the name you reached the panel by plus txAdmin's port. txAdmin's port is closed to other computers by
+  default, so if the page does not load, forward it like the panel's own (`ssh -L 40120:localhost:40120 ...`). Through an
+  SSH tunnel to the panel, `localhost` is your own computer, so add that port to the tunnel too.
+- **Open folder** / **Copy path:** at the computer that runs Kora, with a desktop in front of it, it opens the server's
+  folder in the file manager. From anywhere else (Tailscale, a token sign-in, an SSH tunnel, a computer with no desktop)
+  it is **Copy path** instead, because opening a window nobody is looking at would do nothing useful.
+- **Copy connect address:** this computer's address on your network with the server's game port, for players on the same
+  network. Players on the internet need your public address (or domain name) with the same port, and the port forwarded
+  on your router or opened with your hosting provider. Kora cannot see your public address.
+
 ## 4. A server's tabs
 
 | Tab | What it is for |
 |---|---|
-| Overview | State, ports, the update badge, start / stop / restart, open the server folder (only when you are on that computer). |
+| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin and the connect address. **Licence key:** which saved key the server uses and **Change licence key** (pick a saved key or add a new one; it says whether a restart is needed and offers it). Same as `kora keys use`. |
 | Console | Live server output and a box to send commands. The first time, Kora offers to add a small resource called `kora_console`; it loads on the next server start. |
 | Logs | Pick a log file and read its latest lines. |
 | Resources | **Updates** at the top: check for newer versions, pick what to update, choose what happens about restarts, and roll back to an earlier snapshot (same as `kora update`). Below it the installed resources, each with buttons to check it for updates and to start, stop or restart it on a running server (needs the live console from the Console tab), and the catalogue of resources you can add (same as `kora add-resources`). What the tab shows stays when you open another tab and come back. |
 | Schedule | Development servers only: when the server updates itself. Changing it needs administrator rights. Same as `kora schedule`. |
 | Notifications | The Discord webhook for update reports: set, test, remove. The address is never shown back to you. Same as `kora webhook`. |
 | Ports | Change the game and txAdmin ports. The server must be stopped. Kora checks the ports are free. Firewall rules are not changed: open the new ports and close the old ones yourself. |
-| GitHub | Development servers only: sign in to GitHub, report an issue about a resource, or open a pull request. |
+| GitHub | Development servers only: sign in to GitHub, **change a resource's branch or try a pull request** (see below), report an issue about a resource, or open a pull request. |
 | Danger zone | Delete the server. You choose whether to keep the files and the database, then type the server's name to confirm. |
+
+### Branches and pull requests (Development servers)
+
+On a Development server every resource is a clone of your own fork. The GitHub tab's **Branches and pull requests** card lets you move a resource onto another version of its code without using git yourself. The same operations are `kora branch ...` and `kora pr ...` in a terminal.
+
+- **See where each resource is.** Each resource shows "Normal version (dev)", "Branch fix-hud", "Trying PR #12" or "A single commit", plus how many files you changed and how many sets of changes are kept aside. The Resources tab shows the same next to the name.
+- **Switch to a branch.** Pick it from the list (branches already in the folder, on your fork, on the original repository; "Refresh list" asks GitHub for the newest) and press Switch.
+- **Try a pull request.** Paste its number or its GitHub address, or pick one from the list. The list holds the open pull requests of the original repository *and* of your fork, each marked "Original repository" or "Your fork" with its title, number and author. The pull request is downloaded onto a branch called `pr/<number>`; trying it again later fetches its new commits (fast-forward only; if the author rewrote it, it goes on a new branch and your earlier copy stays). A pull request that was merged or closed, a number that does not exist, an address on some other repository and a pull request whose fork was deleted each get a plain explanation.
+- **Back to the normal version** puts the resource back on its normal branch (the one Kora updates). In the bulk section, "Back to the normal version, for all" does it for every resource.
+- **Several resources at once.** Type a branch name, "Check which resources have it" shows who has it and who does not, then "Switch the N that have it" moves those and leaves the others as they are.
+- **Your own changes are never lost.** A resource with changes you have not saved is not touched until you choose: *Keep my changes aside* (recommended), *Throw my changes away* (asked a second time, with a warning that it cannot be undone) or *Cancel*. Kept-aside changes are listed in that resource's window with *Bring my changes back*; if they no longer fit, nothing changes and they stay kept aside. In git they are an ordinary stash starting with "Kora:", so `git stash list` in the resource folder shows them too. Kora never deletes a stash, not even after bringing the changes back.
+- **After a switch** the files on disk have changed but a running server still has the old version loaded. Kora says so and offers "Restart <resource> now" (needs the live console) or tells you to restart the server.
+
+What updates do with a switched resource: **they leave it alone.** The update check shows it as "Not updated: on another branch" with the reason ("on branch fix-hud", "trying pull request #12"), the scheduled daily update skips it with the same words, and neither counts it as a problem or reports it "up to date". Nothing is ever pulled into your branch. Going back to the normal version makes updates work for it again. Snapshots record each resource's branch; a rollback first returns the resource to the branch it was on when the snapshot was taken and only then resets it, so it never rewrites a branch you moved to afterwards. Switching waits while an update is running (and the other way round). Production servers have none of this: they stay on their pinned releases.
+
+Sign-in: listing and trying pull requests uses the GitHub CLI (`gh`); if you are not signed in, or `gh` is missing, the panel offers the usual sign-in and install buttons. Switching between branches that are already downloaded needs no GitHub sign-in. Switching branches needs the **admin** role, because it changes the code the server runs.
 
 ## 5. Installing a server (the wizard)
 
@@ -171,15 +201,22 @@ If a server's folder has gone missing, the list says so rather than hiding it.
 6. **Database:** use the MariaDB already on the machine, let Kora install it, or skip it. "Test login" checks the admin
    password before anything starts.
 7. **Options:** the background service and the firewall rule (the server is started when the install finishes).
-8. **Licence key:** your Cfx.re licence key. It is sent to Kora on this computer only and is never shown again.
+8. **Licence key:** pick one of your saved keys by name, or add a new one. A pasted key is saved on this computer by
+   default (under a name you can change, "Main" at first) so next time you only pick it; untick "Save this key" to use it
+   once. Kora only ever shows the last 4 characters of a key. Roles other than admin can only pick a saved key.
 9. **Your Cfx.re account:** type your Cfx.re username and press "Check". Kora asks forum.cfx.re (only the username is sent)
    which account owns it, and that account becomes the txAdmin admin, so you sign in to txAdmin with Cfx.re. Leave it
-   empty to skip: Kora then creates a local txAdmin admin with a generated password saved in the server folder.
+   empty to skip: Kora then creates a local txAdmin admin with a generated password saved in the server folder. After
+   the first time Kora remembers your name (and, in development mode, your GitHub owner) and fills them in; change them
+   on that page, or forget them in Settings.
 10. **GitHub** (development mode only): sign in with a short code and choose where the forks go.
 11. **Review and install.** Kora shows a dry-run plan first, then the install with live progress.
 
-If an install fails, the panel keeps your answers (never the licence key or the database password) and offers "Continue
-where you left off" the next time. The wizard also checks free disk space before it begins.
+If an install fails, the panel keeps your answers (never the licence key or the database password; only the name of a
+saved key) and offers "Continue where you left off" the next time. An install that stopped at a failed step and uses a
+saved key can also carry on after Kora Panel was restarted ("Carry on"); the database administrator password, if you
+typed one, is not kept and the install uses the automatic login or fails at that step again. A key you pasted without
+saving it is only remembered while the panel runs. The wizard also checks free disk space before it begins.
 
 ## 6. Settings
 
@@ -189,11 +226,38 @@ where you left off" the next time. The wizard also checks free disk space before
   Files or /opt/kora, and shortcuts that ask for administrator rights) it offers **Tidy up old shortcuts**, also as a
   notice on the servers screen. That makes the new shortcuts first, so the old ones keep working until the end, then removes
   the old copy. Removing the old copy needs administrator rights: on Windows the panel asks Windows for permission
-  (one prompt); on Linux it shows the command to run (`kora app uninstall --yes`) or, with the helper installed, does it itself.
+  (one prompt); on Linux it shows the command to run (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
+- **Licence keys:** the keys saved on this computer (`secrets.json` in the Kora folder: plain text, readable only by you,
+  not encrypted, like each server's `secrets.cfg`). Add, rename, replace and delete (admins and this computer only); each
+  shows its last 4 characters and the servers that use it. Deleting a key does not affect servers already installed with it
+  (they have their own copy); an unfinished install that used it needs another key. Same as `kora keys`.
+- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in `profile.json` (nothing secret), with a
+  button to forget each. Same as `kora profile`.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
-  and databases are kept unless you tick them.
+  and databases are kept unless you tick them. Your saved licence keys and remembered answers are never removed from here;
+  `kora uninstall` in a terminal asks about them (default: keep), or delete `secrets.json` and `profile.json` in the Kora
+  folder yourself.
 - **About:** the version, platform, and links. The settings page makes no requests to other websites.
+
+### The System check
+
+**System check** in the side menu (or `kora check` in a terminal) lists what Kora needs on this computer, each line in plain
+words with a button where something is wrong:
+
+- **Git** and **GitHub CLI**: *Install it for me* downloads Kora's own copy into its own folder (a known, checksum-verified
+  release from GitHub; no administrator rights; nothing else on the computer changes). If you already have Git or the
+  GitHub CLI Kora uses yours. If the download fails (no internet, a proxy, GitHub busy) you get *Try again* and a link to
+  install it by hand. Git on Linux is your system's package, which needs administrator rights (the helper does it, or the
+  panel shows the command). `kora tools status` shows which copy is used and where it is; `kora tools install` sets them up.
+- **GitHub sign-in**: *Sign in to GitHub* (or *Sign in again* when only some permissions are missing).
+- **Database**: when a database server is installed but not running, *Start it for me*. Starting a service needs
+  administrator rights: with the helper (Linux) it just works, otherwise the panel shows the command (`kora check
+  --start-database`; Windows asks for administrator permission).
+- **Administrator rights** and **Background service**: what Kora can do without asking, for your information.
+
+The same buttons appear wherever an error offers them (the install wizard, the GitHub account card), and those errors link here.
+`kora uninstall` also removes Kora's own copies of Git and the GitHub CLI.
 
 ## 7. Actions that need administrator rights
 
@@ -353,17 +417,35 @@ Managing remote access and users from the panel is only possible from a local se
 hours idle or 7 days in total, and at once when the account is removed or its role changes. The sign-in link from
 `kora panel` only works on the computer itself (or through an SSH tunnel), never remotely.
 
-**Destructive actions are off for remote sessions by default.** These only work from a local session, even for a
-remote admin: deleting a server, unregistering it (removing it from Kora's list), uninstalling Kora, removing the Kora
-app, sending console commands, installing a server, updating Kora, and setting or removing restart schedules. To allow
-them for remote admins, run this on the computer that runs Kora:
+**What a remote administrator can do depends on how they signed in.**
+
+| | Tailscale admin | Token admin |
+|---|---|---|
+| Install a new server (start an install, resume a paused one) | yes | yes |
+| Manage servers: start/stop, settings, resources, snapshots, ports, GitHub | yes | yes |
+| Delete a server, unregister a server, uninstall Kora, remove the Kora app | yes | **off** until `remote actions` is on |
+| Send console commands, update Kora, set or remove restart schedules | yes | **off** until `remote actions` is on |
+| Open a server's folder, manage users and remote access, restart the panel | never (this computer only) | never (this computer only) |
+
+An SSH tunnel is a local session: everything works. Viewer and operator roles are unchanged (no installs, no
+destructive actions, whatever the setting).
+
+Why the difference: a Tailscale sign-in is checked by the Tailscale service on this computer, so it names a real
+person on a device they have signed in. A token is a secret in a link: it can be pasted into a chat or left in a
+backup, and whoever holds it *is* that user. A leaked token that can only install can be undone by removing the
+server it made. A leaked token that can delete cannot be undone, so deleting stays off for tokens until someone on
+the computer that runs Kora turns it on. The typed-name confirmation for deleting always applies.
+
+When a token session asks for one of those, the panel says why and shows the command. To allow them for token
+administrators, run this on the computer that runs Kora (over SSH is fine):
 
 ```sh
 kora panel remote-actions on       # off turns them off again; status shows the setting
 ```
 
 or use the switch in Settings > Remote access from a local session. A running panel uses the new setting right away;
-no restart is needed. Even when it is on you must type the server's name to delete it.
+no restart is needed. Installing on Windows from afar still needs someone at the computer to accept the Windows
+administrator prompt.
 
 **A panel admin can do a lot on that computer**: install and delete servers, send console commands, update Kora. The panel itself does not run as root (since 0.6.1), but only make people you fully trust
 admin; give others the operator or viewer role.
@@ -406,7 +488,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   requests).
 - **Strict page policy.** The page can only load its own files: no inline scripts, no other sites, no framing.
 - **Secrets are write-only.** Licence keys, database passwords and webhook addresses are accepted but never sent back to
-  the browser.
+  the browser. Saved licence keys show only their name and last 4 characters.
 - **No elevated panel.** The panel runs as you (as root only when you are signed in as root, see [section 10](#10-optional-remote-access)). Privileged actions are a command you run, a helper that accepts only
   Kora's fixed actions (Linux), or on Windows a short-lived administrator copy of Kora started through the Windows
   permission prompt that runs only Kora's fixed administrator steps and exits (see SECURITY.md for how it is protected).

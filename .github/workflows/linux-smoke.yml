@@ -29,6 +29,8 @@ jobs:
         run: cargo build --release --locked -p kora-cli
       - name: "basics: --version, no-TTY error, dry run, ports, github owners"
         run: scripts/smoke-linux/01-basics.sh
+      - name: "tools: Kora's own gh (download, checksum, run without PATH, uninstall)"
+        run: scripts/smoke-linux/06-tools.sh
       - name: Collect logs
         if: always()
         run: |

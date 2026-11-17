@@ -11,7 +11,7 @@
 //! * Linux: `/opt/kora/bin/kora`, a `/usr/local/bin/kora` symlink and (desktop sessions only) a
 //!   `kora.desktop` launcher that opens the manager in a terminal.
 //!
-//! Everything is decided by a pure planner ([`plan_install`] / [`plan_uninstall`]) that only *reads*
+//! Everything is decided by a pure planner ([`plan_uninstall`], and `user::plan_user_install`) that only *reads*
 //! through the [`Sys`] trait, and a small executor that applies the resulting [`Action`]s, so a dry run
 //! lists every change and tests run against an in-memory fake. Uninstalling removes only what the app
 //! installed: never servers, never databases.
@@ -165,6 +165,7 @@ impl Layout {
     }
 
     /// The folder a user's shell should find `kora` in.
+    #[cfg(test)]
     pub fn command_dir(&self) -> Option<PathBuf> {
         if self.windows {
             Some(self.dir.clone())
@@ -278,6 +279,8 @@ pub struct Plan {
     pub notes: Vec<String>,
 }
 
+/// Test fixture: the result of laying down the OLD machine-wide app on a fake machine.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct AppInstall {
     pub exe: PathBuf,
@@ -288,6 +291,7 @@ pub struct AppInstall {
     pub dry_run: bool,
 }
 
+#[cfg(test)]
 impl AppInstall {
     pub fn changed(&self) -> bool {
         !self.changes.is_empty()
@@ -437,6 +441,7 @@ pub fn desktop_exec_arg(p: &Path) -> String {
     }
 }
 
+#[cfg(test)]
 pub fn desktop_entry_text(exe: &Path, icon: &Path) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName={APP_NAME}\nComment=Install and manage your Kora FiveM servers\nExec={} manager\nIcon={}\nTerminal=true\nCategories=System;Utility;\n{DESKTOP_MARKER}\n",
@@ -446,10 +451,12 @@ pub fn desktop_entry_text(exe: &Path, icon: &Path) -> String {
 }
 
 /// `"<exe>" uninstall --app`
+#[cfg(test)]
 pub fn uninstall_string(exe: &Path) -> String {
     format!("\"{}\" uninstall --app", exe.display())
 }
 
+#[cfg(test)]
 fn shortcut_spec(l: &Layout, path: &Path) -> ShortcutSpec {
     ShortcutSpec {
         path: path.to_path_buf(),
@@ -476,11 +483,13 @@ fn load_state(sys: &dyn Sys, l: &Layout) -> Option<AppState> {
     sys.read(&l.state).and_then(|b| serde_json::from_slice(&b).ok())
 }
 
+#[cfg(test)]
 fn now_unix() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// One-line fix when the folder holding the `kora` command is not on the user's `PATH`.
+#[cfg(test)]
 pub fn path_hint(command_dir: &Path, path_env: &str) -> Option<String> {
     let on = std::env::split_paths(path_env).any(|p| same_path(&p, command_dir));
     (!on).then(|| format!("{} is not on your PATH. Add it with:  export PATH=\"{}:$PATH\"  (put that line in ~/.profile)", command_dir.display(), command_dir.display()))
@@ -491,6 +500,7 @@ pub fn path_hint(command_dir: &Path, path_env: &str) -> Option<String> {
 // ---------------------------------------------------------------------------------------------
 
 /// Work out what installing (or refreshing) the app would change. Reads only.
+#[cfg(test)]
 pub fn plan_install(sys: &dyn Sys, l: &Layout, run: &Running, opts: &AppOptions) -> Plan {
     let mut plan = Plan::default();
     // ---- the program ----
@@ -722,6 +732,7 @@ fn run_plan(sys: &mut dyn Sys, l: &Layout, plan: &Plan) -> Result<Vec<String>> {
 }
 
 /// Install or refresh the app with explicit dependencies (tests use a fake [`Sys`]).
+#[cfg(test)]
 pub fn install_app_with(sys: &mut dyn Sys, l: &Layout, run: &Running, opts: &AppOptions) -> Result<AppInstall> {
     let mut plan = plan_install(sys, l, run, opts);
     let changes = if opts.dry_run { plan.actions.iter().map(Action::describe).collect() } else { run_plan(sys, l, &plan)? };
@@ -792,6 +803,7 @@ pub fn status_with(sys: &dyn Sys, l: &Layout, run: &Running) -> AppStatus {
 // Public API on the real system
 // ---------------------------------------------------------------------------------------------
 
+#[cfg(test)]
 pub fn install_app(opts: &AppOptions) -> Result<AppInstall> {
     let run = Running::current()?;
     let l = Layout::from_env(&run.exe)?;

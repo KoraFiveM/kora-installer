@@ -75,6 +75,21 @@ pub mod codes {
     /// The step to retry or skip is not known, not failed, or not safe to skip.
     pub const INSTALL_CANNOT_RESUME: &str = "install.cannot_resume";
 
+    /// A remote sign-in made with a token asked for something that stays off until `remote actions` is on.
+    pub const REMOTE_ACTIONS_OFF: &str = "remote.actions_off";
+    /// The saved licence keys file (`secrets.json`) cannot be read or is damaged: nothing is changed.
+    pub const KEYS_UNREADABLE: &str = "keys.unreadable";
+    /// No saved licence key has that name (never saved, renamed or deleted).
+    pub const KEYS_NOT_FOUND: &str = "keys.not_found";
+    /// A saved licence key already has that name.
+    pub const KEYS_NAME_TAKEN: &str = "keys.name_taken";
+    /// That licence key is already saved (under another name).
+    pub const KEYS_DUPLICATE: &str = "keys.duplicate";
+    /// The key name or the key itself is not acceptable.
+    pub const KEYS_INVALID: &str = "keys.invalid";
+    /// Kora could not find or change the licence key in the server's own configuration.
+    pub const KEYS_SERVER_CONFIG: &str = "keys.server_config";
+
     /// The GitHub CLI (`gh`) is not installed.
     pub const GH_MISSING: &str = "github.gh_missing";
     /// `gh` is installed but not signed in.
@@ -89,6 +104,15 @@ pub mod codes {
     pub const GH_RATE_LIMITED: &str = "github.rate_limited";
     /// Reading the GitHub accounts failed.
     pub const GH_UNAVAILABLE: &str = "github.unavailable";
+
+    /// Kora's own copy of git or gh could not be downloaded (offline, a proxy, GitHub busy).
+    pub const TOOLS_DOWNLOAD_FAILED: &str = "tools.download_failed";
+    /// There is no copy of the tool for this kind of computer.
+    pub const TOOLS_UNSUPPORTED: &str = "tools.unsupported";
+    /// The download did not match the checksum Kora expects, so nothing was installed.
+    pub const TOOLS_CHECKSUM: &str = "tools.checksum_mismatch";
+    /// Starting the database server did not work.
+    pub const DB_START_FAILED: &str = "db.start_failed";
 }
 
 /// Ready-made problems that several places raise (the installer and the panel's GitHub routes).
@@ -97,12 +121,27 @@ pub mod known {
 
     /// Where the GitHub CLI can be downloaded by hand.
     pub const GH_URL: &str = "https://cli.github.com";
+    /// Where Git can be downloaded by hand.
+    pub const GIT_URL: &str = "https://git-scm.com/downloads";
 
     /// `gh` is not installed.
     pub fn gh_missing() -> Problem {
         Problem::new(codes::GH_MISSING, "The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.")
             .with_action(Action::InstallTool { tool: Tool::Gh })
             .with_action(Action::open_link(GH_URL))
+    }
+
+    /// Git is not installed (and Kora has no copy of its own yet).
+    pub fn git_missing() -> Problem {
+        Problem::new(codes::INSTALL_TOOL_MISSING, "Git is not installed. Kora needs it to download and update resources.")
+            .with_action(Action::InstallTool { tool: Tool::Git })
+            .with_action(Action::open_link(GIT_URL))
+    }
+
+    /// A database server is installed but not running.
+    pub fn db_stopped(name: &str) -> Problem {
+        Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running."))
+            .with_action(Action::StartDatabase)
     }
 
     /// `gh` is installed but not signed in.
@@ -197,6 +236,8 @@ pub enum Action {
     },
     /// Copy the message and details (for a bug report).
     CopyDetails,
+    /// Start the installed (but stopped) database server for the user.
+    StartDatabase,
     /// An action this build does not know (sent by a newer Kora). Never shown.
     #[serde(other)]
     Unknown,
@@ -227,6 +268,7 @@ impl Action {
             }
             Action::SignInGithub { .. } => Some("Sign in to GitHub: gh auth login".into()),
             Action::InstallTool { tool } => Some(format!("Install {}.", tool.label())),
+            Action::StartDatabase => Some("Start the database: kora check --start-database".into()),
             Action::RequestAdmin => Some("This needs administrator rights: run it again as administrator (root).".into()),
             _ => None,
         }

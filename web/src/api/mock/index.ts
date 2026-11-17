@@ -3,6 +3,9 @@
 import type * as T from '../types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
+import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, resetToolchainMock } from './toolchain'
+import { installKeysMock } from './keys'
+import { installBranchesMock } from './branches'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
@@ -51,11 +54,14 @@ function init(name: ScenarioName) {
   paidAssets = {}
   uploads = new Map()
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
+  resetBranches?.()
   jobs.clear()
   busy.clear()
   paused.clear()
+  keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
   nextId = 1
   consoleTick = 0
+  resetToolchainMock(beh.trouble)
 }
 
 class Fail extends Error {
@@ -149,6 +155,7 @@ const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, sta
 
 const detail = (s: T.ServerSummary): T.ServerDetail => ({
   ...s,
+  connect: `192.168.1.20:${s.ports.game}`,
   running: s.status === 'running',
   game_listening: s.status === 'running',
   txadmin_up: s.status === 'running',
@@ -302,7 +309,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     await sleep(step === 'build.fxserver' ? 1800 : 900)
     if (step === failAt) {
       emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier }
+      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null }
       const id = jobId()
       paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
       const common: Partial<T.JobError> = {
@@ -369,6 +376,8 @@ let lastHeaders = new Headers()
 /** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
 const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
+const keysMock = installKeysMock(route, Fail, () => servers)
+const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
 
@@ -407,7 +416,7 @@ route('POST', '/session/link', () => {
 route('GET', '/system', () => (beh.windows
   ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
   : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
-route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
+route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
     await sleep(1200)
@@ -795,18 +804,20 @@ route('POST', '/servers/{s}/pr', (m, b) => {
   if (!String(b.title ?? '').trim()) throw new Fail(400, 'bad_request', 'Give the pull request a title.')
   return { url: 'https://github.com/KoraFiveM/kora_core/pull/87' }
 })
-route('GET', '/github/status', () => {
-  // `trouble`: the GitHub CLI is not installed (told apart from "signed out").
-  if (beh.trouble) {
+const githubStatus = (): T.GithubStatus => {
+  // `trouble`: the GitHub CLI is not installed (told apart from "signed out") until the "Install it for me" button has run.
+  if (!mockGhInstalled()) {
     return {
       signed_in: false, user: null, state: 'gh_missing', missing_scopes: [],
       problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
-    } satisfies T.GithubStatus
+    }
   }
   return prefs.github
-    ? ({ signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null } satisfies T.GithubStatus)
-    : ({ signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } } satisfies T.GithubStatus)
-})
+    ? { signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null }
+    : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } }
+}
+route('GET', '/github/status', () => githubStatus())
+installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble, windows: () => beh.windows })
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
     await sleep(beh.trouble ? 3000 : 6000)
@@ -825,7 +836,7 @@ route('GET', '/artifacts', () => ({ recommended: 17000, items: [17200, 17100, 17
 route('GET', '/installs/defaults', () => {
   const taken = servers.map((s) => s.ports.game)
   const game = nextFree(30120, taken)
-  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall } satisfies T.InstallDefaults
+  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall && prefs.savedInstall.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { ...prefs.savedInstall, license_key_name: null } : prefs.savedInstall, profile: keysMock.profile(), resumable: [...paused.entries()].map(([job, p]) => ({ job, name: p.req.name, failed_step: p.failed })), ...(prefs.savedInstall?.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { saved_key_missing: prefs.savedInstall.license_key_name } : {}) } satisfies T.InstallDefaults
 })
 route('DELETE', '/installs/saved', () => {
   prefs.savedInstall = null
@@ -845,7 +856,7 @@ route('POST', '/checks/disk', (_m, b) => {
 })
 route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
-  if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.' }
+  if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() } satisfies T.DbLoginCheck
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
 })
 route('POST', '/checks/cfx', (_m, b) => {
@@ -854,7 +865,7 @@ route('POST', '/checks/cfx', (_m, b) => {
   const none = (message: string) => ({ ok: false, id: null, username: null, identifier: null, message }) satisfies T.CfxCheck
   if (beh.trouble) return none('forum.cfx.re did not answer. Check the internet connection and try again, or skip this step.')
   if (name.toLowerCase().includes('offline')) return none('Could not reach forum.cfx.re. Check the internet connection and try again, or skip this step.')
-  if (name.toLowerCase() === 'jsixty') return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck
+  if (name.toLowerCase() === 'jsixty') { keysMock.remember({ cfx_username: 'JSixty', cfx_identifier: 'fivem:4465268' }); return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck }
   return none(`No Cfx.re account called "${name}" was found. Check the spelling: it is the name on forum.cfx.re.`)
 })
 route('POST', '/installs/plan', (_m, b) => {
@@ -872,7 +883,9 @@ route('POST', '/installs/plan', (_m, b) => {
 })
 route('POST', '/installs', (_m, b) => {
   const r = b as unknown as T.InstallRequest
-  if (!r.license_key) throw new Fail(400, 'bad_request', 'A licence key is needed. Get one from the Cfx.re portal.')
+  if (!r.license_key && !r.license_key_name) throw new Fail(400, 'bad_request', 'A licence key is needed. Get one from the Cfx.re portal.')
+  keysMock.forInstall(r)
+  if (r.mode === 'development' && r.github_owner) keysMock.remember({ github_owner: r.github_owner })
   if (servers.some((s) => s.name === r.name)) throw new Fail(409, 'conflict', `A server called "${r.name}" already exists.`)
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)
@@ -928,7 +941,7 @@ route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.v
 route('PUT', '/app', (_m, b) => {
   prefs.shortcuts = true
   prefs.desktopShortcut = !!b.desktop_shortcut
-  if (beh.trouble) throw elevate('Your new Kora shortcuts are ready. Removing the old copy of Kora', ['app', 'uninstall', '--yes'])
+  if (beh.trouble) throw elevate('Your new Kora shortcuts are ready. Removing the old copy of Kora', ['uninstall', '--app', '--yes'])
   prefs.app = false
   return { message: 'Done. Kora now opens from your own shortcuts. Your servers were not touched.' }
 })
@@ -949,7 +962,7 @@ route('POST', '/uninstall/plan', (_m, b) => {
       { item: `${s.name}/database`, description: `Drop the database and database user Kora created for '${s.name}'`, kind: 'database', remove: false },
     )
   }
-  if (!only && prefs.app) items.push({ item: 'app', description: 'The Kora app (the `kora` command, shortcuts and the installed program)', kind: 'app', remove: false })
+  if (!only && prefs.app) items.push({ item: 'app', description: "Kora's shortcuts (and the old machine-wide Kora app, if it is still installed). Your servers are not touched", kind: 'app', remove: false })
   return { items } satisfies T.UninstallPlan
 })
 route('POST', '/uninstall', (_m, b) => {

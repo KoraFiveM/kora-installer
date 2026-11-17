@@ -123,6 +123,12 @@ pub struct ServerConfig {
     pub ensure: Vec<String>,
 }
 
+/// The shape of a Cfx.re licence key: 8 to 64 letters, digits, `-` or `_`. The key store checks keys with
+/// this too, so a key that is saved is one the installer accepts.
+pub fn license_key_ok(k: &str) -> bool {
+    (8..=64).contains(&k.len()) && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 fn free_text(field: &'static str, v: &str, max: usize) -> Result<()> {
     if v.trim().is_empty() {
         return invalid(field, "must not be empty");
@@ -169,8 +175,7 @@ impl ServerConfig {
         if self.game_build == 0 || self.game_build > 99_999 {
             return invalid("game_build", "out of range");
         }
-        let k = self.license_key.expose();
-        if k.len() < 8 || k.len() > 64 || !k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        if !license_key_ok(self.license_key.expose()) {
             return invalid("license_key", "unexpected format (letters, digits, '-', '_')");
         }
         self.db.validate()?;

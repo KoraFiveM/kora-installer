@@ -18,6 +18,7 @@ pub mod parity;
 pub mod panel_updates;
 pub mod ops;
 pub mod system;
+pub mod toolchain;
 
 pub use backend::{badge_of, Backend, Res, Status, StatusDetail, UpdateBadge};
 pub use dto::WebhookView;

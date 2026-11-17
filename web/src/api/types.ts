@@ -103,6 +103,11 @@ export interface ServerSummary {
   badge: Badge | null
   /** false = adopted (an existing server Kora did not install). */
   managed: boolean
+  /**
+   * `<this computer's network address>:<game port>`: what players on the same network type to join. Null when
+   * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
+   */
+  connect?: string | null
 }
 
 export interface ServerDetail extends ServerSummary {
@@ -110,8 +115,6 @@ export interface ServerDetail extends ServerSummary {
   game_listening: boolean
   txadmin_up: boolean
   console_enabled: boolean
-  /** Full address to connect with, when the server knows it. */
-  connect?: string
 }
 
 export type ControlAction = 'start' | 'stop' | 'restart'
@@ -140,6 +143,7 @@ export type ProblemAction =
   | { kind: 'open_link'; url: string }
   | { kind: 'open_log'; job?: string; path?: string }
   | { kind: 'copy_details' }
+  | { kind: 'start_database' }
 
 export type ProblemActionKind = ProblemAction['kind']
 
@@ -208,6 +212,10 @@ export interface InstallRequest {
   dir: string
   hostname: string
   license_key: string | null
+  /** Use the saved licence key with this name instead of carrying a key (the key is looked up by Kora). */
+  license_key_name?: string | null
+  /** With a pasted `license_key`: save it under this name for the next install. */
+  save_license_key_as?: string | null
   ports: Ports
   txadmin_public: boolean
   artifact_url: string | null
@@ -247,6 +255,12 @@ export interface InstallDefaults {
   ports: Ports
   /** Answers saved from an install that stopped part-way (never contains secrets). */
   saved: SavedInstall | null
+  /** What Kora remembers between installs (nothing secret). */
+  profile?: Profile
+  /** The saved answers name a saved licence key that no longer exists (its old name). */
+  saved_key_missing?: string
+  /** Stopped installs that can carry on, also after the panel was restarted. */
+  resumable?: { job: string; name: string; failed_step: string | null }[]
 }
 export type SavedInstall = Partial<Omit<InstallRequest, 'license_key' | 'db_admin'>>
 
@@ -269,6 +283,8 @@ export interface DiskCheck {
 export interface DbLoginCheck {
   ok: boolean
   message: string
+  /** A failed login on a database that is installed but stopped: carries the "Start it for me" button. */
+  problem?: Problem | null
 }
 /** Answer of `POST /checks/cfx` (HTTP 200 whether or not the account was found). */
 export interface CfxCheck {
@@ -375,7 +391,7 @@ export interface AddOutcome {
 
 // ---- updates --------------------------------------------------------------------------------
 
-export type ChangeStatus = 'up_to_date' | 'clean' | 'dirty' | 'diverged'
+export type ChangeStatus = 'up_to_date' | 'clean' | 'dirty' | 'diverged' | 'other_branch'
 export interface ResourceChange {
   id: string
   from: string
@@ -384,6 +400,8 @@ export interface ResourceChange {
   changelog: string[]
   needs_restart: boolean
   status: ChangeStatus
+  /** A plain sentence when this is not a normal update ("trying pull request #12; not updated"). */
+  note?: string
 }
 export interface UpdatePreview {
   resources: ResourceChange[]
@@ -753,3 +771,208 @@ export interface AssetImportReport {
 }
 
 export type AssetImportEvent = { type: 'status'; message: string } | { type: 'asset'; name: string; state: 'imported' }
+
+/** One tool of `GET /tools`: Git or the GitHub CLI, from this computer or Kora's own private copy. */
+export interface ToolStatus {
+  tool: 'git' | 'gh'
+  name: string
+  label: string
+  installed: boolean
+  version: string | null
+  source: 'system' | 'private' | null
+  path: string | null
+  /** Found, but it did not run. */
+  broken: boolean
+  /** Kora can download its own copy on this computer. */
+  can_install: boolean
+}
+
+export type CheckState = 'ok' | 'problem' | 'info'
+
+/** One line of the System check (`GET /system/check`). */
+export interface CheckItem {
+  id: 'git' | 'gh' | 'github' | 'database' | 'admin' | 'service'
+  label: string
+  state: CheckState
+  summary: string
+  /** What to do about it, with the fix buttons (null when fine). */
+  problem: Problem | null
+}
+
+export interface SystemCheck {
+  items: CheckItem[]
+  /** No line needs fixing. */
+  ok: boolean
+}
+
+/** Progress of an install-tool job (`message`, `fraction` 0..1). */
+export interface ToolInstallEvent {
+  type: 'progress' | 'status'
+  message: string
+  fraction?: number
+}
+
+// ---- saved licence keys and the remembered profile --------------------------------------------
+
+/** A saved key as the panel shows it: the name and the last four characters, never the key. */
+export interface SavedKeyInfo {
+  name: string
+  last4: string
+  /** Unix seconds (0 = unknown). */
+  added: number
+}
+export interface SavedKey extends SavedKeyInfo {
+  /** Servers whose configuration holds exactly this key. */
+  servers: string[]
+  /** Unfinished installs (and saved answers) that use it. */
+  stopped_installs: number
+}
+export interface SavedKeys {
+  keys: SavedKey[]
+  /** false: this sign-in can only pick from the saved names (admins and this computer manage them). */
+  can_manage: boolean
+  /** Where the file is (only told to the computer that runs Kora). */
+  path: string | null
+}
+export interface KeyChange {
+  key: SavedKeyInfo
+  notes: string[]
+}
+export interface ServerKeyChanged {
+  server: string
+  last4: string
+  /** The saved key it was set from (null: a pasted key that was not saved). */
+  key_name: string | null
+  running: boolean
+  restart_needed: boolean
+  message: string
+}
+export interface Profile {
+  cfx_username: string | null
+  cfx_identifier: string | null
+  github_owner: string | null
+}
+
+// ---- branches and pull requests (Development servers) ---------------------------------------
+
+export type BranchState = 'default' | 'branch' | 'pr' | 'detached' | 'pinned' | 'unavailable'
+
+/** Where one resource is: its branch, in plain words (`label`). */
+export interface ResourceBranch {
+  id: string
+  folder: string
+  state: BranchState
+  branch?: string
+  pr?: number
+  /** The normal branch, e.g. `dev`. */
+  default_branch: string
+  /** "the normal version (dev)", "pull request #12", "branch fix-hud". */
+  label: string
+  changed_count: number
+  /** Sets of changes Kora kept aside in this folder. */
+  stashes: number
+  note?: string
+  problem?: Problem
+}
+
+/** Changes Kora kept aside; `index` is what "bring them back" sends. */
+export interface BranchStash {
+  index: number
+  message: string
+  branch: string
+}
+
+export interface BranchLists {
+  current: string | null
+  default_branch: string
+  /** Branches in the folder, on the person's fork, and on the original repository. */
+  local: string[]
+  fork: string[]
+  upstream: string[]
+}
+
+export interface BranchChoices {
+  resource: ResourceBranch
+  branches: BranchLists
+  stashes: BranchStash[]
+  notes: string[]
+}
+
+export type PrSource = 'upstream' | 'fork'
+
+export interface PullRequest {
+  number: number
+  title: string
+  author: string
+  /** Which repository it is on: the original, or the person's fork. */
+  source: PrSource
+  repo: string
+  branch: string
+  /** Where its branch is; null when that fork was deleted. */
+  from: string | null
+  draft: boolean
+  url: string
+  updated: string
+}
+
+export interface PrChoices {
+  prs: PullRequest[]
+  notes: string[]
+}
+
+/** What to do with changes of the person's own that are in the way. `ask` = do nothing and say which files. */
+export type ChangesChoice = 'ask' | 'stash' | 'discard'
+
+export type SwitchRequest =
+  | { action: 'default'; changes?: ChangesChoice }
+  | { action: 'branch'; branch: string; remote?: 'origin' | 'upstream'; changes?: ChangesChoice }
+  | { action: 'pr'; pr: string | number; source?: PrSource; changes?: ChangesChoice }
+
+export interface SwitchResult {
+  resource: string
+  status: 'switched' | 'already' | 'needs_choice'
+  now: { kind: 'default' | 'branch' | 'pr' | 'detached'; branch: string | null; pr?: number; changed_files: string[]; changed_count: number }
+  stashed?: BranchStash
+  saved_branch?: string
+  /** The pull request's title. */
+  title?: string
+  message: string
+  /** Files changed: a running server still has the old version until it is restarted. */
+  needs_restart: boolean
+  restart_note?: string
+}
+
+export interface BulkRow {
+  id: string
+  has: boolean
+  from?: 'origin' | 'upstream'
+  already: boolean
+  now: string
+  changed_count: number
+  note?: string
+}
+export interface BulkPreview {
+  branch: string
+  rows: BulkRow[]
+  have: number
+  missing: number
+  notes: string[]
+}
+export type BulkStatus = 'switched' | 'already' | 'needs_choice' | 'skipped' | 'failed'
+export interface BulkItem {
+  id: string
+  status: BulkStatus
+  message: string
+  stashed?: BranchStash
+  files?: string[]
+  problem?: Problem
+}
+export interface BulkResult {
+  items: BulkItem[]
+  switched: number
+  needs_choice: number
+  failed: number
+  skipped: number
+  needs_restart: boolean
+  restart_note?: string
+}
