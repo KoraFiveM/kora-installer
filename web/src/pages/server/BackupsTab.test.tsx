@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import type { ReactElement } from 'react'
 import type { BackupInfo, BackupsView, Meta, RestorePreview, ServerDetail } from '@/api/types'
 import { jsonResponse } from '@/test/utils'
@@ -41,7 +42,7 @@ const preview = (o: Partial<RestorePreview> = {}): RestorePreview => ({ id: '202
 function renderAs(ui: ReactElement, meta?: Partial<Meta>) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   if (meta) qc.setQueryData(['meta'], { version: '0', api: 1, platform: 'linux', ops: [], node: 'n', ...meta })
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={qc}><MemoryRouter>{ui}</MemoryRouter></QueryClientProvider>)
 }
 
 const answers = (v: BackupsView, extra: (url: string, init?: RequestInit) => Response | undefined = () => undefined) =>
@@ -200,6 +201,25 @@ describe('BackupsTab', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(true))
     const post = fetchMock.mock.calls.find(([, i]) => i?.method === 'POST')!
     expect(JSON.parse(String(post[1].body))).toEqual({ passphrase: 'a long enough password', everything: false, stop_server: false, for_move: true })
+  })
+
+  it('suggests daily backups until a schedule exists, and turns them on only when asked', async () => {
+    const user = userEvent.setup()
+    answers(view(), (_u, init) => (init?.method === 'PUT' ? jsonResponse(200, JSON.parse(String(init.body))) : undefined))
+    renderAs(<BackupsTab server={server} />)
+    await user.click(await screen.findByRole('button', { name: 'Turn on daily backups' }))
+    expect(await screen.findByText('Daily backups are on')).toBeInTheDocument()
+    const put = JSON.parse(String(fetchMock.mock.calls.find(([, i]) => i?.method === 'PUT')![1].body))
+    expect(put.schedule).toEqual({ enabled: true, cadence: 'daily', time: '03:30' })
+    expect(put.retention.keep_last).toBe(7)
+  })
+
+  it('does not suggest what is already scheduled', async () => {
+    const sch = { enabled: true, cadence: 'daily' as const, time: '03:30' }
+    answers(view({ settings: { ...view().settings, schedule: sch } }))
+    renderAs(<BackupsTab server={server} />)
+    await screen.findByText(/A backup holds your secrets/)
+    expect(screen.queryByText('Back this server up every day?')).not.toBeInTheDocument()
   })
 })
 

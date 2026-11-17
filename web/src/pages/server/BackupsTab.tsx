@@ -19,6 +19,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { timeAgo } from '@/lib/ago'
 import { downloadFile } from '@/lib/download'
+import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { fileSize } from './PaidAssetsTab'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -435,6 +436,7 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
             </CardContent>
           </Card>
         )}
+        {v && !v.settings.schedule.enabled && <BackupSuggestion server={s.name} />}
         {undo && <UndoBanner server={s.name} undo={undo} onChanged={changed} onDismiss={() => setUndo(null)} canRestore={!whyAdmin} />}
         <MakeBackup server={s} onDone={changed} />
         <Card>
