@@ -216,8 +216,8 @@ mod tests {
                 "build.artifact",
                 "build.config",
                 "system.firewall",
-                "container.create",
                 "finalize",
+                "container.create",
                 "launch"
             ],
             "no `kora` account even when one would be planned, no service, no schedule"

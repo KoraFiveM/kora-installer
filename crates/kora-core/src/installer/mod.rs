@@ -305,9 +305,6 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
     if req.firewall {
         v.push(PlannedStep { id: "system.firewall", title: "Open the game port in the firewall", weight: 2, needs_admin: true, skippable: true });
     }
-    if container {
-        v.push(PlannedStep { id: "container.create", title: "Create the server's container", weight: 3, needs_admin: false, skippable: false });
-    }
     if req.service && !container {
         v.push(PlannedStep { id: "system.service", title: "Register the background service", weight: 2, needs_admin: true, skippable: false });
     }
@@ -315,6 +312,10 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
         v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true, skippable: true });
     }
     v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false, skippable: false });
+    // After `finalize`: the container is made from the server's saved record (its ports and FXServer build).
+    if container {
+        v.push(PlannedStep { id: "container.create", title: "Create the server's container", weight: 3, needs_admin: false, skippable: false });
+    }
     if req.start {
         v.push(PlannedStep { id: "launch", title: "Start your server", weight: 4, needs_admin: false, skippable: true });
     }

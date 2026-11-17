@@ -159,11 +159,31 @@ impl<'a> Manager<'a> {
         e.run_ok(self.runner, &want).map(|_| ()).map_err(|x| self.fail("create the server's container", x))
     }
 
-    /// Start the database container (creating nothing: it is made by the install).
+    /// Start the database container. One that is gone (removed by hand) is made again from the login in
+    /// `database.json`; its data is in the volume, so nothing is lost. A volume that is gone too is not made up:
+    /// a new empty database would not fit the saved login.
     pub fn start_db(&self) -> Result<(), Problem> {
         let Some(db) = &self.rec.db else { return Ok(()) };
-        if self.state_of(&db.container) == ContainerState::Running {
-            return Ok(());
+        match self.state_of(&db.container) {
+            ContainerState::Running => return Ok(()),
+            ContainerState::Missing => {
+                let engine = self.engine();
+                let volume_here = engine.run(self.runner, &engine::volume_inspect_args(&db.volume)).is_ok_and(|o| o.success());
+                let creds: Option<crate::db::Credentials> = std::fs::read(self.dir.join("database.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+                match (volume_here, creds) {
+                    (true, Some(c)) => super::dbc::create_container(self, &c, &mut |_| {})?,
+                    _ => {
+                        return Err(Problem::new(
+                            super::codes::DB_NOT_RUNNING,
+                            format!(
+                                "This server's database container ({}) is gone and so is its data volume or its login file. Restore a backup, or delete the server and install it again.",
+                                db.container
+                            ),
+                        ))
+                    }
+                }
+            }
+            _ => {}
         }
         self.engine().run_ok(self.runner, &engine::start_args(&db.container)).map(|_| ()).map_err(|x| self.fail("start the database container", x))
     }
@@ -212,6 +232,10 @@ impl<'a> Manager<'a> {
     /// Remove the game container only (stopping it first, whatever state it is in).
     pub fn remove_game(&self) -> Result<Vec<String>, Problem> {
         let mut done = Vec::new();
+        // A running server is stopped the proper way first (SIGTERM, the same grace period), then removed.
+        if self.state() == ContainerState::Running {
+            self.stop()?;
+        }
         self.gone(&mut done, &format!("the container {}", self.rec.container), engine::rm_args(&self.rec.container), self.state() != ContainerState::Missing)?;
         Ok(done)
     }
@@ -347,7 +371,8 @@ pub(crate) mod tests {
         let d = server_dir();
         let rec = sample();
         let r = FakeRunner::default();
-        // inspect of the containers: missing; images: present
+        // the database container exists (stopped); the game container does not; images: present
+        r.respond("State.Status}} kora-main-db", 0, "exited\n");
         r.respond("inspect --type container", 125, "");
         r.responses.borrow_mut().last_mut().unwrap().1.stderr = "Error: no such container".into();
         r.respond("network inspect", 0, "kora-main-net\n");
@@ -384,6 +409,47 @@ pub(crate) mod tests {
         let rm = calls.iter().position(|c| c == "podman rm -f -v kora-main").expect("old container removed");
         let create = calls.iter().position(|c| c.starts_with("podman create --name kora-main ")).expect("new one created");
         assert!(rm < create);
+    }
+
+    #[test]
+    fn a_missing_database_container_is_made_again_from_its_login_and_volume_but_never_without_them() {
+        let d = server_dir();
+        let rec = sample();
+        let creds = crate::container::dbc::game_credentials("main", "kora_ab12cd34", "kora_ab12cd34", &crate::db::Secret::new("pw-1"));
+        std::fs::write(d.path().join("database.json"), serde_json::to_vec(&creds).unwrap()).unwrap();
+        let r = FakeRunner::default();
+        r.respond("State.Status}} kora-main-db", 125, "");
+        r.responses.borrow_mut().last_mut().unwrap().1.stderr = "Error: no such container".into();
+        r.respond("volume inspect", 0, "kora-main-dbdata\n");
+        r.respond("network inspect", 0, "kora-main-net\n");
+        Manager::new(d.path(), &rec, &r).start_db().unwrap();
+        let calls = r.calls();
+        assert!(calls.iter().any(|c| c.starts_with("podman create --name kora-main-db ")), "{calls:#?}");
+        assert!(calls.last().unwrap() == "podman start kora-main-db", "{calls:#?}");
+        assert!(!d.path().join(".kora/db-init.env").exists());
+
+        // no volume: a new empty database would not fit the saved login
+        let r = FakeRunner::default();
+        r.respond("State.Status}} kora-main-db", 125, "");
+        r.responses.borrow_mut().last_mut().unwrap().1.stderr = "Error: no such container".into();
+        r.respond("volume inspect", 1, "");
+        let e = Manager::new(d.path(), &rec, &r).start_db().unwrap_err();
+        assert!(e.message.contains("is gone"), "{}", e.message);
+        assert!(!r.calls().iter().any(|c| c.contains(" create ")));
+    }
+
+    #[test]
+    fn removing_a_running_game_container_stops_it_properly_first() {
+        let d = server_dir();
+        let rec = sample();
+        let r = FakeRunner::default();
+        r.respond("State.Status}} kora-main\n", 0, "running\n");
+        r.respond("State.Status", 0, "running\n");
+        Manager::new(d.path(), &rec, &r).remove_game().unwrap();
+        let calls = r.calls();
+        let stop = calls.iter().position(|c| c == "podman stop -t 30 kora-main").expect("stopped gracefully");
+        let rm = calls.iter().position(|c| c == "podman rm -f -v kora-main").expect("then removed");
+        assert!(stop < rm, "{calls:#?}");
     }
 
     #[test]
