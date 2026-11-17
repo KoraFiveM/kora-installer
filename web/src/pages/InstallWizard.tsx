@@ -228,6 +228,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
   const ports = usePortsCheck(f.game, f.tx)
   const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
+  /** Windows: the panel can ask Windows for permission itself ("Ask again" / "Ask for administrator permission"). */
+  const canAsk = !!useQuery({ queryKey: ['system'], queryFn: api.system, staleTime: 60_000 }).data?.admin_prompt
 
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
   const req = buildRequest(f, { artifactUrl: artUrl })
@@ -284,7 +286,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     change_answers: (a) => changeAnswers(a.section),
     sign_in_github: () => setGithubAsked(true),
     // Windows said no (or nobody answered): ask again, or carry on as you, keeping what was done.
-    request_admin: () => resume(undefined, { askAdmin: true }),
+    ...(canAsk ? { request_admin: () => resume(undefined, { askAdmin: true }) } : {}),
     continue_without_admin: async () => {
       setF(withoutAdmin(f))
       if (run.error?.resume) return resume(undefined, { withoutAdmin: true })
@@ -296,7 +298,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.mode)) },
     continue_without_admin: () => { setStartErr(null); setF(withoutAdmin(f)); setEditing(null) },
     // A remote session: Windows only asks when the person says so.
-    request_admin: () => start({ askAdmin: true }),
+    ...(canAsk ? { request_admin: () => start({ askAdmin: true }) } : {}),
     sign_in_github: () => { setStartErr(null); setEditing(f.mode === 'development' ? 'github' : null) },
   }
 

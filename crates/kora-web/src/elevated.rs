@@ -252,6 +252,13 @@ pub fn privileged_as(ask: AdminAsk, what: &str, message: &str, command: Vec<Stri
     }
 }
 
+/// Windows: start (`"start"`) or install (`"install"`) Kora's own MariaDB through the worker, one
+/// prompt (for the panel's "Start database for me"). Elsewhere: the `needs_elevation` answer.
+pub fn admin_db(ask: AdminAsk, action: &str, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
+    let what = if action == "install" { "install Kora's own database server" } else { "start Kora's own database server" };
+    privileged_as(ask, what, "Starting the database server needs administrator rights. Run this command as administrator:", vec!["kora".into(), "admin-db".into(), action.into()], vec![], on_line)
+}
+
 /// The install's (or a delete's) administrator steps through one worker session: opened on first
 /// use (or up front with [`WorkerAdmin::open`]), reused for every later step, closed when dropped.
 pub struct WorkerAdmin {

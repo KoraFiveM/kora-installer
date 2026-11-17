@@ -79,8 +79,9 @@ use crate::problem::{codes, Action, Problem};
 
 /// The top-level `kora` subcommands the worker runs: the Linux helper's, without `install` (on
 /// Windows the install runs as the person and only its administrator steps come here), plus
-/// `admin-step` (one administrator step of an install or a delete).
-pub const WORKER_VERBS: &[&str] = &["self-update", "schedule", "app", "uninstall", "admin-step"];
+/// `admin-step` (one administrator step of an install or a delete) and `admin-db` (start or install
+/// Kora's own MariaDB outside an install).
+pub const WORKER_VERBS: &[&str] = &["self-update", "schedule", "app", "uninstall", "admin-step", "admin-db"];
 /// Panel → worker: the person's Kora folder (`args: ["--kora-home", path]`).
 pub const SESSION: &str = "session";
 /// Panel → worker: that was all, exit.

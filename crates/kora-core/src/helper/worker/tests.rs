@@ -112,9 +112,11 @@ mod stream {
     use std::sync::{Arc, Mutex};
 
 
+    type Call = (Vec<String>, Vec<(String, String)>);
+
     #[derive(Default)]
     struct Fake {
-        calls: Mutex<Vec<(Vec<String>, Vec<(String, String)>)>>,
+        calls: Mutex<Vec<Call>>,
         code: i32,
     }
 

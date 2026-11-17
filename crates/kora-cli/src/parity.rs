@@ -194,6 +194,8 @@ const TABLE: &[(&str, Entry)] = &[
     ("admin-worker --pipe", CliOnly("Windows: started elevated by the panel itself through the permission prompt, never by a person")),
     ("admin-worker --parent", CliOnly("Windows: started elevated by the panel itself through the permission prompt, never by a person")),
     ("admin-worker --selftest", CliOnly("a check for the Windows smoke tests on an already elevated CI account")),
+    ("admin-db", CliOnly("Windows: run by the panel's administrator helper (\"Start database for me\"), never by a person")),
+    ("admin-db <action>", CliOnly("Windows: run by the panel's administrator helper (\"Start database for me\"), never by a person")),
     ("admin-step", CliOnly("run by the panel's administrator helper for one install or delete step, never by a person")),
     ("admin-step <action>", CliOnly("run by the panel's administrator helper for one install or delete step, never by a person")),
     ("admin-step --step", CliOnly("run by the panel's administrator helper for one install or delete step, never by a person")),

@@ -40,6 +40,27 @@ pub struct AdminStepArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct AdminDbArgs {
+    /// `start` Kora's own MariaDB, or `install` it when it is not there yet.
+    #[arg(value_parser = ["start", "install"])]
+    pub action: String,
+}
+
+/// `kora admin-db start|install` (Windows, run by the administrator helper).
+pub fn admin_db(a: &AdminDbArgs) -> i32 {
+    match system_ops::db_server(&a.action, &mut |l| println!("{l}")) {
+        Ok(m) => {
+            println!("{m}");
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
+            1
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct AdminWorkerArgs {
     /// The panel's pipe.
     #[arg(long, required_unless_present = "selftest")]
@@ -127,6 +148,7 @@ pub fn worker_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&Path
             }
             check_dir(&a.dir)
         }
+        Some(Command::AdminDb(_)) if verb == "admin-db" => Ok(()),
         Some(Command::SelfUpdate { version: Some(v), .. })
             if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) =>
         {
@@ -160,6 +182,8 @@ mod tests {
             ("app", vec!["uninstall", "--yes"]),
             ("uninstall", vec!["--yes"]),
             ("self-update", vec!["--yes"]),
+            ("admin-db", vec!["start"]),
+            ("admin-db", vec!["install"]),
         ] {
             assert!(v(verb, &args).is_ok(), "{verb} {args:?}");
         }
@@ -179,6 +203,8 @@ mod tests {
             ("helper", vec!["install"]),
             ("self-update", vec!["--version", "0.0.1", "--yes"]),
             ("cmd.exe", vec!["/c", "whoami"]),
+            ("admin-db", vec!["drop"]),
+            ("admin-db", vec!["start", "--other"]),
         ] {
             assert!(v(verb, &args).is_err(), "{verb} {args:?}");
         }

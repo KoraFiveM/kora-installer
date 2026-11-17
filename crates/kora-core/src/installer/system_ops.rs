@@ -167,10 +167,41 @@ pub fn delete_needs_admin(created: Option<&Created>, has_db_state: bool, keep_db
     system || (has_db_state && !keep_db && db_with_helper)
 }
 
-/// [`delete_needs_admin`] for the server folder `dir` on this machine.
+/// [`delete_needs_admin`] for the server folder `dir` on this machine. The database goes to the
+/// helper only when the install used Kora's own login (no login was typed, none is given now).
 pub fn delete_needs_admin_at(dir: &Path, keep_db: bool, password_given: bool) -> bool {
     let has_db = super::meta_dir(dir).join("db-provision.json").is_file();
-    delete_needs_admin(super::load_created_from(dir).as_ref(), has_db, keep_db, cfg!(windows) && !password_given)
+    let own_login = load_request_from(dir).is_some_and(|r| r.db_admin.is_none());
+    delete_needs_admin(super::load_created_from(dir).as_ref(), has_db, keep_db, cfg!(windows) && !password_given && own_login)
+}
+
+/// `kora admin-db start|install`: Kora's own MariaDB on Windows, outside an install (the panel's
+/// "Start database for me"). `start` starts its service and waits until it takes logins; `install`
+/// sets it up when it is not there yet. Run by the administrator helper.
+pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
+    use super::windows_db;
+    if crate::db::Os::current() != crate::db::Os::Windows {
+        return Err(InstallError("Kora manages its own database server only on Windows.".into()));
+    }
+    match action {
+        "start" => {
+            let rec = windows_db::saved_record().ok_or_else(|| InstallError("Kora's own database server (MariaDB) is not installed on this computer.".into()))?;
+            say(&format!("Starting Kora's MariaDB service {}", rec.service));
+            windows_db::ensure_running(&rec)?;
+            if let Some(a) = windows_db::saved_admin() {
+                windows_db::wait_for_login(&a.to_conn(), std::time::Duration::from_secs(90))?;
+            }
+            Ok(format!("Kora's MariaDB ({}) is running", rec.service))
+        }
+        "install" => {
+            if let Some(rec) = windows_db::saved_record() {
+                return Ok(format!("Kora's MariaDB {} is already installed ({})", rec.version, rec.service));
+            }
+            let rec = windows_db::install(&Hooks::from_env().http, say)?;
+            Ok(format!("Kora installed its own MariaDB {} as the Windows service '{}'", rec.version, rec.service))
+        }
+        other => Err(InstallError(format!("'{other}' is not something Kora's administrator helper does with the database server"))),
+    }
 }
 
 /// `kora admin-step`: run (or undo) one administrator step for the server in `dir`, in THIS
@@ -276,6 +307,12 @@ mod tests {
         assert!(delete_needs_admin(Some(&none), true, false, true), "Kora's MariaDB login");
         assert!(!delete_needs_admin(Some(&none), true, true, true), "the database is kept");
         assert!(!delete_needs_admin(Some(&none), true, false, false), "a password was given");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_database_server_commands_are_windows_only() {
+        assert!(db_server("start", &mut |_| {}).is_err());
     }
 
     #[test]

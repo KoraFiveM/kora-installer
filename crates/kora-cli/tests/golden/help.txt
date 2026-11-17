@@ -102,14 +102,14 @@ Options:
       --start
           Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --no-start
           Do not start the server after installing (start it later with `kora start <name>`)
 
       --dry-run
           Show the full plan and change nothing
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --auto-ports
           If a port is in use, silently use the next free one and say what changed
@@ -1052,6 +1052,24 @@ Options:
       --keep-db
           
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora admin-db =====
+Start (or install) Kora's own MariaDB on Windows, run by that helper
+
+Usage: kora admin-db [OPTIONS] <ACTION>
+
+Arguments:
+  <ACTION>
+          `start` Kora's own MariaDB, or `install` it when it is not there yet
+          
+          [possible values: start, install]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
