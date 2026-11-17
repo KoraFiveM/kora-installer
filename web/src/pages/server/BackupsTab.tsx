@@ -23,7 +23,7 @@ import { downloadFile } from '@/lib/download'
 import { browseForFolder, inShell } from '@/lib/shell'
 import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { fileSize } from './PaidAssetsTab'
-import { t, msg, type Msg } from '@/i18n'
+import { t, msg, type Msg, unix as unixToDate } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/backups'
 
@@ -33,8 +33,8 @@ const MIN_PASSWORD = 8
 /** What the backup file holds. Said before and after every backup, in plain words. */
 export const SECRETS_NOTE = msg('backups.backupsTab.backupHoldsSecretsLicence')
 
-function when(unix: number): string {
-  return `${new Date(unix * 1000).toLocaleString()} (${timeAgo(unix * 1000, Date.now())})`
+function when(seconds: number): string {
+  return t('backups.backupsTab.whenAgo', { when: unixToDate(seconds), ago: timeAgo(seconds * 1000, Date.now()) })
 }
 
 function latestPercent(events: BackupEvent[]): { percent: number; message: string } {

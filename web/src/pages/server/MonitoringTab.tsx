@@ -14,7 +14,7 @@ import { Field } from '@/components/Field'
 import { LineChart } from '@/components/LineChart'
 import { Skeleton } from '@/components/Skeleton'
 import { cn } from '@/lib/utils'
-import { t as tt, msg, type Msg } from '@/i18n'
+import { t as tt, msg, type Msg, fmt } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/servers'
 
@@ -25,8 +25,8 @@ const RANGES: { id: MetricsRange; label: Msg }[] = [
   { id: '24h', label: msg('servers.monitoringTab.lastHours2') },
 ]
 
-const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`
-const mbText = (mb: number) => (mb >= 1024 ? gb(mb) : `${Math.round(mb)} MB`)
+const gb = (mb: number) => fmt.bytes(mb * 1_000_000)
+const mbText = (mb: number) => fmt.bytes(mb * 1_000_000)
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -43,7 +43,7 @@ function Current({ s }: { s: MetricSample | null }) {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       <Stat label={tt('servers.monitoringTab.players')} value={s?.players === undefined ? dash : String(s.players)} hint={s?.max_players ? tt('servers.monitoringTab.maxPlayers', { max_players: s.max_players }) : undefined} />
-      <Stat label={tt('servers.monitoringTab.serverCpu')} value={s?.cpu === undefined ? dash : `${s.cpu.toFixed(1)}%`} hint={tt('servers.monitoringTab.wholeMachine')} />
+      <Stat label={tt('servers.monitoringTab.serverCpu')} value={s?.cpu === undefined ? dash : fmt.percent(s.cpu)} hint={tt('servers.monitoringTab.wholeMachine')} />
       <Stat label={tt('servers.monitoringTab.serverMemory')} value={s?.ram_mb === undefined ? dash : mbText(s.ram_mb)} hint={s?.sys_ram_pct === undefined ? undefined : tt('servers.monitoringTab.roundMachineUse', { round: Math.round(s.sys_ram_pct) })} />
       <Stat label={tt('servers.monitoringTab.freeDiskSpace')} value={s?.disk_free_mb === undefined ? dash : gb(s.disk_free_mb)} hint={s?.disk_free_pct === undefined ? undefined : tt('servers.monitoringTab.roundFree', { round: Math.round(s.disk_free_pct) })} />
     </div>
@@ -68,7 +68,7 @@ function Charts({ name, range }: { name: string; range: MetricsRange }) {
       {samples.length === 0 && <p className="text-sm text-muted-foreground">{tt('servers.monitoringTab.nothingBeenMeasuredYet')}</p>}
       <div className="grid gap-5 lg:grid-cols-2">
         <LineChart title={tt('servers.monitoringTab.players')} points={series((s) => s.players)} format={(v) => String(Math.round(v))} tone="text-info" />
-        <LineChart title={tt('servers.monitoringTab.serverCpuPercentMachine')} points={series((s) => s.cpu)} max={100} format={(v) => `${v.toFixed(0)}%`} tone="text-amber" />
+        <LineChart title={tt('servers.monitoringTab.serverCpuPercentMachine')} points={series((s) => s.cpu)} max={100} format={(v) => fmt.percent(v, 0)} tone="text-amber" />
         <LineChart title={tt('servers.monitoringTab.serverMemory')} points={series((s) => s.ram_mb)} format={(v) => mbText(v)} tone="text-success" className="lg:col-span-2" />
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import { t as tt } from '@/i18n'
+import { t as tt, fmt, unix } from '@/i18n'
 import '@/i18n/en/core'
 
 export interface ChartPoint {
@@ -69,9 +69,9 @@ export function LineChart({ title, points, max, format, tone = 'text-info', clas
         )}
       </svg>
       <div className="flex justify-between text-[11px] text-muted-foreground">
-        <span>{points.length ? new Date(t0 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+        <span>{points.length ? fmt.time(unix(t0)) : ''}</span>
         <span>{tt('core.lineChart.topScaleFormat', { format: format(top) })}</span>
-        <span>{points.length ? new Date(t1 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+        <span>{points.length ? fmt.time(unix(t1)) : ''}</span>
       </div>
     </figure>
   )

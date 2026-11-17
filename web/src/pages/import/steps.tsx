@@ -17,7 +17,7 @@ import { Announcer, progressSentence } from '@/components/Announcer'
 import { Progress } from '@/components/ui/progress'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { t, msg } from '@/i18n'
+import { t, msg, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/backups'
 
@@ -65,7 +65,7 @@ export function FileStep({ local, busy, error, archived, onFile, onPath, onArchi
             {archived.flatMap((a) => a.backups.map((b) => (
               <li key={`${a.name}-${a.deleted_unix}-${b.id}`} className="flex flex-wrap items-center gap-2 p-2 text-sm">
                 <span className="font-medium">{a.name}</span>
-                <span className="text-xs text-muted-foreground">{t('backups.steps.backupTolocalestringValue', { toLocaleString: new Date(b.created_unix * 1000).toLocaleString(), value: b.encrypted ? t('backups.steps.passwordProtected') : '' })}</span>
+                <span className="text-xs text-muted-foreground">{t(b.encrypted ? 'backups.steps.backupOfProtected' : 'backups.steps.backupOf', { when: unix(b.created_unix) })}</span>
                 <Button size="sm" className="ml-auto" disabled={busy} onClick={() => onArchived(a, b.id)}>{t('backups.steps.restoreNewServer')}</Button>
               </li>
             )))}

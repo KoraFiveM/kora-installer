@@ -12,22 +12,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { timeAgo } from '@/lib/ago'
-import { t, msg, type Msg } from '@/i18n'
+import { t, msg, type Msg, fmt, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/resources'
 
 export const PORTAL_URL = 'https://portal.cfx.re/assets/granted-assets'
 
-/** `1.5 MB`-style size. */
+/** `1.5 MB`-style size, in the current language. */
 export function fileSize(n: number): string {
-  const units = ['bytes', 'KB', 'MB', 'GB']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return i === 0 ? `${n} bytes` : `${v.toFixed(1)} ${units[i]}`
+  return fmt.bytes(n)
 }
 
 const HINT_TITLE: Record<AssetHint['kind'], Msg> = {
@@ -191,7 +184,7 @@ function AssetRow({ server, asset: a, canChange, onReplace, onRemoved }: { serve
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs">{a.name}</span>
         {a.version && <Badge tone="plain">{t('resources.paidAssetsTab.versionVersion', { version: a.version })}</Badge>}
-        {a.imported_unix && <span className="text-xs text-muted-foreground">{t('resources.paidAssetsTab.importedTolocaledatestring', { toLocaleDateString: new Date(a.imported_unix * 1000).toLocaleDateString() })}</span>}
+        {a.imported_unix && <span className="text-xs text-muted-foreground">{t('resources.paidAssetsTab.importedTolocaledatestring', { when: unix(a.imported_unix) })}</span>}
         {!a.present && <Badge tone="danger">{t('resources.paidAssetsTab.folderMissing')}</Badge>}
         {a.present && !a.has_fxap && <Badge tone="amber">{t('resources.paidAssetsTab.noFxapFile')}</Badge>}
         {canChange && (

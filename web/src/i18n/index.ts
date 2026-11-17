@@ -19,6 +19,30 @@ export type { MessageId, MessageParams, PlainId, RichId } from './types'
 export { LOCALES, offered, infoOf, DEFAULT_LOCALE } from './locales'
 export { intlFor, clock } from './format'
 
+/**
+ * Numbers, sizes, dates and times for the current language, through `Intl`. Use these instead of `toFixed`, `toLocaleString`
+ * or hand-made "5 minutes ago" text. Unix seconds are what the server sends: `unix()` turns them into a Date.
+ */
+export const fmt = {
+  number: (n: number) => intlFor(current).number(n),
+  /** 152 kB, 1.5 GB (the unit and the decimal mark follow the language). */
+  bytes: (n: number) => intlFor(current).bytes(n),
+  date: (d: Date | number) => intlFor(current).date(d, 'date'),
+  time: (d: Date | number) => intlFor(current).date(d, 'time'),
+  dateTime: (d: Date | number) => intlFor(current).date(d, 'datetime'),
+  /** "3 days ago", "in 5 minutes". `now` (ms) defaults to the clock. */
+  relative: (d: Date | number, now?: number) => intlFor(current).relative(d, now),
+  /** "1h 5m". */
+  duration: (seconds: number) => intlFor(current).duration(seconds),
+  list: (items: string[]) => intlFor(current).list(items),
+  /** A percentage like 12.5% (the argument is 0-100). */
+  percent: (n: number, digits = 1) => new Intl.NumberFormat(intlLocale(current), { style: 'percent', maximumFractionDigits: digits }).format(n / 100),
+  /** A decimal with a fixed number of digits (the language's own decimal mark). */
+  fixed: (n: number, digits: number) => new Intl.NumberFormat(intlLocale(current), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n),
+}
+/** Unix seconds (what the server sends) as a Date. */
+export const unix = (seconds: number): Date => new Date(seconds * 1000)
+
 type Table = Record<string, string>
 
 const tables = new Map<string, Table>()

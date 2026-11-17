@@ -170,7 +170,7 @@ export function UpdatesPanel({ server: s, updates: u }: { server: ServerDetail; 
                   <ul className="divide-y divide-border" aria-label={tt('resources.updatesPanel.resourcesUpdates')}>
                     {pending.map((r) => <ChangeRow key={r.id} r={r} selected={u.selected.has(r.id)} onToggle={() => u.toggle(r.id)} onCheck={() => void u.checkOne(r.id)} checking={u.checkingRow === r.id} disabled={busy || noOperator !== null} checkedAt={u.checkedAt[r.id]} now={now} progress={rowCheckProgress(r.id, u.checkingRow, u.rowCheck.events)} />)}
                   </ul>
-                  {upToDate > 0 && <p className="text-xs text-muted-foreground">{tt('resources.updatesPanel.uptodateOtherResourceValue', { upToDate, value: upToDate === 1 ? ' is' : 's are' })}</p>}
+                  {upToDate > 0 && <p className="text-xs text-muted-foreground">{tt('resources.updatesPanel.uptodateOtherResourceValue', { upToDate })}</p>}
                 </>
               )}
               {u.clean.length > 0 && (

@@ -68,6 +68,16 @@ function endsInValuePosition(n: ts.Node): boolean {
   return false
 }
 
+/** A plain-word fragment: at least two words (one for a template with a hole), no code characters. */
+export function fragment(text: string, template: boolean): boolean {
+  const t = text.trim()
+  if (/[/\\=<>{}$_@#]|\.[a-z]|[a-z]-[a-z0-9]|[0-9]-[a-z]|:\/\//.test(t)) return false
+  const w = words(t)
+  if (w.length < (template ? 2 : 2)) return false
+  if (w.every((x) => PROPER.test(x))) return false
+  return /^[A-Za-z][A-Za-z' ,.:;!?()%0-9-]*$/.test(t) && /\s/.test(t)
+}
+
 /** A value in a table of words for people: "Running", "Not allowed", "Needs a restart". */
 export function tableValue(text: string): boolean {
   return /^[A-Z][a-z]+( [A-Za-z']+)*[.!?]?$/.test(text.trim()) && !PROPER.test(text.trim())
@@ -114,7 +124,7 @@ export function scanSource(file: string, source: string): Finding[] {
       const check = (e: ts.Node, kind: Finding['kind']) => {
         const text = literalText(e)
         if (text === null) return
-        if (USER_ATTRS.has(name) ? looksLikeText(text, false) : !NOT_TEXT_ATTRS.has(name) && !name.startsWith('data-') && looksLikeText(text, true)) add(e, text, kind)
+        if (USER_ATTRS.has(name) ? looksLikeText(text, false) : !NOT_TEXT_ATTRS.has(name) && !name.startsWith('data-') && (looksLikeText(text, true) || fragment(text, ts.isTemplateExpression(e)))) add(e, text, kind)
       }
       if (init && (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init))) check(init, 'jsx-attr')
       else if (init && ts.isJsxExpression(init) && init.expression) leaves(init.expression, (l) => check(l, 'jsx-attr'))
@@ -137,6 +147,8 @@ export function scanSource(file: string, source: string): Finding[] {
       if (!skip && text !== null && !inJsx(n) && looksLikeText(text, true)) add(n, text, 'string')
       // A label in a table of labels: one capitalised word is enough ({ running: 'Running' }).
       else if (!skip && text !== null && endsInValuePosition(n) && tableValue(text)) add(n, text, 'string')
+      // Lowercase fragments of a sentence ("a while ago", "was added.", " is up to date"): two or more plain words.
+      else if (!skip && text !== null && !inJsx(n) && fragment(text, ts.isTemplateExpression(n))) add(n, text, 'string')
     }
     ts.forEachChild(n, visit)
   }

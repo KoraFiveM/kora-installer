@@ -30,8 +30,6 @@ const messages = {
   'core.status.folderMissing': 'Folder missing',
   'core.status.notChecked': 'Not checked',
   'core.status.upDate': 'Up to date',
-  'core.status.update': '1 update',
-  'core.status.valueUpdates': '{value} updates',
   'core.status.needsAttention': 'Needs attention',
   'core.status.newRelease': 'New release',
   'core.status.plainCopiesOriginalRepositorie': 'Plain copies of the original repositories',
@@ -135,6 +133,8 @@ const messages = {
   'core.useServerControl.stopping': 'Stopping',
   'core.useServerControl.restarting': 'Restarting',
   'core.store.someone': 'someone',
+  'core.status.updates': '{count, plural, one {# update} other {# updates}}',
+  'core.notNormalBadge.summary': '{count, plural, one {# resource not on its normal version} other {# resources not on their normal version}}',
 } as const
 
 register('en', messages)

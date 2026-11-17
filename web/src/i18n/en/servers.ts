@@ -1,8 +1,6 @@
 import { register } from '../index'
 
 const messages = {
-  'servers.serversPage.alert': '1 alert',
-  'servers.serversPage.alertsAlerts': '{alerts} alerts',
   'servers.serversPage.addedFromExistingFolder': 'Added from an existing folder',
   'servers.serversPage.yourServers': 'Your servers',
   'servers.serversPage.refreshcwNodeRefresh': '{refreshCw, node} Refresh',
@@ -13,8 +11,6 @@ const messages = {
   'servers.serversPage.healthSummary': 'Health summary',
   'servers.serversPage.runningRunning': '{running} running',
   'servers.serversPage.stoppedStopped': '{stopped} stopped',
-  'servers.serversPage.alertNeedsAttention': '1 alert needs attention',
-  'servers.serversPage.countAlertsNeedAttention': '{count} alerts need attention',
   'servers.serversPage.noAlerts': 'No alerts',
   'servers.serversPage.gamePort': 'Game port',
   'servers.serversPage.lastBackup': 'Last backup',
@@ -75,9 +71,9 @@ const messages = {
   'servers.monitoringTab.serverCpu': 'Server CPU',
   'servers.monitoringTab.wholeMachine': 'of the whole machine',
   'servers.monitoringTab.serverMemory': 'Server memory',
-  'servers.monitoringTab.roundMachineUse': '{round}% of the machine in use',
+  'servers.monitoringTab.roundMachineUse': '{round, number}% of the machine in use',
   'servers.monitoringTab.freeDiskSpace': 'Free disk space',
-  'servers.monitoringTab.roundFree': '{round}% free',
+  'servers.monitoringTab.roundFree': '{round, number}% free',
   'servers.monitoringTab.noDataYet': 'No data yet',
   'servers.monitoringTab.running': 'Running',
   'servers.monitoringTab.stopped': 'Stopped',
@@ -252,8 +248,6 @@ const messages = {
   'servers.fleetPage.online': 'Online',
   'servers.fleetPage.notReachable': 'Not reachable',
   'servers.fleetPage.viewOnlyUpdateControl': 'View only: update it to control it',
-  'servers.fleetPage.server': '1 server',
-  'servers.fleetPage.serverCountServers': '{server_count} servers',
   'servers.fleetPage.removeName': 'Remove {name}',
   'servers.fleetPage.trashNodeRemove': '{trash2, node} Remove',
   'servers.fleetPage.fleet': 'Fleet',
@@ -336,6 +330,9 @@ const messages = {
   'servers.monitoringTab.lastHours': 'Last 6 hours',
   'servers.monitoringTab.lastHours2': 'Last 24 hours',
   'servers.reachCard.ok': 'OK',
+  'servers.serversPage.alertsCount': '{count, plural, one {# alert} other {# alerts}}',
+  'servers.serversPage.alertsNeedAttention': '{count, plural, one {# alert needs attention} other {# alerts need attention}}',
+  'servers.fleetPage.serversCount': '{count, plural, one {# server} other {# servers}}',
 } as const
 
 register('en', messages)

@@ -32,7 +32,7 @@ export function BranchesPanel({ server: s }: { server: ServerDetail }) {
           <ErrorNotice error={b.error} onRetry={() => void b.refetch()} />
           {b.isLoading && <p className="text-sm text-muted-foreground" role="status">{t('resources.branchesPanel.lookingResources')}</p>}
           {away.length > 0 && (
-            <Alert tone="warning" title={t('resources.branchesPanel.countResourceValueNormal', { count: away.length, value: away.length === 1 ? ' is' : 's are' })}>{t('resources.branchesPanel.updatesLeaveValueAlone', { value: away.length === 1 ? 'it' : 'them', value2: away.length === 1 ? 'it goes' : 'they go' })}</Alert>
+            <Alert tone="warning" title={t('resources.branchesPanel.countResourceValueNormal', { count: away.length })}>{t('resources.branchesPanel.updatesLeaveValueAlone', { count: away.length })}</Alert>
           )}
           {!b.isLoading && !b.error && rows.length === 0 && <p className="text-sm text-muted-foreground">{t('resources.branchesPanel.noneServersResourcesChange')}</p>}
           <ul className="divide-y divide-border" aria-label={t('resources.branchesPanel.resourcesTheirBranches')}>

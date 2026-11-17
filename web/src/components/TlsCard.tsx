@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { t, msg, type Msg } from '@/i18n'
+import { t, msg, type Msg, fmt, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/settings'
 
@@ -25,8 +25,8 @@ const TRUST_STEPS = [
   [msg('settings.tlsCard.platformMobile'), msg('settings.tlsCard.sendFileDeviceOpen')],
 ]
 
-function when(unix: number): string {
-  return new Date(unix * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+function when(seconds: number): string {
+  return fmt.date(unix(seconds))
 }
 
 /** Settings > HTTPS: which certificate the panel uses, until when, its fingerprint, renew now. */

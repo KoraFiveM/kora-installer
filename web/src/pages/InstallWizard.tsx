@@ -392,7 +392,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const waiting: StepId[] = ports.state === 'checking' && !validatePorts(f.game, f.tx) ? ['ports'] : []
   const toFix = (Object.keys(problems) as StepId[]).filter((s) => !waiting.includes(s))
   const installBlocked = toFix.length > 0
-    ? (toFix.length === 1 ? t('install.installWizard.serverCannotInstalledYet') : t('install.installWizard.serverCannotInstalledYet2', { count: toFix.length }))
+    ? t('install.installWizard.serverCannotInstalledYet', { count: toFix.length })
     : !diskOk ? t('install.installWizard.serverCannotInstalledYet3') : null
   const switchFlow = (all: boolean) => { setEveryStep(all); setEditing(null); setStep(0) }
   return (

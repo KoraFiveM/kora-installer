@@ -152,7 +152,7 @@ function NodeCard({ n, onRemove }: { n: HubNode; onRemove: () => void }) {
           {n.reachable && !n.can_control && <Badge tone="orange">{t('servers.fleetPage.viewOnlyUpdateControl')}</Badge>}
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground">{n.url}</div>
-        {n.server_count !== null && <div className="text-xs text-muted-foreground">{n.server_count === 1 ? t('servers.fleetPage.server') : t('servers.fleetPage.serverCountServers', { server_count: n.server_count })}</div>}
+        {n.server_count !== null && <div className="text-xs text-muted-foreground">{t('servers.fleetPage.serversCount', { count: n.server_count })}</div>}
         {n.last_error && <div className="text-xs text-danger-text">{n.last_error}</div>}
         {n.warning && <div className="text-xs text-orange">{n.warning}</div>}
       </div>

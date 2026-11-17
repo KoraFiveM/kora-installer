@@ -1,21 +1,20 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
-import { t as tt } from '@/i18n'
+import { t as tt, fmt, unix } from '@/i18n'
 import '@/i18n/en/core'
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))
 }
 
+/** 152 kB, 1.5 GB: through Intl, so the unit and the decimal mark follow the language. */
 export function formatBytes(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`
-  if (n >= 1e3) return `${Math.round(n / 1e3)} KB`
-  return `${n} B`
+  return fmt.bytes(n)
 }
 
-export function formatDate(unix: number): string {
-  return new Date(unix * 1000).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+/** A date and time from unix seconds, in the current language. */
+export function formatDate(seconds: number): string {
+  return fmt.dateTime(unix(seconds))
 }
 
 /** "my server!" -> "my-server" (same rule as `kora install`). */

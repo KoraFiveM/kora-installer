@@ -114,6 +114,7 @@ const messages = {
   'auth.signedOut.koraPanelPrintlink': 'kora panel --print-link',
   'auth.signedOut.koraPanel': 'kora panel',
   'auth.signedOut.keepServersSafePage': 'To keep your servers safe, this page needs a sign-in link. Run <code>kora panel --print-link</code> on this computer to get a new sign-in link. Open that link, or paste it below. If the command says the background service is not installed, run <code2>kora panel</code2> instead and use the link it prints. ',
+  'auth.accountCard.never': 'never',
 } as const
 
 register('en', messages)

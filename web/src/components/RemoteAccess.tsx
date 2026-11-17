@@ -14,7 +14,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { t as tt, msg, type Msg } from '@/i18n'
+import { t as tt, msg, type Msg, fmt, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/settings'
 
@@ -43,10 +43,10 @@ export function enrolUrl(s: { tailnet_url: string | null; allowed_hosts: string[
 
 function howSignsIn(u: { passkeys: number; code: boolean; legacy_token: boolean }): string {
   const how: string[] = []
-  if (u.passkeys > 0) how.push(`${u.passkeys} passkey${u.passkeys === 1 ? '' : 's'}`)
-  if (u.code) how.push('one-time codes')
-  if (u.legacy_token) how.push('old token link')
-  return how.length ? how.join(', ') : 'waiting to set up'
+  if (u.passkeys > 0) how.push(tt('settings.remoteAccess.passkeysCount', { count: u.passkeys }))
+  if (u.code) how.push(tt('settings.remoteAccess.oneTimeCodes'))
+  if (u.legacy_token) how.push(tt('settings.remoteAccess.oldTokenLink'))
+  return how.length ? fmt.list(how) : tt('settings.remoteAccess.waitingSetUp')
 }
 
 function Users({ settings }: { settings: T.RemoteSettings | undefined }) {
@@ -146,7 +146,7 @@ function ApiTokens() {
     onSuccess: (t) => { setFresh({ name: t.name, token: t.token }); setName(''); setDays(''); void refresh() },
   })
   const revoke = useMutation({ mutationFn: (id: number) => api.apiTokens.revoke(id), onSuccess: () => void refresh(), onSettled: () => setRevoking(null) })
-  const day = (unix: number) => (unix ? new Date(unix * 1000).toLocaleDateString('en-GB') : 'never')
+  const day = (seconds: number) => (seconds ? fmt.date(unix(seconds)) : tt('settings.remoteAccess.never'))
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-semibold">{tt('settings.remoteAccess.apiTokensScripts')}</h3>
@@ -157,7 +157,7 @@ function ApiTokens() {
             <li key={t.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm">
               <span>
                 <strong>{t.name}</strong> <Badge tone="plain">{t.role}</Badge>
-                <span className="block text-xs text-muted-foreground">{tt('settings.remoteAccess.expiresDayLastUsed', { day: day(t.expires), value: t.last_used ? day(t.last_used) : 'never' })}</span>
+                <span className="block text-xs text-muted-foreground">{tt('settings.remoteAccess.expiresDayLastUsed', { day: day(t.expires), lastUsed: day(t.last_used ?? 0) })}</span>
               </span>
               <Button size="sm" variant="destructive" onClick={() => setRevoking({ id: t.id, name: t.name })} aria-label={tt('settings.remoteAccess.revokeName', { name: t.name })}>{tt('settings.remoteAccess.revoke')}</Button>
             </li>

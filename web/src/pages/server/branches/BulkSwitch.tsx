@@ -100,7 +100,7 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
           </ul>
           {ready.length > 0 && (
             <div>
-              <Button variant="default" disabled={applying || blocked !== null} title={blocked ?? undefined} onClick={() => void start({ action: 'branch', branch: p.branch, resources: ready.map((r) => r.id) })}>{t('resources.bulkSwitch.switchCountValue', { count: ready.length, value: ready.length === 1 ? 'has' : 'have' })}</Button>
+              <Button variant="default" disabled={applying || blocked !== null} title={blocked ?? undefined} onClick={() => void start({ action: 'branch', branch: p.branch, resources: ready.map((r) => r.id) })}>{t('resources.bulkSwitch.switchCountValue', { count: ready.length })}</Button>
               {blocked && <p className="mt-1 text-xs text-muted-foreground">{blocked}</p>}
               <p className="mt-1 text-xs text-muted-foreground">{t('resources.bulkSwitch.oneChangesOwnKora')}</p>
             </div>
@@ -123,7 +123,7 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
               </li>
             ))}
           </ul>
-          {waiting.length > 0 && <Button disabled={blocked !== null} onClick={() => setAsking(true)}>{t('resources.bulkSwitch.chooseWhatDoCount', { count: waiting.length, value: waiting.length === 1 ? 'has' : 'have' })}</Button>}
+          {waiting.length > 0 && <Button disabled={blocked !== null} onClick={() => setAsking(true)}>{t('resources.bulkSwitch.chooseWhatDoCount', { count: waiting.length })}</Button>}
         </div>
       )}
 

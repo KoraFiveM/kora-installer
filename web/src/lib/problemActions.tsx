@@ -18,7 +18,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { ApiError } from '@/api/client'
 import type { JobError, Problem, ProblemAction, ProblemActionKind } from '@/api/types'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/errors'
 
 export type ActionOf<K extends ProblemActionKind> = Extract<ProblemAction, { kind: K }>
@@ -47,23 +47,22 @@ const KNOWN: readonly ProblemActionKind[] = [
   'continue_without_admin', 'show_command', 'open_link', 'open_log', 'copy_details', 'start_database', 'make_fork',
 ]
 
-/** Wizard pages that `change_answers` can open, as the user sees them. */
-const SECTION_LABEL: Record<string, string> = {
-  licence: 'the licence key',
-  source: 'where the resources come from',
-  versions: 'which versions to follow',
-  mode: 'where the resources come from',
-  name: 'the name or folder',
-  ports: 'the ports',
-  build: 'the server build',
-  resources: 'the resources',
-  database: 'the database choice',
-  options: 'the options',
-  cfx: 'the txAdmin sign-in',
-  github: 'the GitHub account',
+/** Wizard pages that `change_answers` can open, as the user sees them (the whole button text, so each language can phrase it its own way). */
+const SECTION_LABEL: Record<string, Msg> = {
+  licence: msg('errors.problemActions.changeLicence'),
+  source: msg('errors.problemActions.changeSource'),
+  versions: msg('errors.problemActions.changeVersions'),
+  mode: msg('errors.problemActions.changeMode'),
+  name: msg('errors.problemActions.changeName'),
+  ports: msg('errors.problemActions.changePorts'),
+  build: msg('errors.problemActions.changeBuild'),
+  resources: msg('errors.problemActions.changeResources'),
+  database: msg('errors.problemActions.changeDatabase'),
+  options: msg('errors.problemActions.changeOptions'),
+  cfx: msg('errors.problemActions.changeCfx'),
+  github: msg('errors.problemActions.changeGithub'),
 }
 
-const TOOL_LABEL: Record<string, string> = { git: 'Git', gh: 'the GitHub CLI', mariadb: 'MariaDB' }
 
 /** Codes of "this needs administrator rights" problems: the administrator service is missing or not turned on for you. */
 export function isAdminCode(code: string): boolean {
@@ -79,11 +78,11 @@ export function actionLabel(a: ProblemAction): string {
     case 'skip_step':
       return t('errors.problemActions.skipStep')
     case 'change_answers':
-      return a.section && SECTION_LABEL[a.section] ? t('errors.problemActions.changeSectionLabel', { section: SECTION_LABEL[a.section] }) : t('errors.problemActions.changeMyAnswers')
+      return a.section && SECTION_LABEL[a.section] ? t(SECTION_LABEL[a.section]) : t('errors.problemActions.changeMyAnswers')
     case 'sign_in_github':
       return a.scopes?.length ? t('errors.problemActions.signGithubAgain') : t('errors.problemActions.signGithub')
     case 'install_tool':
-      return t('errors.problemActions.installValueMe', { value: TOOL_LABEL[a.tool] ?? 'it' })
+      return t('errors.problemActions.installValueMe', { tool: a.tool })
     case 'install_admin_service':
       return t('errors.problemActions.installKorasAdministratorServi')
     case 'continue_without_admin':
@@ -111,7 +110,7 @@ function hostOf(url: string): string {
   try {
     return new URL(url).host
   } catch {
-    return 'the page'
+    return t('errors.problemActions.thePage')
   }
 }
 

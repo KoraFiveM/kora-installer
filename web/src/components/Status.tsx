@@ -18,7 +18,7 @@ function updateBadge(badge: BadgeT | null) {
     case 'up_to_date':
       return <Badge tone="plain">{t('core.status.upDate')}</Badge>
     case 'updates':
-      return <Badge tone="info">{badge.count === 1 ? t('core.status.update') : t('core.status.valueUpdates', { value: badge.count ?? 0 })}</Badge>
+      return <Badge tone="info">{t('core.status.updates', { count: badge.count ?? 0 })}</Badge>
     case 'needs_attention':
       return <Badge tone="orange">{t('core.status.needsAttention')}</Badge>
     case 'new_release':

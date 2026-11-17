@@ -17,7 +17,7 @@ import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/auth'
 
-const when = (unix: number) => (unix ? timeAgo(unix * 1000, Date.now()) : 'never')
+const when = (seconds: number) => (seconds ? timeAgo(seconds * 1000, Date.now()) : t('auth.accountCard.never'))
 
 /**
  * "Your sign-in" for someone signed in from another computer with a passkey, one-time codes or the old token: passkeys,

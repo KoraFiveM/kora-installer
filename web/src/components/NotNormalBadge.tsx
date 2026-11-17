@@ -40,5 +40,5 @@ export function NotNormalBadge({ branch, to }: { branch: Where | undefined | nul
 /** "2 resources not on their normal version", for a server's row or Overview. Nothing for 0. */
 export function offNormalSummary(rows: Array<Pick<ResourceBranch, 'state'>>): string | null {
   const n = rows.filter(isOffNormal).length
-  return n === 0 ? null : `${n} resource${n === 1 ? '' : 's'} not on ${n === 1 ? 'its' : 'their'} normal version`
+  return n === 0 ? null : t('core.notNormalBadge.summary', { count: n })
 }

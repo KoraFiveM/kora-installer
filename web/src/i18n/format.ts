@@ -51,11 +51,11 @@ export function intlFor(code: string): Intls {
     bytes: (n) => (n >= 1e12 ? TB.format(n / 1e12) : n >= 1e9 ? GB.format(n / 1e9) : n >= 1e6 ? MB.format(n / 1e6) : n >= 1e3 ? KB.format(Math.round(n / 1e3)) : B.format(n)),
     date: (d, style) => (style === 'date' ? dateOnly : style === 'time' ? timeOnly : both).format(d),
     list: (items) => list.format(items),
-    relative: (d) => {
-      const diff = (typeof d === 'number' ? d : d.getTime()) - clock.now()
+    relative: (d, now) => {
+      const diff = (typeof d === 'number' ? d : d.getTime()) - (now ?? clock.now())
       const abs = Math.abs(diff)
       for (const [unit, ms] of UNITS) {
-        if (abs >= ms || unit === 'second') return rel.format(Math.round(diff / ms), unit)
+        if (abs >= ms || unit === 'second') return rel.format(Math.sign(diff) * Math.round(abs / ms), unit)
       }
       return rel.format(0, 'second')
     },

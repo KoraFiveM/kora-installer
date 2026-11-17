@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { t, msg, type Msg } from '@/i18n'
+import { t, msg, type Msg, fmt, unix } from '@/i18n'
 import '@/i18n/en/settings'
 
 /** A key field that hides what is typed until the eye is pressed. */
@@ -35,7 +35,7 @@ function SecretBox({ value, onChange, show, toggle, id, ...rest }: { value: stri
   )
 }
 
-const when = (unix: number) => (unix > 0 ? new Date(unix * 1000).toLocaleDateString() : null)
+const when = (seconds: number) => (seconds > 0 ? fmt.date(unix(seconds)) : null)
 
 type Dialogue = { kind: 'rename' | 'replace' | 'delete'; key: SavedKey } | null
 
@@ -48,7 +48,7 @@ function KeychainLine({ data }: { data: SavedKeys }) {
   const set = useMutation({
     mutationFn: (on: boolean) => api.keys.keychain(on),
     onSuccess: (r) => {
-      setResult([`Moved ${r.moved} ${r.moved === 1 ? 'key' : 'keys'}.`, ...r.left.map((l) => t('settings.licenceKeys.couldMoveL', { l }))])
+      setResult([t('settings.licenceKeys.movedKeys', { count: r.moved }), ...r.left.map((l) => t('settings.licenceKeys.couldMoveL', { l }))])
       void qc.invalidateQueries({ queryKey: ['keys'] })
     },
   })

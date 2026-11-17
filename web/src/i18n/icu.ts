@@ -185,7 +185,7 @@ export interface Context {
   intl: {
     number(n: number): string
     date(d: Date | number, style: 'date' | 'time' | 'datetime'): string
-    relative(d: Date | number): string
+    relative(d: Date | number, now?: number): string
     list(items: string[]): string
     bytes(n: number): string
     duration(seconds: number): string

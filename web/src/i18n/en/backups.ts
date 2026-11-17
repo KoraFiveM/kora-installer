@@ -134,8 +134,6 @@ const messages = {
   'backups.steps.browse': 'Browse...',
   'backups.steps.backupsServersNoLonger': 'Backups of servers that no longer exist',
   'backups.steps.koraKeepsBackupsServer': 'Kora keeps the backups of a server you deleted. Restore one as a new server:',
-  'backups.steps.passwordProtected': ' · password protected',
-  'backups.steps.backupTolocalestringValue': 'backup of {toLocaleString}{value}',
   'backups.steps.restoreNewServer': 'Restore as a new server',
   'backups.steps.filearchiveNodeSpanNode': '{fileArchive, node} {span, node} is protected with a password.',
   'backups.steps.itsPassword': 'Its password',
@@ -192,6 +190,9 @@ const messages = {
   'backups.backupsTab.safetyCopyBeforeRestore': 'Safety copy before a restore',
   'backups.backupsTab.movingServer': 'For moving the server',
   'backups.steps.fileMadeOldComputer': 'A file made on the old computer with "Move this server" (it ends in .tar.gz.age), or any Kora server backup (.tar.gz or .tar.gz.age).',
+  'backups.steps.backupOf': 'backup of {when, datetime}',
+  'backups.steps.backupOfProtected': 'backup of {when, datetime} · password protected',
+  'backups.backupsTab.whenAgo': '{when, datetime} ({ago})',
 } as const
 
 register('en', messages)

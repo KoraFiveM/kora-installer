@@ -33,7 +33,6 @@ type Request = (
   | { kind: 'database' }
 ) & { id: number; afterFix?: () => void | Promise<void> }
 
-const TOOL_NAME = { git: 'Git', gh: 'the GitHub CLI' } as const
 
 /** What on the page may have changed once a fix has worked. */
 const STALE = [['github'], ['github-owners'], ['tools'], ['system-check'], ['system']] as const
@@ -60,7 +59,7 @@ export function ToolchainActions({ children }: { children: ReactNode }) {
       <Dialog open={!!req} onOpenChange={(o) => !o && setReq(null)}>
         {req && (
           <DialogContent title={titleOf(req)} description={descriptionOf(req)}>
-            {req.kind === 'install' && <RunJob key={req.id} start={() => api.tools.install(req.tool)} working={t('errors.toolchainActions.settingUpToolName', { TOOL_NAME: TOOL_NAME[req.tool] })} done={`${cap(TOOL_NAME[req.tool])} is ready.`} afterFix={req.afterFix} onClose={() => setReq(null)} />}
+            {req.kind === 'install' && <RunJob key={req.id} start={() => api.tools.install(req.tool)} working={t('errors.toolchainActions.settingUpToolName', { tool: req.tool })} done={t('errors.toolchainActions.toolReady', { tool: req.tool })} afterFix={req.afterFix} onClose={() => setReq(null)} />}
             {req.kind === 'database' && <RunJob key={req.id} start={() => api.systemCheck.startDatabase()} working={t('errors.toolchainActions.startingDatabaseServer')} done={t('errors.toolchainActions.databaseServerRunning')} afterFix={req.afterFix} onClose={() => setReq(null)} />}
             {req.kind === 'signin' && <SignIn key={req.id} afterFix={req.afterFix} onClose={() => setReq(null)} />}
           </DialogContent>
@@ -70,10 +69,9 @@ export function ToolchainActions({ children }: { children: ReactNode }) {
   )
 }
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 function titleOf(r: Request): string {
-  if (r.kind === 'install') return t('errors.toolchainActions.installToolName', { tool: TOOL_NAME[r.tool] })
+  if (r.kind === 'install') return t('errors.toolchainActions.installToolName', { tool: r.tool })
   return r.kind === 'signin' ? t('errors.toolchainActions.signGithub') : t('errors.toolchainActions.startDatabase')
 }
 

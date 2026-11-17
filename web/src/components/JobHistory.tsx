@@ -6,7 +6,7 @@ import { opLabel } from '@/api/store'
 import { Badge, type Tone } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { t, msg, type Msg } from '@/i18n'
+import { t, msg, type Msg, fmt, unix } from '@/i18n'
 import '@/i18n/en/core'
 
 const STATE: Record<JobState, { label: Msg; tone: Tone }> = {
@@ -16,7 +16,7 @@ const STATE: Record<JobState, { label: Msg; tone: Tone }> = {
   interrupted: { label: msg('core.jobHistory.stoppedRestart'), tone: 'amber' },
 }
 
-export const when = (secs: number) => new Date(secs * 1000).toLocaleString()
+export const when = (secs: number) => fmt.dateTime(unix(secs))
 
 function Row({ j }: { j: JobSummary }) {
   const s = STATE[j.state] ?? STATE.failed

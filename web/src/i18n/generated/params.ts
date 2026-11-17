@@ -31,10 +31,12 @@ export interface MessageParams {
   'backups.backupsTab.useLeastMinPassword': { MIN_PASSWORD: string | number }
   'backups.backupsTab.valueBackupSurvivesDead': { value: string | number; value2: string | number }
   'backups.backupsTab.valueFilesRestoredFiles': { value: string | number; files_restored: string | number; value2: string | number }
+  'backups.backupsTab.whenAgo': { when: Date | number; ago: string | number }
   'backups.backupSuggestion.backupMadeEveryDay': { link: Tag }
   'backups.backupSuggestion.diskFailsUpdateGoes': { value: string | number }
   'backups.importPage.accountRoleCannotBring': { role: string | number }
-  'backups.steps.backupTolocalestringValue': { toLocaleString: string | number; value: string | number }
+  'backups.steps.backupOf': { when: Date | number }
+  'backups.steps.backupOfProtected': { when: Date | number }
   'backups.steps.copiesGithubOwner': { owner: string | number }
   'backups.steps.filearchiveNodeSpanNode': { fileArchive: ReactNode; span: ReactNode }
   'backups.steps.koraForksOriginalRepositories': { signed_in_as: string | number }
@@ -62,12 +64,13 @@ export interface MessageParams {
   'core.lineChart.topScaleFormat': { format: string | number }
   'core.notNormalBadge.branchBranch': { branch: string | number }
   'core.notNormalBadge.itsNormalVersionDefault': { default_branch: string | number; text: string | number }
+  'core.notNormalBadge.summary': { count: number }
   'core.notNormalBadge.tryingPullRequestPr': { pr: string | number }
   'core.notNormalBadge.tryingPullRequestTitle': { pr: string | number; title: string | number }
   'core.serverLinks.opensTxadminThroughPanel': { gw: string | number; host: string | number }
   'core.serverLinks.opensTxadminThroughPanelOwn': { host: string | number }
   'core.serverLinks.reachedPanelThroughTunnel': { gw: string | number }
-  'core.status.valueUpdates': { value: string | number }
+  'core.status.updates': { count: number }
   'core.store.nComputer': { n: string | number }
   'core.store.nKoraCommand': { n: string | number }
   'core.store.nSignedFromAnother': { n: string | number; kind: string; provider: string | number; role: string | number }
@@ -77,8 +80,7 @@ export interface MessageParams {
   'errors.errorNotice.logCodeNode': { code: ReactNode }
   'errors.errorNotice.savedCodeNode': { code: ReactNode }
   'errors.errorNotice.stillStuckSupportbundlelinkNod': { supportBundleLink: ReactNode }
-  'errors.problemActions.changeSectionLabel': { section: string | number }
-  'errors.problemActions.installValueMe': { value: string | number }
+  'errors.problemActions.installValueMe': { tool: string }
   'errors.problemActions.openHostof': { host: string | number }
   'errors.supportBundleDialog.accountRoleCannotMake': { role: string | number }
   'errors.supportBundleDialog.downloadNodeDownload': { download: ReactNode }
@@ -88,8 +90,9 @@ export interface MessageParams {
   'errors.supportBundleDialog.textOpen': { open: string | number }
   'errors.supportBundleDialog.whatFileHoldSize': { size: string | number }
   'errors.toolchainActions.checkcircleNodeSignedValue': { checkCircle2: ReactNode; value: string | number }
-  'errors.toolchainActions.installToolName': { tool: string | number }
-  'errors.toolchainActions.settingUpToolName': { TOOL_NAME: string | number }
+  'errors.toolchainActions.installToolName': { tool: string }
+  'errors.toolchainActions.settingUpToolName': { tool: string }
+  'errors.toolchainActions.toolReady': { tool: string }
   'install.form.keyN': { n: string | number }
   'install.installWizard.alreadyServerComputerLink': { link: Tag }
   'install.installWizard.buildArtifactbuild': { artifactBuild: string | number }
@@ -109,7 +112,7 @@ export interface MessageParams {
   'install.installWizard.providedHiddenSavedTrim': { trim: string | number }
   'install.installWizard.savedLicenceKeyLicencename': { licenceName: string | number }
   'install.installWizard.savedLicenceKeySaved': { saved_key_missing: string | number }
-  'install.installWizard.serverCannotInstalledYet2': { count: string | number }
+  'install.installWizard.serverCannotInstalledYet': { count: number }
   'install.installWizard.signTxadminCfxRe2': { strong: ReactNode }
   'install.installWizard.txadminAdministratorStrongNode': { strong: ReactNode; code: ReactNode }
   'install.installWizard.typedUserDbuserPassword': { dbUser: string | number }
@@ -135,12 +138,12 @@ export interface MessageParams {
   'resources.actingAs.doneGithubStrongNode': { strong: ReactNode }
   'resources.branchesPanel.changeBranchId': { id: string | number }
   'resources.branchesPanel.changedCountChangedFile': { changed_count: number }
-  'resources.branchesPanel.countResourceValueNormal': { count: string | number; value: string | number }
+  'resources.branchesPanel.countResourceValueNormal': { count: number }
   'resources.branchesPanel.openPageId': { id: string | number }
   'resources.branchesPanel.stashesKeptAside': { stashes: string | number }
-  'resources.branchesPanel.updatesLeaveValueAlone': { value: string | number; value2: string | number }
+  'resources.branchesPanel.updatesLeaveValueAlone': { count: number }
   'resources.bulkSwitch.changedCountChangedFile': { changed_count: number }
-  'resources.bulkSwitch.chooseWhatDoCount': { count: string | number; value: string | number }
+  'resources.bulkSwitch.chooseWhatDoCount': { count: number }
   'resources.bulkSwitch.doneTotalChecked': { done: string | number; total: string | number }
   'resources.bulkSwitch.doneTotalDone': { done: string | number; total: string | number }
   'resources.bulkSwitch.failedCouldSwitched': { failed: string | number }
@@ -149,7 +152,7 @@ export interface MessageParams {
   'resources.bulkSwitch.nodeNodeCheckWhich': { node: ReactNode }
   'resources.bulkSwitch.nowNow': { now: string | number }
   'resources.bulkSwitch.restartNoteRunningServer': { restart_note: string | number }
-  'resources.bulkSwitch.switchCountValue': { count: string | number; value: string | number }
+  'resources.bulkSwitch.switchCountValue': { count: number }
   'resources.bulkSwitch.switchedSwitchedValueValue': { switched: string | number; value: string | number; value2: string | number }
   'resources.bulkSwitch.valueResourcesBranch': { have: string | number; value: string | number; branch: string | number }
   'resources.changesDialog.changedFilesGoBack': { value: string | number }
@@ -181,7 +184,7 @@ export interface MessageParams {
   'resources.paidAssetsTab.addedServerCfgJoin': { join: string | number }
   'resources.paidAssetsTab.importCountAssetValue': { count: number }
   'resources.paidAssetsTab.importedPaidAssetsValue': { value: string | number }
-  'resources.paidAssetsTab.importedTolocaledatestring': { toLocaleDateString: string | number }
+  'resources.paidAssetsTab.importedTolocaledatestring': { when: Date | number }
   'resources.paidAssetsTab.openCfxRePortal': { externalLink: ReactNode }
   'resources.paidAssetsTab.removeName': { name: string | number }
   'resources.paidAssetsTab.resourcesPaidNameFilesize': { name: string | number; fileSize: string | number }
@@ -266,7 +269,7 @@ export interface MessageParams {
   'resources.updatesPanel.safetyCopyCodeNode': { code: ReactNode }
   'resources.updatesPanel.updateCountResourceValue': { count: number }
   'resources.updatesPanel.updateId': { id: string | number }
-  'resources.updatesPanel.uptodateOtherResourceValue': { upToDate: string | number; value: string | number }
+  'resources.updatesPanel.uptodateOtherResourceValue': { upToDate: number }
   'resources.updatesPanel.valueGoBackNormal': { value: string | number }
   'resources.useBranches.normalVersionDefaultBranch': { default_branch: string | number }
   'servers.addExistingDialog.addName': { name: string | number }
@@ -288,7 +291,7 @@ export interface MessageParams {
   'servers.fleetPage.restartName': { name: string | number }
   'servers.fleetPage.restartNameNodeName': { name: string | number; node_name: string | number }
   'servers.fleetPage.rotatecwNodeRestart': { rotateCw: ReactNode }
-  'servers.fleetPage.serverCountServers': { server_count: string | number }
+  'servers.fleetPage.serversCount': { count: number }
   'servers.fleetPage.squareNodeStop': { square: ReactNode }
   'servers.fleetPage.startNameNodeName': { name: string | number; node_name: string | number }
   'servers.fleetPage.stopNameNodeName': { name: string | number; node_name: string | number }
@@ -297,8 +300,8 @@ export interface MessageParams {
   'servers.logsTab.refreshcwNodeReload': { refreshCw: ReactNode }
   'servers.monitoringTab.koraOnlyMeasuresWhile': { code: Tag }
   'servers.monitoringTab.maxPlayers': { max_players: string | number }
-  'servers.monitoringTab.roundFree': { round: string | number }
-  'servers.monitoringTab.roundMachineUse': { round: string | number }
+  'servers.monitoringTab.roundFree': { round: number }
+  'servers.monitoringTab.roundMachineUse': { round: number }
   'servers.monitoringTab.webAddressCodeNode': { code: ReactNode }
   'servers.notificationsTab.currentWebhookCodeNode': { code: ReactNode }
   'servers.overviewTab.gamePortGame': { game: string | number }
@@ -320,8 +323,8 @@ export interface MessageParams {
   'servers.serverLinks.folderopenNodeOpenFolder': { folderOpen: ReactNode }
   'servers.serverLinks.txadminItsOwnSignin': { node: ReactNode }
   'servers.serverLinks.useAccountStrongNode': { strong: ReactNode; code: Tag }
-  'servers.serversPage.alertsAlerts': { alerts: string | number }
-  'servers.serversPage.countAlertsNeedAttention': { count: string | number }
+  'servers.serversPage.alertsCount': { count: number }
+  'servers.serversPage.alertsNeedAttention': { count: number }
   'servers.serversPage.folderplusNodeAddExisting': { folderPlus: ReactNode }
   'servers.serversPage.plusNodeInstallFirst': { plus: ReactNode }
   'servers.serversPage.refreshcwNodeRefresh': { refreshCw: ReactNode }
@@ -343,6 +346,7 @@ export interface MessageParams {
   'settings.licenceKeys.forgetLabel': { label: string | number }
   'settings.licenceKeys.keptKept': { kept: string | number }
   'settings.licenceKeys.keyEndingLast': { last4: string | number }
+  'settings.licenceKeys.movedKeys': { count: number }
   'settings.licenceKeys.nameNowHoldsKey': { name: string | number; last4: string | number }
   'settings.licenceKeys.noKeysSavedYet': { value: string | number }
   'settings.licenceKeys.renamedName': { name: string | number }
@@ -354,11 +358,12 @@ export interface MessageParams {
   'settings.licenceKeys.usedS': { s: string | number }
   'settings.remoteAccess.apiTokenName': { name: string | number }
   'settings.remoteAccess.enrolmentLinkName': { name: string | number }
-  'settings.remoteAccess.expiresDayLastUsed': { day: string | number; value: string | number }
+  'settings.remoteAccess.expiresDayLastUsed': { day: string | number; lastUsed: string | number }
   'settings.remoteAccess.invitationName': { name: string | number }
   'settings.remoteAccess.listeningCodeNodeNode': { code: ReactNode; node: ReactNode }
   'settings.remoteAccess.newSetupLinkName': { name: string | number }
   'settings.remoteAccess.openPanelOwnPhone': { code: Tag; code2: Tag }
+  'settings.remoteAccess.passkeysCount': { count: number }
   'settings.remoteAccess.removeH': { h: string | number }
   'settings.remoteAccess.removeL': { l: string | number }
   'settings.remoteAccess.removeName': { name: string | number }
@@ -391,7 +396,7 @@ export interface MessageParams {
   'system.systemCheckPage.koraRunsCodeNode': { code: ReactNode }
   'system.systemCheckPage.loaderNodeCheckingComputer': { loader2: ReactNode }
   'system.systemCheckPage.nodeNodeCheckAgain': { node: ReactNode }
-  'system.systemCheckPage.problemsThingsNeedFixing': { problems: string | number }
+  'system.systemCheckPage.thingsNeedFixing': { count: number }
 }
 
 /** Messages with <tags> or {pieces, node}: drawn with rich(), not t(). */

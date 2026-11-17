@@ -56,7 +56,7 @@ export default function SystemCheckPage() {
 
       {check.data && (
         <p role="status" className="text-sm">
-          {problems === 0 ? <span className="text-success">{tt('system.systemCheckPage.everythingKoraNeedsHere')}</span> : <span className="text-amber">{problems === 1 ? tt('system.systemCheckPage.thingNeedsFixing') : tt('system.systemCheckPage.problemsThingsNeedFixing', { problems })}</span>}
+          {problems === 0 ? <span className="text-success">{tt('system.systemCheckPage.everythingKoraNeedsHere')}</span> : <span className="text-amber">{tt('system.systemCheckPage.thingsNeedFixing', { count: problems })}</span>}
         </p>
       )}
 

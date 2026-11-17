@@ -32,7 +32,7 @@ function Row({ s, alerts, backup }: { s: ServerSummary; alerts: number; backup?:
     <tr className="border-t border-border align-middle">
       <td className="px-4 py-3">
         <Link to={`/servers/${encodeURIComponent(s.name)}`} className="font-medium hover:underline">{s.name}</Link>
-        {alerts > 0 && <Link to={`/servers/${encodeURIComponent(s.name)}?tab=monitoring`} className="ml-2 align-middle"><Badge tone="danger">{alerts === 1 ? t('servers.serversPage.alert') : t('servers.serversPage.alertsAlerts', { alerts })}</Badge></Link>}
+        {alerts > 0 && <Link to={`/servers/${encodeURIComponent(s.name)}?tab=monitoring`} className="ml-2 align-middle"><Badge tone="danger">{t('servers.serversPage.alertsCount', { count: alerts })}</Badge></Link>}
         <div className="mt-1"><OffNormalSummary server={s} /></div>
         {!s.managed && <div className="text-xs text-muted-foreground">{t('servers.serversPage.addedFromExistingFolder')}</div>}
       </td>
@@ -105,7 +105,7 @@ export default function ServersPage() {
         <p className="flex flex-wrap items-center gap-2 text-sm" aria-label={t('servers.serversPage.healthSummary')}>
           <Badge tone="success" dot>{t('servers.serversPage.runningRunning', { running })}</Badge>
           {stopped > 0 && <Badge tone="neutral" dot>{t('servers.serversPage.stoppedStopped', { stopped })}</Badge>}
-          {openAlerts.length > 0 ? <Badge tone="danger">{openAlerts.length === 1 ? t('servers.serversPage.alertNeedsAttention') : t('servers.serversPage.countAlertsNeedAttention', { count: openAlerts.length })}</Badge> : <Badge tone="plain">{t('servers.serversPage.noAlerts')}</Badge>}
+          {openAlerts.length > 0 ? <Badge tone="danger">{t('servers.serversPage.alertsNeedAttention', { count: openAlerts.length })}</Badge> : <Badge tone="plain">{t('servers.serversPage.noAlerts')}</Badge>}
         </p>
       )}
       {servers.length > 0 && (

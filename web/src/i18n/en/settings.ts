@@ -148,7 +148,7 @@ const messages = {
   'settings.remoteAccess.apiTokensScripts': 'API tokens for scripts',
   'settings.remoteAccess.authorizationBearer': 'Authorization: Bearer',
   'settings.remoteAccess.scriptBackupJobPeople': 'For a script or a backup job, not for people. Sent as an <code>Authorization: Bearer</code> header only: never in an address, and never a way to sign in to the page. Deleting and uninstalling through a token still needs the switch below.',
-  'settings.remoteAccess.expiresDayLastUsed': 'Expires {day}, last used {value}',
+  'settings.remoteAccess.expiresDayLastUsed': 'Expires {day}, last used {lastUsed}',
   'settings.remoteAccess.revokeName': 'Revoke {name}',
   'settings.remoteAccess.revoke': 'Revoke',
   'settings.remoteAccess.tokenName': 'Token name',
@@ -326,6 +326,12 @@ const messages = {
   'settings.store.broughtServerFromBackup': 'Brought a server in from a backup',
   'settings.store.savedSupportBundle': 'Saved a support bundle',
   'settings.store.downloadedSupportBundle': 'Downloaded a support bundle',
+  'settings.remoteAccess.never': 'never',
+  'settings.remoteAccess.passkeysCount': '{count, plural, one {# passkey} other {# passkeys}}',
+  'settings.remoteAccess.oneTimeCodes': 'one-time codes',
+  'settings.remoteAccess.oldTokenLink': 'old token link',
+  'settings.remoteAccess.waitingSetUp': 'waiting to set up',
+  'settings.licenceKeys.movedKeys': '{count, plural, one {Moved # key.} other {Moved # keys.}}',
 } as const
 
 register('en', messages)

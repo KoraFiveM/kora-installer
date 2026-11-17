@@ -6,13 +6,12 @@ const messages = {
   'system.systemCheckPage.nodeNodeCheckAgain': '{node, node}Check again ',
   'system.systemCheckPage.loaderNodeCheckingComputer': '{loader2, node}Checking this computer...',
   'system.systemCheckPage.everythingKoraNeedsHere': 'Everything Kora needs is here.',
-  'system.systemCheckPage.thingNeedsFixing': '1 thing needs fixing.',
-  'system.systemCheckPage.problemsThingsNeedFixing': '{problems} things need fixing.',
   'system.systemCheckPage.accountRoleLookBut': 'Your account ({role}) can look at this but not fix it. Ask an administrator to open this page and use the buttons, or to run the commands shown.',
   'system.systemCheckPage.koraRunsCodeNode': 'Kora runs {code, node}',
   'system.systemCheckPage.fine': 'Fine',
   'system.systemCheckPage.needsFixing': 'Needs fixing',
   'system.systemCheckPage.goodKnow': 'Good to know',
+  'system.systemCheckPage.thingsNeedFixing': '{count, plural, one {# thing needs fixing.} other {# things need fixing.}}',
 } as const
 
 register('en', messages)
