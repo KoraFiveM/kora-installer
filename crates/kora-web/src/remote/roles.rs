@@ -152,8 +152,13 @@ pub fn min_role(op: Op) -> Role {
     }
 }
 
-/// Refused for remote requests unless `allow_remote_destructive` is on, even for admins. The typed-name
-/// confirmation the handlers enforce still applies when it is on.
+/// Destructive operations: deleting or unregistering a server, uninstalling Kora, console input, updating
+/// Kora itself, changing the schedule. A remote session signed in with a **user token** is refused these
+/// unless `allow_remote_destructive` is on (`kora panel remote-actions on`), even for admins. A
+/// **Tailscale** admin is not held back: see [`remote_gate`]. The typed-name confirmation the handlers
+/// enforce applies in every case.
+///
+/// Installing a server is NOT in this list: see [`installs`].
 pub fn destructive(op: Op) -> bool {
     match op {
         Op::ServerDelete
@@ -161,8 +166,6 @@ pub fn destructive(op: Op) -> bool {
         | Op::UninstallRun
         | Op::AppUninstall
         | Op::ConsoleSend
-        | Op::InstallStart
-        | Op::InstallResume
         | Op::SelfUpdateApply
         | Op::ScheduleSet
         | Op::ScheduleRemove => true,
@@ -211,6 +214,8 @@ pub fn destructive(op: Op) -> bool {
         | Op::CheckDbLogin
         | Op::CheckCfx
         | Op::InstallPlan
+        | Op::InstallStart
+        | Op::InstallResume
         | Op::InstallLog
         | Op::SelfUpdateCheck
         | Op::AppStatus
@@ -245,6 +250,125 @@ pub fn destructive(op: Op) -> bool {
         | Op::AssetRemove
         | Op::AssetDownloads => false,
     }
+}
+
+/// Installing a new server: starting an install and resuming a paused one. Admin only (see [`min_role`]),
+/// and allowed for every remote admin by default, token or Tailscale. A leaked install-only token can be
+/// undone by removing the server it made; removing is what token sessions cannot do until the switch is on.
+pub fn installs(op: Op) -> bool {
+    match op {
+        Op::InstallStart | Op::InstallResume => true,
+        Op::Meta
+        | Op::SessionCreate
+        | Op::SystemInfo
+        | Op::ServersList
+        | Op::ServerGet
+        | Op::ServerControl
+        | Op::ServerDelete
+        | Op::ServerUnregister
+        | Op::ServersScan
+        | Op::ServersAdopt
+        | Op::ServerOpenFolder
+        | Op::LogsList
+        | Op::LogsTail
+        | Op::ConsoleStream
+        | Op::ConsoleSend
+        | Op::ConsoleEnable
+        | Op::ResourcesList
+        | Op::ResourceEnsure
+        | Op::ResourceControl
+        | Op::UpdatePreview
+        | Op::UpdateApply
+        | Op::UpdateAuto
+        | Op::SnapshotsList
+        | Op::SnapshotRollback
+        | Op::CatalogForServer
+        | Op::ResourcesPlan
+        | Op::ResourcesAdd
+        | Op::WebhookGet
+        | Op::WebhookSet
+        | Op::WebhookRemove
+        | Op::WebhookTest
+        | Op::ScheduleGet
+        | Op::ScheduleSet
+        | Op::ScheduleRemove
+        | Op::PortsSet
+        | Op::IssueReport
+        | Op::PrPlan
+        | Op::PrOpen
+        | Op::GithubStatus
+        | Op::GithubLogin
+        | Op::GithubOwners
+        | Op::CatalogGet
+        | Op::ArtifactsList
+        | Op::InstallDefaults
+        | Op::InstallSavedClear
+        | Op::CheckPorts
+        | Op::CheckDisk
+        | Op::CheckDbLogin
+        | Op::CheckCfx
+        | Op::InstallPlan
+        | Op::InstallLog
+        | Op::SelfUpdateCheck
+        | Op::SelfUpdateApply
+        | Op::AppStatus
+        | Op::AppInstall
+        | Op::AppUninstall
+        | Op::UninstallPlan
+        | Op::UninstallRun
+        | Op::JobsGet
+        | Op::JobEvents
+        | Op::Events
+        | Op::SessionLogout
+        | Op::SessionLink
+        | Op::PanelRestart
+        | Op::RemoteGet
+        | Op::RemoteSet
+        | Op::UsersList
+        | Op::UserAdd
+        | Op::UserRemove
+        | Op::MetricsGet
+        | Op::AlertsList
+        | Op::AlertsAck
+        | Op::AlertSettingsGet
+        | Op::AlertSettingsSet
+        | Op::NodesList
+        | Op::NodeAdd
+        | Op::NodeRemove
+        | Op::NodeServers
+        | Op::NodeServerControl
+        | Op::Fleet
+        | Op::AssetsList
+        | Op::AssetInspect
+        | Op::AssetImport
+        | Op::AssetRemove
+        | Op::AssetDownloads => false,
+    }
+}
+
+/// How a remote session signed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    /// Tailscale: the Tailscale daemon verified which person and device this is.
+    Tailscale,
+    /// A user token: a secret in a link, whoever holds it is that user.
+    Token,
+}
+
+/// Does the machine's `remote actions` switch decide whether this session may run `op`? Only a token
+/// session, and only for the destructive operations. A Tailscale identity is verified by the daemon
+/// (a person on a known device), so Tailscale admins get the destructive actions by default; a token can
+/// leak in a chat or a backup, so it cannot delete anything until someone on the machine says it may.
+/// Installs are never held back by the switch. Pure, so every session kind x action class is tested.
+pub fn needs_switch(op: Op, via: Via) -> bool {
+    destructive(op) && via == Via::Token
+}
+
+/// Role, local-only and the `remote actions` switch together: may a remote session of `role` that signed
+/// in `via` run `op` when the switch is `switch_on`? (`security::authorise` applies the same rules and
+/// words the refusals.)
+pub fn remote_allowed(op: Op, role: Role, via: Via, switch_on: bool) -> bool {
+    !local_only(op) && role >= min_role(op) && (switch_on || !needs_switch(op, via))
 }
 
 /// Never available to a remote session, whatever its role: it acts on this computer's desktop, or it
@@ -461,14 +585,66 @@ mod tests {
             Op::UninstallRun,
             Op::AppUninstall,
             Op::ConsoleSend,
-            Op::InstallStart,
-            Op::InstallResume,
             Op::SelfUpdateApply,
             Op::ScheduleSet,
             Op::ScheduleRemove,
         ];
         for op in Op::ALL {
             assert_eq!(destructive(*op), want.contains(op), "{op:?}");
+        }
+    }
+
+    #[test]
+    fn installing_is_its_own_class_and_not_destructive() {
+        for op in Op::ALL {
+            assert_eq!(installs(*op), matches!(op, Op::InstallStart | Op::InstallResume), "{op:?}");
+            if installs(*op) {
+                assert!(!destructive(*op), "{op:?}: the switch must not hold an install back");
+                assert_eq!(min_role(*op), Role::Admin, "{op:?}");
+                assert!(!local_only(*op), "{op:?}");
+            }
+        }
+    }
+
+    /// Every session kind x action class, for an admin with the switch off and on.
+    #[test]
+    fn who_may_do_what_remotely() {
+        use Via::{Tailscale, Token};
+        let delete = [Op::ServerDelete, Op::ServerUnregister, Op::UninstallRun, Op::AppUninstall];
+        let install = [Op::InstallStart, Op::InstallResume];
+        // Ordinary admin work: no switch involved.
+        let ordinary = [Op::ServerControl, Op::ResourcesAdd, Op::PortsSet, Op::WebhookSet, Op::AssetImport];
+        let local = [Op::ServerOpenFolder, Op::RemoteSet, Op::UserAdd, Op::SessionLink];
+        for op in delete.iter().chain(&[Op::ConsoleSend, Op::SelfUpdateApply, Op::ScheduleSet, Op::ScheduleRemove]) {
+            assert!(remote_allowed(*op, Role::Admin, Tailscale, false), "{op:?}: Tailscale admin, switch off");
+            assert!(remote_allowed(*op, Role::Admin, Tailscale, true), "{op:?}: Tailscale admin, switch on");
+            assert!(!remote_allowed(*op, Role::Admin, Token, false), "{op:?}: token admin, switch off");
+            assert!(remote_allowed(*op, Role::Admin, Token, true), "{op:?}: token admin, switch on");
+            for via in [Tailscale, Token] {
+                assert!(!remote_allowed(*op, Role::Operator, via, true), "{op:?}: operators never");
+                assert!(!remote_allowed(*op, Role::Viewer, via, true), "{op:?}: viewers never");
+            }
+        }
+        for op in install {
+            assert!(remote_allowed(op, Role::Admin, Tailscale, false), "{op:?}");
+            assert!(remote_allowed(op, Role::Admin, Token, false), "{op:?}: token admin installs by default");
+            assert!(remote_allowed(op, Role::Admin, Token, true), "{op:?}");
+            for via in [Tailscale, Token] {
+                assert!(!remote_allowed(op, Role::Operator, via, true), "{op:?}: operators cannot install");
+                assert!(!remote_allowed(op, Role::Viewer, via, true), "{op:?}");
+            }
+        }
+        for op in ordinary {
+            for via in [Tailscale, Token] {
+                assert!(remote_allowed(op, Role::Admin, via, false), "{op:?}");
+            }
+        }
+        for op in local {
+            for via in [Tailscale, Token] {
+                for on in [false, true] {
+                    assert!(!remote_allowed(op, Role::Admin, via, on), "{op:?}: local only, whatever the switch");
+                }
+            }
         }
     }
 

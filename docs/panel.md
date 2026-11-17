@@ -329,17 +329,35 @@ Managing remote access and users from the panel is only possible from a local se
 hours idle or 7 days in total, and at once when the account is removed or its role changes. The sign-in link from
 `kora panel` only works on the computer itself (or through an SSH tunnel), never remotely.
 
-**Destructive actions are off for remote sessions by default.** These only work from a local session, even for a
-remote admin: deleting a server, unregistering it (removing it from Kora's list), uninstalling Kora, removing the Kora
-app, sending console commands, installing a server, updating Kora, and setting or removing restart schedules. To allow
-them for remote admins, run this on the computer that runs Kora:
+**What a remote administrator can do depends on how they signed in.**
+
+| | Tailscale admin | Token admin |
+|---|---|---|
+| Install a new server (start an install, resume a paused one) | yes | yes |
+| Manage servers: start/stop, settings, resources, snapshots, ports, GitHub | yes | yes |
+| Delete a server, unregister a server, uninstall Kora, remove the Kora app | yes | **off** until `remote actions` is on |
+| Send console commands, update Kora, set or remove restart schedules | yes | **off** until `remote actions` is on |
+| Open a server's folder, manage users and remote access, restart the panel | never (this computer only) | never (this computer only) |
+
+An SSH tunnel is a local session: everything works. Viewer and operator roles are unchanged (no installs, no
+destructive actions, whatever the setting).
+
+Why the difference: a Tailscale sign-in is checked by the Tailscale service on this computer, so it names a real
+person on a device they have signed in. A token is a secret in a link: it can be pasted into a chat or left in a
+backup, and whoever holds it *is* that user. A leaked token that can only install can be undone by removing the
+server it made. A leaked token that can delete cannot be undone, so deleting stays off for tokens until someone on
+the computer that runs Kora turns it on. The typed-name confirmation for deleting always applies.
+
+When a token session asks for one of those, the panel says why and shows the command. To allow them for token
+administrators, run this on the computer that runs Kora (over SSH is fine):
 
 ```sh
 kora panel remote-actions on       # off turns them off again; status shows the setting
 ```
 
 or use the switch in Settings > Remote access from a local session. A running panel uses the new setting right away;
-no restart is needed. Even when it is on you must type the server's name to delete it.
+no restart is needed. Installing on Windows from afar still needs someone at the computer to accept the Windows
+administrator prompt.
 
 **A panel admin can do a lot on that computer**: install and delete servers, send console commands, update Kora. The panel itself does not run as root (since 0.6.1), but only make people you fully trust
 admin; give others the operator or viewer role.

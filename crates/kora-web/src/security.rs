@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use crate::remote::{self, roles, Caller, Identity, Provider, Role};
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{header, HeaderMap, HeaderValue, Method};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use kora_core::api::Op;
+use kora_core::problem::{codes, Action, Problem};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -597,6 +599,33 @@ pub async fn guard(State(st): State<AppState>, mut req: Request, next: Next) -> 
     resp
 }
 
+/// The refusal for a token session asking for a destructive operation while `remote actions` is off:
+/// why, exactly how to turn it on, and the other ways to do it.
+fn actions_off(op: Op) -> ApiError {
+    let what = match op {
+        Op::ServerDelete => "Deleting a server",
+        Op::ServerUnregister => "Removing a server from Kora's list",
+        Op::UninstallRun | Op::AppUninstall => "Uninstalling Kora",
+        Op::ConsoleSend => "Sending commands to the server console",
+        Op::SelfUpdateApply => "Updating Kora",
+        _ => "Changing the schedule",
+    };
+    let p = Problem::new(
+        codes::REMOTE_ACTIONS_OFF,
+        format!("{what} is turned off for sign-ins made with a token. A token is a secret in a link, and anyone who gets hold of it could use it, so this stays off until someone on the computer that runs Kora turns it on."),
+    )
+    .with_details(format!(
+        "To turn it on, run this on the computer that runs Kora (over SSH is fine): {}\n\
+         Or do it another way: sign in through Tailscale as an administrator, or open the panel on the computer that runs Kora (an SSH tunnel counts).",
+        REMOTE_ACTIONS_ON
+    ))
+    .with_action(Action::show_command(&["kora", "panel", "remote-actions", "on"], false));
+    ApiError::problem(StatusCode::FORBIDDEN, p)
+}
+
+/// The command that turns the token-session destructive actions on.
+pub const REMOTE_ACTIONS_ON: &str = "kora panel remote-actions on";
+
 /// What a remote session with `id` may do with this request (plan section 1). Loopback never gets here.
 fn authorise(st: &AppState, method: &Method, path: &str, id: &Identity) -> Result<(), ApiError> {
     let safe = method == Method::GET || method == Method::HEAD;
@@ -622,10 +651,8 @@ fn authorise(st: &AppState, method: &Method, path: &str, id: &Identity) -> Resul
             id.role
         )));
     }
-    if roles::destructive(op) && !st.remote.config().allow_remote_destructive {
-        return Err(ApiError::forbidden(
-            "This action is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora: `kora panel remote-actions on`",
-        ));
+    if roles::needs_switch(op, id.provider.via()) && !st.remote.config().allow_remote_destructive {
+        return Err(actions_off(op));
     }
     Ok(())
 }

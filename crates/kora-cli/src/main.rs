@@ -365,7 +365,7 @@ enum PanelCmd {
     },
     /// Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again.
     Restart,
-    /// Let people who sign in from another computer do the risky things too: install, delete and uninstall servers, send console commands, change schedules and update Kora. Off by default.
+    /// Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
     RemoteActions {
         #[command(subcommand)]
         cmd: RemoteActionsCmd,
@@ -374,9 +374,9 @@ enum PanelCmd {
 
 #[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
 enum RemoteActionsCmd {
-    /// Allow these actions for remote administrators.
+    /// Allow these actions for administrators who sign in with a token.
     On,
-    /// Refuse these actions for everyone who signs in remotely (the default).
+    /// Refuse these actions for token sign-ins from other computers (the default).
     Off,
     /// Show whether they are on or off.
     Status,
@@ -2282,10 +2282,10 @@ fn print_setup_fallback(why: &str) {
 /// What `kora panel remote-actions on|off|status` prints.
 fn remote_actions_message(cmd: RemoteActionsCmd, on: bool) -> &'static str {
     match (cmd, on) {
-        (RemoteActionsCmd::Status, true) => "Remote actions are on: remote administrators can install, delete and uninstall servers, send console commands, change schedules and update Kora. Turn them off with `kora panel remote-actions off`.",
-        (RemoteActionsCmd::Status, false) => "Remote actions are off: nobody who signs in from another computer can install, delete or uninstall servers, send console commands, change schedules or update Kora. Turn them on with `kora panel remote-actions on`.",
-        (_, true) => "Remote administrators can now install, delete and uninstall servers, send console commands, change schedules and update Kora. Deleting still asks for the server's name. Only people with the admin role can do this, so only give that role to people you trust.",
-        (_, false) => "Remote actions are turned off. Nobody who signs in from another computer can install, delete or uninstall servers, send console commands, change schedules or update Kora. These still work on this computer.",
+        (RemoteActionsCmd::Status, true) => "Remote actions are on: administrators who sign in with a token from another computer can delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Turn them off with `kora panel remote-actions off`.",
+        (RemoteActionsCmd::Status, false) => "Remote actions are off: administrators who sign in with a token from another computer can install and manage servers, but cannot delete or unregister them, uninstall Kora, send console commands, change schedules or update Kora. Tailscale administrators are not held back by this setting. Turn it on with `kora panel remote-actions on`.",
+        (_, true) => "Administrators who sign in with a token from another computer can now delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Deleting still asks for the server's name. Only give the admin role to people you trust.",
+        (_, false) => "Remote actions are turned off. Token sign-ins from other computers cannot delete or unregister servers, uninstall Kora, send console commands, change schedules or update Kora (they can still install and manage servers). These all still work on this computer, and for Tailscale administrators.",
     }
 }
 
