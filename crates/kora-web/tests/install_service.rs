@@ -121,10 +121,10 @@ impl InstallEnv for Env {
     fn disk(&self) -> &dyn DiskInfo {
         &Disk
     }
-    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
         Ok(())
     }
-    fn artifacts(&self) -> Result<ArtifactList, String> {
+    fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
         Err("offline".into())
     }
     fn is_elevated(&self) -> bool {
@@ -151,10 +151,10 @@ impl InstallEnv for Env {
         self.skipped.lock().unwrap().push(step.into());
         Ok(())
     }
-    fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+    fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
         unreachable!("the panel always passes its administrator service (or none)")
     }
-    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<SharedAdmin>) -> Result<InstallOutcome, String> {
+    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<SharedAdmin>) -> Result<InstallOutcome, kora_core::problem::Problem> {
         self.runs.lock().unwrap().push((req.service, req.firewall, admin.is_some()));
         sink.event(ev("build.config", StepStatus::Done, "written"));
         let skipped = self.skipped.lock().unwrap().clone();

@@ -81,7 +81,8 @@ pub async fn tool_install(State(st): State<AppState>, Path(tool): Path<String>) 
         let what = "install Git";
         crate::elevated::precheck_verb(&kora_core::privsvc::problems::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, msg)?;
         return st.spawn_job(Op::ToolInstall, None, move |h| {
-            let out = crate::elevated::privileged_as(what, msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| e.message)?;
+            let out =
+                crate::elevated::privileged_as(what, msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| kora_core::api::JobFailure::new(e.to_problem()))?;
             Ok(json!({"tool": "git", "output": out["output"]}))
         });
     }

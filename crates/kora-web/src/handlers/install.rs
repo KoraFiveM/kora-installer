@@ -139,7 +139,7 @@ pub async fn check_db_login(Json(body): Json<Value>) -> Result<Json<Value>, ApiE
                 // "start it for me" button (`problem`, shown by the wizard).
                 let db = if local { super::toolchain::env().database() } else { Default::default() };
                 let problem = (db.installed && !db.running).then(|| kora_core::problem::known::db_stopped(db.name.as_deref().unwrap_or("the database")).to_json());
-                json!({"ok": false, "message": m, "problem": problem})
+                json!({"ok": false, "message": m.message, "problem": problem})
             }
         })
     })
@@ -164,7 +164,7 @@ pub async fn check_cfx(Json(body): Json<Value>) -> Result<Json<Value>, ApiError>
                     "message": format!("Found {} (fivem:{}). This account will be the txAdmin admin.", a.username, a.id),
                 })
             }
-            Err(m) => json!({"ok": false, "id": null, "username": null, "identifier": null, "message": m}),
+            Err(m) => json!({"ok": false, "id": null, "username": null, "identifier": null, "message": m.message}),
         })
     })
     .await?;
