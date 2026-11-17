@@ -41,6 +41,8 @@ async function defaultBody(): Promise<InstallRequest> {
     mode: 'production', name: d.name, dir: d.dir, hostname: d.hostname, license_key: KEY, ports: d.ports, txadmin_public: false,
     artifact_url: null, game_build: null, resources: 'all', db: 'install_if_missing', service: true, firewall: true, github_owner: null,
     dry_run: false, db_admin: null, start: true, cfx_identifier: null,
+    // A pasted key is saved by default (under "Main" when nothing is saved yet).
+    save_license_key_as: 'Main',
   }
 }
 
@@ -101,7 +103,7 @@ describe('Install wizard: the short path', () => {
 
     // 3. Check and install: every suggested answer, in plain words, each with Change.
     expect(await heading('Check and install')).toBeInTheDocument()
-    for (const text of ['Provided (hidden)', 'Production (a server for players)', want.name, want.dir, `Game ${want.ports.game}, txAdmin ${want.ports.txadmin}`, 'Recommended', 'Everything', 'Set up for me', 'Automatic', 'Open the game port', 'Yes', 'Not set. Kora makes a local admin with a generated password.']) {
+    for (const text of [/Provided \(hidden\)/, 'Production (a server for players)', want.name, want.dir, `Game ${want.ports.game}, txAdmin ${want.ports.txadmin}`, 'Recommended', 'Everything', 'Set up for me', 'Automatic', 'Open the game port', 'Yes', 'Not set. Kora makes a local admin with a generated password.']) {
       expect(screen.getByText(text)).toBeInTheDocument()
     }
     for (const row of ['Licence key', 'Kind of server', 'Name', 'Folder', 'Ports', 'FiveM server build', 'Resources', 'Database', 'Firewall', 'Background service', 'Sign in to txAdmin with your Cfx.re account']) {
@@ -382,7 +384,7 @@ describe('Install wizard: when a step fails', () => {
     expect(await heading('Database')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Back to the summary' }))
     expect(await heading('Check and install')).toBeInTheDocument()
-    expect(screen.getByText('Provided (hidden)')).toBeInTheDocument()
+    expect(screen.getByText(/Provided \(hidden\)/)).toBeInTheDocument()
   })
 
   it('shows the GitHub sign-in when the step needs it', async () => {

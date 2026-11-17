@@ -206,6 +206,10 @@ export interface InstallRequest {
   dir: string
   hostname: string
   license_key: string | null
+  /** Use the saved licence key with this name instead of carrying a key (the key is looked up by Kora). */
+  license_key_name?: string | null
+  /** With a pasted `license_key`: save it under this name for the next install. */
+  save_license_key_as?: string | null
   ports: Ports
   txadmin_public: boolean
   artifact_url: string | null
@@ -245,6 +249,12 @@ export interface InstallDefaults {
   ports: Ports
   /** Answers saved from an install that stopped part-way (never contains secrets). */
   saved: SavedInstall | null
+  /** What Kora remembers between installs (nothing secret). */
+  profile?: Profile
+  /** The saved answers name a saved licence key that no longer exists (its old name). */
+  saved_key_missing?: string
+  /** Stopped installs that can carry on, also after the panel was restarted. */
+  resumable?: { job: string; name: string; failed_step: string | null }[]
 }
 export type SavedInstall = Partial<Omit<InstallRequest, 'license_key' | 'db_admin'>>
 
@@ -749,3 +759,44 @@ export interface AssetImportReport {
 }
 
 export type AssetImportEvent = { type: 'status'; message: string } | { type: 'asset'; name: string; state: 'imported' }
+
+// ---- saved licence keys and the remembered profile --------------------------------------------
+
+/** A saved key as the panel shows it: the name and the last four characters, never the key. */
+export interface SavedKeyInfo {
+  name: string
+  last4: string
+  /** Unix seconds (0 = unknown). */
+  added: number
+}
+export interface SavedKey extends SavedKeyInfo {
+  /** Servers whose configuration holds exactly this key. */
+  servers: string[]
+  /** Unfinished installs (and saved answers) that use it. */
+  stopped_installs: number
+}
+export interface SavedKeys {
+  keys: SavedKey[]
+  /** false: this sign-in can only pick from the saved names (admins and this computer manage them). */
+  can_manage: boolean
+  /** Where the file is (only told to the computer that runs Kora). */
+  path: string | null
+}
+export interface KeyChange {
+  key: SavedKeyInfo
+  notes: string[]
+}
+export interface ServerKeyChanged {
+  server: string
+  last4: string
+  /** The saved key it was set from (null: a pasted key that was not saved). */
+  key_name: string | null
+  running: boolean
+  restart_needed: boolean
+  message: string
+}
+export interface Profile {
+  cfx_username: string | null
+  cfx_identifier: string | null
+  github_owner: string | null
+}

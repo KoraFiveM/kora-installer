@@ -3,6 +3,7 @@
 import type * as T from '../types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
+import { installKeysMock } from './keys'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 
@@ -53,6 +54,7 @@ function init(name: ScenarioName) {
   jobs.clear()
   busy.clear()
   paused.clear()
+  keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
   nextId = 1
   consoleTick = 0
 }
@@ -284,7 +286,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     await sleep(step === 'build.fxserver' ? 1800 : 900)
     if (step === failAt) {
       emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier }
+      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null }
       const id = jobId()
       paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
       const common: Partial<T.JobError> = {
@@ -347,6 +349,7 @@ const route = (method: string, pattern: string, h: Handler) => {
 }
 const dec = (s: string) => decodeURIComponent(s)
 installHubMock(route, startJob, Fail, () => servers)
+const keysMock = installKeysMock(route, Fail, () => servers)
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
 
@@ -801,7 +804,7 @@ route('GET', '/artifacts', () => ({ recommended: 17000, items: [17200, 17100, 17
 route('GET', '/installs/defaults', () => {
   const taken = servers.map((s) => s.ports.game)
   const game = nextFree(30120, taken)
-  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall } satisfies T.InstallDefaults
+  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall && prefs.savedInstall.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { ...prefs.savedInstall, license_key_name: null } : prefs.savedInstall, profile: keysMock.profile(), ...(prefs.savedInstall?.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { saved_key_missing: prefs.savedInstall.license_key_name } : {}) } satisfies T.InstallDefaults
 })
 route('DELETE', '/installs/saved', () => {
   prefs.savedInstall = null
@@ -830,7 +833,7 @@ route('POST', '/checks/cfx', (_m, b) => {
   const none = (message: string) => ({ ok: false, id: null, username: null, identifier: null, message }) satisfies T.CfxCheck
   if (beh.trouble) return none('forum.cfx.re did not answer. Check the internet connection and try again, or skip this step.')
   if (name.toLowerCase().includes('offline')) return none('Could not reach forum.cfx.re. Check the internet connection and try again, or skip this step.')
-  if (name.toLowerCase() === 'jsixty') return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck
+  if (name.toLowerCase() === 'jsixty') { keysMock.remember({ cfx_username: 'JSixty', cfx_identifier: 'fivem:4465268' }); return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck }
   return none(`No Cfx.re account called "${name}" was found. Check the spelling: it is the name on forum.cfx.re.`)
 })
 route('POST', '/installs/plan', (_m, b) => {
@@ -844,7 +847,9 @@ route('POST', '/installs/plan', (_m, b) => {
 })
 route('POST', '/installs', (_m, b) => {
   const r = b as unknown as T.InstallRequest
-  if (!r.license_key) throw new Fail(400, 'bad_request', 'A licence key is needed. Get one from the Cfx.re portal.')
+  if (!r.license_key && !r.license_key_name) throw new Fail(400, 'bad_request', 'A licence key is needed. Get one from the Cfx.re portal.')
+  keysMock.forInstall(r)
+  if (r.mode === 'development' && r.github_owner) keysMock.remember({ github_owner: r.github_owner })
   if (servers.some((s) => s.name === r.name)) throw new Fail(409, 'conflict', `A server called "${r.name}" already exists.`)
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)

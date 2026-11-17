@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { LicenceKeyCard } from '@/components/ChangeLicenceKey'
 import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
 
@@ -59,6 +60,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
           <ErrorNotice error={err} />
         </CardContent>
       </Card>
+      <LicenceKeyCard server={s} busy={ctl.busy} restart={() => void ctl.run('restart')} />
     </div>
   )
 }

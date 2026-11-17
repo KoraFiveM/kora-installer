@@ -35,7 +35,7 @@ interface ReviewRow {
 function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
   const rows: ReviewRow[] = [
-    { label: 'Licence key', value: f.license.trim() ? 'Provided (hidden)' : 'Not given yet', step: 'licence' },
+    { label: 'Licence key', value: f.licenceChoice === 'saved' ? (f.licenceName ? `Your saved key "${f.licenceName}"` : 'Not picked yet') : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? `Provided (hidden). It will be saved as "${f.saveKeyName.trim()}".` : 'Provided (hidden). It will not be saved.') : 'Not given yet', step: 'licence' },
     { label: 'Kind of server', value: f.mode === 'production' ? 'Production (a server for players)' : 'Development (for building and changing resources)', step: 'mode' },
     { label: 'Name', value: req.name || 'Not given yet', step: 'name' },
     { label: 'Folder', value: req.dir || 'Not given yet', step: 'name' },
@@ -50,7 +50,7 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   ]
   rows.push({
     label: 'Sign in to txAdmin with your Cfx.re account',
-    value: f.cfxFound ? (f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier) : 'Not set. Kora makes a local admin with a generated password.',
+    value: f.cfxFound ? `${f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier}${f.cfxRemembered ? '. Remembered from your last install.' : ''}` : 'Not set. Kora makes a local admin with a generated password.',
     step: 'cfx',
   })
   if (f.mode === 'development') rows.push({ label: 'GitHub forks go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
@@ -173,7 +173,9 @@ function Wizard() {
   const defaults = useQuery({ queryKey: ['install-defaults'], queryFn: api.installs.defaults, staleTime: Infinity })
   const gh = useQuery({ queryKey: ['github-status'], queryFn: api.github.status })
   const [f, setF] = useState<WizardForm | null>(null)
-  if (defaults.data && !f) setF(initialForm(defaults.data))
+  // The saved keys decide which licence answer is pre-selected; if they cannot be read the wizard still opens (paste a key).
+  const keys = useQuery({ queryKey: ['keys'], queryFn: api.keys.list, retry: false })
+  if (defaults.data && !keys.isPending && !f) setF(initialForm(defaults.data, keys.data?.keys))
   if (defaults.isError) return <ErrorNotice error={defaults.error} />
   if (!f || !defaults.data) return <Skeleton className="h-64" />
   const set = (p: Partial<WizardForm>) => setF((x) => (x ? { ...x, ...p } : x))
@@ -338,7 +340,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       </div>
       {saved && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
-          <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers (not your licence key).</p>
+          <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
+          {defaults.saved_key_missing && <p className="mt-1">The saved key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
           <div className="mt-2 flex gap-2">
             <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
             <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>

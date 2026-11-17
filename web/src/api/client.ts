@@ -258,6 +258,20 @@ export const api = {
     login: () => post<T.GithubLoginStart>('/github/login'),
     owners: () => get<{ owners: T.GithubOwner[] }>('/github/owners').then((r) => r.owners),
   },
+  keys: {
+    list: () => get<T.SavedKeys>('/keys'),
+    add: (name: string, license_key: string) => post<{ key: T.SavedKeyInfo }>('/keys', { name, license_key }),
+    /** Rename, put a new key under the name, or both. */
+    update: (name: string, body: { new_name?: string; license_key?: string }) => put<T.KeyChange>(`/keys/${enc(name)}`, body),
+    remove: (name: string) => del<{ removed: boolean; notes: string[] }>(`/keys/${enc(name)}`),
+    /** Change the licence key of an installed server: a saved key by name, or a new one (optionally saved). */
+    setForServer: (server: string, body: { name: string } | { license_key: string; save_as?: string }) => put<T.ServerKeyChanged>(`/servers/${enc(server)}/licence-key`, body),
+  },
+  profile: {
+    get: () => get<T.Profile>('/profile'),
+    /** `null` forgets a field; a field left out stays as it is. */
+    set: (body: Partial<T.Profile>) => put<T.Profile>('/profile', body),
+  },
   checks: {
     cfx: (username: string) => post<T.CfxCheck>('/checks/cfx', { username }),
   },
