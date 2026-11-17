@@ -118,6 +118,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::BackupVerify
         | Op::BackupPreview
         | Op::BackupsOverview
+        | Op::SupportSummary
         | Op::ReachCheck => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
@@ -196,6 +197,10 @@ pub fn min_role(op: Op) -> Role {
         | Op::BackupRestore
         | Op::BackupDelete
         | Op::BackupDownload
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
         | Op::TxAdminTicket => Admin,
     }
 }
@@ -337,6 +342,11 @@ pub fn destructive(op: Op) -> bool {
         | Op::BackupVerify
         | Op::BackupPreview
         | Op::BackupsOverview
+        | Op::SupportSummary
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
         | Op::ReachFirewallOpen => false,
     }
 }
@@ -468,6 +478,11 @@ pub fn installs(op: Op) -> bool {
         | Op::BackupDelete
         | Op::BackupDownload
         | Op::BackupsOverview
+        | Op::SupportSummary
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
         | Op::TxAdminTicket => false,
     }
 }
@@ -632,6 +647,11 @@ pub fn local_only(op: Op) -> bool {
         | Op::BackupDelete
         | Op::BackupDownload
         | Op::BackupsOverview
+        | Op::SupportSummary
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
         | Op::TxAdminTicket => false,
     }
 }
@@ -749,6 +769,17 @@ mod tests {
             assert!(remote_allowed(op, Role::Admin, Via::Tailscale, false), "{op:?}: a Tailscale admin may");
         }
         assert!(Op::BackupVerify.is_read_only_job() && Op::BackupRestore.is_job() && Op::BackupCreate.is_job());
+    }
+
+    /// The support bundle: an administrator's (it carries the computer's diagnostics even with every secret removed);
+    /// only the short cleaned summary for a bug report is an operator's.
+    #[test]
+    fn support_roles() {
+        for op in [Op::SupportBundlePreview, Op::SupportBundleFile, Op::SupportBundleCreate, Op::SupportBundleDownload] {
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(!local_only(op) && !destructive(op), "{op:?}");
+        }
+        assert_eq!(min_role(Op::SupportSummary), Role::Operator);
     }
 
     #[test]

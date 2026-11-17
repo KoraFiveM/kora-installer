@@ -757,6 +757,73 @@ export type BulkRow = {
 
 export type BulkStatus = "switched" | "already" | "needs_choice" | "skipped" | "failed";
 
+/**
+ * `POST /support/bundle`: save what was previewed.
+ */
+export type BundleCreateRequest = {
+  id: string,
+};
+
+/**
+ * One file of the bundle, for the screen.
+ */
+export type BundleFile = {
+  name: string,
+  bytes: number,
+  /**
+   * How many values were hidden in it.
+   */
+  redactions: number,
+  /**
+   * What kinds ("licence key", "address with a login", ...).
+   */
+  hidden: Array<string>,
+};
+
+/**
+ * `POST /support/bundle/file`: one file's (cleaned) text.
+ */
+export type BundleFileRequest = {
+  id: string,
+  name: string,
+};
+
+export type BundleFileText = {
+  name: string,
+  text: string,
+};
+
+/**
+ * What a bundle holds, built and kept for a few minutes so that what is saved is exactly what was shown.
+ */
+export type BundleListing = {
+  id: string,
+  files: Array<BundleFile>,
+  /**
+   * Left out altogether, and why.
+   */
+  omitted: Array<Omitted>,
+  total_bytes: number,
+  /**
+   * Where it will be saved, on the computer that runs Kora.
+   */
+  folder: string,
+  /**
+   * "Kora never uploads this…", said by the program, not the page.
+   */
+  never_uploaded: string,
+};
+
+export type BundleSaved = {
+  file_name: string,
+  /**
+   * The full path on the computer that runs Kora.
+   */
+  path: string,
+  bytes: number,
+  folder: string,
+};
+
 export type Cadence = "daily" | "weekly";
 
 /**
@@ -1800,6 +1867,14 @@ export type Notes = {
  */
 export type Nothing = Record<symbol, never>;
 
+/**
+ * Something deliberately left out, and why.
+ */
+export type Omitted = {
+  name: string,
+  why: string,
+};
+
 export type OwnerKind = "user" | "org";
 
 /**
@@ -2743,6 +2818,23 @@ export type StatusEvent = {
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
 
 export type StoredAs = "reference" | "full";
+
+/**
+ * `POST /support/bundle/preview` and `POST /support/summary`.
+ */
+export type SupportRequest = {
+  /**
+   * Only this server's files (left out: every server).
+   */
+  server?: string,
+};
+
+/**
+ * `POST /support/summary`: the short cleaned text an issue report may attach (never the file).
+ */
+export type SupportSummary = {
+  text: string,
+};
 
 /**
  * What is checked out.

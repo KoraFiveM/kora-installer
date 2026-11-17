@@ -187,6 +187,16 @@ pub enum Op {
     BackupDownload,
     /// The "last backup" line of every server, for the servers list.
     BackupsOverview,
+    /// Prepare a support bundle and show what is in it (nothing is saved or sent).
+    SupportBundlePreview,
+    /// One file of a prepared support bundle, as it will be saved.
+    SupportBundleFile,
+    /// Save the prepared support bundle on this computer.
+    SupportBundleCreate,
+    /// Download a saved support bundle.
+    SupportBundleDownload,
+    /// The short cleaned text a bug report may attach.
+    SupportSummary,
 }
 
 impl Op {
@@ -315,6 +325,11 @@ impl Op {
         Op::BackupDelete,
         Op::BackupDownload,
         Op::BackupsOverview,
+        Op::SupportBundlePreview,
+        Op::SupportBundleFile,
+        Op::SupportBundleCreate,
+        Op::SupportBundleDownload,
+        Op::SupportSummary,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -444,6 +459,11 @@ impl Op {
             Op::BackupDelete => "backup_delete",
             Op::BackupDownload => "backup_download",
             Op::BackupsOverview => "backups_overview",
+            Op::SupportBundlePreview => "support_bundle_preview",
+            Op::SupportBundleFile => "support_bundle_file",
+            Op::SupportBundleCreate => "support_bundle_create",
+            Op::SupportBundleDownload => "support_bundle_download",
+            Op::SupportSummary => "support_summary",
         }
     }
 
@@ -576,6 +596,11 @@ impl Op {
             Op::BackupDelete => (Method::Delete, "/servers/{s}/backups/{id}"),
             Op::BackupDownload => (Method::Get, "/servers/{s}/backups/{id}/file"),
             Op::BackupsOverview => (Method::Get, "/backups"),
+            Op::SupportBundlePreview => (Method::Post, "/support/bundle/preview"),
+            Op::SupportBundleFile => (Method::Post, "/support/bundle/file"),
+            Op::SupportBundleCreate => (Method::Post, "/support/bundle"),
+            Op::SupportBundleDownload => (Method::Get, "/support/bundle/{file}"),
+            Op::SupportSummary => (Method::Post, "/support/summary"),
         }
     }
 
@@ -804,13 +829,18 @@ mod tests {
             | Op::BackupRestore
             | Op::BackupDelete
             | Op::BackupDownload
-            | Op::BackupsOverview => Op::ALL.contains(&op),
+            | Op::BackupsOverview
+            | Op::SupportBundlePreview
+            | Op::SupportBundleFile
+            | Op::SupportBundleCreate
+            | Op::SupportBundleDownload
+            | Op::SupportSummary => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 124);
+        assert_eq!(Op::ALL.len(), 129);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

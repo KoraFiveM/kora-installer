@@ -134,6 +134,11 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::BackupDelete => on_op(op, handlers::backups::backup_delete),
         Op::BackupDownload => on_op(op, handlers::backups::backup_download),
         Op::BackupsOverview => on_op(op, handlers::backups::backups_overview),
+        Op::SupportBundlePreview => on_op(op, handlers::support::support_bundle_preview),
+        Op::SupportBundleFile => on_op(op, handlers::support::support_bundle_file),
+        Op::SupportBundleCreate => on_op(op, handlers::support::support_bundle_create),
+        Op::SupportBundleDownload => on_op(op, handlers::support::support_bundle_download),
+        Op::SupportSummary => on_op(op, handlers::support::support_summary),
         // The zip is the request body: streamed to a file, so the panel-wide 1 MiB limit does not apply.
         Op::AssetInspect => on_op(op, handlers::assets::asset_inspect).layer(DefaultBodyLimit::max(handlers::assets::UPLOAD_LIMIT as usize)),
         Op::AssetImport => on_op(op, handlers::assets::asset_import),

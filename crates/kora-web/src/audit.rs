@@ -35,7 +35,7 @@ pub struct JobStarted {
 /// Does a request for `op` with `method` belong in the log?
 pub fn audited(op: Op, method: &Method) -> bool {
     // Downloading a backup hands out the secrets inside it: that is always written down.
-    if (method == Method::GET || method == Method::HEAD) && op != Op::BackupDownload {
+    if (method == Method::GET || method == Method::HEAD) && !matches!(op, Op::BackupDownload | Op::SupportBundleDownload) {
         return false;
     }
     !matches!(
@@ -58,6 +58,9 @@ pub fn audited(op: Op, method: &Method) -> bool {
             | Op::AlertsAck
             | Op::BranchBulkPreview
             | Op::BackupPreview
+            | Op::SupportBundlePreview
+            | Op::SupportBundleFile
+            | Op::SupportSummary
     )
 }
 

@@ -533,6 +533,8 @@ fn cases() -> Vec<Case> {
         case(Op::ReachFirewallOpen, s, None),
         case(Op::BackupsList, s, None),
         case(Op::BackupsOverview, &[], None),
+        case(Op::SupportBundlePreview, &[], Some(json!({}))),
+        case(Op::SupportSummary, &[], Some(json!({"server": "prod"}))),
         case(Op::BackupCreate, s, Some(json!({"passphrase": "a long passphrase", "everything": false, "stop_server": false}))),
         case(
             Op::BackupSettingsSet,
@@ -553,6 +555,9 @@ fn cases() -> Vec<Case> {
 const UNVERIFIED: &[(Op, &str)] = &[
     (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
     (Op::BackupDelete, "204"),
+    (Op::SupportBundleFile, "needs the id of a bundle prepared moments before; covered by tests/support.rs"),
+    (Op::SupportBundleCreate, "needs the id of a bundle prepared moments before; covered by tests/support.rs"),
+    (Op::SupportBundleDownload, "the saved zip itself (binary), not JSON"),
     (Op::BackupDownload, "the archive file itself (binary), not JSON"),
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),

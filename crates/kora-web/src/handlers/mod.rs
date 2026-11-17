@@ -15,6 +15,7 @@ pub mod remote;
 pub mod resources;
 pub mod servers;
 pub mod settings;
+pub mod support;
 pub mod system;
 pub mod toolchain;
 pub mod updates;

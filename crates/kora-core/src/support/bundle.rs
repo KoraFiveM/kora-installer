@@ -476,3 +476,14 @@ pub(crate) mod tests {
         assert!(!b.files.iter().any(|x| x.name.starts_with("servers/prod")));
     }
 }
+
+/// A small bundle for a test double of the backend (the fake in `api::fake`): real shapes, no machine reads.
+#[doc(hidden)]
+pub fn tests_bundle_for_fake() -> Bundle {
+    let mut b = Bundle { id: "x".into(), created_unix: crate::monitor::now_unix(), files: vec![], omitted: vec![], texts: BTreeMap::new() };
+    b.add("about.txt", "Kora 0.8.0\nOperating system: Ubuntu 24.04\n".into(), Hits::new());
+    b.add("servers/prod/server.cfg", "sv_licenseKey \"<hidden: licence key>\"\nendpoint_add_tcp \"0.0.0.0:30120\"\n".into(), [("licence key", 1usize)].into_iter().collect());
+    b.omitted.push(Omitted { name: "servers/prod/secrets.cfg".into(), why: "holds the licence key and the database connection string".into() });
+    b.add("README.txt", README.to_string(), Hits::new());
+    b
+}

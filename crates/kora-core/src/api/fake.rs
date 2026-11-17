@@ -467,6 +467,18 @@ impl Backend for FakeBackend {
         self.state().calls.push(format!("backup_prune {}", e.name));
         Ok(vec!["20260101-000000".into()])
     }
+    fn support_preview(&mut self, server: Option<&str>) -> Res<crate::api::wire::BundleListing> {
+        self.state().calls.push(format!("support_preview {}", server.unwrap_or("-")));
+        let mut b = crate::support::bundle::tests_bundle_for_fake();
+        b.id = "20260320-030000".into();
+        Ok(crate::support::service::listing(b))
+    }
+    fn support_summary(&mut self, server: Option<&str>) -> Res<String> {
+        self.state().calls.push(format!("support_summary {}", server.unwrap_or("-")));
+        Ok("--- about.txt
+Kora 0.8.0
+".into())
+    }
     fn backup_file(&mut self, e: &ServerEntry, id: &str) -> Res<PathBuf> {
         self.state().calls.push(format!("backup_file {} {id}", e.name));
         Err("The fake has no archive files.".into())

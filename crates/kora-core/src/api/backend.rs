@@ -246,6 +246,13 @@ pub trait Backend {
     fn backup_prune(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
         crate::backup::service::prune(self, e)
     }
+    // ---- the support bundle (see `crate::support`)
+    fn support_preview(&mut self, server: Option<&str>) -> Res<crate::api::wire::BundleListing> {
+        crate::support::service::preview(self, server)
+    }
+    fn support_summary(&mut self, server: Option<&str>) -> Res<String> {
+        Ok(crate::support::service::summary(self, server))
+    }
     /// The archive file of a backup, to download it (it holds secrets: administrators only).
     fn backup_file(&mut self, e: &ServerEntry, id: &str) -> Res<PathBuf> {
         crate::backup::service::file(self, e, id)

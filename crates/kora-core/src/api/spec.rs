@@ -311,6 +311,12 @@ pub fn spec(op: Op) -> OpSpec {
         Op::BackupPreview => OpSpec::call::<w::PassphraseRequest, crate::backup::restore::RestorePreview>(),
         Op::BackupRestore => OpSpec::start_job_with::<w::PassphraseRequest>().events::<crate::backup::BackupEvent>().result::<crate::backup::restore::RestoreReport>(),
         Op::BackupsOverview => OpSpec::get::<w::BackupsOverview>(),
+        Op::SupportBundlePreview => OpSpec::call::<w::SupportRequest, w::BundleListing>(),
+        Op::SupportBundleFile => OpSpec::call::<w::BundleFileRequest, w::BundleFileText>(),
+        Op::SupportBundleCreate => OpSpec::call::<w::BundleCreateRequest, w::BundleSaved>(),
+        // The saved zip itself (binary): downloaded by the panel, not called through the generated client.
+        Op::SupportBundleDownload => OpSpec::nothing(),
+        Op::SupportSummary => OpSpec::call::<w::SupportRequest, w::SupportSummary>(),
         Op::BackupDelete => OpSpec::nothing(),
         // The archive file itself (binary): not JSON, so the generated client does not call it; the panel opens it as a download.
         Op::BackupDownload => OpSpec::nothing(),
