@@ -31,6 +31,35 @@ function Test-OnMachinePath([string]$Folder) {
     @([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | ForEach-Object { $_.TrimEnd('\') }) -contains $want
 }
 
+# The pipe's security descriptor (SDDL). `Get-Item \\.\pipe\name` does not work (the file system provider does not list pipes) and
+# the .NET pipe client cannot be opened with READ_CONTROL only, so: CreateFile(READ_CONTROL) + GetSecurityInfo, read from the handle
+# (the elevated administrator has READ_CONTROL through the pipe's Administrators entry).
+Add-Type -Namespace Kora -Name PipeAcl -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sa, uint disposition, uint flags, IntPtr template);
+[DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+[DllImport("kernel32.dll")] public static extern IntPtr LocalFree(IntPtr p);
+[DllImport("advapi32.dll")]
+public static extern uint GetSecurityInfo(IntPtr h, int type, uint info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl, out IntPtr sd);
+[DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern bool ConvertSecurityDescriptorToStringSecurityDescriptorW(IntPtr sd, uint rev, uint info, out IntPtr text, IntPtr len);
+'@
+function Get-PipeSddl([string]$Name) {
+    $pipes = [IO.Directory]::GetFiles('\\.\pipe\') | ForEach-Object { $_.ToLowerInvariant() }
+    if ($pipes -notcontains ("\\.\pipe\" + $Name.ToLowerInvariant())) { throw "the pipe $Name does not exist (pipes: $($pipes -join ', '))" }
+    $h = [Kora.PipeAcl]::CreateFileW("\\.\pipe\$Name", 0x20000, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)   # READ_CONTROL, open existing
+    if ($h -eq [IntPtr]::new(-1)) { throw "cannot open the pipe with READ_CONTROL (error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
+    try {
+        $sd = [IntPtr]::Zero
+        $rc = [Kora.PipeAcl]::GetSecurityInfo($h, 6, 5, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero, [ref]$sd)   # kernel object; owner + DACL
+        if ($rc -ne 0) { throw "GetSecurityInfo failed ($rc)" }
+        $text = [IntPtr]::Zero
+        if (-not [Kora.PipeAcl]::ConvertSecurityDescriptorToStringSecurityDescriptorW($sd, 1, 5, [ref]$text, [IntPtr]::Zero)) { throw 'ConvertSecurityDescriptor failed' }
+        [Runtime.InteropServices.Marshal]::PtrToStringUni($text)
+    }
+    finally { [void][Kora.PipeAcl]::CloseHandle($h) }
+}
+
 function Show-Diagnostics {
     Write-Host '----- diagnostics -----'
     foreach ($l in 'install.log', 'upgrade.log', 'uninstall.log') { if (Test-Path "$work\$l") { Write-Host "== $l (last 60 lines, errors first)"; Select-String -Path "$work\$l" -Pattern 'Error|Return value 3|failed' | Select-Object -First 15 | ForEach-Object { Write-Host $_.Line }; Get-Content "$work\$l" -Tail 60 } }
@@ -96,10 +125,10 @@ try {
     Assert-That ($policy -match [regex]::Escape($sidA) -and $policy -match [regex]::Escape($sidC)) 'A and C are on the list'
     Assert-That ($policy -notmatch [regex]::Escape($sidB)) 'B is not'
     Assert-That (((Get-Item "$pf\data\service.json").GetAccessControl().Owner) -match 'SYSTEM|Administrators') 'the settings file belongs to SYSTEM or Administrators'
-    $pipeSd = (Get-Item '\\.\pipe\kora-service').GetAccessControl()
-    Assert-That ($pipeSd.Owner -match 'SYSTEM') "the pipe is owned by SYSTEM ($($pipeSd.Owner))"
-    Assert-That ($pipeSd.Sddl -match [regex]::Escape($sidA) -and $pipeSd.Sddl -notmatch [regex]::Escape($sidB)) 'the pipe grants A and not B'
-    Write-Host "pipe SDDL: $($pipeSd.Sddl)"
+    $pipeSddl = Get-PipeSddl 'kora-service'
+    Write-Host "pipe SDDL: $pipeSddl"
+    Assert-That ($pipeSddl -match '^O:SY') 'the pipe is owned by SYSTEM'
+    Assert-That ($pipeSddl -match [regex]::Escape($sidA) -and $pipeSddl -notmatch [regex]::Escape($sidB)) 'the pipe grants A and not B'
 
     Write-Host '=== status as standard accounts (nothing is elevated) ==='
     $r = Invoke-AsUser $A "& '$koraExe' service status"; Write-Host $r.Output
@@ -173,7 +202,7 @@ try {
     Assert-That (-not (Test-OnMachinePath $pf)) 'the PATH entry is gone'
     Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")) 'the Start Menu shortcut is gone'
     Assert-That (-not (Test-Path "$pf\kora-desktop.exe")) 'the desktop app is gone'
-    Assert-That (-not (Test-Path '\\.\pipe\kora-service')) 'no pipe'
+    Assert-That (-not ([IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\kora-service')) 'no pipe'
     Assert-That (Test-Path "$srvA\.kora\request.json") 'the server folder was never touched'
     Write-Host 'all MSI checks passed'
 }
