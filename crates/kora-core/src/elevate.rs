@@ -379,10 +379,16 @@ pub fn ensure_elevated(need: &Need, args: &[OsString], elevator: &dyn Elevator, 
 /// Keep the console window open until a key is pressed? (Windows only: a window that Kora's
 /// own relaunch or a double-click created closes the moment the program ends.)
 ///
-/// Never in session 0 (`no_desktop`): the MSI's custom actions, services and scheduled jobs run there with a console of
-/// their own that nobody can see, so "Press Enter" would wait for ever (the installer hung on it).
+/// Never when `no_desktop`: in session 0 (services, scheduled jobs) or for a command an installer runs (the MSI's custom
+/// actions get a console of their own that nobody can see, also in the person's session), so "Press Enter" would wait for ever (the installer hung on it).
 pub fn should_pause(windows: bool, owns_console: bool, relaunched: bool, stdin_tty: bool, stdout_tty: bool, no_desktop: bool) -> bool {
     windows && !no_desktop && stdin_tty && stdout_tty && (owns_console || relaunched)
+}
+
+/// Is nobody looking at this process's window? Session 0, or a command that installers run (`automated`) unless Kora
+/// relaunched it itself in a window for a person.
+pub fn unattended(session_zero: bool, automated_command: bool, relaunched: bool) -> bool {
+    session_zero || (automated_command && !relaunched)
 }
 
 /// True when this process runs in Windows session 0: no person is looking at its window.
@@ -778,6 +784,10 @@ mod tests {
         assert!(!should_pause(true, true, true, false, true, false), "no stdin: scheduler/CI, never block");
         assert!(!should_pause(true, true, true, true, false, false), "output piped");
         assert!(!should_pause(false, true, true, true, true, false), "not Windows");
+        assert!(unattended(true, false, false), "session 0");
+        assert!(unattended(false, true, false), "an installer's `kora service ...`");
+        assert!(!unattended(false, true, true), "our own elevated window for a person keeps its output");
+        assert!(!unattended(false, false, false), "an ordinary run");
         assert!(!should_pause(true, true, true, true, true, true), "session 0 (the installer's actions, services): nobody can press Enter");
     }
 
