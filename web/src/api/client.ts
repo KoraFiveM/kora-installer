@@ -258,6 +258,16 @@ export const api = {
     login: () => post<T.GithubLoginStart>('/github/login'),
     owners: () => get<{ owners: T.GithubOwner[] }>('/github/owners').then((r) => r.owners),
   },
+  /** Git and the GitHub CLI, the System check, and starting the database. */
+  tools: {
+    status: () => get<{ tools: T.ToolStatus[] }>('/tools').then((r) => r.tools),
+    /** Download and set up Kora's own copy (a job; `git` on Linux is the system package and needs administrator rights). */
+    install: (tool: 'git' | 'gh') => post<T.JobStarted>(`/tools/${enc(tool)}/install`),
+  },
+  systemCheck: {
+    get: () => get<T.SystemCheck>('/system/check'),
+    startDatabase: () => post<T.JobStarted>('/system/database/start'),
+  },
   checks: {
     cfx: (username: string) => post<T.CfxCheck>('/checks/cfx', { username }),
   },

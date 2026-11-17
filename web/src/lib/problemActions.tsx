@@ -27,7 +27,7 @@ export const BUILT_IN: readonly ProblemActionKind[] = ['show_command', 'open_lin
 
 const KNOWN: readonly ProblemActionKind[] = [
   'retry', 'retry_step', 'skip_step', 'change_answers', 'sign_in_github', 'install_tool', 'request_admin',
-  'continue_without_admin', 'show_command', 'open_link', 'open_log', 'copy_details',
+  'continue_without_admin', 'show_command', 'open_link', 'open_log', 'copy_details', 'start_database',
 ]
 
 /** Wizard pages that `change_answers` can open, as the user sees them. */
@@ -72,6 +72,8 @@ export function actionLabel(a: ProblemAction): string {
       return 'Show the log'
     case 'copy_details':
       return 'Copy details'
+    case 'start_database':
+      return 'Start it for me'
   }
 }
 

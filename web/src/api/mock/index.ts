@@ -3,6 +3,7 @@
 import type * as T from '../types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
+import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, resetToolchainMock } from './toolchain'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 
@@ -55,6 +56,7 @@ function init(name: ScenarioName) {
   paused.clear()
   nextId = 1
   consoleTick = 0
+  resetToolchainMock(beh.trouble)
 }
 
 class Fail extends Error {
@@ -771,18 +773,20 @@ route('POST', '/servers/{s}/pr', (m, b) => {
   if (!String(b.title ?? '').trim()) throw new Fail(400, 'bad_request', 'Give the pull request a title.')
   return { url: 'https://github.com/KoraFiveM/kora_core/pull/87' }
 })
-route('GET', '/github/status', () => {
-  // `trouble`: the GitHub CLI is not installed (told apart from "signed out").
-  if (beh.trouble) {
+const githubStatus = (): T.GithubStatus => {
+  // `trouble`: the GitHub CLI is not installed (told apart from "signed out") until the "Install it for me" button has run.
+  if (!mockGhInstalled()) {
     return {
       signed_in: false, user: null, state: 'gh_missing', missing_scopes: [],
       problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
-    } satisfies T.GithubStatus
+    }
   }
   return prefs.github
-    ? ({ signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null } satisfies T.GithubStatus)
-    : ({ signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } } satisfies T.GithubStatus)
-})
+    ? { signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null }
+    : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } }
+}
+route('GET', '/github/status', () => githubStatus())
+installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble })
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
     await sleep(beh.trouble ? 3000 : 6000)
@@ -821,7 +825,7 @@ route('POST', '/checks/disk', (_m, b) => {
 })
 route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
-  if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.' }
+  if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() } satisfies T.DbLoginCheck
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
 })
 route('POST', '/checks/cfx', (_m, b) => {

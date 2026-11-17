@@ -138,6 +138,7 @@ export type ProblemAction =
   | { kind: 'open_link'; url: string }
   | { kind: 'open_log'; job?: string; path?: string }
   | { kind: 'copy_details' }
+  | { kind: 'start_database' }
 
 export type ProblemActionKind = ProblemAction['kind']
 
@@ -267,6 +268,8 @@ export interface DiskCheck {
 export interface DbLoginCheck {
   ok: boolean
   message: string
+  /** A failed login on a database that is installed but stopped: carries the "Start it for me" button. */
+  problem?: Problem | null
 }
 /** Answer of `POST /checks/cfx` (HTTP 200 whether or not the account was found). */
 export interface CfxCheck {
@@ -749,3 +752,43 @@ export interface AssetImportReport {
 }
 
 export type AssetImportEvent = { type: 'status'; message: string } | { type: 'asset'; name: string; state: 'imported' }
+
+/** One tool of `GET /tools`: Git or the GitHub CLI, from this computer or Kora's own private copy. */
+export interface ToolStatus {
+  tool: 'git' | 'gh'
+  name: string
+  label: string
+  installed: boolean
+  version: string | null
+  source: 'system' | 'private' | null
+  path: string | null
+  /** Found, but it did not run. */
+  broken: boolean
+  /** Kora can download its own copy on this computer. */
+  can_install: boolean
+}
+
+export type CheckState = 'ok' | 'problem' | 'info'
+
+/** One line of the System check (`GET /system/check`). */
+export interface CheckItem {
+  id: 'git' | 'gh' | 'github' | 'database' | 'admin' | 'service'
+  label: string
+  state: CheckState
+  summary: string
+  /** What to do about it, with the fix buttons (null when fine). */
+  problem: Problem | null
+}
+
+export interface SystemCheck {
+  items: CheckItem[]
+  /** No line needs fixing. */
+  ok: boolean
+}
+
+/** Progress of an install-tool job (`message`, `fraction` 0..1). */
+export interface ToolInstallEvent {
+  type: 'progress' | 'status'
+  message: string
+  fraction?: number
+}
