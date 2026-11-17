@@ -67,6 +67,7 @@ impl SocketClient {
                 Message::Progress { line, .. } => on_line(&line),
                 Message::Result { ok, code, version, .. } => return Ok((Outcome { ok, code }, version)),
                 Message::Error { message } => return Err(HelperError::Rejected(message)),
+                Message::Hello { .. } => {}
             }
         }
         Err(HelperError::Protocol("The Kora helper closed the connection before it finished.".into()))

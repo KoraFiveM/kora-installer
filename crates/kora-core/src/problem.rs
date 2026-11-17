@@ -43,6 +43,16 @@ pub mod codes {
     pub const FAILED: &str = "failed";
     /// Administrator / root rights are needed and Kora does not have them.
     pub const NEEDS_ELEVATION: &str = "needs_elevation";
+    /// Windows: the administrator permission prompt was declined (`helper::worker`).
+    pub const ADMIN_DECLINED: &str = "admin.declined";
+    /// Windows: nobody answered the administrator permission prompt in time.
+    pub const ADMIN_TIMED_OUT: &str = "admin.timed_out";
+    /// Windows: a remote session; the prompt would appear on a desktop nobody may be watching.
+    pub const ADMIN_REMOTE: &str = "admin.remote";
+    /// Windows: an earlier permission prompt is still open.
+    pub const ADMIN_BUSY: &str = "admin.busy";
+    /// Windows: the administrator worker stopped before it finished.
+    pub const ADMIN_LOST: &str = "admin.lost";
 
     /// An install step failed for a reason that has no code of its own.
     pub const INSTALL_STEP_FAILED: &str = "install.step_failed";
