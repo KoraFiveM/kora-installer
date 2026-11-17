@@ -60,6 +60,7 @@ pub mod logs;
 pub mod pins;
 pub mod reach;
 pub mod record;
+pub mod setup;
 pub mod spec;
 
 pub use engine::{Engine, EngineKind, EngineRunner};

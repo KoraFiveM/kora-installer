@@ -14,42 +14,13 @@
 //! left alone, like the service steps do.
 
 use super::*;
-use crate::container::dbc;
-use crate::container::detect;
+use crate::container;
 use crate::container::lifecycle::{self, Manager};
-use crate::container::record::{ContainerRecord, DbRecord};
-use crate::container::{self, pins};
+use crate::container::record::ContainerRecord;
 
 /// A progress line from the engine (a pull prints one per layer): short and without control characters.
 fn tidy_line(l: &str) -> String {
     l.chars().filter(|c| !c.is_control()).take(160).collect()
-}
-
-fn no_engine(check: &container::detect::ContainerCheck, wanted: Option<container::EngineKind>) -> Problem {
-    use crate::container::codes;
-    let mut p = match (wanted, check.engines.iter().find(|e| wanted.is_none_or(|w| e.kind == w)).and_then(|e| e.problem.clone())) {
-        (_, Some(p)) => p,
-        (Some(w), None) => Problem::new(codes::NO_ENGINE, format!("{} was chosen to run the server, but it was not found on this computer.", w.label())),
-        (None, None) => {
-            Problem::new(codes::NO_ENGINE, "Container mode needs Podman or Docker, and neither was found on this computer. Podman (rootless) needs no administrator rights to run servers.")
-        }
-    };
-    p.push_action(Action::open_link("https://podman.io/docs/installation"));
-    p.push_action(Action::change_answers("run_mode"));
-    p
-}
-
-fn dir_owner_ids(dir: &Path) -> Option<(u32, u32)> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        std::fs::metadata(dir).ok().map(|m| (m.uid(), m.gid()))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = dir;
-        None
-    }
 }
 
 impl InstallStep {
@@ -73,42 +44,11 @@ impl InstallStep {
 
     pub(super) fn container_engine(&self) -> Result<String> {
         let ctx = &*self.ctx;
-        if !cfg!(target_os = "linux") {
-            return err("Container mode is only available on Linux.");
-        }
         let want = ctx.req.container.clone().unwrap_or_default();
         ctx.emit(self.id, StepStatus::Running, "Looking for a container engine and trying a test container", 0.2);
-        let check = detect::check_system();
-        let Some(engine) = check.engine_for(want.engine) else { return Err(no_engine(&check, want.engine).into()) };
-        let status = check.engines.iter().find(|e| e.kind == engine.kind).cloned();
-        let (uid, gid) = dir_owner_ids(&ctx.req.dir).ok_or_else(|| InstallError("cannot read who owns the server folder".into()))?;
-        if uid == 0 || gid == 0 {
-            return err("The server folder belongs to root. A container server runs as the folder's owner and never as root: choose a folder in your own home, or change its owner.");
-        }
+        let (engine, status, check) = container::setup::choose_engine(want.engine)?;
         let s = slug(&ctx.req.name);
-        let rec = ContainerRecord {
-            version: container::record::VERSION,
-            engine: engine.kind,
-            rootless: engine.rootless,
-            image: pins::BASE.reference(),
-            container: container::container_name(&s),
-            uid,
-            gid,
-            bind: want.bind.clone(),
-            memory_mb: want.memory_mb,
-            cpu_tenths: want.cpu_tenths,
-            selinux_label: status.as_ref().is_some_and(|s| s.selinux),
-            read_only_root: false,
-            host_network: false,
-            db: (ctx.req.db == DbChoice::Container).then(|| DbRecord {
-                container: container::db_container_name(&s),
-                volume: container::volume_name(&s),
-                network: container::network_name(&s),
-                image: pins::MARIADB.reference(),
-            }),
-        };
-        container::spec::check_dir(&ctx.req.dir).map_err(InstallError)?;
-        rec.check(&s).map_err(InstallError)?;
+        let rec = container::setup::new_record(&ctx.req.dir, &s, &engine, status.as_ref(), &want, ctx.req.db == DbChoice::Container).map_err(InstallError)?;
         io(rec.save(&ctx.req.dir), "cannot write kora-container.json")?;
         ctx.update_created(|c| {
             if !c.files.iter().any(|f| f == container::record::FILE) {
@@ -125,8 +65,7 @@ impl InstallStep {
                     p.message,
                     p.actions.iter().find_map(|a| if let Action::ShowCommand { command, .. } = a { Some(format!("Run: {}", command.join(" "))) } else { None }).unwrap_or_default()
                 )
-                .trim()
-                .to_string(),
+                .trim(),
             );
         }
         Ok(format!("Using {} ({})", engine.label(), check.summary))
@@ -151,51 +90,14 @@ impl InstallStep {
         let db = rec.db.clone().ok_or_else(|| InstallError("this server was not set up with a database container".into()))?;
         let r = lifecycle::system();
         let m = Manager::new(&ctx.req.dir, &rec, &r);
-        let s = slug(&ctx.req.name);
-        let path = ctx.req.dir.join("database.json");
         let state_path = db_state_path(ctx);
         io(std::fs::create_dir_all(ctx.meta_dir()), "cannot create state folder")?;
-
-        // A retry reuses the login an earlier attempt already chose (the volume may hold it).
-        let reused: Option<Credentials> = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok());
-        let creds = match reused {
-            Some(c) => c,
-            None => {
-                let vol_exists = crate::container::engine::Engine::new(rec.engine, rec.rootless).run(&r, &container::engine::volume_inspect_args(&db.volume)).is_ok_and(|o| o.success());
-                if vol_exists {
-                    return Err(Problem::new(
-                        container::codes::NAME_TAKEN,
-                        format!(
-                            "A database volume called {} is already there, probably kept when an earlier server with this name was deleted. Its login is not known any more, so Kora will not use it. Choose another server name, or remove the volume yourself (`{} volume rm {}`) if you do not need its data.",
-                            db.volume,
-                            rec.engine().program(),
-                            db.volume
-                        ),
-                    )
-                    .with_action(Action::change_answers("name"))
-                    .into());
-                }
-                let name = dbc::new_names().map_err(|e| InstallError(e.to_string()))?;
-                let pw = db::generate_password().map_err(|e| InstallError(e.to_string()))?;
-                let creds = dbc::game_credentials(&s, &name, &name, &pw);
-                // Written before the container exists: the volume is initialised with it on the first start.
-                ctx.update_created(|c| c.files.push("database.json".into()))?;
-                let json = serde_json::to_string_pretty(&creds).map_err(|e| InstallError(e.to_string()))?;
-                db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, None).map_err(|e| InstallError(e.to_string()))?;
-                ProvisionState { database: creds.database.clone(), user: creds.user.clone(), host: "%".into(), ..Default::default() }.save(&state_path).map_err(|e| InstallError(e.to_string()))?;
-                creds
-            }
+        let mut say = |l: &str| ctx.emit(self.id, StepStatus::Running, tidy_line(l), 0.5);
+        let mut fresh = |c: &Credentials| {
+            let _ = ctx.update_created(|x| x.files.push("database.json".into()));
+            let _ = ProvisionState { database: c.database.clone(), user: c.user.clone(), host: "%".into(), ..Default::default() }.save(&state_path);
         };
-
-        let mut say = |l: &str| ctx.emit(self.id, StepStatus::Running, tidy_line(l), 0.3);
-        if matches!(m.db_state(), Some(container::engine::ContainerState::Missing)) {
-            dbc::create_container(&m, &creds, &mut say)?;
-        }
-        ctx.emit(self.id, StepStatus::Running, "Starting the database container", 0.5);
-        m.start_db()?;
-        ctx.emit(self.id, StepStatus::Running, "Waiting for the database to be ready (the first start takes a little while)", 0.6);
-        let exec = dbc::ExecRunner::new(&rec, &db::SystemRunner).ok_or_else(|| InstallError("no database container".into()))?;
-        dbc::wait_ready(&exec, &creds, std::time::Duration::from_secs(180), &std::thread::sleep)?;
+        let creds = container::setup::ensure_database(&m, &slug(&ctx.req.name), &mut say, &mut fresh)?;
         ProvisionState { database: creds.database.clone(), user: creds.user.clone(), host: "%".into(), created_database: false, created_user: false, granted: true }
             .save(&state_path)
             .map_err(|e| InstallError(e.to_string()))?;
@@ -209,36 +111,14 @@ impl InstallStep {
         let r = lifecycle::system();
         let m = Manager::new(&ctx.req.dir, &rec, &r);
         let mut say = |l: &str| ctx.emit(self.id, StepStatus::Running, tidy_line(l), 0.4);
-        m.ensure_game_container(&mut say)?;
-        // Start at boot: Docker's restart policy needs nothing more (its daemon is enabled by the system); rootless
-        // Podman's restarts come from the stock user unit `podman-restart.service`, which needs lingering to run
-        // while nobody is signed in. Both are the person's own account: no administrator rights.
-        let mut boot = format!("{} restarts the server by itself (restart policy) and at boot", rec.engine().label());
-        if rec.engine == container::EngineKind::Podman && rec.rootless {
-            let sys = service::SystemRunner;
-            let enable = service::SystemStep::run("Start the server's containers at boot", "systemctl", &["--user", "enable", "podman-restart.service"]).user_level().tolerant();
-            let linger = service::SystemStep::run("Keep them running when you are signed out", "loginctl", &["enable-linger"]).user_level().tolerant();
-            let mut failed = Vec::new();
-            for step in [enable, linger] {
-                let line = step.command_line().unwrap_or_default();
-                if service::apply_plan(&service::Plan::new(vec![service::SystemStep { ignore_failure: false, ..step }]), &sys).is_err() {
-                    failed.push(line);
-                }
-            }
-            if failed.is_empty() {
-                boot = "Podman starts the server at boot (podman-restart.service, lingering on)".into();
-            } else {
-                ctx.note(format!(
-                    "The server will run, but may not start again after a restart of this computer until you run: {}. (Rootless Podman needs the user unit `podman-restart.service` enabled and lingering on for your account.)",
-                    failed.join(" ; ")
-                ));
-                boot = "created; start at boot needs the command in the notes".into();
-            }
+        let boot = container::setup::create_game(&m, &mut say)?;
+        for n in &boot.notes {
+            ctx.note(n.clone());
         }
         if rec.engine().bypasses_host_firewall() && ctx.req.firewall {
             ctx.note(format!("{} publishes the game port with its own firewall rules, so it is reachable even where ufw or firewalld say it is closed.", rec.engine.label()));
         }
-        Ok(format!("The server's container {} is created ({boot})", rec.container))
+        Ok(format!("The server's container {} is created ({})", rec.container, boot.detail))
     }
 
     /// Undo of the container steps; `None` when `self.id` is not one of them (and `build.db` of another mode).
