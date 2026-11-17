@@ -11,10 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Radio } from '@/components/ui/checkbox'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { normaliseUpdateEvent, ResourceProgress } from '@/components/JobProgress'
+import { CountBar, normaliseUpdateEvent, percentOf, ResourceProgress } from '@/components/JobProgress'
+import { Progress } from '@/components/ui/progress'
 import { formatDate } from '@/lib/utils'
 import { timeAgo } from '@/lib/ago'
 import type { Updates } from './useUpdates'
+import { applyProgress, checkProgress, rowCheckProgress, type CheckProgress } from './updateProgress'
 
 export const RESTART_OPTIONS: { value: RestartPolicy; label: string; hint: string }[] = [
   { value: 'none', label: 'Do not restart', hint: 'Update the files only. The changes load the next time the server restarts.' },
@@ -38,7 +40,8 @@ export function reportHasProblems(r: UpdateReport): boolean {
   return r.rolled_back.length > 0 || r.needs_attention.length > 0 || (r.not_attempted?.length ?? 0) > 0 || (r.held?.length ?? 0) > 0
 }
 
-function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, checkedAt, now }: { r: ResourceChange; selected: boolean; onToggle: () => void; onCheck: () => void; checking: boolean; disabled: boolean; checkedAt?: number; now: number }) {
+/** One row. `progress` is given only to the row that is being checked on its own, so only that row shows a bar. */
+export function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, checkedAt, now, progress }: { r: ResourceChange; selected: boolean; onToggle: () => void; onCheck: () => void; checking: boolean; disabled: boolean; checkedAt?: number; now: number; progress?: CheckProgress }) {
   const info = STATUS_INFO[r.status]
   const selectable = r.status === 'clean'
   return (
@@ -52,6 +55,12 @@ function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, checked
             {r.needs_restart && selectable && <Badge tone="amber">Needs a restart</Badge>}
             {checkedAt !== undefined && <span className="text-xs text-muted-foreground">Last checked {timeAgo(checkedAt, now)}</span>}
           </div>
+          {progress && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+              <Progress value={percentOf(progress.done, progress.total)} label={`Checking ${r.id}`} className="h-1 w-32 shrink-0" />
+              <span>{progress.done > 0 ? `Checked ${r.id}` : `Checking ${r.id}...`}</span>
+            </div>
+          )}
           {r.status !== 'up_to_date' && <div className="mt-1 text-xs text-muted-foreground"><code className="font-mono">{shortSha(r.from)}</code> to <code className="font-mono">{shortSha(r.to)}</code>{r.behind ? `, ${r.behind} new change${r.behind === 1 ? '' : 's'}` : ''}</div>}
           {info.why && <p className="mt-1 text-xs text-orange">{info.why}</p>}
           {r.changelog.length > 0 && (
@@ -113,6 +122,9 @@ export function UpdatesPanel({ server: s, updates: u }: { server: ServerDetail; 
   const snapshotId = applyEvents.find((e) => e.type === 'snapshot')?.id
   const health = [...applyEvents].reverse().find((e) => e.type === 'health')?.message
   const checking = u.check.phase === 'running'
+  // Progress of the whole-server check, and of the update (the one-resource check has its own row bar).
+  const checked = checkProgress(u.check.events)
+  const applying = applyProgress(apply.events)
 
   // A rollback that stopped because of changes of the person's own can be repeated, throwing them away.
   const rollError = roll.phase === 'failed' ? String((roll.error as { message?: string } | null)?.message ?? roll.error ?? '') : ''
@@ -132,6 +144,15 @@ export function UpdatesPanel({ server: s, updates: u }: { server: ServerDetail; 
               {checking ? 'Looking at every resource. This can take a minute; you can open other tabs meanwhile.' : noOperator ?? 'Looks for newer versions. Nothing is changed yet.'}
             </span>
           </div>
+          {checking && (
+            <CountBar
+              label="Checking resources for updates"
+              done={checked?.done ?? 0}
+              total={checked?.total ?? u.rows.length}
+              text={checked ? `${checked.done} of ${checked.total} resources checked` : 'Starting...'}
+              detail={checked?.id ? `Checked ${checked.id}` : undefined}
+            />
+          )}
           <ErrorNotice error={u.error} />
           {view && (
             <>
@@ -142,7 +163,7 @@ export function UpdatesPanel({ server: s, updates: u }: { server: ServerDetail; 
               {pending.length > 0 && (
                 <>
                   <ul className="divide-y divide-border" aria-label="Resources with updates">
-                    {pending.map((r) => <ChangeRow key={r.id} r={r} selected={u.selected.has(r.id)} onToggle={() => u.toggle(r.id)} onCheck={() => void u.checkOne(r.id)} checking={u.checkingRow === r.id} disabled={busy || noOperator !== null} checkedAt={u.checkedAt[r.id]} now={now} />)}
+                    {pending.map((r) => <ChangeRow key={r.id} r={r} selected={u.selected.has(r.id)} onToggle={() => u.toggle(r.id)} onCheck={() => void u.checkOne(r.id)} checking={u.checkingRow === r.id} disabled={busy || noOperator !== null} checkedAt={u.checkedAt[r.id]} now={now} progress={rowCheckProgress(r.id, u.checkingRow, u.rowCheck.events)} />)}
                   </ul>
                   {upToDate > 0 && <p className="text-xs text-muted-foreground">{upToDate} other resource{upToDate === 1 ? ' is' : 's are'} up to date.</p>}
                 </>
@@ -172,6 +193,15 @@ export function UpdatesPanel({ server: s, updates: u }: { server: ServerDetail; 
         <Card>
           <CardHeader><CardTitle>Update progress</CardTitle></CardHeader>
           <CardContent className="space-y-3">
+            {applying && (
+              <CountBar
+                label="Updating resources"
+                done={applying.done}
+                total={applying.total}
+                text={`${applying.done} of ${applying.total} updated${applying.failed > 0 ? `, ${applying.failed} failed` : ''}`}
+                detail={applying.current}
+              />
+            )}
             <ResourceProgress events={apply.events} />
             {snapshotId && <p className="text-sm">Safety copy: <code className="font-mono text-xs">{snapshotId}</code></p>}
             {health && <p className="text-sm">Health check: {health}</p>}
