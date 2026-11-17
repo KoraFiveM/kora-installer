@@ -53,11 +53,13 @@ fn exe_paths_compare_like_windows_does() {
 
 #[test]
 fn peers_must_be_exactly_the_processes_we_expect() {
-    let own = PathBuf::from(r"C:\k\kora.exe");
-    assert!(check_server_peer(10, 10, Some(&own), &own).is_ok());
-    assert!(check_server_peer(10, 11, Some(&own), &own).is_err(), "another process owns the pipe");
-    assert!(check_server_peer(10, 10, Some(Path::new(r"C:\evil\kora.exe")), &own).is_err(), "pid reused by another program");
-    assert!(check_server_peer(10, 10, None, &own).is_err());
+    let own: FileId = (0xabcd, 42);
+    assert!(check_server_peer(10, 10, Some(own), Some(own), "x").is_ok(), "the same file, whatever the paths look like");
+    assert!(check_server_peer(10, 11, Some(own), Some(own), "x").is_err(), "another process owns the pipe");
+    assert!(check_server_peer(10, 10, Some((0xabcd, 43)), Some(own), r"C:\evil\kora.exe").unwrap_err().contains("evil"), "pid reused by another program, or a copy");
+    assert!(check_server_peer(10, 10, Some((0xabce, 42)), Some(own), "x").is_err(), "same index on another volume");
+    assert!(check_server_peer(10, 10, None, Some(own), "x").is_err());
+    assert!(check_server_peer(10, 10, Some(own), None, "x").is_err());
     assert!(check_client_peer(5, 5).is_ok());
     assert!(check_client_peer(5, 6).is_err() && check_client_peer(0, 0).is_err());
 }

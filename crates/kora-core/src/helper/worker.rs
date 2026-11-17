@@ -9,10 +9,14 @@
 //! 2. It starts ITS OWN program (`std::env::current_exe()`) elevated with `ShellExecuteExW`
 //!    (verb `runas`): `kora.exe admin-worker --pipe <name> --parent <panel pid>` ([`worker_args`]).
 //!    That is the Windows prompt. No secret is ever on that command line.
-//! 3. The worker refuses to run unless it is elevated, connects to the pipe, and checks that the
-//!    process at the other end ([`check_server_peer`]) is the panel pid it was given AND runs the
-//!    very same program file as itself. The panel checks that the client is the process it just
-//!    started ([`check_client_peer`]). Only then does anything else travel.
+//! 3. Before asking, the panel opens its own program file so that nobody can write, rename or
+//!    delete it until the session ends (no write or delete sharing): the prompt and every
+//!    elevated child start exactly the file the panel runs. The worker refuses to run unless it is
+//!    elevated, locks its own file the same way, connects to the pipe, and checks that the process
+//!    at the other end ([`check_server_peer`]) is the panel pid it was given AND runs the very same
+//!    FILE as itself (volume serial and file index, not path text). The panel checks that the
+//!    client is the process it just started ([`check_client_peer`]). Only then does anything else
+//!    travel.
 //! 4. The conversation is the Linux helper's protocol ([`super::Request`] / [`super::Message`],
 //!    one JSON object per line), with three additions: the worker first says [`super::Message::Hello`];
 //!    one connection carries MANY requests (a whole install, or one action), ended by `bye` or by
@@ -38,9 +42,15 @@
 //! * **Another process of the same user, not elevated** (malware running as the person). It cannot
 //!   open the pipe (it lacks the enabled Administrators group). It could start its own `runas`
 //!   prompt, or tamper with the panel's memory, but both are true of any program the person runs;
-//!   Windows itself does not treat UAC as a boundary against the same user. What we guarantee is
-//!   that our prompt only ever starts our own `kora.exe`, that the elevated process takes orders
-//!   only from the panel process that started it, and only allow-listed ones.
+//!   Windows itself does not treat UAC as a boundary against the same user. What we guarantee:
+//!   from the moment the panel asks until the session ends, the program file it runs cannot be
+//!   replaced, so the prompt and every elevated child start that file; the elevated process takes
+//!   orders only from the panel process that started it, and only allow-listed ones; its children
+//!   get an environment built from nothing ([`elevated_child_env`]), so the person's own
+//!   environment variables cannot steer them. What we cannot guarantee: a program running as the
+//!   person BEFORE the panel starts can replace `kora.exe` in their own folder (that is true of
+//!   every program a person installs for themselves), and one that injects code into the running
+//!   panel can use an open session until it ends.
 //! * **Another elevated process.** Is already administrator; nothing to win.
 //! * **A process racing to be "the worker".** The panel serves only the pid `ShellExecuteExW`
 //!   returned; anything else that connects is dropped and the session fails without sending a byte.
@@ -135,15 +145,21 @@ pub fn same_exe(a: &Path, b: &Path) -> bool {
     !x.is_empty() && x == y
 }
 
-/// Worker side: is the pipe's server the panel we were started for?
-pub fn check_server_peer(expected_pid: u32, server_pid: u32, server_image: Option<&Path>, own_image: &Path) -> Result<(), String> {
+/// A file's identity on Windows: (volume serial number, file index). Two paths name the same
+/// file exactly when these are equal (8.3 names, `subst` drives, junctions and case all resolve).
+pub type FileId = (u32, u64);
+
+/// Worker side: is the pipe's server the panel we were started for? The panel's program file and
+/// the worker's own (both taken from the running processes, then opened) must be the very same
+/// file; `server_image` is only for the message.
+pub fn check_server_peer(expected_pid: u32, server_pid: u32, server: Option<FileId>, own: Option<FileId>, server_image: &str) -> Result<(), String> {
     if server_pid != expected_pid {
         return Err(format!("the pipe belongs to process {server_pid}, not to Kora Panel ({expected_pid})"));
     }
-    match server_image {
-        Some(img) if same_exe(img, own_image) => Ok(()),
-        Some(img) => Err(format!("process {server_pid} runs {}, not {}", img.display(), own_image.display())),
-        None => Err(format!("cannot see which program process {server_pid} runs")),
+    match (server, own) {
+        (Some(a), Some(b)) if a == b => Ok(()),
+        (Some(_), Some(_)) => Err(format!("process {server_pid} runs {server_image}, which is not this program")),
+        _ => Err(format!("cannot see which program process {server_pid} runs")),
     }
 }
 
@@ -508,6 +524,8 @@ pub struct Session {
     writer: Box<dyn Write + Send>,
     /// The worker's process id (from its hello).
     pub worker_pid: u32,
+    /// Kept for as long as the session lives (the lock on the program file).
+    guard: Option<Box<dyn Send>>,
 }
 
 fn lost(e: impl std::fmt::Display) -> HelperError {
@@ -517,7 +535,7 @@ fn lost(e: impl std::fmt::Display) -> HelperError {
 impl Session {
     /// Read the worker's hello (it must be this very version) and tell it the Kora folder.
     pub fn begin(reader: Box<dyn BufRead + Send>, writer: Box<dyn Write + Send>, kora_home: Option<&str>) -> Result<Session, HelperError> {
-        let mut s = Session { reader, writer, worker_pid: 0 };
+        let mut s = Session { reader, writer, worker_pid: 0, guard: None };
         match s.next()? {
             Message::Hello { version, pid } if version == env!("CARGO_PKG_VERSION") => s.worker_pid = pid,
             Message::Hello { version, .. } => return Err(HelperError::Protocol(format!("The administrator helper is Kora {version}, not {}.", env!("CARGO_PKG_VERSION")))),
@@ -530,6 +548,11 @@ impl Session {
             Message::Error { message } => Err(HelperError::Rejected(message)),
             _ => Err(HelperError::Protocol("Kora's administrator helper did not accept the session.".into())),
         }
+    }
+
+    /// Keep `g` alive until the session ends.
+    pub fn hold(&mut self, g: Box<dyn Send>) {
+        self.guard = Some(g);
     }
 
     fn send(&mut self, req: &Request) -> Result<(), HelperError> {

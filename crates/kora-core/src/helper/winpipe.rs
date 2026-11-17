@@ -144,6 +144,7 @@ mod imp {
         fn QueryFullProcessImageNameW(h: Handle, flags: u32, buf: *mut u16, len: *mut u32) -> i32;
         fn LocalFree(p: *mut c_void) -> *mut c_void;
         fn GetSystemWindowsDirectoryW(buf: *mut u16, size: u32) -> u32;
+        fn GetFileInformationByHandle(file: Handle, info: *mut ByHandleFileInformation) -> i32;
     }
 
     #[link(name = "advapi32")]
@@ -167,6 +168,43 @@ mod imp {
     extern "system" {
         fn CoInitializeEx(reserved: *mut c_void, flags: u32) -> i32;
         fn CoTaskMemFree(p: *mut c_void);
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct ByHandleFileInformation {
+        attributes: u32,
+        times: [u32; 6],
+        volume_serial: u32,
+        size_high: u32,
+        size_low: u32,
+        links: u32,
+        index_high: u32,
+        index_low: u32,
+    }
+
+    /// Open `path` for reading so that nobody can write, rename or delete it while the returned
+    /// file is open (no write or delete sharing). Running programs may still start it.
+    pub(super) fn lock_exe(path: &Path) -> std::io::Result<File> {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).share_mode(1 /* FILE_SHARE_READ */).open(path)
+    }
+
+    fn handle_file_id(f: &File) -> Option<worker::FileId> {
+        use std::os::windows::io::AsRawHandle;
+        let mut info = ByHandleFileInformation::default();
+        // SAFETY: an open file handle and a correctly sized struct.
+        if unsafe { GetFileInformationByHandle(f.as_raw_handle() as Handle, &mut info) } == 0 {
+            return None;
+        }
+        Some((info.volume_serial, (u64::from(info.index_high) << 32) | u64::from(info.index_low)))
+    }
+
+    /// The identity of the file at `path` (opened for its attributes only, sharing everything).
+    pub(super) fn file_id(path: &Path) -> Option<worker::FileId> {
+        use std::os::windows::fs::OpenOptionsExt;
+        let f = std::fs::OpenOptions::new().access_mode(0x80 /* FILE_READ_ATTRIBUTES */).share_mode(7).open(path).ok()?;
+        handle_file_id(&f)
     }
 
     #[repr(C)]
@@ -390,6 +428,15 @@ mod imp {
                 return Err(OpenError::Failed(format!("cannot find the kora program: {e}")));
             }
         };
+        // Nobody may replace or rename our program file from now until the session ends: the
+        // prompt starts exactly the file this panel runs, and every elevated child after it.
+        let lock = match lock_exe(&exe) {
+            Ok(l) => l,
+            Err(e) => {
+                PROMPT_OPEN.store(false, Ordering::SeqCst);
+                return Err(OpenError::Failed(format!("cannot lock Kora's program file ({e}); another program may be changing it")));
+            }
+        };
         let me = std::process::id();
         let name = pipe_name(me, &random16());
         let pipe = match create_pipe(&name) {
@@ -446,7 +493,8 @@ mod imp {
         let file = unsafe { File::from_raw_handle(pipe.0 as RawHandle) };
         std::mem::forget(pipe);
         let reader = file.try_clone().map_err(|e| OpenError::Failed(e.to_string()))?;
-        let s = Session::begin(Box::new(BufReader::new(reader)), Box::new(file), kora_home).map_err(|e| OpenError::Failed(e.to_string()))?;
+        let mut s = Session::begin(Box::new(BufReader::new(reader)), Box::new(file), kora_home).map_err(|e| OpenError::Failed(e.to_string()))?;
+        s.hold(Box::new(lock));
         Ok((s, process))
     }
 
@@ -628,8 +676,13 @@ mod imp {
         if unsafe { GetNamedPipeServerProcessId(h, &mut server) } == 0 {
             return Err("cannot see who made the connection".into());
         }
-        let own = std::env::current_exe().map_err(|e| e.to_string())?;
-        check_server_peer(parent, server, process_image(server).as_deref(), &own)?;
+        // Our own program as Windows started it (the same API as for the panel: 8.3 names, subst
+        // drives and junctions compare equal), locked against replacement while we run.
+        let own = process_image(std::process::id()).ok_or("cannot see this program's own file")?;
+        let own_lock = lock_exe(&own).map_err(|e| format!("cannot lock this program's file: {e}"))?;
+        let panel_image = process_image(server);
+        let panel_id = panel_image.as_deref().and_then(file_id);
+        check_server_peer(parent, server, panel_id, handle_file_id(&own_lock), &panel_image.map(|p| p.display().to_string()).unwrap_or_default())?;
         let user = process_user(server).ok_or("cannot see which account runs Kora Panel")?;
         let _ = PANEL_USER.set(user.clone());
         // Idle watchdog: a worker nobody talks to goes away.
@@ -670,7 +723,9 @@ mod imp {
         }
         // The children's whole environment, built from nothing (never this process's inherited one).
         let base = worker::elevated_child_env(&system_dirs(), &user, profile_dir(&user.sid).as_deref(), None);
-        worker::serve(&mut reader, &mut writer, validator.as_ref(), exec.as_ref(), &base, &touch).map_err(|e| e.to_string())
+        let r = worker::serve(&mut reader, &mut writer, validator.as_ref(), exec.as_ref(), &base, &touch).map_err(|e| e.to_string());
+        drop(own_lock);
+        r
     }
 }
 
