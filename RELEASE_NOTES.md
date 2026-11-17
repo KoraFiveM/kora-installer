@@ -1,3 +1,18 @@
+## Kora Installer (next release)
+
+### What is new
+- **"Production" and "Development" are gone.** A server now has two plain choices. **Where the resources come from:** plain copies of Kora's resources (no GitHub account needed), or your own copies on GitHub that you can change (in your account or an organisation you belong to). **Which versions:** released versions (stable, you choose when to move to a newer one) or the latest changes. The install asks both, and "Which versions" can be changed later on the Resources tab. Nothing moves when you change it: the next update check shows what would.
+- **A page for every resource.** Click a resource's name. On its page: check for an update and update just that resource; start, stop and restart it on the running server; its pull requests (with their checks and reviews), your own changes line by line, commit and push, open a pull request, issues, releases, and "Make my own copy". After anything that changes a resource's files the page says **"Restart needed: the running server still has the old version"** until it has really been restarted, for everyone who looks, even after a reload.
+- **You can always see what is not on its normal version.** A resource on a branch or a pull request is marked with one badge ("Trying pull request #12: Fix the HUD", "On branch fix-hud") on the resource's page, the Resources list, the servers list, the Overview, the GitHub tab, the update check and the snapshot list, and in `kora status`.
+- **Branches, pull requests and the automatic update are for every server.** On a server that follows released versions, trying a pull request is a deliberate choice with a clear warning and one click back to the exact release. Review, comment, approve and merge pull requests from the panel if your GitHub account has the rights. Everything done on GitHub is done as the GitHub account the computer is signed in as, and the panel says which one every time.
+- **Command line:** `kora install --source clone|fork --versions released|latest --fork-owner <login-or-org>`; `kora resource ...` (show, changes, log, commit, push, new-branch, issues, releases, fork, versions) and `kora pr view|comment|review|merge`.
+
+### Upgrading from 0.7.x
+- **Your servers are not changed and keep working.** A server that was "production" now reads as plain copies at released versions; one that was "development" reads as your own copies at the latest changes. Both the old and the new words are written to the server's settings, so an older Kora can still read them. `kora install --mode prod|dev` and `--github-owner` still work.
+- The **Schedule** and **GitHub** tabs now show on every server. The scheduled update is off until you turn it on; on a server that follows released versions it moves between releases and leaves a resource alone that you put on a branch or pull request.
+- The first step of the install wizard asks a different question (see above). Saved answers and stopped installs from the old wizard are read as before.
+- Going back to an older Kora: nothing to do for these settings (`kora store export-json` writes the old words too). A new file, `kora-resource-state.json`, appears in a server's folder; an older Kora ignores it.
+
 ## Kora Installer v0.7.0
 
 Install and manage a Kora FiveM server from your browser. Run `kora` (or double-click the Kora shortcut) and the panel opens.

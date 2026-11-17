@@ -184,11 +184,11 @@ async fn auto_update_runs_the_seam_not_the_real_updater() {
 #[tokio::test]
 async fn snapshots_list_and_rollback() {
     let fake = FakeBackend::sample();
-    fake.state().snapshots = vec![SnapshotInfo { id: "snap1".into(), created_unix: 1700000000, resources: vec!["kora_core".into()] }];
+    fake.state().snapshots = vec![SnapshotInfo { id: "snap1".into(), created_unix: 1700000000, resources: vec!["kora_core".into()], ..Default::default() }];
     let app = app(&fake);
     let (s, v) = call(&app, "GET", "/servers/dev/snapshots", None).await;
     assert_eq!(s, 200);
-    assert_eq!(v["snapshots"][0], json!({"id": "snap1", "created_unix": 1700000000u64, "resources": ["kora_core"]}));
+    assert_eq!(v["snapshots"][0], json!({"id": "snap1", "created_unix": 1700000000u64, "resources": ["kora_core"], "on_other_branch": []}));
     let j = run_job(&app, "POST", "/servers/dev/snapshots/snap1/rollback", None).await;
     assert_eq!(j["state"], "done", "{j}");
     assert!(fake.calls().contains(&"rollback dev snap1".to_string()));
@@ -341,7 +341,7 @@ async fn schedule_validation() {
     let fake = FakeBackend::sample();
     let app = app(&fake);
     let (s, _) = call(&app, "PUT", "/servers/prod/schedule", Some(daily())).await;
-    assert_eq!(s, 400, "production servers have no schedule");
+    assert_ne!(s, 400, "every server can have an automatic update now, whatever it follows");
     let mut bad = daily();
     bad["time"] = json!("4pm");
     let (s, _) = call(&app, "PUT", "/servers/dev/schedule", Some(bad)).await;
@@ -351,7 +351,8 @@ async fn schedule_validation() {
     assert_eq!(s, 400);
     let (s, _) = call(&app, "PUT", "/servers/dev/schedule", Some(json!({"preset": "hourly"}))).await;
     assert_eq!(s, 400);
-    assert!(!fake.calls().iter().any(|c| c.starts_with("schedule_set")));
+    // Only the valid request for the server on released versions got through; none of the bad ones did.
+    assert_eq!(fake.calls().iter().filter(|c| c.starts_with("schedule_set")).count(), 1);
 }
 
 #[tokio::test]
@@ -416,7 +417,7 @@ async fn apply_defaults_to_when_quiet_and_passes_the_previewed_targets() {
 #[tokio::test]
 async fn rollback_can_be_forced() {
     let fake = FakeBackend::sample();
-    fake.state().snapshots = vec![SnapshotInfo { id: "snap1".into(), created_unix: 1, resources: vec![] }];
+    fake.state().snapshots = vec![SnapshotInfo { id: "snap1".into(), created_unix: 1, resources: vec![], ..Default::default() }];
     let app = app(&fake);
     let j = run_job(&app, "POST", "/servers/dev/snapshots/snap1/rollback", Some(json!({"force": true}))).await;
     assert_eq!(j["state"], "done", "{j}");
@@ -430,7 +431,7 @@ async fn every_update_entry_point_is_refused_while_another_update_runs() {
     let fake = FakeBackend::sample();
     let t = tempfile::tempdir().unwrap();
     fake.state().servers[1].dir = t.path().to_path_buf();
-    fake.state().snapshots = vec![SnapshotInfo { id: "snap1".into(), created_unix: 1, resources: vec![] }];
+    fake.state().snapshots = vec![SnapshotInfo { id: "snap1".into(), created_unix: 1, resources: vec![], ..Default::default() }];
     let app = app(&fake);
     let held = kora_core::update::lock::acquire(t.path()).unwrap();
     for (uri, body) in

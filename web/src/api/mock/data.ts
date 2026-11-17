@@ -32,6 +32,8 @@ export function seedFleet(): ServerSummary[] {
           name,
           dir: `/srv/fivem/${name}`,
           mode,
+          source: mode === 'production' ? 'clone' : 'fork',
+          versions: mode === 'production' ? 'released' : 'latest',
           ports: high ? { game: 64000 + i, txadmin: 65000 + i } : { game: 30120 + i, txadmin: 40120 + i },
           created_unix: FIXED_NOW - (i + 1) * 3 * DAY,
           status,
@@ -41,7 +43,7 @@ export function seedFleet(): ServerSummary[] {
         })
         i++
       }
-  out.push({ name: 'adopted-existing-server', dir: '/home/sam/games/adopted-existing-server', mode: 'production', ports: { game: 30190, txadmin: 40190 }, created_unix: FIXED_NOW - 400 * DAY, status: 'stopped', badge: null, managed: false, connect: null })
+  out.push({ name: 'adopted-existing-server', dir: '/home/sam/games/adopted-existing-server', mode: 'production', source: 'clone', versions: 'released', ports: { game: 30190, txadmin: 40190 }, created_unix: FIXED_NOW - 400 * DAY, status: 'stopped', badge: null, managed: false, connect: null })
   return out
 }
 
@@ -49,9 +51,9 @@ export function seedServers(scenario: ScenarioName = 'default'): ServerSummary[]
   if (scenario === 'empty') return []
   if (scenario === 'fleet') return seedFleet()
   return [
-    { name: 'kora-live', dir: '/srv/fivem/kora-live', mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: now - 40 * DAY, status: 'running', badge: { kind: 'up_to_date' }, managed: true, connect: null },
-    { name: 'kora-dev', dir: '/srv/fivem/kora-dev', mode: 'development', ports: { game: 30121, txadmin: 40121 }, created_unix: now - 12 * DAY, status: 'stopped', badge: { kind: 'updates', count: 2 }, managed: true, connect: null },
-    { name: 'kora-old', dir: '/srv/fivem/kora-old', mode: 'production', ports: { game: 30122, txadmin: 40122 }, created_unix: now - 200 * DAY, status: 'missing', badge: null, managed: true, connect: null },
+    { name: 'kora-live', dir: '/srv/fivem/kora-live', mode: 'production', source: 'clone', versions: 'released', ports: { game: 30120, txadmin: 40120 }, created_unix: now - 40 * DAY, status: 'running', badge: { kind: 'up_to_date' }, managed: true, connect: null },
+    { name: 'kora-dev', dir: '/srv/fivem/kora-dev', mode: 'development', source: 'fork', versions: 'latest', ports: { game: 30121, txadmin: 40121 }, created_unix: now - 12 * DAY, status: 'stopped', badge: { kind: 'updates', count: 2 }, managed: true, connect: null },
+    { name: 'kora-old', dir: '/srv/fivem/kora-old', mode: 'production', source: 'clone', versions: 'released', ports: { game: 30122, txadmin: 40122 }, created_unix: now - 200 * DAY, status: 'missing', badge: null, managed: true, connect: null },
   ]
 }
 
@@ -106,10 +108,10 @@ export const INSTALLED: Record<string, string[]> = {
 
 export function seedSnapshots(): Record<string, SnapshotInfo[]> {
   return {
-    'kora-live': [{ id: 'snap-20260301-0412', created_unix: now - 9 * DAY, resources: ['kora_core', 'kora_jobs'] }],
+    'kora-live': [{ id: 'snap-20260301-0412', created_unix: now - 9 * DAY, resources: ['kora_core', 'kora_jobs'], on_other_branch: [] }],
     'kora-dev': [
-      { id: 'snap-20260310-0400', created_unix: now - 2 * DAY, resources: ['kora_inventory'] },
-      { id: 'snap-20260308-0400', created_unix: now - 4 * DAY, resources: ['kora_core', 'kora_phone'] },
+      { id: 'snap-20260310-0400', created_unix: now - 2 * DAY, resources: ['kora_inventory'], on_other_branch: [] },
+      { id: 'snap-20260308-0400', created_unix: now - 4 * DAY, resources: ['kora_core', 'kora_phone'], on_other_branch: [{ id: 'kora_phone', branch: 'fix-contacts' }] },
     ],
     'kora-old': [],
   }

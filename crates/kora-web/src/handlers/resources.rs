@@ -13,7 +13,6 @@ use kora_core::api::panel_updates::catalog_json;
 use kora_core::api::{valid_resource_name, Op, Status};
 use kora_core::catalog::Catalog;
 use kora_core::console;
-use kora_core::installer::Mode;
 use kora_core::update::lock;
 use serde_json::{json, Value};
 
@@ -123,6 +122,10 @@ pub async fn resource_control(State(st): State<AppState>, Path((s, name)): Path<
             return Err(ApiError::conflict(console::NEEDS_RESTART));
         }
         console::send(&e.dir, &format!("{verb} {folder}")).map_err(ApiError::internal)?;
+        if verb != "stop" {
+            // The resource is loaded again from the files on disk.
+            kora_core::resourcestate::mark_resource_restarted(&e.dir, &name);
+        }
         Ok(Json(json!({
             "message": format!("Asked the server to {said} {folder}. The Console tab shows what happened.")
         })))
@@ -133,10 +136,10 @@ pub async fn resource_control(State(st): State<AppState>, Path((s, name)): Path<
 pub async fn catalog_for_server(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
-        let dev = e.mode == Mode::Development;
+        let latest = e.versions() == kora_core::installer::Versions::Latest;
         let (cat, installed, note) = st.backend().add_catalog(&e).map_err(ApiError::core)?;
-        let note = note.or_else(|| dev.then(|| "Resources are forked into your GitHub account, so you can change them.".to_string()));
-        Ok(Json(json!({"catalog": catalog_json(&cat, Some(dev)), "installed": installed, "note": note})))
+        let note = note.or_else(|| (e.source() == kora_core::installer::Source::Fork).then(|| "Resources are copied into your GitHub account, so you can change them.".to_string()));
+        Ok(Json(json!({"catalog": catalog_json(&cat, Some(latest)), "installed": installed, "note": note})))
     })
     .await
 }

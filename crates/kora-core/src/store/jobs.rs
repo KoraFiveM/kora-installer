@@ -55,7 +55,7 @@ fn secret_name(k: &str) -> bool {
 }
 
 /// `cfxk_...` licence keys (and anything shaped like one) inside text.
-fn redact_text(s: &str) -> String {
+pub fn redact_text(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = String::with_capacity(s.len());
     let mut i = 0;

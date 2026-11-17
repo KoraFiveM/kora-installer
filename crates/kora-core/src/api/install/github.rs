@@ -172,7 +172,7 @@ pub fn resolve_owner_with(runner: &dyn crate::git::CommandRunner, requested: Opt
     }
     // Nothing named: the accounts must be read, so say exactly what is missing first.
     match owners::gh_auth(runner) {
-        GhAuth::Missing => return Err(known::gh_missing().with_action(Action::change_answers("mode")).encode()),
+        GhAuth::Missing => return Err(known::gh_missing().with_action(Action::change_answers("source")).encode()),
         GhAuth::LoggedOut => return Err(known::github_signed_out().encode()),
         GhAuth::LoggedIn { .. } => {}
     }

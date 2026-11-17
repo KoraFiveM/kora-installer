@@ -16,7 +16,7 @@ use crate::catalog::{self, Catalog, Picker};
 use crate::git::{self, CommandRunner};
 use crate::installer::registry::{ResourceRecord, ServerFile};
 use crate::installer::{layout, pinned};
-use crate::installer::{repo_slug, InstallError, Mode, Result};
+use crate::installer::{repo_slug, InstallError, Result, Source, Versions};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -73,7 +73,7 @@ pub fn load_catalog() -> Result<(Catalog, Option<String>)> {
 
 /// What to install for `ids` (plus dependencies) on `server`.
 pub fn plan(cat: &Catalog, server: &ServerFile, ids: &[String]) -> Result<AddPlan> {
-    let picker = Picker::with_ids(cat, installed_ids(server), server.mode == Mode::Development, ids).map_err(|e| InstallError(e.to_string()))?;
+    let picker = Picker::with_ids(cat, installed_ids(server), server.versions() == Versions::Latest, ids).map_err(|e| InstallError(e.to_string()))?;
     plan_from_picker(&picker, server, ids)
 }
 
@@ -85,7 +85,7 @@ pub fn plan_from_picker(picker: &Picker<'_>, server: &ServerFile, asked: &[Strin
         .into_iter()
         .map(|r| {
             let third_party = r.is_pinned_copy();
-            let pinned = server.mode == Mode::Production || third_party;
+            let pinned = server.versions() == Versions::Released || third_party;
             let commit = match (pinned, r.latest_release()) {
                 (true, Some(rel)) => Some(rel.commit.clone()),
                 _ => None,
@@ -96,7 +96,7 @@ pub fn plan_from_picker(picker: &Picker<'_>, server: &ServerFile, asked: &[Strin
                 repo: repo_slug(&r.repository),
                 branch: r.branch.clone(),
                 commit,
-                fork: server.mode == Mode::Development && !third_party,
+                fork: server.source() == Source::Fork && !third_party,
                 third_party,
                 subpath: r.subpath.clone(),
                 dependency: !asked_n.contains(&norm(&r.id)) && !picker.is_picked(&r.id),

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::registry::{now_unix, Registry, ServerFile};
-use super::types::Mode;
+use super::types::Versions;
 use super::{slug, InstallError, Result};
 use crate::firewall;
 use crate::git::{self, CommandRunner, SystemRunner};
@@ -371,6 +371,16 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         let entry = reg.find(server).ok_or_else(|| InstallError(format!("no registered server named '{server}' (see `kora status`)")))?;
         (entry.name.clone(), entry.dir.clone())
     };
+    // A server on released versions moves between releases (the catalogue decides), through the same engine as the
+    // manual update; it takes the update lock itself.
+    if let Some(sf) = ServerFile::load(&dir).ok().filter(|sf| sf.versions() == Versions::Released) {
+        let res = auto_update_released(&sf, &|sf| update::manual::apply(sf, update::manual::Scope::All, update::manual::ApplyOpts::new(update::manual::RestartPolicy::WhenQuiet), &mut |_| {}));
+        if let Ok(report) = &res {
+            let record = super::registry::ServerEntry { source: sf.source, versions: sf.versions, name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
+            crate::notify::after_update(&record, report);
+        }
+        return res;
+    }
     let res = with_git(&dir, |git| {
         // Read the server file under the lock, so a concurrent manual update is never overwritten.
         auto_update_in(&name, &dir, git, &|sf| service_health(&name, &dir, sf), &|sf, h| {
@@ -382,10 +392,19 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         })
     });
     if let Ok((report, sf)) = &res {
-        let record = super::registry::ServerEntry { name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
+        let record = super::registry::ServerEntry { source: sf.source, versions: sf.versions, name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
         crate::notify::after_update(&record, report);
     }
     res.map(|(r, _)| r)
+}
+
+/// The scheduled update of a server on released versions: `run` is the release engine (the same one as a manual update, which
+/// takes the update lock itself); this writes `update.log` the way the branch-following update does. A resource that was
+/// put on a branch or a pull request is left alone by the engine and reported, never a failure.
+pub(crate) fn auto_update_released(sf: &ServerFile, run: &dyn Fn(&ServerFile) -> Result<UpdateReport>) -> Result<UpdateReport> {
+    let res = run(sf);
+    append_log(&sf.dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {e}")));
+    res
 }
 
 /// The locked part of [`auto_update`], with injectable git, health and player count: takes the
@@ -467,8 +486,8 @@ fn append_log(dir: &Path, text: &str) {
 /// The engine wiring, with injectable git and health (used by tests). Does not take the update lock:
 /// [`auto_update_in`] does. `players` is asked after the forks were synced.
 pub fn update_server(name: &str, dir: &Path, sf: &ServerFile, git: &dyn GitOps, health: &dyn HealthCheck, players: &dyn Fn() -> Option<u32>) -> Result<UpdateReport> {
-    if sf.mode != Mode::Development {
-        return err_msg("auto-update only supports development servers; production servers move to newer releases manually");
+    if sf.versions() != Versions::Latest {
+        return err_msg("this server follows released versions: its automatic update moves between releases (see `kora_core::update::manual::apply`), not along a branch");
     }
     let targets: Vec<UpdateTarget> = sf
         .resources
@@ -502,6 +521,8 @@ fn err_msg<T>(m: &str) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::installer::Mode;
 
     /// The update timer runs as root; `update.log` is in a folder the service account owns.
     #[cfg(unix)]
@@ -684,6 +705,8 @@ mod tests {
         // make the second fork dirty
         std::fs::write(t.path().join("srv/resources/[kora]/kora_hud/a"), "local edit").unwrap();
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "t".into(),
             mode: Mode::Development,
             dir: t.path().join("srv"),
@@ -718,6 +741,8 @@ mod tests {
         let dir = t.path().join("srv");
         std::fs::create_dir_all(&dir).unwrap();
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "t".into(),
             mode: Mode::Development,
             dir: dir.clone(),

@@ -25,12 +25,15 @@ struct World {
 }
 
 fn world() -> World {
+    world_with(FakeBackend::sample())
+}
+
+fn world_with(fake: FakeBackend) -> World {
     let home = tempfile::tempdir().unwrap();
     let mut cfg = RemoteConfig { enabled: true, ..Default::default() };
     let v = cfg.add_user("vera", Role::Viewer).unwrap();
     let o = cfg.add_user("olly", Role::Operator).unwrap();
     let a = cfg.add_user("adam", Role::Admin).unwrap();
-    let fake = FakeBackend::sample();
     let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap())
         .with_backend(Arc::new(move || Box::new(fake.clone())))
         .with_remote(Arc::new(Remote::new(None, cfg)))
@@ -220,4 +223,31 @@ async fn the_jobs_list_survives_a_restart_and_shows_an_interrupted_job_with_its_
     // a remote operator does not see jobs of operations above their role (an install is admin-only)
     let (_, list) = send(&w2, "GET", "/api/v1/jobs", &operator, Some(REMOTE_PEER), None).await;
     assert!(list["jobs"].as_array().unwrap().iter().all(|j| j["op"] != "install_start"), "{list}");
+}
+
+#[tokio::test]
+async fn acting_on_github_is_recorded_with_the_account_that_acted_and_never_the_text() {
+    use kora_core::collab::{Acted, Reply};
+    let fake = FakeBackend::sample();
+    fake.state().collab = Some(Ok(Reply::Acted(Acted { message: "Pull request #12 was merged (squash).".into(), acting_as: Some("sam-rp".into()), url: None })));
+    let w = world_with(fake);
+    let [_viewer, operator, admin] = w.tokens.clone();
+    let uri = "/api/v1/servers/dev/resources/kora_hud/prs/12";
+    // An operator may not merge or comment (refused, and recorded as refused).
+    let (s, _) = send(&w, "POST", &format!("{uri}/merge"), &operator, Some(REMOTE_PEER), Some(json!({"method": "squash"}))).await;
+    assert_eq!(s, 403);
+    // An admin over a token is held back from the destructive ones unless remote actions are on; a comment is fine.
+    let (s, _) = send(&w, "POST", &format!("{uri}/comment"), &admin, Some(REMOTE_PEER), Some(json!({"body": "TOPSECRETTEXT looks fine"}))).await;
+    assert_eq!(s, 200);
+    let (s, _) = send(&w, "POST", &format!("{uri}/merge"), LAUNCH, None, Some(json!({"method": "squash"}))).await;
+    assert_eq!(s, 200);
+    let all = rows(&w);
+    let merge: Vec<_> = all.iter().filter(|r| r.op == "pr_merge").collect();
+    assert!(merge.iter().any(|r| r.result == "refused" && r.actor_name.as_deref() == Some("olly")), "{all:?}");
+    let ok = merge.iter().find(|r| r.result == "ok").expect("the merge is in the log");
+    assert!(ok.detail.as_deref().unwrap_or("").contains("GitHub account sam-rp"), "{ok:?}");
+    let comment = all.iter().find(|r| r.op == "pr_comment" && r.result == "ok").expect("the comment is in the log");
+    assert!(comment.detail.as_deref().unwrap_or("").contains("sam-rp"));
+    // Nothing of what was written reaches the log.
+    assert!(!serde_json::to_string(&all).unwrap().contains("TOPSECRETTEXT"));
 }

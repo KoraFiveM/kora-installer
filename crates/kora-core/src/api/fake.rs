@@ -67,6 +67,8 @@ pub struct FakeState {
     pub asset_remove_error: Option<String>,
     /// What `branches` answers (`None`: an error that says nothing is set up). Every request is in `calls` as `branches {request:?}`.
     pub branches: Option<Res<crate::branches::Reply>>,
+    /// The answer to the next `collab` request.
+    pub collab: Option<Res<crate::collab::Reply>>,
 }
 
 /// Cheap to clone; clones share state. Give `move || Box::new(fake.clone())` to the panel.
@@ -75,7 +77,7 @@ pub struct FakeBackend(pub Arc<Mutex<FakeState>>);
 
 /// A registry entry for tests.
 pub fn entry(name: &str, mode: Mode, game: u16, txadmin: u16) -> ServerEntry {
-    ServerEntry { name: name.into(), dir: PathBuf::from(format!("/srv/{name}")), mode, ports: PortsRecord { game, txadmin }, created_unix: 0 }
+    ServerEntry { source: None, versions: None, name: name.into(), dir: PathBuf::from(format!("/srv/{name}")), mode, ports: PortsRecord { game, txadmin }, created_unix: 0 }
 }
 
 impl FakeBackend {
@@ -110,6 +112,15 @@ fn err_or<T>(e: &Option<String>, ok: impl FnOnce() -> T) -> Res<T> {
 }
 
 impl Backend for FakeBackend {
+    fn collab(&mut self, e: &ServerEntry, req: &crate::collab::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
+        let mut s = self.state();
+        s.calls.push(format!("collab {} {req:?}", e.name));
+        if matches!(req, crate::collab::Request::Fork { .. }) {
+            say(0, 1, "");
+            say(1, 1, "kora_hud");
+        }
+        s.collab.clone().unwrap_or_else(|| Err("No collab answer is set up.".into()))
+    }
     fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
         let mut s = self.state();
         s.calls.push(format!("branches {} {req:?}", e.name));

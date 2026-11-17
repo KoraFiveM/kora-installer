@@ -23,7 +23,7 @@ afterEach(() => {
 const dev = { name: 'kora-dev', mode: 'development', status: 'stopped', running: false, console_enabled: false, game_listening: false, txadmin_up: false, dir: '/srv/fivem/kora-dev', ports: { game: 30121, txadmin: 40121 }, created_unix: 0, badge: null, managed: true } as unknown as ServerDetail
 
 // A dialog on top hides the page from the accessibility tree, so look at the list the way a mouse would.
-const row = (id: string) => within(screen.getByRole('list', { name: 'Resources and their branches', hidden: true })).getByText(id, { selector: 'span' }).closest('li') as HTMLElement
+const row = (id: string) => within(screen.getByRole('list', { name: 'Resources and their branches', hidden: true })).getByText(id, { selector: 'a' }).closest('li') as HTMLElement
 /** The list is on screen as soon as the page is; its rows arrive with the answer. */
 const loaded = () => screen.findByRole('button', { name: 'Change the branch of kora_core' })
 async function signIn() {
@@ -37,7 +37,7 @@ describe('BranchesPanel', () => {
     await loaded()
     const list = screen.getByRole('list', { name: 'Resources and their branches' })
     expect(within(list).getAllByText('Normal version (dev)').length).toBeGreaterThan(1)
-    expect(within(row('kora_phone')).getByText('Branch fix-contacts')).toBeInTheDocument()
+    expect(within(row('kora_phone')).getByText('On branch fix-contacts')).toBeInTheDocument()
     expect(within(row('kora_jobs')).getByText('2 changed files')).toBeInTheDocument()
     expect(screen.getByText(/1 resource is not on the normal version/)).toBeInTheDocument()
     expect(screen.getByText(/Updates leave it alone/)).toBeInTheDocument()
@@ -55,7 +55,7 @@ describe('BranchesPanel', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Switch' }))
     expect(await within(dialog).findByText(/Now on branch feature\/new-ui/)).toBeInTheDocument()
     expect(within(dialog).getByText(/The server is not running, so it will use the new version when it starts/)).toBeInTheDocument()
-    await waitFor(() => expect(within(row('kora_core')).getByText('Branch feature/new-ui')).toBeInTheDocument())
+    await waitFor(() => expect(within(row('kora_core')).getByText('On branch feature/new-ui')).toBeInTheDocument())
     // Back to the normal version.
     await user.click(within(dialog).getByRole('button', { name: 'Back to the normal version' }))
     expect(await within(dialog).findByText(/Now on the normal version \(dev\)/)).toBeInTheDocument()
@@ -105,7 +105,7 @@ describe('BranchesPanel', () => {
     await waitFor(() => expect(within(row('kora_jobs')).queryByText('2 changed files')).not.toBeInTheDocument())
   })
 
-  it('lists pull requests from both places, labelled, and tries one', async () => {
+  it('points to the resource page for the list of pull requests, and still says whose code it is', async () => {
     const user = userEvent.setup()
     renderApp(<BranchesPanel server={dev} />)
     await loaded()
@@ -113,20 +113,7 @@ describe('BranchesPanel', () => {
     const dialog = await screen.findByRole('dialog', { name: /Branch of kora_core/ })
     // A pull request is someone else's code: said before anyone tries one.
     expect(within(dialog).getByRole('note')).toHaveTextContent(/someone else's code.*runs on your server.*people you trust/)
-    // Not signed in: a plain message, not a git error.
-    await user.click(within(dialog).getByRole('button', { name: 'Show open pull requests' }))
-    expect(await within(dialog).findByText('You are not signed in to GitHub.')).toBeInTheDocument()
-    await signIn()
-    await user.click(within(dialog).getByRole('button', { name: 'Try again' }))
-    const prs = await within(dialog).findByRole('list', { name: 'Open pull requests' })
-    expect(within(prs).getAllByText('Original repository')).toHaveLength(2)
-    expect(within(prs).getByText('Your fork')).toBeInTheDocument()
-    expect(within(prs).getByText('Draft')).toBeInTheDocument()
-    expect(within(prs).getByText('by jo-dev')).toBeInTheDocument()
-    await user.click(within(prs).getByRole('button', { name: 'Try it: pull request #41' }))
-    expect(await within(dialog).findByText(/Now on pull request #41/)).toBeInTheDocument()
-    await waitFor(() => expect(within(row('kora_core')).getByText('Trying pull request #41')).toBeInTheDocument())
-    expect(within(dialog).getByRole('button', { name: 'Back to the normal version' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'page of kora_core' })).toHaveAttribute('href', '/servers/kora-dev/resources/kora_core')
   })
 
   it('explains a merged pull request, an unknown one and nonsense, without leaving the dialog', async () => {
@@ -183,10 +170,9 @@ describe('BranchesPanel', () => {
     await waitFor(() => expect(within(row('kora_phone')).getByText('Normal version (dev)')).toBeInTheDocument())
   })
 
-  it('production servers are refused by the API with a plain reason', async () => {
+  it('a server on released versions answers too (every server can switch a resource)', async () => {
     const r = await fetch('/api/v1/servers/kora-live/branches')
-    expect(r.status).toBe(409)
-    expect(((await r.json()) as { error: { code: string } }).error.code).toBe('branch.not_development')
+    expect(r.status).toBe(200)
   })
 })
 
@@ -194,7 +180,7 @@ describe('the branch where resources are listed', () => {
   it('shows each resource\'s branch on the Resources tab of a Development server', async () => {
     const { ResourcesTab } = await import('../ResourcesTab')
     renderApp(<ResourcesTab server={dev} />)
-    const badge = await screen.findByText('Branch fix-contacts')
+    const badge = await screen.findByText('On branch fix-contacts')
     // The badge sits on the same row as the resource's name.
     expect(badge.closest('li')).toHaveTextContent('kora_phone')
     expect(screen.getAllByText('Normal version (dev)').length).toBeGreaterThanOrEqual(3)

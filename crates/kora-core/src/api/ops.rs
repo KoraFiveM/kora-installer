@@ -40,6 +40,8 @@ pub enum Op {
     ConsoleSend,
     ConsoleEnable,
     ResourcesList,
+    /// One resource's page: what it is, where its files are, whether a restart is needed.
+    ResourceGet,
     ResourceEnsure,
     /// Start, stop or restart one resource on a running server (through the console helper).
     ResourceControl,
@@ -153,6 +155,34 @@ pub enum Op {
     BranchBulkPreview,
     /// Development: switch every resource that has a branch, or all back to normal.
     BranchBulkApply,
+    /// A resource's local changes and a read-only diff.
+    ResourceChanges,
+    /// Recent commits of the branch a resource is on.
+    ResourceLog,
+    /// Commit a resource's changes with a message (admins).
+    ResourceCommit,
+    /// Push the checked-out branch to your own copy on GitHub (admins; never forced).
+    ResourcePush,
+    /// Make a new branch from where a resource is (admins).
+    ResourceNewBranch,
+    /// A pull request in full: checks, reviews, files, conversation.
+    PrView,
+    /// Comment on a pull request as the signed-in GitHub account (admins).
+    PrComment,
+    /// Approve, ask for changes or comment on a pull request (admins).
+    PrReview,
+    /// Merge a pull request, if the GitHub account may (admins).
+    PrMerge,
+    /// Open issues of a resource's repository.
+    IssuesList,
+    /// Comment on an issue as the signed-in GitHub account (admins).
+    IssueComment,
+    /// Releases of a resource's repository and which one the server is pinned to.
+    ResourceReleases,
+    /// Make your own copy (fork) of resources that are plain clones (a job; admins).
+    ResourcesFork,
+    /// Follow released versions or the latest changes (admins).
+    VersionsSet,
     /// Can players reach this server? The guided checklist (running, firewall, router, internet).
     ReachCheck,
     /// Which outside services the reachability check may contact.
@@ -186,6 +216,7 @@ impl Op {
         Op::ConsoleSend,
         Op::ConsoleEnable,
         Op::ResourcesList,
+        Op::ResourceGet,
         Op::ResourceEnsure,
         Op::ResourceControl,
         Op::UpdatePreview,
@@ -276,6 +307,20 @@ impl Op {
         Op::StashRestore,
         Op::BranchBulkPreview,
         Op::BranchBulkApply,
+        Op::ResourceChanges,
+        Op::ResourceLog,
+        Op::ResourceCommit,
+        Op::ResourcePush,
+        Op::ResourceNewBranch,
+        Op::PrView,
+        Op::PrComment,
+        Op::PrReview,
+        Op::PrMerge,
+        Op::IssuesList,
+        Op::IssueComment,
+        Op::ResourceReleases,
+        Op::ResourcesFork,
+        Op::VersionsSet,
         Op::ReachCheck,
         Op::ReachSettingsGet,
         Op::ReachSettingsSet,
@@ -304,6 +349,7 @@ impl Op {
             Op::ConsoleSend => "console_send",
             Op::ConsoleEnable => "console_enable",
             Op::ResourcesList => "resources_list",
+            Op::ResourceGet => "resource_get",
             Op::ResourceEnsure => "resource_ensure",
             Op::ResourceControl => "resource_control",
             Op::UpdatePreview => "update_preview",
@@ -394,6 +440,20 @@ impl Op {
             Op::StashRestore => "stash_restore",
             Op::BranchBulkPreview => "branch_bulk_preview",
             Op::BranchBulkApply => "branch_bulk_apply",
+            Op::ResourceChanges => "resource_changes",
+            Op::ResourceLog => "resource_log",
+            Op::ResourceCommit => "resource_commit",
+            Op::ResourcePush => "resource_push",
+            Op::ResourceNewBranch => "resource_new_branch",
+            Op::PrView => "pr_view",
+            Op::PrComment => "pr_comment",
+            Op::PrReview => "pr_review",
+            Op::PrMerge => "pr_merge",
+            Op::IssuesList => "issues_list",
+            Op::IssueComment => "issue_comment",
+            Op::ResourceReleases => "resource_releases",
+            Op::ResourcesFork => "resources_fork",
+            Op::VersionsSet => "versions_set",
             Op::ReachCheck => "reach_check",
             Op::ReachSettingsGet => "reach_settings_get",
             Op::ReachSettingsSet => "reach_settings_set",
@@ -423,6 +483,7 @@ impl Op {
             Op::ConsoleSend => (Method::Post, "/servers/{s}/console"),
             Op::ConsoleEnable => (Method::Put, "/servers/{s}/console/enabled"),
             Op::ResourcesList => (Method::Get, "/servers/{s}/resources"),
+            Op::ResourceGet => (Method::Get, "/servers/{s}/resources/{name}"),
             Op::ResourceEnsure => (Method::Post, "/servers/{s}/ensure"),
             Op::ResourceControl => (Method::Post, "/servers/{s}/resources/{name}/control"),
             Op::UpdatePreview => (Method::Post, "/servers/{s}/update/preview"),
@@ -515,6 +576,20 @@ impl Op {
             Op::StashRestore => (Method::Post, "/servers/{s}/resources/{name}/stash/restore"),
             Op::BranchBulkPreview => (Method::Post, "/servers/{s}/branches/preview"),
             Op::BranchBulkApply => (Method::Post, "/servers/{s}/branches/apply"),
+            Op::ResourceChanges => (Method::Get, "/servers/{s}/resources/{name}/changes"),
+            Op::ResourceLog => (Method::Get, "/servers/{s}/resources/{name}/log"),
+            Op::ResourceCommit => (Method::Post, "/servers/{s}/resources/{name}/commit"),
+            Op::ResourcePush => (Method::Post, "/servers/{s}/resources/{name}/push"),
+            Op::ResourceNewBranch => (Method::Post, "/servers/{s}/resources/{name}/new-branch"),
+            Op::PrView => (Method::Get, "/servers/{s}/resources/{name}/prs/{number}"),
+            Op::PrComment => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/comment"),
+            Op::PrReview => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/review"),
+            Op::PrMerge => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/merge"),
+            Op::IssuesList => (Method::Get, "/servers/{s}/resources/{name}/issues"),
+            Op::IssueComment => (Method::Post, "/servers/{s}/resources/{name}/issues/{number}/comment"),
+            Op::ResourceReleases => (Method::Get, "/servers/{s}/resources/{name}/releases"),
+            Op::ResourcesFork => (Method::Post, "/servers/{s}/fork"),
+            Op::VersionsSet => (Method::Put, "/servers/{s}/versions"),
             Op::ReachCheck => (Method::Post, "/servers/{s}/reach"),
             Op::ReachSettingsGet => (Method::Get, "/reach/settings"),
             Op::ReachSettingsSet => (Method::Put, "/reach/settings"),
@@ -547,6 +622,7 @@ impl Op {
                 | Op::DbStart
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::ResourcesFork
         )
     }
 
@@ -571,6 +647,7 @@ impl Op {
                 | Op::ConsoleSend
                 | Op::ConsoleEnable
                 | Op::ResourcesList
+                | Op::ResourceGet
                 | Op::ResourceEnsure
                 | Op::ResourceControl
                 | Op::UpdatePreview
@@ -610,6 +687,20 @@ impl Op {
                 | Op::StashRestore
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::ResourceChanges
+                | Op::ResourceLog
+                | Op::ResourceCommit
+                | Op::ResourcePush
+                | Op::ResourceNewBranch
+                | Op::PrView
+                | Op::PrComment
+                | Op::PrReview
+                | Op::PrMerge
+                | Op::IssuesList
+                | Op::IssueComment
+                | Op::ResourceReleases
+                | Op::ResourcesFork
+                | Op::VersionsSet
         )
     }
 }
@@ -639,6 +730,7 @@ mod tests {
             | Op::ConsoleSend
             | Op::ConsoleEnable
             | Op::ResourcesList
+            | Op::ResourceGet
             | Op::ResourceEnsure
             | Op::ResourceControl
             | Op::UpdatePreview
@@ -729,6 +821,20 @@ mod tests {
             | Op::StashRestore
             | Op::BranchBulkPreview
             | Op::BranchBulkApply
+            | Op::ResourceChanges
+            | Op::ResourceLog
+            | Op::ResourceCommit
+            | Op::ResourcePush
+            | Op::ResourceNewBranch
+            | Op::PrView
+            | Op::PrComment
+            | Op::PrReview
+            | Op::PrMerge
+            | Op::IssuesList
+            | Op::IssueComment
+            | Op::ResourceReleases
+            | Op::ResourcesFork
+            | Op::VersionsSet
             | Op::ReachCheck
             | Op::ReachSettingsGet
             | Op::ReachSettingsSet
@@ -740,7 +846,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 113);
+        assert_eq!(Op::ALL.len(), 128);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

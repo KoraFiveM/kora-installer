@@ -22,6 +22,8 @@ pub mod pinned;
 pub mod registry;
 pub mod saved;
 mod steps;
+#[cfg(test)]
+mod style_tests;
 pub mod system;
 pub mod system_ops;
 pub mod types;
@@ -273,12 +275,16 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
         PlannedStep { id: "prepare.catalog", title: "Load the resource catalog", weight: 3, needs_admin: false, skippable: false },
         PlannedStep { id: "prepare.tools", title: "Check git, GitHub CLI, database server and ports", weight: 5, needs_admin: false, skippable: false },
     ]);
-    if req.mode == Mode::Development {
+    if req.source() == Source::Fork {
         v.push(PlannedStep { id: "build.forks", title: "Fork the resources into your GitHub account", weight: 30, needs_admin: false, skippable: false });
     }
     v.push(PlannedStep {
         id: "build.resources",
-        title: if req.mode == Mode::Production { "Download the resources (pinned releases)" } else { "Clone your forks" },
+        title: match (req.source(), req.versions()) {
+            (Source::Clone, Versions::Released) => "Download the resources (released versions)",
+            (Source::Clone, Versions::Latest) => "Download the resources (latest changes)",
+            (Source::Fork, _) => "Clone your copies",
+        },
         weight: 30,
         needs_admin: false,
         skippable: false,
@@ -294,7 +300,7 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
     if req.service {
         v.push(PlannedStep { id: "system.service", title: "Register the background service", weight: 2, needs_admin: true, skippable: false });
     }
-    if req.service && req.mode == Mode::Development {
+    if req.service && req.versions() == Versions::Latest {
         v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true, skippable: true });
     }
     v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false, skippable: false });
@@ -473,7 +479,7 @@ pub(crate) fn validate_request(req: &InstallRequest) -> Result<()> {
     if req.ports.game < 1024 || req.ports.txadmin < 1024 || req.ports.game == req.ports.txadmin {
         return err("ports must be 1024-65535 and the game and txAdmin ports must differ");
     }
-    if req.mode == Mode::Development && req.github_owner.as_deref().is_some_and(|o| o.trim().is_empty()) {
+    if req.source() == Source::Fork && req.github_owner.as_deref().is_some_and(|o| o.trim().is_empty()) {
         return err("GitHub owner must not be empty");
     }
     Ok(())
@@ -680,7 +686,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
         }
     };
     notes.extend(cnote);
-    let selected = select_resources(&cat, &req.resources, req.mode == Mode::Development).unwrap_or_default();
+    let selected = select_resources(&cat, &req.resources, req.versions() == Versions::Latest).unwrap_or_default();
     match preflight(req, hooks, admin) {
         Ok(()) => notes.push("Free disk space and service-account access look fine.".into()),
         Err(e) => notes.push(format!("WARNING, a real install would stop here: {e}")),
@@ -709,7 +715,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
             "prepare.dir" => format!("Create {}", req.dir.display()),
             "prepare.catalog" => format!("{} resources selected", selected.len()),
             "prepare.tools" => {
-                format!("Needs git{}; ports {} (game) and {} (txAdmin) must be free", if req.mode == Mode::Development { " and a logged-in `gh`" } else { "" }, req.ports.game, req.ports.txadmin)
+                format!("Needs git{}; ports {} (game) and {} (txAdmin) must be free", if req.source() == Source::Fork { " and a logged-in `gh`" } else { "" }, req.ports.game, req.ports.txadmin)
             }
             "build.forks" => format!(
                 "Fork {} repositories into {}, reusing any forks already there (needs `gh auth login`; paced in batches)",
@@ -722,8 +728,8 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
                     "{} resources under {}/resources ({} pinned to releases, {} default-branch head), 4 at a time",
                     selected.len(),
                     req.dir.display(),
-                    if req.mode == Mode::Production { pinned } else { 0 },
-                    if req.mode == Mode::Production { selected.len() - pinned } else { selected.len() }
+                    if req.versions() == Versions::Released { pinned } else { 0 },
+                    if req.versions() == Versions::Released { selected.len() - pinned } else { selected.len() }
                 )
             }
             "build.db" => match req.db {
@@ -861,6 +867,8 @@ mod tests {
 
     fn req(dir: &Path) -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: "My Server".into(),
             dir: dir.to_path_buf(),

@@ -79,6 +79,8 @@ mod tests {
 
     fn req() -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: "Dev Den".into(),
             dir: "/tmp/dev-den".into(),

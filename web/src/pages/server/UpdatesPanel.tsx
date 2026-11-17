@@ -25,11 +25,11 @@ export const RESTART_OPTIONS: { value: RestartPolicy; label: string; hint: strin
   { value: 'when_quiet', label: 'Restart only when nobody is playing', hint: 'If players are online, the restart is left for later.' },
 ]
 
-export const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'orange'; text: string; why?: string }> = {
+export const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'amber' | 'orange'; text: string; why?: string }> = {
   up_to_date: { tone: 'plain', text: 'Up to date' },
   clean: { tone: 'info', text: 'Ready to update' },
   dirty: { tone: 'orange', text: 'Needs attention', why: 'You changed files in this resource, so Kora left it alone and did not update it. Your changes are untouched. What to do: open the resource folder in a terminal and run "git stash" to set your changes aside, then check again. After the update, "git stash pop" brings them back. Saving them as a commit does not help: Kora never mixes your own commits with new ones.' },
-  other_branch: { tone: 'info', text: 'Not updated: on another branch', why: 'You put this resource on another branch or a pull request, so updates leave it alone. Nothing is lost and nothing is pulled in. To update it again, go back to the normal version in the GitHub tab.' },
+  other_branch: { tone: 'amber', text: 'Not updated: on another branch', why: 'You put this resource on another branch or a pull request, so updates leave it alone. Nothing is lost and nothing is pulled in. To update it again, go back to the normal version in the GitHub tab.' },
   diverged: { tone: 'orange', text: 'Needs attention', why: 'This resource has saved changes of your own (commits) that the new version does not include, or Kora could not check it. Kora did not update it. It will not merge your commits or drop them for you. What to do: move your commits somewhere else or merge the new version by hand with git, then check again.' },
 }
 
@@ -234,6 +234,11 @@ export function UpdatesPanel({ server: s, updates: u }: { server: ServerDetail; 
                 <div className="min-w-0">
                   <div className="font-mono text-xs">{sn.id}</div>
                   <div className="break-words text-muted-foreground">{formatDate(sn.created_unix)}: {sn.resources.join(', ')}</div>
+                  {(sn.on_other_branch ?? []).length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      {(sn.on_other_branch ?? []).map((o) => <Badge key={o.id} tone="amber" title="Not on its normal version when this snapshot was taken. Rolling back puts it on this branch again.">{o.id} was on branch {o.branch}</Badge>)}
+                    </div>
+                  )}
                 </div>
                 <Button size="sm" disabled={busy || noAdmin !== null} title={noAdmin ?? undefined} onClick={() => setRollbackId(sn.id)} aria-label={`Roll back to ${sn.id}`}>Roll back</Button>
               </li>

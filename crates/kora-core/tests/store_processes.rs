@@ -34,7 +34,15 @@ fn run_workers(role: &str, home: &Path, workers: usize, count: usize) {
 }
 
 fn entry(name: String, n: u64) -> ServerEntry {
-    ServerEntry { name, dir: PathBuf::from(format!("/srv/{n}")), mode: Mode::Production, ports: PortsRecord { game: 30000 + n as u16, txadmin: 40000 + n as u16 }, created_unix: n }
+    ServerEntry {
+        source: None,
+        versions: None,
+        name,
+        dir: PathBuf::from(format!("/srv/{n}")),
+        mode: Mode::Production,
+        ports: PortsRecord { game: 30000 + n as u16, txadmin: 40000 + n as u16 },
+        created_unix: n,
+    }
 }
 
 /// Not a test of its own: the body of a worker process. Does nothing in a normal run.

@@ -310,7 +310,15 @@ impl probe::IpEcho for EchoStatic {
 }
 
 fn entry() -> ServerEntry {
-    ServerEntry { name: "main".into(), dir: "/nope".into(), mode: crate::installer::Mode::Production, ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 }
+    ServerEntry {
+        source: None,
+        versions: None,
+        name: "main".into(),
+        dir: "/nope".into(),
+        mode: crate::installer::Mode::Production,
+        ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
+        created_unix: 0,
+    }
 }
 
 fn env(consent: Consent, log: &str, router_ext: Option<Ipv4Addr>) -> Env {

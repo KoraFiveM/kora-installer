@@ -33,7 +33,7 @@ export type AssetSource = { upload: string } | { download: string }
 
 // ---- saved licence keys and the remembered profile --------------------------------------------
 
-// ---- branches and pull requests (Development servers) ---------------------------------------
+// ---- branches and pull requests (every server) ---------------------------------------
 
 // ---- generated from the Rust side (`./generated/types.ts`): re-exported so existing imports keep working ----
 // (Do not define a type here that the Rust side already describes: add it to crates/kora-core/src/api/wire/.)
@@ -207,6 +207,34 @@ export type {
   ResourceChange,
   ResourceControlRequest,
   ResourceEvent,
+  ResourcePage,
+  ResourceServerState,
+  RestartInfo,
+  SnapshotBranch,
+  Source,
+  Versions,
+  Acted,
+  Check,
+  ChecksState,
+  ChangedFile,
+  Committed,
+  ForkEvent,
+  ForkOutcome,
+  Forked,
+  IssueItem,
+  Issues,
+  LocalChanges,
+  Log,
+  LogEntry,
+  PrComment,
+  PrFile,
+  PrView,
+  Pushed,
+  ReleaseItem,
+  Releases,
+  Repos,
+  Trying,
+  VersionsSet,
   ResourceSelection,
   ResourcesList,
   RestartPolicy,

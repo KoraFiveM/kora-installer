@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# update-auto: `kora update --auto` on a development-mode server whose forks and upstreams are local bare
+# update-auto: `kora update --auto` on a server of own copies that follows the latest changes (an old record: mode development) whose forks and upstreams are local bare
 # git repos (no GitHub). Scenarios: up to date, fast-forward, diverged + dirty skipped, health failure
 # rolled back, and the daily timer in the install plan.
 . "$(dirname "$0")/common.sh"
@@ -49,7 +49,7 @@ json.dump({"servers": [{"name": name, "dir": d, "mode": "development", "ports": 
 # (an old-format servers.json: Kora imports it into its data file the first time it starts, so this seeds the registry)
 PY
 kora status
-assert_matches "the hand-made server is registered as dev" "$OUT" "$NAME[[:space:]]+dev[[:space:]]+31120"
+assert_matches "the hand-made server (an old record with only mode: development) reads as own copies + latest changes" "$OUT" "$NAME[[:space:]]+fork, latest[[:space:]]+31120"
 
 step "1. everything up to date: nothing to do, exit 0"
 kora update --auto $NAME
@@ -156,23 +156,33 @@ assert_eq "update after going back: exit 0" 0 "$CODE"
 assert_contains "hud updates again" "$OUT" "updated kora-hud"
 assert_eq "hud now equals upstream" "$(up_head kora-hud)" "$(head_of kora-hud)"
 
-step "5. production servers are refused"
-python3 -I - "$D" <<'PY'
-import json, sys
-p = sys.argv[1] + "/kora-server.json"; s = json.load(open(p)); s["mode"] = "production"; json.dump(s, open(p, "w"))
-PY
-kora update --auto $NAME
-assert_eq "exit 1 (failure)" 1 "$CODE"
-assert_contains "explains development only" "$OUT" "development"
-python3 -I - "$D" <<'PY'
-import json, sys
-p = sys.argv[1] + "/kora-server.json"; s = json.load(open(p)); s["mode"] = "development"; json.dump(s, open(p, "w"))
-PY
+step "5. which versions a server follows is its own setting (released or latest), and nothing moves when it changes"
+kora resource versions $NAME released
+assert_eq "switch to released exit 0" 0 "$CODE"
+assert_contains "says nothing changed yet" "$OUT" "nothing has changed yet"
+kora status
+assert_matches "status says released" "$OUT" "released"
+# the old `mode` word is still written next to the new fields, so an older Kora reads the file
+assert_eq "the file keeps the old word" production "$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]+"/kora-server.json"))["mode"])' "$D")"
+kora resource versions $NAME latest
+assert_eq "switch back exit 0" 0 "$CODE"
+assert_eq "the file says development again" development "$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]+"/kora-server.json"))["mode"])' "$D")"
+assert_eq "hud was not touched" dev "$(git -C "$(fork kora-hud)" rev-parse --abbrev-ref HEAD)"
 
-step "6. the install plan schedules the daily update timer (dev + --service)"
+step "6. the install plan schedules the daily update timer (OLD spelling on purpose: --mode dev --github-owner, + --service)"
 CFX_LICENSE_KEY="$FAKE_KEY" kora install --mode dev --github-owner smoke-owner --name timer --dir "$SMOKE_ROOT/timer" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --service --dry-run -y
 assert_eq "dry run exits 0" 0 "$CODE"
 assert_matches "plan has the daily 04:00 update step" "$OUT" "Schedule daily automatic updates \(04:00\)"
 assert "dry run created nothing" test ! -e "$SMOKE_ROOT/timer"
+
+step "7. the same plan with the NEW spelling (--source fork --versions latest --fork-owner)"
+CFX_LICENSE_KEY="$FAKE_KEY" kora install --source fork --versions latest --fork-owner smoke-owner --name timer2 --dir "$SMOKE_ROOT/timer2" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --service --dry-run -y
+assert_eq "dry run exits 0" 0 "$CODE"
+assert_matches "plan has the daily 04:00 update step" "$OUT" "Schedule daily automatic updates \(04:00\)"
+assert_contains "the plan says own copies" "$OUT" "your own copies"
+assert "dry run created nothing" test ! -e "$SMOKE_ROOT/timer2"
+CFX_LICENSE_KEY="$FAKE_KEY" kora install --source clone --versions released --name timer3 --dir "$SMOKE_ROOT/timer3" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --service --dry-run -y
+assert_eq "clone + released dry run exits 0" 0 "$CODE"
+assert_contains "the plan says plain clones" "$OUT" "plain clones"
 
 echo; echo "update-auto: $PASS assertions passed"

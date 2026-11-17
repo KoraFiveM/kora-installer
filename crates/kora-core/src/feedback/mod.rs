@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use crate::catalog;
 use crate::git::{self, CommandRunner};
 use crate::installer::registry::{ResourceRecord, ServerFile};
-use crate::installer::{repo_slug, InstallError, Mode, Result};
+use crate::installer::{repo_slug, InstallError, Result, Source, Versions};
 
 pub const SIGN_IN_HINT: &str = "You are not signed in to GitHub. Sign in first (the manager offers it, or run `gh auth login`), then try again.";
 
@@ -44,9 +44,11 @@ fn gh_err(e: git::GitError) -> InstallError {
 
 /// Text appended to every issue so maintainers can reproduce it. No secrets, no paths.
 pub fn diagnostics(server: &ServerFile, res: &ResourceRecord, commit: Option<&str>) -> String {
-    let mode = match server.mode {
-        Mode::Production => "production",
-        Mode::Development => "development",
+    let mode = match (server.source(), server.versions()) {
+        (Source::Clone, Versions::Released) => "clones, released versions",
+        (Source::Clone, Versions::Latest) => "clones, latest changes",
+        (Source::Fork, Versions::Released) => "own copies, released versions",
+        (Source::Fork, Versions::Latest) => "own copies, latest changes",
     };
     let mut s = String::from("---\nReported from Kora Panel.\n");
     s.push_str(&format!("- Kora installer: {}\n", env!("CARGO_PKG_VERSION")));
@@ -86,8 +88,11 @@ pub struct PrPlan {
 /// Check that a PR is possible: development server, a fork (not third-party), a named branch with
 /// commits upstream does not have. Fetches `upstream`; changes nothing else.
 pub fn plan_pr(r: &dyn CommandRunner, server: &ServerFile, resource_id: &str) -> Result<PrPlan> {
-    if server.mode != Mode::Development {
-        return Err(InstallError("Pull requests are only available on development servers (production servers use pinned copies, not forks).".into()));
+    if server.source() != Source::Fork {
+        return Err(InstallError(
+            "A pull request is made from your own copy of the resource on GitHub, and this server uses plain copies of the originals. Choose \"Make my own copy (fork)\" for this resource first."
+                .into(),
+        ));
     }
     let res = find(server, resource_id)?;
     if res.third_party {

@@ -22,7 +22,7 @@ use crate::cmd::toolchain::ToolsCmd;
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
 use crate::cmd::webhook::{webhook, WebhookCmd};
-use crate::cmd::{admin_worker, bare, branch, keys_cmd, toolchain};
+use crate::cmd::{admin_worker, bare, branch, keys_cmd, resource, toolchain};
 
 #[derive(Parser)]
 #[command(name = "kora", version, about = "Kora installer and server manager")]
@@ -122,6 +122,11 @@ enum Command {
     Pr {
         #[command(subcommand)]
         cmd: branch::PrCmd,
+    },
+    /// One resource: what it is, which version it is on, and whether a restart is needed.
+    Resource {
+        #[command(subcommand)]
+        cmd: resource::ResourceCmd,
     },
     /// GitHub helpers for development mode.
     Github {
@@ -226,6 +231,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Profile { .. }
             | Command::Branch { .. }
             | Command::Pr { .. }
+            | Command::Resource { .. }
             | Command::Webhook { .. }
             | Command::Desktop { .. }
             | Command::Reach(_)
@@ -425,6 +431,7 @@ fn main() {
         Some(Command::Reach(a)) => cmd::reach::run(a),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
+        Some(Command::Resource { cmd }) => resource::resource(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Tools { cmd: ToolsCmd::Status }) => toolchain::run_tools_status(),

@@ -20,7 +20,7 @@ assert_contains "says no servers" "$OUT" "No Kora servers registered"
 
 step "4. install --dry-run prints the plan and changes nothing"
 D="$SMOKE_ROOT/dry"
-CFX_LICENSE_KEY="$FAKE_KEY" kora install --name dry --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --dry-run -y
+CFX_LICENSE_KEY="$FAKE_KEY" kora install --source clone --versions released --name dry --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --dry-run -y
 assert_eq "exit 0" 0 "$CODE"
 assert_contains "plan header" "$OUT" "Plan (nothing was changed)"
 assert_matches "choices show the ports" "$OUT" "ports:[[:space:]]+game $GAME_PORT, txAdmin $TX_PORT"
@@ -42,7 +42,7 @@ HOLD=$!
 trap 'rc=$?; kill $HOLD 2>/dev/null || true; [ $rc -ne 0 ] && dump_logs; exit $rc' EXIT
 wait_for "listener up" 20 bash -c "exec 3<>/dev/tcp/127.0.0.1/$GAME_PORT"
 D="$SMOKE_ROOT/busy"
-CFX_LICENSE_KEY="$FAKE_KEY" kora install --name busy --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip -y
+CFX_LICENSE_KEY="$FAKE_KEY" kora install --mode prod --name busy --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip -y
 assert_eq "busy port: exit 1" 1 "$CODE"
 assert_contains "message names the port" "$OUT" "$GAME_PORT"
 assert_contains "message suggests --auto-ports" "$OUT" "--auto-ports"

@@ -21,7 +21,7 @@ use crate::catalog::{self, normalize_id, Catalog};
 use crate::installer::gitops::{online_players, service_health, with_git};
 use crate::installer::http::HttpClient;
 use crate::installer::registry::{now_unix, Registry, ServerFile};
-use crate::installer::types::Mode;
+use crate::installer::types::{Source, Versions};
 use crate::installer::{InstallError, Result};
 
 /// A registered server as recorded in its `kora-server.json`.
@@ -150,10 +150,21 @@ pub enum UpdateEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SnapshotBranch {
+    pub id: String,
+    /// The branch it was on when the snapshot was taken (not its normal one).
+    pub branch: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SnapshotInfo {
     pub id: String,
     pub created_unix: u64,
     pub resources: Vec<String>,
+    /// Resources that were not on their normal branch when the snapshot was taken: a rollback puts them back on it.
+    #[serde(default)]
+    pub on_other_branch: Vec<SnapshotBranch>,
 }
 
 fn err<T>(m: impl Into<String>) -> Result<T> {
@@ -248,6 +259,12 @@ impl GitOps for PinnedGit<'_> {
     fn is_dirty(&self, repo: &Path) -> GitResult<bool> {
         self.0.is_dirty(repo)
     }
+    fn current_branch(&self, repo: &Path) -> GitResult<Option<String>> {
+        self.0.current_branch(repo)
+    }
+    fn pinned_releases(&self) -> bool {
+        true
+    }
     /// "Ahead" = what is checked out is not part of the release: a commit of the user's own on the
     /// detached checkout, or a newer release than the target. Moving would leave it behind.
     fn is_diverged(&self, repo: &Path, commit: &str) -> GitResult<bool> {
@@ -300,7 +317,7 @@ fn select(server: &ServerRecord, scope: &Scope, skip: &[String], catalog: Option
     }
     let skip: Vec<String> = skip.iter().map(|s| normalize_id(s)).collect();
     let planned: Option<BTreeMap<String, String>> = planned.map(|m| m.iter().map(|(k, v)| (normalize_id(k), v.trim().to_ascii_lowercase())).collect());
-    let prod = server.mode == Mode::Production;
+    let prod = server.versions() == Versions::Released;
     let cat = if prod { Some(catalog.ok_or_else(|| InstallError("could not read the release catalog, so releases cannot be compared".into()))?) } else { None };
     let mut sel = Selection { targets: Vec::new(), versions: Vec::new(), gone: Vec::new(), rejected: Vec::new(), planned_dev: Vec::new() };
     for r in &server.resources {
@@ -409,7 +426,7 @@ fn finish_plan(g: &dyn GitOps, sel: &Selection, mut p: UpdatePlan) -> UpdatePlan
 }
 
 fn git_view<'a>(server: &ServerRecord, git: &'a dyn GitOps, pinned: &'a PinnedGit<'a>) -> &'a dyn GitOps {
-    if server.mode == Mode::Production {
+    if server.versions() == Versions::Released {
         pinned
     } else {
         git
@@ -469,7 +486,7 @@ pub fn preview_events(server: &ServerRecord, scope: Scope, sink: &mut dyn FnMut(
 
 /// The organisation hint for a whole-server check of a development server (None otherwise, or when `KORA_NO_ORG_HINT` is set).
 fn org_hints_for(server: &ServerRecord, scope: &Scope) -> Option<OrgHints> {
-    (server.mode == Mode::Development && *scope == Scope::All && std::env::var_os("KORA_NO_ORG_HINT").is_none()).then(|| OrgHints::load(&orgcache::HttpOrg, Some(&orgcache::cache_path()), now_unix()))
+    (server.source() == Source::Fork && *scope == Scope::All && std::env::var_os("KORA_NO_ORG_HINT").is_none()).then(|| OrgHints::load(&orgcache::HttpOrg, Some(&orgcache::cache_path()), now_unix()))
 }
 
 /// Ids of the targets whose remote has not moved since this clone was last fetched (per the organisation), plus the
@@ -508,7 +525,7 @@ fn record_hints(hints: Option<&mut OrgHints>, targets: &[UpdateTarget], slugs: &
 
 /// The catalog a production server compares against, and a warning when it is the built-in copy.
 fn load_catalog_if_needed(server: &ServerRecord) -> Result<(Option<Catalog>, Option<String>)> {
-    if server.mode != Mode::Production {
+    if server.versions() != Versions::Released {
         return Ok((None, None));
     }
     let (c, origin) = catalog::load(&HttpClient::default(), catalog::CATALOG_URL).map_err(|e| InstallError(e.to_string()))?;
@@ -624,7 +641,15 @@ pub fn apply(server: &ServerRecord, scope: Scope, opts: ApplyOpts, sink: &mut dy
     let mut hints = org_hints_for(server, &scope);
     let report = with_git(&server.dir, |g| apply_with_hints(server, scope, opts, g, &health, cat.as_ref(), note.as_deref(), &players, now_unix(), sink, hints.as_mut()))?;
     // Same Discord notification as the automatic path (it never fails the update). Sent here only.
-    let record = crate::installer::registry::ServerEntry { name: server.name.clone(), dir: server.dir.clone(), mode: server.mode, ports: server.ports, created_unix: server.created_unix };
+    let record = crate::installer::registry::ServerEntry {
+        source: None,
+        versions: None,
+        name: server.name.clone(),
+        dir: server.dir.clone(),
+        mode: server.mode,
+        ports: server.ports,
+        created_unix: server.created_unix,
+    };
     crate::notify::after_update(&record, &report);
     Ok(report)
 }
@@ -666,7 +691,7 @@ pub fn apply_with_hints(
     let pinned = PinnedGit(git);
     let g = git_view(server, git, &pinned);
     // Development: fast-forward the user's forks on GitHub first (never forced); production has no forks.
-    let fork_sync = if server.mode == Mode::Development {
+    let fork_sync = if server.source() == Source::Fork {
         // Planned targets are commits: the forks are found from the branch the resource tracks.
         let fork_targets: Vec<UpdateTarget> = sel
             .targets
@@ -713,8 +738,10 @@ pub fn apply_with_hints(
     };
 
     super::add_fork_sync(&mut report, fork_sync);
+    let changed: Vec<String> = report.updated.iter().map(|u| u.id.clone()).collect();
+    crate::resourcestate::mark_changed(&server.dir, &changed, "updated");
     report.notes = selection_notes(&sel, catalog_note);
-    if server.mode == Mode::Production && !report.updated.is_empty() {
+    if server.versions() == Versions::Released && !report.updated.is_empty() {
         let moved: Vec<(String, String)> = report.updated.iter().map(|u| (u.id.clone(), u.to.clone())).collect();
         if let Err(m) = record_commits(server, &moved) {
             report.needs_attention.push(("kora-server.json".into(), m));
@@ -815,7 +842,21 @@ fn record_commits(server: &ServerRecord, moved: &[(String, String)]) -> std::res
 
 /// Saved snapshots (manual and automatic updates), newest first.
 pub fn snapshots(server: &ServerRecord) -> Vec<SnapshotInfo> {
-    super::list_snapshots(&server.dir).into_iter().map(|(id, s)| SnapshotInfo { id, created_unix: s.created_unix, resources: s.entries.into_iter().map(|e| e.id).collect() }).collect()
+    super::list_snapshots(&server.dir)
+        .into_iter()
+        .map(|(id, s)| {
+            let normal = |rid: &str| server.resources.iter().find(|r| r.id == rid).map(|r| r.branch.clone());
+            let on_other_branch = s
+                .entries
+                .iter()
+                .filter_map(|e| {
+                    let b = e.branch.as_deref().filter(|b| *b != "HEAD")?;
+                    (normal(&e.id).as_deref() != Some(b)).then(|| SnapshotBranch { id: e.id.clone(), branch: b.to_string() })
+                })
+                .collect();
+            SnapshotInfo { id, created_unix: s.created_unix, resources: s.entries.into_iter().map(|e| e.id).collect(), on_other_branch }
+        })
+        .collect()
 }
 
 /// Put every resource in the snapshot back on its previous commit, and restart if the server runs.
@@ -859,7 +900,9 @@ fn rollback_locked(server: &ServerRecord, snapshot_id: &str, git: &dyn GitOps, f
     let failed: Vec<String> = results.iter().filter_map(|(id, r)| r.as_ref().err().map(|e| format!("{id}: {e}"))).collect();
     let restored: Vec<(String, String)> = snap.entries.iter().filter(|e| results.iter().any(|(id, r)| *id == e.id && r.is_ok())).map(|e| (e.id.clone(), e.commit.clone())).collect();
     hold_undone(&server.dir, &undone, &restored);
-    if server.mode == Mode::Production {
+    let restored_ids: Vec<String> = restored.iter().map(|(id, _)| id.clone()).collect();
+    crate::resourcestate::mark_changed(&server.dir, &restored_ids, "rolled back");
+    if server.versions() == Versions::Released {
         if let Err(m) = record_commits(server, &restored) {
             return err(m);
         }

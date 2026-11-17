@@ -15,6 +15,7 @@ pub(crate) mod panel_remote;
 pub(crate) mod panel_running;
 pub(crate) mod panel_tailscale;
 pub(crate) mod reach;
+pub(crate) mod resource;
 pub(crate) mod resources;
 pub(crate) mod schedule;
 pub(crate) mod server;

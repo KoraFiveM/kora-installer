@@ -4,7 +4,6 @@ use crate::cmd::install::CODE_REMOVED;
 use crate::ui::{confirm, server_dir};
 
 use clap::Args;
-use kora_core::installer::Mode;
 
 #[derive(Args, Debug, Default)]
 pub(crate) struct AddResourcesArgs {
@@ -168,7 +167,15 @@ pub(crate) fn add_resources(a: AddResourcesArgs) -> i32 {
         println!("Nothing to add.");
         return 0;
     }
-    println!("Will add ({} mode):", if server.mode == Mode::Development { "development" } else { "production" });
+    println!(
+        "Will add ({} mode):",
+        match (server.source(), server.versions()) {
+            (kora_core::installer::Source::Clone, kora_core::installer::Versions::Released) => "clones, released versions",
+            (kora_core::installer::Source::Clone, kora_core::installer::Versions::Latest) => "clones, latest changes",
+            (kora_core::installer::Source::Fork, kora_core::installer::Versions::Released) => "own copies, released versions",
+            (kora_core::installer::Source::Fork, kora_core::installer::Versions::Latest) => "own copies, latest changes",
+        }
+    );
     for i in &plan.items {
         let how = if i.third_party {
             "pinned, never forked"

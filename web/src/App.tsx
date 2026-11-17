@@ -15,6 +15,7 @@ import NotFound from '@/pages/NotFound'
 // carries what the first screen needs. A file that cannot be fetched (the panel was updated meanwhile) ends in the
 // ErrorBoundary of the app shell, which offers a reload: see lib/chunkError.ts. The shell shows the loading state.
 const ServerDetailPage = lazy(() => import('@/pages/ServerDetailPage'))
+const ResourcePage = lazy(() => import('@/pages/ResourcePage'))
 const InstallWizard = lazy(() => import('@/pages/InstallWizard'))
 const FleetPage = lazy(() => import('@/pages/FleetPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
@@ -78,6 +79,7 @@ export function App({ boot }: { boot: BootResult }) {
             <Route element={<AppShell />}>
               <Route index element={<ServersPage />} />
               <Route path="servers/:name" element={<ServerDetailPage />} />
+              <Route path="servers/:name/resources/:resource" element={<ResourcePage />} />
               <Route path="install" element={<InstallWizard />} />
               <Route path="fleet" element={<FleetPage />} />
               <Route path="settings" element={<SettingsPage />} />
