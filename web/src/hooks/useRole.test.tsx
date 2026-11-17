@@ -30,7 +30,7 @@ describe('useRole', () => {
     const off = renderHook(() => useRole(), { wrapper: withMeta({ remote: true, identity: id }) }).result.current
     expect(off.can('admin')).toBe(true)
     expect(off.canDestroy).toBe(false)
-    expect(whyNot(off, 'admin', true)).toMatch(/turned off for remote sign-ins.*kora panel remote-actions on/)
+    expect(whyNot(off, 'admin', true)).toMatch(/turned off for sign-ins made with a token.*kora panel remote-actions on/)
     const on = renderHook(() => useRole(), { wrapper: withMeta({ remote: true, identity: id, allow_remote_destructive: true }) }).result.current
     expect(on.canDestroy).toBe(true)
     expect(whyNot(on, 'admin', true)).toBeNull()
