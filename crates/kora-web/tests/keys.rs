@@ -180,8 +180,21 @@ impl Rig {
         self.ok("POST", "/keys", Some(json!({"name": name, "license_key": key}))).await;
     }
 
+    /// Everything in the store's folder (the database, its log and any backups) as lossy text, to look for secrets in.
     fn file(&self) -> String {
-        std::fs::read_to_string(self.home.join("secrets.json")).unwrap()
+        let store = self.home.join("store");
+        let mut all = String::new();
+        // Fold the log into the database file first, so a key cannot hide in the log only.
+        if let Ok(s) = kora_core::store::Store::open(&self.home) {
+            let _ = s.read(|c| {
+                let _ = c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+                Ok(())
+            });
+        }
+        for e in std::fs::read_dir(&store).unwrap().flatten().filter(|e| e.path().is_file()) {
+            all.push_str(&String::from_utf8_lossy(&std::fs::read(e.path()).unwrap()));
+        }
+        all
     }
 }
 
@@ -365,11 +378,12 @@ async fn a_stopped_install_with_a_saved_key_carries_on_after_a_restart_without_a
     let job = r.job(&first).await;
     assert_eq!(job["state"], "failed", "{job}");
     assert_eq!(job["error"]["resume"], true);
-    // Written down, without the key or the database password.
-    let file = r.home.join("paused-installs").join(format!("{first}.json"));
-    let text = std::fs::read_to_string(&file).unwrap();
+    // Written down in the store, without the key or the database password.
+    let text: String =
+        kora_core::store::Store::open(&r.home).unwrap().read(|c| Ok(c.query_row("SELECT req_json FROM paused_installs WHERE job = ?1", [&first], |row| row.get::<_, String>(0)).unwrap())).unwrap();
     assert!(!text.contains("MAINKEY") && !text.contains("hunter2-db"), "{text}");
-    assert!(text.contains("\"license_key_name\": \"Main\""), "{text}");
+    assert!(text.contains("\"license_key_name\":\"Main\""), "{text}");
+    assert!(!r.file().contains("hunter2-db"), "not even in the database file");
     // The wizard is told it can carry on.
     let d = r.ok("GET", "/installs/defaults", None).await;
     assert_eq!(d["resumable"][0]["job"], first.as_str(), "{d}");
@@ -438,7 +452,9 @@ async fn a_pasted_key_that_was_not_saved_is_only_in_memory() {
     let (_, v) = r.call("POST", "/installs", Some(install_body(&dir, json!({"license_key": PASTED})))).await;
     let id = v["job"].as_str().unwrap().to_string();
     r.job(&id).await;
-    assert!(!r.home.join("paused-installs").exists() && !r.home.join("secrets.json").exists());
+    let paused = kora_core::installer::paused::PausedStore::at(r.home.join("paused-installs"));
+    assert!(paused.list().is_empty() && kora_core::keystore::KeyStore::at(r.home.join("secrets.json")).list().unwrap().is_empty());
+    assert!(!r.file().contains("PASTEDKEY"), "a pasted key that was not saved is nowhere on disk");
     assert!(!r.env.st().saved.as_ref().is_some_and(|s| s.license_key.is_some()));
     // Works while the panel runs ...
     r.env.st().fail = None;
@@ -516,8 +532,9 @@ async fn the_cfx_name_and_github_owner_are_remembered_in_a_separate_non_secret_f
     assert_eq!(v["ok"], true);
     let d = r.ok("GET", "/installs/defaults", None).await;
     assert_eq!((d["profile"]["cfx_username"].as_str(), d["profile"]["cfx_identifier"].as_str()), (Some("JSixty"), Some("fivem:4242")), "{d}");
-    let p = std::fs::read_to_string(r.home.join("profile.json")).unwrap();
-    assert!(p.contains("JSixty") && !r.home.join("secrets.json").exists());
+    let p = kora_core::profile::ProfileStore::at(r.home.join("profile.json")).load();
+    assert_eq!(p.cfx_username.as_deref(), Some("JSixty"));
+    assert!(kora_core::keystore::KeyStore::at(r.home.join("secrets.json")).list().unwrap().is_empty(), "the profile is not in the keys table");
     // Editing and forgetting.
     let v = r.ok("PUT", "/profile", Some(json!({"github_owner": "KoraFiveM", "cfx_username": null, "cfx_identifier": null}))).await;
     assert_eq!(v, json!({"cfx_username": null, "cfx_identifier": null, "github_owner": "KoraFiveM"}));

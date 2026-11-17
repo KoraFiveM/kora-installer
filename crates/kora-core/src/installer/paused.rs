@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::registry::kora_home;
-use crate::store::{problem_to_io, Store};
 use super::InstallRequest;
+use crate::store::{problem_to_io, Store};
 
 /// How long a stopped install can be continued after a restart.
 pub const KEEP_SECS: u64 = 3 * 24 * 3600;

@@ -1,7 +1,7 @@
-//! The nodes file: `<kora home>/hub.json`, mode 0600 on Unix. The token lives only here and is never
-//! returned by the API.
-use std::fs;
-use std::io::Write;
+//! The nodes: in the Kora home's private database (`hub_nodes`, see `store::privacy` for who can read it;
+//! `<kora home>/hub.json` before v0.8). The token lives only here and is never returned by the API.
+use crate::problem::Problem;
+use crate::store::{problem_to_string, Store};
 use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
@@ -20,12 +20,6 @@ impl std::fmt::Debug for NodeConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeConfig").field("id", &self.id).field("name", &self.name).field("url", &self.url).field("token", &"<hidden>").finish()
     }
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct File {
-    #[serde(default)]
-    nodes: Vec<NodeConfig>,
 }
 
 /// A checked node address.
@@ -113,73 +107,99 @@ pub fn check_url(raw: &str) -> Result<UrlCheck, String> {
     Ok(UrlCheck { url, insecure: !https && !host_is_private(host) })
 }
 
-/// Where the nodes live and how they are read and written. Cheap to construct.
+/// Where the nodes live and how they are read and written. Cheap to construct. They are in the Kora home's
+/// private database (`hub_nodes`); `path` (`<kora home>/hub.json` before v0.8) only says which Kora home.
 #[derive(Debug, Clone)]
 pub struct NodeStore {
+    /// `<kora home>/hub.json`: only names the Kora home.
     path: PathBuf,
+    db: PathBuf,
+}
+
+fn read_nodes(c: &rusqlite::Connection) -> Result<Vec<NodeConfig>, Problem> {
+    let mut st = c.prepare("SELECT id, name, url, token FROM hub_nodes ORDER BY seq")?;
+    let v = st.query_map([], |r| Ok(NodeConfig { id: r.get(0)?, name: r.get(1)?, url: r.get(2)?, token: r.get(3)? }))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(v)
+}
+
+fn write_nodes(c: &rusqlite::Connection, nodes: &[NodeConfig]) -> Result<(), Problem> {
+    c.execute("DELETE FROM hub_nodes", [])?;
+    for n in nodes {
+        c.execute(
+            "INSERT INTO hub_nodes (id, name, url, token) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url, token = excluded.token",
+            rusqlite::params![n.id, n.name, n.url, n.token],
+        )?;
+    }
+    Ok(())
+}
+
+fn blocked(s: &Store) -> Result<(), String> {
+    match s.blocked("hub") {
+        Some(b) => Err(format!("The nodes file ({}) could not be read ({}); it was left exactly as it was. Fix or move it and try again.", b.file.display(), b.why)),
+        None => Ok(()),
+    }
 }
 
 impl NodeStore {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        let path = path.into();
+        let db = crate::store::db_path(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
+        Self { path, db }
     }
-    /// `<kora home>/hub.json`.
+    /// The nodes of this process's Kora home.
     pub fn default_store() -> Self {
         Self::at(crate::installer::registry::kora_home().join("hub.json"))
     }
+    /// Where the nodes are saved: the store's database file.
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.db
     }
 
     pub fn load(&self) -> Result<Vec<NodeConfig>, String> {
-        match fs::read_to_string(&self.path) {
-            Ok(s) if s.trim().is_empty() => Ok(vec![]),
-            Ok(s) => serde_json::from_str::<File>(&s).map(|f| f.nodes).map_err(|_| "The nodes file (hub.json) could not be read; fix or delete it.".to_string()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
-            Err(e) => Err(format!("The nodes file could not be read ({e}).")),
-        }
+        let Some(s) = Store::open_existing_beside(&self.path).map_err(problem_to_string)? else { return Ok(vec![]) };
+        blocked(&s)?;
+        s.read(|c| read_nodes(c)).map_err(problem_to_string)
     }
 
+    /// Replace the whole list (prefer [`add`](Self::add) and [`remove`](Self::remove): each is one transaction).
     pub fn save(&self, nodes: &[NodeConfig]) -> Result<(), String> {
-        let text = serde_json::to_string_pretty(&File { nodes: nodes.to_vec() }).map_err(|e| e.to_string())?;
-        if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir).map_err(|e| format!("The nodes file could not be saved ({e})."))?;
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        let mut f = open_private(&tmp).map_err(|e| format!("The nodes file could not be saved ({e})."))?;
-        f.write_all(text.as_bytes()).and_then(|_| f.sync_all()).map_err(|e| format!("The nodes file could not be saved ({e})."))?;
-        drop(f);
-        fs::rename(&tmp, &self.path).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            format!("The nodes file could not be saved ({e}).")
-        })
+        let s = Store::open_beside(&self.path).map_err(problem_to_string)?;
+        blocked(&s)?;
+        s.write(|tx| write_nodes(tx, nodes)).map_err(problem_to_string)
     }
 
     /// Add a node (checked by the caller); refuses a repeated name or address.
     pub fn add(&self, name: &str, url: &str, token: &str) -> Result<NodeConfig, String> {
-        let mut nodes = self.load()?;
-        if nodes.iter().any(|n| n.name.eq_ignore_ascii_case(name)) {
-            return Err(format!("There is already a node called '{name}'."));
-        }
-        if nodes.iter().any(|n| n.url == url) {
-            return Err("That node is already in the list.".into());
-        }
-        let node = NodeConfig { id: new_id(&nodes), name: name.into(), url: url.into(), token: token.into() };
-        nodes.push(node.clone());
-        self.save(&nodes)?;
-        Ok(node)
+        let s = Store::open_beside(&self.path).map_err(problem_to_string)?;
+        blocked(&s)?;
+        let mut refused: Option<String> = None;
+        let r = s.write(|tx| {
+            let mut nodes = read_nodes(tx)?;
+            if nodes.iter().any(|n| n.name.eq_ignore_ascii_case(name)) {
+                refused = Some(format!("There is already a node called '{name}'."));
+                return Err(Problem::generic("refused"));
+            }
+            if nodes.iter().any(|n| n.url == url) {
+                refused = Some("That node is already in the list.".into());
+                return Err(Problem::generic("refused"));
+            }
+            let node = NodeConfig { id: new_id(&nodes), name: name.into(), url: url.into(), token: token.into() };
+            nodes.push(node.clone());
+            write_nodes(tx, &nodes)?;
+            Ok(node)
+        });
+        r.map_err(|p| refused.unwrap_or_else(|| problem_to_string(p)))
     }
 
     /// `Ok(false)` when there was no such node.
     pub fn remove(&self, id: &str) -> Result<bool, String> {
-        let mut nodes = self.load()?;
-        let before = nodes.len();
-        nodes.retain(|n| n.id != id);
-        if nodes.len() == before {
-            return Ok(false);
-        }
-        self.save(&nodes)?;
-        Ok(true)
+        let Some(s) = Store::open_existing_beside(&self.path).map_err(problem_to_string)? else { return Ok(false) };
+        blocked(&s)?;
+        s.write(|tx| {
+            let n = tx.execute("DELETE FROM hub_nodes WHERE id = ?1", [id])?;
+            Ok(n > 0)
+        })
+        .map_err(problem_to_string)
     }
 
     pub fn get(&self, id: &str) -> Result<Option<NodeConfig>, String> {
@@ -196,22 +216,6 @@ fn new_id(existing: &[NodeConfig]) -> String {
             return id;
         }
     }
-}
-
-/// A fresh owner-only file. `mode` only applies when a file is created, so a temp file left behind
-/// (perhaps with looser permissions, or as a symlink) is removed first and `create_new` makes sure
-/// the file written is the one just created.
-#[cfg(unix)]
-fn open_private(p: &Path) -> std::io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let _ = fs::remove_file(p);
-    fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(p)
-}
-
-// Windows: the file lives in the user's own profile folder, which other accounts cannot read by default.
-#[cfg(not(unix))]
-fn open_private(p: &Path) -> std::io::Result<fs::File> {
-    fs::OpenOptions::new().write(true).create(true).truncate(true).open(p)
 }
 
 #[cfg(test)]
@@ -247,23 +251,9 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(fs::metadata(s.path()).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(std::fs::metadata(crate::store::db_path(d.path())).unwrap().permissions().mode() & 0o777, 0o600);
         }
         assert!(s.remove(&n.id).unwrap());
         assert!(!s.remove(&n.id).unwrap());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_leftover_temp_file_does_not_loosen_the_mode() {
-        use std::os::unix::fs::PermissionsExt;
-        let d = tempfile::tempdir().unwrap();
-        let s = NodeStore::at(d.path().join("hub.json"));
-        let tmp = d.path().join("hub.json.tmp");
-        fs::write(&tmp, "old").unwrap();
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o666)).unwrap();
-        s.add("Home", "http://10.0.0.2:47120", "sekret").unwrap();
-        assert_eq!(fs::metadata(s.path()).unwrap().permissions().mode() & 0o777, 0o600);
-        assert!(!tmp.exists());
     }
 }

@@ -1,8 +1,14 @@
-//! `<kora home>/panel.json`: who may sign in remotely, with which role. Tokens are stored only as a
-//! salted SHA-256 hash; the file is written with mode 0600 on Unix (on Windows it inherits the
-//! permissions of the user's profile folder).
+//! Who may sign in remotely, with which role, kept in the Kora home's private database (the `remote_*`
+//! tables of `kora_core::store`; `<kora home>/panel.json` before v0.8, imported once). Tokens are stored
+//! only as a salted SHA-256 hash. Every change made through [`RemoteConfig::update_at`] (what the panel
+//! uses) is one transaction that reads and writes together, so a change made by `kora panel user add`
+//! while the panel runs cannot be lost. [`RemoteConfig::save`] after a [`RemoteConfig::load`] (what the
+//! CLI does) refuses, with a plain message, when somebody else changed the settings in between.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use kora_core::store::{self, rusqlite, Store};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,9 +31,28 @@ pub struct TokenUser {
     pub created: u64,
 }
 
+/// Which version of the stored settings a [`RemoteConfig`] was loaded from (0: none). Not part of the
+/// settings: ignored by comparisons, copies and serialisation.
+#[derive(Debug, Default)]
+pub struct Rev(AtomicU64);
+
+impl Clone for Rev {
+    fn clone(&self) -> Self {
+        Rev(AtomicU64::new(self.0.load(Ordering::Relaxed)))
+    }
+}
+impl PartialEq for Rev {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for Rev {}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RemoteConfig {
+    #[serde(skip)]
+    pub loaded_rev: Rev,
     /// Remote access on. (`kora panel --remote` turns it on for one run without saving.)
     pub enabled: bool,
     /// Let people on the tailnet in, by their Tailscale login (asked of the local tailscaled).
@@ -79,28 +104,71 @@ fn now() -> u64 {
 }
 
 impl RemoteConfig {
-    /// Missing file: the default (remote access off). A file that cannot be read or understood is an
-    /// error, never silently replaced.
+    /// Nothing saved yet: the default (remote access off). Settings that cannot be read (or an old `panel.json`
+    /// that could not be imported) are an error, never silently replaced.
     pub fn load(path: &Path) -> Result<Self, String> {
-        match std::fs::read_to_string(path) {
-            Ok(s) if s.trim().is_empty() => Ok(Self::default()),
-            Ok(s) => serde_json::from_str(&s).map_err(|e| format!("The remote access settings file {} is not valid: {e}", path.display())),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(format!("Could not read {}: {e}", path.display())),
-        }
+        let Some(s) = Store::open_existing_beside(path).map_err(store::problem_to_string)? else {
+            let nothing = Self::default();
+            nothing.loaded_rev.0.store(1, Ordering::Relaxed); // version 0 of the settings
+            return Ok(nothing);
+        };
+        blocked(&s)?;
+        s.read(read_cfg).map_err(store::problem_to_string)
     }
 
-    /// Write atomically (temp file in the same folder, then rename), mode 0600 on Unix.
+    /// The version of the saved settings now (0: none saved).
+    pub fn stored_rev(path: &Path) -> Result<u64, String> {
+        let Some(s) = Store::open_existing_beside(path).map_err(store::problem_to_string)? else { return Ok(0) };
+        s.read(|c| Ok(rev_of(c)?)).map_err(store::problem_to_string)
+    }
+
+    /// Save these settings (replacing what is saved). Refuses, saving nothing, when the settings changed since
+    /// this value was loaded (see the module docs).
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
-        let tmp = dir.join(format!(".{FILE_NAME}.{}.tmp", random_hex().get(..12).unwrap_or("tmp")));
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        write_private(&tmp, json.as_bytes()).map_err(|e| format!("Could not write {}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, path).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            format!("Could not save {}: {e}", path.display())
-        })
+        let s = Store::open_beside(path).map_err(store::problem_to_string)?;
+        blocked(&s)?;
+        let base = self.loaded_rev.0.load(Ordering::Relaxed);
+        let new_rev = s
+            .write(|tx| {
+                let now = rev_of(tx)?;
+                if base != 0 && now + 1 != base {
+                    return Err(kora_core::problem::Problem::generic(
+                        "The remote access settings were changed by another Kora window or command while you were editing them, so nothing was saved. Run the command again.",
+                    ));
+                }
+                write_cfg(tx, self)
+            })
+            .map_err(store::problem_to_string)?;
+        self.loaded_rev.0.store(new_rev + 1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Read, change and write the settings in ONE transaction (nothing is lost if another program changes them
+    /// at the same moment). Nothing is written when `f` fails.
+    pub fn update_at<R>(path: &Path, f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>) -> Result<R, String> {
+        Self::update_at_cfg(path, f).map(|(r, _)| r)
+    }
+
+    /// [`update_at`](Self::update_at), also giving back the settings as saved.
+    pub fn update_at_cfg<R>(path: &Path, f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>) -> Result<(R, RemoteConfig), String> {
+        let s = Store::open_beside(path).map_err(store::problem_to_string)?;
+        blocked(&s)?;
+        let mut inner: Option<String> = None;
+        let r = s.write(|tx| {
+            let mut cfg = read_cfg(tx)?;
+            match f(&mut cfg) {
+                Ok(out) => {
+                    let rev = write_cfg(tx, &cfg)?;
+                    cfg.loaded_rev.0.store(rev + 1, Ordering::Relaxed);
+                    Ok((out, cfg))
+                }
+                Err(e) => {
+                    inner = Some(e.clone());
+                    Err(kora_core::problem::Problem::generic(e))
+                }
+            }
+        });
+        r.map_err(|p| inner.unwrap_or_else(|| store::problem_to_string(p)))
     }
 
     pub fn user(&self, name: &str) -> Option<&TokenUser> {
@@ -145,19 +213,78 @@ impl RemoteConfig {
     }
 }
 
-#[cfg(unix)]
-fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
-    f.write_all(data)?;
-    f.sync_all()
+fn blocked(s: &Store) -> Result<(), String> {
+    match s.blocked("remote") {
+        Some(b) => Err(format!("The remote access settings file {} could not be read ({}); it was left exactly as it was. Fix or move it and try again.", b.file.display(), b.why)),
+        None => Ok(()),
+    }
 }
 
-#[cfg(not(unix))]
-fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    // Windows: the file sits in the user's own profile folder and inherits its access list.
-    std::fs::write(path, data)
+fn rev_of(c: &rusqlite::Connection) -> Result<u64, kora_core::problem::Problem> {
+    Ok(store::meta_get(c, "remote_rev")?.and_then(|v| v.parse().ok()).unwrap_or(0))
+}
+
+fn role_text(r: Role) -> &'static str {
+    r.as_str()
+}
+
+fn role_from(s: &str) -> Result<Role, kora_core::problem::Problem> {
+    s.parse::<Role>().map_err(|_| kora_core::problem::Problem::generic(format!("The saved remote access settings have an unknown role \"{s}\". Nothing was changed.")))
+}
+
+fn read_cfg(c: &rusqlite::Connection) -> Result<RemoteConfig, kora_core::problem::Problem> {
+    let mut cfg = RemoteConfig::default();
+    let flag = |k: &str| -> Result<bool, kora_core::problem::Problem> {
+        match c.query_row("SELECT value FROM remote_settings WHERE key = ?1", [k], |r| r.get::<_, String>(0)) {
+            Ok(v) => Ok(v == "1"),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+            Err(e) => Err(e.into()),
+        }
+    };
+    cfg.enabled = flag("enabled")?;
+    cfg.tailscale = flag("tailscale")?;
+    cfg.allow_remote_destructive = flag("allow_remote_destructive")?;
+    let mut st = c.prepare("SELECT login, role FROM remote_tailscale_users ORDER BY login")?;
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (l, r) = row?;
+        cfg.tailscale_users.insert(l, role_from(&r)?);
+    }
+    let mut st = c.prepare("SELECT name, role, salt, hash, created FROM remote_users ORDER BY seq")?;
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, i64>(4)?)))? {
+        let (name, role, salt, hash, created) = row?;
+        cfg.users.push(TokenUser { name, role: role_from(&role)?, salt, hash, created: created as u64 });
+    }
+    let mut st = c.prepare("SELECT host FROM remote_hosts ORDER BY seq")?;
+    for row in st.query_map([], |r| r.get::<_, String>(0))? {
+        cfg.allowed_hosts.push(row?);
+    }
+    cfg.loaded_rev.0.store(rev_of(c)? + 1, Ordering::Relaxed);
+    Ok(cfg)
+}
+
+/// Replace what is saved; returns the new version.
+fn write_cfg(c: &rusqlite::Connection, cfg: &RemoteConfig) -> Result<u64, kora_core::problem::Problem> {
+    for (k, v) in [("enabled", cfg.enabled), ("tailscale", cfg.tailscale), ("allow_remote_destructive", cfg.allow_remote_destructive)] {
+        c.execute("INSERT INTO remote_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", rusqlite::params![k, if v { "1" } else { "0" }])?;
+    }
+    c.execute("DELETE FROM remote_tailscale_users", [])?;
+    for (l, r) in &cfg.tailscale_users {
+        c.execute("INSERT INTO remote_tailscale_users (login, role) VALUES (?1, ?2) ON CONFLICT(login) DO UPDATE SET role = excluded.role", rusqlite::params![l, role_text(*r)])?;
+    }
+    c.execute("DELETE FROM remote_users", [])?;
+    for u in &cfg.users {
+        c.execute(
+            "INSERT INTO remote_users (name, name_folded, role, salt, hash, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(name_folded) DO UPDATE SET name = excluded.name, role = excluded.role, salt = excluded.salt, hash = excluded.hash, created = excluded.created",
+            rusqlite::params![u.name, u.name.to_lowercase(), role_text(u.role), u.salt, u.hash, u.created as i64],
+        )?;
+    }
+    c.execute("DELETE FROM remote_hosts", [])?;
+    for h in &cfg.allowed_hosts {
+        c.execute("INSERT INTO remote_hosts (host) VALUES (?1)", [h])?;
+    }
+    let rev = rev_of(c)? + 1;
+    store::meta_set(c, "remote_rev", &rev.to_string())?;
+    Ok(rev)
 }
 
 #[cfg(test)]
@@ -182,29 +309,65 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn the_file_is_private() {
+    fn the_store_is_private_and_settings_round_trip() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join(FILE_NAME);
-        let mut c = RemoteConfig::default();
+        let mut c = RemoteConfig { enabled: true, tailscale: true, allowed_hosts: vec!["box.example.com".into(), "a.b".into()], ..Default::default() };
+        c.tailscale_users.insert("sam@example.com".into(), Role::Admin);
         c.add_user("a", Role::Admin).unwrap();
+        c.add_user("b", Role::Viewer).unwrap();
         c.save(&p).unwrap();
-        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
-        // Saving again (rename over the old file) keeps it private.
-        c.save(&p).unwrap();
-        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        let db = store::db_path(dir.path());
+        assert_eq!(std::fs::metadata(&db).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(RemoteConfig::load(&p).unwrap(), c);
-        // No temp files left behind.
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        c.save(&p).unwrap();
+        assert_eq!(RemoteConfig::load(&p).unwrap(), c);
     }
 
     #[test]
-    fn missing_is_default_and_corrupt_is_an_error() {
+    fn saving_what_was_loaded_before_somebody_elses_change_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(FILE_NAME);
+        let mut mine = RemoteConfig::load(&p).unwrap();
+        // the panel (or another command) adds a user meanwhile
+        RemoteConfig::update_at(&p, |c| c.add_user("theirs", Role::Viewer).map(|_| ())).unwrap();
+        mine.add_user("mine", Role::Admin).unwrap();
+        let e = mine.save(&p).unwrap_err();
+        assert!(e.contains("changed by another Kora"), "{e}");
+        let now = RemoteConfig::load(&p).unwrap();
+        assert!(now.user("theirs").is_some() && now.user("mine").is_none());
+        // loading again and changing is fine
+        let mut again = RemoteConfig::load(&p).unwrap();
+        again.add_user("mine", Role::Admin).unwrap();
+        again.save(&p).unwrap();
+        again.add_user("third", Role::Viewer).unwrap();
+        again.save(&p).unwrap();
+        assert_eq!(RemoteConfig::load(&p).unwrap().users.len(), 3);
+    }
+
+    #[test]
+    fn updates_in_threads_all_land() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(FILE_NAME);
+        let hs: Vec<_> = (0..6)
+            .map(|i| {
+                let p = p.clone();
+                std::thread::spawn(move || RemoteConfig::update_at(&p, |c| c.add_user(&format!("u{i}"), Role::Viewer).map(|_| ())).unwrap())
+            })
+            .collect();
+        for h in hs {
+            h.join().unwrap();
+        }
+        assert_eq!(RemoteConfig::load(&p).unwrap().users.len(), 6);
+    }
+
+    #[test]
+    fn nothing_saved_is_default() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join(FILE_NAME);
         assert_eq!(RemoteConfig::load(&p).unwrap(), RemoteConfig::default());
-        std::fs::write(&p, "{ not json").unwrap();
-        assert!(RemoteConfig::load(&p).is_err());
+        assert!(!store::db_path(dir.path()).exists(), "reading creates nothing");
     }
 
     #[test]

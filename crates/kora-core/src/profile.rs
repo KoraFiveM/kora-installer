@@ -52,12 +52,14 @@ impl Field {
 /// Kora home (`<home>/profile.json` was the file before v0.8; the data is in the database now).
 #[derive(Debug, Clone)]
 pub struct ProfileStore {
+    /// `<kora home>/profile.json`: only names the Kora home.
     path: PathBuf,
+    db: PathBuf,
 }
 
 impl Default for ProfileStore {
     fn default() -> Self {
-        Self { path: kora_home().join(FILE_NAME) }
+        Self::at(kora_home().join(FILE_NAME))
     }
 }
 
@@ -93,13 +95,32 @@ fn write(c: &rusqlite::Connection, p: &Profile) -> Result<(), Problem> {
     Ok(())
 }
 
+pub(crate) fn read_profile_pub(c: &rusqlite::Connection) -> Result<Profile, Problem> {
+    read(c)
+}
+
+/// Used by the import of the old `profile.json`: replace what is remembered, or fill in what is missing.
+pub(crate) fn import_profile(c: &rusqlite::Connection, p: &Profile, replace: bool) -> Result<(), Problem> {
+    if replace {
+        return write(c, p);
+    }
+    let mut have = read(c)?;
+    have.cfx_username = have.cfx_username.or_else(|| p.cfx_username.clone());
+    have.cfx_identifier = have.cfx_identifier.or_else(|| p.cfx_identifier.clone());
+    have.github_owner = have.github_owner.or_else(|| p.github_owner.clone());
+    write(c, &have)
+}
+
 impl ProfileStore {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        let path = path.into();
+        let db = crate::store::db_path(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
+        Self { path, db }
     }
 
+    /// Where the profile is saved: the store's database file.
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.db
     }
 
     /// What is remembered. It only saves typing, so anything that goes wrong reads as "nothing remembered".

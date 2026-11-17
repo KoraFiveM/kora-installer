@@ -113,12 +113,15 @@ fn same(a: &str, b: &str) -> bool {
 /// The saved keys of one Kora home. [`KeyStore::default`] is the one of this process; tests use [`KeyStore::at`].
 #[derive(Debug, Clone)]
 pub struct KeyStore {
+    /// `<kora home>/secrets.json`: only names the Kora home (see the module docs).
     path: PathBuf,
+    /// The database file the keys are in.
+    db: PathBuf,
 }
 
 impl Default for KeyStore {
     fn default() -> Self {
-        Self { path: kora_home().join(FILE_NAME) }
+        Self::at(kora_home().join(FILE_NAME))
     }
 }
 
@@ -157,13 +160,41 @@ fn persist(c: &rusqlite::Connection, before: &[Entry], after: &[Entry]) -> Resul
     Ok(())
 }
 
+/// Every saved key as (name, key, added): what the import of the old file verifies against.
+pub(crate) fn export_keys(c: &rusqlite::Connection) -> Result<Vec<(String, String, u64)>, Problem> {
+    Ok(load_entries(c)?.into_iter().map(|e| (e.name, e.key, e.added)).collect())
+}
+
+/// Used by the import of the old `secrets.json`: replace the saved keys, or add the ones that are not there.
+/// A name that is already taken by a DIFFERENT key gets " (2)", " (3)" ... so no key is ever dropped.
+pub(crate) fn import_keys(c: &rusqlite::Connection, keys: &[(String, String, u64)], replace: bool) -> Result<(), Problem> {
+    let before = load_entries(c)?;
+    let mut after: Vec<Entry> = if replace { Vec::new() } else { before.clone() };
+    for (name, key, added) in keys {
+        if after.iter().any(|e| same(&e.name, name) && e.key == *key) {
+            continue;
+        }
+        let mut unique = name.clone();
+        let mut n = 2;
+        while after.iter().any(|e| same(&e.name, &unique)) {
+            unique = format!("{name} ({n})");
+            n += 1;
+        }
+        after.push(Entry { id: 0, name: unique, key: key.clone(), added: *added });
+    }
+    persist(c, &before, &after)
+}
+
 impl KeyStore {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        let path = path.into();
+        let db = crate::store::db_path(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")));
+        Self { path, db }
     }
 
+    /// Where the keys are saved: the store's database file.
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.db
     }
 
     fn unreadable(&self, why: &str, details: String) -> Problem {

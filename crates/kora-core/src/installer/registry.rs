@@ -78,6 +78,7 @@ impl Registry {
     /// the folder: the data lives in the database, see [`crate::store`]). Nothing registered: empty.
     pub fn load_from(path: &Path) -> std::io::Result<Self> {
         let Some(s) = Store::open_existing_beside(path).map_err(problem_to_io)? else { return Ok(Self::default()) };
+        blocked(&s)?;
         s.read(|c| read_servers(c)).map(|servers| Self { servers }).map_err(problem_to_io)
     }
 
@@ -89,6 +90,7 @@ impl Registry {
     /// overwrite each other's change: use [`Registry::update_at`] for a change that must not be lost.)
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
         let s = Store::open_beside(path).map_err(problem_to_io)?;
+        blocked(&s)?;
         s.write(|tx| write_servers(tx, &self.servers)).map_err(problem_to_io)
     }
 
@@ -109,6 +111,7 @@ impl Registry {
     /// moment cannot lose each other's change. `f` returns whether it changed anything.
     pub fn update_at<R>(path: &Path, f: impl FnOnce(&mut Registry) -> std::io::Result<R>) -> std::io::Result<R> {
         let s = Store::open_beside(path).map_err(problem_to_io)?;
+        blocked(&s)?;
         let mut inner: Option<std::io::Error> = None;
         let r = s.write(|tx| {
             let mut reg = Registry { servers: read_servers(tx)? };
@@ -157,14 +160,11 @@ impl Registry {
     }
 }
 
-
 // ---- the `servers` table ---------------------------------------------------------------------
 
 fn read_servers(c: &rusqlite::Connection) -> Result<Vec<ServerEntry>, crate::problem::Problem> {
     let mut st = c.prepare("SELECT name, dir, mode, game_port, txadmin_port, created_unix FROM servers ORDER BY seq")?;
-    let rows = st.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?))
-    })?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?)))?;
     let mut out = Vec::new();
     for row in rows {
         let (name, dir, mode, game, txadmin, created) = row?;
@@ -180,6 +180,36 @@ pub(crate) fn mode_text(m: Mode) -> String {
         Ok(serde_json::Value::String(s)) => s,
         _ => "production".into(),
     }
+}
+
+/// The server list is waiting on an old `servers.json` that could not be imported: say so, never start empty.
+fn blocked(s: &Store) -> std::io::Result<()> {
+    match s.blocked("servers") {
+        Some(b) => Err(std::io::Error::other(format!("Kora cannot read its old server list {} ({}); it was left exactly as it was. Fix or move that file and try again", b.file.display(), b.why))),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn read_servers_pub(c: &rusqlite::Connection) -> Result<Vec<ServerEntry>, crate::problem::Problem> {
+    read_servers(c)
+}
+
+/// Used by the import of the old `servers.json`: replace the list, or add what is not there yet.
+pub(crate) fn write_servers_merging(c: &rusqlite::Connection, servers: &[ServerEntry], replace: bool) -> Result<(), crate::problem::Problem> {
+    if replace {
+        return write_servers(c, servers);
+    }
+    let have = read_servers(c)?;
+    if have.is_empty() {
+        return write_servers(c, servers);
+    }
+    let mut all = have;
+    for e in servers {
+        if !all.iter().any(|h| h.name == e.name) {
+            all.push(e.clone());
+        }
+    }
+    write_servers(c, &all)
 }
 
 fn write_servers(tx: &rusqlite::Connection, servers: &[ServerEntry]) -> Result<(), crate::problem::Problem> {
