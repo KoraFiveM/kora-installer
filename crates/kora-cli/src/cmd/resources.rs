@@ -1,7 +1,7 @@
 //! `kora add-resources` and `kora add-asset`: put more resources on an installed server.
 
+use crate::cmd::install::CODE_REMOVED;
 use crate::ui::{confirm, server_dir};
-use crate::CODE_REMOVED;
 use std::path::PathBuf;
 
 use clap::{Args, Parser};
