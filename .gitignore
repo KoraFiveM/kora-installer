@@ -14,3 +14,4 @@ database.json
 # Kora Panel web UI
 web/node_modules
 web/dist
+.pw-browsers/
