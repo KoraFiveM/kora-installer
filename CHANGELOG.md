@@ -5,6 +5,11 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-11-17
+
+### Added
+- **Progress bars for checking and updating.** Check for updates shows "N of M resources checked" and the resource it is on, and a single-resource check shows a small bar on its own row. The update progress card shows "N of M updated", counts failed resources as done, and names the step in progress. The check bar stays at "Starting" until the GitHub fetch returns, then moves through the resources.
+
 ## [0.6.4] - 2026-11-17
 
 ### Added
