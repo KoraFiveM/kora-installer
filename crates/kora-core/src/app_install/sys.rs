@@ -2,7 +2,6 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::{lnk, AppError, Result, ShortcutSpec, Sys, UninstallEntry, UNINSTALL_KEY};
 
@@ -27,7 +26,8 @@ fn io<T>(r: std::io::Result<T>, what: impl AsRef<str>) -> Result<T> {
 /// Run a PowerShell script. Values travel in environment variables (never spliced into the script), so
 /// paths with spaces, quotes or non-ASCII characters need no escaping.
 fn powershell(script: &str, env: &[(&str, OsString)]) -> Result<String> {
-    let mut c = Command::new("powershell.exe");
+    // Through `sysexe`: by name Windows looks next to kora.exe first, and this can run as administrator.
+    let mut c = crate::sysexe::command("powershell.exe");
     let script = format!("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {script}");
     c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script]);
     for (k, v) in env {

@@ -322,7 +322,9 @@ pub(crate) fn hand_to_home_owner(path: &Path) {
         }
         if let Some(m) = path.parent().and_then(|p| std::fs::metadata(p).ok()) {
             if m.uid() != 0 {
-                let _ = std::os::unix::fs::chown(path, Some(m.uid()), Some(m.gid()));
+                // `lchown`: the folder belongs to someone else, who could swap `path` for a link to any file
+                // while root is here; `chown` would follow it and hand that file over.
+                let _ = std::os::unix::fs::lchown(path, Some(m.uid()), Some(m.gid()));
             }
         }
     }
@@ -335,9 +337,10 @@ fn tighten(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(m) = std::fs::metadata(path) {
-            if m.permissions().mode() & 0o077 != 0 {
-                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        // On the open file, never through a link (root may be reading inside someone else's folder).
+        if let Ok(f) = crate::fsutil::open_no_follow(path, crate::fsutil::Access::Read, None) {
+            if f.metadata().is_ok_and(|m| m.permissions().mode() & 0o077 != 0) {
+                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
             }
         }
     }
@@ -414,19 +417,28 @@ fn config_problem(what: &str, details: String) -> Problem {
 /// Replace the contents of an existing config file IN PLACE (same file, so its owner, permissions and on
 /// Windows its access list, including the grant the server's service account was given, all stay as they are:
 /// a new file renamed over it would be owned by whoever runs Kora and the service could no longer read it).
-/// If writing fails half-way the old contents are put back.
+/// Only the bytes from the first difference onwards are written, and the file is never emptied first, so
+/// a crash or power cut at the wrong moment cannot lose the file's other lines (the database connection
+/// string lives here too): with a new key of the same length, the usual case, only the key's own bytes are
+/// touched. If writing fails half-way the old contents are put back.
 fn rewrite_in_place(path: &Path, old: &str, new: &str) -> std::io::Result<()> {
     use std::io::{Seek, SeekFrom, Write};
     let mut f = crate::fsutil::open_no_follow(path, crate::fsutil::Access::ReadWrite, None)?;
+    let from = changed_from(old.as_bytes(), new.as_bytes());
     let put = |f: &mut std::fs::File, text: &str| -> std::io::Result<()> {
-        f.set_len(0)?;
-        f.seek(SeekFrom::Start(0))?;
-        f.write_all(text.as_bytes())?;
+        f.seek(SeekFrom::Start(from as u64))?;
+        f.write_all(&text.as_bytes()[from..])?;
+        f.set_len(text.len() as u64)?;
         f.sync_all()
     };
     put(&mut f, new).inspect_err(|_| {
         let _ = put(&mut f, old);
     })
+}
+
+/// Where `old` and `new` first differ (their common length when one is the start of the other).
+fn changed_from(old: &[u8], new: &[u8]) -> usize {
+    old.iter().zip(new).take_while(|(a, b)| a == b).count()
 }
 
 /// Write `key` into the server's own configuration, where the key lives today (`secrets.cfg`, else
@@ -610,6 +622,20 @@ mod tests {
         let out = replace_key_line(text, K1).unwrap();
         assert_eq!(out, format!("# Kora secrets\r\nsv_licenseKey \"{K1}\"\r\nset mysql_connection_string \"mysql://u:p@h/d\"\r\n"));
         assert_eq!(replace_key_line("sv_hostname \"x\"\n", K1), None);
+    }
+
+    #[test]
+    fn a_key_change_only_touches_the_bytes_that_differ() {
+        assert_eq!(changed_from(b"abc KEY1 tail", b"abc KEY2 tail"), 7);
+        assert_eq!(changed_from(b"abc", b"abcdef"), 3);
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("secrets.cfg");
+        // Longer, shorter and same-length replacements all leave the other lines as they were.
+        for old in ["short", "a_much_longer_old_key_than_the_new_one_is_by_far_0123456789", K2] {
+            std::fs::write(&p, format!("# top\nsv_licenseKey \"{old}\"\nset mysql_connection_string \"x\"\n")).unwrap();
+            set_server_key(d.path(), K1).unwrap();
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("# top\nsv_licenseKey \"{K1}\"\nset mysql_connection_string \"x\"\n"));
+        }
     }
 
     #[test]

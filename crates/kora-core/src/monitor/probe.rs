@@ -313,7 +313,18 @@ mod os {
             std::fs::copy("/bin/sleep", &sleep)
                 .or_else(|_| std::fs::copy("/usr/bin/sleep", &sleep))
                 .unwrap();
-            let mut child = std::process::Command::new(&sleep).arg("5").spawn().unwrap();
+            // Another test thread forking at this moment can still hold the copy open for writing
+            // ("Text file busy"): try again shortly.
+            let mut child = (0..50)
+                .find_map(|_| match std::process::Command::new(&sleep).arg("5").spawn() {
+                    Ok(c) => Some(c),
+                    Err(e) if e.raw_os_error() == Some(26) => {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        None
+                    }
+                    Err(e) => panic!("could not start the copy of sleep: {e}"),
+                })
+                .expect("the copy of sleep stayed busy");
             // A loaded machine can take a moment to show a new process in /proc: look for up to 3 s.
             let pid = child.id();
             let mut found = None;

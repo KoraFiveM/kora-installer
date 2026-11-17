@@ -84,9 +84,8 @@ impl ProfileStore {
             std::fs::create_dir_all(d)?;
         }
         let text = serde_json::to_string_pretty(&p).map_err(std::io::Error::other)?;
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, text)?;
-        crate::fsutil::rename_retrying(&tmp, &self.path)?;
+        // Never through a link: `kora install` can run as root (through the helper) inside the user's own folder.
+        crate::fsutil::write_no_follow(&self.path, text.as_bytes(), 0o644)?;
         crate::keystore::hand_to_home_owner(&self.path);
         Ok(p)
     }
@@ -139,5 +138,24 @@ mod tests {
         assert_eq!(s.load(), Profile::default());
         s.remember_github_owner("x-org");
         assert_eq!(s.load().github_owner.as_deref(), Some("x-org"));
+    }
+    /// `kora install` can run as root through the helper, inside the user's own folder: a link the user left at
+    /// the file (or at its temporary name) must be replaced, never written through.
+    #[cfg(unix)]
+    #[test]
+    fn saving_never_writes_through_a_link() {
+        let d = tempfile::tempdir().unwrap();
+        let victim = d.path().join("victim.txt");
+        std::fs::write(&victim, "keep me").unwrap();
+        let p = d.path().join("profile.json");
+        for planted in [p.clone(), p.with_extension("json.tmp")] {
+            std::os::unix::fs::symlink(&victim, &planted).unwrap();
+            let s = ProfileStore::at(&p);
+            s.remember_github_owner("x-org");
+            assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me", "{planted:?}");
+            assert_eq!(s.load().github_owner.as_deref(), Some("x-org"));
+            let _ = std::fs::remove_file(&planted);
+            let _ = std::fs::remove_file(&p);
+        }
     }
 }

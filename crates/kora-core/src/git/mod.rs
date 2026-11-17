@@ -301,7 +301,7 @@ pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::
     let inv = sudo_invocation(program, args, cwd, user.as_ref(), runuser.as_deref(), std::env::var("GIT_CONFIG_COUNT").ok().as_deref(), bus.as_deref());
     let inv = harden_for_root(inv, root_mode(user.is_some()), user.as_ref(), runuser.as_deref());
     // `git` / `gh`: a system copy, else Kora's own (never depends on this process's PATH being up to date).
-    let program = crate::tools::program_for(&inv.program);
+    let program = crate::tools::exec_program(&inv.program);
     let mut c = crate::sysexe::command(&program);
     c.args(&inv.args);
     if let Some(d) = &inv.cwd {

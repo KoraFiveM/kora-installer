@@ -162,6 +162,27 @@ pub fn program_for(program: &str) -> String {
     }
 }
 
+/// What to start for a `git` / `gh` command Kora runs itself: always the full path of the copy [`locate`] chose
+/// (a system copy too, on every platform), so the operating system never searches for the bare name. Starting
+/// `git` by name would search the `PATH` the way the shell does, and an empty or relative entry in it means the
+/// current folder, which is the resource's own folder (a pull request's files) while Kora runs `git` there.
+/// Nothing found: the bare name (the command then fails to start and says so). Any other program is unchanged.
+pub fn exec_program(program: &str) -> String {
+    exec_program_from(program, locate_for(program))
+}
+
+fn locate_for(program: &str) -> Option<Found> {
+    locate(tool_of(program)?)
+}
+
+/// Pure part of [`exec_program`].
+pub fn exec_program_from(program: &str, found: Option<Found>) -> String {
+    match found {
+        Some(f) if tool_of(program).is_some() => f.path.to_string_lossy().into_owned(),
+        _ => program.to_string(),
+    }
+}
+
 /// `PATH` for a child process when the private Git is the one in use (so `gh`, which starts `git`, finds
 /// it): its `cmd` folder in front of the current `PATH`. `None` when nothing has to change.
 pub fn child_path() -> Option<OsString> {
