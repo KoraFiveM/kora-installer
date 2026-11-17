@@ -490,6 +490,33 @@ mod per_user {
     }
 
     #[test]
+    fn the_shortcuts_open_the_desktop_app_when_it_is_installed_next_to_kora() {
+        let ul = win_user();
+        let shell = r"C:\Users\Sam\AppData\Local\Kora\bin\kora-desktop.exe";
+        assert_eq!(shell_sibling(Path::new(EXE), true), PathBuf::from(shell));
+        assert_eq!(shell_sibling(Path::new("/home/sam/.local/bin/kora"), false), PathBuf::from("/home/sam/.local/bin/kora-desktop"));
+        let mut f = fake_with(EXE);
+        f.files.insert(PathBuf::from(shell), b"shell".to_vec());
+        let out = install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        assert_eq!(out.exe, PathBuf::from(shell));
+        for p in [ul.start_menu.as_ref().unwrap(), ul.desktop.as_ref().unwrap()] {
+            let s = &f.shortcuts[p];
+            assert_eq!(
+                (s.target.as_path(), s.args.as_str(), s.run_as_admin, s.minimized),
+                (Path::new(shell), "", false, false),
+                "the app has no console to hide, and never asks for administrator rights"
+            );
+        }
+        // Still recognised as Kora's own shortcuts (so uninstall removes them).
+        let removed = uninstall_user_with(&mut f, &ul, false).unwrap();
+        assert_eq!(removed.len(), 2, "{removed:?}");
+        // Without the app, a bare `kora` as before.
+        let mut g = fake_with(EXE);
+        install_user_with(&mut g, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        assert!(g.shortcuts.values().all(|s| s.target.as_path() == Path::new(EXE) && s.minimized));
+    }
+
+    #[test]
     fn no_desktop_shortcut_and_dry_run() {
         let ul = win_user();
         let mut f = fake_with(EXE);
