@@ -554,6 +554,8 @@ route('POST', '/servers/{s}/update/preview', (m, b) => {
   return startJob('update_preview', s.name, async () => {
     await sleep(1500)
     const p = makePreview(s)
+    // A resource switched to another branch or a pull request is left alone by updates.
+    if (s.mode === 'development') p.resources = p.resources.map((r) => { const note = resetBranches.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
     dirtyPreviewed[s.name] = p
     s.badge = badgeFrom(p)
     pushServer(s)
