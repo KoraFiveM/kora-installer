@@ -125,6 +125,27 @@ impl Policy {
     }
 }
 
+/// The security descriptor of the Windows named pipe, rebuilt from the settings every time the
+/// service makes the next pipe instance, so allow / deny reach the pipe's own access list too:
+/// owner SYSTEM (the panel checks that before it sends anything), protected (nothing inherited),
+/// network logons denied, SYSTEM and Administrators full control, and the specific rights to talk
+/// over the pipe (`0x120083`) for exactly the accounts on the list. (The per-connection check of [`authorise`] is the real decision; this is
+/// the second fence. Unreadable settings: only SYSTEM and Administrators.)
+pub fn pipe_sddl(policy: &Result<Policy, String>) -> String {
+    let mut s = String::from("O:SYG:SYD:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)");
+    if let Ok(p) = policy {
+        for a in &p.accounts {
+            // only SIDs: a `uid:N` entry (a Linux file copied over) is skipped
+            if crate::helper::winhelper::valid_user_sid(a.id.as_str()) {
+                // read data, write data, read attributes, read control, synchronize: not FILE_APPEND_DATA
+                // (= create a pipe instance), so an allowed account cannot make a look-alike pipe.
+                s.push_str(&format!("(A;;0x120083;;;{})", a.id));
+            }
+        }
+    }
+    s
+}
+
 /// Who is at the other end of a connection, as the OS says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
@@ -233,6 +254,17 @@ mod tests {
         assert!(Policy::parse(&dup).is_err());
         let lower = format!(r#"{{"version":1,"accounts":[{{"id":"{}"}}]}}"#, ME.to_lowercase());
         assert!(Policy::parse(&lower).is_err(), "only the form Kora writes");
+    }
+
+    #[test]
+    fn the_pipe_descriptor_lists_exactly_the_allowed_accounts() {
+        let mut p = Policy::new("0.8.0");
+        p.allow(AccountId::sid(ME).unwrap(), "jo").unwrap();
+        p.allow(AccountId::uid(1000), "linux").unwrap();
+        let s = pipe_sddl(&Ok(p));
+        assert_eq!(s, format!("O:SYG:SYD:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x120083;;;{ME})"));
+        assert_eq!(pipe_sddl(&Err("bad".into())), "O:SYG:SYD:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)", "unreadable settings: administrators only");
+        assert!(!pipe_sddl(&Ok(Policy::new("x"))).contains("AU") && !pipe_sddl(&Ok(Policy::new("x"))).contains(";WD)"), "never everyone");
     }
 
     #[test]

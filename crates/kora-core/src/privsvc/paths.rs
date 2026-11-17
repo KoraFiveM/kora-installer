@@ -20,8 +20,32 @@ pub const LINUX_PROGRAM_DIRS: &[&str] = &["/usr/lib/kora", "/opt/kora"];
 // ---- Windows --------------------------------------------------------------------------------
 pub const WINDOWS_SERVICE: &str = "KoraService";
 pub const WINDOWS_PIPE: &str = r"\\.\pipe\kora-service";
-/// Folders (under `%ProgramData%\Kora`, locked to SYSTEM and Administrators by the installer).
-pub const WINDOWS_DATA_SUBDIR: &str = "service";
+/// The service keeps its files under `%ProgramFiles%\\Kora\\data`: only administrators can create
+/// anything in Program Files, so (unlike `%ProgramData%`) a folder cannot be squatted by a user
+/// before the installer runs. (`owners.json` stays next to it, where earlier versions put it.)
+pub const WINDOWS_DATA_SUBDIR: &str = "data";
+
+/// The files of the Windows service, from `%ProgramFiles%` as Windows reports it (never from the
+/// environment).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WinFiles {
+    pub exe: String,
+    pub data_dir: String,
+    pub policy: String,
+    pub audit: String,
+    pub ledger: String,
+}
+
+pub fn windows_files(program_files: &str) -> WinFiles {
+    let base = format!("{}\\Kora", program_files.trim_end_matches(['\\', '/']));
+    WinFiles {
+        exe: format!("{base}\\kora.exe"),
+        data_dir: format!("{base}\\{WINDOWS_DATA_SUBDIR}"),
+        policy: format!("{base}\\{WINDOWS_DATA_SUBDIR}\\service.json"),
+        audit: format!("{base}\\{WINDOWS_DATA_SUBDIR}\\audit.log"),
+        ledger: format!("{base}\\owners.json"),
+    }
+}
 
 /// Could a file or folder with this owner and mode be changed by someone other than root?
 /// (Owner root, and neither group nor others may write. A sticky bit does not make it safe.)
@@ -117,6 +141,17 @@ mod tests {
             assert!(!program_location_ok(bad, true, pf), "{bad}");
         }
         assert!(!program_location_ok(r"C:\Program Files\Kora\kora.exe", true, None), "no trusted Program Files: refuse");
+    }
+
+    #[test]
+    fn the_windows_files_are_all_under_program_files() {
+        let f = windows_files(r"C:\Program Files\");
+        assert_eq!(f.exe, r"C:\Program Files\Kora\kora.exe");
+        assert_eq!(f.policy, r"C:\Program Files\Kora\data\service.json");
+        assert_eq!(f.ledger, r"C:\Program Files\Kora\owners.json");
+        for p in [&f.exe, &f.data_dir, &f.policy, &f.audit, &f.ledger] {
+            assert!(program_location_ok(p, true, Some(r"C:\Program Files")), "{p}");
+        }
     }
 
     #[test]

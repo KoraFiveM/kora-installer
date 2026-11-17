@@ -79,6 +79,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::InstallLog => on_op(op, handlers::install::install_log),
         Op::SelfUpdateCheck => on_op(op, handlers::maintenance::self_update_check),
         Op::SelfUpdateApply => on_op(op, handlers::maintenance::self_update_apply),
+        Op::AdminServiceInstall => on_op(op, handlers::system::admin_service_install),
         Op::AppStatus => on_op(op, handlers::maintenance::app_status),
         Op::AppInstall => on_op(op, handlers::maintenance::app_install),
         Op::AppUninstall => on_op(op, handlers::maintenance::app_uninstall),

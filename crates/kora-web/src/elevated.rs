@@ -121,29 +121,17 @@ impl Channel for Session {
     }
 }
 
-/// Windows, until the service lands there: the short-lived elevated worker.
-#[cfg(windows)]
-struct WorkerBroker;
-
-#[cfg(windows)]
-impl Broker for WorkerBroker {
-    fn supported(&self) -> bool {
-        true
-    }
-    fn open(&self, kora_home: Option<&str>) -> Result<Box<dyn Channel>, OpenError> {
-        kora_core::helper::winpipe::open_session(kora_home, worker::PROMPT_LIMIT).map(|s| Box::new(s) as Box<dyn Channel>)
-    }
-}
-
-/// Linux: the administrator service on its socket.
-#[cfg(unix)]
+/// The administrator service: Linux on its Unix socket, Windows on its named pipe.
 struct ServiceBroker;
 
-#[cfg(unix)]
 impl ServiceBroker {
     fn probe() -> Availability {
-        use kora_core::privsvc::unixsvc::{probe, ClientError};
-        match probe(std::path::Path::new(kora_core::privsvc::paths::LINUX_SOCKET)) {
+        use kora_core::privsvc::conn::ClientError;
+        #[cfg(unix)]
+        let r = kora_core::privsvc::unixsvc::probe(std::path::Path::new(kora_core::privsvc::paths::LINUX_SOCKET));
+        #[cfg(windows)]
+        let r = kora_core::privsvc::winsvc::probe();
+        match r {
             Ok(_) => Availability::Ready,
             Err(ClientError::Refused(why)) => Availability::NotAllowed(why),
             Err(_) => Availability::Missing,
@@ -151,7 +139,6 @@ impl ServiceBroker {
     }
 }
 
-#[cfg(unix)]
 impl Broker for ServiceBroker {
     fn supported(&self) -> bool {
         Self::probe() == Availability::Ready
@@ -171,14 +158,16 @@ impl Broker for ServiceBroker {
 }
 
 /// One request per connection to the service; `finish` has nothing to close.
-#[cfg(unix)]
 struct ServiceChannel;
 
-#[cfg(unix)]
 impl Channel for ServiceChannel {
     fn run(&mut self, verb: &str, args: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, HelperError> {
-        use kora_core::privsvc::unixsvc::{call, ClientError};
-        match call(std::path::Path::new(kora_core::privsvc::paths::LINUX_SOCKET), verb, args, env, on_line) {
+        use kora_core::privsvc::conn::ClientError;
+        #[cfg(unix)]
+        let r = kora_core::privsvc::unixsvc::call(std::path::Path::new(kora_core::privsvc::paths::LINUX_SOCKET), verb, args, env, on_line);
+        #[cfg(windows)]
+        let r = kora_core::privsvc::winsvc::call(verb, args, env, on_line);
+        match r {
             Ok(a) => Ok(StepOutcome { ok: a.ok, code: a.code, data: a.data }),
             Err(ClientError::Unavailable(m)) => Err(HelperError::Unavailable(m)),
             Err(ClientError::Refused(m)) => Err(HelperError::Rejected(m)),
@@ -202,10 +191,8 @@ impl Broker for NoBroker {
 }
 
 fn default_broker() -> Arc<dyn Broker> {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     return Arc::new(ServiceBroker);
-    #[cfg(windows)]
-    return Arc::new(WorkerBroker);
     #[cfg(not(any(unix, windows)))]
     return Arc::new(NoBroker);
 }

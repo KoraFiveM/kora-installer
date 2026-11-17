@@ -11,8 +11,7 @@
 //! * The socket is `0666`: the uid check is the control, and a refused user gets a clear reason
 //!   instead of "permission denied".
 
-use std::collections::BTreeMap;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -25,7 +24,7 @@ use super::op::MAX_LINE;
 use super::paths;
 use super::policy::{AccountId, Caller, Policy};
 use crate::helper::winhelper::Ledger;
-use crate::helper::{Message, Request, PING};
+use crate::helper::PING;
 
 const MAX_CONNECTIONS: usize = 16;
 

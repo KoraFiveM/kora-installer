@@ -289,3 +289,52 @@ mod tests {
         assert!(d.recv().await.is_ok());
     }
 }
+
+/// `POST /system/admin-service/install` → `202 {job}` on Windows, where the installer is launched and
+/// asks an administrator for approval on the computer that runs Kora (the one place a prompt remains: it
+/// is the install of the service itself). Elsewhere `403 needs_elevation` with the command to run in
+/// an administrator terminal (`kora service install`). Local callers only (see `remote::roles`).
+pub async fn admin_service_install(State(st): State<AppState>) -> Result<axum::response::Response, ApiError> {
+    use kora_core::problem::{codes, Action, Problem};
+    if crate::elevated::worker_supported() {
+        return Err(ApiError::conflict("Kora's administrator service is already installed and turned on for you."));
+    }
+    let command = vec!["kora".to_string(), "service".into(), "install".into()];
+    if !cfg!(windows) || kora_core::elevate::is_elevated() {
+        let p = Problem::new(codes::NEEDS_ELEVATION, "Installing Kora's administrator service needs administrator rights. Run this command as administrator, then come back here:")
+            .with_action(Action::ShowCommand { command, elevated: true });
+        return Err(ApiError::problem(axum::http::StatusCode::FORBIDDEN, p));
+    }
+    st.spawn_job(kora_core::api::Op::AdminServiceInstall, None, move |h| {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let mut child = std::process::Command::new(exe)
+            .args(["--no-elevate", "service", "install"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Kora could not start the installer: {e}"))?;
+        let err = child.stderr.take();
+        let t = std::thread::spawn(move || {
+            use std::io::Read;
+            let mut s = String::new();
+            if let Some(mut e) = err {
+                let _ = e.read_to_string(&mut s);
+            }
+            s
+        });
+        if let Some(out) = child.stdout.take() {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                h.event(json!({"type": "status", "message": line}));
+            }
+        }
+        let status = child.wait().map_err(|e| e.to_string())?;
+        let stderr = t.join().unwrap_or_default();
+        if !status.success() {
+            let why = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("the installer stopped").trim_start_matches("error: ").to_string();
+            return Err(format!("Kora's administrator service was not installed: {why}"));
+        }
+        Ok(json!({"installed": crate::elevated::worker_supported()}))
+    })
+}

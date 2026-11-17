@@ -76,3 +76,5 @@ pub mod policy;
 pub mod problems;
 #[cfg(unix)]
 pub mod unixsvc;
+#[cfg(windows)]
+pub mod winsvc;

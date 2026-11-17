@@ -163,6 +163,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::AssetDownloads
         | Op::ToolInstall
         | Op::DbStart
+        | Op::AdminServiceInstall
         // Adding, renaming, replacing and deleting saved licence keys.
         | Op::KeyAdd
         | Op::KeyUpdate
@@ -193,6 +194,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::ScheduleSet
         | Op::ScheduleRemove => true,
         Op::Meta
+        | Op::AdminServiceInstall
         | Op::SessionCreate
         | Op::SystemInfo
         | Op::ServersList
@@ -354,6 +356,7 @@ pub fn installs(op: Op) -> bool {
         | Op::InstallLog
         | Op::SelfUpdateCheck
         | Op::SelfUpdateApply
+        | Op::AdminServiceInstall
         | Op::AppStatus
         | Op::AppInstall
         | Op::AppUninstall
@@ -456,7 +459,9 @@ pub fn local_only(op: Op) -> bool {
         // Restarting stops this computer's panel (and drops every session).
         | Op::PanelRestart
         // Lists files in the Downloads folder of the computer that runs Kora.
-        | Op::AssetDownloads => true,
+        | Op::AssetDownloads
+        // Runs an installer that asks for administrator approval on this computer's desktop.
+        | Op::AdminServiceInstall => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
