@@ -73,7 +73,12 @@ impl CommandRunner for SystemRunner {
         let mut c = system_command(program, args, cwd);
         // Never block on interactive prompts from git.
         c.env("GIT_TERMINAL_PROMPT", "0");
-        for (k, v) in windows_git_env(cfg!(windows), std::env::var("GIT_CONFIG_COUNT").ok().as_deref()) {
+        // Only when no other layer (the sudo / root wrappers, or the user) already set `GIT_CONFIG_COUNT`
+        // (`windows_git_env` checks the process; the wrappers' own lists are on the command itself).
+        let own = std::env::var("GIT_CONFIG_COUNT").ok();
+        let wrapped = c.get_envs().any(|(k, _)| k == "GIT_CONFIG_COUNT");
+        let cred = crate::tools::gh_credential_helper().filter(|_| program == "git" && own.is_none() && !wrapped);
+        for (k, v) in git_config_env(cfg!(windows), own.as_deref(), cred.as_deref()) {
             c.env(k, v);
         }
         let o = c.output()?;
@@ -145,7 +150,7 @@ pub fn sudo_invocation(
                 ("GIT_CONFIG_KEY_0".to_string(), key.clone()),
                 ("GIT_CONFIG_VALUE_0".to_string(), String::new()),
                 ("GIT_CONFIG_KEY_1".to_string(), key),
-                ("GIT_CONFIG_VALUE_1".to_string(), format!("!{ru} -u {} -- gh auth git-credential", u.name)),
+                ("GIT_CONFIG_VALUE_1".to_string(), format!("!{ru} -u {} -- {} auth git-credential", u.name, crate::tools::program_for("gh"))),
             ]);
         }
     };
@@ -161,7 +166,7 @@ pub fn sudo_invocation(
             }
         }
         "gh" => {
-            let mut a = vec!["-u".to_string(), u.name.clone(), "--".to_string(), "gh".to_string()];
+            let mut a = vec!["-u".to_string(), u.name.clone(), "--".to_string(), crate::tools::program_for("gh")];
             a.extend(args.iter().map(|s| s.to_string()));
             let mut env = Vec::new();
             if let Some(b) = bus {
@@ -243,7 +248,7 @@ pub fn harden_for_root(mut inv: Invocation, root: Option<bool>, user: Option<&cr
     }
     inv.env.retain(|(k, _)| !k.starts_with("GIT_CONFIG_"));
     let cred = match (user, runuser) {
-        (Some(u), Some(ru)) if u.uid != 0 && crate::userhome::valid_user_name(&u.name) => Some(format!("!{} -u {} -- gh auth git-credential", ru.to_string_lossy(), u.name)),
+        (Some(u), Some(ru)) if u.uid != 0 && crate::userhome::valid_user_name(&u.name) => Some(format!("!{} -u {} -- {} auth git-credential", ru.to_string_lossy(), u.name, crate::tools::program_for("gh"))),
         _ => None,
     };
     inv.env.extend(root_git_env(isolate, cred.as_deref()));
@@ -286,7 +291,9 @@ pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::
     let (user, runuser, bus) = sudo_context();
     let inv = sudo_invocation(program, args, cwd, user.as_ref(), runuser.as_deref(), std::env::var("GIT_CONFIG_COUNT").ok().as_deref(), bus.as_deref());
     let inv = harden_for_root(inv, root_mode(user.is_some()), user.as_ref(), runuser.as_deref());
-    let mut c = crate::sysexe::command(&inv.program);
+    // `git` / `gh`: a system copy, else Kora's own (never depends on this process's PATH being up to date).
+    let program = crate::tools::program_for(&inv.program);
+    let mut c = crate::sysexe::command(&program);
     c.args(&inv.args);
     if let Some(d) = &inv.cwd {
         c.current_dir(d);
@@ -294,7 +301,38 @@ pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::
     for (k, v) in inv.env {
         c.env(k, v);
     }
+    // Kora's own Git in front of the PATH, so `gh` (which starts `git`) finds it too.
+    if let Some(p) = crate::tools::child_path() {
+        c.env("PATH", p);
+    }
     c
+}
+
+/// [`windows_git_env`] plus, when Kora's own `gh` is the one in use, the credential helper that asks it for
+/// GitHub sign-in details (the private copy is in no global git config, so every Kora git call carries it).
+/// `existing_count`: the caller's own `GIT_CONFIG_COUNT` (then git is left alone).
+pub fn git_config_env(windows: bool, existing_count: Option<&str>, credential: Option<&str>) -> Vec<(String, String)> {
+    if existing_count.is_some() {
+        return vec![];
+    }
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    if windows {
+        pairs.push(("core.longpaths".into(), "true".into()));
+    }
+    if let Some(c) = credential {
+        let key = "credential.https://github.com.helper".to_string();
+        pairs.push((key.clone(), String::new()));
+        pairs.push((key, c.to_string()));
+    }
+    if pairs.is_empty() {
+        return vec![];
+    }
+    let mut env = vec![("GIT_CONFIG_COUNT".to_string(), pairs.len().to_string())];
+    for (i, (k, v)) in pairs.into_iter().enumerate() {
+        env.push((format!("GIT_CONFIG_KEY_{i}"), k));
+        env.push((format!("GIT_CONFIG_VALUE_{i}"), v));
+    }
+    env
 }
 
 /// Windows: allow paths over 260 characters (node_modules inside resources routinely exceed it, and
@@ -398,7 +436,8 @@ fn detect_tool(r: &dyn CommandRunner, tool: &str) -> Option<ToolInfo> {
         return None;
     }
     let version = parse_version(&o.stdout)?;
-    Some(ToolInfo { version, path: locate(r, tool) })
+    let path = locate(r, tool).or_else(|| crate::tools::tool_of(tool).and_then(crate::tools::locate).map(|f| f.path));
+    Some(ToolInfo { version, path })
 }
 
 /// First token that starts with a digit on the first line:
