@@ -45,6 +45,14 @@ pub fn export_json(s: &Store, dir: &Path) -> Result<Vec<PathBuf>, Problem> {
         put(dir, "servers.json", &Registry { servers }, &mut out)?;
     }
     let keys = s.read(crate::keystore::export_keys)?;
+    // A key whose value is in a keychain this session cannot reach is not in the file: say which, so nothing is lost silently.
+    let unreadable = s.read(crate::keystore::unreadable_keys)?;
+    if !unreadable.is_empty() {
+        let text: String = unreadable.iter().map(|(n, why)| format!("{n}: {why}\n")).collect();
+        let path = dir.join("keys-not-exported.txt");
+        crate::fsutil::write_no_follow(&path, format!("These saved licence keys could not be read from here, so they are NOT in secrets.json:\n{text}").as_bytes(), 0o600).map_err(|e| failed("keys-not-exported.txt", e))?;
+        out.push(path);
+    }
     if !keys.is_empty() {
         let doc = json!({"version": 1, "keys": keys.iter().map(|(n, k, a)| json!({"name": n, "key": k, "added": a})).collect::<Vec<_>>()});
         put(dir, "secrets.json", &doc, &mut out)?;
