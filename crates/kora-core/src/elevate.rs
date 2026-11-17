@@ -261,10 +261,7 @@ impl Elevator for SystemElevator {
 /// What kind of command is being run (drives the Windows "always elevated" rule).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdKind {
-    /// No arguments: the interactive wizard.
-    Wizard,
     Install { dry_run: bool },
-    Manager,
     Delete,
     Uninstall { dry_run: bool },
     Start,
@@ -277,10 +274,11 @@ pub enum CmdKind {
 }
 
 impl CmdKind {
-    /// Interactive and privileged: on Windows these always run elevated.
+    /// Interactive and privileged: on Windows these always run elevated. (Bare `kora`, `kora manager` and
+    /// `kora install` with no options only open the panel, so they are `Other` and never elevate.)
     pub fn privileged(self) -> bool {
         match self {
-            CmdKind::Wizard | CmdKind::Manager | CmdKind::Delete | CmdKind::Start | CmdKind::Stop | CmdKind::Restart => true,
+            CmdKind::Delete | CmdKind::Start | CmdKind::Stop | CmdKind::Restart => true,
             CmdKind::Install { dry_run } | CmdKind::Uninstall { dry_run } => !dry_run,
             CmdKind::Update { auto } => !auto,
             CmdKind::Status | CmdKind::Other => false,
@@ -680,11 +678,9 @@ mod tests {
         assert_eq!((r, f.calls.get(), said.len()), (Elevation::Continue, 0, 0));
     }
 
-    const ALL: [CmdKind; 12] = [
-        CmdKind::Wizard,
+    const ALL: [CmdKind; 10] = [
         CmdKind::Install { dry_run: false },
         CmdKind::Install { dry_run: true },
-        CmdKind::Manager,
         CmdKind::Delete,
         CmdKind::Uninstall { dry_run: false },
         CmdKind::Uninstall { dry_run: true },
@@ -710,7 +706,7 @@ mod tests {
         let privileged: Vec<CmdKind> = ALL.into_iter().filter(|k| k.privileged()).collect();
         assert_eq!(
             privileged,
-            [CmdKind::Wizard, CmdKind::Install { dry_run: false }, CmdKind::Manager, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]
+            [CmdKind::Install { dry_run: false }, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]
         );
         assert!(CmdKind::Stop.privileged() && CmdKind::Restart.privileged());
         assert!(!CmdKind::Status.privileged() && !CmdKind::Other.privileged(), "--version/--help/status stay unelevated");

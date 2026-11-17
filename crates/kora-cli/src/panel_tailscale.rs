@@ -130,6 +130,11 @@ pub struct Ready {
     pub admin: String,
 }
 
+/// Is Tailscale installed and running here? (For the hint printed on a computer with no screen.)
+pub fn tailscale_running() -> bool {
+    tailscale_status().is_ok()
+}
+
 fn tailscale_status() -> Result<TsSelf, String> {
     let Some(s) = SystemWhois.status() else {
         return Err("Tailscale is not installed or not running on this computer. Install it (https://tailscale.com/download), \

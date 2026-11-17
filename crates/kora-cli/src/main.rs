@@ -2,7 +2,6 @@
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
-use std::sync::mpsc;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use kora_core::elevate;
@@ -106,11 +105,11 @@ struct InstallArgs {
     /// Show the full plan and change nothing.
     #[arg(long)]
     dry_run: bool,
-    /// Do not install the Kora app (the `kora` command and Start Menu shortcut) next to the server.
-    #[arg(long)]
+    /// Accepted and ignored since 0.7.0 (the install no longer adds a machine-wide Kora app).
+    #[arg(long, hide = true)]
     no_app: bool,
-    /// With the Kora app: no desktop shortcut (Windows).
-    #[arg(long)]
+    /// Accepted and ignored since 0.7.0 (shortcuts are made by the install scripts and `kora app install`).
+    #[arg(long, hide = true)]
     no_desktop_shortcut: bool,
     /// If a port is in use, silently use the next free one and say what changed.
     #[arg(long)]
@@ -211,8 +210,8 @@ impl InstallArgs {
             db_admin,
             // Headless installs start nothing unless asked (CI and scripts keep their behaviour).
             start: self.start && !self.no_start,
-            // Real installs include the app by default; a dry run lists nothing it would not change anyway.
-            app: (!self.no_app && !self.dry_run).then_some(kora_core::app_install::AppChoice { desktop_shortcut: !self.no_desktop_shortcut }),
+            // Retired in 0.7.0: the install no longer adds a machine-wide app.
+            app: None,
         })
     }
 }
@@ -404,9 +403,9 @@ enum PanelUserCmd {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Install a new Kora server (interactive TUI, or headless with options).
+    /// Install a new Kora server. With no options this opens the panel's install page in your browser; with options it installs without asking (for scripts).
     Install(Box<InstallArgs>),
-    /// Open the multi-server manager.
+    /// Open Kora Panel in your browser (the same as running `kora` with nothing after it).
     Manager,
     /// Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up).
     Panel(PanelArgs),
@@ -455,7 +454,7 @@ enum Command {
         #[command(subcommand)]
         cmd: ScheduleCmd,
     },
-    /// The Kora app: the `kora` command / Start Menu shortcut that reopens the manager.
+    /// The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app.
     App {
         #[command(subcommand)]
         cmd: AppCmd,
@@ -763,24 +762,25 @@ fn webhook(cmd: WebhookCmd) -> i32 {
 
 #[derive(Subcommand)]
 enum AppCmd {
-    /// Install or update the Kora app (idempotent).
+    /// Make the Kora shortcuts that open the panel (per user, no administrator rights; idempotent).
     Install {
-        /// Do not ask (nothing is asked today; accepted for scripts).
+        /// Do not ask (nothing is asked; accepted for scripts).
         #[arg(long, short = 'y')]
         yes: bool,
         /// No desktop shortcut (Windows).
         #[arg(long)]
         no_desktop_shortcut: bool,
-        /// Replace a newer installed copy with this program.
-        #[arg(long)]
+        /// Accepted and ignored since 0.7.0.
+        #[arg(long, hide = true)]
         force: bool,
         /// List every change and make none.
         #[arg(long)]
         dry_run: bool,
     },
-    /// Show whether the Kora app is installed (`key: value` lines).
+    /// Show the shortcuts and whether the old machine-wide app is still here (`key: value` lines).
     Status,
-    /// Remove the Kora app. Servers and databases are never touched.
+    /// Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights
+    /// only when there is something to remove. Servers and databases are never touched.
     Uninstall {
         #[arg(long, short = 'y')]
         yes: bool,
@@ -789,42 +789,29 @@ enum AppCmd {
     },
 }
 
-/// What a bare `kora` does in a terminal: manage the servers you have, or set up the first one.
-fn default_command(registered: usize) -> Command {
-    if registered > 0 {
-        Command::Manager
-    } else {
-        Command::Install(Box::default())
-    }
-}
-
-fn registered_servers() -> usize {
-    registry::Registry::load().map(|r| r.servers.len()).unwrap_or(0)
-}
-
 fn print_lines(prefix: &str, lines: &[String]) {
     for l in lines {
         println!("{prefix}{l}");
     }
 }
 
-fn app_install(force: bool, no_desktop_shortcut: bool, dry_run: bool) -> i32 {
-    use kora_core::app_install as app;
-    if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
-        eprintln!("error: installing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
-        return 1;
-    }
-    match app::install_app(&app::AppOptions { desktop_shortcut: !no_desktop_shortcut, force, dry_run }) {
+/// `kora app install`: the per-user shortcuts that open the panel. No administrator rights.
+fn app_install(no_desktop_shortcut: bool, dry_run: bool) -> i32 {
+    use kora_core::app_install::user;
+    match user::install_user(&user::UserOptions { desktop_shortcut: !no_desktop_shortcut, dry_run }) {
         Ok(out) => {
             if dry_run {
-                println!("Dry run: nothing was changed. The Kora app install would:");
-            } else if out.changed() {
-                println!("The Kora app is installed ({}):", out.exe.display());
+                println!("Dry run: nothing was changed. Making the Kora shortcuts would:");
+            } else if out.changes.is_empty() {
+                println!("The Kora shortcuts are already in place ({}).", out.exe.display());
             } else {
-                println!("The Kora app is already installed and up to date ({}).", out.exe.display());
+                println!("The Kora shortcuts are ready ({}):", out.exe.display());
             }
             print_lines("  - ", &out.changes);
             print_lines("  note: ", &out.notes);
+            if user::legacy_present().present() {
+                println!("The old machine-wide Kora app is still installed. Remove it with `kora app uninstall` (as administrator), or use \"Tidy up old shortcuts\" in the panel.");
+            }
             0
         }
         Err(e) => {
@@ -835,29 +822,42 @@ fn app_install(force: bool, no_desktop_shortcut: bool, dry_run: bool) -> i32 {
 }
 
 fn app_status() -> i32 {
+    use kora_core::app_install::user;
+    let st = user::user_status();
+    let yn = |b: Option<bool>| b.map_or("n/a", |b| if b { "yes" } else { "no" });
+    println!("shortcut_start_menu: {}", yn(st.start_menu));
+    println!("shortcut_desktop: {}", yn(st.desktop));
+    println!("launcher: {}", yn(st.launcher));
+    let legacy = user::legacy_present();
+    println!("old_app_present: {}", if legacy.present() { "yes" } else { "no" });
+    print_lines("old_app_item: ", &legacy.items);
     print_lines("", &kora_core::app_install::status().lines());
     0
 }
 
 fn app_uninstall(yes: bool, dry_run: bool) -> i32 {
     use kora_core::app_install as app;
+    if !app::user::legacy_present().present() {
+        println!("The old machine-wide Kora app is not installed: nothing to remove. Your servers and databases were not touched.");
+        return 0;
+    }
     if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
-        eprintln!("error: removing the Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
+        eprintln!("error: removing the old Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
         return 1;
     }
     if !yes && !dry_run {
         if !std::io::stdin().is_terminal() {
-            eprintln!("error: pass --yes to remove the Kora app without a terminal to ask in (or --dry-run to preview).");
+            eprintln!("error: pass --yes to remove the old Kora app without a terminal to ask in (or --dry-run to preview).");
             return 2;
         }
-        if !installer::uninstall::Asker::ask(&mut Terminal, "Remove the Kora app (shortcuts, PATH entry, the installed program)? Your servers and databases are not touched.", true) {
+        if !installer::uninstall::Asker::ask(&mut Terminal, "Remove the old Kora app (its shortcuts, PATH entry and installed program)? Your servers and databases are not touched.", true) {
             println!("Cancelled. Nothing was changed.");
             return 0;
         }
     }
     match app::uninstall_app_opts(dry_run) {
         Ok(lines) => {
-            println!("{}", if dry_run { "Dry run: nothing was changed. Removing the Kora app would:" } else { "The Kora app was removed:" });
+            println!("{}", if dry_run { "Dry run: nothing was changed. Removing the old Kora app would:" } else { "The old Kora app was removed:" });
             print_lines("  - ", &lines);
             println!("Your servers and databases were not touched.");
             0
@@ -1038,17 +1038,12 @@ fn install(args: InstallArgs) -> i32 {
         eprintln!("{CODE_REMOVED}");
         return 2;
     }
-    let headless = args.any_given();
-    if !headless {
-        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-            eprintln!(
-                "error: `kora install` needs an interactive terminal to ask its questions. \
-                 Run it in a terminal, or pass options instead e.g. `kora install --name \"My Server\" --dir ~/kora/my-server --license-key <key> -y` (see `kora install --help`)."
-            );
-            return 2;
+    // No options: this is the panel's install page. Options: the scriptable installer below.
+    if !args.any_given() {
+        if args.catalog.is_some() {
+            eprintln!("note: --catalog only applies to an install with options; the panel uses the catalogue it knows (or KORA_CATALOG).");
         }
-        let catalog = args.catalog.or_else(|| std::env::var("KORA_CATALOG").ok().filter(|c| !c.is_empty()));
-        return interactive_flow(catalog, args.no_app, args.no_desktop_shortcut);
+        return bare::open_panel(bare::Landing::Install, false);
     }
     if let Some(name) = args.cfx_user.take() {
         match kora_core::cfx::lookup(&name) {
@@ -1755,6 +1750,11 @@ const ROOT_ONLY_HELP: &[&str] = &[
 ];
 
 fn panel(a: &PanelArgs) -> i32 {
+    panel_with(a, None)
+}
+
+/// [`panel`], opening the browser on `landing` (`/install`) when it runs in this window.
+fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
     use kora_core::monitor::panel_service as svc;
     // SECURITY.md: the panel runs as the installing user, never as administrator/root. A root panel
     // would keep its token and state in root's home and run every action with full rights.
@@ -1880,6 +1880,7 @@ fn panel(a: &PanelArgs) -> i32 {
         token: Some(token.clone()),
         tailscale: a.tailscale || a.listen_tailscale,
         allow_public: a.allow_public,
+        landing: landing.map(str::to_string),
         ..Default::default()
     };
     let pid = std::process::id();
@@ -2037,21 +2038,26 @@ fn ask_yes_no(question: &str) -> bool {
 /// The port for a new background panel: the asked-for one, else the saved one, else the default; when
 /// not asked for explicitly and it is taken, the next free one.
 fn background_port(a: &PanelArgs, home: &std::path::Path, ports: &dyn kora_web::launch::PortCheck) -> Result<u16, String> {
+    background_port_for(a.port, home, ports)
+}
+
+/// [`background_port`] with the asked-for port given directly.
+fn background_port_for(requested: Option<u16>, home: &std::path::Path, ports: &dyn kora_web::launch::PortCheck) -> Result<u16, String> {
     use kora_core::monitor::panel_service as svc;
-    let preferred = a.port.or_else(|| svc::saved_port(home)).unwrap_or(kora_web::DEFAULT_PORT);
+    let preferred = requested.or_else(|| svc::saved_port(home)).unwrap_or(kora_web::DEFAULT_PORT);
     // Our own background panel on its saved port is about to be restarted, not "another program":
     // keep the port, so links, bookmarks, tunnels and firewall rules stay right.
     if svc::saved_port(home) == Some(preferred) && ports.is_kora_panel(preferred) {
         return Ok(preferred);
     }
-    match kora_web::launch::pick_port(preferred, a.port.is_some(), ports) {
+    match kora_web::launch::pick_port(preferred, requested.is_some(), ports) {
         Some(p) => {
             if p != preferred {
                 println!("Port {preferred} is used by another program, so Kora Panel uses port {p}.");
             }
             Ok(p)
         }
-        None if a.port.is_some() => Err(format!("port {preferred} is already in use. Choose another with --port.")),
+        None if requested.is_some() => Err(format!("port {preferred} is already in use. Choose another with --port.")),
         None => Err(format!("ports {} to {} are all in use. Choose one with --port.", kora_web::DEFAULT_PORT, kora_web::launch::FALLBACK_PORTS.end())),
     }
 }
@@ -2363,9 +2369,10 @@ fn panel_user(cmd: &PanelUserCmd) -> i32 {
 fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
     use elevate::CmdKind as K;
     match cmd {
-        None => K::Wizard,
+        // Bare `kora`, `kora manager` and a flagless `kora install` only open the panel: never elevated.
+        None | Some(Command::Manager) => K::Other,
+        Some(Command::Install(a)) if !a.any_given() => K::Other,
         Some(Command::Install(a)) => K::Install { dry_run: a.dry_run },
-        Some(Command::Manager) => K::Manager,
         Some(Command::Update(a)) => K::Update { auto: a.auto },
         Some(Command::Status | Command::Schedule { cmd: ScheduleCmd::Show { .. } }) => K::Status,
         Some(Command::Schedule { .. }) => K::Restart,
@@ -2382,8 +2389,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Restart { .. }) => K::Restart,
         Some(Command::Uninstall { dry_run, .. }) => K::Uninstall { dry_run: *dry_run },
         Some(Command::App { cmd }) => match cmd {
-            AppCmd::Install { dry_run, .. } | AppCmd::Uninstall { dry_run, .. } => K::Uninstall { dry_run: *dry_run },
-            AppCmd::Status => K::Status,
+            AppCmd::Uninstall { dry_run, .. } => K::Uninstall { dry_run: *dry_run },
+            // The per-user shortcuts need no administrator rights.
+            AppCmd::Install { .. } | AppCmd::Status => K::Status,
         },
     }
 }
@@ -2415,9 +2423,9 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
             }
         }
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) => one("change the automatic-update schedule"),
-        Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the Kora app (the command, shortcuts and the installed program)"),
+        Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
-        Some(Command::App { cmd: AppCmd::Install { dry_run: false, .. } | AppCmd::Uninstall { dry_run: false, .. } }) => one("install or remove the Kora app (the command, shortcuts and the installed program)"),
+        Some(Command::App { cmd: AppCmd::Uninstall { dry_run: false, .. } }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
         _ => vec![],
     }
@@ -2461,11 +2469,11 @@ fn strip_license_key_arg(args: Vec<std::ffi::OsString>) -> (Vec<std::ffi::OsStri
 }
 
 /// Window kept open (Windows) so an elevated or double-clicked console never flashes and vanishes.
-static ALREADY_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static NO_PAUSE_ON_SUCCESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn finish(code: i32) -> ! {
     let (si, so) = (std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
-    if !ALREADY_PAUSED.load(std::sync::atomic::Ordering::Relaxed)
+    if !NO_PAUSE_ON_SUCCESS.load(std::sync::atomic::Ordering::Relaxed)
         && elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
         println!("\nPress Enter to close this window.");
         let mut line = String::new();
@@ -2505,14 +2513,10 @@ fn main() {
     // Before parsing: `--version`/`--help` exit inside the parser and must clean up too.
     kora_core::self_update::startup_cleanup();
     let cli = Cli::parse();
-    // Bare `kora` in a terminal: the manager when servers exist, the install wizard otherwise.
+    // Bare `kora` opens the panel (see `bare`); it never asks for administrator rights.
     let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    let bare = match &cli.command {
-        None if tty => Some(default_command(registered_servers())),
-        _ => None,
-    };
-    elevate_if_needed(&cli, if bare.is_some() { &bare } else { &cli.command });
-    let command = if bare.is_some() { bare } else { cli.command };
+    elevate_if_needed(&cli, &cli.command);
+    let command = cli.command;
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::Update(UpdateArgs { auto: true, .. })));
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
@@ -2520,16 +2524,22 @@ fn main() {
     // accounts can change (`~/.local/bin/kora`). Does nothing when not root or nothing is wrong.
     let repairs = match &command {
         Some(Command::Install(a)) => !a.dry_run,
-        Some(Command::Update(_) | Command::Schedule { .. }) | None => true,
+        Some(Command::Update(_) | Command::Schedule { .. }) => true,
         _ => false,
     };
     if repairs {
         kora_core::service::repair_root_update_units(&mut |line| println!("{line}"));
     }
     let code = match command {
-        None => install(InstallArgs::default()),
         Some(Command::Install(a)) => install(*a),
-        Some(Command::Manager) => manager(),
+        None | Some(Command::Manager) => {
+            let code = bare::open_panel(bare::Landing::Home, false);
+            if code == 0 {
+                // A shortcut's window should vanish, not wait for a key.
+                NO_PAUSE_ON_SUCCESS.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            code
+        }
         Some(Command::Panel(a)) => panel(&a),
         Some(Command::Update(a)) => update(a),
         Some(Command::AddResources(a)) => add_resources(a),
@@ -2554,7 +2564,7 @@ fn main() {
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
-            AppCmd::Install { force, no_desktop_shortcut, dry_run, .. } => app_install(force, no_desktop_shortcut, dry_run),
+            AppCmd::Install { no_desktop_shortcut, dry_run, .. } => app_install(no_desktop_shortcut, dry_run),
             AppCmd::Status => app_status(),
             AppCmd::Uninstall { yes, dry_run } => app_uninstall(yes, dry_run),
         },
@@ -2565,6 +2575,7 @@ fn main() {
     finish(code);
 }
 
+mod bare;
 mod panel_tailscale;
 
 #[cfg(test)]
@@ -2621,14 +2632,25 @@ mod tests {
     }
 
     #[test]
-    fn bare_kora_opens_the_manager_with_servers_and_the_wizard_without() {
-        for (registered, manager) in [(0, false), (1, true), (2, true), (50, true)] {
-            match default_command(registered) {
-                Command::Manager => assert!(manager, "{registered} servers"),
-                Command::Install(a) => assert!(!manager && !a.any_given(), "{registered} servers: the plain wizard"),
-                _ => panic!("unexpected default command"),
-            }
+    fn bare_kora_and_the_panel_aliases_never_elevate_but_install_with_options_still_may() {
+        use elevate::CmdKind as K;
+        let kind = |a: &[&str]| command_kind(&Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command);
+        for opens_panel in [&[][..], &["manager"], &["install"], &["install", "--no-app"], &["install", "--catalog", "x"]] {
+            let k = kind(opens_panel);
+            assert!(matches!(k, K::Other) && !k.privileged(), "{opens_panel:?}");
         }
+        assert!(kind(&["install", "--name", "a"]).privileged(), "an install with options is the scriptable installer");
+        assert!(!kind(&["app", "install"]).privileged(), "the per-user shortcuts need no administrator rights");
+    }
+
+    #[test]
+    fn install_without_options_is_the_panel_and_the_old_app_flags_are_ignored() {
+        assert!(!InstallArgs::default().any_given());
+        assert!(!InstallArgs { no_app: true, no_desktop_shortcut: true, ..Default::default() }.any_given());
+        let r = InstallArgs { name: Some("a".into()), ..Default::default() }.into_request().unwrap();
+        assert_eq!(r.app, None, "the machine-wide app is retired");
+        // still accepted, so an old script keeps working
+        assert!(Cli::try_parse_from(["kora", "install", "--name", "a", "--no-app", "--no-desktop-shortcut", "-y"]).is_ok());
     }
 
     #[test]
@@ -2666,16 +2688,6 @@ mod tests {
         assert!(p(&["webhook", "remove", "alpha"]).is_ok());
         assert!(p(&["webhook", "set"]).is_err());
         assert!(p(&["webhook"]).is_err());
-    }
-
-    #[test]
-    fn real_installs_include_the_app_unless_told_not_to_and_dry_runs_do_not() {
-        let app = |a: InstallArgs| a.into_request().unwrap().app;
-        assert_eq!(app(InstallArgs::default()), Some(kora_core::app_install::AppChoice { desktop_shortcut: true }));
-        assert_eq!(app(InstallArgs { no_desktop_shortcut: true, ..Default::default() }), Some(kora_core::app_install::AppChoice { desktop_shortcut: false }));
-        assert_eq!(app(InstallArgs { no_app: true, ..Default::default() }), None);
-        assert_eq!(app(InstallArgs { dry_run: true, ..Default::default() }), None);
-        assert!(!InstallArgs { no_app: true, ..Default::default() }.any_given(), "--no-app alone still opens the wizard");
     }
 
     #[test]
@@ -2747,8 +2759,9 @@ mod tests {
     fn app_commands_are_classified_for_elevation() {
         use elevate::CmdKind as K;
         let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
-        assert_eq!(command_kind(&parse(&["app", "install", "--yes"])), K::Uninstall { dry_run: false });
-        assert_eq!(command_kind(&parse(&["app", "install", "--dry-run"])), K::Uninstall { dry_run: true });
+        assert_eq!(command_kind(&parse(&["app", "install", "--yes"])), K::Status, "per-user shortcuts: no administrator rights");
+        assert_eq!(command_kind(&parse(&["app", "uninstall", "--yes"])), K::Uninstall { dry_run: false });
+        assert_eq!(command_kind(&parse(&["app", "uninstall", "--dry-run"])), K::Uninstall { dry_run: true });
         assert_eq!(command_kind(&parse(&["app", "status"])), K::Status);
         assert!(matches!(parse(&["uninstall", "--app", "-y"]), Some(Command::Uninstall { app: true, yes: true, .. })));
     }

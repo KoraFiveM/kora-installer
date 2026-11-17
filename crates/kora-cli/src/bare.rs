@@ -17,7 +17,7 @@ use kora_core::monitor::panel_service as svc;
 use kora_web::launch::{self, PortCheck, SystemPorts};
 
 use super::{
-    background_port, headless_session, one_time_link, panel_tailscale, panel_with, running_panel, start_background_service, svc_tailscale,
+    background_port_for, headless_session, one_time_link, panel_tailscale, panel_with, running_panel, start_background_service, svc_tailscale,
     user_services_available, Running, ROOT_ONLY_HELP, SETUP_WAIT,
 };
 
@@ -238,7 +238,7 @@ fn foreground_args(no_open: bool) -> super::PanelArgs {
 
 /// Set up and start the background panel, wait for it, return its port and sign-in link.
 fn start_and_wait(home: &std::path::Path, ports: &dyn PortCheck) -> Result<(u16, String), String> {
-    let port = background_port(None, home, ports)?;
+    let port = background_port_for(None, home, ports)?;
     println!("Starting Kora Panel in the background (it also starts by itself when you sign in) ...");
     let link = start_background_service(home, port, svc_tailscale(home))?;
     if !launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), ports) {

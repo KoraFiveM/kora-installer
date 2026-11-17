@@ -66,7 +66,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --yes", CliOnly("the panel confirms in the UI")),
     (
         "manager",
-        CliOnly("opens the terminal manager; the panel is the web equivalent"),
+        CliOnly("an alias that opens the panel itself (the same as a bare `kora`)"),
     ),
     ("panel", CliOnly("starts the panel itself")),
     ("panel --port", CliOnly("starts the panel itself")),
