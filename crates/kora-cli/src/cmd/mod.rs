@@ -21,6 +21,7 @@ pub(crate) mod resources;
 pub(crate) mod schedule;
 pub(crate) mod server;
 pub(crate) mod service_cmd;
+pub(crate) mod service_jobs;
 pub(crate) mod store;
 pub(crate) mod support;
 pub(crate) mod toolchain;

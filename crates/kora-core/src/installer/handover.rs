@@ -59,7 +59,15 @@ pub fn plan_for(dir: &Path, platform: Platform, rn: &dyn CommandRunner, ids: &dy
                 return none("this server does not run as a Windows service");
             }
             let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "kora.exe".into());
-            let server = ManagedServer { name: slug.clone(), dir: dir.to_string_lossy().into_owned(), start_command: vec![exe.clone()], user: "kora".into(), env_file: None, kora_exe: exe, windows_run_as: None };
+            let server = ManagedServer {
+                name: slug.clone(),
+                dir: dir.to_string_lossy().into_owned(),
+                start_command: vec![exe.clone()],
+                user: "kora".into(),
+                env_file: None,
+                kora_exe: exe,
+                windows_run_as: None,
+            };
             server.validate().map_err(|e| e.to_string())?;
             let plan = service::windows_grant_plan(&server);
             Ok((plan, Outcome::Done(format!("The server's service account has its rights on the restored files again ({}).", service::virtual_account(&server.service_name())))))

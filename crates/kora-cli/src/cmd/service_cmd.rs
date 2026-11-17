@@ -335,6 +335,7 @@ mod tests {
     #[test]
     fn what_the_service_runs_is_understood_by_this_command_line() {
         use crate::cmd::schedule::ScheduleCmd;
+        use crate::cmd::service_jobs::BackupJobCmd;
         use crate::cmd::toolchain::ToolsCmd;
         use crate::{Cli, Command};
         use clap::Parser;
@@ -351,6 +352,10 @@ mod tests {
             Op::ScheduleSet { dir: "/srv/a".into(), when: When::Daily { hour: 3, minute: 5 } },
             Op::ScheduleSet { dir: "/srv/a".into(), when: When::Weekly { day: "fri", hour: 4, minute: 0 } },
             Op::ScheduleOff { dir: "/srv/a".into() },
+            Op::BackupJobSet { dir: "/srv/a".into(), when: When::Daily { hour: 3, minute: 30 } },
+            Op::BackupJobSet { dir: "/srv/a".into(), when: When::Weekly { day: "sun", hour: 4, minute: 0 } },
+            Op::BackupJobOff { dir: "/srv/a".into() },
+            Op::HandOver { dir: "/srv/a".into() },
             Op::InstallGit,
             Op::UpdateApply { version: None },
             Op::UpdateApply { version: Some("v99.0.0".into()) },
@@ -365,6 +370,16 @@ mod tests {
                 (Op::StartDatabase, Some(Command::Check { start_database: true })) => true,
                 (Op::ScheduleSet { dir: server, .. }, Some(Command::Schedule { cmd: ScheduleCmd::Set { server: s, as_user, as_system, .. } })) => s == *server && as_user && !as_system,
                 (Op::ScheduleOff { dir: server }, Some(Command::Schedule { cmd: ScheduleCmd::Off { server: s } })) => s == *server,
+                (Op::BackupJobSet { dir, when }, Some(Command::BackupJob { cmd: BackupJobCmd::Set { dir: d, daily, weekly } })) => {
+                    d == std::path::Path::new(dir)
+                        && match when {
+                            When::Daily { hour, minute } => daily.as_deref() == Some(&format!("{hour:02}:{minute:02}")) && weekly.is_none(),
+                            When::Weekly { day, hour, minute } => daily.is_none() && weekly.as_deref() == Some(&[day.to_string(), format!("{hour:02}:{minute:02}")][..]),
+                            When::Default => false,
+                        }
+                }
+                (Op::BackupJobOff { dir }, Some(Command::BackupJob { cmd: BackupJobCmd::Off { dir: d } })) => d == std::path::Path::new(dir),
+                (Op::HandOver { dir }, Some(Command::HandOver(a))) => a.dir == std::path::Path::new(dir),
                 (Op::InstallGit, Some(Command::Tools { cmd: ToolsCmd::Install { tool: Some(t) } })) => t == "git",
                 (Op::UpdateApply { version }, Some(Command::SelfUpdate { yes, version: v, .. })) => yes && v == *version,
                 _ => false,

@@ -34,6 +34,7 @@ Commands:
   restart        Restart a server's background service
   uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
   service        Kora's administrator service: who may use it, and whether it is running
+  hand-over      Give a restored or imported server's files to the account the server runs as (asks Kora's administrator service; or run as administrator)
 
 Options:
       --no-elevate
@@ -2837,6 +2838,76 @@ Arguments:
           `start` Kora's own MariaDB, or `install` it when it is not there yet
           
           [possible values: start, install]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job =====
+Create, replace or remove the operating-system job of a server's scheduled backups, run by Kora's administrator service
+
+Usage: kora backup-job [OPTIONS] <COMMAND>
+
+Commands:
+  set  Create or replace the job
+  off  Remove the job (nothing else)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job set =====
+Create or replace the job
+
+Usage: kora backup-job set [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
+
+Options:
+      --daily <HH:MM>
+          Every day at HH:MM (24 hours, this computer's time)
+
+      --weekly <DAY> <HH:MM>
+          Every week on DAY (mon..sun) at HH:MM
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job off =====
+Remove the job (nothing else)
+
+Usage: kora backup-job off [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora hand-over =====
+Give a restored or imported server's files to the account the server runs as (asks Kora's administrator service; or run as administrator)
+
+Usage: kora hand-over [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
 
 Options:
       --no-elevate
