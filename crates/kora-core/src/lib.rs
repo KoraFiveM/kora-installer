@@ -32,6 +32,7 @@ pub mod reach;
 pub mod self_update;
 pub mod service;
 pub mod space;
+pub mod support;
 pub mod steps;
 pub mod store;
 pub mod sysexe;
