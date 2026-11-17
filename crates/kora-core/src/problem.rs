@@ -17,39 +17,55 @@
 //! # One error convention (typed errors)
 //!
 //! An error that can reach a person is a [`Problem`] from where it is raised to where it is shown.
-//! Nothing packs a Problem into a string any more: functions return `Result<T, Problem>`
-//! ([`Res`]), the web panel turns it into its JSON error envelope, and the command line prints it
-//! in one place (`kora_cli::fail`, which uses `Display`: message, details, one hint per action).
+//! Nothing packs a Problem into a string: functions return `Result<T, Problem>` ([`Res`]), the web
+//! panel turns it into its JSON error envelope (`ApiError::from`), and the command line prints it
+//! in one place (`kora-cli`'s `ui::fail`, which uses `Display`: message, details, one hint per
+//! action).
 //!
 //! * Raise one with [`Problem::new`] (+ details and actions), or [`Problem::generic`] for a plain
 //!   sentence. A bare `String` or `&str` converts into a generic Problem (`?` and `.into()` work),
 //!   so a sentence written for a person needs no ceremony.
-//! * Low-level errors (`std::io::Error`, `serde_json::Error`, `ureq::Error`,
+//! * Low-level errors (`std::io::Error`, `serde_json::Error`, `ureq::Error`, SQLite errors,
 //!   [`crate::git::GitError`]) convert into a Problem whose message is a generic sentence and whose
 //!   `details` hold the low-level text (never the message: a person does not need `os error 13`).
-//! * Add context with [`Problem::context`] / [`Context::context`] (`.context("saving the server
-//!   list")`) instead of `format!("...: {e}")`: the code, the actions and the details survive.
-//! * Error codes are the constants in [`codes`]; there are no string literals for codes outside
-//!   this file (a test greps for it).
-//! * Internal enums that callers `match` on (`GitError`, `DbError`, ...) stay enums and convert
-//!   into a Problem where a person could see them (`impl From<X> for Problem`).
-//! * Old data: job errors and step records written by v0.7.0 may hold a packed string; the one
-//!   function that still reads that form is `store::legacy_problem::from_packed` (read only, never
-//!   written). A test greps the tree for the packed marker and the removed helper names.
+//!   The internal enums that callers `match` on (`GitError`, `LockError`, `UpdateError`, `DbError`,
+//!   ...) stay enums; `problem/convert.rs` holds their `From` conversions.
+//! * Add words with [`Problem::context`] / [`Context::context`] (`.context("saving the server
+//!   list")`), [`Problem::lead`] (`"could not save: <message>"`) or [`Problem::and_say`]
+//!   (`"<message>. Nothing was changed."`) instead of `format!("...: {e}")`: the code, the actions
+//!   and the details survive. [`Problem::one_line`] is for the few places that must keep a plain
+//!   string (a field of a wire type, a log line, a summary list).
+//! * Error codes are the constants in a `codes` module, never a string literal at the place a
+//!   Problem is raised (a test greps for it). They stay `&str` constants, and `Problem::code` a
+//!   `String`, because the wire format is that string and other branches add codes the same way; a
+//!   newtype would only have made every one of them a merge conflict.
+//! * Old data: job errors stored by v0.7.0 may hold a packed string. The one function that still
+//!   reads that form is `store::jobs::read_legacy_packed` (read only, never written). A test
+//!   (`tests/problem_conventions.rs`) greps the tree for the packed marker and the removed helper
+//!   names.
 //!
-//! # Plan this module followed (the order of the conversion)
+//! # What each part became
 //!
 //! | Area | Before | After |
 //! |---|---|---|
-//! | `api::Res<T>` and the `Backend` trait, `SystemBackend`, `FakeBackend` | `Result<T, String>` (maybe packed) | `Result<T, Problem>` |
-//! | `paidassets::Res`, `support::service`, `backup::service`, `backup::host` | `String` | `Problem` |
-//! | `InstallError`, `installer::Result`, `StepError` | wrapper over a (maybe packed) string | `InstallError(Problem)`, `StepError::Failed(Problem)` |
-//! | step records / plan state | error string (maybe packed) | `error: Option<String>` stays on disk (message text), the live value is a Problem |
-//! | job bodies (`kora-web` `start_job`), job rows in the store | `Err(String)`, string column | `Err(Problem)`; the column holds the Problem as JSON (plus `resume`/`kept`/`log_path`) as before |
-//! | `ApiError::core`, handlers | `is_encoded` / `decode` | `ApiError::from(Problem)` |
-//! | CLI | `plain_text(&string)` at each print | `Problem` printed in one place |
-//! | privileged service protocol | see `privsvc` docs | the Problem as JSON |
-//! | removed | `encode`, `decode`, `is_encoded`, `plain_text`, `message_of`, `From<Problem> for String`, the packed marker | |
+//! | `api::Res<T>`, the `Backend` trait, `SystemBackend`, `FakeBackend` | `Result<T, String>` (maybe packed) | `Result<T, Problem>` |
+//! | `paidassets`, `support::service`, `backup::*`, `reach`, `update::manual`, `addresources`, `feedback`, `hub::config` | `String` | `Problem` |
+//! | `InstallError`, `installer::Result` | wrapper over a (maybe packed) string | gone: `Result<T, Problem>` |
+//! | `StepError::Failed` | `String` | `Problem` (io and JSON variants stay) |
+//! | `Registry`, `ServerFile`, `Profile`, saved answers, paused installs | `io::Result`, store problems flattened by `problem_to_io` | `Result<T, Problem>` (the flatteners are deleted) |
+//! | job bodies and job rows | `Err(String)`, maybe packed or JSON text | `Err(JobFailure)` = `Problem` + extras; the stored `error` is that flat JSON (as before) |
+//! | `ApiError::core`, handlers | `is_encoded` / `decode`, words sniffed for 404 and "no record" | `ApiError::from(Problem)`; codes (`server.not_kora`, `needs_db_password`, `branch.busy`) |
+//! | CLI | `plain_text(&string)` at each print | `ui::fail(problem)` |
+//! | privileged service protocol | refusals are text, a step's failure is a Problem as JSON inside `data` | unchanged (it never carried a packed string) |
+//! | removed | `encode`, `decode`, `is_encoded`, `plain_text`, `message_of`, `From<Problem> for String`, `problem_to_io`, `problem_to_string`, `is_busy_message`, the packed marker | |
+//!
+//! Plain `String` errors that remain on purpose: validation helpers whose text is only ever the
+//! message (`validate_name`'s callers, `backup::dest::check_space`, `check_passphrase`), the
+//! parsers and byte-level helpers inside `self_update`, `tools::unpack`, `installer::http`,
+//! `installer::pinned`, `cfx`, `console`, the privileged service's own refusals (`privsvc::wire::Rejected`),
+//! the panel's sign-in, certificate and Tailscale plumbing (`kora-web` `remote/`, `tls/`), the hub
+//! transport, and the panel start-up helpers in `kora-web/launch.rs`. They are sentences for a person
+//! with nothing to attach; the handlers show them as they are (`ApiError::bad_request`).
 //!
 //! # Adding an action
 //!

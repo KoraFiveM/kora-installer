@@ -35,6 +35,13 @@ if you add or update a dependency.
   A new action is a variant of `Action` in Rust (its TypeScript is generated, see below); the page needs a label and a
   handler for it in `web/src/lib/problemActions.tsx`. The generated union includes `unknown`, and a page ignores a
   `kind` it has no handler for, so an older panel survives a newer Kora.
+- **One error convention:** a function that can fail in front of a person returns `Result<T, Problem>` (`problem::Res<T>`),
+  never `Result<T, String>`. Write `Problem::new(codes::SOME_CODE, "...")` (a constant, never a string literal; a test
+  checks), or a plain sentence with `Problem::generic("...")` / `.into()`. `?` converts io, JSON, SQLite, internet,
+  `GitError` and the other internal enums for you (the technical text goes to "Show details"). Add words with
+  `.context("saving the list")`, `.lead("could not save")` or `.and_say("Nothing was changed.")`, never
+  `format!("...: {e}")` around a `Problem` (that loses the code and the buttons). Print one on the command line with
+  `ui::fail(problem)`. Do not pack a `Problem` into a string; a test fails if the old packed form comes back.
 - **Words:** plain, friendly British spelling ("licence"), no jargon in what a person reads.
 - **Changing `kora --help`:** the command help is checked against `crates/kora-cli/tests/golden/help.txt`; the test
   failure says how to refresh it.
