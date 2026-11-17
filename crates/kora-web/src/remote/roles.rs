@@ -170,9 +170,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::InstallResume
         | Op::SelfUpdateApply
         | Op::ScheduleSet
-        | Op::ScheduleRemove
-        | Op::ToolInstall
-        | Op::DbStart => true,
+        | Op::ScheduleRemove => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -251,8 +249,11 @@ pub fn destructive(op: Op) -> bool {
         | Op::AssetImport
         | Op::AssetRemove
         | Op::AssetDownloads
+        // Verified pinned downloads into Kora's own folder, and starting the installed database: admin-only, not destructive.
         | Op::ToolsStatus
-        | Op::SystemCheck => false,
+        | Op::ToolInstall
+        | Op::SystemCheck
+        | Op::DbStart => false,
     }
 }
 

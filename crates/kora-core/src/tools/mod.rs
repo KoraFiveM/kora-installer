@@ -451,6 +451,15 @@ pub fn install_real(tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<Instal
     install(tool, &HttpFetcher(crate::installer::http::HttpClient::default()), say)
 }
 
+/// Kora's private copies that exist now, as `"Git 2.56.1"` (what `kora uninstall` would remove).
+pub fn private_present() -> Vec<String> {
+    private_present_in(&private_root())
+}
+
+pub fn private_present_in(root: &Path) -> Vec<String> {
+    [Tool::Git, Tool::Gh].iter().filter_map(|t| private_in(root, *t).map(|p| format!("{} {}", t.label(), p.version))).collect()
+}
+
 /// Delete Kora's private tools. Returns what was removed (empty: there were none).
 pub fn remove_private() -> Result<Vec<String>, String> {
     remove_private_in(&private_root())
@@ -460,12 +469,7 @@ pub fn remove_private_in(root: &Path) -> Result<Vec<String>, String> {
     if !root.exists() {
         return Ok(vec![]);
     }
-    let mut removed = Vec::new();
-    for t in [Tool::Git, Tool::Gh] {
-        if let Some(p) = private_in(root, t) {
-            removed.push(format!("{} {}", t.label(), p.version));
-        }
-    }
+    let removed = private_present_in(root);
     std::fs::remove_dir_all(root).map_err(|e| format!("could not remove {}: {e}", root.display()))?;
     Ok(removed)
 }

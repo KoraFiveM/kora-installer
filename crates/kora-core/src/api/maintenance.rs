@@ -381,6 +381,14 @@ impl Maintenance for SystemMaintenance {
                 remove: false,
             });
         }
+        if only.is_none() && !crate::tools::private_present().is_empty() {
+            out.push(PlanItem {
+                item: "tools".into(),
+                description: format!("Kora's own copies of {} (in Kora's folder; nothing else on this computer changes)", crate::tools::private_present().join(" and ")),
+                kind: "system",
+                remove: true,
+            });
+        }
         Ok(out)
     }
 
@@ -482,6 +490,14 @@ impl Maintenance for SystemMaintenance {
                     &mut remove,
                     &mut sum,
                 );
+            }
+        }
+        if req.only.is_empty() && answers.get("tools").copied().unwrap_or(false) {
+            status("Removing Kora's own copies of Git and the GitHub CLI");
+            match crate::tools::remove_private() {
+                Ok(gone) if !gone.is_empty() => sum.removed.push(format!("Kora's own copies of {}", gone.join(" and "))),
+                Ok(_) => {}
+                Err(e) => sum.failed.push(format!("Kora's own Git and GitHub CLI copies: {e}")),
             }
         }
         if answers.get("app").copied().unwrap_or(false) {

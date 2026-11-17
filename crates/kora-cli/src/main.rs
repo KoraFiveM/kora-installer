@@ -464,6 +464,17 @@ enum Command {
         #[command(subcommand)]
         cmd: GithubCmd,
     },
+    /// Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed).
+    Tools {
+        #[command(subcommand)]
+        cmd: ToolsCmd,
+    },
+    /// Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it.
+    Check {
+        /// Start the database server if it is installed but not running (needs administrator rights).
+        #[arg(long)]
+        start_database: bool,
+    },
     /// Run a server's FXServer (used by the Windows service and supervisors).
     #[command(hide = true)]
     ServiceHost {
@@ -566,6 +577,9 @@ fn helper_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&std::pat
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
         Some(Command::App { cmd: AppCmd::Install { .. } | AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
         Some(Command::Uninstall { .. }) if verb == "uninstall" => Ok(()),
+        // Git on Linux (the system package) and starting the database: the only privileged parts of these two.
+        Some(Command::Tools { cmd: ToolsCmd::Install { tool: Some(t) } }) if verb == "tools" && t == "git" => Ok(()),
+        Some(Command::Check { start_database: true }) if verb == "check" => Ok(()),
         _ => deny(),
     }
 }
@@ -867,6 +881,18 @@ fn app_uninstall(yes: bool, dry_run: bool) -> i32 {
             1
         }
     }
+}
+
+#[derive(Subcommand)]
+enum ToolsCmd {
+    /// Show which Git and GitHub CLI Kora uses (the one on this computer, or its own copy).
+    Status,
+    /// Download Kora's own copy of Git (Windows) and the GitHub CLI, checked against a pinned checksum. No administrator rights, nothing else on the computer changes.
+    Install {
+        /// `git`, `gh` or `all` (the default: whatever is missing).
+        #[arg(value_name = "TOOL")]
+        tool: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1718,6 +1744,30 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
             un::mariadb_cleanup(&reg, &opts, admin, record, &mut Terminal, &mut say, &mut remove, &mut summary);
         }
     }
+    // Kora's own Git and GitHub CLI copies live in Kora's folder; they go with a full uninstall.
+    if opts.only.is_none() {
+        let present = kora_core::tools::private_present();
+        if !present.is_empty() {
+            let what = present.join(" and ");
+            if dry_run {
+                println!("Would remove Kora's own copies of {what}.");
+            } else {
+                let q = format!("Remove Kora's own copies of {what}?");
+                let go = if yes { un::Asker::ask(&mut un::Defaults, &q, true) } else { un::Asker::ask(&mut Terminal, &q, true) };
+                if go {
+                    match kora_core::tools::remove_private() {
+                        Ok(_) => {
+                            println!("Removed Kora's own copies of {what}.");
+                            summary.removed.push(format!("Kora's own copies of {what}"));
+                        }
+                        Err(e) => summary.failed.push(format!("Kora's own copies of {what}: {e}")),
+                    }
+                } else {
+                    summary.kept.push(format!("Kora's own copies of {what}"));
+                }
+            }
+        }
+    }
     if dry_run {
         println!("\nDry run: nothing was changed.");
         if kora_core::app_install::status().installed {
@@ -2378,7 +2428,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
         // The panel runs as the user; privileged actions report the command to run instead.
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Tools { .. } | Command::Check { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
         Some(Command::Helper { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
@@ -2549,6 +2599,9 @@ fn main() {
         Some(Command::Webhook { cmd }) => webhook(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
+        Some(Command::Tools { cmd: ToolsCmd::Status }) => toolchain::run_tools_status(),
+        Some(Command::Tools { cmd: ToolsCmd::Install { tool } }) => toolchain::run_tools_install(tool.as_deref()),
+        Some(Command::Check { start_database }) => toolchain::run_check(start_database),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {
             Ok(c) => c,
@@ -2577,6 +2630,7 @@ fn main() {
 
 mod bare;
 mod panel_tailscale;
+mod toolchain;
 
 #[cfg(test)]
 mod parity;
