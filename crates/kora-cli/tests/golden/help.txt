@@ -105,9 +105,28 @@ Options:
           `all` or a comma separated list of resource ids (dependencies and core are always included)
 
       --db <DB>
-          existing = use the local MariaDB, install = install it if missing, skip = no database
+          existing = use the local MariaDB, install = install it if missing, skip = no database, container = a MariaDB container next to the server (the default with --run-mode container)
+
+          Possible values:
+          - existing
+          - install
+          - skip
+          - container: Container mode: a MariaDB container next to the server
+
+      --run-mode <RUN_MODE>
+          How the server runs: service = a system service (the default; --service sets it up), container = in a container run by Podman or Docker (Linux; needs no administrator rights with rootless Podman)
+
+          Possible values:
+          - service:   A system service (the default)
+          - container: A container run by Podman or Docker (Linux)
+
+      --engine <ENGINE>
+          With --run-mode container: which engine (default: the best one found, rootless Podman first)
           
-          [possible values: existing, install, skip]
+          [possible values: podman, docker]
+
+      --bind <IP>
+          With --run-mode container: publish the game port on this address only (default: every address)
 
       --service
           Install and enable the OS service (needs admin)
@@ -148,14 +167,14 @@ Options:
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
 
-  -y, --yes
-          Do not ask anything (implied by any other option)
-
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
+  -y, --yes
+          Do not ask anything (implied by any other option)
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
 ===== kora manager =====
 Open Kora Panel in your browser (the same as running `kora` with nothing after it)
@@ -1145,6 +1164,11 @@ Options:
 
       --start-over
           Remove what an earlier, failed import of this server made, and begin again
+
+      --run-mode <RUN_MODE>
+          How the new server runs: `service` (the default) or `container` (Linux, Podman or Docker)
+          
+          [possible values: service, container]
 
       --yes
           Do not ask for confirmation
@@ -2534,6 +2558,22 @@ Usage: kora service-host [OPTIONS] <NAME>
 Arguments:
   <NAME>
           Registry name, or the server folder (absolute path)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora container-logs =====
+Copy a container server's output to its console log (started by Kora for container-mode servers)
+
+Usage: kora container-logs [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server folder (absolute path)
 
 Options:
       --no-elevate
