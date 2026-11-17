@@ -9,6 +9,7 @@ pub(crate) mod helper;
 pub(crate) mod install;
 pub(crate) mod keys_cmd;
 pub(crate) mod panel_remote;
+pub(crate) mod panel_running;
 pub(crate) mod panel_tailscale;
 pub(crate) mod resources;
 pub(crate) mod schedule;
