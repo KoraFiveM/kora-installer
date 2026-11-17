@@ -2,7 +2,7 @@ import { register } from '../../index'
 
 const messages = {
   'servers.scheduleTab.automaticUpdatesOff': 'Automatic updates are off.',
-  'servers.scheduleTab.savedServerUpdatesItself': 'Saved. The server updates itself every {value} at {time}.',
+  'servers.scheduleTab.savedServerUpdatesItself': 'Saved. The server updates itself every {day} at {time}.',
   'servers.scheduleTab.automaticUpdates': 'Automatic updates',
   'servers.scheduleTab.everyServerUpdateItself': 'Every server can update itself on a schedule. Kora checks for newer versions (released versions or the latest changes, whichever the server follows), updates what is safe to update and checks the server still starts. It is off until you turn it on.',
   'servers.scheduleTab.currentSchedule': 'Current schedule',

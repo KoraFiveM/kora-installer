@@ -177,7 +177,7 @@ export function BranchControls({ server: s, resource }: { server: BranchServer; 
                 {c!.stashes.map((st) => (
                   <li key={st.index} className="flex flex-wrap items-center gap-2 p-3 text-sm">
                     <span className="min-w-0 flex-1">{st.message} <span className="text-xs text-muted-foreground">{t('resources.resourceDialog.madeBranch', { branch: st.branch })}</span></span>
-                    <Button size="sm" disabled={working || !!blocked} aria-label={t('resources.resourceDialog.bringMyChangesBack', { value: st.index + 1 })} onClick={() => restore.mutate(st.index)}>{t('resources.resourceDialog.bringMyChangesBack2')}</Button>
+                    <Button size="sm" disabled={working || !!blocked} aria-label={t('resources.resourceDialog.bringMyChangesBack', { set: st.index + 1 })} onClick={() => restore.mutate(st.index)}>{t('resources.resourceDialog.bringMyChangesBack2')}</Button>
                   </li>
                 ))}
               </ul>

@@ -178,7 +178,7 @@ function ReplaceDialog({ d, value, setValue, onClose, onDone }: { d: Dialogue; v
   })
   return (
     <Dialog open={d?.kind === 'replace'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }}>
-      <DialogContent title={t('settings.licenceKeys.replaceKeyValue', { value: d?.key.name ?? '' })} description={t('settings.licenceKeys.putDifferentKeyUnder')}>
+      <DialogContent title={t('settings.licenceKeys.replaceKeyValue', { name: d?.key.name ?? '' })} description={t('settings.licenceKeys.putDifferentKeyUnder')}>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); m.mutate() }}>
           <SecretInput label={t('settings.licenceKeys.newLicenceKey')} value={value} onChange={setValue} />
           <ErrorNotice error={m.error} />
@@ -199,7 +199,7 @@ function DeleteDialog({ d, onClose, onDone }: { d: Dialogue; onClose: () => void
   })
   const k = d?.key
   return (
-    <ConfirmDialog open={d?.kind === 'delete'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }} title={t('settings.licenceKeys.deleteValue', { value: k?.name ?? '' })}
+    <ConfirmDialog open={d?.kind === 'delete'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }} title={t('settings.licenceKeys.deleteValue', { name: k?.name ?? '' })}
       description={t('settings.licenceKeys.forgetsKeyComputerAdd')} confirmLabel={t('settings.licenceKeys.deleteKey')} destructive busy={m.isPending} onConfirm={() => m.mutate()}>
       <div className="space-y-3 text-sm">
         <p>{t('settings.licenceKeys.serversWereInstalledKey')}</p>

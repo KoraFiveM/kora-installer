@@ -48,7 +48,6 @@ const messages = {
   'servers.monitoringTab.health': 'Health',
   'servers.monitoringTab.timeRange': 'Time range',
   'servers.monitoringTab.koraPanelRunsBackground': 'Kora Panel runs in the background on this machine, so it keeps measuring when this page is closed.',
-  'servers.monitoringTab.koraPanelInstallservice': 'kora panel --install-service',
   'servers.monitoringTab.koraOnlyMeasuresWhile': 'Kora only measures while the panel is running. To keep watching when this page is closed, run <code>kora panel --install-service</code> on the machine.',
   'servers.monitoringTab.alerts': 'Alerts',
   'servers.monitoringTab.alertSettingsAvailable': 'Alert settings are not available to you',

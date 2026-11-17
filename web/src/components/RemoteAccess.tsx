@@ -102,7 +102,7 @@ function Users({ settings }: { settings: T.RemoteSettings | undefined }) {
       <ConfirmDialog
         open={removing !== null}
         onOpenChange={(o) => { if (!o) setRemoving(null) }}
-        title={tt('settings.remoteAccess.removeValue', { value: removing ?? '' })}
+        title={tt('settings.remoteAccess.removeValue', { name: removing ?? '' })}
         description={tt('settings.remoteAccess.theySignedOutTheir')}
         confirmLabel={tt('settings.remoteAccess.remove')}
         destructive
@@ -112,7 +112,7 @@ function Users({ settings }: { settings: T.RemoteSettings | undefined }) {
       <ConfirmDialog
         open={resetting !== null}
         onOpenChange={(o) => { if (!o) setResetting(null) }}
-        title={tt('settings.remoteAccess.resetSigninValue', { value: resetting ?? '' })}
+        title={tt('settings.remoteAccess.resetSigninValue', { name: resetting ?? '' })}
         description={tt('settings.remoteAccess.everyDeviceTheySigned')}
         confirmLabel={tt('settings.remoteAccess.resetMakeLink')}
         destructive
@@ -180,7 +180,7 @@ function ApiTokens() {
       <ConfirmDialog
         open={revoking !== null}
         onOpenChange={(o) => { if (!o) setRevoking(null) }}
-        title={tt('settings.remoteAccess.revokeValue', { value: revoking?.name ?? '' })}
+        title={tt('settings.remoteAccess.revokeValue', { name: revoking?.name ?? '' })}
         description={tt('settings.remoteAccess.anythingUsingTokenStops')}
         confirmLabel={tt('settings.remoteAccess.revoke')}
         destructive
@@ -272,7 +272,7 @@ export function RemoteAccessCard() {
         <ConfirmDialog
           open={removing !== null}
           onOpenChange={(o) => { if (!o) setRemoving(null) }}
-          title={tt('settings.remoteAccess.removeValue', { value: removing ?? '' })}
+          title={tt('settings.remoteAccess.removeValue', { name: removing ?? '' })}
           description={tt('settings.remoteAccess.theySignedOutCannot')}
           confirmLabel={tt('settings.remoteAccess.remove')}
           destructive

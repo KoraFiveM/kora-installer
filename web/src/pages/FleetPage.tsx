@@ -233,7 +233,7 @@ function Fleet() {
       <ConfirmDialog
         open={removing !== null}
         onOpenChange={(o) => !o && setRemoving(null)}
-        title={t('servers.fleetPage.removeValue', { value: removing?.name ?? 'this node' })}
+        title={t('servers.fleetPage.removeValue', { name: removing?.name ?? 'this node' })}
         description={t('servers.fleetPage.onlyDisappearsFromList')}
         confirmLabel={t('servers.fleetPage.removeNode')}
         destructive

@@ -83,7 +83,7 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
 
       {p && (
         <div className="space-y-3">
-          <Alert tone={p.have > 0 ? 'info' : 'warning'} title={t('resources.bulkSwitch.valueResourcesBranch', { have: p.have, value: p.have + p.missing, branch: p.branch })}>
+          <Alert tone={p.have > 0 ? 'info' : 'warning'} title={t('resources.bulkSwitch.valueResourcesBranch', { have: p.have, total: p.have + p.missing, branch: p.branch })}>
             {p.have === 0 ? t('resources.bulkSwitch.noneThemBranchNothing') : t('resources.bulkSwitch.missingDoWouldStay', { missing: p.missing })}
             {p.notes.map((n) => <p key={n}>{n}</p>)}
           </Alert>

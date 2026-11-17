@@ -39,7 +39,7 @@ const messages = {
   'resources.resourcesTab.startStopRestartOff': 'Start, stop and restart are off: {noControl}',
   'resources.resourcesTab.noResourceMatchesTrim': 'No resource matches "{trim}".',
   'resources.resourcesTab.stopId': 'Stop {id}?',
-  'resources.resourcesTab.restartValue': 'Restart {value}?',
+  'resources.resourcesTab.restartValue': 'Restart {resource}?',
   'resources.resourcesTab.resourceStopsEveryoneServer': 'The resource stops for everyone on the server until it is started again. Other resources that need it may stop working. The server itself keeps running.',
   'resources.resourcesTab.resourceStopsStartsAgain': 'The resource stops and starts again. Players may notice a short interruption in what it does. The server itself keeps running.',
   'resources.resourcesTab.stopResource': 'Stop resource',

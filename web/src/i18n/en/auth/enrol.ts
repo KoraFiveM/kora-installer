@@ -19,7 +19,6 @@ const messages = {
   'auth.enrol.worksEverywhereNeedAuthenticat': "Works everywhere. You need an authenticator app (any app that scans a QR code: your phone's, 1Password, Aegis, and so on).",
   'auth.enrol.setUpOnetimeCodes': 'Set up one-time codes',
   'auth.enrol.qrCodeAuthenticatorApp': 'QR code for your authenticator app',
-  'auth.enrol.cannotScanTypeKey': 'Cannot scan? Type this key into the app instead:',
   'auth.enrol.setupKey': 'Setup key',
   'auth.enrol.scanAuthenticatorAppImg': 'Scan this with your authenticator app. {img, node}<p>Cannot scan? Type this key into the app instead:</p>{copyField, node}',
   'auth.enrol.choosePassword': 'Choose a password',

@@ -5,7 +5,7 @@ const messages = {
   'core.alertsBanner.dismissAlertServer': 'Dismiss the alert for {server}',
   'core.alertsBanner.dismiss': 'Dismiss',
   'core.alertsBanner.alertCouldDismissed': 'The alert could not be dismissed',
-  'core.alertsBanner.valueMoreAlerts': 'And {value} more alerts.',
+  'core.alertsBanner.valueMoreAlerts': 'And {count} more alerts.',
 } as const
 
 register('en', messages)

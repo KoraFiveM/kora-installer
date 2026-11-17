@@ -128,7 +128,7 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkCh
     <div className="space-y-5">
       {s && (
         <div className="space-y-1 text-sm">
-          <p><span className="font-semibold">{s.name}</span> <Badge tone="plain">{t('backups.steps.madeValue', { value: s.os === 'windows' ? 'Windows' : 'Linux' })}</Badge> <StyleChip source={s.source} versions={s.versions} /></p>
+          <p><span className="font-semibold">{s.name}</span> <Badge tone="plain">{t('backups.steps.madeValue', { os: s.os === 'windows' ? 'Windows' : 'Linux' })}</Badge> <StyleChip source={s.source} versions={s.versions} /></p>
           <p className="text-muted-foreground">{t('backups.steps.referenceResourcesFetchedAgain', { by_reference: preview.by_reference, in_full: preview.in_full, value: preview.database ? ` · database: ${preview.database.kind === 'none' ? 'none' : 'included'}` : '' })}</p>
         </div>
       )}

@@ -33,11 +33,11 @@ const messages = {
   'resources.prDetail.approve': 'Approve',
   'resources.prDetail.writeReasonFirst': 'Write the reason first',
   'resources.prDetail.askChanges': 'Ask for changes',
-  'resources.prDetail.githubAccountValueMay': 'Your GitHub account ({value}) may not merge here',
+  'resources.prDetail.githubAccountValueMay': 'Your GitHub account ({account}) may not merge here',
   'resources.prDetail.mergeValue': 'Merge{value}',
-  'resources.prDetail.mergingNeedsWriteAccess': 'Merging needs write access on {repo}, and the GitHub account this computer is signed in as ({value}) does not have it.',
+  'resources.prDetail.mergingNeedsWriteAccess': 'Merging needs write access on {repo}, and the GitHub account this computer is signed in as ({account}) does not have it.',
   'resources.prDetail.mergePullRequestNumber': 'Merge pull request #{number}?',
-  'resources.prDetail.mergesIntoBaseRepo': 'This merges it into {base} of {repo} on GitHub, for real, as {value}{value2}. It cannot be undone from here.',
+  'resources.prDetail.mergesIntoBaseRepo': 'This merges it into {base} of {repo} on GitHub, for real, as {account}{value2}. It cannot be undone from here.',
   'resources.prDetail.mergeIt': 'Merge it',
 } as const
 

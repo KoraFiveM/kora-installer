@@ -37,12 +37,11 @@ const messages = {
   'resources.resourceDialog.pullRequestNumberAddress': 'Pull request number or address',
   'resources.resourceDialog.httpsGithubComOwner': '12 or https://github.com/owner/name/pull/12',
   'resources.resourceDialog.tryIt': 'Try it',
-  'resources.resourceDialog.pageId': 'page of {id}',
   'resources.resourceDialog.pickOneFromOpen': 'To pick one from the open pull requests, with their checks and reviews, use the <link>page of {id}</link>.',
   'resources.resourceDialog.changesKeptAside': 'Changes you kept aside',
   'resources.resourceDialog.koraSetTheseAside': 'Kora set these aside when you switched. They stay here until you bring them back, and bringing them back does not delete them. They are also kept in this folder in git, as a "stash".',
   'resources.resourceDialog.madeBranch': '(made on {branch})',
-  'resources.resourceDialog.bringMyChangesBack': 'Bring my changes back: kept-aside set {value}',
+  'resources.resourceDialog.bringMyChangesBack': 'Bring my changes back: kept-aside set {set}',
   'resources.resourceDialog.bringMyChangesBack2': 'Bring my changes back',
   'resources.resourceDialog.bringingChangesBackNeeds': 'Bringing changes back needs a clean folder: keep or save your current changes first.',
 } as const

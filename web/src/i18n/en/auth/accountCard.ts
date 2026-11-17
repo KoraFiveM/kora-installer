@@ -15,7 +15,6 @@ const messages = {
   'auth.accountCard.addPasskey': 'Add a passkey',
   'auth.accountCard.browserCannotMakePasskeys': 'This browser cannot make passkeys here.',
   'auth.accountCard.passwordOnetimeCodes': 'Password and one-time codes',
-  'auth.accountCard.recoveryLeftRecoveryCodes': '{recovery_left} recovery codes left',
   'auth.accountCard.setUpBadgeRecovery': 'Set up. <badge>{recovery_left} recovery codes left</badge>',
   'auth.accountCard.setUpUseThem': 'Not set up. Use them where a passkey cannot work (an address with no name, an old browser).',
   'auth.accountCard.setUpOnetimeCodes': 'Set up one-time codes',

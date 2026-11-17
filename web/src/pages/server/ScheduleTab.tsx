@@ -42,7 +42,7 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
       }
       const cfg: ScheduleConfig = { preset: kind, time, weekday: kind === 'weekly' ? day : null, run_as: runAs, enabled: true }
       await api.schedule.set(s.name, cfg)
-      return t('servers.scheduleTab.savedServerUpdatesItself', { value: kind === 'weekly' ? DAYS[day] : 'day', time })
+      return t('servers.scheduleTab.savedServerUpdatesItself', { day: kind === 'weekly' ? DAYS[day] : 'day', time })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schedule', s.name] }),
   })

@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 type Tag = (children: ReactNode) => ReactNode
 
 export interface MessageParams {
-  'auth.accountCard.recoveryLeftRecoveryCodes': { recovery_left: string | number }
   'auth.accountCard.removePasskeyLabel': { label: string | number }
   'auth.accountCard.rpIdAddedWhen': { rp_id: string | number; when: string | number; when2: string | number }
   'auth.accountCard.setUpBadgeRecovery': { badge: Tag; recovery_left: string | number }
@@ -40,7 +39,7 @@ export interface MessageParams {
   'backups.steps.copiesGithubOwner': { owner: string | number }
   'backups.steps.filearchiveNodeSpanNode': { fileArchive: ReactNode; span: ReactNode }
   'backups.steps.koraForksOriginalRepositories': { signed_in_as: string | number }
-  'backups.steps.madeValue': { value: string | number }
+  'backups.steps.madeValue': { os: string | number }
   'backups.steps.nameImported': { name: string | number }
   'backups.steps.noteKoraNeedsAdministrator': { note: string | number }
   'backups.steps.openName': { name: string | number }
@@ -48,7 +47,7 @@ export interface MessageParams {
   'backups.steps.spanNodeValue': { span: ReactNode; value: string | number }
   'backups.steps.useSuggestion': { suggestion: string | number }
   'core.alertsBanner.dismissAlertServer': { server: string | number }
-  'core.alertsBanner.valueMoreAlerts': { value: string | number }
+  'core.alertsBanner.valueMoreAlerts': { count: string | number }
   'core.announcer.labelMPerCent': { label: string | number; m: string | number }
   'core.appShell.pageCannotReachKora': { code: Tag }
   'core.appShell.signedTokenSecretLink': { navLink: Tag }
@@ -102,7 +101,7 @@ export interface MessageParams {
   'install.installWizard.changeLabel': { label: string | number }
   'install.installWizard.earlierInstallNameStopped': { name: string | number; node: ReactNode }
   'install.installWizard.formatbytesFree': { formatBytes: string | number }
-  'install.installWizard.gameValueTxadminValue': { value: string | number; value2: string | number }
+  'install.installWizard.gameValueTxadminValue': { game: string | number; txadmin: string | number }
   'install.installWizard.goingThroughEveryStep': { button: Tag }
   'install.installWizard.koraPicksPortsDatabase': { button: Tag }
   'install.installWizard.loaderNodeCheckingAnswers': { loader2: ReactNode }
@@ -121,7 +120,7 @@ export interface MessageParams {
   'install.installWizard.valueAnswersKept': { value: string | number }
   'install.installWizard.valueLicenceKeyDatabase': { value: string | number }
   'install.installWizard.whichSavedLicenceKey': { license_key_name: string | number }
-  'install.steps.belongJoinButMay': { join: string | number; value: string | number }
+  'install.steps.belongJoinButMay': { join: string | number; reason: string | number }
   'install.steps.buildRecommendedOneCfx': { recommended: string | number }
   'install.steps.countPicked': { count: string | number }
   'install.steps.foundUsernameIdentifierAccount': { username: string | number; identifier: string | number }
@@ -134,7 +133,7 @@ export interface MessageParams {
   'install.steps.resourcesPlainCopiesOriginals': { button: Tag }
   'install.steps.savedLicenceKeyGonename': { goneName: string | number; value: string | number }
   'install.steps.serverFilesGoCode': { code: ReactNode; button: Tag }
-  'install.steps.usedFolderServiceDatabase': { value: string | number }
+  'install.steps.usedFolderServiceDatabase': { name: string | number }
   'install.steps.usedJoin': { join: string | number }
   'install.steps.useSuggestion': { suggestion: string | number }
   'resources.actingAs.doneGithubStrongNode': { strong: ReactNode }
@@ -156,10 +155,10 @@ export interface MessageParams {
   'resources.bulkSwitch.restartNoteRunningServer': { restart_note: string | number }
   'resources.bulkSwitch.switchCountValue': { count: number }
   'resources.bulkSwitch.switchedSwitchedValueValue': { switched: string | number; value: string | number; value2: string | number }
-  'resources.bulkSwitch.valueResourcesBranch': { have: string | number; value: string | number; branch: string | number }
-  'resources.changesDialog.changedFilesGoBack': { value: string | number }
+  'resources.bulkSwitch.valueResourcesBranch': { have: string | number; total: string | number; branch: string | number }
+  'resources.changesDialog.changedFilesGoBack': { where: string | number }
   'resources.changesDialog.countResourcesChangesOwn': { count: string | number; join: string | number }
-  'resources.changesDialog.valueChangesOwnWere': { value: string | number }
+  'resources.changesDialog.valueChangesOwnWere': { resource: string | number }
   'resources.changesPanel.aheadSavedChangeValue': { ahead: number }
   'resources.changesPanel.codeNode': { code: ReactNode }
   'resources.changesPanel.countChangedFileValue': { count: number; code: ReactNode }
@@ -193,21 +192,21 @@ export interface MessageParams {
   'resources.paidAssetsTab.seenConsoleLine': { line: string | number }
   'resources.paidAssetsTab.versionVersion': { version: string | number }
   'resources.prDetail.changesCountFileValue': { count: number }
-  'resources.prDetail.githubAccountValueMay': { value: string | number }
+  'resources.prDetail.githubAccountValueMay': { account: string | number }
   'resources.prDetail.githubBehindNewerCommit': { behind: number }
   'resources.prDetail.headIntoBaseRepo': { head: string | number; base: string | number; repo: string | number }
   'resources.prDetail.loaderNodeAskingGithub': { loader2: ReactNode; number: string | number }
   'resources.prDetail.madeAheadOwnTop': { ahead: string | number }
   'resources.prDetail.mergePullRequestNumber': { number: string | number }
-  'resources.prDetail.mergesIntoBaseRepo': { base: string | number; repo: string | number; value: string | number; value2: string | number }
+  'resources.prDetail.mergesIntoBaseRepo': { base: string | number; repo: string | number; account: string | number; value2: string | number }
   'resources.prDetail.mergeValue': { value: string | number }
-  'resources.prDetail.mergingNeedsWriteAccess': { repo: string | number; value: string | number }
+  'resources.prDetail.mergingNeedsWriteAccess': { repo: string | number; account: string | number }
   'resources.prDetail.pullRequestNumber': { number: string | number }
   'resources.pullRequestsPanel.byAuthor': { author: string | number }
   'resources.pullRequestsPanel.checkcircleNodeChecksPassing': { checkCircle2: ReactNode }
   'resources.pullRequestsPanel.circledashedNodeChecksRunning': { circleDashed: ReactNode }
   'resources.pullRequestsPanel.nodeNodeGetLatest': { node: ReactNode }
-  'resources.pullRequestsPanel.openedValueUpdatedValue': { value: string | number; value2: string | number }
+  'resources.pullRequestsPanel.openedValueUpdatedValue': { opened: string | number; updated: string | number }
   'resources.pullRequestsPanel.openPullRequestNumber': { number: string | number }
   'resources.pullRequestsPanel.tryingPullRequestTrying': { trying: string | number }
   'resources.pullRequestsPanel.tryPullRequestNumber': { number: string | number }
@@ -222,7 +221,7 @@ export interface MessageParams {
   'resources.resourceActions.nodeNodeCheckUpdate': { node: ReactNode }
   'resources.resourceActions.nodeNodeUpdate': { node: ReactNode }
   'resources.resourceDialog.branchId': { id: string | number }
-  'resources.resourceDialog.bringMyChangesBack': { value: string | number }
+  'resources.resourceDialog.bringMyChangesBack': { set: string | number }
   'resources.resourceDialog.changedCountChangedFile': { changed_count: number }
   'resources.resourceDialog.changesKeptAsideMessage': { message: string | number }
   'resources.resourceDialog.commitWereHadNo': { code: ReactNode }
@@ -230,7 +229,6 @@ export interface MessageParams {
   'resources.resourceDialog.madeBranch': { branch: string | number }
   'resources.resourceDialog.nodeNodeRefreshList': { node: ReactNode }
   'resources.resourceDialog.nodeNodeRestartResource': { node: ReactNode; resource: string | number }
-  'resources.resourceDialog.pageId': { id: string | number }
   'resources.resourceDialog.pickOneFromOpen': { link: Tag; id: string | number }
   'resources.resourcePage.arrowleftNodeResourcesName': { arrowLeft: ReactNode; name: string | number }
   'resources.resourcePage.couldResource': { a: string | number; resource: string | number }
@@ -249,7 +247,7 @@ export interface MessageParams {
   'resources.resourcesTab.noResourceMatchesTrim': { trim: string | number }
   'resources.resourcesTab.openPageId': { id: string | number }
   'resources.resourcesTab.resourcesRel': { rel: string | number }
-  'resources.resourcesTab.restartValue': { value: string | number }
+  'resources.resourcesTab.restartValue': { resource: string | number }
   'resources.resourcesTab.startStopRestartOff': { noControl: string | number }
   'resources.resourcesTab.stopId': { id: string | number }
   'resources.restartNotice.nodeNodeRestartResource': { node: ReactNode }
@@ -296,7 +294,7 @@ export interface MessageParams {
   'servers.fleetPage.plusNodeAddNode': { plus: ReactNode }
   'servers.fleetPage.refreshcwNodeRefresh': { refreshCw: ReactNode }
   'servers.fleetPage.removeName': { name: string | number }
-  'servers.fleetPage.removeValue': { value: string | number }
+  'servers.fleetPage.removeValue': { name: string | number }
   'servers.fleetPage.restartName': { name: string | number }
   'servers.fleetPage.restartNameNodeName': { name: string | number; node_name: string | number }
   'servers.fleetPage.rotatecwNodeRestart': { rotateCw: ReactNode }
@@ -318,7 +316,7 @@ export interface MessageParams {
   'servers.overviewTab.txadminPortTxadmin': { txadmin: string | number }
   'servers.reachCard.checkAskedWhatLearned': { what: string | number; learned: string | number }
   'servers.reachCard.contactWhat': { what: string | number }
-  'servers.scheduleTab.savedServerUpdatesItself': { value: string | number; time: string | number }
+  'servers.scheduleTab.savedServerUpdatesItself': { day: string | number; time: string | number }
   'servers.serverControls.playNodeStart': { play: ReactNode }
   'servers.serverControls.restartName': { name: string | number }
   'servers.serverControls.restartName2': { name: string | number }
@@ -339,7 +337,7 @@ export interface MessageParams {
   'servers.serversPage.refreshcwNodeRefresh': { refreshCw: ReactNode }
   'servers.serversPage.runningRunning': { running: string | number }
   'servers.serversPage.stoppedStopped': { stopped: string | number }
-  'servers.versionsCard.resourcesHereValueSets': { value: string | number }
+  'servers.versionsCard.resourcesHereValueSets': { style: string | number }
   'settings.auditLog.entriesKeptDaysDays': { days: string | number }
   'settings.auditLog.nothingMatchesValue': { value: string | number }
   'settings.auditLog.whoChangedWhatFrom': { code: Tag; code2: Tag; code3: Tag; value: string | number }
@@ -350,7 +348,7 @@ export interface MessageParams {
   'settings.changeLicenceKey.serverUsesSavedLicence': { strong: ReactNode; last4: string | number }
   'settings.licenceKeys.couldMoveL': { l: string | number }
   'settings.licenceKeys.deleteName': { name: string | number }
-  'settings.licenceKeys.deleteValue': { value: string | number }
+  'settings.licenceKeys.deleteValue': { name: string | number }
   'settings.licenceKeys.enterAgainName': { name: string | number }
   'settings.licenceKeys.forgetLabel': { label: string | number }
   'settings.licenceKeys.keptKept': { kept: string | number }
@@ -361,7 +359,7 @@ export interface MessageParams {
   'settings.licenceKeys.renamedName': { name: string | number }
   'settings.licenceKeys.renameName': { name: string | number }
   'settings.licenceKeys.replaceKeyName': { name: string | number }
-  'settings.licenceKeys.replaceKeyValue': { value: string | number }
+  'settings.licenceKeys.replaceKeyValue': { name: string | number }
   'settings.licenceKeys.savedKeyEndingLast': { last4: string | number; name: string | number }
   'settings.licenceKeys.savedWhen': { when: string | number }
   'settings.licenceKeys.usedS': { s: string | number }
@@ -376,11 +374,11 @@ export interface MessageParams {
   'settings.remoteAccess.removeH': { h: string | number }
   'settings.remoteAccess.removeL': { l: string | number }
   'settings.remoteAccess.removeName': { name: string | number }
-  'settings.remoteAccess.removeValue': { value: string | number }
+  'settings.remoteAccess.removeValue': { name: string | number }
   'settings.remoteAccess.resetSigninName': { name: string | number }
-  'settings.remoteAccess.resetSigninValue': { value: string | number }
+  'settings.remoteAccess.resetSigninValue': { name: string | number }
   'settings.remoteAccess.revokeName': { name: string | number }
-  'settings.remoteAccess.revokeValue': { value: string | number }
+  'settings.remoteAccess.revokeValue': { name: string | number }
   'settings.remoteAccess.savedSaved': { saved_to: string | number }
   'settings.remoteAccess.scriptBackupJobPeople': { code: Tag }
   'settings.remoteAccess.signedStrongNodeBadge': { strong: ReactNode; badge: ReactNode; value: string | number }
@@ -399,7 +397,7 @@ export interface MessageParams {
   'settings.tlsCard.daysLeftDaysLeft': { days: number }
   'settings.tlsCard.installCertificateAuthorityOnc': { code: Tag }
   'settings.tlsCard.panelServesPlainHttp': { code: Tag; code2: Tag }
-  'settings.tlsCard.panelUsesValueBadge': { value: string | number; badge: ReactNode }
+  'settings.tlsCard.panelUsesValueBadge': { source: string | number; badge: ReactNode }
   'settings.tlsCard.reverseProxyTrustedCode': { code: Tag }
   'system.systemCheckPage.accountRoleLookBut': { role: string | number }
   'system.systemCheckPage.koraRunsCodeNode': { code: ReactNode }

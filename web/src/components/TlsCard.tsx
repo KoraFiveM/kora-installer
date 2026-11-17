@@ -46,7 +46,7 @@ export function TlsCard() {
       <CardContent className="space-y-4 text-sm">
         {s.active ? (
           <>
-            <p>{rich('settings.tlsCard.panelUsesValueBadge', { value: t(SOURCE[s.source ?? ''] ?? msg('settings.tlsCard.sourceOther')), badge: <Badge tone={soon ? 'amber' : 'plain'}>{s.days_left !== null && s.days_left >= 0 ? t('settings.tlsCard.daysLeftDaysLeft', { days: s.days_left }) : t('settings.tlsCard.expired')}</Badge> })}</p>
+            <p>{rich('settings.tlsCard.panelUsesValueBadge', { source: t(SOURCE[s.source ?? ''] ?? msg('settings.tlsCard.sourceOther')), badge: <Badge tone={soon ? 'amber' : 'plain'}>{s.days_left !== null && s.days_left >= 0 ? t('settings.tlsCard.daysLeftDaysLeft', { days: s.days_left }) : t('settings.tlsCard.expired')}</Badge> })}</p>
             <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[10rem_1fr]">
               <dt className="text-muted-foreground">{t('settings.tlsCard.validUntil')}</dt><dd>{when(s.not_after)}</dd>
               <dt className="text-muted-foreground">{t('settings.tlsCard.names')}</dt><dd>{s.names.join(', ')}</dd>

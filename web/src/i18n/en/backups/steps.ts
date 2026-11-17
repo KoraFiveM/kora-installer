@@ -19,7 +19,7 @@ const messages = {
   'backups.steps.openFile': 'Open the file',
   'backups.steps.useSuggestion': 'Use {suggestion}',
   'backups.steps.chooseAnotherFolderBelow': 'Choose another folder below.',
-  'backups.steps.madeValue': 'made on {value}',
+  'backups.steps.madeValue': 'made on {os}',
   'backups.steps.referenceResourcesFetchedAgain': '{by_reference} resources will be fetched again, {in_full} come from the file{value}.',
   'backups.steps.somethingAlreadyUsingThese': 'Something is already using these on this computer',
   'backups.steps.nameServerHere': 'Name of the server here',

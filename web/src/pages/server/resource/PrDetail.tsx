@@ -83,9 +83,9 @@ export function PrDetail({ page, number, source, tried, onChanged }: { page: Res
             <Button size="sm" disabled={!text.trim() || comment.isPending || !!noAdmin} title={noAdmin ?? undefined} onClick={() => comment.mutate()}>{t('resources.prDetail.comment')}</Button>
             <Button size="sm" disabled={review.isPending || !!noAdmin} title={noAdmin ?? undefined} onClick={() => review.mutate('approve')}>{t('resources.prDetail.approve')}</Button>
             <Button size="sm" disabled={!text.trim() || review.isPending || !!noAdmin} title={noAdmin ?? (text.trim() ? undefined : t('resources.prDetail.writeReasonFirst')) ?? undefined} onClick={() => review.mutate('request_changes')}>{t('resources.prDetail.askChanges')}</Button>
-            <Button size="sm" variant="destructive" disabled={!p.can_merge || !method || merge.isPending || !!noAdmin} title={noAdmin ?? (!p.can_merge ? t('resources.prDetail.githubAccountValueMay', { value: p.acting_as ?? 'not known' }) : undefined) ?? undefined} onClick={() => setConfirmMerge(true)}>{t('resources.prDetail.mergeValue', { value: method ? ` (${method})` : '' })}</Button>
+            <Button size="sm" variant="destructive" disabled={!p.can_merge || !method || merge.isPending || !!noAdmin} title={noAdmin ?? (!p.can_merge ? t('resources.prDetail.githubAccountValueMay', { account: p.acting_as ?? 'not known' }) : undefined) ?? undefined} onClick={() => setConfirmMerge(true)}>{t('resources.prDetail.mergeValue', { value: method ? ` (${method})` : '' })}</Button>
           </div>
-          {!p.can_merge && <p className="text-xs text-muted-foreground">{t('resources.prDetail.mergingNeedsWriteAccess', { repo: p.repo, value: p.acting_as ?? 'not known' })}</p>}
+          {!p.can_merge && <p className="text-xs text-muted-foreground">{t('resources.prDetail.mergingNeedsWriteAccess', { repo: p.repo, account: p.acting_as ?? 'not known' })}</p>}
           <ActingAs did={p.acting_as} />
         </section>
       )}
@@ -95,7 +95,7 @@ export function PrDetail({ page, number, source, tried, onChanged }: { page: Res
         open={confirmMerge}
         onOpenChange={setConfirmMerge}
         title={t('resources.prDetail.mergePullRequestNumber', { number })}
-        description={t('resources.prDetail.mergesIntoBaseRepo', { base: p.base, repo: p.repo, value: p.acting_as ?? 'the account this computer is signed in as', value2: method ? `, by ${method}` : '' })}
+        description={t('resources.prDetail.mergesIntoBaseRepo', { base: p.base, repo: p.repo, account: p.acting_as ?? 'the account this computer is signed in as', value2: method ? `, by ${method}` : '' })}
         confirmLabel={t('resources.prDetail.mergeIt')}
         destructive
         onConfirm={() => { setConfirmMerge(false); merge.mutate(method) }}

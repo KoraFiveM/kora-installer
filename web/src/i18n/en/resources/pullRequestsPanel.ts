@@ -27,7 +27,7 @@ const messages = {
   'resources.pullRequestsPanel.openPullRequests': 'Open pull requests',
   'resources.pullRequestsPanel.draft': 'Draft',
   'resources.pullRequestsPanel.byAuthor': 'by {author}',
-  'resources.pullRequestsPanel.openedValueUpdatedValue': 'opened {value}, updated {value2}',
+  'resources.pullRequestsPanel.openedValueUpdatedValue': 'opened {opened}, updated {updated}',
   'resources.pullRequestsPanel.itsForkDeleted': 'its fork was deleted',
   'resources.pullRequestsPanel.openPullRequestNumber': 'Open pull request #{number} on GitHub',
   'resources.pullRequestsPanel.hideDetails': 'Hide details',

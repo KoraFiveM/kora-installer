@@ -2,9 +2,6 @@ import { register } from '../../index'
 
 const messages = {
   'settings.auditLog.activityLog': 'Activity log',
-  'settings.auditLog.kora': 'kora',
-  'settings.auditLog.programfilesKoraDataAudit': '%ProgramFiles%\\\\Kora\\\\data\\\\audit.log',
-  'settings.auditLog.varLogKoraAudit': '/var/log/kora/audit.log',
   'settings.auditLog.entriesKeptDaysDays': ' Entries are kept for {days} days.',
   'settings.auditLog.whoChangedWhatFrom': "Who changed what, from this panel (on this computer or from another device) and from <code>kora</code> commands. Passwords, licence keys and what was typed are never recorded. What Kora's administrator service did with administrator rights (services, firewall rules, databases, updates) is kept in its own log that only administrators can read: <code2>%ProgramFiles%\\\\Kora\\\\data\\\\audit.log</code2> on Windows, <code3>/var/log/kora/audit.log</code3> on Linux.{value}",
   'settings.auditLog.server': 'Server',

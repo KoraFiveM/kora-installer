@@ -27,7 +27,7 @@ export function ChangesDialog({ open, resources, files, busy, onChoose, onCancel
     <Dialog open={open} onOpenChange={(o) => { if (!o) close() }}>
       <DialogContent
         title={sure ? t('resources.changesDialog.throwChangesAway') : t('resources.changesDialog.changesSaved')}
-        description={many ? t('resources.changesDialog.countResourcesChangesOwn', { count: resources.length, join: resources.join(', ') }) : t('resources.changesDialog.valueChangesOwnWere', { value: resources[0] ?? t('resources.changesDialog.thisResource') })}
+        description={many ? t('resources.changesDialog.countResourcesChangesOwn', { count: resources.length, join: resources.join(', ') }) : t('resources.changesDialog.valueChangesOwnWere', { resource: resources[0] ?? t('resources.changesDialog.thisResource') })}
       >
         {files.length > 0 && (
           <div className="mb-3 text-xs text-muted-foreground">
@@ -37,7 +37,7 @@ export function ChangesDialog({ open, resources, files, busy, onChoose, onCancel
         )}
         {sure ? (
           <>
-            <Alert tone="danger" title={t('resources.changesDialog.cannotUndone')}>{t('resources.changesDialog.changedFilesGoBack', { value: many ? 'those folders' : 'that folder' })}</Alert>
+            <Alert tone="danger" title={t('resources.changesDialog.cannotUndone')}>{t('resources.changesDialog.changedFilesGoBack', { where: many ? 'those folders' : 'that folder' })}</Alert>
             <div className="mt-5 flex flex-wrap justify-end gap-2">
               <Button onClick={() => setSure(false)} disabled={busy}>{t('resources.changesDialog.goBack')}</Button>
               <Button variant="destructive" disabled={busy} onClick={() => { setSure(false); onChoose('discard') }}>{t('resources.changesDialog.throwMyChangesAway')}</Button>

@@ -31,7 +31,7 @@ export function AlertsBanner() {
         </div>
       ))}
       <ErrorNotice error={ack.error} title={t('core.alertsBanner.alertCouldDismissed')} />
-      {open.length > 5 && <p className="text-sm text-muted-foreground">{t('core.alertsBanner.valueMoreAlerts', { value: open.length - 5 })}</p>}
+      {open.length > 5 && <p className="text-sm text-muted-foreground">{t('core.alertsBanner.valueMoreAlerts', { count: open.length - 5 })}</p>}
     </div>
   )
 }

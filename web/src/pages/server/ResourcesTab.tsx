@@ -231,7 +231,7 @@ function InstalledList({ server: s, installed, updates: u }: { server: ServerDet
       <ConfirmDialog
         open={!!ask}
         onOpenChange={(o) => { if (!o) setAsk(null) }}
-        title={ask?.action === 'stop' ? t('resources.resourcesTab.stopId', { id: ask.id }) : t('resources.resourcesTab.restartValue', { value: ask?.id ?? '' })}
+        title={ask?.action === 'stop' ? t('resources.resourcesTab.stopId', { id: ask.id }) : t('resources.resourcesTab.restartValue', { resource: ask?.id ?? '' })}
         description={ask?.action === 'stop'
           ? t('resources.resourcesTab.resourceStopsEveryoneServer')
           : t('resources.resourcesTab.resourceStopsStartsAgain')}

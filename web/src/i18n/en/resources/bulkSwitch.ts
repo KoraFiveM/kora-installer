@@ -8,7 +8,7 @@ const messages = {
   'resources.bulkSwitch.checkingResources': 'Checking resources',
   'resources.bulkSwitch.askingGithub': 'Asking GitHub...',
   'resources.bulkSwitch.doneTotalChecked': '{done} of {total} checked',
-  'resources.bulkSwitch.valueResourcesBranch': '{have} of {value} resources have {branch}',
+  'resources.bulkSwitch.valueResourcesBranch': '{have} of {total} resources have {branch}',
   'resources.bulkSwitch.noneThemBranchNothing': 'None of them has this branch, so nothing can be switched. Check the spelling.',
   'resources.bulkSwitch.missingDoWouldStay': '{missing} do not have it and would stay as they are.',
   'resources.bulkSwitch.whichResourcesBranch': 'Which resources have the branch',

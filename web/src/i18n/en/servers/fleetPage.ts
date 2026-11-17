@@ -42,7 +42,7 @@ const messages = {
   'servers.fleetPage.noOtherPanelsYet': 'No other panels yet. Add a node to see and control its servers from here.',
   'servers.fleetPage.serversAllNodes': 'Servers on all nodes',
   'servers.fleetPage.gamePort': 'Game port',
-  'servers.fleetPage.removeValue': 'Remove {value}?',
+  'servers.fleetPage.removeValue': 'Remove {name}?',
   'servers.fleetPage.onlyDisappearsFromList': 'It only disappears from this list. Nothing changes on that computer, and its servers keep running.',
   'servers.fleetPage.removeNode': 'Remove node',
   'servers.fleetPage.starting': 'Starting',

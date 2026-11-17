@@ -122,7 +122,7 @@ export function PullRequestsPanel({ page }: { page: ResourcePage }) {
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <Badge tone={p.source === 'upstream' ? 'info' : 'amber'}>{tt(SOURCE_LABEL[p.source])}</Badge>
                     <span>{tt('resources.pullRequestsPanel.byAuthor', { author: p.author })}</span>
-                    <span>{tt('resources.pullRequestsPanel.openedValueUpdatedValue', { value: since(p.created) || 'a while ago', value2: since(p.updated) || 'a while ago' })}</span>
+                    <span>{tt('resources.pullRequestsPanel.openedValueUpdatedValue', { opened: since(p.created) || 'a while ago', updated: since(p.updated) || 'a while ago' })}</span>
                     <ChecksBadge state={p.checks} />
                     <ReviewBadge review={p.review} />
                     {p.from === null && <span className="text-orange">{tt('resources.pullRequestsPanel.itsForkDeleted')}</span>}

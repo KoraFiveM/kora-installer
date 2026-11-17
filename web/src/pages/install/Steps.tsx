@@ -59,7 +59,7 @@ export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & {
   const showKind = kindOpen || f.source === 'fork'
   return (
     <div className="space-y-4">
-      <Field label={t('install.steps.serverName')} hint={t('install.steps.usedFolderServiceDatabase', { value: slug(f.name) || '...' })}>
+      <Field label={t('install.steps.serverName')} hint={t('install.steps.usedFolderServiceDatabase', { name: slug(f.name) || '...' })}>
         <Input value={f.name} onChange={(e) => set({ name: e.target.value, ...(f.dirTouched ? {} : { dir: folderFor(base, e.target.value) }) })} autoComplete="off" />
       </Field>
       {showFolder ? (
@@ -393,7 +393,7 @@ export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signe
             disabled={usable.length === 0}
             onChange={() => { setWhere('org'); if (!chosenOrg) set({ githubOwner: '', githubRemembered: false }) }}
             label={t('install.steps.organisationIBelong')}
-            hint={orgs.length === 0 ? t('install.steps.doBelongOrganisationKora') : usable.length === 0 ? t('install.steps.belongJoinButMay', { join: orgs.map((o) => o.login).join(', '), value: orgs[0].reason ?? 'not allowed' }) : undefined}
+            hint={orgs.length === 0 ? t('install.steps.doBelongOrganisationKora') : usable.length === 0 ? t('install.steps.belongJoinButMay', { join: orgs.map((o) => o.login).join(', '), reason: orgs[0].reason ?? 'not allowed' }) : undefined}
           />
           {shown === 'org' && usable.length > 0 && (
             <Field label={t('install.steps.whichOrganisation')} hint={f.githubRemembered && chosenOrg ? t('install.steps.rememberedFromLastInstall2') : t('install.steps.ownCopiesCreatedThere')}>
