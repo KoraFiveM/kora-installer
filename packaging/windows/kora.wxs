@@ -18,6 +18,9 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Kora is already installed. Remove it first (Apps &amp; features) to go back." Schedule="afterInstallExecute" />
     <MediaTemplate EmbedCab="yes" />
     <Property Id="ALLOWUSERS" Secure="yes" />
+    <!-- The desktop app (tray icon and window) is on by default; `msiexec /i kora.msi DESKTOP=0` leaves it out (and the
+         Start Menu / Desktop shortcuts then start a bare `kora`, as before). -->
+    <Property Id="DESKTOP" Value="1" Secure="yes" />
     <Property Id="ARPCOMMENTS" Value="Kora and its administrator service" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/KoraFiveM/kora-installer" />
 
@@ -49,16 +52,51 @@
 
     <StandardDirectory Id="ProgramMenuFolder">
       <Component Id="StartMenuShortcut" Guid="C41B8E2D-5F90-4A37-B6D1-0E9A7C3F8A52" Bitness="always64">
+        <?ifdef DesktopExe?><Condition>DESKTOP=&quot;0&quot;</Condition><?endif?>
         <Shortcut Id="KoraStartMenu" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
     <StandardDirectory Id="CommonDesktopFolder">
       <Component Id="DesktopShortcut" Guid="E7D2A049-1B38-4C65-8F90-3D5B6A1C9E04" Bitness="always64">
+        <?ifdef DesktopExe?><Condition>DESKTOP=&quot;0&quot;</Condition><?endif?>
         <Shortcut Id="KoraDesktop" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
+
+    <?ifdef DesktopExe?>
+    <!-- The desktop app (crates/kora-desktop, docs/desktop-app.md): next to kora.exe in the protected folder; its shortcuts
+         carry the notification identity "Kora.Desktop". No autostart from here: the app turns it on per user at its first
+         run (the person's to switch off in the tray); an elevated installer must not write another user's registry. -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="DesktopApp" Bitness="always64">
+        <File Id="KoraDesktopExe" Source="$(DesktopExe)" Name="kora-desktop.exe" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="DesktopAppStartMenuShortcut" Guid="4B7A1D52-8C3E-4F69-A0D7-5E2B9C6F1A83" Bitness="always64">
+        <Shortcut Id="KoraDesktopAppStartMenu" Name="Kora" Description="Your FiveM servers at a glance" Target="[INSTALLFOLDER]kora-desktop.exe" WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="Kora.Desktop" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="Software\Kora" Name="DesktopAppStartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+    <StandardDirectory Id="CommonDesktopFolder">
+      <Component Id="DesktopAppDesktopShortcut" Guid="9E3C5A17-2D84-4B06-8F1A-7C0D6B4E2A95" Bitness="always64">
+        <Shortcut Id="KoraDesktopAppDesktop" Name="Kora" Description="Your FiveM servers at a glance" Target="[INSTALLFOLDER]kora-desktop.exe" WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="Kora.Desktop" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="Software\Kora" Name="DesktopAppDesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+    <!-- Uninstall: take the app's start-up entry out for the user who runs the uninstall (it is per user; other users'
+         entries point at a missing file and do nothing). Not elevated: it runs as that user. -->
+    <CustomAction Id="KoraDesktopUninstall" FileRef="KoraDesktopExe" ExeCommand="--uninstall" Execute="deferred" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="KoraDesktopUninstall" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+    <?endif?>
 
     <!-- Allow the installing account (and ALLOWUSERS). Runs as SYSTEM after the files are in place. -->
     <CustomAction Id="KoraEnrolUsers" FileRef="KoraExe" ExeCommand="service allow [UserSID] &quot;[ALLOWUSERS]&quot;" Execute="deferred" Impersonate="no" Return="ignore" />
@@ -77,6 +115,14 @@
       <Feature Id="DesktopShortcutFeature" Title="Desktop shortcut" Level="1">
         <ComponentRef Id="DesktopShortcut" />
       </Feature>
+      <?ifdef DesktopExe?>
+      <Feature Id="DesktopApp" Title="Kora desktop app (tray icon and window)" Level="1" AllowAbsent="yes">
+        <Level Value="0" Condition="DESKTOP=&quot;0&quot;" />
+        <ComponentRef Id="DesktopApp" />
+        <ComponentRef Id="DesktopAppStartMenuShortcut" />
+        <ComponentRef Id="DesktopAppDesktopShortcut" />
+      </Feature>
+      <?endif?>
     </Feature>
   </Package>
 </Wix>

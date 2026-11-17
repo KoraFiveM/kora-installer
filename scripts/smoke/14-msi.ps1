@@ -140,6 +140,12 @@ try {
     Assert-That ($r.Code -eq 0) 'A removes their own firewall rules through the service'
     Assert-That ((Get-Content "$pf\owners.json" -Raw) -notmatch 'firewall:smoke-a') 'and the record is gone'
 
+    Write-Host '=== the desktop app (a feature of the newer MSI; the older one has none) ==='
+    Assert-That (Test-Path "$pf\kora-desktop.exe") 'kora-desktop.exe is in Program Files\Kora after the upgrade'
+    $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")
+    Assert-That ($lnk.TargetPath -eq "$pf\kora-desktop.exe") "the Start Menu shortcut starts the desktop app ($($lnk.TargetPath))"
+    Assert-That (-not (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Kora -ErrorAction SilentlyContinue)) 'the MSI does not write an autostart entry (the app does, per user)'
+
     Write-Host '=== uninstall leaves nothing behind ==='
     $p = Start-Process msiexec.exe -ArgumentList "/x `"$Msi`" /qn /l*v `"$work\uninstall.log`"" -Wait -PassThru
     Assert-That ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) "msiexec /x succeeded (exit $($p.ExitCode))"
@@ -147,6 +153,7 @@ try {
     Assert-That (-not (Test-Path $pf)) 'Program Files\Kora is gone (program, settings, records, audit log)'
     Assert-That (-not (([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';') -contains $pf)) 'the PATH entry is gone'
     Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")) 'the Start Menu shortcut is gone'
+    Assert-That (-not (Test-Path "$pf\kora-desktop.exe")) 'the desktop app is gone'
     Assert-That (-not (Test-Path '\\.\pipe\kora-service')) 'no pipe'
     Assert-That (Test-Path "$srvA\.kora\request.json") 'the server folder was never touched'
     Write-Host 'all MSI checks passed'

@@ -70,6 +70,54 @@ jobs:
           name: ${{ matrix.name }}
           path: dist/*
 
+  build-desktop:
+    # The desktop app (tray icon and window, crates/kora-desktop, its own Cargo workspace; docs/desktop-app.md). Built here the
+    # same way .github/workflows/desktop.yml builds it (that workflow also smoke-tests it); the smoke test is not repeated.
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bin: kora-desktop
+            name: kora-desktop-linux-x86_64
+          - os: windows-latest
+            bin: kora-desktop.exe
+            name: kora-desktop-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "System packages (Linux, WebKitGTK 4.1, GTK 3, AppIndicator)"
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: stable
+      - run: cargo build --release --locked --manifest-path crates/kora-desktop/Cargo.toml
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir dist
+          cp "crates/kora-desktop/target/release/${{ matrix.bin }}" "dist/${{ matrix.name }}"
+          (cd dist && sha256sum "${{ matrix.name }}" > "${{ matrix.name }}.sha256")
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+
+  sign-desktop:
+    needs: build-desktop
+    # Same rule as sign-exe: only real releases; the same signing workflow (a no-op until configured).
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.publish)
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/sign-windows.yml
+    with:
+      unsigned-artifact: kora-desktop-windows-x86_64.exe
+      # require-signing: true   # switch on together with sign-exe
+    secrets: inherit
+
   sign-exe:
     needs: build
     # Only real releases: a rehearsal would otherwise wait for a maintainer to approve a signing request.
@@ -112,8 +160,8 @@ jobs:
     # The MSI: the program in Program Files, Kora's administrator service, PATH, shortcuts, Apps & features.
     # WiX is fetched here as a pinned .NET tool (not vendored). It embeds kora.exe, so it is built from the
     # artifact AFTER sign-exe (the signed exe when signing ran); a failed signing skips it and everything after.
-    needs: [build, sign-exe]
-    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.sign-exe.result == 'success' || needs.sign-exe.result == 'skipped') }}
+    needs: [build, sign-exe, build-desktop, sign-desktop]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.build-desktop.result == 'success' && (needs.sign-exe.result == 'success' || needs.sign-exe.result == 'skipped') && (needs.sign-desktop.result == 'success' || needs.sign-desktop.result == 'skipped') }}
     runs-on: windows-latest
     defaults:
       run:
@@ -123,6 +171,10 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: kora-windows-x86_64.exe
+          path: in
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kora-desktop-windows-x86_64.exe
           path: in
       - name: Install the WiX tool
         run: |
@@ -134,12 +186,36 @@ jobs:
           $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
           $ver = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object { $_.name -eq 'kora-cli' } | ForEach-Object { $_.version }
           New-Item -ItemType Directory dist | Out-Null
-          ./packaging/windows/build-msi.ps1 -Exe in/kora-windows-x86_64.exe -Version $ver -Out dist/kora-windows-x86_64.msi
+          ./packaging/windows/build-msi.ps1 -Exe in/kora-windows-x86_64.exe -DesktopExe in/kora-desktop-windows-x86_64.exe -Version $ver -Out dist/kora-windows-x86_64.msi
           $h = (Get-FileHash -Algorithm SHA256 dist/kora-windows-x86_64.msi).Hash.ToLowerInvariant()
           Set-Content -NoNewline -Encoding ascii -Path dist/kora-windows-x86_64.msi.sha256 -Value ("$h  kora-windows-x86_64.msi" + [char]10)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kora-windows-x86_64.msi
+          path: dist/*
+
+  package-desktop-linux:
+    # The `kora-desktop` .deb: a separate package so headless servers do not pull in GTK / WebKit.
+    needs: build-desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kora-desktop-linux-x86_64
+          path: in
+      - name: Build the package
+        run: |
+          chmod +x in/kora-desktop-linux-x86_64
+          ver="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="kora-cli"))')"
+          mkdir dist
+          packaging/linux/build-desktop-deb.sh in/kora-desktop-linux-x86_64 "$ver" dist/kora-desktop-linux-x86_64.deb
+          (cd dist && sha256sum kora-desktop-linux-x86_64.deb > kora-desktop-linux-x86_64.deb.sha256)
+          dpkg-deb -I dist/kora-desktop-linux-x86_64.deb
+          dpkg-deb -c dist/kora-desktop-linux-x86_64.deb
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kora-desktop-linux-x86_64.deb
           path: dist/*
 
   sign-msi:
@@ -155,10 +231,10 @@ jobs:
     secrets: inherit
 
   verify:
-    needs: [build, package-linux, package-windows, sign-exe, sign-msi]
+    needs: [build, package-linux, package-windows, package-desktop-linux, build-desktop, sign-exe, sign-desktop, sign-msi]
     # A skipped sign job (a rehearsal) must not skip verify; a failed or cancelled one must (nothing unsigned ships
     # after signing was configured and broke).
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.package-linux.result == 'success' && needs.package-windows.result == 'success' && (needs.sign-exe.result == 'success' || needs.sign-exe.result == 'skipped') && (needs.sign-msi.result == 'success' || needs.sign-msi.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.package-linux.result == 'success' && needs.package-windows.result == 'success' && needs.package-desktop-linux.result == 'success' && (needs.sign-exe.result == 'success' || needs.sign-exe.result == 'skipped') && (needs.sign-desktop.result == 'success' || needs.sign-desktop.result == 'skipped') && (needs.sign-msi.result == 'success' || needs.sign-msi.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1  (for the install scripts)
@@ -173,28 +249,32 @@ jobs:
         working-directory: dist
         run: |
           ls -l
-          for f in kora-linux-x86_64 kora-linux-x86_64.sha256 kora-linux-x86_64.deb kora-linux-x86_64.deb.sha256 kora-windows-x86_64.exe kora-windows-x86_64.exe.sha256 kora-windows-x86_64.msi kora-windows-x86_64.msi.sha256 install.sh install.ps1; do
+          for f in kora-linux-x86_64 kora-linux-x86_64.sha256 kora-linux-x86_64.deb kora-linux-x86_64.deb.sha256 kora-windows-x86_64.exe kora-windows-x86_64.exe.sha256 kora-windows-x86_64.msi kora-windows-x86_64.msi.sha256 kora-desktop-linux-x86_64 kora-desktop-linux-x86_64.sha256 kora-desktop-linux-x86_64.deb kora-desktop-linux-x86_64.deb.sha256 kora-desktop-windows-x86_64.exe kora-desktop-windows-x86_64.exe.sha256 install.sh install.ps1; do
             [ -s "$f" ] || { echo "MISSING or empty: $f"; exit 1; }
           done
           sha256sum -c kora-linux-x86_64.sha256
           sha256sum -c kora-linux-x86_64.deb.sha256
           sha256sum -c kora-windows-x86_64.exe.sha256
           sha256sum -c kora-windows-x86_64.msi.sha256
+          sha256sum -c kora-desktop-linux-x86_64.sha256
+          sha256sum -c kora-desktop-linux-x86_64.deb.sha256
+          sha256sum -c kora-desktop-windows-x86_64.exe.sha256
       - name: The Windows files carry a signature when signing ran (and its checksums are of the signed files)
-        if: needs.sign-exe.outputs.signed == 'true' || needs.sign-msi.outputs.signed == 'true'
+        if: needs.sign-exe.outputs.signed == 'true' || needs.sign-desktop.outputs.signed == 'true' || needs.sign-msi.outputs.signed == 'true'
         run: |
-          python3 - dist/kora-windows-x86_64.exe dist/kora-windows-x86_64.msi <<'PY'
+          python3 - dist/kora-windows-x86_64.exe dist/kora-desktop-windows-x86_64.exe dist/kora-windows-x86_64.msi <<'PY'
           import struct, sys
-          exe, msi = sys.argv[1], sys.argv[2]
-          d = open(exe, 'rb').read()
-          pe = struct.unpack_from('<I', d, 0x3c)[0]
-          assert d[pe:pe+4] == b'PE\0\0'
-          opt = pe + 24
-          magic = struct.unpack_from('<H', d, opt)[0]
-          dd = opt + (112 if magic == 0x20b else 96)          # data directories
-          off, size = struct.unpack_from('<II', d, dd + 4 * 8)  # entry 4: the certificate table
-          assert off and size, 'no Authenticode signature in the Windows exe'
-          print('exe certificate table:', off, size)
+          exes, msi = sys.argv[1:3], sys.argv[3]
+          for exe in exes:
+              d = open(exe, 'rb').read()
+              pe = struct.unpack_from('<I', d, 0x3c)[0]
+              assert d[pe:pe+4] == b'PE\0\0'
+              opt = pe + 24
+              magic = struct.unpack_from('<H', d, opt)[0]
+              dd = opt + (112 if magic == 0x20b else 96)          # data directories
+              off, size = struct.unpack_from('<II', d, dd + 4 * 8)  # entry 4: the certificate table
+              assert off and size, 'no Authenticode signature in ' + exe
+              print(exe, 'certificate table:', off, size)
           # An MSI keeps its signature in the compound file's "\x05DigitalSignature" stream (UTF-16 name).
           m = open(msi, 'rb').read()
           assert '\x05DigitalSignature'.encode('utf-16-le') in m, 'no Authenticode signature in the MSI'
@@ -237,6 +317,9 @@ jobs:
             dist/kora-linux-x86_64.deb
             dist/kora-windows-x86_64.exe
             dist/kora-windows-x86_64.msi
+            dist/kora-desktop-linux-x86_64
+            dist/kora-desktop-linux-x86_64.deb
+            dist/kora-desktop-windows-x86_64.exe
             dist/install.sh
             dist/install.ps1
 
