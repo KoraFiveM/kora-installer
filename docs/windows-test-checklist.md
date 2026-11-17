@@ -6,8 +6,8 @@ GitHub Windows runner, which is an administrator account with no real desktop. E
 cover: shortcuts, Explorer, UAC, a real browser, a normal user's permissions.
 
 Time: about 30 to 45 minutes for sections 1 to 6 on a clean Windows 11 machine, then section 8 to clean up. Section 7 (the
-upgrade from 0.6.x) is an extra 10 minutes on a machine that has 0.6.x. The section "Administrator prompt (UAC)" belongs
-to the elevated worker and has its own list. Tick a box when the step does what it says. When it
+upgrade from 0.6.x) is an extra 10 minutes on a machine that has 0.6.x. The section about the old UAC prompt
+has been replaced by "Kora's administrator service and the MSI". Tick a box when the step does what it says. When it
 does not, stop on that step, write down its number and collect the items under **If not, copy back**.
 
 ## 0. Before you start
