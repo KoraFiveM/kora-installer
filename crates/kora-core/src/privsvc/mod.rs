@@ -78,6 +78,7 @@ pub mod policy;
 pub mod problems;
 #[cfg(unix)]
 pub mod unixsvc;
+pub mod update;
 #[cfg(windows)]
 pub mod wininstall;
 #[cfg(windows)]

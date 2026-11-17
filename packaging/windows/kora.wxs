@@ -27,7 +27,7 @@
           <File Id="KoraExe" Source="$(KoraExe)" Name="kora.exe" KeyPath="yes" />
           <ServiceInstall Id="KoraService" Name="KoraService" DisplayName="Kora administrator service" Description="Does a short list of administrator jobs for Kora Panel (servers' services, firewall rules, databases, updates) for the accounts an administrator allowed. Manage it with: kora service list|allow|deny" Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Arguments="service serve" Vital="yes" />
           <ServiceControl Id="KoraServiceControl" Name="KoraService" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
-          <util:ServiceConfig ServiceName="KoraService" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
+          <util:ServiceConfig ServiceName="KoraService" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" FailureActionsWhen="failedToStopOrReturnedError" />
           <!-- everything the service made while running goes with a real uninstall (not with an upgrade: this
                component is the same one in the next version, so Windows Installer keeps it) -->
           <RemoveFile Id="RmLedger" Name="owners.json" On="uninstall" />

@@ -17,6 +17,10 @@ pub trait Svc: Send + Sync {
     fn host(&self) -> &dyn Host;
     /// The current settings (read at every connection).
     fn policy(&self) -> Result<Policy, String>;
+    /// The service must exit once this answer is sent (an update was installed: the service manager starts the new program).
+    fn restart_requested(&self) -> bool {
+        super::update::restart_requested()
+    }
     /// Run the child for `caller`.
     fn run(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> std::io::Result<Ran>;
 }

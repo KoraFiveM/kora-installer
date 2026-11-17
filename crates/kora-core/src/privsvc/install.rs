@@ -25,7 +25,7 @@ pub const UNIT_PATH: &str = "/etc/systemd/system/kora.service";
 pub fn unit_text() -> String {
     format!(
         "[Unit]\nDescription=Kora administrator service (does a short list of administrator jobs for Kora Panel)\nDocumentation=https://github.com/KoraFiveM/kora-installer/blob/main/SECURITY.md\nAfter=local-fs.target\n\n\
-         [Service]\nType=simple\nExecStart={PROGRAM} service serve\nRuntimeDirectory=kora\nRuntimeDirectoryMode=0755\nStateDirectory=kora\nStateDirectoryMode=0755\nLogsDirectory=kora\nLogsDirectoryMode=0750\nUMask=0022\nPrivateTmp=true\nRestart=on-failure\nRestartSec=3\n\n\
+         [Service]\nType=simple\nExecStart={PROGRAM} service serve\nRuntimeDirectory=kora\nRuntimeDirectoryMode=0755\nStateDirectory=kora\nStateDirectoryMode=0755\nLogsDirectory=kora\nLogsDirectoryMode=0750\nUMask=0022\nPrivateTmp=true\nRestart=always\nRestartSec=2\n\n\
          [Install]\nWantedBy=multi-user.target\n"
     )
 }

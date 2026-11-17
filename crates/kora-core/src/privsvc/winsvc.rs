@@ -333,6 +333,16 @@ impl Svc for WinSvc {
     }
 
     fn run(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> std::io::Result<Ran> {
+        if spec.argv.get(1).map(String::as_str) == Some("self-update") {
+            let dir = std::path::PathBuf::from(&self.files.data_dir);
+            return super::update::run_update(Path::new(&self.files.exe), &dir, progress, &mut |p| self.run_child(caller, spec, p, cancel));
+        }
+        self.run_child(caller, spec, progress, cancel)
+    }
+}
+
+impl WinSvc {
+    fn run_child(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> std::io::Result<Ran> {
         use crate::helper::worker::{elevated_child_env, ChildExecutor, Executor};
         let id = caller.id.clone().ok_or_else(|| std::io::Error::other("no caller"))?;
         let (domain, name) = self.names.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned().unwrap_or_default();
@@ -385,6 +395,17 @@ fn make_instance(svc: &WinSvc, first: bool) -> std::io::Result<Owned> {
     Ok(Owned(h))
 }
 
+/// Wake the blocking `ConnectNamedPipe` with a client of our own (stop, or restart after an update).
+fn wake_listener() {
+    let w = wide(paths::WINDOWS_PIPE);
+    // SAFETY: valid name; the handle (if any) is closed at once.
+    let h = unsafe { CreateFileW(w.as_ptr(), CLIENT_ACCESS, 0, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut()) };
+    if h != INVALID {
+        // SAFETY: a handle we just opened.
+        unsafe { CloseHandle(h) };
+    }
+}
+
 fn serve_connection(svc: Arc<WinSvc>, pipe: Owned) {
     let raw = pipe.0;
     let got_request = Arc::new(AtomicBool::new(false));
@@ -423,6 +444,9 @@ fn serve_connection(svc: Arc<WinSvc>, pipe: Owned) {
     }
     // SAFETY: our handle; the File drop closes it.
     unsafe { DisconnectNamedPipe(raw) };
+    if svc.restart_requested() {
+        wake_listener();
+    }
 }
 
 /// Serve until `stop`. Returns an error when the pipe cannot be made first (a squatter).
@@ -430,6 +454,11 @@ pub fn serve_pipe(svc: Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
     let active = Arc::new(AtomicUsize::new(0));
     let mut inst = make_instance(&svc, true).map_err(|e| format!("cannot create {} (is another program using the name?): {e}", paths::WINDOWS_PIPE))?;
     while !stop.load(Ordering::SeqCst) {
+        // An update was installed and its answer sent: leave (the service manager starts the new program).
+        if svc.restart_requested() {
+            std::thread::sleep(Duration::from_secs(1)); // the answer in flight is sent
+            break;
+        }
         // SAFETY: a pipe instance we own; blocks until a client connects.
         let ok = unsafe { ConnectNamedPipe(inst.0, std::ptr::null_mut()) } != 0 || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
         if stop.load(Ordering::SeqCst) {
@@ -504,14 +533,7 @@ fn run_as_service() -> Result<(), String> {
     let handler = move |ev: ServiceControl| match ev {
         ServiceControl::Stop | ServiceControl::Shutdown => {
             stop2.store(true, Ordering::SeqCst);
-            // wake the blocking ConnectNamedPipe with a client of our own
-            let w = wide(paths::WINDOWS_PIPE);
-            // SAFETY: valid name; the handle (if any) is closed at once.
-            let h = unsafe { CreateFileW(w.as_ptr(), CLIENT_ACCESS, 0, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut()) };
-            if h != INVALID {
-                // SAFETY: a handle we just opened.
-                unsafe { CloseHandle(h) };
-            }
+            wake_listener();
             ServiceControlHandlerResult::NoError
         }
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -532,10 +554,28 @@ fn run_as_service() -> Result<(), String> {
     report(ServiceState::StartPending, ServiceControlAccept::empty(), Duration::from_secs(15), 0);
     let svc = Arc::new(WinSvc::new());
     let r = check_program_trusted(&svc).and_then(|_| {
+        // An update that was just installed: count this start, roll back when the new program keeps failing.
+        let paths = super::update::Paths::in_dir(Path::new(&svc.files.data_dir));
+        let (boot, said) = super::update::on_start(&paths, Path::new(&svc.files.exe), env!("CARGO_PKG_VERSION"));
+        if let Some(s) = said {
+            svc.audit(&format!("{} | service | {s}", super::audit::rfc3339(svc.now())));
+        }
+        match boot {
+            super::update::Boot::RolledBack => return Err("rolled back to the previous program; stopping with an error so Windows starts it".to_string()),
+            super::update::Boot::Probation(m) => {
+                std::thread::spawn(move || {
+                    std::thread::sleep(super::update::COMMIT_AFTER);
+                    super::update::commit(&paths, &m);
+                });
+            }
+            super::update::Boot::Normal => {}
+        }
         report(ServiceState::Running, ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN, Duration::ZERO, 0);
         serve_pipe(Arc::clone(&svc), &stop)
     });
-    report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, u32::from(r.is_err()));
+    // After an update the service stops with an error code on purpose: the failure actions restart it on the new program.
+    let code = u32::from(r.is_err() || super::update::restart_requested());
+    report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, code);
     r
 }
 

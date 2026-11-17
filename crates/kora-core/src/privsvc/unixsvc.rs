@@ -52,6 +52,10 @@ pub fn serve(svc: Arc<dyn Svc>, listener: UnixListener, stop: &AtomicBool) {
     let active = Arc::new(AtomicUsize::new(0));
     let _ = listener.set_nonblocking(true);
     while !stop.load(Ordering::Relaxed) {
+        // An update was installed: leave once the answers in flight are sent (systemd starts the new program).
+        if svc.restart_requested() && active.load(Ordering::SeqCst) == 0 {
+            break;
+        }
         match listener.accept() {
             Ok((stream, _)) => {
                 if active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
@@ -235,6 +239,21 @@ impl Svc for LinuxSvc {
     }
 
     fn run(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> io::Result<Ran> {
+        if spec.argv.get(1).map(String::as_str) == Some("self-update") {
+            return self.run_update(caller, spec, progress, cancel);
+        }
+        self.run_child(caller, spec, progress, cancel)
+    }
+}
+
+impl LinuxSvc {
+    /// `UpdateApply` (see [`super::update::run_update`]).
+    fn run_update(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> io::Result<Ran> {
+        let dir = self.files.ledger.parent().ok_or_else(|| io::Error::other("no data folder"))?;
+        super::update::run_update(&self.exe, dir, progress, &mut |p| self.run_child(caller, spec, p, cancel))
+    }
+
+    fn run_child(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> io::Result<Ran> {
         use crate::helper::worker::{ChildExecutor, Executor};
         let uid = caller.id.as_ref().and_then(|i| i.as_str().strip_prefix("uid:")).and_then(|n| n.parse::<u32>().ok()).ok_or_else(|| io::Error::other("no caller"))?;
         let acct = crate::helper::install::lookup_account(uid).ok_or_else(|| io::Error::other("the caller's account has no passwd entry"))?;
@@ -268,6 +287,23 @@ pub fn run_service() -> Result<(), String> {
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     check_program_trusted(&exe)?;
+    // An update that was just installed: count this start, roll back when the new program keeps failing.
+    let paths = super::update::Paths::in_dir(Path::new(paths::LINUX_LEDGER).parent().unwrap_or(Path::new("/var/lib/kora")));
+    let (boot, said) = super::update::on_start(&paths, &exe, env!("CARGO_PKG_VERSION"));
+    if let Some(s) = said {
+        eprintln!("kora service: {s}");
+    }
+    match boot {
+        super::update::Boot::RolledBack => return Err("rolled back to the previous program; exiting so it is started".into()),
+        super::update::Boot::Probation(m) => {
+            let p = paths.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(super::update::COMMIT_AFTER);
+                super::update::commit(&p, &m);
+            });
+        }
+        super::update::Boot::Normal => {}
+    }
     let svc = Arc::new(LinuxSvc { exe, files: Files::system(), strict_owner: true });
     let l = bind(Path::new(paths::LINUX_SOCKET)).map_err(|e| format!("cannot open {}: {e}", paths::LINUX_SOCKET))?;
     let stop = AtomicBool::new(false);

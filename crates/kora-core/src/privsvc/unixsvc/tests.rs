@@ -180,3 +180,24 @@ fn the_program_must_be_in_the_protected_folder() {
     assert!(check_program_trusted(Path::new("/home/jo/.local/bin/kora")).unwrap_err().contains("protected program folder"));
     assert!(check_program_trusted(Path::new("/usr/lib/kora/../../tmp/x")).is_err());
 }
+
+#[test]
+fn an_update_whose_new_program_does_not_run_is_rolled_back_at_once() {
+    let e = env(true);
+    // the fake program answers --version with something older than the service: "the new program is broken"
+    let script = format!("#!/bin/sh\n[ \"$1\" = \"--version\" ] && {{ echo 'kora 0.0.1'; exit 0; }}\necho \"$@\" > {}\necho updating\n", e.marker.display());
+    std::fs::write(&e.svc.exe, &script).unwrap();
+    std::fs::set_permissions(&e.svc.exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = ask(&e, me(), &Request { verb: "self-update".into(), args: vec!["--yes".into()], env: BTreeMap::new() });
+    let lines: Vec<String> = out.iter().filter_map(|m| if let Message::Progress { line, .. } = m { Some(line.clone()) } else { None }).collect();
+    assert!(lines.iter().any(|l| l == "updating"), "{out:?}");
+    assert!(lines.iter().any(|l| l.contains("previous one was put back")), "{lines:?}");
+    assert!(matches!(out.last(), Some(Message::Result { ok: false, code: 1, .. })), "{out:?}");
+    assert_eq!(std::fs::read_to_string(&e.svc.exe).unwrap(), script, "the previous program is back");
+    let dir = e.svc.files.ledger.parent().unwrap();
+    assert!(dir.join("kora.previous").is_file(), "the copy kept");
+    assert!(!dir.join("update.json").exists(), "no pending update");
+    assert!(!crate::privsvc::update::restart_requested(), "no restart for a failed update");
+    let audit = std::fs::read_to_string(&e.svc.files.audit).unwrap();
+    assert!(audit.contains("| update | failed (code 1)"), "{audit}");
+}
