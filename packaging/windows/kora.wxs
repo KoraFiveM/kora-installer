@@ -30,7 +30,7 @@
           <File Id="KoraExe" Source="$(KoraExe)" Name="kora.exe" KeyPath="yes" />
           <ServiceInstall Id="KoraService" Name="KoraService" DisplayName="Kora administrator service" Description="Does a short list of administrator jobs for Kora Panel (servers' services, firewall rules, databases, updates) for the accounts an administrator allowed. Manage it with: kora service list|allow|deny" Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Arguments="service serve" Vital="yes" />
           <ServiceControl Id="KoraServiceControl" Name="KoraService" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
-          <util:ServiceConfig ServiceName="KoraService" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" FailureActionsWhen="failedToStopOrReturnedError" />
+          <util:ServiceConfig ServiceName="KoraService" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
           <!-- everything the service made while running goes with a real uninstall (not with an upgrade: this
                component is the same one in the next version, so Windows Installer keeps it) -->
           <RemoveFile Id="RmLedger" Name="owners.json" On="uninstall" />
@@ -57,7 +57,7 @@
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
-    <StandardDirectory Id="CommonDesktopFolder">
+    <StandardDirectory Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="E7D2A049-1B38-4C65-8F90-3D5B6A1C9E04" Bitness="always64">
         <?ifdef DesktopExe?><Condition>DESKTOP=&quot;0&quot;</Condition><?endif?>
         <Shortcut Id="KoraDesktop" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
@@ -82,7 +82,7 @@
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="DesktopAppStartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
-    <StandardDirectory Id="CommonDesktopFolder">
+    <StandardDirectory Id="DesktopFolder">
       <Component Id="DesktopAppDesktopShortcut" Guid="9E3C5A17-2D84-4B06-8F1A-7C0D6B4E2A95" Bitness="always64">
         <Shortcut Id="KoraDesktopAppDesktop" Name="Kora" Description="Your FiveM servers at a glance" Target="[INSTALLFOLDER]kora-desktop.exe" WorkingDirectory="INSTALLFOLDER">
           <ShortcutProperty Key="System.AppUserModel.ID" Value="Kora.Desktop" />
