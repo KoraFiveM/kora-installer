@@ -26,6 +26,8 @@ export default defineConfig(({ command, mode }) => {
               { name: 'vendor-react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 30 },
               { name: 'vendor-router', test: /node_modules[\\/](react-router|react-router-dom|@remix-run)[\\/]/, priority: 20 },
               { name: 'vendor-query', test: /node_modules[\\/]@tanstack[\\/]/, priority: 20 },
+              // Button's tiny Slot stays with the app: the rest of Radix (dialogs, tabs) is only fetched when a dialog or a server page opens.
+              { name: 'vendor-slot', test: /node_modules[\\/]@radix-ui[\\/]react-(slot|compose-refs)[\\/]/, priority: 40 },
               { name: 'vendor-radix', test: /node_modules[\\/](@radix-ui|radix-ui|@floating-ui|aria-hidden|react-remove-scroll[\w-]*|react-style-singleton|use-callback-ref|use-sidecar|get-nonce|tslib)[\\/]/, priority: 20 },
               { name: 'vendor-icons', test: /node_modules[\\/]lucide-react[\\/]/, priority: 20 },
             ],

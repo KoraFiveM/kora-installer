@@ -9,7 +9,6 @@
  * in `<ToolchainActions>` once; it registers the handlers with `<ProblemActions>` (see lib/problemActions.tsx).
  */
 import { Suspense, lazy, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Dialog } from '@/components/ui/dialog'
 import { useRole } from '@/hooks/useRole'
 import { ProblemActions, type ActionHandlers } from '@/lib/problemActions'
 import type { Request } from '@/components/ToolchainDialog'
@@ -36,13 +35,11 @@ export function ToolchainActions({ children }: { children: ReactNode }) {
   return (
     <ProblemActions handlers={handlers}>
       {children}
-      <Dialog open={!!req} onOpenChange={(o) => !o && setReq(null)}>
-        {req && (
-          <Suspense fallback={null}>
-            <ToolchainDialog req={req} onClose={() => setReq(null)} />
-          </Suspense>
-        )}
-      </Dialog>
+      {req && (
+        <Suspense fallback={null}>
+          <ToolchainDialog req={req} onClose={() => setReq(null)} />
+        </Suspense>
+      )}
     </ProblemActions>
   )
 }

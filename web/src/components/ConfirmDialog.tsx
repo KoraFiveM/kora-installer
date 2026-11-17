@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { LazyDialog } from '@/components/ui/lazy-dialog'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
 import '@/i18n/en/core/confirmDialog'
@@ -16,8 +16,7 @@ export function ConfirmDialog({ open, onOpenChange, title, description, confirmL
   children?: ReactNode
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title={title} description={description}>
+    <LazyDialog open={open} onOpenChange={onOpenChange} title={title} description={description}>
         {children}
         <div className="mt-5 flex justify-end gap-2">
           <Button onClick={() => onOpenChange(false)}>{t('core.confirmDialog.cancel')}</Button>
@@ -25,7 +24,6 @@ export function ConfirmDialog({ open, onOpenChange, title, description, confirmL
             {confirmLabel}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+    </LazyDialog>
   )
 }

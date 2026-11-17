@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { api, ApiError, setReauthHandler } from '@/api/client'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { LazyDialog } from '@/components/ui/lazy-dialog'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { getPasskey, passkeyErrorText, passkeysSupported } from '@/lib/webauthn'
@@ -83,8 +83,7 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={ask}>
       {children}
-      <Dialog open={open} onOpenChange={(o) => { if (!o) settle(false) }}>
-        <DialogContent title={t('auth.reauthProvider.confirmItIsYou')} description={t('auth.reauthProvider.sensitiveActionUsePasskey')}>
+      <LazyDialog open={open} onOpenChange={(o) => { if (!o) settle(false) }} title={t('auth.reauthProvider.confirmItIsYou')} description={t('auth.reauthProvider.sensitiveActionUsePasskey')}>
           {err && <Alert tone="danger">{err}</Alert>}
           {!useCode ? (
             <div className="flex flex-wrap gap-3">
@@ -101,8 +100,7 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
               </div>
             </form>
           )}
-        </DialogContent>
-      </Dialog>
+      </LazyDialog>
     </Ctx.Provider>
   )
 }

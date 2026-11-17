@@ -16,7 +16,7 @@ import type { JobStarted, ToolInstallEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Announcer, progressSentence } from '@/components/Announcer'
 import { Progress } from '@/components/ui/progress'
 import { ErrorNotice } from '@/components/ErrorNotice'
@@ -37,11 +37,13 @@ const STALE = [['github'], ['github-owners'], ['tools'], ['system-check'], ['sys
 /** The dialog of a fix (install a tool, sign in to GitHub, start the database): loaded when first opened, so the first screen does not carry it. */
 export default function ToolchainDialog({ req, onClose }: { req: Request; onClose: () => void }) {
   return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
     <DialogContent title={titleOf(req)} description={descriptionOf(req)}>
       {req.kind === 'install' && <RunJob key={req.id} start={() => api.tools.install(req.tool)} working={t('errors.toolchainActions.settingUpToolName', { tool: req.tool })} done={t('errors.toolchainActions.toolReady', { tool: req.tool })} afterFix={req.afterFix} onClose={onClose} />}
       {req.kind === 'database' && <RunJob key={req.id} start={() => api.systemCheck.startDatabase()} working={t('errors.toolchainActions.startingDatabaseServer')} done={t('errors.toolchainActions.databaseServerRunning')} afterFix={req.afterFix} onClose={onClose} />}
       {req.kind === 'signin' && <SignIn key={req.id} afterFix={req.afterFix} onClose={onClose} />}
     </DialogContent>
+    </Dialog>
   )
 }
 
