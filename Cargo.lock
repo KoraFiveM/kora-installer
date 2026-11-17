@@ -817,6 +817,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kora-shell"
+version = "0.7.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "kora-web"
 version = "0.7.0"
 dependencies = [
