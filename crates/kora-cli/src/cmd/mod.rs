@@ -3,6 +3,7 @@
 pub(crate) mod app;
 pub(crate) mod github;
 pub(crate) mod helper;
+pub(crate) mod resources;
 pub(crate) mod schedule;
 pub(crate) mod update;
 pub(crate) mod webhook;
