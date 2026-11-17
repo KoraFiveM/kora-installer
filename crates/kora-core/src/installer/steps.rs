@@ -627,7 +627,6 @@ impl InstallStep {
             "system.firewall" => self.firewall(),
             "system.service" => self.service(),
             "system.schedule" => self.schedule(),
-            "system.app" => self.app(),
             "finalize" => self.finalize(),
             "launch" => self.launch(),
             other => err(format!("unknown step {other}")),
@@ -1261,46 +1260,6 @@ impl InstallStep {
         };
         ctx.shared.lock().unwrap().launch = Some(report);
         Ok(detail)
-    }
-
-    /// The Kora app (command + shortcuts). Machine-wide, so it needs administrator rights, and it is
-    /// never fatal: a server that installed fine must not be reported as failed because of a shortcut.
-    fn app(&self) -> Result<String> {
-        use crate::app_install as app;
-        let ctx = &*self.ctx;
-        let choice = ctx.req.app.unwrap_or_default();
-        let opts = app::AppOptions { desktop_shortcut: choice.desktop_shortcut, force: false, dry_run: false };
-        if !ctx.admin {
-            let what = app::Running::current()
-                .and_then(|run| {
-                    let l = app::Layout::from_env(&run.exe)?;
-                    Ok(app::plan_install(&app::RealSys::new(), &l, &run, &opts).actions.iter().map(app::Action::describe).collect::<Vec<_>>().join("; "))
-                })
-                .unwrap_or_default();
-            ctx.note(format!("The Kora app was NOT installed (needs administrator rights). Re-run as root/Administrator, or run `kora app install`, to: {what}"));
-            return Ok("Skipped (needs admin); see notes".into());
-        }
-        match app::install_app(&opts) {
-            Ok(out) => {
-                for n in &out.notes {
-                    ctx.note(n.clone());
-                }
-                if out.changed() {
-                    ctx.note(if cfg!(windows) {
-                        "Kora is installed as an app: open \"Kora\" from the Start Menu to manage your servers later.".to_string()
-                    } else {
-                        "Run `kora` any time to manage your servers.".to_string()
-                    });
-                    Ok(format!("Kora app installed at {}", out.exe.display()))
-                } else {
-                    Ok("The Kora app is already installed and up to date".into())
-                }
-            }
-            Err(e) => {
-                ctx.note(format!("The Kora app could not be installed ({e}). Your server is fine; try `kora app install` later."));
-                Ok("Skipped (see notes)".into())
-            }
-        }
     }
 
     fn finalize(&self) -> Result<String> {

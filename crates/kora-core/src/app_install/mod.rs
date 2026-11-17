@@ -1,5 +1,9 @@
-//! The "Kora app": a stable, per-machine copy of `kora` that the user can open again later to see and
-//! manage their servers.
+//! The old "Kora app" (retired from the install flow in 0.7.0) and the per-user shortcuts that replace it.
+//!
+//! Since 0.7.0 the "app" is just the web panel in a browser tab: the install scripts (and `kora app install`)
+//! make per-user shortcuts that run a bare `kora` (see [`user`]): no administrator rights, no copy in
+//! `%ProgramFiles%`. What is described below is the OLD machine-wide app, which this module still detects
+//! and removes ("Tidy up old shortcuts" in the panel, `kora app uninstall`):
 //!
 //! * Windows: `%ProgramFiles%\Kora\kora.exe`, on the machine `PATH`, a Start Menu shortcut "Kora" (and
 //!   optionally a Desktop shortcut) that runs `kora.exe manager` with "Run as administrator" set, and an
@@ -19,6 +23,7 @@ pub mod pathlist;
 mod sys;
 #[cfg(test)]
 mod tests;
+pub mod user;
 
 use std::cmp::Ordering;
 use std::ffi::OsString;
@@ -192,6 +197,9 @@ pub struct ShortcutSpec {
     pub icon: String,
     pub description: String,
     pub run_as_admin: bool,
+    /// Start the program in a minimised window (a console program opened from a shortcut should not
+    /// flash a big black window). Not read back from a shortcut, so it is ignored when comparing.
+    pub minimized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +224,8 @@ pub enum Action {
     CopyExe { from: PathBuf, to: PathBuf, kind: CopyKind },
     WriteState(AppState),
     AddMachinePath(String),
+    /// Windows: add a folder to the PATH of this user only (no administrator rights).
+    AddUserPath(String),
     BroadcastEnv,
     Shortcut(ShortcutSpec),
     Symlink { link: PathBuf, target: PathBuf },
@@ -239,6 +249,7 @@ impl Action {
             CopyExe { from, to, kind: CopyKind::Replace } => format!("Replace {} with {}", to.display(), from.display()),
             WriteState(s) => format!("Record installed version {} in the app state file", s.version),
             AddMachinePath(d) => format!("Add {d} to the machine PATH"),
+            AddUserPath(d) => format!("Add {d} to your PATH"),
             BroadcastEnv => "Tell running programs the environment changed (new terminals see the new PATH)".into(),
             Shortcut(s) => format!(
                 "Create the shortcut {} -> {} {}{}",
@@ -338,6 +349,13 @@ pub trait Sys {
     /// Remove a file or symlink (a program that is in use is renamed away and deleted later).
     fn remove_file(&mut self, p: &Path) -> Result<()>;
     fn remove_dir_if_empty(&mut self, p: &Path) -> Result<()>;
+    // Windows per-user PATH (raw, unexpanded); nothing to read elsewhere
+    fn user_path(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+    fn set_user_path(&mut self, _value: &str) -> Result<()> {
+        Ok(())
+    }
     // Windows machine PATH (raw, unexpanded)
     fn machine_path(&self) -> Result<Option<String>>;
     fn set_machine_path(&mut self, value: &str) -> Result<()>;
@@ -441,6 +459,7 @@ fn shortcut_spec(l: &Layout, path: &Path) -> ShortcutSpec {
         icon: format!("{},0", l.exe.display()),
         description: "Open the Kora server manager".into(),
         run_as_admin: true,
+        minimized: false,
     }
 }
 
@@ -661,6 +680,13 @@ fn apply(sys: &mut dyn Sys, l: &Layout, a: &Action) -> Result<()> {
             let cur = sys.machine_path()?.unwrap_or_default();
             match pathlist::add(&cur, d) {
                 Some(v) => sys.set_machine_path(&v),
+                None => Ok(()),
+            }
+        }
+        Action::AddUserPath(d) => {
+            let cur = sys.user_path()?.unwrap_or_default();
+            match pathlist::add(&cur, d) {
+                Some(v) => sys.set_user_path(&v),
                 None => Ok(()),
             }
         }

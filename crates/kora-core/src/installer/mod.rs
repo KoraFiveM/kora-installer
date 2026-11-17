@@ -273,9 +273,6 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
     if req.service && req.mode == Mode::Development {
         v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true });
     }
-    if req.app.is_some() {
-        v.push(PlannedStep { id: "system.app", title: "Install the Kora app (command, Start Menu shortcut)", weight: 1, needs_admin: true });
-    }
     v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false });
     if req.start {
         v.push(PlannedStep { id: "launch", title: "Start your server", weight: 4, needs_admin: false });
@@ -678,7 +675,6 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
             "build.config" => "Write txData/default profile, server.cfg, permissions.cfg, secrets.cfg (0600)".into(),
             "system.firewall" => format!("Open {}/tcp+udp (admin needed)", req.ports.game),
             "system.service" => "Create + enable the background service (admin needed)".into(),
-            "system.app" => app_dry_run_detail(req),
             "finalize" => format!("Write kora-server.json and register in {}", registry::registry_path().display()),
             "launch" => format!("Start FXServer and wait until txAdmin answers on port {}", req.ports.txadmin),
             _ => String::new(),
@@ -706,22 +702,6 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
         name: req.name.clone(),
         ..Default::default()
     })
-}
-
-/// Dry run text for the app step: every change it would make (read-only look at this machine).
-fn app_dry_run_detail(req: &InstallRequest) -> String {
-    use crate::app_install as app;
-    let choice = req.app.unwrap_or_default();
-    let planned = app::Running::current().and_then(|run| {
-        let l = app::Layout::from_env(&run.exe)?;
-        let opts = app::AppOptions { desktop_shortcut: choice.desktop_shortcut, force: false, dry_run: true };
-        Ok(app::plan_install(&app::RealSys::new(), &l, &run, &opts))
-    });
-    match planned {
-        Ok(p) if p.actions.is_empty() => "The Kora app is already installed and up to date".into(),
-        Ok(p) => format!("Install the Kora app: {}", p.actions.iter().map(app::Action::describe).collect::<Vec<_>>().join("; ")),
-        Err(e) => format!("Install the Kora app (cannot plan it here: {e})"),
-    }
 }
 
 /// What `rollback` should remove.
@@ -1078,20 +1058,12 @@ mod tests {
     }
 
     #[test]
-    fn the_app_step_is_planned_only_when_asked_and_a_dry_run_lists_its_changes() {
+    fn the_old_app_step_is_gone_even_when_an_old_request_asks_for_it() {
         let t = tempfile::tempdir().unwrap();
         let dir = t.path().join("srv");
         let mut r = req(&dir);
-        assert!(!plan_steps(&r, true).iter().any(|p| p.id == "system.app"), "no app step by default");
         r.app = Some(crate::app_install::AppChoice::default());
-        let ids: Vec<&str> = plan_steps(&r, true).iter().map(|p| p.id).collect();
-        assert_eq!(&ids[ids.len() - 2..], ["system.app", "finalize"], "after config and services, before registering");
-        r.catalog = Some("/nonexistent/catalog.json".into());
-        let mut sink = Collect(vec![]);
-        run_with(&r, &mut sink, &Hooks { assume_admin: Some(true), ..Hooks::default() }).unwrap();
-        let ev = sink.0.iter().find(|e| e.step == "system.app").expect("app step in the dry run");
-        assert!(ev.detail.starts_with("Install the Kora app") || ev.detail.contains("already installed"), "{}", ev.detail);
-        assert!(!dir.exists());
+        assert!(!plan_steps(&r, true).iter().any(|p| p.id == "system.app"), "retired in 0.7.0: shortcuts are per-user now");
     }
 
     #[test]

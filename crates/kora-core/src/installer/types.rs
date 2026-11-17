@@ -103,8 +103,9 @@ pub struct InstallRequest {
     /// Start the server when the install is done (final `launch` step) and wait until it answers.
     #[serde(default)]
     pub start: bool,
-    /// Also install the Kora app (command / Start Menu shortcut) so the user can reopen the manager later. `None` = no.
-    #[serde(default)]
+    /// Retired in 0.7.0 and ignored: the old machine-wide "Kora app" is no longer installed (the install
+    /// scripts make per-user shortcuts instead). Kept so saved requests and old clients still load.
+    #[serde(default, skip_serializing)]
     pub app: Option<crate::app_install::AppChoice>,
 }
 

@@ -45,7 +45,7 @@ struct InstallArgs {
     /// Server name (display + registry name).
     #[arg(long)]
     name: Option<String>,
-    /// Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: %USERPROFILE%\kora\<name>).
+    /// Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: C:\Kora\<name>, the same as in the panel).
     #[arg(long)]
     dir: Option<PathBuf>,
     /// prod = pinned release clones, dev = forks on your GitHub account.
@@ -217,24 +217,11 @@ impl InstallArgs {
     }
 }
 
-/// The folder used when `--dir` is not given. Linux/macOS: `kora_core::userhome::default_server_dir`
-/// (the home folder of the person installing, also under sudo; `/home/kora/<name>` when logged in as
-/// root). Windows: `%USERPROFILE%\kora\<name>` as before. Never relative.
+/// The folder used when `--dir` is not given: the same one the panel suggests
+/// (`kora_core::userhome::default_server_dir`). Windows: `C:\Kora\<name>`. Linux: the home folder of
+/// the person installing, also under sudo (`/home/kora/<name>` when logged in as root). Never relative.
 fn default_dir(name: &str) -> Result<PathBuf, String> {
-    let slug = installer::slug(name);
-    if !cfg!(windows) {
-        return kora_core::userhome::default_server_dir(&slug);
-    }
-    home_dir(true, &|k| std::env::var_os(k))
-        .map(|h| h.join("kora").join(&slug))
-        .ok_or_else(|| format!("Kora could not find your user folder (USERPROFILE is not set). Choose the server folder with --dir, for example --dir C:\\Kora\\{slug}."))
-}
-
-/// The user's home folder: USERPROFILE first on Windows (HOME may point elsewhere under Git Bash),
-/// HOME first elsewhere. `None` when neither is set (never an empty, relative path).
-fn home_dir(windows: bool, get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
-    let order = if windows { ["USERPROFILE", "HOME"] } else { ["HOME", "USERPROFILE"] };
-    order.iter().find_map(|k| get(k).filter(|v| !v.is_empty())).map(PathBuf::from).filter(|p| windows || p.is_absolute())
+    kora_core::userhome::default_server_dir(&installer::slug(name))
 }
 
 /// What to do when an update needs a restart.
@@ -2926,24 +2913,14 @@ mod tests {
     }
 
     #[test]
-    fn home_dir_prefers_the_platform_variable() {
-        let env = |k: &str| match k {
-            "HOME" => Some("/c/Users/Git Bash Home".into()),
-            "USERPROFILE" => Some("C:\\Users\\Real".into()),
-            _ => None,
-        };
-        assert_eq!(home_dir(true, &env), Some(PathBuf::from("C:\\Users\\Real")));
-        // `/c/...` is only an absolute path on Unix (on Windows it has no drive), so the non-Windows
-        // branch is checked where its paths mean something.
-        if cfg!(unix) {
-            assert_eq!(home_dir(false, &env), Some(PathBuf::from("/c/Users/Git Bash Home")));
+    fn the_headless_default_folder_is_the_one_the_panel_suggests() {
+        // One rule for both: `kora_core::userhome` (Windows: C:\Kora\<name>).
+        assert_eq!(default_dir("Alpha Server"), kora_core::userhome::default_server_dir("alpha-server"));
+        if cfg!(windows) {
+            assert_eq!(default_dir("Alpha Server").unwrap(), PathBuf::from("C:\\Kora\\alpha-server"));
         }
-        let only_home = |k: &str| (k == "HOME").then(|| "/home/me".into());
-        assert_eq!(home_dir(true, &only_home), Some(PathBuf::from("/home/me")), "falls back");
-        let empty = |k: &str| (k == "USERPROFILE").then(|| "".into());
-        assert_eq!(home_dir(true, &empty), None, "never an empty (relative) folder");
-        let relative = |k: &str| (k == "HOME").then(|| "rel/home".into());
-        assert_eq!(home_dir(false, &relative), None);
+        let r = InstallArgs { name: Some("Alpha".into()), ..Default::default() }.into_request().unwrap();
+        assert_eq!(Ok(r.dir), kora_core::userhome::default_server_dir("alpha"));
     }
 
     #[test]
