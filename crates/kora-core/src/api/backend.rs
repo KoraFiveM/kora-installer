@@ -113,6 +113,10 @@ pub trait Backend {
     fn scan_roots(&self) -> Vec<PathBuf>;
 
     fn preview(&mut self, e: &ServerEntry, scope: Scope) -> Res<UpdatePreview>;
+    /// [`Backend::preview`] that also reports each resource as it is checked. Front ends that show progress override it.
+    fn preview_events(&mut self, e: &ServerEntry, scope: Scope, _on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdatePreview> {
+        self.preview(e, scope)
+    }
     fn apply(
         &mut self,
         e: &ServerEntry,

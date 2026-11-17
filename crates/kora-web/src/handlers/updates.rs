@@ -122,8 +122,9 @@ pub async fn update_preview(
     let e = known(&st, s.clone()).await?;
     not_busy(&e).await?;
     let make = st.backend.clone();
-    st.spawn_job(Op::UpdatePreview, Some(s), move |_h| {
-        let p = make().preview(&e, scope)?;
+    st.spawn_job(Op::UpdatePreview, Some(s), move |h| {
+        // Each resource checked is an event on the job (the response shape is unchanged).
+        let p = make().preview_events(&e, scope, &mut |ev| h.event(update_event_json(&ev)))?;
         let mut v = serde_json::to_value(&p).map_err(|x| x.to_string())?;
         v["badge"] = badge_json(badge_of(&p));
         Ok(v)

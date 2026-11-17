@@ -278,6 +278,10 @@ impl Backend for SystemBackend {
         manual::preview(&record(e)?, scope).map_err(err)
     }
 
+    fn preview_events(&mut self, e: &ServerEntry, scope: Scope, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdatePreview> {
+        manual::preview_events(&record(e)?, scope, on).map_err(err)
+    }
+
     fn apply(
         &mut self,
         e: &ServerEntry,
