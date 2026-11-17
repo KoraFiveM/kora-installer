@@ -342,8 +342,22 @@ fn service_for(name: &str) -> Result<crate::service::ManagedServer> {
     })
 }
 
-/// Current OS service state of a registered server (`NotInstalled` when it has no service).
+/// The container-mode target of a registered server (`None`: it runs as a service or by hand).
+fn container_target(name: &str) -> Result<Option<crate::container::lifecycle::Target>> {
+    if !cfg!(unix) {
+        return Ok(None);
+    }
+    let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
+    let Some(entry) = reg.find(name) else { return Ok(None) };
+    crate::container::lifecycle::target_of(&entry.name, &entry.dir).map_err(InstallError)
+}
+
+/// Current OS service state of a registered server (`NotInstalled` when it has no service). A container
+/// server answers from its engine: a stopped or missing container is `Stopped` (a start makes it again).
 pub fn service_state(name: &str) -> Result<crate::service::ServiceState> {
+    if let Some(t) = container_target(name)? {
+        return Ok(crate::container::lifecycle::service_state(&t, &crate::container::lifecycle::system()));
+    }
     let server = service_for(name)?;
     let rn = crate::service::SystemRunner;
     crate::service::ServiceManager::new(crate::service::Platform::current(), &rn).status(&server).map_err(|e| InstallError(e.to_string()))
@@ -352,6 +366,9 @@ pub fn service_state(name: &str) -> Result<crate::service::ServiceState> {
 /// start / stop / restart the server's OS service.
 pub fn service_control(name: &str, action: crate::service::ControlAction) -> Result<()> {
     use crate::service::ServiceState;
+    if let Some(t) = container_target(name)? {
+        return crate::container::lifecycle::control(&t, action, &crate::container::lifecycle::system()).map_err(|p| InstallError(p.encode()));
+    }
     if service_state(name)? == ServiceState::NotInstalled {
         return Err(InstallError(format!("'{name}' has no background service. Install with --service (as administrator), or run `kora service-host {name}` in a terminal.")));
     }

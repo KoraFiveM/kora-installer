@@ -87,6 +87,37 @@ impl ContainerRecord {
         }
     }
 
+    /// Is this record what Kora itself writes for the server with this slug? The file sits in a folder the
+    /// server's own processes can change (a resource is somebody else's code), and Kora acts on the names in
+    /// it: stops, removes. So a record is only acted on when every name is the canonical one for the
+    /// server's slug (taken from the server list, which the folder cannot change), the images are Kora's pins,
+    /// and the account is not root. A forged record then cannot make Kora touch any other container.
+    pub fn check(&self, slug: &str) -> Result<(), String> {
+        use super::{container_name, db_container_name, network_name, pins, volume_name};
+        let bad = |what: &str| Err(format!("this server's container record ({FILE}) was changed: {what}. Kora will not act on it; restore it from a backup or reinstall the server."));
+        if self.container != container_name(slug) {
+            return bad("the container name is not this server's");
+        }
+        if !self.image.starts_with(&format!("{}@sha256:", pins::BASE.repository)) {
+            return bad("the image is not one Kora pins");
+        }
+        if self.uid == 0 || self.gid == 0 {
+            return bad("it asks for the root account");
+        }
+        if let Some(d) = &self.db {
+            if d.container != db_container_name(slug) || d.network != network_name(slug) || d.volume != volume_name(slug) {
+                return bad("the database container, network or volume name is not this server's");
+            }
+            if !d.image.starts_with(&format!("{}@sha256:", pins::MARIADB.repository)) {
+                return bad("the database image is not one Kora pins");
+            }
+        }
+        if self.bind.as_deref().is_some_and(|b| b.parse::<std::net::IpAddr>().is_err()) {
+            return bad("the address to publish on is not an IP address");
+        }
+        Ok(())
+    }
+
     pub fn engine(&self) -> super::engine::Engine {
         super::engine::Engine::new(self.engine, self.rootless)
     }
@@ -138,6 +169,31 @@ pub(crate) mod tests {
         ContainerRecord::remove(d.path()).unwrap();
         assert!(!is_container(d.path()));
         ContainerRecord::remove(d.path()).unwrap();
+    }
+
+    #[test]
+    fn a_forged_record_is_refused_so_kora_never_touches_another_container() {
+        let ok = sample();
+        assert!(ok.check("main").is_ok());
+        assert!(ok.check("other").is_err(), "a record copied from another server is not this server's");
+        let mut r = ok.clone();
+        r.container = "some-other-container".into();
+        assert!(r.check("main").unwrap_err().contains("container name"));
+        let mut r = ok.clone();
+        r.db.as_mut().unwrap().volume = "precious-data".into();
+        assert!(r.check("main").is_err());
+        let mut r = ok.clone();
+        r.image = "evil.example/miner@sha256:00".into();
+        assert!(r.check("main").is_err());
+        let mut r = ok.clone();
+        r.uid = 0;
+        assert!(r.check("main").is_err());
+        let mut r = ok.clone();
+        r.bind = Some("not an address".into());
+        assert!(r.check("main").is_err());
+        let mut r = ok;
+        r.db.as_mut().unwrap().image = "docker.io/library/alpine@sha256:00".into();
+        assert!(r.check("main").is_err());
     }
 
     #[test]

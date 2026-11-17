@@ -247,6 +247,49 @@ pub fn record_of(dir: &Path) -> Option<ContainerRecord> {
     ContainerRecord::load(dir)
 }
 
+/// A container-mode server found by its registry name: its folder, its (checked) record and its slug.
+#[derive(Debug, Clone)]
+pub struct Target {
+    pub dir: std::path::PathBuf,
+    pub rec: ContainerRecord,
+    pub slug: String,
+}
+
+/// The container target of a registered server. `Ok(None)`: it is not a container-mode server. `Err`: it is,
+/// but its record fails [`ContainerRecord::check`] and Kora will not act on it.
+pub fn target_of(registry_name: &str, dir: &Path) -> Result<Option<Target>, String> {
+    let Some(rec) = ContainerRecord::load(dir) else { return Ok(None) };
+    let slug = crate::installer::slug(registry_name);
+    rec.check(&slug)?;
+    Ok(Some(Target { dir: dir.to_path_buf(), rec, slug }))
+}
+
+/// A container server's state in the words the service layer uses. A container that does not exist (removed by
+/// hand, or a fresh machine) is a stopped server: starting it creates the container again.
+pub fn service_state(t: &Target, runner: &dyn EngineRunner) -> crate::service::ServiceState {
+    use crate::service::ServiceState;
+    match Manager::new(&t.dir, &t.rec, runner).state() {
+        ContainerState::Running => ServiceState::Running,
+        ContainerState::Stopped | ContainerState::Missing => ServiceState::Stopped,
+        ContainerState::Other(w) => ServiceState::Other(w),
+    }
+}
+
+/// start / stop / restart of a container server. A start also makes sure the console copy runs.
+pub fn control(t: &Target, action: crate::service::ControlAction, runner: &dyn EngineRunner) -> Result<(), Problem> {
+    use crate::service::ControlAction;
+    let m = Manager::new(&t.dir, &t.rec, runner);
+    match action {
+        ControlAction::Start => m.start(&mut |_| {})?,
+        ControlAction::Stop => m.stop()?,
+        ControlAction::Restart => m.restart(&mut |_| {})?,
+    }
+    if action != ControlAction::Stop {
+        super::logs::ensure_follower(&t.dir);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
