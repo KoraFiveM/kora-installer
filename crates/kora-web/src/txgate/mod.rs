@@ -336,7 +336,14 @@ pub async fn txadmin_ticket(State(st): State<AppState>, Extension(caller): Exten
     let Some(gw_wanted) = (st.txgate.port_fn)(e.ports.txadmin) else {
         return Err(ApiError::bad_request("This server's txAdmin port cannot get a panel address. Change the txAdmin port to one between 1024 and 55000."));
     };
-    st.txgate.set_route(gw_wanted, &e.name, e.ports.txadmin).map_err(ApiError::conflict)?;
+    // Another server's gateway already owns this port: say so before opening anything (0 = "any", tests).
+    if gw_wanted != 0 {
+        if let Some(r) = st.txgate.route(gw_wanted) {
+            if r.server != e.name {
+                return Err(ApiError::conflict(format!("Port {gw_wanted} is already the txAdmin address of the server '{}'.", r.server)));
+            }
+        }
+    }
     let mut actual = None;
     let mut first_err = None;
     for ip in st.txgate.ips(&st) {
@@ -349,9 +356,7 @@ pub async fn txadmin_ticket(State(st): State<AppState>, Extension(caller): Exten
         return Err(ApiError::conflict(first_err.unwrap_or_else(|| "Kora could not open txAdmin's address.".into())));
     };
     // The route is keyed by the port that is really open.
-    if port != gw_wanted {
-        st.txgate.set_route(port, &e.name, e.ports.txadmin).map_err(ApiError::conflict)?;
-    }
+    st.txgate.set_route(port, &e.name, e.ports.txadmin).map_err(ApiError::conflict)?;
     let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("127.0.0.1");
     let ticket = st.txgate.mint_ticket(Ticket { server: e.name.clone(), panel_session, remote: caller.remote, gateway: port, expires: st.txgate.now() + TICKET_TTL });
     let dir = e.dir.clone();

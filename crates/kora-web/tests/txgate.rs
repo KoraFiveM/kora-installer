@@ -30,6 +30,7 @@ struct Tx {
     /// Requests that reached it (not counting the sockets).
     hits: AtomicUsize,
     last_head: Mutex<String>,
+    paths: Mutex<Vec<String>>,
 }
 
 /// Serves on an ephemeral loopback port; returns the port.
@@ -60,6 +61,7 @@ async fn fake_txadmin(label: &'static str) -> (u16, Arc<Tx>) {
                 *tx.last_head.lock().unwrap() = head.clone();
                 let first = head.lines().next().unwrap_or("").to_string();
                 let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
+                tx.paths.lock().unwrap().push(path.clone());
                 let lower = head.to_ascii_lowercase();
                 let clen: usize = lower.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse().ok()).unwrap_or(0);
                 while buf.len() < head_end + clen {
@@ -272,9 +274,10 @@ async fn ticket_enter_then_proxied_with_cookies_and_redirects_rewritten() {
     // The ticket worked once.
     let (_, j) = ticket(&w, &s, "prod").await;
     let url = j["url"].as_str().unwrap().to_string();
-    let again = raw(port, &get(&enter_path(&url), port, "")).await;
+    let port2 = gate_port(&url);
+    let again = raw(port2, &get(&enter_path(&url), port2, "")).await;
     assert_eq!(again.status, 303);
-    let reuse = raw(port, &get(&enter_path(&url), port, "")).await;
+    let reuse = raw(port2, &get(&enter_path(&url), port2, "")).await;
     assert_eq!(reuse.status, 401, "a ticket is single use");
 }
 
@@ -449,16 +452,17 @@ async fn smuggling_attempts_are_dropped_or_refused() {
         let a = raw(port, &get("/who", port, &format!("Cookie: {gate}\r\n{h}\r\n"))).await;
         assert_eq!(a.status, 403, "{h}");
     }
+    // Framing tricks: whatever the parser makes of them, a second, hidden request never reaches txAdmin.
     let hits = w.prod_tx.hits.load(Ordering::SeqCst);
-    // Both a length and chunked framing, or a doubled length: the parser refuses, nothing is forwarded.
-    let a = raw(port, &format!("POST /post HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {gate}\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\nGET /who HTTP/1.1\r\n\r\n")).await;
-    assert!(a.status == 400 || a.status == 0, "{}", a.status);
+    let a = raw(port, &format!("POST /post HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {gate}\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\nGET /who HTTP/1.1\r\nHost: x\r\n\r\n")).await;
+    assert!(matches!(a.status, 0 | 200 | 400), "{}", a.status);
     let a = raw(port, &format!("POST /post HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {gate}\r\nContent-Length: 5\r\nContent-Length: 6\r\nConnection: close\r\n\r\nhello!")).await;
-    assert!(a.status == 400 || a.status == 0, "{}", a.status);
-    // A space before the colon (a classic) and a bare line feed.
+    assert!(matches!(a.status, 0 | 400), "a doubled length is refused: {}", a.status);
+    // A space before the colon (a classic).
     let a = raw(port, &format!("GET /who HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {gate}\r\nX-Evil : 1\r\nConnection: close\r\n\r\n")).await;
-    assert!(a.status == 400 || a.status == 0, "{}", a.status);
-    assert_eq!(w.prod_tx.hits.load(Ordering::SeqCst), hits, "no smuggled request got through");
+    assert!(matches!(a.status, 0 | 400), "{}", a.status);
+    assert!(w.prod_tx.hits.load(Ordering::SeqCst) <= hits + 1, "more than the one POST reached txAdmin");
+    assert!(!w.prod_tx.paths.lock().unwrap().iter().any(|p| p == "/who"), "a smuggled request got through");
     // An unsupported upgrade is not passed on either.
     let a = raw(port, &get("/who", port, &format!("Cookie: {gate}\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n"))).await;
     assert_eq!(a.status, 400);
