@@ -131,9 +131,8 @@ fn tell(dir: &Path, message: &Message) -> bool {
                 let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
                 if s.write_all(encode(&info.nonce, message).as_bytes()).is_ok() {
                     let mut reply = String::new();
-                    if BufReader::new(s).read_line(&mut reply).is_ok() && reply.trim() == "ok" {
-                        return true;
-                    }
+                    // Connected: whatever it answers is final (no more waiting).
+                    return BufReader::new(s).read_line(&mut reply).is_ok() && reply.trim() == "ok";
                 }
             }
         }

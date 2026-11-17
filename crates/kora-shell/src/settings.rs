@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::toast::Quiet;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Settings {
     /// "Kora keeps running in the tray" has been shown once.
@@ -25,12 +25,6 @@ pub struct Settings {
     pub quiet_end: Option<u16>,
     pub window_width: Option<u32>,
     pub window_height: Option<u32>,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self { close_hint_shown: false, autostart_default_applied: false, pause_until: None, quiet_start: None, quiet_end: None, window_width: None, window_height: None }
-    }
 }
 
 impl Settings {
