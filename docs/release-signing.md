@@ -134,7 +134,9 @@ Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 | `.signpath/policies/release-signing.yml` | Optional pipeline policy (GitHub-hosted runners only, branch rules). |
 | `docs/release-signing.md` | This file. |
 
-## `release.yml` change (the installer workstream owns that file; this is the exact snippet)
+## `release.yml` (wired in; this is what the snippet became)
+
+`release.yml` now has jobs `sign-exe` (signs `kora.exe`), `package-windows` (builds the MSI from the signed exe, needs `sign-exe`), `sign-msi` (signs the MSI) and `verify` (needs all of them; skipped signing = rehearsal = fine, failed signing = nothing ships; checks the signatures are present in the exe and the MSI when signing ran, and every `.sha256` against the signed files). The original snippet, kept for reference:
 
 Add a job between `build` and `verify`, and make `verify` wait for it:
 
