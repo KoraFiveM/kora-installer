@@ -1339,7 +1339,6 @@ impl InstallStep {
         let mut tail = Vec::new();
         if platform == SvcPlatform::Linux {
             tail.push(service::SystemStep::write("Save the server's non-secret environment (txAdmin data folder and port)", &server.env_file_path(), txadmin_env_text(ctx), 0o600));
-            tail.push(service::SystemStep::run(format!("Give '{account}' ownership of the server folder (and only that folder)"), "chown", &["-R", &format!("{account}:{account}"), &server.dir]));
         }
         if platform == SvcPlatform::Windows {
             server.validate().map_err(|e| InstallError(e.to_string()))?;
@@ -1388,6 +1387,13 @@ impl InstallStep {
         super::check_dir_links(&ctx.req.dir)?;
         let unit = server.unit_path();
         ctx.update_created(|c| c.service_unit = Some(unit))?;
+        if platform == SvcPlatform::Linux {
+            // Hand the server folder (and only it) to the server's own account, through open folder
+            // handles: `chown -R <path>` would follow a link swapped in after the check above.
+            let (uid, gid) = crate::userhome::account_ids(&account).ok_or_else(|| InstallError(format!("cannot find the account '{account}'")))?;
+            ctx.emit(self.id, StepStatus::Running, &format!("Giving '{account}' ownership of the server folder (and only that folder)"), 0.8);
+            crate::fsutil::chown_tree_no_follow(&ctx.req.dir, uid, gid).map_err(|e| InstallError(format!("cannot give '{account}' the server folder: {e}")))?;
+        }
         service::apply_plan(&service::Plan::new(tail), &rn).map_err(|e| InstallError(e.to_string()))?;
         if create_account {
             ctx.note(format!("Created the system account '{account}' (no login, no home folder) for the server; `kora delete` removes it again."));
