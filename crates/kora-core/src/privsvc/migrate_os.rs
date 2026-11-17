@@ -21,7 +21,11 @@ impl Quick {
         let mut cmd = crate::sysexe::command(program);
         cmd.args(args);
         let out = crate::sysexe::output_within(cmd, Self::LIMIT)?;
-        Ok(crate::service::CommandOutput { code: out.status.code().unwrap_or(-1), stdout: String::from_utf8_lossy(&out.stdout).into_owned(), stderr: String::from_utf8_lossy(&out.stderr).into_owned() })
+        Ok(crate::service::CommandOutput {
+            code: out.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        })
     }
 }
 
