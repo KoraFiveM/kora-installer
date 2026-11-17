@@ -38,6 +38,7 @@
 //! No cryptographic primitive is implemented here: WebAuthn is `webauthn-rs`, hashing `argon2`, HMAC/SHA from
 //! RustCrypto, comparisons constant time.
 pub mod db;
+pub mod passkey;
 pub mod password;
 pub mod recovery;
 pub mod totp;

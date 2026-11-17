@@ -39,6 +39,7 @@ exceptions = [
   { allow = ["MPL-2.0"], crate = "webauthn-rs-proto" },
   { allow = ["MPL-2.0"], crate = "webauthn-attestation-ca" },
   { allow = ["MPL-2.0"], crate = "crypto-glue" },
+  { allow = ["MPL-2.0"], crate = "webauthn-authenticator-rs" }, # dev-dependency: a software passkey for the tests
 ]
 
 [bans]
