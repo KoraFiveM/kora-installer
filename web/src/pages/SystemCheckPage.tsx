@@ -11,6 +11,16 @@ import { t as tt, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/system/systemCheckPage'
 
+/** The heading of each line is chosen by its id (the server's `label` is the fallback for an id this page does not know yet). */
+const ITEM_LABEL: Record<string, Msg> = {
+  git: msg('system.systemCheckPage.itemGit'),
+  gh: msg('system.systemCheckPage.itemGh'),
+  github: msg('system.systemCheckPage.itemGithub'),
+  database: msg('system.systemCheckPage.itemDatabase'),
+  admin: msg('system.systemCheckPage.itemAdmin'),
+  service: msg('system.systemCheckPage.itemService'),
+}
+
 const BADGE: Record<CheckState, { tone: 'success' | 'amber' | 'neutral'; text: Msg }> = {
   ok: { tone: 'success', text: msg('system.systemCheckPage.fine') },
   problem: { tone: 'amber', text: msg('system.systemCheckPage.needsFixing') },
@@ -75,7 +85,7 @@ export default function SystemCheckPage() {
                     <StateIcon state={i.state} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="font-semibold">{i.label}</h2>
+                        <h2 className="font-semibold">{ITEM_LABEL[i.id] ? tt(ITEM_LABEL[i.id]!) : i.label}</h2>
                         <Badge tone={BADGE[i.state].tone} dot>{tt(BADGE[i.state].text)}</Badge>
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">{i.summary}</p>

@@ -12,6 +12,12 @@ const messages = {
   'system.systemCheckPage.needsFixing': 'Needs fixing',
   'system.systemCheckPage.goodKnow': 'Good to know',
   'system.systemCheckPage.thingsNeedFixing': '{count, plural, one {# thing needs fixing.} other {# things need fixing.}}',
+  'system.systemCheckPage.itemGit': 'Git',
+  'system.systemCheckPage.itemGh': 'GitHub CLI',
+  'system.systemCheckPage.itemGithub': 'GitHub sign-in',
+  'system.systemCheckPage.itemDatabase': 'Database',
+  'system.systemCheckPage.itemAdmin': 'Administrator rights',
+  'system.systemCheckPage.itemService': 'Background service',
 } as const
 
 register('en', messages)
