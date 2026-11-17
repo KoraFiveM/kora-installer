@@ -374,8 +374,7 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
     // A server on released versions moves between releases (the catalogue decides), through the same engine as the
     // manual update; it takes the update lock itself.
     if let Some(sf) = ServerFile::load(&dir).ok().filter(|sf| sf.versions() == Versions::Released) {
-        let res = update::manual::apply(&sf, update::manual::Scope::All, update::manual::ApplyOpts::new(update::manual::RestartPolicy::WhenQuiet), &mut |_| {});
-        append_log(&dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {e}")));
+        let res = auto_update_released(&sf, &|sf| update::manual::apply(sf, update::manual::Scope::All, update::manual::ApplyOpts::new(update::manual::RestartPolicy::WhenQuiet), &mut |_| {}));
         if let Ok(report) = &res {
             let record = super::registry::ServerEntry { source: sf.source, versions: sf.versions, name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
             crate::notify::after_update(&record, report);
@@ -397,6 +396,15 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
         crate::notify::after_update(&record, report);
     }
     res.map(|(r, _)| r)
+}
+
+/// The scheduled update of a server on released versions: `run` is the release engine (the same one as a manual update, which
+/// takes the update lock itself); this writes `update.log` the way the branch-following update does. A resource that was
+/// put on a branch or a pull request is left alone by the engine and reported, never a failure.
+pub(crate) fn auto_update_released(sf: &ServerFile, run: &dyn Fn(&ServerFile) -> Result<UpdateReport>) -> Result<UpdateReport> {
+    let res = run(sf);
+    append_log(&sf.dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {e}")));
+    res
 }
 
 /// The locked part of [`auto_update`], with injectable git, health and player count: takes the

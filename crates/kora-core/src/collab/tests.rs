@@ -416,7 +416,15 @@ fn changing_the_versions_writes_both_spellings_and_moves_nothing() {
     assert!(v.message.contains("nothing has changed yet"));
     // The registry entry follows, in the store.
     crate::installer::registry::Registry::update(|r| {
-        r.upsert(crate::installer::registry::ServerEntry { source: None, versions: None, name: "s".into(), dir: d.path().to_path_buf(), mode: crate::installer::Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 });
+        r.upsert(crate::installer::registry::ServerEntry {
+            source: None,
+            versions: None,
+            name: "s".into(),
+            dir: d.path().to_path_buf(),
+            mode: crate::installer::Mode::Production,
+            ports: PortsRecord { game: 1, txadmin: 2 },
+            created_unix: 0,
+        });
         Ok(())
     })
     .unwrap();

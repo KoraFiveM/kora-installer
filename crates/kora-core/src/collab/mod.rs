@@ -163,7 +163,22 @@ pub fn parse_status(z: &str) -> Vec<ChangedFile> {
 }
 
 /// Files whose contents are never shown in a diff.
-const SECRET_FILES: &[&str] = &["**/secrets.cfg", "**/server.cfg", "**/.env", "**/.env.*", "**/*.env", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/*secret*", "**/*credential*", "**/*password*", "**/*.p12", "**/*.pfx"];
+const SECRET_FILES: &[&str] = &[
+    "**/secrets.cfg",
+    "**/server.cfg",
+    "**/.env",
+    "**/.env.*",
+    "**/*.env",
+    "**/*.pem",
+    "**/*.key",
+    "**/id_rsa*",
+    "**/id_ed25519*",
+    "**/*secret*",
+    "**/*credential*",
+    "**/*password*",
+    "**/*.p12",
+    "**/*.pfx",
+];
 
 fn is_secret_file(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
@@ -175,7 +190,8 @@ fn is_secret_file(path: &str) -> bool {
 /// Hide what looks like a secret in diff text: `cfxk_` licence keys anywhere, and the value after `=` or `:` on a line whose
 /// name says key, token, password, secret or licence.
 pub fn hide_secrets(diff: &str) -> String {
-    const WORDS: &[&str] = &["password", "passwd", "secret", "token", "api_key", "apikey", "api-key", "licen", "private_key", "webhook", "authorization", "bearer", "connection_string", "mysql_connection"];
+    const WORDS: &[&str] =
+        &["password", "passwd", "secret", "token", "api_key", "apikey", "api-key", "licen", "private_key", "webhook", "authorization", "bearer", "connection_string", "mysql_connection"];
     let cleaned = crate::store::jobs::redact_text(diff);
     cleaned
         .lines()

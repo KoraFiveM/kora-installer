@@ -900,3 +900,86 @@ fn the_plan_comes_first_and_every_planned_resource_reaches_a_final_state() {
         assert!(!matches!(last.as_str(), "updating" | "rolling back"), "{id} stuck at {last}: {ev:?}");
     }
 }
+
+/// The scheduled update of a server on released versions, end to end with real git: two resources pinned to release 0.1.0
+/// (tags in their repositories, a catalogue that lists 0.2.0), one of them being used to try a pull request.
+#[test]
+fn a_scheduled_run_on_released_versions_moves_pinned_resources_and_leaves_one_that_is_trying_a_pull_request() {
+    use crate::installer::gitops::auto_update_released;
+    let t = tempfile::tempdir().unwrap();
+    let dir = t.path().join("rel server");
+    let mut recs = vec![];
+    let mut pins = vec![];
+    for (id, path) in [("kora-chat", "[kora]/kora_chat"), ("kora-hud", "[kora]/kora_hud")] {
+        let up = t.path().join(format!("up-{id}"));
+        std::fs::create_dir(&up).unwrap();
+        sh(&up, &["init", "-q", "-b", "main"]);
+        let c1 = commit(&up, "1", "one");
+        sh(&up, &["tag", "v0.1.0", &c1]);
+        let c2 = commit(&up, "2", "two");
+        sh(&up, &["tag", "v0.2.0", &c2]);
+        let dest = dir.join("resources").join(path);
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        sh(t.path(), &["clone", "-q", up.to_str().unwrap(), dest.to_str().unwrap()]);
+        sh(&dest, &["checkout", "-q", "--detach", &c1]);
+        recs.push(ResourceRecord {
+            id: id.into(),
+            path: path.into(),
+            repository: format!("https://github.com/x/{}.git", path.rsplit('/').next().unwrap()),
+            branch: "main".into(),
+            commit: Some(c1.clone()),
+            ..Default::default()
+        });
+        pins.push((id, path, c1, c2));
+    }
+    // kora-hud is the one someone is trying a pull request on.
+    let hud = dir.join("resources").join(pins[1].1);
+    sh(&hud, &["checkout", "-q", "-b", "pr/12", &pins[1].2]);
+    let cat_json = format!(
+        r#"{{"schemaVersion":1,"resources":[{}]}}"#,
+        pins.iter()
+            .map(|(id, path, c1, c2)| format!(
+                r#"{{"id":"{id}","repository":"https://github.com/x/{n}.git","path":"{path}","group":"kora","kind":"kora","branch":"main","latest":"0.2.0","versions":[{{"version":"0.2.0","tag":"v0.2.0","commit":"{c2}"}},{{"version":"0.1.0","tag":"v0.1.0","commit":"{c1}"}}]}}"#,
+                n = path.rsplit('/').next().unwrap()
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let cat = Catalog::parse(&cat_json).unwrap();
+    let mut env = server(Mode::Production, recs, t, dir);
+    env.sf.source = Some(crate::installer::Source::Clone);
+    env.sf.versions = Some(crate::installer::Versions::Released);
+    env.sf.save().unwrap();
+    let (chat_c2, hud_c1) = (pins[0].3.clone(), pins[1].2.clone());
+
+    // What the timer does: the release engine, restart only when quiet, then a line in update.log.
+    let sf = env.sf.clone();
+    let run = |sf: &ServerFile| {
+        let mut ev = vec![];
+        apply_with(sf, Scope::All, opts(RestartPolicy::WhenQuiet, &[]), &GitCli::default(), &Health::ok(), Some(&cat), Some(0), 70, &mut |e| ev.push(e))
+    };
+    let r = auto_update_released(&sf, &run).unwrap();
+    assert_eq!(head(&env.path(0)), chat_c2, "the pinned resource moved to the newer release");
+    assert_eq!(r.updated.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), vec!["kora-chat"]);
+    assert_eq!(head(&env.path(1)), hud_c1, "the resource trying a pull request was not touched");
+    assert_eq!(git_branch(&env.path(1)), "pr/12", "and is still on its pull request branch");
+    assert!(r.skipped.iter().any(|(id, why)| id == "kora-hud" && matches!(why, SkipReason::OtherBranch(b) if b == "pr/12")), "{:?}", r.skipped);
+    assert!(!r.has_problems(), "a resource on a pull request is not a problem: {:?}", r.needs_attention);
+    // The pin is recorded for the one that moved, and not for the other.
+    let saved = ServerFile::load(&env.sf.dir).unwrap();
+    assert_eq!(saved.resources[0].commit.as_deref(), Some(chat_c2.as_str()));
+    assert_eq!(saved.resources[1].commit.as_deref(), Some(hud_c1.as_str()));
+    // The report in the log says what happened, in the same words as the branch-following update.
+    let log = std::fs::read_to_string(env.sf.dir.join("update.log")).unwrap();
+    assert!(log.contains("kora-chat") && log.contains("pull request #12"), "{log}");
+    // The status file counts nothing as needing attention.
+    assert_eq!(status_of(&env)["attention"], 0);
+    // The next night has nothing to do.
+    let again = auto_update_released(&saved, &run).unwrap();
+    assert!(again.updated.is_empty() && !again.has_problems(), "{again:?}");
+    assert_eq!(head(&env.path(1)), hud_c1);
+}
+
+fn git_branch(p: &Path) -> String {
+    String::from_utf8(std::process::Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).current_dir(p).output().unwrap().stdout).unwrap().trim().to_string()
+}

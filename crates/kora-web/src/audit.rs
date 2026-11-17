@@ -208,7 +208,9 @@ impl Ctx {
                     Ok(JobMessage::Event(_)) => {}
                     Ok(JobMessage::Done(v)) => {
                         // Making copies is done on GitHub too: say into which account.
-                        let who = (op == Op::ResourcesFork).then(|| v.get("owner").and_then(Value::as_str).filter(|o| !o.is_empty() && o.len() <= 64).map(|o| format!(", copies in GitHub account {o}"))).flatten();
+                        let who = (op == Op::ResourcesFork)
+                            .then(|| v.get("owner").and_then(Value::as_str).filter(|o| !o.is_empty() && o.len() <= 64).map(|o| format!(", copies in GitHub account {o}")))
+                            .flatten();
                         return write(&home, op, server.as_deref(), &actor, result::OK, Some(format!("job {id}{}", who.unwrap_or_default())));
                     }
                     Ok(JobMessage::Failed(e)) => {
