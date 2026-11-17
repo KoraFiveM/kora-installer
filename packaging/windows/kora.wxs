@@ -8,7 +8,7 @@
   Upgrade and uninstall work from Apps & features. One administrator approval at install time.
 
   Who may use the service: the account that runs the installer, plus any in the public property
-  ALLOWUSERS (a SID, or names separated by spaces). `kora service allow|deny|list` change it later.
+  ALLOWUSERS (a SID, or several separated by spaces, or by ; when a name has spaces). `kora service allow|deny|list` change it later.
 
   Properties for unattended installs:  msiexec /i kora.msi /qn ALLOWUSERS="S-1-5-21-..."
 -->
