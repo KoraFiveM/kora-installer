@@ -352,7 +352,7 @@ static NO_PAUSE_ON_SUCCESS: std::sync::atomic::AtomicBool = std::sync::atomic::A
 
 fn finish(code: i32) -> ! {
     let (si, so) = (std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
-    if !NO_PAUSE_ON_SUCCESS.load(std::sync::atomic::Ordering::Relaxed) && elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
+    if !NO_PAUSE_ON_SUCCESS.load(std::sync::atomic::Ordering::Relaxed) && elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so, elevate::in_session_zero()) {
         println!("\nPress Enter to close this window.");
         let mut line = String::new();
         let _ = std::io::stdin().read_line(&mut line);

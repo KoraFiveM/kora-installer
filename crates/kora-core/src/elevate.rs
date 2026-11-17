@@ -378,8 +378,30 @@ pub fn ensure_elevated(need: &Need, args: &[OsString], elevator: &dyn Elevator, 
 
 /// Keep the console window open until a key is pressed? (Windows only: a window that Kora's
 /// own relaunch or a double-click created closes the moment the program ends.)
-pub fn should_pause(windows: bool, owns_console: bool, relaunched: bool, stdin_tty: bool, stdout_tty: bool) -> bool {
-    windows && stdin_tty && stdout_tty && (owns_console || relaunched)
+///
+/// Never in session 0 (`no_desktop`): the MSI's custom actions, services and scheduled jobs run there with a console of
+/// their own that nobody can see, so "Press Enter" would wait for ever (the installer hung on it).
+pub fn should_pause(windows: bool, owns_console: bool, relaunched: bool, stdin_tty: bool, stdout_tty: bool, no_desktop: bool) -> bool {
+    windows && !no_desktop && stdin_tty && stdout_tty && (owns_console || relaunched)
+}
+
+/// True when this process runs in Windows session 0: no person is looking at its window.
+#[cfg(windows)]
+pub fn in_session_zero() -> bool {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn ProcessIdToSessionId(process_id: u32, session_id: *mut u32) -> i32;
+        fn GetCurrentProcessId() -> u32;
+    }
+    let mut session = u32::MAX;
+    // SAFETY: `session` is a valid out pointer; the call only reads the process table.
+    let ok = unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) };
+    ok != 0 && session == 0
+}
+
+#[cfg(not(windows))]
+pub fn in_session_zero() -> bool {
+    false
 }
 
 /// True when this process is the only one attached to its console (double-click, or our elevated copy).
@@ -750,12 +772,13 @@ mod tests {
     #[test]
     fn pause_only_for_windows_consoles_that_would_close() {
         // (windows, owns_console, relaunched, stdin_tty, stdout_tty)
-        assert!(should_pause(true, true, false, true, true), "double-click");
-        assert!(should_pause(true, false, true, true, true), "our elevated copy");
-        assert!(!should_pause(true, false, false, true, true), "ran from an open terminal");
-        assert!(!should_pause(true, true, true, false, true), "no stdin: scheduler/CI, never block");
-        assert!(!should_pause(true, true, true, true, false), "output piped");
-        assert!(!should_pause(false, true, true, true, true), "not Windows");
+        assert!(should_pause(true, true, false, true, true, false), "double-click");
+        assert!(should_pause(true, false, true, true, true, false), "our elevated copy");
+        assert!(!should_pause(true, false, false, true, true, false), "ran from an open terminal");
+        assert!(!should_pause(true, true, true, false, true, false), "no stdin: scheduler/CI, never block");
+        assert!(!should_pause(true, true, true, true, false, false), "output piped");
+        assert!(!should_pause(false, true, true, true, true, false), "not Windows");
+        assert!(!should_pause(true, true, true, true, true, true), "session 0 (the installer's actions, services): nobody can press Enter");
     }
 
     #[test]
