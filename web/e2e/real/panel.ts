@@ -135,7 +135,9 @@ class Trouble {
 
 export const test = base.extend<{ trouble: Trouble; signedIn: Page }, { panel: Panel }>({
   panel: [
-    async (_deps, use) => {
+    // Playwright needs the destructuring pattern even when there is nothing to take from it.
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
       const { panel, stop } = await startPanel()
       try {
         await use(panel)
