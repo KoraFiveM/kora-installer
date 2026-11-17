@@ -5,7 +5,8 @@ import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/CopyButton'
 import { toNotice } from '@/components/ErrorNotice'
-import { useRole } from '@/hooks/useRole'
+import { useRole, whyNot } from '@/hooks/useRole'
+import { reachApi } from '@/api/reach'
 import { txAdminLink, type TxAdminLink } from '@/lib/serverLinks'
 
 type Size = 'sm' | 'default'
@@ -40,20 +41,57 @@ export function OpenFolderButton({ name, dir, size = 'sm' }: { name: string; dir
   )
 }
 
-/** The txAdmin address for this browser, and what to say about it. */
+/** How txAdmin is reached from this browser (see [`txAdminLink`]). */
 export function useTxAdminLink(port: number): TxAdminLink {
   const sys = useQuery({ queryKey: ['system'], queryFn: api.system })
   return txAdminLink(window.location.hostname, port, sys.data?.local === true)
 }
 
-/** A real button that opens txAdmin in a new tab. Greyed out (with the reason as its tooltip) while txAdmin is not answering. */
-export function TxAdminButton({ port, up, size = 'sm' }: { port: number; up: boolean; size?: Size }) {
+/**
+ * Opens a server's txAdmin in a new tab: straight to localhost on the computer that runs Kora, through the panel
+ * everywhere else (one-time ticket, see `txgate`). Greyed out (with the reason as its tooltip) while txAdmin is not answering.
+ * Opening it through the panel needs the same trust as the console (it is full control of the server), so only
+ * administrators get it.
+ */
+export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; port: number; up: boolean; size?: Size }) {
   const link = useTxAdminLink(port)
+  const role = useRole()
+  const [failed, setFailed] = useState<string | null>(null)
+  const [note, setNote] = useState<{ username: string | null; url: string | null } | null>(null)
   if (!up) return <Button size={size} variant="default" disabled title="txAdmin answers once the server is running."><ExternalLink /> Open txAdmin</Button>
+  if (!link.viaPanel && link.url) {
+    return (
+      <Button asChild size={size} variant="default">
+        <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.hint ?? undefined}><ExternalLink /> Open txAdmin</a>
+      </Button>
+    )
+  }
+  const off = whyNot(role, 'admin', true)
+  const open = async () => {
+    setFailed(null)
+    // Opened first, in the click, so the browser does not take it for a pop-up; pointed at txAdmin once the ticket is there.
+    const w = window.open('about:blank', '_blank')
+    try {
+      const t = await reachApi.txadminTicket(name)
+      if (w) {
+        w.opener = null
+        w.location.href = t.url
+        setNote({ username: t.username, url: null })
+      } else {
+        setNote({ username: t.username, url: t.url })
+      }
+    } catch (e) {
+      w?.close()
+      setFailed(toNotice(e)?.message ?? 'unknown error')
+    }
+  }
   return (
-    <Button asChild size={size} variant="default">
-      <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.hint ?? undefined}><ExternalLink /> Open txAdmin</a>
-    </Button>
+    <span className="inline-flex flex-col items-start gap-1">
+      <Button size={size} variant="default" disabled={off !== null} title={off ?? link.hint ?? undefined} onClick={() => void open()}><ExternalLink /> Open txAdmin</Button>
+      {failed && <span className="max-w-sm text-xs text-destructive">{failed}</span>}
+      {note?.url && <a className="text-xs underline" href={note.url} target="_blank" rel="noopener noreferrer">Your browser blocked the new tab: click here to open txAdmin.</a>}
+      {note && <span className="max-w-sm text-xs text-muted-foreground">txAdmin has its own sign-in{note.username ? <>: use the account <strong>{note.username}</strong> that Kora made when it installed the server (its password is in <code className="font-mono">secrets/txadmin-admin.txt</code> in the server folder)</> : '.'}. The panel cannot sign you in to it.</span>}
+    </span>
   )
 }
 

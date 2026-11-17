@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { InstallDefaults, InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
-import { OpenFolderButton, useTxAdminLink } from '@/components/ServerLinks'
+import { OpenFolderButton, TxAdminButton, useTxAdminLink } from '@/components/ServerLinks'
+import { ReachCard } from '@/components/ReachCard'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -131,7 +132,6 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
 export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin: number }; cfx?: string | null }) {
   // The same address, hint and note the server's Overview page gives (right for local, tunnelled and remote visits).
   const link = useTxAdminLink(ports.txadmin)
-  const tx = link.url
   return (
     <div className="space-y-4">
       <Alert tone={o.running ? 'success' : 'warning'} title={o.running ? 'Your server is installed and running' : 'Your server is installed'}>
@@ -145,9 +145,10 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       </div>
       <div className="space-y-1.5">
         <div className="text-sm text-muted-foreground">txAdmin</div>
-        <CopyField value={tx} label="txAdmin address" />
+        {link.url ? <CopyField value={link.url} label="txAdmin address" /> : <p className="text-sm">Open it with the button below: it goes through this panel, so no extra port has to be open on this computer.</p>}
         {link.hint && <p className="text-xs text-muted-foreground">{link.hint}</p>}
       </div>
+      <ReachCard name={o.name} compact />
       {!o.admin_user && cfx && (
         <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
       )}
@@ -156,7 +157,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       )}
       {o.notes.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">{o.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
       <div className="flex flex-wrap gap-2">
-        <Button asChild variant="default"><a href={tx} target="_blank" rel="noopener noreferrer"><ExternalLink /> Open txAdmin</a></Button>
+        <TxAdminButton name={o.name} port={ports.txadmin} up={o.running} size="default" />
         <CopyButton text={o.connect} label="Copy connect address" size="default" />
         <OpenFolderButton name={o.name} dir={o.dir} size="default" />
         <Button asChild><Link to={`/servers/${encodeURIComponent(o.name)}`}>Go to the server</Link></Button>

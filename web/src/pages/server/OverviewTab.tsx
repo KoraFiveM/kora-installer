@@ -6,6 +6,7 @@ import { CopyField } from '@/components/CopyButton'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton, useCanOpenFolder, useTxAdminLink } from '@/components/ServerLinks'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { LicenceKeyCard } from '@/components/ChangeLicenceKey'
+import { ReachCard } from '@/components/ReachCard'
 import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
 
@@ -35,7 +36,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
         <CardHeader><CardTitle>Connect and manage</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <TxAdminButton port={s.ports.txadmin} up={s.txadmin_up} size="default" />
+            <TxAdminButton name={s.name} port={s.ports.txadmin} up={s.txadmin_up} size="default" />
             <OpenFolderButton name={s.name} dir={s.dir} size="default" />
             <CopyConnectButton connect={s.connect} size="default" />
           </div>
@@ -53,6 +54,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
           </div>
         </CardContent>
       </Card>
+      <div className="lg:col-span-2"><ReachCard name={s.name} onStart={s.status === 'stopped' ? () => void ctl.run('start') : undefined} /></div>
       <LicenceKeyCard server={s} busy={ctl.busy} restart={() => void ctl.run('restart')} />
     </div>
   )

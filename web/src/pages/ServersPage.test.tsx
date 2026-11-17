@@ -30,7 +30,8 @@ describe('ServersPage quick buttons', () => {
       return jsonResponse(200, { alerts: [] })
     })
     renderApp(<ServersPage />)
-    expect(await screen.findByRole('link', { name: /open txadmin/i })).toHaveAttribute('href', 'http://localhost:40120')
+    // Not at the computer that runs Kora (a tunnel to a machine with no desktop): txAdmin opens through the panel.
+    expect(await screen.findByRole('button', { name: /open txadmin/i })).toBeInTheDocument()
     // On a computer with no desktop (or from afar) the folder button is "Copy path".
     expect(await screen.findByRole('button', { name: /copy path/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy connect address/i })).toBeInTheDocument()
