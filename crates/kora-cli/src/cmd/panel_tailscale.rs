@@ -172,14 +172,14 @@ pub fn configure(admin_flag: Option<&str>) -> Result<Ready, String> {
     enable(&mut cfg, &admin);
     cfg.save(&path)?;
     println!("Tailscale sign-in is on. Admin: {admin} ({}).", source.why());
-    if crate::launch_uid_is_root() {
+    if crate::cmd::panel::launch_uid_is_root() {
         println!("Note: Kora Panel runs as root on this computer (you are signed in as root), so a panel admin can change anything here. Only make people you fully trust admin; give others the operator or viewer role.");
     }
     Ok(Ready { status, admin })
 }
 
 /// Start (or restart) the background panel listening on Tailscale too, wait for it, and say where to go.
-pub fn start_background(a: &crate::PanelArgs, home: &Path, ready: &Ready) -> i32 {
+pub fn start_background(a: &crate::cmd::panel::PanelArgs, home: &Path, ready: &Ready) -> i32 {
     if cfg!(target_os = "linux") && !crate::cmd::panel_background::user_services_available() {
         eprintln!("Kora Panel cannot run in the background from this session (common after sudo or su, or in a container).");
         eprintln!("Run it in a window instead (it stops when the window closes):  kora panel --tailscale --foreground");
@@ -234,7 +234,7 @@ pub fn start_background(a: &crate::PanelArgs, home: &Path, ready: &Ready) -> i32
 /// After `kora panel --setup` (the install scripts): use Tailscale when it is here.
 /// Already set up: print the address. Otherwise, on a server with no screen, ask (on the terminal,
 /// even under `curl | sh`); `KORA_TAILSCALE=1` says yes without asking, `KORA_TAILSCALE=0` never asks.
-pub fn after_setup(a: &crate::PanelArgs, home: &Path, headless: bool) {
+pub fn after_setup(a: &crate::cmd::panel::PanelArgs, home: &Path, headless: bool) {
     if tailnet_on(home) {
         if let Some(port) = svc::saved_port(home) {
             print_tailnet_address(home, port);
@@ -408,7 +408,7 @@ fn open_firewall(port: u16) {
         return;
     }
     let rule = ufw_rule(port);
-    if crate::launch_uid_is_root() {
+    if crate::cmd::panel::launch_uid_is_root() {
         let ok = std::process::Command::new("ufw").args(&rule).stdin(std::process::Stdio::null()).output().is_ok_and(|o| o.status.success());
         if ok {
             println!("The firewall (ufw) now lets Tailscale devices reach port {port} (on the Tailscale interface only).");
@@ -426,7 +426,7 @@ fn close_firewall(port: u16) {
     }
     let mut rule = vec!["delete".to_string()];
     rule.extend(ufw_rule(port).into_iter().take(10)); // without the comment: ufw matches the rule itself
-    if crate::launch_uid_is_root() && std::process::Command::new("ufw").args(&rule).stdin(std::process::Stdio::null()).output().is_ok_and(|o| o.status.success()) {
+    if crate::cmd::panel::launch_uid_is_root() && std::process::Command::new("ufw").args(&rule).stdin(std::process::Stdio::null()).output().is_ok_and(|o| o.status.success()) {
         println!("The firewall rule for the panel on the Tailscale interface was removed.");
     } else {
         println!("If you added the firewall rule for the panel, remove it with:  sudo ufw {}", rule.join(" "));

@@ -121,9 +121,9 @@ pub(crate) fn panel_user(cmd: &PanelUserCmd) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cmd::panel::PanelCmd;
     use crate::Cli;
     use crate::Command;
-    use crate::PanelCmd;
     use clap::Parser;
 
     #[test]

@@ -1,7 +1,7 @@
 //! The background panel (the per-user service that keeps the panel running): install, restart and `kora panel --setup`.
 
+use crate::cmd::panel::{headless_session, PanelArgs};
 use crate::cmd::panel_running::{background_port, one_time_link, running_panel, Running};
-use crate::{headless_session, PanelArgs};
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -226,9 +226,9 @@ fn print_setup_fallback(why: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cmd::panel::PanelCmd;
     use crate::Cli;
     use crate::Command;
-    use crate::PanelCmd;
     use clap::Parser;
 
     #[test]
