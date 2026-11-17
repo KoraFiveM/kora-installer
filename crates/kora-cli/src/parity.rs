@@ -59,6 +59,8 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --yes", CliOnly("the panel confirms in the UI")),
     ("manager", CliOnly("an alias that opens the panel itself (the same as a bare `kora`)")),
     ("service", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
+    ("service allow-installer", CliOnly("run by the Windows installer to allow the person who started it; never by a person")),
+    ("service allow-installer <client_pid>", CliOnly("run by the Windows installer to allow the person who started it; never by a person")),
     ("service allow", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
     ("service allow <accounts>", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
     ("service deny", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),

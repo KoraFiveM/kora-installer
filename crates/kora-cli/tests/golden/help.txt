@@ -2788,6 +2788,22 @@ Options:
   -h, --help
           Print help
 
+===== kora service allow-installer =====
+Allow the person who started Kora's installer, when an administrator typed the password for them (Windows; run by the installer, not by people). Windows tells it which process started the installation; it asks Windows who that is and who asked for the permission, and allows that person only when the answer is sound (see `kora_core::privsvc::installer_user`)
+
+Usage: kora service allow-installer [OPTIONS] <CLIENT_PID>
+
+Arguments:
+  <CLIENT_PID>
+          The process that started the installation (the installer's `ClientProcessId`)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
 ===== kora service install =====
 Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
 

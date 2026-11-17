@@ -69,6 +69,7 @@ pub mod dispatch;
 pub mod exec;
 pub mod identity;
 pub mod install;
+pub mod installer_user;
 pub mod manage;
 pub mod migrate;
 pub mod migrate_os;
@@ -81,6 +82,8 @@ pub mod problems;
 pub mod unixsvc;
 pub mod update;
 pub mod winapi;
+#[cfg(windows)]
+pub mod winclient;
 #[cfg(windows)]
 pub mod wininstall;
 #[cfg(windows)]

@@ -258,9 +258,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         ) => K::Other,
         // Already elevated (the worker) or run by it: never relaunched.
         Some(Command::AdminStep(_) | Command::AdminDb(_) | Command::BackupJob { .. } | Command::HandOver(_)) => K::Other,
-        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. } }) => {
-            K::Uninstall { dry_run: false }
-        }
+        Some(Command::Service {
+            cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::AllowInstaller { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. },
+        }) => K::Uninstall { dry_run: false },
         // Linux: relaunched with sudo. Windows: the install has its own single prompt (the installer's).
         Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => {
             if cfg!(windows) {

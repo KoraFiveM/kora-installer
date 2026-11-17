@@ -25,6 +25,14 @@ pub enum ServiceCmd {
         #[arg(required = true)]
         accounts: Vec<String>,
     },
+    /// Allow the person who started Kora's installer, when an administrator typed the password for them (Windows; run by the installer, not by
+    /// people). Windows tells it which process started the installation; it asks Windows who that is and who asked for the permission,
+    /// and allows that person only when the answer is sound (see `kora_core::privsvc::installer_user`).
+    #[command(hide = true)]
+    AllowInstaller {
+        /// The process that started the installation (the installer's `ClientProcessId`).
+        client_pid: String,
+    },
     /// Install the service on this computer (needs administrator rights; asks once). Linux: downloads this
     /// version's program from the official release, checks its checksum and puts it in /usr/lib/kora.
     /// For Debian and Ubuntu the `.deb` package does the same.
@@ -167,6 +175,7 @@ pub fn service(cmd: ServiceCmd) -> i32 {
             }
             code
         }
+        ServiceCmd::AllowInstaller { client_pid } => allow_installer(&client_pid),
         ServiceCmd::Deny { account } => match manage::deny(&policy_path(), &account) {
             Ok(m) => {
                 println!("{m}");
@@ -174,6 +183,46 @@ pub fn service(cmd: ServiceCmd) -> i32 {
             }
             Err(e) => fail(e),
         },
+    }
+}
+
+/// `kora service allow-installer <pid>` (the installer's second enrolment, after the account that runs it).
+fn allow_installer(client_pid: &str) -> i32 {
+    #[cfg(any(windows, not(windows)))]
+    let fail = |m: String| {
+        eprintln!("error: {m}");
+        1
+    };
+    #[cfg(windows)]
+    {
+        use kora_core::privsvc::installer_user as iu;
+        let Some(pid) = iu::parse_pid(client_pid) else {
+            // The installer passes the property through even when Windows has none: nothing to do, and never a failure of the install.
+            println!("No process started the installation that Kora can look at; only the account that runs the installer is allowed.");
+            return 0;
+        };
+        let Some(facts) = kora_core::privsvc::winclient::process_facts(pid) else {
+            println!("Kora could not look at the program that started the installer; only the account that runs the installer is allowed. Allow others with `kora service allow <account>`.");
+            return 0;
+        };
+        match iu::decide(&facts) {
+            Ok(sid) => match manage::allow(&policy_path(), &sid) {
+                Ok(m) => {
+                    println!("{m}");
+                    0
+                }
+                Err(e) => fail(e),
+            },
+            Err(why) => {
+                println!("Only the account that runs the installer is allowed ({}). Allow the person who uses Kora with `kora service allow <account>`.", why.text());
+                0
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = client_pid;
+        fail("this is part of the Windows installer".to_string())
     }
 }
 
