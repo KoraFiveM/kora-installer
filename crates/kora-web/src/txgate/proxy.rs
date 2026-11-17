@@ -68,7 +68,7 @@ fn sign_in_again() -> Response {
 }
 
 /// Is this `Host` one the panel answers to, with this gateway's port?
-fn host_allowed(st: &AppState, host: &str, port: u16) -> bool {
+pub(super) fn host_allowed(st: &AppState, host: &str, port: u16) -> bool {
     let Some((name, p)) = (if host.starts_with('[') { host.find(']').and_then(|i| host[i + 1..].strip_prefix(':').map(|p| (&host[..=i], p))) } else { host.rsplit_once(':') }) else {
         return false;
     };
@@ -76,8 +76,9 @@ fn host_allowed(st: &AppState, host: &str, port: u16) -> bool {
 }
 
 /// The browser-facing origin of a request (`http://<host>`), for comparing with `Origin`.
-fn origin_matches(origin: &HeaderValue, host: &str) -> bool {
-    origin.to_str().ok().and_then(|o| o.strip_prefix("http://")).is_some_and(|h| h.eq_ignore_ascii_case(host))
+fn origin_matches(origin: &HeaderValue, host: &str, secure: bool) -> bool {
+    let scheme = crate::tls::rules::origin_scheme(secure);
+    origin.to_str().ok().and_then(|o| o.get(..scheme.len()).filter(|p| p.eq_ignore_ascii_case(scheme)).map(|_| &o[scheme.len()..])).is_some_and(|h| h.eq_ignore_ascii_case(host))
 }
 
 /// May this gateway session still do this? The panel session must be alive and its role must still allow
@@ -114,6 +115,7 @@ async fn handle(State(ctx): State<Ctx>, peer: Option<ConnectInfo<SocketAddr>>, r
     if security::PROXY_HEADERS.iter().any(|p| h.contains_key(*p)) {
         return deny(StatusCode::FORBIDDEN, "Not through a proxy", security::PROXY_REFUSED);
     }
+    let secure = req.extensions().get::<crate::tls::serve::Transport>().is_some_and(|t| t.secure);
     let host = h.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     if !host_allowed(st, &host, ctx.port) {
         return deny(StatusCode::FORBIDDEN, "Address not allowed", "This address is not one the Kora panel answers to.");
@@ -128,7 +130,7 @@ async fn handle(State(ctx): State<Ctx>, peer: Option<ConnectInfo<SocketAddr>>, r
         Err(r) => return *r,
     };
     if req.uri().path() == "/__kora/enter" {
-        return enter(&ctx, req, remote).await;
+        return enter(&ctx, req, remote, secure).await;
     }
     // Who is this? The gateway cookie (every one of that name: another service on this host may set one).
     let cookie_name = gate_cookie_name(ctx.port);
@@ -145,11 +147,11 @@ async fn handle(State(ctx): State<Ctx>, peer: Option<ConnectInfo<SocketAddr>>, r
     if route.server != gs.server {
         return sign_in_again();
     }
-    forward(&ctx, req, &host, route.txadmin_port, sid).await
+    forward(&ctx, req, &host, route.txadmin_port, sid, secure).await
 }
 
 /// `/__kora/enter?t=<ticket>`: turn a ticket into a gateway cookie and send the person to txAdmin.
-async fn enter(ctx: &Ctx, req: Request, remote: bool) -> Response {
+async fn enter(ctx: &Ctx, req: Request, remote: bool, secure: bool) -> Response {
     if req.method() != Method::GET {
         return deny(StatusCode::METHOD_NOT_ALLOWED, "Not allowed", "Use the \"Open txAdmin\" button in the Kora panel.");
     }
@@ -170,7 +172,7 @@ async fn enter(ctx: &Ctx, req: Request, remote: bool) -> Response {
         return sign_in_again();
     }
     let id = st.txgate.open_session(&t);
-    let cookie = format!("{}={id}; HttpOnly; SameSite=Lax; Path=/", gate_cookie_name(ctx.port));
+    let cookie = format!("{}={id}; HttpOnly; SameSite=Lax; Path=/{}", gate_cookie_name(ctx.port), if secure { "; Secure" } else { "" });
     let mut r = Response::new(Body::empty());
     *r.status_mut() = StatusCode::SEE_OTHER;
     r.headers_mut().insert(header::LOCATION, HeaderValue::from_static("/"));
@@ -184,7 +186,7 @@ fn bad_gateway(text: &str) -> Response {
     deny(StatusCode::BAD_GATEWAY, "txAdmin is not answering", text)
 }
 
-async fn forward(ctx: &Ctx, mut req: Request, host: &str, txadmin_port: u16, sid: String) -> Response {
+async fn forward(ctx: &Ctx, mut req: Request, host: &str, txadmin_port: u16, sid: String, secure: bool) -> Response {
     let upgrade = is_websocket_upgrade(req.headers());
     if rewrite::asks_for_upgrade(req.headers()) && !upgrade {
         return deny(StatusCode::BAD_REQUEST, "Bad request", "Only WebSocket upgrades are supported.");
@@ -192,7 +194,7 @@ async fn forward(ctx: &Ctx, mut req: Request, host: &str, txadmin_port: u16, sid
     let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
     let origin = req.headers().get(header::ORIGIN).cloned();
     if let Some(o) = &origin {
-        if !origin_matches(o, host) && (!safe || upgrade) {
+        if !origin_matches(o, host, secure) && (!safe || upgrade) {
             return deny(StatusCode::FORBIDDEN, "Origin not allowed", "This request came from another web page.");
         }
     } else if upgrade {

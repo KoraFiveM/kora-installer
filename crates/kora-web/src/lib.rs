@@ -103,6 +103,8 @@ pub struct AppState {
     /// The Kora folder whose store gets an audit row for every state-changing request. `None` (the default: tests and
     /// embedders) records nothing and never touches the disk; the real panel sets it ([`AppState::with_audit`]).
     pub audit_home: Option<std::path::PathBuf>,
+    /// The certificate in use (inactive until the panel loads one: plain HTTP).
+    pub tls: tls::TlsState,
 }
 
 impl AppState {
@@ -129,7 +131,13 @@ impl AppState {
             fleet_cache: Arc::default(),
             txgate: Arc::default(),
             audit_home: None,
+            tls: tls::TlsState::new(),
         }
+    }
+    /// Serve with this certificate state (the panel's own, shared with its [`tls::manager::Manager`]).
+    pub fn with_tls(mut self, t: tls::TlsState) -> Self {
+        self.tls = t;
+        self
     }
     /// Record state-changing requests in the audit log of the store in this Kora folder.
     pub fn with_audit(mut self, home: std::path::PathBuf) -> Self {
@@ -267,6 +275,7 @@ fn hostname() -> String {
 pub(crate) async fn session_create(
     State(st): State<AppState>,
     Extension(caller): Extension<remote::Caller>,
+    Extension(transport): Extension<tls::serve::Transport>,
     headers: axum::http::HeaderMap,
     Json(req): Json<SessionReq>,
 ) -> Result<Response, ApiError> {
@@ -306,7 +315,7 @@ pub(crate) async fn session_create(
     if let Some(old) = security::current_session(&st, &headers, caller.remote) {
         st.sessions.remove(&old);
     }
-    let cookie = format!("{}={}; HttpOnly; SameSite=Strict; Path=/", security::cookie_name(st.addr.port()), session.id);
+    let cookie = format!("{}={}; {}", security::cookie_name(st.addr.port()), session.id, tls::rules::cookie_attrs(transport.secure));
     let mut r = Json(wire::SessionCreated { ok: true, identity: (&identity).into(), secret: session.secret.clone() }).into_response();
     r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).expect("ascii cookie"));
     // Older versions used one name for every port, sent to every service on this host: drop it.
@@ -325,14 +334,14 @@ pub(crate) async fn session_link(State(st): State<AppState>, Extension(caller): 
 }
 
 /// `POST /session/logout`: forget this session and clear the cookie. 204.
-pub(crate) async fn session_logout(State(st): State<AppState>, Extension(caller): Extension<remote::Caller>, req_headers: axum::http::HeaderMap) -> Response {
+pub(crate) async fn session_logout(State(st): State<AppState>, Extension(caller): Extension<remote::Caller>, Extension(transport): Extension<tls::serve::Transport>, req_headers: axum::http::HeaderMap) -> Response {
     let name = security::cookie_name(st.addr.port());
     // Only the session this request proves (cookie and secret); a cookie on its own ends nothing.
     if let Some(id) = security::current_session(&st, &req_headers, caller.remote) {
         st.sessions.remove(&id);
     }
     let mut r = StatusCode::NO_CONTENT.into_response();
-    r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("{name}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")).expect("ascii cookie"));
+    r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("{name}=; {}; Max-Age=0", tls::rules::cookie_attrs(transport.secure))).expect("ascii cookie"));
     r
 }
 
@@ -419,9 +428,11 @@ async fn serve_tailnet(state: AppState, port: u16) {
                     Ok(l) => {
                         bound.push(ip);
                         state.txgate.add_ip(&state, ip);
-                        let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+                        // HTTPS here as soon as there is a certificate (a tailnet name gets a real one); plain until then.
+                        let (app, tls, st2) = (router(state.clone()), state.tls.clone(), state.clone());
+                        let host_ok: tls::serve::HostCheck = Arc::new(move |h: &str| st2.host_ok(h));
                         tokio::spawn(async move {
-                            let _ = axum::serve(l, app).await;
+                            let _ = tls::serve::serve(l, app, Some(tls), host_ok, std::future::pending()).await;
                         });
                     }
                     Err(e) if !reported.contains(&ip) => {
@@ -431,12 +442,13 @@ async fn serve_tailnet(state: AppState, port: u16) {
                     Err(_) => {}
                 }
             }
+            let scheme = if state.tls.active() { "https" } else { "http" };
             if !bound.is_empty() {
-                state.remote.set_tailnet_url(s.url(port));
+                state.remote.set_tailnet_url(s.url_with(scheme, port));
             }
             if !announced && !bound.is_empty() {
                 announced = true;
-                if let Some(u) = s.url(port) {
+                if let Some(u) = s.url_with(scheme, port) {
                     println!("Your Tailscale devices can open the panel at {u}");
                 }
             }
@@ -471,7 +483,32 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
     if non_loopback && rem.enabled() {
         rem.learn_self_names();
     }
-    let warnings = remote::bind_plan(opts.bind, rem.enabled(), opts.allow_public, &rem.config(), &rem.extra_hosts()).map_err(PanelError::Remote)?;
+    let mut warnings = remote::bind_plan(opts.bind, rem.enabled(), opts.allow_public, &rem.config(), &rem.extra_hosts()).map_err(PanelError::Remote)?;
+    // HTTPS: load the certificate now (a listener that other computers can reach serves HTTPS as soon as there is one).
+    let home = kora_core::installer::registry::kora_home();
+    let tls_mgr = Arc::new(tls::manager::Manager::new(home, Arc::new(remote::SystemWhois)));
+    let mut hint_names = rem.extra_hosts();
+    if non_loopback && !opts.bind.is_unspecified() {
+        hint_names.push(opts.bind.to_string());
+    }
+    tls_mgr.set_hints(tls::manager::Hints { names: hint_names, tailnet: opts.tailscale });
+    let wants_tls = non_loopback || opts.tailscale;
+    if wants_tls {
+        if let Err(e) = tls_mgr.reload(true) {
+            warnings.push(format!("HTTPS is not available: {e}"));
+        }
+    }
+    let has_https = tls_mgr.state.active();
+    tls::rules::allow_public_check(opts.allow_public, opts.bind, has_https, rem.config().trusted_proxy.is_some()).map_err(PanelError::Remote)?;
+    if has_https {
+        warnings.retain(|w| w != remote::PLAIN_HTTP_WARNING);
+    } else if non_loopback && tls::rules::plain_is_risky(opts.bind) && rem.config().trusted_proxy.is_none() {
+        warnings.retain(|w| w != remote::PLAIN_HTTP_WARNING);
+        warnings.push(tls::plain_http_warning(&format!("{}:{}", opts.bind, opts.port)));
+    }
+    if let Some(e) = tls_mgr.state.last_error() {
+        warnings.push(format!("HTTPS: {e}"));
+    }
     let rem = Arc::new(rem);
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(async move {
@@ -481,13 +518,18 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
         // The real panel keeps its jobs in the store: history survives a restart, and what was running when the last panel died is
         // marked interrupted. (Tests use `AppState::system` with the in-memory registry and never touch the Kora folder.)
-        let state = AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem);
+        let state = AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem).with_tls(tls_mgr.state.clone());
+        tokio::spawn(tls_mgr.clone().maintain());
         for w in &warnings {
             eprintln!("{w}");
         }
+        let scheme = if non_loopback && has_https { "https" } else { "http" };
         if non_loopback {
-            println!("Kora Panel: http://{addr}/");
-            println!("Sign in with a user token (kora panel user add <name> --role <role>) or, if set up, your Tailscale account.");
+            println!("Kora Panel: {scheme}://{addr}/");
+            println!("Sign in with a passkey or one-time codes (`kora panel user invite <name> --role <role>`), or, if set up, your Tailscale account.");
+            if let Some(i) = tls_mgr.state.info().filter(|i| i.source == tls::CertSource::SelfSigned) {
+                println!("This panel uses a certificate Kora made. Fingerprint to compare in your browser: {}", i.fingerprint);
+            }
         } else if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
             // A service: what it prints ends up in the system log, which other accounts may read
             // (Linux: the `adm` group). So no sign-in link there; `--print-link` makes one when asked.
@@ -526,11 +568,14 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
         // Forward the game port on the router for servers that have it switched on (and run without a service).
         let port_keeper = kora_core::reach::forward::keeper::spawn_panel_keeper();
-        let served = axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>())
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
-            .await;
+        // Loopback is plain HTTP by default; any other address serves HTTPS once there is a certificate.
+        let main_tls = (tls::rules::listener_kind(addr.ip(), false) == tls::rules::Listener::Tls).then(|| tls_mgr.state.clone());
+        let st_hosts = state.clone();
+        let host_ok: tls::serve::HostCheck = Arc::new(move |h: &str| st_hosts.host_ok(h));
+        let served = tls::serve::serve(listener, router(state), main_tls, host_ok, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await;
         monitor.stop();
         port_keeper.stop();
         served?;

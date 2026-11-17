@@ -27,6 +27,9 @@ pub struct Report {
     pub ca_fingerprint: Option<String>,
 }
 
+/// How often a missing Tailscale certificate is asked for again.
+pub const RETRY_EVERY: Duration = Duration::from_secs(300);
+
 pub fn now_unix() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
@@ -59,11 +62,12 @@ pub struct Manager {
     hints: Mutex<Hints>,
     /// The setting and files the loaded certificate came from, to notice a change.
     seen: Mutex<Option<(TlsConfig, Vec<Option<std::time::SystemTime>>)>>,
+    last_try: Mutex<Option<std::time::Instant>>,
 }
 
 impl Manager {
     pub fn new(home: PathBuf, whois: Arc<dyn Whois>) -> Self {
-        Self { home, state: TlsState::new(), whois, hints: Mutex::default(), seen: Mutex::default() }
+        Self { home, state: TlsState::new(), whois, hints: Mutex::default(), seen: Mutex::default(), last_try: Mutex::default() }
     }
     pub fn set_hints(&self, h: Hints) {
         *self.hints.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = h;
@@ -201,6 +205,7 @@ impl Manager {
             }
         };
         *self.seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((cfg.clone(), Self::stamp(&cfg)));
+        *self.last_try.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
         match result {
             Ok(i) => Ok(i),
             Err(e) => {
@@ -242,7 +247,12 @@ impl Manager {
             CertSource::SelfSigned => certs::days_left(i.not_after, now_unix()) <= selfsigned::RENEW_DAYS,
             CertSource::Provided => false,
         });
-        changed || renew
+        // Tailscale may come up after the panel (at boot): try again every few minutes until there is a certificate.
+        let retry = !self.state.active()
+            && matches!(cfg.mode, TlsMode::Auto | TlsMode::Tailscale)
+            && (self.hints().tailnet || cfg.mode == TlsMode::Tailscale)
+            && self.last_try.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none_or(|t| t.elapsed() >= RETRY_EVERY);
+        changed || renew || retry
     }
 
     /// For as long as the panel runs: check every 20 seconds, reload when something changed.

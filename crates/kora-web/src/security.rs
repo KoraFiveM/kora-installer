@@ -491,10 +491,14 @@ fn is_public(method: &Method, path: &str) -> bool {
 
 pub async fn guard(State(st): State<AppState>, mut req: Request, next: Next) -> Response {
     let api = req.uri().path() == "/api" || req.uri().path().starts_with("/api/");
+    let mut secure = false;
     let mut resp = match check(&st, &req) {
-        Ok(caller) => {
+        Ok((caller, transport)) => {
+            secure = transport.secure;
             let audit_ctx = st.audit_home.as_ref().and_then(|home| crate::audit::Ctx::begin(home, req.method(), req.uri().path(), &caller));
             req.extensions_mut().insert(caller);
+            // What the handlers see: how THIS request reached us (a trusted proxy's `X-Forwarded-Proto` counts).
+            req.extensions_mut().insert(transport);
             let resp = next.run(req).await;
             if let Some(ctx) = audit_ctx {
                 if let Some(job) = resp.extensions().get::<crate::audit::JobStarted>().cloned() {
@@ -510,6 +514,10 @@ pub async fn guard(State(st): State<AppState>, mut req: Request, next: Next) -> 
     h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    // HSTS only over TLS, and only for certificates the person chose or Tailscale vouches for (`tls::CertSource::hsts`).
+    if secure && st.tls.hsts() {
+        h.insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static(crate::tls::rules::HSTS));
+    }
     if api {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
@@ -564,17 +572,41 @@ fn authorise(st: &AppState, method: &Method, path: &str, id: &Identity) -> Resul
     Ok(())
 }
 
-fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
+/// Is `host` (a `Host` header or the host of an `Origin`) acceptable for a request that came through the trusted
+/// proxy? The proxy forwards the public name without the panel's port, so only the name is compared.
+fn proxied_host_ok(st: &AppState, host: &str) -> bool {
+    let name = crate::tls::selfsigned::host_only(host);
+    st.remote.extra_hosts().iter().any(|e| crate::tls::selfsigned::host_only(e).eq_ignore_ascii_case(name))
+}
+
+fn check(st: &AppState, req: &Request) -> Result<(Caller, crate::tls::serve::Transport), ApiError> {
     let h = req.headers();
-    if PROXY_HEADERS.iter().any(|p| h.contains_key(*p)) {
+    let direct_peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
+    let mut transport = req.extensions().get::<crate::tls::serve::Transport>().copied().unwrap_or_default();
+    // A reverse proxy Kora was told to trust (address AND shared secret): then the visitor is the forwarded
+    // address, always a remote one. Anywhere else forwarded headers are refused, as ever.
+    let mut peer = direct_peer;
+    let mut proxied = false;
+    if let (Some(p), Some(pc)) = (direct_peer, st.remote.trusted_proxy()) {
+        match pc.judge(p.ip(), h) {
+            remote::proxy::Verdict::Trusted { client, secure } => {
+                proxied = true;
+                peer = Some(SocketAddr::new(client, 0));
+                transport.secure = secure;
+            }
+            remote::proxy::Verdict::Refused(why) => return Err(ApiError::forbidden(why)),
+            remote::proxy::Verdict::NotProxied => {}
+        }
+    }
+    if !proxied && PROXY_HEADERS.iter().any(|p| h.contains_key(*p)) {
         return Err(ApiError::forbidden(PROXY_REFUSED));
     }
-    let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
     // No peer information (the router called directly, as the tests do) counts as local.
-    let remote = peer.is_some_and(|a| remote::is_remote_peer(a.ip()));
+    let remote = proxied || peer.is_some_and(|a| remote::is_remote_peer(a.ip()));
     // DNS rebinding defence: every route, including static files.
     let host = h.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
-    if !st.host_ok(host) {
+    let host_ok = |x: &str| if proxied { proxied_host_ok(st, x) } else { st.host_ok(x) };
+    if !host_ok(host) {
         return Err(ApiError::forbidden("host not allowed"));
     }
     let method = req.method();
@@ -612,8 +644,8 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
     if !safe {
         if let Some(o) = h.get(header::ORIGIN) {
             let o = o.to_str().unwrap_or("");
-            let ok = o.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("http://")) && st.host_ok(&o[7..]);
-            if !ok {
+            // The scheme must be the one this connection used: a page served over HTTPS never posts from `http://`.
+            if !crate::tls::rules::origin_ok(o, transport.secure, host_ok) {
                 return Err(ApiError::forbidden("origin not allowed"));
             }
         }
@@ -643,7 +675,7 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
         };
         caller.identity = bearer_identity.or_else(session_identity);
         if is_public(method, path) {
-            return Ok(caller);
+            return Ok((caller, transport));
         }
         let Some(id) = caller.identity.clone() else {
             return Err(ApiError::unauthorized("missing or invalid session"));
@@ -656,7 +688,7 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
             })?;
         }
     }
-    Ok(caller)
+    Ok((caller, transport))
 }
 
 #[cfg(test)]

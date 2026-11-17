@@ -3,8 +3,10 @@
 //!
 //! * [`config`]: remote access settings (in the store), hashed per-user tokens.
 //! * [`tailscale`]: the `whois` seam (identity comes from the local tailscaled, never from headers).
+//! * [`proxy`]: the opt-in trusted reverse proxy.
 //! * [`roles`]: viewer / operator / admin, the exhaustive Op classification and request → Op lookup.
 pub mod config;
+pub mod proxy;
 pub mod roles;
 pub mod tailscale;
 
@@ -166,6 +168,11 @@ impl Remote {
 
     pub fn config(&self) -> RemoteConfig {
         self.lock().cfg.clone()
+    }
+
+    /// The trusted reverse proxy, if one was configured.
+    pub fn trusted_proxy(&self) -> Option<proxy::ProxyConfig> {
+        self.lock().cfg.trusted_proxy.clone()
     }
 
     pub fn path(&self) -> Option<PathBuf> {
@@ -342,9 +349,9 @@ Using Tailscale? `kora panel --tailscale` sets everything up for you."
     }
     if !allow_public && (bind.is_unspecified() || !is_private_address(bind)) {
         return Err(format!(
-            "Kora will not listen on {bind}: other people on the internet could reach it, and the panel is plain HTTP, \
-so sign-in tokens could be read on the way. Use `kora panel --tailscale` (recommended), a private address \
-(Tailscale, WireGuard, your home network) or an SSH tunnel. If you really mean it, add --allow-public."
+            "Kora will not listen on {bind}: other people on the internet could reach it. Use `kora panel --tailscale` (recommended), \
+a private address (Tailscale, WireGuard, your home network) or an SSH tunnel. If you really mean it, add --allow-public, \
+which also needs HTTPS (`kora panel tls self-signed`, or your own certificate) or a reverse proxy you tell Kora to trust."
         ));
     }
     let mut warnings = vec![PLAIN_HTTP_WARNING.to_string()];

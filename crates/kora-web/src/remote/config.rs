@@ -65,6 +65,11 @@ pub struct RemoteConfig {
     pub allowed_hosts: Vec<String>,
     /// Allow destructive actions from remote sessions (admins only; still needs the typed name).
     pub allow_remote_destructive: bool,
+    /// Interactive remote users must sign in with a passkey or one-time codes: the old token link is refused
+    /// for people (API tokens for scripts are unaffected). Off by default so an upgrade breaks nothing.
+    pub require_strong_auth: bool,
+    /// A reverse proxy in front of the panel that Kora has been told to trust (`remote::proxy`).
+    pub trusted_proxy: Option<super::proxy::ProxyConfig>,
 }
 
 pub fn default_path() -> PathBuf {
@@ -244,6 +249,12 @@ fn read_cfg(c: &rusqlite::Connection) -> Result<RemoteConfig, kora_core::problem
     cfg.enabled = flag("enabled")?;
     cfg.tailscale = flag("tailscale")?;
     cfg.allow_remote_destructive = flag("allow_remote_destructive")?;
+    cfg.require_strong_auth = flag("require_strong_auth")?;
+    cfg.trusted_proxy = match c.query_row("SELECT value FROM remote_settings WHERE key = 'trusted_proxy'", [], |r| r.get::<_, String>(0)) {
+        Ok(v) => Some(serde_json::from_str(&v).map_err(|e| kora_core::problem::Problem::generic(format!("The saved trusted proxy setting cannot be read ({e}). Nothing was changed.")))?),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => return Err(e.into()),
+    };
     let mut st = c.prepare("SELECT login, role FROM remote_tailscale_users ORDER BY login")?;
     for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (l, r) = row?;
@@ -264,8 +275,19 @@ fn read_cfg(c: &rusqlite::Connection) -> Result<RemoteConfig, kora_core::problem
 
 /// Replace what is saved; returns the new version.
 fn write_cfg(c: &rusqlite::Connection, cfg: &RemoteConfig) -> Result<u64, kora_core::problem::Problem> {
-    for (k, v) in [("enabled", cfg.enabled), ("tailscale", cfg.tailscale), ("allow_remote_destructive", cfg.allow_remote_destructive)] {
+    for (k, v) in [("enabled", cfg.enabled), ("tailscale", cfg.tailscale), ("allow_remote_destructive", cfg.allow_remote_destructive), ("require_strong_auth", cfg.require_strong_auth)] {
         c.execute("INSERT INTO remote_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", rusqlite::params![k, if v { "1" } else { "0" }])?;
+    }
+    match &cfg.trusted_proxy {
+        Some(p) => {
+            c.execute(
+                "INSERT INTO remote_settings (key, value) VALUES ('trusted_proxy', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [serde_json::to_string(p).map_err(|e| kora_core::problem::Problem::generic(e.to_string()))?],
+            )?;
+        }
+        None => {
+            c.execute("DELETE FROM remote_settings WHERE key = 'trusted_proxy'", [])?;
+        }
     }
     c.execute("DELETE FROM remote_tailscale_users", [])?;
     for (l, r) in &cfg.tailscale_users {
