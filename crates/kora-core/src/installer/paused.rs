@@ -33,7 +33,16 @@ pub struct Stored {
 }
 
 fn valid_id(job: &str) -> bool {
-    !job.is_empty() && job.len() <= 64 && job.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    !job.is_empty() && job.len() <= 64 && job.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') && !windows_device_name(job)
+}
+
+/// `CON`, `NUL`, `COM1`...: on Windows `<folder>\CON.json` is the console device, not a file, and reading it
+/// waits for keyboard input forever. The job id comes from the request address, so such names are refused
+/// (real ids are 16 hex digits).
+fn windows_device_name(s: &str) -> bool {
+    let u = s.to_ascii_uppercase();
+    let numbered = |p: &str| u.strip_prefix(p).is_some_and(|n| n.len() == 1 && matches!(n.as_bytes()[0], b'1'..=b'9'));
+    matches!(u.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
 }
 
 #[derive(Debug, Clone)]
@@ -237,8 +246,13 @@ mod tests {
         assert_eq!(s.load("a2").unwrap().req.license_key_name.as_deref(), Some("Live"));
         s.remove_for_dir(Path::new("/srv/b"));
         assert!(s.load("b1").is_none());
-        // Path tricks are refused.
+        // Path tricks are refused, and so are Windows device names (`CON.json` is the console there).
         assert!(!s.save("../x", &req("/srv/c", Some("Main")), false, None, &[]).unwrap());
+        for dev in ["CON", "nul", "Aux", "PRN", "com1", "LPT9"] {
+            assert!(!s.save(dev, &req("/srv/c", Some("Main")), false, None, &[]).unwrap(), "{dev}");
+            assert!(s.load(dev).is_none(), "{dev}");
+        }
+        assert!(valid_id("0123456789abcdef") && valid_id("com10") && valid_id("lpt0") && valid_id("console"));
         assert!(s.load("../a2").is_none());
         // Too old.
         let mut old: Stored = serde_json::from_slice(&std::fs::read(d.path().join("a2.json")).unwrap()).unwrap();
