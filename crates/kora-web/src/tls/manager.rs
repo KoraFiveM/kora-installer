@@ -63,11 +63,13 @@ pub struct Manager {
     /// The setting and files the loaded certificate came from, to notice a change.
     seen: Mutex<Option<(TlsConfig, Vec<Option<std::time::SystemTime>>)>>,
     last_try: Mutex<Option<std::time::Instant>>,
+    /// The day (days since 1970) the expiry warning was last given, so it is given once a day.
+    warned_day: Mutex<Option<i64>>,
 }
 
 impl Manager {
     pub fn new(home: PathBuf, whois: Arc<dyn Whois>) -> Self {
-        Self { home, state: TlsState::new(), whois, hints: Mutex::default(), seen: Mutex::default(), last_try: Mutex::default() }
+        Self { home, state: TlsState::new(), whois, hints: Mutex::default(), seen: Mutex::default(), last_try: Mutex::default(), warned_day: Mutex::default() }
     }
     pub fn set_hints(&self, h: Hints) {
         *self.hints.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = h;
@@ -253,6 +255,31 @@ impl Manager {
         changed || renew || retry
     }
 
+    /// A certificate in its last 14 days: one line on the terminal and one in the activity log, once a day (Settings and the System
+    /// check show it all the time).
+    fn warn_expiry(&self) {
+        let Some(i) = self.state.info() else { return };
+        let days = certs::days_left(i.not_after, now_unix());
+        let today = now_unix().div_euclid(86_400);
+        if days > 14 || *self.warned_day.lock().unwrap_or_else(std::sync::PoisonError::into_inner) == Some(today) {
+            return;
+        }
+        *self.warned_day.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(today);
+        let what = if days < 0 { "has EXPIRED".to_string() } else { format!("ends in {days} days") };
+        eprintln!("WARNING: the panel's HTTPS certificate ({}) {what}. See `kora panel tls status`.", i.source.label());
+        kora_core::store::audit::record_quiet(
+            &self.home,
+            &kora_core::store::audit::New {
+                op: "tls_expiry".into(),
+                actor_kind: kora_core::store::audit::actor::LOCAL.into(),
+                actor_name: Some("kora panel".into()),
+                result: kora_core::store::audit::result::FAILED.into(),
+                detail: Some(format!("the HTTPS certificate {what}")),
+                ..Default::default()
+            },
+        );
+    }
+
     /// For as long as the panel runs: check every 20 seconds, reload when something changed.
     pub async fn maintain(self: Arc<Self>) {
         loop {
@@ -261,6 +288,7 @@ impl Manager {
                 if m.due() {
                     let _ = m.reload(true);
                 }
+                m.warn_expiry();
             })
             .await;
             tokio::time::sleep(Duration::from_secs(20)).await;

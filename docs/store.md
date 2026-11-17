@@ -35,9 +35,43 @@ It holds your saved licence keys and the hashes of remote-access tokens, so it i
 - Kora never writes through a link: a link in place of the folder or the file is refused;
 - `sudo kora ...` inside someone else's Kora folder hands every file it creates back to that folder's owner (`lchown`), so you can still open your own data afterwards.
 
-Saved licence keys are **not encrypted** (as before): the file's privacy is the protection. The key values are in their own table
-(`license_key_material`) behind one small trait (`kora_core::store::material::KeyMaterial`), so a later version can move just those
-into the operating system's keychain.
+Saved licence keys are **not encrypted in the file** (as before) unless the operating system keeps them (below): the file's privacy
+is the protection. The key values go through one small trait (`kora_core::store::material::KeyMaterial`).
+
+### Saved licence keys in the system keychain (0.8)
+
+Where each key's value lives is chosen per key and shown in Settings > Licence keys and `kora keys keychain status`:
+
+| kept in | what | when |
+|---|---|---|
+| Kora's private file | the `license_key_material` table, as before | no keychain, the keychain is turned off, or it is locked/unreachable when the key is saved |
+| your system keychain | an item in the Secret Service of the desktop (GNOME Keyring, KWallet, KeePassXC), over the user's D-Bus session bus | Linux, with a session bus and an unlocked default collection |
+| Windows (protected for your account) | the value sealed with DPAPI (`CryptProtectData`, this user only), the sealed text kept in the same table | Windows |
+
+Names, order and dates stay in the database either way; `license_key_location` records the place per key (no row: the private file,
+which is every key saved before this version). The choice is automatic and can be turned off: `kora keys keychain off` moves every key
+back into the private file and keeps new ones there; `kora keys keychain on` moves them in again (the Settings button does the same).
+`KORA_KEYCHAIN=off` in the environment disables it for a whole machine.
+
+Rules that keep a key from being lost: a server or background panel with no desktop session simply keeps keys in the private file (Settings
+says "no system keychain on this computer"); a **locked** keyring is never prompted (a background panel has no screen): new keys wait in the
+private file and a key that is in the keyring reads as "locked" until it is unlocked; a **different session** (a background service, SSH,
+another account) that cannot reach the keyring, or an entry the user deleted in their Passwords app, or a DPAPI value from another Windows
+account, is reported as a guided problem naming the key with **Enter it again** (it is never treated as an empty key, never overwritten
+blind, and the install that needs it stops with that problem). The keyring write comes first and the database row second; keyring items are
+only deleted afterwards, for items no key points to, so a rolled-back change leaves at worst an orphan, never a lost key. The installer
+reads the value in the unprivileged panel or CLI process of the person (the privileged side is handed the value in the operation and never
+reads a keychain), and writes it into the server's `secrets.cfg` as before.
+
+**Backups and moving to another computer.** The database file alone does not carry keychain values (and a DPAPI-sealed value cannot be
+opened by another user or on another computer). `kora_core::keystore::export_keys` returns every value whatever its place, which is what
+`kora store export-json` (the way back to Kora 0.7, `secrets.json`) uses; a key that cannot be read from here is left out and named in
+`keys-not-exported.txt` next to it. SEAM for the backup feature: if a backup includes secrets, it must call `export_keys` (and write the
+result protected as that feature decides), and a restore must `KeyStore::add` each key (which puts it wherever the new computer keeps keys).
+
+Threat model: a copy of the Kora folder (a backup, a disk image, another account reading the file) does not contain keys in clear once they
+are in a keychain. It does not protect from malware running as the same user, which can ask the keyring or DPAPI too. On Linux the
+Secret Service session uses the `plain` algorithm: the value crosses the user's own session bus unencrypted.
 
 ## The first start of a new version
 

@@ -271,8 +271,10 @@ saving it is only remembered while the panel runs. The wizard also checks free d
   the old copy. Removing the old copy needs administrator rights: on Windows the panel asks Windows for permission
   (one prompt); on Linux it shows the command to run (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
-- **Licence keys:** the keys saved on this computer (in Kora's data file, `store/kora.db` in the Kora folder: plain text, readable only by you,
-  not encrypted, like each server's `secrets.cfg`; see [store.md](store.md)). Add, rename, replace and delete (admins and this computer only); each
+- **Licence keys:** the keys saved on this computer: in your **system keychain** when this computer has one (Windows: protected for your
+  account; Linux: GNOME Keyring, KWallet), otherwise in Kora's private data file (`store/kora.db`, readable only by you, not encrypted, like
+  each server's `secrets.cfg`); each key says where it is kept, and a button turns the keychain on or off (`kora keys keychain`). A key that
+  cannot be read from here (locked keychain, another session, deleted entry) says so and offers **Enter it again**; see [store.md](store.md). Add, rename, replace and delete (admins and this computer only); each
   shows its last 4 characters and the servers that use it. Deleting a key does not affect servers already installed with it
   (they have their own copy); an unfinished install that used it needs another key. Same as `kora keys`.
 - **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in Kora's data file (nothing secret), with a
@@ -441,31 +443,123 @@ Tailscale ACLs if you want to limit which devices can reach the server at all.
 Do not put the panel behind a reverse proxy or `tailscale serve`: every visitor would then look like the computer
 itself. The panel refuses requests that came through a proxy.
 
+### HTTPS: the connection to the panel
+
+Plain HTTP is fine on this computer's own address and inside Tailscale (already encrypted). On a home network or a
+public address the session cookie, the sign-in link and everything you type (licence keys) would cross the network in
+clear, so the panel serves **HTTPS** there:
+
+- the loopback address (`http://127.0.0.1:47120`) stays plain HTTP: no certificate warnings for the normal local case;
+- any other address uses HTTPS on the **same port** as soon as there is a certificate, and says loudly when there is none.
+  A browser that opens `http://` on that port from another computer is sent to `https://` (plain requests from this
+  computer are still answered, so the launch link keeps working);
+- `--allow-public` refuses to start without HTTPS (or a reverse proxy you told Kora to trust, below);
+- the session cookie gets `Secure` over HTTPS; `Strict-Transport-Security` is sent only for a certificate you provided
+  or Tailscale's (not for a self-signed one: a mistake there would lock you out of the name for a year); the "Open
+  txAdmin" gateway ports, the live views and the console use the same HTTPS.
+
+Where the certificate comes from, in order of preference (`kora panel tls ...`):
+
+1. **Your own certificate:** `kora panel tls set --cert fullchain.pem --key privkey.pem`. The panel reads the files
+   again when they change (certbot, a script), so renewing needs no restart. The key file must not be readable by other
+   accounts (`chmod 600`); the panel refuses it otherwise and says the command.
+2. **Tailscale:** `kora panel tls tailscale`. Kora asks `tailscale cert` for this computer's tailnet name and renews it
+   before it ends. It needs MagicDNS and "HTTPS Certificates" turned on in the Tailscale admin console (DNS page): when
+   Tailscale says no, its own reason is shown. Open the panel by its Tailscale **name**; the certificate is for that name
+   (the `100.x` address gives a name mismatch). With `kora panel --tailscale` this is used automatically when it works.
+3. **Self-signed:** `kora panel tls self-signed --name box.lan`. Kora makes a local certificate authority (once) and a
+   server certificate from it for this computer's names and addresses (it is made again by itself before it ends, or when a
+   name is added). You trust the **authority once**: `kora panel tls export-ca` saves it as `kora-local-ca.crt`, and the
+   command prints how to install it on Windows, macOS, Linux, Firefox and phones. Compare the fingerprint it prints with
+   what the browser shows (also in Settings > HTTPS) before you install it.
+
+`kora panel tls status` shows what is in use (certificate, names, end date, fingerprint); `kora panel tls off` turns HTTPS
+off again (not recommended); `kora panel tls renew` fetches or makes the certificate again now. The System check has an
+HTTPS line, and a certificate in its last 14 days is warned about in Settings, the System check, the terminal and the
+activity log.
+
+**Public domain names with Let's Encrypt are not done by Kora.** Put a reverse proxy (Caddy, nginx) in front instead and
+tell Kora to trust it:
+
+```sh
+kora panel proxy trust 127.0.0.1          # prints a secret and ready-to-paste Caddy and nginx snippets
+```
+
+Kora then accepts `X-Forwarded-For` and `X-Forwarded-Proto` only from that address **and** only on requests that carry
+the shared secret (`X-Kora-Proxy-Secret`). The visitor's address (the right-most one that is not a proxy of yours) is what
+the sign-in lockout counts; `X-Forwarded-Proto: https` makes the request count as secure; a proxied visitor is always a
+remote one, never the person at the computer, and never gets a Tailscale identity. Without the secret, or from another
+address, forwarded headers are refused as before. Add the public name to the allowed names (Settings > Remote access)
+and turn remote access on. The "Open txAdmin" gateway ports are not proxied this way. `kora panel proxy forget` removes the trust.
+
 ### Other options
 
 1. **SSH tunnel** (`ssh -L`, as in [section 1](#starting-it-on-a-server-with-no-screen-ssh)). Nothing is exposed.
-2. **WireGuard or another private network:** start the panel with `kora panel --bind <private address> --remote` and
-   sign in with a user token (below). Kora refuses public addresses and `0.0.0.0` unless you add `--allow-public`,
-   because the page is plain HTTP: without an encrypted network around it, anyone on the way could read and change
-   what you send, including sign-in tokens.
+2. **WireGuard or another private network:** start the panel with `kora panel --bind <private address> --remote`, set
+   up HTTPS as above if it is not an encrypted network, and sign in with a passkey or one-time codes (below). Kora
+   refuses public addresses and `0.0.0.0` unless you add `--allow-public`, which also needs HTTPS.
 
-**Users and roles.** Besides Tailscale accounts, remote sign-in can use named users with a token each:
-`kora panel user add <name> --role <role>`, `kora panel user list`, `kora panel user remove <name>`. Each Tailscale
-account or user has a role:
+### Signing in from another computer: passkeys and one-time codes
 
-- **viewer:** can look at server status and lists and charts; cannot change anything, and cannot read logs or
-  the console (they can contain player names and addresses).
-- **operator:** a viewer, plus logs and console output, start/stop/restart, update preview and apply, ensuring resources.
-- **admin:** an operator, plus settings (ports, webhooks, resources, snapshots, GitHub).
+A remote user used to sign in with a **token**: a secret in a link, valid until revoked, so whoever held the link *was*
+that user. That is no longer the day-to-day credential.
 
-Managing remote access and users from the panel is only possible from a local session, never remotely; the
-`kora panel tailscale`, `kora panel user` and `kora panel remote-actions` commands work on the server at any time. Remote sessions end after 12
-hours idle or 7 days in total, and at once when the account is removed or its role changes. The sign-in link from
-`kora panel` only works on the computer itself (or through an SSH tunnel), never remotely.
+1. On the computer that runs Kora: `kora panel user invite sam --role operator` (or **Invite person** in Settings > Remote
+   access). It prints a **one-time link** (works once, for 30 minutes). That link is the only bearer link left.
+2. Sam opens the link, and sets up **a passkey** (WebAuthn: the phone, laptop or security key holds a private key and
+   asks for a fingerprint, face or PIN; nothing is replayable) or **a password and one-time codes** (any authenticator app;
+   ten single-use recovery codes are shown once). Sam is signed in at the end.
+3. From then on Sam signs in with the passkey (type the name, touch the device) or password + code.
+
+**Passkeys need a name and a secure address.** A passkey belongs to the name it was registered on (the "relying party
+ID"), and browsers allow passkeys only over `https://` (or `localhost`). So:
+
+| how the panel is opened | passkeys |
+|---|---|
+| `https://box.tail1234.ts.net:47120` (Tailscale HTTPS) | yes, for `box.tail1234.ts.net` |
+| `https://panel.example.com` (your domain, reverse proxy) | yes, for `panel.example.com` |
+| `https://box.lan:47120` (a LAN name with a certificate) | yes, for `box.lan` |
+| `https://192.168.1.5:47120` (a bare address) | **no**: an IP address cannot be a relying-party ID; use one-time codes, or give the panel a name |
+| `http://...` | **no**: not a secure address |
+
+Pick one name for remote access and register there: a passkey registered for one name does not work on another (the page
+says so). People who cannot use a passkey (a bare address, an old browser) use **password + one-time codes**, which work
+everywhere. Passwords are checked for strength (12 characters or more, not a common one, not the name) and stored as
+argon2id hashes; a code is accepted for the current 30-second step and one either side, and **each step only once**
+(a code seen over a shoulder cannot be replayed); five wrong passwords lock that account for 15 minutes (a passkey still
+works, so a stranger cannot lock the owner out of their own device); wrong attempts from one address lock that address
+out, as for tokens.
+
+**Lost a phone or laptop?** On the computer that runs Kora: `kora panel user reset sam` (Settings: **Reset sign-in**). It
+removes the credentials you choose (`--what passkeys|code|all|legacy-token`), signs every device of that person out at
+once and prints a new one-time link. A user can also remove a lost passkey themselves from another device (**Your sign-in**
+in Settings), which signs their other devices out.
+
+**Your sign-in** (Settings, for people signed in remotely) lists your passkeys, one-time-code status and recovery codes,
+and the **signed-in devices** (browser, address, when) with Sign out. Changing how you sign in asks for a fresh check first.
+
+**A fresh check before the most sensitive actions.** For a session that signed in with a passkey or one-time codes, deleting
+or unregistering a server, uninstalling Kora, updating Kora, console input, schedules and opening txAdmin ask for a passkey or
+code check made in the last 10 minutes (the page shows a "Confirm it is you" box and then carries on). This comes on top of
+the roles and the remote-actions switch, which are unchanged. Sessions: a remote passkey or code session ends after 8 hours
+idle or 3 days in all (the computer's own and Tailscale sessions keep 12 hours / 7 days; an old token session at most 1 day).
+
+**API tokens, for scripts.** `kora panel user api-token create backup-script --role operator --days 90` prints a token
+once (stored only as a salted hash; optional expiry). It is sent as `Authorization: Bearer <token>` and **never** accepted in
+an address (query or `?ks=`), never makes a browser session, and cannot sign anyone in to the page. Its role is its limit,
+and deleting or uninstalling through it still needs `kora panel remote-actions on`. `api-token list` and `api-token revoke`
+manage them; Settings > Remote access has the same.
+
+**Upgrading from token links.** Nothing breaks on upgrade: existing users keep their token, which still signs them in to the
+page and still works as a header for scripts. At their next sign-in the page suggests a passkey or one-time codes ("Replace
+your token link"). Once a user has a passkey or one-time codes, their old token link is **not accepted for signing in any more**
+(so a leaked old link cannot bypass them); it keeps working as a script header until the user ends it (**End my token link**)
+or an administrator resets it. An administrator can turn on **Require a passkey or one-time codes for everybody** (Settings >
+Remote access, or `PUT /remote`), which refuses the token link for signing in for everyone. New users never get a token.
 
 **What a remote administrator can do depends on how they signed in.**
 
-| | Tailscale admin | Token admin |
+| | Tailscale admin | Passkey, code or token admin |
 |---|---|---|
 | Install a new server (start an install, resume a paused one) | yes | yes |
 | Manage servers: start/stop, settings, resources, snapshots, ports, GitHub | yes | yes |
@@ -478,7 +572,7 @@ destructive actions, whatever the setting).
 
 Why the difference: a Tailscale sign-in is checked by the Tailscale service on this computer, so it names a real
 person on a device they have signed in. A token is a secret in a link: it can be pasted into a chat or left in a
-backup, and whoever holds it *is* that user. A leaked token that can only install can be undone by removing the
+backup, and whoever holds it *is* that user (a passkey or one-time code cannot be copied that way, but the switch stays the same for now: what each role may do is unchanged). A leaked token that can only install can be undone by removing the
 server it made. A leaked token that can delete cannot be undone, so deleting stays off for tokens until someone on
 the computer that runs Kora turns it on. The typed-name confirmation for deleting always applies.
 
@@ -516,6 +610,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   only on private addresses (Tailscale with `--tailscale`); public addresses need `--allow-public`.
 - **Identity from Tailscale, not the browser.** Tailscale sign-in asks the Tailscale service on the computer who is
   connecting, and only listed accounts get in, each with a role.
+- **HTTPS off the loopback address, passkeys and one-time codes for people.** See sections above and `SECURITY.md`.
 - **One-time sign-in links.** The link printed by `kora panel` holds a one-time code (it works once, for 10 minutes,
   and only on the computer that runs Kora), never the panel's long-lived token. It is exchanged for a session.
   Wrong codes and tokens are rate limited: on the computer itself, and per address for remote sign-ins (so a
@@ -525,8 +620,8 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   secret that the page keeps for its own address and port and sends with every request (`X-Kora-Session`); the
   cookie alone is refused. The cookie (`kora_session_<port>`) is `HttpOnly` and `SameSite=Strict`.
 - **txAdmin through the panel is a second door, guarded by the first.** The gateway port of a server's txAdmin (txAdmin's port + 10000) lets nobody in without a one-time ticket made by a signed-in administrator's panel session (cookie and session secret together); the gateway then follows that session (signing out, a removed user, a changed role or the remote-actions switch ending it, also for an open live console), never passes the panel's cookies or secret on to txAdmin, keeps two servers' txAdmin cookies apart, only ever connects to that server's own txAdmin on this computer, and refuses proxy headers, other `Host` and `Origin` values and WebSocket handshakes without a matching `Origin`. See `SECURITY.md`.
-- **No proxies.** Requests that came through a reverse proxy or `tailscale serve` are refused (they connect from
-  127.0.0.1, so everyone would look like the owner).
+- **No proxies, unless you say so.** Requests that came through a reverse proxy or `tailscale serve` are refused (they connect from
+  127.0.0.1, so everyone would look like the owner), except from the one proxy you told Kora to trust, with its secret.
 - **Limits for remote sessions.** At most 8 live views per account and 64 in total. A remote session can only read a
   job its role could have started. The hub (fleet, other panels' servers) is local only. Alert webhooks set from
   another computer must point to the public internet.
@@ -535,7 +630,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   requests).
 - **Strict page policy.** The page can only load its own files: no inline scripts, no other sites, no framing.
 - **Secrets are write-only.** Licence keys, database passwords and webhook addresses are accepted but never sent back to
-  the browser. Saved licence keys show only their name and last 4 characters.
+  the browser. Saved licence keys show only their name and last 4 characters, and live in the system keychain when there is one.
 - **No elevated panel.** The panel runs as you (as root only when you are signed in as root, see [section 10](#10-optional-remote-access)). Privileged actions are a command you run, a helper that accepts only
   Kora's fixed actions (Linux), or on Windows a short-lived administrator copy of Kora started through the Windows
   permission prompt that runs only Kora's fixed administrator steps and exits (see SECURITY.md for how it is protected).

@@ -165,9 +165,61 @@ you type (licence keys) cross the network unencrypted. Fix it with `kora panel t
     )
 }
 
+/// The System check line for HTTPS. `exposed`: the panel listens on an address other computers can reach (outside loopback and
+/// outside the tailnet), where plain HTTP is a real risk.
+pub fn check_item(info: Option<&CertInfo>, error: Option<&str>, exposed: bool, now: i64) -> kora_core::api::toolchain::CheckItem {
+    use kora_core::api::toolchain::{CheckItem, CheckState};
+    use kora_core::problem::{Action, Problem};
+    let item = |state, summary: String, problem: Option<Problem>| CheckItem { id: "https", label: "HTTPS", state, summary, problem };
+    match info {
+        Some(i) => {
+            let days = certs::days_left(i.not_after, now);
+            if days <= 14 {
+                let fix = match i.source {
+                    CertSource::Provided => "Replace the certificate files; the panel reads them again by itself.",
+                    _ => "Kora renews it by itself; if it does not, run `kora panel tls renew`.",
+                };
+                let p = Problem::new("tls.expiring", format!("The panel's HTTPS certificate {}. {fix}", if days < 0 { "has expired".to_string() } else { format!("ends in {days} days") }))
+                    .with_action(Action::show_command(&["kora", "panel", "tls", "renew"], false));
+                item(CheckState::Problem, format!("{} ({})", if days < 0 { "Certificate expired" } else { "Certificate ending soon" }, i.source.label()), Some(p))
+            } else {
+                item(CheckState::Ok, format!("On, with {} ({days} days left).", i.source.label()), None)
+            }
+        }
+        None if exposed => {
+            let msg = error.map_or(String::new(), |e| format!(" ({e})"));
+            let p = Problem::new("tls.missing", format!("The panel can be reached from other computers over plain HTTP{msg}: the session cookie, sign-in links and licence keys cross the network unencrypted. Set up HTTPS."))
+                .with_action(Action::show_command(&["kora", "panel", "tls", "self-signed"], false));
+            item(CheckState::Problem, "Plain HTTP on a reachable address".into(), Some(p))
+        }
+        None => item(CheckState::Info, "Plain HTTP on this computer (or inside Tailscale): nothing to do.".into(), None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn info(source: CertSource, days: i64) -> CertInfo {
+        CertInfo { source, names: vec![], not_before: 0, not_after: days * 86_400, fingerprint: String::new(), ca_fingerprint: None }
+    }
+
+    #[test]
+    fn the_system_check_line_follows_the_state() {
+        use kora_core::api::toolchain::CheckState;
+        let ok = check_item(Some(&info(CertSource::Tailscale, 80)), None, true, 0);
+        assert!(ok.state == CheckState::Ok && ok.summary.contains("80 days left") && ok.problem.is_none(), "{ok:?}");
+        let soon = check_item(Some(&info(CertSource::SelfSigned, 9)), None, true, 0);
+        assert!(soon.state == CheckState::Problem && soon.problem.unwrap().message.contains("ends in 9 days"));
+        let gone = check_item(Some(&info(CertSource::Provided, -2)), None, true, 0);
+        assert!(gone.problem.unwrap().message.contains("has expired"));
+        let plain = check_item(None, None, true, 0);
+        assert!(plain.state == CheckState::Problem && plain.problem.unwrap().actions.iter().any(|a| format!("{a:?}").contains("self-signed")));
+        let local = check_item(None, None, false, 0);
+        assert!(local.state == CheckState::Info && local.problem.is_none());
+        let err = check_item(None, Some("the key file is readable by others"), true, 0);
+        assert!(err.problem.unwrap().message.contains("readable by others"));
+    }
 
     #[test]
     fn a_state_without_a_certificate_serves_nothing() {

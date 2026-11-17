@@ -300,6 +300,25 @@ These were written on Linux; what Windows prints and does is yours to check.
   updates. Sign out of the panel: the console tab closes within about 20 seconds and reloading it shows "Open txAdmin
   from the Kora panel". Windows Firewall may ask about the panel's new port (allow private networks only).
 
+## Saved licence keys with DPAPI, and HTTPS (unverified on Windows)
+
+Written on Linux and type-checked for Windows only; this is what a real run must settle.
+
+1. `kora keys add Main` (key on standard input), then `kora keys keychain status`: it says **Windows (protected for your account)**. Open
+   `%LOCALAPPDATA%\Kora\store\kora.db` in a viewer: the table holds `dpapi1:` followed by hex, not the key. `kora keys list` shows the key
+   ending and "kept in Windows (protected for your account)".
+2. Install a server with that saved key: `secrets.cfg` holds the real key (the privileged side gets the value from the panel, it never reads DPAPI).
+3. Copy `kora.db` to another Windows account (or another PC) and run `kora keys list` there: the key shows the "saved by another Windows account"
+   problem naming it, with Enter it again; entering it again fixes it. `kora store export-json` there names it in `keys-not-exported.txt`.
+4. `kora keys keychain off`: the values come back in clear in the table and the status says "you turned the system keychain off"; `on` seals them again.
+5. A background panel running as the same user (not an administrator) reads the key without any prompt.
+6. `kora panel tls self-signed --name <this PC's name>` then `kora panel --bind <LAN address> --remote`: `https://<name>:47120` works in Edge after installing
+   `kora-local-ca.crt` into Trusted Root Certification Authorities (the printed steps); the fingerprint in Settings > HTTPS matches Edge's certificate viewer.
+   Opening `http://<name>:47120` from another PC redirects to https. Passkeys: invite a user (`kora panel user invite`), open the link from another PC by the **name**
+   (Windows Hello registers a passkey), sign in with it; by the bare IP address the page explains and offers one-time codes.
+7. Private key file check: `kora panel tls set --cert c.pem --key k.pem` with the key in your own folder works (Windows files are not checked for other readers; keep the
+   folder private).
+
 ## 7. Upgrade delta: a machine that has 0.6.x with the old machine-wide app
 
 Do this **instead of** section 1 on a machine that already has 0.6.x, or on a second VM that has it. To make that
