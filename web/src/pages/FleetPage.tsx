@@ -150,7 +150,7 @@ function NodeCard({ n, onRemove }: { n: HubNode; onRemove: () => void }) {
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground">{n.url}</div>
         {n.server_count !== null && <div className="text-xs text-muted-foreground">{n.server_count === 1 ? '1 server' : `${n.server_count} servers`}</div>}
-        {n.last_error && <div className="text-xs text-destructive">{n.last_error}</div>}
+        {n.last_error && <div className="text-xs text-danger-text">{n.last_error}</div>}
         {n.warning && <div className="text-xs text-orange">{n.warning}</div>}
       </div>
       <Button size="sm" onClick={onRemove} aria-label={`Remove ${n.name}`}><Trash2 /> Remove</Button>

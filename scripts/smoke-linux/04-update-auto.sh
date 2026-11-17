@@ -46,6 +46,7 @@ sf = {"name": name, "mode": "development", "dir": d, "ports": {"game": 31120, "t
 json.dump(sf, open(d + "/kora-server.json", "w"), indent=2)
 json.dump({"servers": [{"name": name, "dir": d, "mode": "development", "ports": {"game": 31120, "txadmin": 41120},
                         "created_unix": int(time.time())}]}, open(home + "/servers.json", "w"), indent=2)
+# (an old-format servers.json: Kora imports it into its data file the first time it starts, so this seeds the registry)
 PY
 kora status
 assert_matches "the hand-made server is registered as dev" "$OUT" "$NAME[[:space:]]+dev[[:space:]]+31120"

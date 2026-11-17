@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { InstallDefaults, InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
+import type { InstallDefaults, InstallEvent, InstallOutcome, InstallRequest, ProgressEvent, StatusEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
-import { OpenFolderButton, useTxAdminLink } from '@/components/ServerLinks'
+import { OpenFolderButton, TxAdminButton, useTxAdminLink } from '@/components/ServerLinks'
+import { MoreAddresses, ReachCard } from '@/components/ReachCard'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -104,7 +105,7 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
                 <div className="break-words">{r.value}</div>
                 {problem && (waiting.includes(r.step)
                   ? <p role="status" className="text-muted-foreground">{problem}</p>
-                  : <p role="alert" className="font-medium text-destructive">{problem}</p>)}
+                  : <p role="alert" className="font-medium text-danger-text">{problem}</p>)}
               </dd>
               <dd><Button variant="link" size="sm" className="h-auto p-0 text-sm" aria-label={`Change ${r.label}`} onClick={() => onChange(r)}>Change</Button></dd>
             </div>
@@ -132,7 +133,6 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
 export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin: number }; cfx?: string | null }) {
   // The same address, hint and note the server's Overview page gives (right for local, tunnelled and remote visits).
   const link = useTxAdminLink(ports.txadmin)
-  const tx = link.url
   return (
     <div className="space-y-4">
       <Alert tone={o.running ? 'success' : 'warning'} title={o.running ? 'Your server is installed and running' : 'Your server is installed'}>
@@ -146,9 +146,11 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       </div>
       <div className="space-y-1.5">
         <div className="text-sm text-muted-foreground">txAdmin</div>
-        <CopyField value={tx} label="txAdmin address" />
+        {link.url ? <CopyField value={link.url} label="txAdmin address" /> : <p className="text-sm">Open it with the button below: it goes through this panel, so no extra port has to be open on this computer.</p>}
         {link.hint && <p className="text-xs text-muted-foreground">{link.hint}</p>}
       </div>
+      <ReachCard name={o.name} compact />
+      <MoreAddresses name={o.name} />
       {!o.admin_user && cfx && (
         <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
       )}
@@ -157,7 +159,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       )}
       {o.notes.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">{o.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
       <div className="flex flex-wrap gap-2">
-        <Button asChild variant="default"><a href={tx} target="_blank" rel="noopener noreferrer"><ExternalLink /> Open txAdmin</a></Button>
+        <TxAdminButton name={o.name} port={ports.txadmin} up={o.running} size="default" />
         <CopyButton text={o.connect} label="Copy connect address" size="default" />
         <OpenFolderButton name={o.name} dir={o.dir} size="default" />
         <Button asChild><Link to={`/servers/${encodeURIComponent(o.name)}`}>Go to the server</Link></Button>
@@ -238,7 +240,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const [autoRetried, setAutoRetried] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
   const ports = usePortsCheck(f.game, f.tx)
-  const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
+  const run = useJob<InstallOutcome, InstallEvent>(job, onServersChanged)
   /** Windows: the panel can ask Windows for permission itself ("Ask again" / "Ask for administrator permission"). */
   const canAsk = !!useQuery({ queryKey: ['system'], queryFn: api.system, staleTime: 60_000 }).data?.admin_prompt
 
@@ -317,6 +319,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   }
 
   // ---- running / finished ----
+  // Step rows come from the installer; plain status lines come from an install run by the Linux helper.
+  const progressRows = run.events.filter((e): e is ProgressEvent => 'step' in e)
+  const statusLines = run.events.filter((e): e is StatusEvent => 'type' in e && e.type === 'status')
   if (job) {
     return (
       <div className="mx-auto max-w-2xl space-y-5">
@@ -330,7 +335,12 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
                 <Loader2 className="size-4 animate-spin text-info" aria-hidden /> Getting ready. The first step shows up in a moment...
               </p>
             ) : (
-              <StepProgress events={run.events as ProgressEvent[]} />
+              <>
+                {progressRows.length > 0 && <StepProgress events={progressRows} />}
+                {statusLines.length > 0 && (
+                  <pre aria-label="What Kora is doing" className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{statusLines.slice(-12).map((l) => l.message).join('\n')}</pre>
+                )}
+              </>
             )}
             {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
             {run.phase === 'failed' && (
@@ -379,7 +389,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         <Checkbox label="Show advanced options" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
       </div>
       {at === 0 && !editing && (
-        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline-offset-4 hover:underline">Add an existing server</Link> instead.</p>
+        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline underline-offset-4">Add an existing server</Link> instead.</p>
       )}
       {saved && !defaults.resumable?.some((r) => r.name === saved.name) && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
@@ -452,7 +462,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           ) : (
             <>
               {problem && !last && <p className="text-sm">{problem}</p>}
-              {last && installBlocked && <p role="alert" className="text-sm font-medium text-destructive">{installBlocked}</p>}
+              {last && installBlocked && <p role="alert" className="text-sm font-medium text-danger-text">{installBlocked}</p>}
               {last && !installBlocked && waiting.length > 0 && <p role="status" className="text-sm">Checking that the ports are free. One moment.</p>}
               <div className="flex justify-between pt-2">
                 <Button disabled={at === 0} onClick={() => setStep(at - 1)}>Back</Button>

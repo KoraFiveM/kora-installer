@@ -153,6 +153,7 @@ async fn rig(helper: Option<Arc<FakeHelper>>) -> Rig {
     install_seam::set_env(Some(env.clone()));
     let fake = FakeBackend::sample();
     let f = fake.clone();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone())));
     Rig { app: router(st), fake, maint, env, _turn: turn }
 }
@@ -355,6 +356,12 @@ async fn an_install_runs_in_the_helper_with_secrets_in_the_environment_only() {
     let j = r.job(a).await;
     assert_eq!(j["state"], "done", "{j}");
     assert_eq!(j["result"]["name"], "Alpha Town");
+    // The whole outcome, as the finished-install page reads it (not just name and folder).
+    let out: kora_core::installer::InstallOutcome = serde_json::from_value(j["result"].clone()).expect("reads as InstallOutcome");
+    assert!(out.connect.ends_with(":30140"), "{}", out.connect);
+    assert_eq!(out.txadmin_url, "http://localhost:40140");
+    assert!(!out.start_attempted && !out.running && out.launch_problem.is_none());
+    assert!(out.notes.iter().any(|n| n.contains("kora start")), "{:?}", out.notes);
     let calls = h.calls();
     assert_eq!(calls.len(), 1);
     let (verb, args, env) = &calls[0];
@@ -389,4 +396,23 @@ async fn a_real_socket_client_without_a_socket_is_not_installed() {
     // On a machine that really has the helper this would be true, so only assert the shape.
     let installed = kora_web::elevated::helper_installed();
     assert_eq!(installed, std::path::Path::new(kora_core::helper::SOCKET_PATH).exists() && installed);
+}
+
+#[tokio::test]
+async fn the_helpers_outcome_names_the_generated_txadmin_account_but_never_reads_its_password() {
+    let h = FakeHelper::new(0);
+    let r = rig(Some(h)).await;
+    let dir = abs("kora-helper-test-d");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(std::path::Path::new(&dir).join("secrets")).unwrap();
+    std::fs::write(std::path::Path::new(&dir).join("secrets").join("txadmin-admin.txt"), "Username: kora-admin\nPassword: PASSWORD-IN-THE-FILE-1234\n").unwrap();
+    let a = r.call("POST", "/installs", Some(install_body(&dir))).await;
+    let j = r.job(a).await;
+    assert_eq!(j["state"], "done", "{j}");
+    assert_eq!(j["result"]["admin_user"], kora_core::txadmin::LOCAL_ADMIN_USER);
+    assert!(j["result"]["admin_password_file"].as_str().unwrap().ends_with("txadmin-admin.txt"));
+    assert!(!j.to_string().contains("PASSWORD-IN-THE-FILE-1234"), "the password never leaves its file");
+    // The helper's lines are job events of their own kind (the page shows them as status lines).
+    let _ = std::fs::remove_dir_all(&dir);
+    set_helper_override(None);
 }

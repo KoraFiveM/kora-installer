@@ -1260,7 +1260,7 @@ impl InstallStep {
         let Some(kind) = firewall::detect(svc_platform(), &rn) else {
             if !ctx.req.txadmin_public {
                 ctx.note(format!(
-                    "txAdmin (port {}) listens on all interfaces: txAdmin 8.1.2 cannot bind only the panel to loopback. No firewall is active here, so block that port from outside yourself or use it through an SSH tunnel.",
+                    "txAdmin (port {}) listens on all interfaces: txAdmin 8.1.2 cannot bind only the panel to loopback. No firewall is active here, so block that port from outside yourself. You do not need it open to use txAdmin from other devices: the panel's Open txAdmin button reaches it for you.",
                     ctx.req.ports.txadmin
                 ));
             }
@@ -1502,17 +1502,21 @@ impl InstallStep {
             c.registered = true;
         })?;
         io(sf.save(), "cannot write kora-server.json")?;
-        let mut reg = io(Registry::load(), "cannot read the server registry")?;
-        reg.upsert(ServerEntry {
-            source: Some(req.source()),
-            versions: Some(req.versions()),
-            name: req.name.clone(),
-            dir: req.dir.clone(),
-            mode: compat_mode(req.versions()),
-            ports: PortsRecord::from(&req.ports),
-            created_unix: now,
-        });
-        io(reg.save(), "cannot write the server registry")?;
+        io(
+            Registry::update(|reg| {
+                reg.upsert(ServerEntry {
+                    source: Some(req.source()),
+                    versions: Some(req.versions()),
+                    name: req.name.clone(),
+                    dir: req.dir.clone(),
+                    mode: compat_mode(req.versions()),
+                    ports: PortsRecord::from(&req.ports),
+                    created_unix: now,
+                });
+                Ok(())
+            }),
+            "cannot write the server registry",
+        )?;
         // A server in the `kora` account's home without a service belongs to `kora` (with a service the
         // service step already handed it to the service's own account).
         if ctx.admin && !req.service && ctx.plan.iter().any(|p| p.id == "prepare.account") {
@@ -1520,7 +1524,7 @@ impl InstallStep {
             let plan = crate::userhome::chown_to_kora_plan(std::slice::from_ref(&req.dir), true);
             service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         }
-        Ok(format!("Registered '{}' in {}", req.name, registry::registry_path().display()))
+        Ok(format!("Registered '{}' in Kora's server list", req.name))
     }
 
     // ---- rollback -------------------------------------------------------------------------
@@ -1715,13 +1719,10 @@ impl InstallStep {
             }
             "finalize" => {
                 // By folder, not by the (possibly forged) recorded name: only this server's entry goes.
-                if let Ok(mut reg) = Registry::load() {
-                    let n = reg.servers.len();
+                let _ = Registry::update(|reg| {
                     reg.servers.retain(|s| !registry::same_path(&s.dir, &ctx.req.dir));
-                    if reg.servers.len() != n {
-                        let _ = reg.save();
-                    }
-                }
+                    Ok(())
+                });
                 if !ctx.keep_files {
                     let _ = std::fs::remove_file(registry::server_file_path(&ctx.req.dir));
                 }

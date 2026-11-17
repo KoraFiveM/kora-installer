@@ -6,9 +6,11 @@ import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
 import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
 import { installKeysMock } from './keys'
+import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
 import { installResourceMock } from './resource'
 import { installCollabMock } from './collab'
+import { installReachMock } from './reach'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
@@ -67,6 +69,18 @@ function init(name: ScenarioName) {
   busy.clear()
   paused.clear()
   keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
+  reachMock.reset()
+  storeMock.reset(name === 'restarted')
+  if (name === 'restarted') {
+    // The install that was running when the panel stopped, written down with its (saved) licence key by name.
+    paused.set('old-3', {
+      req: { mode: 'production', name: 'Staging', dir: '/srv/fivem/staging', hostname: 'Staging', license_key_name: 'Main', ports: { game: 30122, txadmin: 40122 }, txadmin_public: false, resources: 'all', db: 'install_if_missing', service: false, firewall: false, dry_run: false, start: true } as unknown as T.InstallRequest,
+      failed: '',
+      attempt: 1,
+      done: [],
+      skip: new Set(),
+    })
+  }
   nextId = 1
   consoleTick = 0
   resetToolchainMock(beh.trouble)
@@ -126,6 +140,8 @@ interface MJob {
   events: unknown[]
   result: unknown
   error: T.JobError | null
+  started: number
+  ended: number | null
   subs: Set<Fn>
 }
 const jobs = new Map<string, MJob>()
@@ -136,7 +152,7 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
     if (busy.has(server)) throw new Fail(409, 'conflict', `Another job is already running on "${server}". Wait for it to finish and try again.`)
     busy.add(server)
   }
-  const job: MJob = { id: `job-${nextId++}`, op, server, state: 'running', events: [], result: null, error: null, subs: new Set() }
+  const job: MJob = { id: `job-${nextId++}`, op, server, state: 'running', events: [], result: null, error: null, started: Math.floor(Date.now() / 1000), ended: null, subs: new Set() }
   jobs.set(job.id, job)
   const emit = (e: unknown) => {
     job.events.push(e)
@@ -147,8 +163,10 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
     try {
       job.result = await run(emit)
       job.state = 'done'
+      job.ended = Math.floor(Date.now() / 1000)
     } catch (e) {
       job.state = 'failed'
+      job.ended = Math.floor(Date.now() / 1000)
       job.error = e instanceof Fail ? { code: e.code, message: e.message, command: e.command, ...e.extra } : { code: 'internal', message: e instanceof Error ? e.message : 'Something went wrong.' }
     }
     if (server) busy.delete(server)
@@ -157,7 +175,7 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
   return { job: job.id }
 }
 
-const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: j.events, result: j.result, error: j.error })
+const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: j.events, result: j.result, error: j.error, started: j.started, ended: j.ended })
 
 // ---- helpers --------------------------------------------------------------------------------
 
@@ -401,7 +419,9 @@ let lastHeaders = new Headers()
 /** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
 const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
-const keysMock = installKeysMock(route, Fail, () => servers)
+const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
+const reachMock = installReachMock(route, () => servers)
+const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
 const resourceMock = installResourceMock(route, Fail, {
   find: (n) => find(n),
   installed: (n) => installed[n] ?? [],
@@ -418,7 +438,7 @@ const collabMock = installCollabMock(route, startJob, Fail, {
 })
 const branchesMock = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github, onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why) })
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: viewer.identity?.provider === 'tailscale' }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
 const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
@@ -453,8 +473,8 @@ route('POST', '/session/link', () => {
   return { code, expires_in: 600 }
 })
 route('GET', '/system', () => (beh.windows
-  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
-  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true, admin_prompt: false }) satisfies T.SystemInfo)
+  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: !viewer.remote, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
+  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: !viewer.remote, kora_home: '/home/sam/.kora', can_restart: true, admin_prompt: false }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -583,6 +603,8 @@ route('POST', '/servers/{s}/update/preview', (m, b) => {
   return startJob('update_preview', s.name, async () => {
     await sleep(1500)
     const p = makePreview(s)
+    // A resource switched to another branch or a pull request is left alone by updates.
+    p.resources = p.resources.map((r) => { const note = branchesMock.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
     dirtyPreviewed[s.name] = p
     s.badge = badgeFrom(p)
     pushServer(s)
@@ -1160,6 +1182,7 @@ export function activeScenario(): ScenarioName {
 export function installMock(opts: MockOptions = {}): ScenarioName {
   const name = opts.scenario ?? resolveScenario(window.location.search, safeStorage())
   init(name)
+  viewer = resolveViewer(window.location.search, safeStorage())
   if (opts.speed !== undefined) speed = opts.speed
   startTicker()
   const real = realFetch ?? (realFetch = window.fetch.bind(window))
@@ -1173,6 +1196,35 @@ export function installMock(opts: MockOptions = {}): ScenarioName {
 }
 
 let realFetch: typeof window.fetch | null = null
+
+/**
+ * Who is looking, for the browser tests of what other people see: `?as=operator` (this computer, an operator),
+ * `?as=remote-operator` (another device through Tailscale), `?as=remote-admin` (another device with an admin token), `?as=remote-tailscale-admin` (another device, a Tailscale administrator).
+ * Remembered for the tab like the scenario; `?as=local` goes back to the default.
+ */
+type Viewer = { identity: T.Meta['identity']; remote: boolean }
+const VIEWERS: Record<string, Viewer> = {
+  operator: { identity: { name: 'kim', provider: 'local', role: 'operator' }, remote: false },
+  'remote-operator': { identity: { name: 'kim', provider: 'tailscale', role: 'operator' }, remote: true },
+  'remote-admin': { identity: { name: 'sam', provider: 'token', role: 'admin' }, remote: true },
+  'remote-tailscale-admin': { identity: { name: 'ada', provider: 'tailscale', role: 'admin' }, remote: true },
+}
+let viewer: Viewer = { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
+function resolveViewer(search: string, storage: Storage | null): Viewer {
+  const key = 'kora-mock-as'
+  try {
+    const q = new URLSearchParams(search).get('as')
+    if (q) {
+      if (VIEWERS[q]) storage?.setItem(key, q)
+      else storage?.removeItem(key)
+    }
+    const saved = storage?.getItem(key)
+    if (saved && VIEWERS[saved]) return VIEWERS[saved]
+  } catch {
+    /* storage blocked: the default viewer */
+  }
+  return { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
+}
 function safeStorage(): Storage | null {
   try {
     return window.sessionStorage

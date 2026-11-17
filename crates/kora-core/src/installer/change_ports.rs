@@ -132,11 +132,13 @@ pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber)
     sf.save().map_err(|e| format!("cannot write kora-server.json: {e}"))?;
 
     let path = super::registry::registry_path();
-    let mut reg = Registry::load_from(&path).map_err(|e| format!("cannot read the server registry: {e}"))?;
-    if let Some(entry) = reg.servers.iter_mut().find(|s| s.name == name) {
-        entry.ports = PortsRecord { game: new.game, txadmin: new.txadmin };
-        reg.save_to(&path).map_err(|e| format!("cannot write the server registry: {e}"))?;
-    }
+    Registry::update_at(&path, |reg| {
+        if let Some(entry) = reg.servers.iter_mut().find(|s| s.name == name) {
+            entry.ports = PortsRecord { game: new.game, txadmin: new.txadmin };
+        }
+        Ok(())
+    })
+    .map_err(|e| format!("cannot write the server registry: {e}"))?;
 
     notes.push("Firewall rules were not changed. Open the new ports and close the old ones if you opened them.".into());
     notes.push("Start the server again to use the new ports.".into());

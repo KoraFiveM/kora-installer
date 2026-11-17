@@ -337,6 +337,15 @@ export const api = {
     set: (name: string, cfg: T.ScheduleConfig) => call('schedule_set', { params: { s: name }, body: cfg }),
     remove: (name: string) => call('schedule_remove', { params: { s: name } }),
   },
+  reach: {
+    /** `once`: allow a lookup for this check only (nothing is saved). */
+    check: (name: string, once?: T.ReachConsentPatch) => call('reach_check', { params: { s: name }, body: once ?? {} }),
+    settings: () => call('reach_settings_get', {}),
+    setSettings: (c: T.ReachConsentPatch) => call('reach_settings_set', { body: c }),
+    setForwarding: (name: string, enabled: boolean) => call('forwarding_set', { params: { s: name }, body: { enabled } }),
+    openFirewall: (name: string) => call('reach_firewall_open', { params: { s: name } }),
+    txadminTicket: (name: string) => call('txadmin_ticket', { params: { s: name } }),
+  },
   ports: {
     set: (name: string, ports: T.Ports) => call('ports_set', { params: { s: name }, body: ports }),
   },
@@ -381,6 +390,11 @@ export const api = {
   systemCheck: {
     get: () => call('system_check', {}),
     startDatabase: () => call('db_start', {}),
+  },
+  /** The audit log (administrators only). `before` is the id of the oldest row already shown. */
+  audit: {
+    list: (q: { limit?: number; before?: number; server?: string; op?: string; actor?: string; result?: string } = {}) =>
+      call('audit_list', { query: { limit: q.limit, before: q.before, server: q.server || undefined, op: q.op || undefined, actor: q.actor || undefined, result: q.result || undefined } }),
   },
   keys: {
     list: () => call('keys_list', {}),
@@ -433,6 +447,8 @@ export const api = {
     run: (body: { answers: { item: string; remove: boolean }[]; delete_files: boolean; delete_databases: boolean; only: string[] }) => call('uninstall_run', { body }),
   },
   jobs: {
+    /** Recent jobs, also from before the panel last restarted (newest first, without events). */
+    list: (limit = 50) => call('jobs_list', { query: { limit } }).then((r) => r.jobs),
     get: <R = unknown, E = unknown>(id: string) => call('jobs_get', { params: { id } }) as Promise<T.Job<R, E>>,
     eventsUrl: (id: string) => streamOf('job_events', { id }),
   },

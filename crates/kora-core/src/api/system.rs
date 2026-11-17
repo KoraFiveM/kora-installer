@@ -259,15 +259,20 @@ impl Backend for SystemBackend {
     }
 
     fn unregister(&mut self, e: &ServerEntry) -> Res<()> {
-        let mut r = Registry::load().map_err(err)?;
-        r.remove(&e.name);
-        r.save_or_clean_to(&registry::registry_path()).map_err(err)
+        crate::reach::forward::release_for_dir(&e.dir);
+        Registry::update(|r| {
+            r.remove(&e.name);
+            Ok(())
+        })
+        .map_err(err)
     }
 
     fn register(&mut self, e: ServerEntry) -> Res<()> {
-        let mut r = Registry::load().map_err(err)?;
-        r.upsert(e);
-        r.save().map_err(err)
+        Registry::update(|r| {
+            r.upsert(e);
+            Ok(())
+        })
+        .map_err(err)
     }
 
     fn scan_roots(&self) -> Vec<PathBuf> {
@@ -385,6 +390,26 @@ impl Backend for SystemBackend {
             Some(c) => schedule::set_args(e, c),
             None => vec!["schedule".into(), "off".into(), e.dir.to_string_lossy().into_owned()],
         })
+    }
+
+    fn reach_check(&mut self, e: &ServerEntry, consent: Option<crate::reach::settings::Consent>) -> Res<crate::reach::ReachReport> {
+        Ok(crate::reach::check(&crate::reach::SystemReach::default(), e, consent))
+    }
+
+    fn reach_consent(&mut self) -> crate::reach::settings::Consent {
+        crate::reach::settings::load_consent()
+    }
+
+    fn reach_consent_set(&mut self, c: crate::reach::settings::Consent) -> Res<()> {
+        crate::reach::settings::save_consent(&c)
+    }
+
+    fn forwarding_set(&mut self, e: &ServerEntry, on: bool) -> Res<crate::reach::ForwardingView> {
+        crate::reach::set_forwarding(e, on)
+    }
+
+    fn firewall_open(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
+        crate::reach::fw::open_game_port(e)
     }
 
     fn assets_list(&mut self, e: &ServerEntry) -> Res<paidassets::AssetsView> {

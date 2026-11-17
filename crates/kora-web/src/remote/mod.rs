@@ -1,7 +1,7 @@
 //! Optional remote access (plan section 1, phase 6): who is asking, what role they have, and what a
 //! remote session may do. Local-only (loopback, launch token) stays the default and is not affected.
 //!
-//! * [`config`]: `panel.json`, hashed per-user tokens.
+//! * [`config`]: remote access settings (in the store), hashed per-user tokens.
 //! * [`tailscale`]: the `whois` seam (identity comes from the local tailscaled, never from headers).
 //! * [`roles`]: viewer / operator / admin, the exhaustive Op classification and request → Op lookup.
 pub mod config;
@@ -11,7 +11,7 @@ pub mod tailscale;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -80,15 +80,16 @@ pub fn is_remote_peer(ip: IpAddr) -> bool {
 struct Store {
     cfg: RemoteConfig,
     path: Option<PathBuf>,
-    stamp: Option<(SystemTime, u64)>,
+    /// The version of the saved settings `cfg` was read at (`None`: nothing saved).
+    stamp: Option<u64>,
 }
 
-fn stamp_of(path: &std::path::Path) -> Option<(SystemTime, u64)> {
-    let m = std::fs::metadata(path).ok()?;
-    Some((m.modified().ok()?, m.len()))
+/// The version of the saved settings now. `Err`: cannot tell (the store is busy): keep what we have.
+fn stamp_of(path: &std::path::Path) -> Result<Option<u64>, String> {
+    RemoteConfig::stored_rev(path).map(|r| (r > 0).then_some(r))
 }
 
-/// Shared remote-access state: the settings (reloaded when `panel.json` changes on disk, so
+/// Shared remote-access state: the settings (reloaded when they change in the store, so
 /// `kora panel user add` works while the panel runs), the whois seam and a failed-attempt limiter.
 pub struct Remote {
     store: Mutex<Store>,
@@ -114,7 +115,7 @@ impl Remote {
     }
 
     pub fn new(path: Option<PathBuf>, cfg: RemoteConfig) -> Self {
-        let stamp = path.as_deref().and_then(stamp_of);
+        let stamp = path.as_deref().and_then(|p| stamp_of(p).ok().flatten());
         Self {
             store: Mutex::new(Store { cfg, path, stamp }),
             forced: false,
@@ -149,14 +150,13 @@ impl Remote {
     fn lock(&self) -> MutexGuard<'_, Store> {
         let mut g = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(p) = g.path.clone() {
-            let now = stamp_of(&p);
+            // A new version of the saved settings (a `kora panel user add` in another process, say) is picked up here.
+            // Cannot tell, or half-way/damaged: keep what we had until it reads again.
+            let Ok(now) = stamp_of(&p) else { return g };
             if now != g.stamp {
-                match (now, RemoteConfig::load(&p)) {
-                    (Some(_), Ok(c)) => g.cfg = c,
-                    // File deleted: forget its users (removing the file revokes everything).
-                    (None, _) => g.cfg = RemoteConfig::default(),
-                    // Half-written or damaged: keep what we had until it reads again.
-                    (Some(_), Err(_)) => return g,
+                match RemoteConfig::load(&p) {
+                    Ok(c) => g.cfg = c,
+                    Err(_) => return g,
                 }
                 g.stamp = now;
             }
@@ -179,12 +179,15 @@ impl Remote {
     /// Change the settings and save them (when there is a file). The change is not kept if saving fails.
     pub fn update<R>(&self, f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>) -> Result<R, String> {
         let mut g = self.lock();
+        if let Some(p) = g.path.clone() {
+            // One transaction in the store: read the saved settings, change them, write them.
+            let (r, saved) = RemoteConfig::update_at_cfg(&p, f)?;
+            g.stamp = stamp_of(&p).ok().flatten();
+            g.cfg = saved;
+            return Ok(r);
+        }
         let mut next = g.cfg.clone();
         let r = f(&mut next)?;
-        if let Some(p) = g.path.clone() {
-            next.save(&p)?;
-            g.stamp = stamp_of(&p);
-        }
         g.cfg = next;
         Ok(r)
     }
@@ -458,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn config_file_changes_are_picked_up() {
+    fn saved_settings_changes_are_picked_up() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join(config::FILE_NAME);
         let r = Remote::from_file(p.clone()).unwrap();
@@ -468,8 +471,15 @@ mod tests {
         let tok = c.add_user("zed", Role::Operator).unwrap();
         c.save(&p).unwrap();
         assert_eq!(r.identity_for_token(&tok).unwrap().role, Role::Operator);
-        // Removing the file revokes everyone.
-        std::fs::remove_file(&p).unwrap();
+        // Removing the user (another process again) revokes them at once.
+        RemoteConfig::update_at(&p, |c| Ok(c.remove_user("zed"))).unwrap();
         assert!(r.identity_for_token(&tok).is_none());
+        // And so does deleting the whole store.
+        let mut c = RemoteConfig::load(&p).unwrap();
+        let tok2 = c.add_user("amy", Role::Viewer).unwrap();
+        c.save(&p).unwrap();
+        assert!(r.identity_for_token(&tok2).is_some());
+        std::fs::remove_dir_all(dir.path().join("store")).unwrap();
+        assert!(r.identity_for_token(&tok2).is_none());
     }
 }

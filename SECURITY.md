@@ -26,11 +26,37 @@ reasonable time to release a fix before you disclose publicly.
   proxy or `tailscale serve` every visitor would look like this computer. Use `kora panel --tailscale` instead.
 - Every request must carry the panel's own address in `Host` (DNS rebinding). Changing requests must also have a
   matching `Origin` (when sent) and an `X-Kora` header (CSRF).
+- **txAdmin through the panel (the gateway).** txAdmin is full control of the game server (resources and `exec` run code),
+  so opening it needs the **admin** role and counts with the risky actions: a remote sign-in made with a user token needs
+  `kora panel remote-actions on`; a Tailscale administrator does not. The panel opens one extra TCP port per server for it
+  (txAdmin's port + 10000, only on the addresses the panel itself listens on). Nobody gets in without a one-time,
+  one-minute ticket made by an authenticated panel request (session cookie and per-session secret, the role check and the
+  remote gate); the ticket becomes a gateway cookie that names that panel session and is checked again on every request and
+  every 20 seconds on an open live console, so signing out, removing the user, a role change or turning the switch off ends
+  it. Requests go only to `127.0.0.1` and the txAdmin port the server list holds for that server (never chosen from the
+  request: absolute-form targets and other `Host` values are refused). The panel's cookies and secret are never sent to
+  txAdmin, txAdmin's cookies are renamed per gateway (two servers never share a session; nothing txAdmin sets can replace a
+  panel cookie), and `x-txadmin-token` / `x-txadmin-identifiers` (which txAdmin treats as FXServer's own, no login needed),
+  `Authorization`, proxy and hop-by-hop headers are dropped. Proxy headers refuse the request, and WebSocket handshakes
+  need an `Origin` equal to the gateway's own `Host`. What stays true: txAdmin sees every visitor as 127.0.0.1, so its
+  own sign-in rate limit is shared and its flood protection does not apply; txAdmin has no single sign-on, so a person
+  who may open it still signs in to txAdmin itself. Checked against txAdmin 8.1.2; the checklist for a real Windows
+  run is in `docs/windows-test-checklist.md`.
+- **Reachability check and port forwarding.** Nothing outside the computer is contacted unless the person allowed that
+  lookup (Cfx.re's public server list with the server's own join code; `api.ipify.org` for the public address). Router
+  discovery (UPnP, PCP, NAT-PMP) stays on the local network: the router's description must come from the address that
+  answered, control addresses on any other host are refused, replies are size-limited and parsed strictly. Forwarding is
+  off by default, per server, admin only; it only ever maps that server's own game port (TCP and UDP, 1024 or higher)
+  to this computer, with a lease that is renewed while the server runs and removed when it stops or is deleted.
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
   `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - Licence keys, database passwords and webhook addresses are accepted but never returned. Saved licence keys live in
-  `secrets.json` in the Kora folder (plain text, readable only by you: `0600` from creation on Linux, inherited permissions
-  removed on Windows, atomic writes, never replaced when unreadable); the API shows only a key's name and last four characters.
+  Kora's data file (`store/kora.db` in the Kora folder, see [docs/store.md](docs/store.md); plain text, not encrypted, as private as `secrets.json`
+  was: the `store` folder is `0700` and its files `0600` from creation on Linux, including SQLite's `-wal`/`-shm` files, and on
+  Windows its inherited permissions are removed so everything created in it inherits that; links are refused, files made by `sudo`
+  inside someone else's folder go back to its owner; every change is one transaction, so two programs cannot overwrite each
+  other, and a file that cannot be read is never replaced). The key values have their own table so they can move to the system
+  keychain later. The API shows only a key's name and last four characters.
   A stopped install or the saved answers refer to a saved key by name and never contain the key. Only admins and this
   computer can add, rename, replace or delete keys.
 - The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, a
@@ -81,7 +107,8 @@ reasonable time to release a fix before you disclose publicly.
 - **Whose GitHub account acts.** Everything done on GitHub from the panel or the command line (push, comment, review, merge, issue comment, opening a pull request, forking) is done by the one GitHub account `gh` on the computer that runs Kora is signed in as. That identity is **shared by every panel user**: the panel says "This is done on GitHub as <login>" beside every such button and in every answer. All of these need the admin role; push and merge are also in the "destructive" class, so a remote administrator signed in with a token is refused them unless the owner turned remote actions on (`kora panel remote-actions on`) or signed in through Tailscale. Reading pull requests, issues, releases and diffs needs the operator role (a diff can contain a resource's configuration, so it is not shown to viewers). The GitHub work never force-pushes, never deletes a remote branch, never rewrites history and never passes `--admin` to a merge; `git push` is only `git push --set-upstream origin <the checked-out branch>` and git itself refuses anything that is not a fast-forward. Commit messages, comments and review texts are sent as argument values (never through a shell), are length-limited, and GitHub text shown in the panel is plain text. A pull request to merge is read again from GitHub immediately before the merge, and it is refused when the account has no write permission, the pull request is not open, or the repository does not allow the chosen method.
 - **Making your own copy (fork)** creates repositories in the account or organisation you choose (an organisation is checked for the right to create repositories first), re-points the resource's remotes and keeps its commit, branch and changes. It uses only `gh repo fork` and `git remote`; nothing is deleted, and the original stays as `upstream`.
 - Remote operators can list the saved licence keys (name and last four characters, and which servers use them) and point a server at one of them by name; they cannot see, paste, add or change a key. Remote administrators (token or Tailscale) can also choose the folder of a new server, anywhere the panel's user can write.
-- A stopped install is kept in memory for six hours, with its licence key and database password. When it used a saved key it is also written to `paused-installs/` in the Kora folder for three days without any secret, so it can carry on after a restart.
+- A stopped install is kept in memory for six hours, with its licence key and database password. When it used a saved key it is also written to Kora's data file for three days without any secret, so it can carry on after a restart (an install that was running when the panel died is written the same way and offered after the restart); a pasted key that was not saved never leaves memory. Job records and their events are kept in the data file for 30 days and never hold a secret (key-shaped text and fields called key, password, token or secret are blanked when written).
+- Every change made through the panel or a `kora` command is recorded in an append-only audit log in the data file (when, operation, server, who with provider and role, result; never a secret or request contents; shown to administrators in Settings and by `kora audit`; kept 365 days). It is not tamper-proof against someone who can open the private data file.
 - `kora panel` and a bare `kora` print a sign-in link with a one-time code. If the running panel cannot give one (an older version, or it does not answer), the link carries the panel's own token instead: do not paste that link into chats or tickets.
 
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
@@ -124,7 +151,7 @@ Kora Installer is pre-release software. Only the newest release receives securit
 ## In scope
 
 - **Privilege elevation:** UAC / `sudo` handling, anything that runs with more rights than needed, services and scheduled tasks.
-- **Secrets handling:** the txAdmin password, database passwords, licence key and tokens (files, permissions, logs, clipboard), including the saved-keys file `secrets.json`.
+- **Secrets handling:** the txAdmin password, database passwords, licence key and tokens (files, permissions, logs, clipboard), including the saved keys in the data file `store/kora.db` and its permissions.
 - **Download verification:** SHA-256 checks and HTTPS enforcement in `kora` and in `install.sh` / `install.ps1`, and the release artifacts.
 - **The panel:** authentication, session handling, the `Host` / `Origin` / `X-Kora` checks, the Content-Security-Policy, anything that lets a web page or another local user act on your servers, and anything that returns a secret to the browser.
 - Overwriting or deleting files the installer should not touch.

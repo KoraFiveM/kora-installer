@@ -127,7 +127,7 @@ export function PullRequestsPanel({ page }: { page: ResourcePage }) {
                 </div>
                 <a className="inline-flex items-center gap-1 text-xs text-info underline" href={p.url} target="_blank" rel="noopener noreferrer" aria-label={`Open pull request #${p.number} on GitHub`}>GitHub <ExternalLink className="size-3" aria-hidden /></a>
                 <Button size="sm" variant="ghost" aria-expanded={open === p.number} onClick={() => setOpen(open === p.number ? null : p.number)}>{open === p.number ? 'Hide details' : 'Details'}</Button>
-                <Button size="sm" disabled={go.isPending || leaving} title={noAdmin ?? (released && !understood ? 'Tick the box above first' : undefined)} aria-label={`Try pull request #${p.number}`} onClick={() => tryIt(p)}>Try it</Button>
+                <Button size="sm" disabled={go.isPending || leaving} title={noAdmin ?? (released && !understood ? 'Tick the box above first' : undefined)} aria-label={`Try it: pull request #${p.number}`} onClick={() => tryIt(p)}>Try it</Button>
               </div>
               {open === p.number && <PrDetail page={page} number={p.number} source={p.source} onChanged={refresh} />}
             </li>

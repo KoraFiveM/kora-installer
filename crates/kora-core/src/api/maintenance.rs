@@ -320,6 +320,7 @@ impl Maintenance for SystemMaintenance {
         let env = un::Env { platform: Platform::current(), runner: &runner, admin };
         let names: Vec<(String, std::path::PathBuf)> =
             reg.servers.iter().filter(|s| req.only.is_empty() || req.only.iter().any(|o| matches_only(s, o))).map(|s| (s.name.clone(), s.dir.clone())).collect();
+        let all_names: Vec<String> = reg.servers.iter().map(|s| s.name.clone()).collect();
         let mut sum = un::Summary::default();
         for (name, dir) in &names {
             let del_files = req.delete_files || answers.get(&format!("{name}/folder")).copied().unwrap_or(false);
@@ -334,7 +335,16 @@ impl Maintenance for SystemMaintenance {
                 }
             };
             let mut delete = |d: &Path, o: &RollbackOptions| installer::rollback(d, o, &mut NullSink);
-            let mut save = |r: &Registry| r.save_or_clean_to(&registry::registry_path());
+            // Only the servers this run took out of its list are removed, inside one transaction: a server that was
+            // registered meanwhile (the panel, another `kora` command) is never dropped by writing a stale whole list.
+            let before: Vec<String> = all_names.clone();
+            let mut save = |r: &Registry| {
+                let removed: Vec<&String> = before.iter().filter(|n| !r.servers.iter().any(|s| &s.name == *n)).collect();
+                Registry::update(|cur| {
+                    cur.servers.retain(|s| !removed.contains(&&s.name));
+                    Ok(())
+                })
+            };
             let s = un::run(&mut reg, &opts, &env, &mut asker, &mut say, &mut delete, &mut save);
             sum.removed.extend(s.removed);
             sum.kept.extend(s.kept);

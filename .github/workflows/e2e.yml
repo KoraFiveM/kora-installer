@@ -1,0 +1,158 @@
+# Browser tests of the panel UI (Playwright). See CONTRIBUTING.md, "Browser tests".
+#   mock      every journey against the UI built with the mock backend, in Chromium (fast, deterministic)
+#   webkit    the core journey once more in WebKit (a different engine; Safari users)
+#   real      a small smoke layer against the REAL `kora panel` binary on Linux (no installs)
+# Browsers are downloaded by an explicit step (never by an install script: `npm ci --ignore-scripts` is used) and cached.
+# On a failure, the traces and screenshots are uploaded as an artifact.
+name: Browser tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # A newer push to the same branch/PR cancels the older run instead of stacking up (runners are limited).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mock:
+    name: "mock backend, Chromium: every journey, accessibility, keyboard"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Cache the Playwright browsers
+        id: browsers
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('web/package-lock.json') }}
+      # An explicit step: the download is never part of `npm ci`.
+      - name: Download Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
+      - name: System libraries for Chromium
+        run: npx playwright install-deps chromium
+      - name: Journeys (mock backend)
+        run: npm run e2e
+        env:
+          CI: "true"
+      - name: Traces, screenshots and the HTML report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-mock-failure
+          path: |
+            web/e2e-results
+            web/e2e-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+  webkit:
+    name: "mock backend, WebKit: the core journey"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Cache the Playwright browsers
+        id: browsers
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-webkit-${{ hashFiles('web/package-lock.json') }}
+      - name: Download WebKit
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install webkit
+      - name: System libraries for WebKit
+        run: npx playwright install-deps webkit
+      - name: Core journey (WebKit)
+        run: npx playwright test --project=mock-webkit
+        env:
+          CI: "true"
+      - name: Traces and screenshots (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-webkit-failure
+          path: |
+            web/e2e-results
+            web/e2e-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+  real:
+    name: "real kora panel on Linux: sign-in, pages, add a fake server, tabs"
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: e2e-real
+      - name: npm ci
+        working-directory: web
+        run: npm ci --ignore-scripts
+      # The UI is embedded in the binary at build time, so build it first (the production build, without the mock).
+      - name: Build the UI
+        working-directory: web
+        run: npm run build
+      - name: Build kora
+        run: cargo build --locked -p kora-cli
+      - name: Cache the Playwright browsers
+        id: browsers
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('web/package-lock.json') }}
+      - name: Download Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install chromium
+      - name: System libraries for Chromium
+        working-directory: web
+        run: npx playwright install-deps chromium
+      - name: Smoke tests (real panel)
+        working-directory: web
+        run: npm run e2e:real
+        env:
+          CI: "true"
+          KORA_BIN: ${{ github.workspace }}/target/debug/kora
+      - name: Traces, screenshots and the HTML report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-real-failure
+          path: |
+            web/e2e-results
+            web/e2e-report
+          retention-days: 7
+          if-no-files-found: ignore

@@ -149,7 +149,7 @@ export function BranchControls({ server: s, resource }: { server: BranchServer; 
                 </Select>
               </Field></div>
               <Button variant="default" disabled={!pick || working || leaving} onClick={switchToPick}>Switch</Button>
-              <Button variant="ghost" onClick={() => reload.mutate()} disabled={reload.isPending} title="Ask GitHub for the newest list of branches" aria-label="Refresh the branch list from GitHub">
+              <Button variant="ghost" onClick={() => reload.mutate()} disabled={reload.isPending} title="Ask GitHub for the newest list of branches" aria-label="Refresh list of branches from GitHub">
                 {reload.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}Refresh list
               </Button>
             </div>
@@ -176,7 +176,7 @@ export function BranchControls({ server: s, resource }: { server: BranchServer; 
                 {c!.stashes.map((st) => (
                   <li key={st.index} className="flex flex-wrap items-center gap-2 p-3 text-sm">
                     <span className="min-w-0 flex-1">{st.message} <span className="text-xs text-muted-foreground">(made on {st.branch})</span></span>
-                    <Button size="sm" disabled={working || !!blocked} aria-label={`Bring back kept-aside changes ${st.index + 1}`} onClick={() => restore.mutate(st.index)}>Bring my changes back</Button>
+                    <Button size="sm" disabled={working || !!blocked} aria-label={`Bring my changes back: kept-aside set ${st.index + 1}`} onClick={() => restore.mutate(st.index)}>Bring my changes back</Button>
                   </li>
                 ))}
               </ul>

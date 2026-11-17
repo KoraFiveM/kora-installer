@@ -212,29 +212,35 @@ pub fn profile(cmd: ProfileCmd) -> i32 {
     }
 }
 
-/// The files this feature keeps in the Kora home that exist: saved keys, remembered names.
-fn data_files() -> Vec<std::path::PathBuf> {
-    [KeyStore::default().path().to_path_buf(), ProfileStore::default().path().to_path_buf()].into_iter().filter(|p| p.is_file()).collect()
+/// The data this feature keeps that exists (saved keys, remembered names), described for a person: `None` when there is none.
+/// It all lives in Kora's one data file now (`<kora home>/store/kora.db`), together with the server list and the rest.
+fn data_note() -> Option<String> {
+    let keys = KeyStore::default().list().map(|k| k.len()).unwrap_or(0);
+    let profile = ProfileStore::default().load() != Default::default();
+    (keys > 0 || profile)
+        .then(|| format!("saved licence keys: {keys}, remembered Cfx.re name and GitHub owner: {}, in Kora's data file {}", if profile { "yes" } else { "none" }, KeyStore::default().path().display()))
 }
 
 /// `kora uninstall` (all servers): your saved keys are YOUR data, like the server folders and databases, so they
 /// are kept unless you say yes here (the default is no, and `--yes` keeps them). A dry run only says so.
+/// Saying yes forgets the keys and the remembered names (the rest of Kora's data file stays: it holds no secret you typed).
 pub fn uninstall_note(dry_run: bool, ask: Option<&mut dyn kora_core::installer::uninstall::Asker>) {
-    let files = data_files();
-    if files.is_empty() {
-        return;
-    }
-    let list = files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
+    let Some(what) = data_note() else { return };
     match ask {
-        _ if dry_run => println!("Your saved licence keys and remembered names ({list}) would be kept unless you say yes when asked."),
-        None => println!("Your saved licence keys and remembered names were kept ({list}). Delete those files yourself if you want them gone."),
+        _ if dry_run => println!("Your saved licence keys and remembered names ({what}) would be kept unless you say yes when asked."),
+        None => println!("Your saved licence keys and remembered names were kept ({what}). Run `kora keys remove <name>` and `kora profile forget` to delete them."),
         Some(a) => {
-            if a.ask(&format!("Also DELETE your saved licence keys and remembered names ({list})? (default: keep)"), false) {
-                for p in files {
-                    match std::fs::remove_file(&p) {
-                        Ok(()) => println!("Deleted {}.", p.display()),
-                        Err(e) => eprintln!("  failed: could not delete {}: {e}", p.display()),
+            if a.ask("Also DELETE your saved licence keys and remembered names? (default: keep)", false) {
+                let store = KeyStore::default();
+                for k in store.list().unwrap_or_default() {
+                    match store.remove(&k.name) {
+                        Ok(()) => println!("Deleted the saved key \"{}\".", k.name),
+                        Err(p) => eprintln!("  failed: could not delete the saved key \"{}\": {}", k.name, plain_text(&String::from(p))),
                     }
+                }
+                match ProfileStore::default().forget_all() {
+                    Ok(()) => println!("Forgot the remembered Cfx.re name and GitHub owner."),
+                    Err(e) => eprintln!("  failed: could not forget the remembered names: {e}"),
                 }
             } else {
                 println!("Kept your saved licence keys and remembered names.");

@@ -88,6 +88,10 @@ pub enum Op {
     UninstallRun,
     JobsGet,
     JobEvents,
+    /// The recent jobs, including those from before the panel last restarted.
+    JobsList,
+    /// The audit log: who did what (admins only).
+    AuditList,
     Events,
     MetricsGet,
     AlertsList,
@@ -179,6 +183,18 @@ pub enum Op {
     ResourcesFork,
     /// Follow released versions or the latest changes (admins).
     VersionsSet,
+    /// Can players reach this server? The guided checklist (running, firewall, router, internet).
+    ReachCheck,
+    /// Which outside services the reachability check may contact.
+    ReachSettingsGet,
+    /// Allow or forbid those outside lookups.
+    ReachSettingsSet,
+    /// Turn automatic port forwarding (UPnP / NAT-PMP) of the game port on or off for one server.
+    ForwardingSet,
+    /// Open the game port in this computer's firewall (administrator rights).
+    ReachFirewallOpen,
+    /// A one-time ticket to open this server's txAdmin through the panel (needs the same role as controlling the server's code).
+    TxAdminTicket,
 }
 
 impl Op {
@@ -245,6 +261,8 @@ impl Op {
         Op::UninstallRun,
         Op::JobsGet,
         Op::JobEvents,
+        Op::JobsList,
+        Op::AuditList,
         Op::Events,
         Op::MetricsGet,
         Op::AlertsList,
@@ -303,6 +321,12 @@ impl Op {
         Op::ResourceReleases,
         Op::ResourcesFork,
         Op::VersionsSet,
+        Op::ReachCheck,
+        Op::ReachSettingsGet,
+        Op::ReachSettingsSet,
+        Op::ForwardingSet,
+        Op::ReachFirewallOpen,
+        Op::TxAdminTicket,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -370,6 +394,8 @@ impl Op {
             Op::UninstallRun => "uninstall_run",
             Op::JobsGet => "jobs_get",
             Op::JobEvents => "job_events",
+            Op::JobsList => "jobs_list",
+            Op::AuditList => "audit_list",
             Op::Events => "events",
             Op::MetricsGet => "metrics_get",
             Op::AlertsList => "alerts_list",
@@ -428,6 +454,12 @@ impl Op {
             Op::ResourceReleases => "resource_releases",
             Op::ResourcesFork => "resources_fork",
             Op::VersionsSet => "versions_set",
+            Op::ReachCheck => "reach_check",
+            Op::ReachSettingsGet => "reach_settings_get",
+            Op::ReachSettingsSet => "reach_settings_set",
+            Op::ForwardingSet => "forwarding_set",
+            Op::ReachFirewallOpen => "reach_firewall_open",
+            Op::TxAdminTicket => "txadmin_ticket",
         }
     }
 
@@ -496,6 +528,8 @@ impl Op {
             Op::UninstallRun => (Method::Post, "/uninstall"),
             Op::JobsGet => (Method::Get, "/jobs/{id}"),
             Op::JobEvents => (Method::Get, "/jobs/{id}/events"),
+            Op::JobsList => (Method::Get, "/jobs"),
+            Op::AuditList => (Method::Get, "/audit"),
             Op::Events => (Method::Get, "/events"),
             Op::MetricsGet => (Method::Get, "/servers/{s}/metrics"),
             Op::AlertsList => (Method::Get, "/alerts"),
@@ -556,6 +590,12 @@ impl Op {
             Op::ResourceReleases => (Method::Get, "/servers/{s}/resources/{name}/releases"),
             Op::ResourcesFork => (Method::Post, "/servers/{s}/fork"),
             Op::VersionsSet => (Method::Put, "/servers/{s}/versions"),
+            Op::ReachCheck => (Method::Post, "/servers/{s}/reach"),
+            Op::ReachSettingsGet => (Method::Get, "/reach/settings"),
+            Op::ReachSettingsSet => (Method::Put, "/reach/settings"),
+            Op::ForwardingSet => (Method::Put, "/servers/{s}/forwarding"),
+            Op::ReachFirewallOpen => (Method::Post, "/servers/{s}/reach/firewall"),
+            Op::TxAdminTicket => (Method::Post, "/servers/{s}/txadmin/ticket"),
         }
     }
 
@@ -735,6 +775,8 @@ mod tests {
             | Op::UninstallRun
             | Op::JobsGet
             | Op::JobEvents
+            | Op::JobsList
+            | Op::AuditList
             | Op::Events
             | Op::MetricsGet
             | Op::AlertsList
@@ -792,13 +834,19 @@ mod tests {
             | Op::IssueComment
             | Op::ResourceReleases
             | Op::ResourcesFork
-            | Op::VersionsSet => Op::ALL.contains(&op),
+            | Op::VersionsSet
+            | Op::ReachCheck
+            | Op::ReachSettingsGet
+            | Op::ReachSettingsSet
+            | Op::ForwardingSet
+            | Op::ReachFirewallOpen
+            | Op::TxAdminTicket => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 120);
+        assert_eq!(Op::ALL.len(), 127);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

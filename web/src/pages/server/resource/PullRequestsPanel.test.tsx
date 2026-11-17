@@ -104,7 +104,7 @@ describe('Pull requests on the resource page', () => {
     const { rerender } = renderApp(<PullRequestsPanel page={page()} />)
     void rerender
     const list = await screen.findByRole('list', { name: 'Open pull requests' })
-    await user.click(await within(list).findByRole('button', { name: 'Try pull request #41' }))
+    await user.click(await within(list).findByRole('button', { name: 'Try it: pull request #41' }))
     expect(await screen.findByText(/Now on pull request #41/)).toBeInTheDocument()
     expect(screen.getByText(/The running server still has the old version/)).toBeInTheDocument()
   })

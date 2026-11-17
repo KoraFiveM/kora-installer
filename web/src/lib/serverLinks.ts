@@ -6,35 +6,52 @@ export function isLoopbackHost(host: string): boolean {
   return h === 'localhost' || h === '[::1]' || h === '::1' || h.startsWith('127.')
 }
 
+/**
+ * The panel-side port of a server's txAdmin: ten thousand above txAdmin's own port (40120 -> 50120), or ten thousand
+ * below when that would leave the port range. The same fixed rule as the panel's (`txgate::gateway_port`), so the hint
+ * can name the port before anything is opened.
+ */
+export function gatewayPort(txadmin: number): number | null {
+  const up = txadmin + 10000
+  const p = up <= 65535 ? up : txadmin - 10000
+  return p >= 1024 ? p : null
+}
+
 export interface TxAdminLink {
-  url: string
-  /** Plain words about when the address will not work and what to do, or null when there is nothing to add. */
+  /** A direct address, or null when txAdmin opens through the panel (a one-time ticket, see `viaPanel`). */
+  url: string | null
+  /** Open it through the panel: the panel signs the person in to its own gateway first. */
+  viaPanel: boolean
+  /** Plain words about what the button does or how to get through, or null when there is nothing to add. */
   hint: string | null
 }
 
 /**
- * The address of a server's txAdmin for THIS browser.
+ * How a server's txAdmin is reached from THIS browser.
  *
- * - Browser on the same computer as Kora (`local`): `localhost`, which is right.
- * - Reached by name or address (LAN, Tailscale): the same name with txAdmin's port. txAdmin's port is closed to other
- *   computers unless it was opened on purpose, so the hint says how to get through if the page does not load.
- * - Reached through an SSH tunnel (`localhost` but no desktop in front of the server): `localhost` is the person's
- *   own computer, so txAdmin needs its own tunnel. The hint gives the command.
+ * - Browser on the same computer as Kora (`local`): `localhost` and txAdmin's own port, as before.
+ * - Anywhere else (another device by name or address, Tailscale, an SSH tunnel to a machine with no desktop): through the
+ *   panel. txAdmin cannot be served under a path of the panel (it uses absolute addresses), so the panel opens one more
+ *   port for it on the same address it is already reached at, signs the person in with their panel session and passes
+ *   everything on to txAdmin. txAdmin's own port does not need to be open for this.
  */
 export function txAdminLink(host: string, port: number, local: boolean): TxAdminLink {
-  if (!isLoopbackHost(host)) {
+  if (isLoopbackHost(host) && local) return { url: `http://localhost:${port}`, viaPanel: false, hint: null }
+  const gw = gatewayPort(port)
+  if (isLoopbackHost(host)) {
     return {
-      url: `http://${host}:${port}`,
-      hint: `This opens ${host} on port ${port}. If the page does not load, that port is closed to other computers (the safe default). Open it with an SSH tunnel instead: ssh -L ${port}:localhost:${port} <user>@${host}, then use http://localhost:${port}.`,
+      url: null,
+      viaPanel: true,
+      hint: `You reached this panel through a tunnel. txAdmin opens through the panel on port ${gw ?? 'its own'}, so add -L ${gw}:localhost:${gw} to your ssh command, then press the button.`,
     }
   }
-  if (local) return { url: `http://localhost:${port}`, hint: null }
   return {
-    url: `http://localhost:${port}`,
-    hint: `You reached this panel through a tunnel, so this only works if txAdmin's port is tunnelled too. Add it to your ssh command: -L ${port}:localhost:${port}`,
+    url: null,
+    viaPanel: true,
+    hint: `Opens txAdmin through this panel (you stay signed in with your panel sign-in), on port ${gw ?? 'its own'} of ${host}. If the page does not load, a firewall is blocking that port: allow TCP port ${gw ?? ''} for the devices that use the panel.`,
   }
 }
 
 /** What to say next to the connect address. The address is the network one: players elsewhere need more. */
 export const CONNECT_NOTE =
-  'This is the address on your own network: players on the same network (or Wi-Fi) can use it. Players on the internet need your public address with this port, and the port has to be forwarded on your router (or opened with your hosting provider), because the server sits behind it. Kora cannot see your public address: search "what is my IP" from this computer, or use your domain name.'
+  'This is the address on your own network: players on the same network (or Wi-Fi) can use it. Players on the internet need your public address with this port, and the port has to be open on your firewall and forwarded on your router (or opened with your hosting provider). The check below ("Can players reach this server?") finds your public address, looks at each of those steps and can set up the port forwarding for you.'

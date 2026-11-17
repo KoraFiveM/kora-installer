@@ -72,7 +72,7 @@ dump_logs() { # called on failure: tail interesting logs
   for f in "$SMOKE_ROOT"/*/.kora/install.log "$SMOKE_ROOT"/*/update.log "$SMOKE_ROOT"/*/txData/*/logs/* "$SMOKE_ROOT"/*/.kora/service-host.log; do
     [ -f "$f" ] && { echo "== $f"; sudo tail -n 60 "$f" 2>/dev/null || true; }
   done
-  [ -d "$KORA_HOME" ] && { echo "== $KORA_HOME"; sudo ls -la "$KORA_HOME" || true; sudo cat "$KORA_HOME/servers.json" 2>/dev/null || true; }
+  [ -d "$KORA_HOME" ] && { echo "== $KORA_HOME"; sudo ls -la "$KORA_HOME" "$KORA_HOME/store" || true; registry_json || true; }
   for u in ${DUMP_UNITS:-kora-smoke}; do
     echo "== journal $u"; sudo journalctl -u "$u" --no-pager -n 60 2>/dev/null || true
   done
@@ -80,4 +80,13 @@ dump_logs() { # called on failure: tail interesting logs
 }
 trap 'rc=$?; if [ $rc -ne 0 ]; then dump_logs; fi' EXIT
 
-registry_has() { sudo grep -q "\"name\": \"$1\"" "$KORA_HOME/servers.json" 2>/dev/null; }
+# The server list lives in Kora's data file ($KORA_HOME/store/kora.db), not in servers.json any more. `kora store export-json`
+# writes it out in the old servers.json format, which is what these checks read (nothing is printed when no server is registered).
+registry_json() {
+  local d; d="$(mktemp -d)"
+  sudo env "KORA_HOME=$KORA_HOME" "$KORA_BIN" store export-json --to "$d/out" >/dev/null 2>&1 || true
+  sudo cat "$d/out/servers.json" 2>/dev/null || true
+  sudo rm -rf "$d"
+}
+registry_has() { registry_json | grep -q "\"name\": \"$1\""; }
+registry_lacks() { ! registry_has "$1"; }

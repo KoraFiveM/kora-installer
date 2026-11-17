@@ -681,6 +681,8 @@ fn cases() -> Vec<Case> {
         case(Op::SystemCheck, &[], None),
         case(Op::DbStart, &[], None),
         case(Op::KeysList, &[], None),
+        case(Op::JobsList, &[], None),
+        case(Op::AuditList, &[], None),
         case(Op::KeyAdd, &[], Some(json!({"name": "Main", "license_key": "cfxk_0123456789abcdef0123456789abcdef_ab12cd"}))),
         case(Op::ProfileGet, &[], None),
         case(Op::ProfileSet, &[], Some(json!({"github_owner": null}))),
@@ -709,11 +711,17 @@ fn cases() -> Vec<Case> {
         with(case(Op::ResourcesFork, dev, Some(json!({"owner": "sam", "resources": ["kora_hud"]}))), collab_fork),
         with(case(Op::VersionsSet, dev, Some(json!({"versions": "latest"}))), collab_versions),
         with(case(Op::BranchBulkApply, dev, Some(json!({"action": "default", "changes": "ask"}))), bulk_apply),
+        case(Op::ReachCheck, s, Some(json!({}))),
+        case(Op::ReachSettingsGet, &[], None),
+        case(Op::ReachSettingsSet, &[], Some(json!({"cfx_list": true}))),
+        case(Op::ForwardingSet, s, Some(json!({"enabled": true}))),
+        case(Op::ReachFirewallOpen, s, None),
     ]
 }
 
 /// Operations the contract test does not run yet, and why. Shrinks as cases are added.
 const UNVERIFIED: &[(Op, &str)] = &[
+    (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),
     (Op::PanelRestart, "would restart the process"),

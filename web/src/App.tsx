@@ -9,13 +9,17 @@ import { AdminActions } from '@/components/AdminActions'
 import { ToolchainActions } from '@/components/ToolchainActions'
 import { SignedOut } from '@/components/SignedOut'
 import ServersPage from '@/pages/ServersPage'
-import ServerDetailPage from '@/pages/ServerDetailPage'
-import ResourcePage from '@/pages/ResourcePage'
-import InstallWizard from '@/pages/InstallWizard'
-import FleetPage from '@/pages/FleetPage'
-import SettingsPage from '@/pages/SettingsPage'
-import SystemCheckPage from '@/pages/SystemCheckPage'
 import NotFound from '@/pages/NotFound'
+
+// Everything except the server list (the landing page) is fetched when it is first opened, so the first load only
+// carries what the first screen needs. A file that cannot be fetched (the panel was updated meanwhile) ends in the
+// ErrorBoundary of the app shell, which offers a reload: see lib/chunkError.ts. The shell shows the loading state.
+const ServerDetailPage = lazy(() => import('@/pages/ServerDetailPage'))
+const ResourcePage = lazy(() => import('@/pages/ResourcePage'))
+const InstallWizard = lazy(() => import('@/pages/InstallWizard'))
+const FleetPage = lazy(() => import('@/pages/FleetPage'))
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const SystemCheckPage = lazy(() => import('@/pages/SystemCheckPage'))
 
 // The styleguide only exists in mock builds: the constant is false in production, so this branch (and the page) is dropped.
 const Styleguide = __KORA_MOCK__ ? lazy(() => import('@/pages/Styleguide')) : null

@@ -78,7 +78,7 @@ describe('BranchesPanel', () => {
     expect(within(row('kora_jobs')).getByText('2 changed files')).toBeInTheDocument()
     await user.click(within(ask).getByRole('button', { name: 'Keep my changes aside' }))
     expect(await within(dialog).findByText(/Your changes were kept aside/)).toBeInTheDocument()
-    const kept = await within(dialog).findByRole('button', { name: /Bring back kept-aside changes 1/ })
+    const kept = await within(dialog).findByRole('button', { name: /Bring my changes back: kept-aside set 1/ })
     await user.click(kept)
     expect(await within(dialog).findByText(/Your changes are back/)).toBeInTheDocument()
   })

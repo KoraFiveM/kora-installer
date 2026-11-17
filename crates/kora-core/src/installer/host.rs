@@ -161,6 +161,8 @@ pub fn service_host(name_or_dir: &str) -> Result<i32> {
         cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| InstallError(format!("could not start FXServer: {e}")))?;
         let _console = ConsoleTee::start(&dir, &mut child, true, None);
+        // Keeps the game port forwarded on the router (if the person turned that on) for exactly as long as FXServer runs.
+        let _port_forward = crate::reach::forward::keeper::ServerGuard::start(dir.clone());
         let pid = child.id() as i32;
         let mut forwarded = false;
         loop {
@@ -296,6 +298,7 @@ mod scm {
             }
         };
         let _console = resolve_dir(&target).ok().map(|d| super::ConsoleTee::start(&d, &mut child, false, log.as_ref().and_then(|f| f.try_clone().ok())));
+        let port_forward = resolve_dir(&target).ok().map(crate::reach::forward::keeper::ServerGuard::start);
         report(ServiceState::Running, ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN, Duration::ZERO, 0, 0);
         let (code, stop) = loop {
             if let Ok(Some(st)) = child.try_wait() {
@@ -308,6 +311,8 @@ mod scm {
                 break (st.and_then(|s| s.code()), true);
             }
         };
+        // Take the router mapping away before reporting that the service has stopped.
+        drop(port_forward);
         let exit = windows_service_exit(code, stop);
         log_line(&log, &format!("kora service-host: FXServer ended after {}s (exit code {code:?}, stop requested: {stop}); reporting {exit}", started.elapsed().as_secs()));
         report(ServiceState::Stopped, ServiceControlAccept::empty(), Duration::ZERO, exit, 0);

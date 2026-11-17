@@ -51,6 +51,7 @@ struct World {
 fn world_with(remote: Remote) -> World {
     let remote = Arc::new(remote);
     let fake = FakeBackend::sample();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(remote.clone());
     World { app: router(st), remote }
 }
@@ -728,7 +729,7 @@ async fn settings_say_where_tailnet_devices_open_the_panel() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn settings_are_saved_to_a_private_file() {
+async fn settings_are_saved_to_the_private_store() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("panel.json");
@@ -736,10 +737,15 @@ async fn settings_are_saved_to_a_private_file() {
     let c = local_cookie(&w).await;
     let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "pat", "role": "admin"})).send(&w.app).await;
     let token = r.json["token"].as_str().unwrap().to_string();
-    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-    let text = std::fs::read_to_string(&path).unwrap();
+    let db = kora_core::store::db_path(dir.path());
+    assert_eq!(std::fs::metadata(&db).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::metadata(dir.path().join("store")).unwrap().permissions().mode() & 0o777, 0o700);
+    let mut text = String::new();
+    for e in std::fs::read_dir(dir.path().join("store")).unwrap().flatten().filter(|e| e.path().is_file()) {
+        text.push_str(&String::from_utf8_lossy(&std::fs::read(e.path()).unwrap()));
+    }
     assert!(!text.contains(&token), "the token must not be on disk");
-    assert!(text.contains("\"hash\""));
+    assert!(RemoteConfig::load(&path).unwrap().users.iter().any(|u| u.name == "pat" && !u.hash.is_empty()));
     // A fresh panel reading the file knows the user.
     let again = Remote::from_file(path).unwrap();
     assert_eq!(again.identity_for_token(&token).unwrap().role, Role::Admin);
@@ -782,6 +788,7 @@ fn timed_world() -> (World, Arc<Mutex<Duration>>, String) {
     let remote = Arc::new(Remote::new(None, cfg));
     let fake = FakeBackend::sample();
     let (clock, offset) = stepping_clock();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(remote.clone()).with_session_clock(clock);
     (World { app: router(st), remote }, offset, tok)
 }

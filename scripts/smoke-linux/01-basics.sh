@@ -27,7 +27,7 @@ assert_matches "choices show the ports" "$OUT" "ports:[[:space:]]+game $GAME_POR
 assert_matches "plan lists the clone step" "$OUT" "build\.resources"
 assert_not_contains "licence key never printed" "$OUT" "$FAKE_KEY"
 assert "dry run created no server folder" test ! -e "$D"
-assert "dry run wrote no registry" test ! -e "$KORA_HOME/servers.json"
+assert_eq "dry run registered no server" "" "$(registry_json)"
 
 step "5. busy port: clear failure, then --auto-ports"
 python3 - "$GAME_PORT" "$TX_PORT" <<'PY' &
@@ -72,7 +72,12 @@ OUT="$(printf '%s\n' "$SAVED_KEY" | "$KORA_BIN" keys add Main 2>&1)"; CODE=$?
 echo "$OUT"
 assert_eq "keys add exits 0" 0 "$CODE"
 assert_not_contains "add never prints the key" "$OUT" "$SAVED_KEY"
-assert_matches "secrets.json is 0600" "$(stat -c %a "$KORA_HOME/secrets.json")" '^600$'
+assert_matches "the data file is 0600 (saved keys live in it)" "$(stat -c %a "$KORA_HOME/store/kora.db")" '^600$'
+assert_matches "the data folder is 0700" "$(stat -c %a "$KORA_HOME/store")" '^700$'
+assert "no old secrets.json is written any more" test ! -e "$KORA_HOME/secrets.json"
+for f in "$KORA_HOME"/store/kora.db-wal "$KORA_HOME"/store/kora.db-shm; do
+  [ -e "$f" ] && assert_matches "$(basename "$f") is 0600 too" "$(stat -c %a "$f")" '^600$' || true
+done
 kora keys list
 assert_eq "keys list exits 0" 0 "$CODE"
 assert_contains "list shows the last four characters" "$OUT" "1234"
@@ -90,6 +95,13 @@ kora keys rename main Live
 assert_eq "keys rename exits 0" 0 "$CODE"
 kora keys remove live -y
 assert_eq "keys remove exits 0" 0 "$CODE"
-assert_not_contains "the file no longer holds the key" "$(cat "$KORA_HOME/secrets.json")" "SAVEDSAVED"
+assert_not_contains "the data file no longer holds the key" "$(cat "$KORA_HOME"/store/kora.db* | strings)" "SAVEDSAVED"
+kora audit
+assert_eq "audit exits 0" 0 "$CODE"
+assert_contains "the audit log recorded the key being added" "$OUT" "key_add"
+assert_not_contains "the audit log never holds a key" "$OUT" "SAVEDSAVED"
+kora store status
+assert_eq "store status exits 0" 0 "$CODE"
+assert_contains "store status names the data file" "$OUT" "store/kora.db"
 
 echo; echo "basics: $PASS assertions passed"

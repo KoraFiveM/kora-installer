@@ -464,6 +464,7 @@ mod tests {
 
     #[test]
     fn a_server_that_is_not_registered_is_a_plain_error_and_a_non_zero_exit() {
+        kora_core::installer::registry::use_test_home();
         assert_eq!(branch(BranchCmd::List { server: "no-such-server".into() }), 1);
         assert_eq!(pr(PrCmd::List { server: "no-such-server".into(), resource: "kora_hud".into() }), 1);
     }

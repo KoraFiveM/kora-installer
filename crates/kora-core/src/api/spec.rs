@@ -253,6 +253,8 @@ pub fn spec(op: Op) -> OpSpec {
         Op::UninstallRun => OpSpec::start_job_with::<w::UninstallRequest>().events::<w::StatusEvent>().result::<w::UninstallResult>(),
         Op::JobsGet => OpSpec::get::<w::JobRecord>(),
         Op::JobEvents => OpSpec::stream::<w::JobFailedData>("failed"),
+        Op::JobsList => OpSpec::get::<w::JobsList>().with_query::<w::JobsQuery>(),
+        Op::AuditList => OpSpec::get::<w::AuditPage>().with_query::<w::AuditQuery>(),
         Op::Events => OpSpec::stream::<w::ServersList>("servers"),
         Op::MetricsGet => OpSpec::get::<w::Metrics>().with_query::<w::MetricsQuery>(),
         Op::AlertsList => OpSpec::get::<w::AlertsList>(),
@@ -311,5 +313,11 @@ pub fn spec(op: Op) -> OpSpec {
         Op::ResourcesFork => OpSpec::start_job_with::<w::ForkRequest>().events::<w::ForkEvent>().result::<crate::collab::ForkOutcome>(),
         Op::VersionsSet => OpSpec::call::<w::VersionsRequest, crate::collab::VersionsSet>(),
         Op::BranchBulkApply => OpSpec::start_job_with::<w::BulkApplyRequest>().events::<w::BulkEvent>().result::<crate::branches::BulkResult>(),
+        Op::ReachCheck => OpSpec::call::<w::ReachConsentPatch, crate::reach::ReachReport>(),
+        Op::ReachSettingsGet => OpSpec::get::<crate::reach::settings::Consent>(),
+        Op::ReachSettingsSet => OpSpec::call::<w::ReachConsentPatch, crate::reach::settings::Consent>(),
+        Op::ForwardingSet => OpSpec::call::<w::ForwardingRequest, crate::reach::ForwardingView>(),
+        Op::ReachFirewallOpen => OpSpec::get::<w::Notes>(),
+        Op::TxAdminTicket => OpSpec::get::<w::TxAdminTicket>(),
     }
 }

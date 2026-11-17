@@ -153,22 +153,59 @@ If a server's folder has gone missing, the list says so rather than hiding it.
 
 Each server in the list (and its Overview) has three buttons:
 
-- **Open txAdmin:** opens txAdmin in a new tab. From the computer that runs Kora it uses `localhost`; from another
-  computer it uses the name you reached the panel by plus txAdmin's port. txAdmin's port is closed to other computers by
-  default, so if the page does not load, forward it like the panel's own (`ssh -L 40120:localhost:40120 ...`). Through an
-  SSH tunnel to the panel, `localhost` is your own computer, so add that port to the tunnel too.
+- **Open txAdmin:** opens txAdmin in a new tab. From the computer that runs Kora it goes straight to `localhost` and
+  txAdmin's own port. From anywhere else (Tailscale, a LAN address, an SSH tunnel) it goes **through the panel**: the
+  panel opens one more port for that server's txAdmin on the same address you reached the panel at (txAdmin's port +
+  10000: 40120 becomes 50120), checks your panel sign-in, and passes everything on to txAdmin on the computer. txAdmin's
+  own port does not have to be open for that. Details and limits:
+  - It is for **administrators** only (txAdmin can run code on the server), and a sign-in made with a token also needs
+    `kora panel remote-actions on`, like console input. Signing out of the panel ends it.
+  - The panel-side port is only opened where the panel itself listens. Through an SSH tunnel add it to the tunnel
+    (`-L 50120:localhost:50120`); with Tailscale and a firewall, allow that TCP port for your devices (for ufw:
+    `sudo ufw allow in on tailscale0 to any port 50120 proto tcp`).
+  - txAdmin has its own sign-in; the panel cannot sign you in to it (txAdmin has no single sign-on). The button's note
+    names the account Kora made at install and where the password is saved.
+  - Why not `/txadmin/<server>/` on the panel's own port? txAdmin's web app cannot live under a path: it calls `/auth/...`
+    and `/socket.io` from the root and has no base-path setting (checked against txAdmin 8.1.2).
 - **Open folder** / **Copy path:** at the computer that runs Kora, with a desktop in front of it, it opens the server's
   folder in the file manager. From anywhere else (Tailscale, a token sign-in, an SSH tunnel, a computer with no desktop)
   it is **Copy path** instead, because opening a window nobody is looking at would do nothing useful.
 - **Copy connect address:** this computer's address on your network with the server's game port, for players on the same
-  network. Players on the internet need your public address (or domain name) with the same port, and the port forwarded
-  on your router or opened with your hosting provider. Kora cannot see your public address.
+  network. For players on the internet use the **Can players reach this server?** card on the Overview (below): it finds
+  your public address, checks the firewall and the router, and shows the address and the Cfx.re join link to give out.
+
+### Can players reach this server?
+
+The card on a server's Overview (and on the install wizard's last page; `kora reach <server>` on the command line) is a
+checklist with one line per step, each **OK**, **Probably OK**, **Problem** or **Not known**:
+
+1. **Running:** the server answers on its game port over TCP and UDP (FiveM needs both), and on this computer's network
+   address, not only on its own loopback address.
+2. **Firewall:** this computer's firewall lets the port in. Kora knows what it opened itself; where it cannot see (a
+   firewall that needs administrator rights to read, or your hosting provider's), it says so. **Open port ...** opens it
+   (needs administrator rights: the card shows the command if Kora cannot ask).
+3. **Router:** is there a router in between, is it the kind that cannot forward at all (carrier-grade NAT: the card
+   explains and lists the alternatives), and is the port forwarded. If your router answers UPnP, PCP or NAT-PMP, **Forward
+   port ... for me** sets it up; otherwise the card lists the exact values to enter on the router's "Port forwarding" page.
+4. **Internet:** only a computer outside your network can say. Kora can look your server up on Cfx.re's public server list
+   (your server's own join code, read from its log) and, to learn your public address when the router cannot tell it,
+   ask a "what is my address" website. **Nothing is contacted unless you allow it**; each lookup has its own switch (at the
+   bottom of the card, and `kora reach --cfx-list --remember`), the card says what it contacts and what that learns before
+   the first use, and each check lists what it contacted. Being listed is "Probably OK", never proof (only a player joining
+   shows the UDP part works), so the line always ends with the manual test: ask a friend who is not on your network to
+   press F8 in FiveM and type `connect <your public address>:<port>`.
+
+**Automatic port forwarding** is optional and off by default, per server. A router that programs can reconfigure is a small
+risk (any program on your network can do the same), so turning it on asks first. Kora then forwards only that server's game
+port (TCP and UDP) to this computer, renews it while the server runs (the server's background service does, or the open
+panel for servers started without a service) and removes it when the server stops, when you turn the option off and when
+the server is deleted. Turn it off again with `kora reach <server> --forward off`.
 
 ## 4. A server's tabs
 
 | Tab | What it is for |
 |---|---|
-| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin and the connect address. **Licence key:** which saved key the server uses and **Change licence key** (pick a saved key or add a new one; it says whether a restart is needed and offers it). Same as `kora keys use`. |
+| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin, the connect address and the **Can players reach this server?** checklist. **Licence key:** which saved key the server uses and **Change licence key** (pick a saved key or add a new one; it says whether a restart is needed and offers it). Same as `kora keys use`. |
 | Console | Live server output and a box to send commands. The first time, Kora offers to add a small resource called `kora_console`; it loads on the next server start. |
 | Logs | Pick a log file and read its latest lines. |
 | Resources | **Updates** at the top: check for newer versions, pick what to update, choose what happens about restarts, and roll back to an earlier snapshot (same as `kora update`). Below it the installed resources, each with buttons to check it for updates and to start, stop or restart it on a running server (needs the live console from the Console tab), and the catalogue of resources you can add (same as `kora add-resources`). What the tab shows stays when you open another tab and come back. |
@@ -269,16 +306,19 @@ saving it is only remembered while the panel runs. The wizard also checks free d
   the old copy. Removing the old copy needs administrator rights: on Windows the panel asks Windows for permission
   (one prompt); on Linux it shows the command to run (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
-- **Licence keys:** the keys saved on this computer (`secrets.json` in the Kora folder: plain text, readable only by you,
-  not encrypted, like each server's `secrets.cfg`). Add, rename, replace and delete (admins and this computer only); each
+- **Licence keys:** the keys saved on this computer (in Kora's data file, `store/kora.db` in the Kora folder: plain text, readable only by you,
+  not encrypted, like each server's `secrets.cfg`; see [store.md](store.md)). Add, rename, replace and delete (admins and this computer only); each
   shows its last 4 characters and the servers that use it. Deleting a key does not affect servers already installed with it
   (they have their own copy); an unfinished install that used it needs another key. Same as `kora keys`.
-- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in `profile.json` (nothing secret), with a
+- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in Kora's data file (nothing secret), with a
   button to forget each. Same as `kora profile`.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
   and databases are kept unless you tick them. Your saved licence keys and remembered answers are never removed from here;
-  `kora uninstall` in a terminal asks about them (default: keep), or delete `secrets.json` and `profile.json` in the Kora
-  folder yourself.
+  `kora uninstall` in a terminal asks about them (default: keep), or run `kora keys remove <name>` and `kora profile forget`.
+- **Recent jobs:** updates, installs and the like, also from before the panel last restarted. A job that was running when
+  the panel was closed shows as "stopped by a restart" with what to do next (an install that used a saved key can be carried on).
+- **Activity log** (administrators only): who changed what, from this panel (this computer or another device, with sign-in name, provider
+  and role) and from `kora` commands, with the result. Nothing secret is recorded; entries are kept 365 days. Same as `kora audit`.
 - **About:** the version, platform, and links. The settings page makes no requests to other websites.
 
 ### The System check
@@ -519,6 +559,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   txAdmin and the FiveM server's own web server, where any resource can log it. Each session therefore also has a
   secret that the page keeps for its own address and port and sends with every request (`X-Kora-Session`); the
   cookie alone is refused. The cookie (`kora_session_<port>`) is `HttpOnly` and `SameSite=Strict`.
+- **txAdmin through the panel is a second door, guarded by the first.** The gateway port of a server's txAdmin (txAdmin's port + 10000) lets nobody in without a one-time ticket made by a signed-in administrator's panel session (cookie and session secret together); the gateway then follows that session (signing out, a removed user, a changed role or the remote-actions switch ending it, also for an open live console), never passes the panel's cookies or secret on to txAdmin, keeps two servers' txAdmin cookies apart, only ever connects to that server's own txAdmin on this computer, and refuses proxy headers, other `Host` and `Origin` values and WebSocket handshakes without a matching `Origin`. See `SECURITY.md`.
 - **No proxies.** Requests that came through a reverse proxy or `tailscale serve` are refused (they connect from
   127.0.0.1, so everyone would look like the owner).
 - **Limits for remote sessions.** At most 8 live views per account and 64 in total. A remote session can only read a

@@ -205,17 +205,21 @@ struct Rig {
     fake: FakeBackend,
     env: Arc<Env>,
     _turn: tokio::sync::MutexGuard<'static, ()>,
+    /// The Kora folder of this test (what the install remembers goes here, never into the real one).
+    _home: tempfile::TempDir,
 }
 
 async fn rig() -> Rig {
     let turn = TURN.lock().await;
+    let home = tempfile::tempdir().unwrap();
+    std::env::set_var("KORA_HOME", home.path());
     let env = Env::new();
     install_seam::set_env(Some(env.clone()));
     gh_seam::set_env(Some(Arc::new(Gh { user: Mutex::new(Some("sam".into())), release: Mutex::new(None) })));
     let fake = FakeBackend::sample();
     let f = fake.clone();
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone())));
-    Rig { app: router(st), fake, env, _turn: turn }
+    Rig { app: router(st), fake, env, _turn: turn, _home: home }
 }
 
 fn tmp(name: &str) -> PathBuf {

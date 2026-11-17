@@ -37,7 +37,7 @@ const RESTART = 'The files changed, but a running server still has the old versi
 const validBranch = (b: string) => /^[A-Za-z0-9._/-]{1,200}$/.test(b) && !b.startsWith('-') && !b.includes('..') && !b.endsWith('/') && !b.endsWith('.lock')
 
 /** Adds the routes; the returned function forgets every switch (a scenario starts from a clean world). */
-export function installBranchesMock(route: Route, startJob: StartJob, Fail: FailCtor, d: BranchesDeps): (() => void) & { row: (server: string, id: string) => T.ResourceBranch } {
+export function installBranchesMock(route: Route, startJob: StartJob, Fail: FailCtor, d: BranchesDeps): (() => void) & { row: (server: string, id: string) => T.ResourceBranch; offDefault: (server: string, id: string) => string | null } {
   const state = new Map<string, Res>()
   const key = (s: string, r: string) => `${s}/${r}`
   const trackable = (s: string) => d.installed(s).filter((r) => r.startsWith('kora_'))
@@ -215,5 +215,6 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
       return { items, switched, needs_choice: count('needs_choice'), failed: 0, skipped: count('skipped'), needs_restart: switched > 0, restart_note: switched > 0 ? RESTART : undefined } satisfies T.BulkResult
     })
   })
-  return Object.assign(() => state.clear(), { row })
+  /** The returned function also says whether a resource was put on another branch or a pull request (updates leave it alone). */
+  return Object.assign(() => state.clear(), { row, offDefault: (server: string, id: string): string | null => { const v = get(server, id); return v.branch === DEFAULT ? null : v.pr !== undefined ? `On pull request #${v.pr}.` : `On branch ${v.branch}.` } })
 }
