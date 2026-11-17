@@ -55,6 +55,24 @@ test.describe('Activity log (administrators only)', () => {
     await expect(rows.first()).toContainText('Not allowed')
   })
 
+  test('with the administrator service its own entries are in the same table, labelled and merged by time', async ({ page, open, scan }) => {
+    await open('/settings', { scenario: 'service' })
+    await expect(page.getByRole('heading', { name: 'Activity log' })).toBeVisible()
+    const service = page.locator('[data-source="service"]')
+    await expect(service).toHaveCount(4)
+    await expect(service.first()).toContainText('Set up scheduled backups as an operating-system job')
+    await expect(service.first()).toContainText('Done with administrator rights')
+    await expect(service.nth(2)).toContainText('code 1')
+    await expect(page.getByText(/only what it did for your account is shown/)).toBeVisible()
+    await scan('settings: activity log with the administrator service entries')
+  })
+
+  test('without the administrator service the log says nothing was done with administrator rights', async ({ page, open }) => {
+    await open('/settings', { scenario: 'restarted' })
+    await expect(page.getByTestId('service-audit-note')).toContainText('nothing has been done with administrator rights')
+    await expect(page.locator('[data-source="service"]')).toHaveCount(0)
+  })
+
   test('a remote operator does not see it (and the page never asks for it)', async ({ page, open }) => {
     const asked: string[] = []
     page.on('request', (r) => asked.push(new URL(r.url()).pathname))

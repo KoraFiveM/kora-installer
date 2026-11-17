@@ -314,6 +314,9 @@ impl Host for WinSvc {
             let _ = writeln!(f, "{line}");
         }
     }
+    fn read_audit(&self, max: u64) -> Result<String, String> {
+        super::audit::read_tail(Path::new(&self.files.audit), max).map_err(|e| e.to_string())
+    }
     fn own_version(&self) -> String {
         env!("CARGO_PKG_VERSION").into()
     }

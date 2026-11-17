@@ -34,6 +34,7 @@ Commands:
   restart        Restart a server's background service
   uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
   service        Kora's administrator service: who may use it, and whether it is running
+  hand-over      Give a restored or imported server's files to the account the server runs as (asks Kora's administrator service; or run as administrator)
 
 Options:
       --no-elevate
@@ -167,14 +168,14 @@ Options:
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
   -y, --yes
           Do not ask anything (implied by any other option)
@@ -206,6 +207,7 @@ Commands:
   proxy           Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name with a real certificate
   restart         Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
   remote-actions  Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
+  remote          Remote sign-in settings that are not about one person
 
 Options:
       --port <PORT>
@@ -647,9 +649,10 @@ Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name wi
 Usage: kora panel proxy [OPTIONS] <COMMAND>
 
 Commands:
-  trust   Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
-  forget  Stop trusting any proxy: forwarded headers are refused again
-  status  Show the trusted proxy setting
+  trust         Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
+  txadmin-host  How each server's txAdmin is reached through the proxy: a host name template with {server}, like `tx-{server}.example.com` (give every server's txAdmin a name in the proxy), or `--clear` to use the panel's own name with the server's gateway port (the proxy listens on that port). txAdmin cannot run under a path prefix, so it gets a name or a port of its own. See docs/panel.md
+  forget        Stop trusting any proxy: forwarded headers are refused again
+  status        Show the trusted proxy setting
 
 Options:
       --no-elevate
@@ -672,6 +675,25 @@ Options:
           The panel address the proxy forwards to, for the configuration examples
           
           [default: 127.0.0.1:47120]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy txadmin-host =====
+How each server's txAdmin is reached through the proxy: a host name template with {server}, like `tx-{server}.example.com` (give every server's txAdmin a name in the proxy), or `--clear` to use the panel's own name with the server's gateway port (the proxy listens on that port). txAdmin cannot run under a path prefix, so it gets a name or a port of its own. See docs/panel.md
+
+Usage: kora panel proxy txadmin-host [OPTIONS] [TEMPLATE]
+
+Arguments:
+  [TEMPLATE]
+          The template (lower-case letters, digits, `-` and `.`, with `{server}`; `{port}` is the gateway port)
+
+Options:
+      --clear
+          Go back to the panel's own name with the gateway port
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
@@ -760,6 +782,74 @@ Options:
 Show whether they are on or off
 
 Usage: kora panel remote-actions status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote =====
+Remote sign-in settings that are not about one person
+
+Usage: kora panel remote [OPTIONS] <COMMAND>
+
+Commands:
+  require-strong  Require a passkey or one-time codes for everybody who signs in from another computer: the old token links stop working for sign-in (the same switch as Settings, Remote access). Local to this computer
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong =====
+Require a passkey or one-time codes for everybody who signs in from another computer: the old token links stop working for sign-in (the same switch as Settings, Remote access). Local to this computer
+
+Usage: kora panel remote require-strong [OPTIONS] <COMMAND>
+
+Commands:
+  on      Allow these actions for administrators who sign in with a token
+  off     Refuse these actions for token sign-ins from other computers (the default)
+  status  Show whether they are on or off
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong on =====
+Allow these actions for administrators who sign in with a token
+
+Usage: kora panel remote require-strong on [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong off =====
+Refuse these actions for token sign-ins from other computers (the default)
+
+Usage: kora panel remote require-strong off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong status =====
+Show whether they are on or off
+
+Usage: kora panel remote require-strong status [OPTIONS]
 
 Options:
       --no-elevate
@@ -1556,6 +1646,9 @@ Options:
 
       --json
           Print JSON, one row per line
+
+      --service
+          Show what Kora's administrator service did with administrator rights instead (its own log: your account's lines, or everyone's when you administer this computer)
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
@@ -2741,6 +2834,22 @@ Options:
   -h, --help
           Print help
 
+===== kora service allow-installer =====
+Allow the person who started Kora's installer, when an administrator typed the password for them (Windows; run by the installer, not by people). Windows tells it which process started the installation; it asks Windows who that is and who asked for the permission, and allows that person only when the answer is sound (see `kora_core::privsvc::installer_user`)
+
+Usage: kora service allow-installer [OPTIONS] <CLIENT_PID>
+
+Arguments:
+  <CLIENT_PID>
+          The process that started the installation (the installer's `ClientProcessId`)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
 ===== kora service install =====
 Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
 
@@ -2883,6 +2992,76 @@ Arguments:
           `start` Kora's own MariaDB, or `install` it when it is not there yet
           
           [possible values: start, install]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job =====
+Create, replace or remove the operating-system job of a server's scheduled backups, run by Kora's administrator service
+
+Usage: kora backup-job [OPTIONS] <COMMAND>
+
+Commands:
+  set  Create or replace the job
+  off  Remove the job (nothing else)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job set =====
+Create or replace the job
+
+Usage: kora backup-job set [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
+
+Options:
+      --daily <HH:MM>
+          Every day at HH:MM (24 hours, this computer's time)
+
+      --weekly <DAY> <HH:MM>
+          Every week on DAY (mon..sun) at HH:MM
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job off =====
+Remove the job (nothing else)
+
+Usage: kora backup-job off [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora hand-over =====
+Give a restored or imported server's files to the account the server runs as (asks Kora's administrator service; or run as administrator)
+
+Usage: kora hand-over [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
 
 Options:
       --no-elevate

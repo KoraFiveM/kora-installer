@@ -14,6 +14,7 @@
 
 pub mod change_ports;
 pub mod gitops;
+pub mod handover;
 pub mod host;
 pub mod http;
 pub mod layout;
@@ -838,6 +839,37 @@ fn rollback_known(
         sink.event(ev);
     }
     handle.join().map_err(|_| Problem::generic("rollback worker panicked"))?
+}
+
+/// An install request for tests in other modules (the install record a server folder holds).
+#[cfg(test)]
+pub(crate) fn tests_request(name: &str, dir: &Path) -> InstallRequest {
+    InstallRequest {
+        source: None,
+        versions: None,
+        mode: Mode::Production,
+        name: name.into(),
+        dir: dir.to_path_buf(),
+        hostname: name.into(),
+        license_key: None,
+        license_key_name: None,
+        cfx_identifier: None,
+        ports: Ports::default(),
+        txadmin_public: false,
+        artifact_url: None,
+        game_build: None,
+        resources: ResourceSelection::All,
+        db: DbChoice::UseExisting,
+        service: true,
+        firewall: true,
+        github_owner: None,
+        catalog: None,
+        dry_run: true,
+        db_admin: None,
+        start: false,
+        app: None,
+        container: None,
+    }
 }
 
 #[cfg(test)]

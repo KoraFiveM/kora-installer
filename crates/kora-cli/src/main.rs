@@ -214,6 +214,14 @@ enum Command {
     /// Start (or install) Kora's own MariaDB on Windows, run by Kora's administrator service.
     #[command(hide = true)]
     AdminDb(admin_step::AdminDbArgs),
+    /// Create, replace or remove the operating-system job of a server's scheduled backups, run by Kora's administrator service.
+    #[command(hide = true)]
+    BackupJob {
+        #[command(subcommand)]
+        cmd: cmd::service_jobs::BackupJobCmd,
+    },
+    /// Give a restored or imported server's files to the account the server runs as (asks Kora's administrator service; or run as administrator).
+    HandOver(cmd::service_jobs::HandOverArgs),
     /// What the Kora desktop app (tray icon and window) asks of kora. Run by the app, never by a person.
     #[command(hide = true)]
     Desktop {
@@ -256,10 +264,10 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Panel(_),
         ) => K::Other,
         // Already elevated (the worker) or run by it: never relaunched.
-        Some(Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
-        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. } }) => {
-            K::Uninstall { dry_run: false }
-        }
+        Some(Command::AdminStep(_) | Command::AdminDb(_) | Command::BackupJob { .. } | Command::HandOver(_)) => K::Other,
+        Some(Command::Service {
+            cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::AllowInstaller { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. },
+        }) => K::Uninstall { dry_run: false },
         // Linux: relaunched with sudo. Windows: the install has its own single prompt (the installer's).
         Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => {
             if cfg!(windows) {
@@ -419,6 +427,7 @@ fn main() {
                 | Command::Service { .. }
                 | Command::AdminStep(_)
                 | Command::AdminDb(_)
+                | Command::BackupJob { .. }
                 | Command::Update(UpdateArgs { auto: true, .. })
         )
     );
@@ -485,6 +494,8 @@ fn main() {
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
         Some(Command::Service { cmd }) => service_cmd::service(cmd),
+        Some(Command::BackupJob { cmd }) => cmd::service_jobs::backup_job(cmd),
+        Some(Command::HandOver(a)) => cmd::service_jobs::hand_over(a),
         Some(Command::AdminStep(_) | Command::AdminDb(_)) => unreachable!("handled above"),
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run, false),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),

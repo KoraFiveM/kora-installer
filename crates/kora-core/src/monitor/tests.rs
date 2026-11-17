@@ -15,11 +15,16 @@ struct Machine {
     disk: Option<DiskUsage>,
     mem: Option<MemUsage>,
     gone: bool,
+    /// The scheduled backups are an OS job: `Some(None)` fine, `Some(Some(why))` the last run failed.
+    os_backup: Option<Option<String>>,
 }
 
 #[derive(Default)]
 struct FakeProbe(Mutex<Machine>);
 impl Probe for FakeProbe {
+    fn os_job_backup_failure(&self, _: &ServerEntry) -> Option<Option<String>> {
+        self.0.lock().unwrap().os_backup.clone()
+    }
     fn dir_exists(&self, _: &Path) -> bool {
         !self.0.lock().unwrap().gone
     }
@@ -42,6 +47,15 @@ struct Recorder(Mutex<Vec<(String, AlertKind, AlertSettings)>>);
 impl AlertSink for Recorder {
     fn deliver(&self, server: &ServerEntry, a: &Alert, s: &AlertSettings) {
         self.0.lock().unwrap().push((server.name.clone(), a.kind, s.clone()));
+    }
+}
+
+#[derive(Default)]
+struct MachineRecorder(Mutex<Vec<(AlertKind, String)>>);
+impl AlertSink for MachineRecorder {
+    fn deliver(&self, _: &ServerEntry, _: &Alert, _: &AlertSettings) {}
+    fn deliver_machine(&self, a: &Alert) {
+        self.0.lock().unwrap().push((a.kind, a.message.clone()));
     }
 }
 
@@ -77,6 +91,7 @@ fn a_sample_collects_status_players_cpu_ram_and_disk() {
         disk: Some(DiskUsage { free: 50 << 30, total: 100 << 30 }),
         mem: Some(MemUsage { total: 16 << 30, available: 4 << 30 }),
         gone: false,
+        os_backup: None,
     };
     r.fake.state().badges.insert("prod".into(), UpdateBadge::Updates(2));
     r.mon.tick(1_000);
@@ -295,4 +310,46 @@ fn a_failed_backup_raises_one_alert_that_closes_when_a_backup_works() {
     // a later failure is a new alert
     r.mon.raise_external(&r.entry, AlertKind::BackupFailed, "a week later".into(), 400);
     assert_eq!(r.mon.alerts().len(), 2);
+}
+
+#[test]
+fn a_machine_alert_has_no_server_shows_in_the_list_is_sent_once_and_clears() {
+    let sink = Arc::new(MachineRecorder::default());
+    let mon = Monitor::new(Arc::new(|| Box::new(FakeBackend::sample())), Arc::new(FakeProbe::default()), sink.clone());
+    mon.raise_machine(AlertKind::CertExpiring, "The panel's HTTPS certificate ends in 9 days.".into(), 100);
+    mon.raise_machine(AlertKind::CertExpiring, "ends in 8 days".into(), 200);
+    let list = mon.alerts();
+    assert_eq!(list.len(), 1, "one open alert per kind");
+    assert_eq!((list[0].server.as_str(), list[0].kind, list[0].tone, list[0].title), ("", AlertKind::CertExpiring, "warning", "HTTPS certificate ending soon"));
+    assert_eq!(sink.0.lock().unwrap().len(), 1, "announced once");
+    mon.resolve_machine(AlertKind::CertExpiring, 300);
+    assert_eq!(mon.alerts()[0].resolved, Some(300));
+    // a second, different kind and a later repeat of the first are separate alerts
+    mon.raise_machine(AlertKind::CertExpired, "It has expired.".into(), 400);
+    mon.raise_machine(AlertKind::CertExpiring, "again".into(), 500);
+    assert_eq!(mon.alerts().len(), 3);
+    assert_eq!(sink.0.lock().unwrap().len(), 3);
+    // acknowledging works like any other alert
+    let id = mon.alerts()[0].id;
+    assert!(mon.ack(id));
+}
+
+#[test]
+fn a_failed_backup_of_the_operating_system_job_raises_backup_failed_once_and_the_next_success_clears_it() {
+    let r = rig();
+    // not an OS job: nothing from this path
+    r.mon.tick(100);
+    assert!(!r.mon.alerts().iter().any(|a| a.kind == AlertKind::BackupFailed));
+    // the job ran as the person and failed: recorded in their store, picked up here
+    r.probe.0.lock().unwrap().os_backup = Some(Some("the disk is full".into()));
+    r.mon.tick(200);
+    r.mon.tick(215);
+    let failed: Vec<_> = r.mon.alerts().into_iter().filter(|a| a.kind == AlertKind::BackupFailed).collect();
+    assert_eq!(failed.len(), 1, "one open alert, however many looks");
+    assert!(failed[0].message.contains("The scheduled backup did not work: the disk is full") && failed[0].server == "prod" && failed[0].resolved.is_none());
+    assert_eq!(r.sink.0.lock().unwrap().iter().filter(|(_, k, _)| *k == AlertKind::BackupFailed).count(), 1, "announced once");
+    // the next run worked
+    r.probe.0.lock().unwrap().os_backup = Some(None);
+    r.mon.tick(300);
+    assert!(r.mon.alerts().iter().find(|a| a.kind == AlertKind::BackupFailed).unwrap().resolved.is_some());
 }

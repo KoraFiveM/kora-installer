@@ -53,6 +53,7 @@ pub fn check_folder(e: &ServerEntry, folder: &str) -> Result<(), Problem> {
 }
 
 pub fn view<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry) -> Res<BackupsView> {
+    super::osjob::verify(e);
     let cfg = settings::load_settings(&e.name);
     let status = settings::load_status(&e.name);
     let d = destination(e);
@@ -77,7 +78,8 @@ pub fn view<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry) -> Res<BackupsView
         free_bytes: d.free_bytes(),
         undo,
         database: DatabaseNote { kind, note, tool_missing },
-        schedule_note: "Scheduled backups run while Kora's background service is running (start it with `kora panel --background`). A backup that was missed is made up when it starts again.".into(),
+        schedule_note: super::osjob::note(e, &status),
+        schedule_by_os: status.os_job,
         settings: cfg,
     })
 }
@@ -128,6 +130,10 @@ pub fn settings_set<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, new: &Back
             .map_err(|x| Problem::new(codes::DEST_UNWRITABLE, format!("Kora cannot write to that folder ({x:?}). Check the path, the permissions and that the drive or share is connected.")))?;
     }
     settings::save_settings(&e.name, &new)?;
+    // The schedule is a job of the operating system when the administrator service can make one (see `osjob`).
+    if new.schedule != old.schedule || new.schedule.enabled != old.schedule.enabled {
+        super::osjob::apply(e, &new);
+    }
     // A newly switched-on or changed schedule starts from now: it does not make up slots from before it existed.
     if new.schedule.enabled && new.schedule != old.schedule {
         let now = crate::monitor::now_unix();

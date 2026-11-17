@@ -22,6 +22,8 @@ pub fn request_header_dropped(name: &str) -> bool {
         || n == "x-kora-session"
         || n == "x-kora"
         || n == "x-kora-admin"
+        // The secret a trusted reverse proxy adds for Kora: never for txAdmin.
+        || n == crate::remote::proxy::SECRET_HEADER
         || n == "authorization"
         || crate::security::PROXY_HEADERS.contains(&n.as_str())
 }

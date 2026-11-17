@@ -125,7 +125,10 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
 
         let reg_snapshot = reg.clone();
         let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&reg_snapshot, b, &[dir.as_path()]));
-        let items = match system::items_for(&target, &created, env.platform, env.runner, !del_files, used) {
+        let items = match system::items_for(&target, &created, env.platform, env.runner, !del_files, used).map(|mut i| {
+            i.extend(system::backup_job_item(&target, env.platform, env.runner));
+            i
+        }) {
             Ok(i) => i,
             Err(e) => {
                 sum.failed.push(format!("{name}: {}", e.one_line()));
@@ -405,11 +408,18 @@ mod tests {
         let mut del = vec![];
         let (sum, rig) = go(&mut reg, &Options { dry_run: true, ..Default::default() }, true, &r, &mut Defaults, &mut del);
         let text = rig.out.join("\n");
-        for want in ["Stop and remove the background service kora-alpha", "systemctl disable kora-alpha", "userdel kora-alpha", "Delete the root-owned copy", "KEEP the server folder and database"] {
+        for want in [
+            "Stop and remove the background service kora-alpha",
+            "systemctl disable kora-alpha",
+            "userdel kora-alpha",
+            "Delete the root-owned copy",
+            "Remove the scheduled-backup job",
+            "KEEP the server folder and database",
+        ] {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
-        // the only commands run were the read-only `id -u`
-        assert!(r.calls().iter().all(|c| c.starts_with("id -u")), "{:?}", r.calls());
+        // the only commands run were the read-only `id -u` and the look for the backup job's timer file
+        assert!(r.calls().iter().all(|c| c.starts_with("id -u") || c.starts_with("cat /etc/systemd/system/kora-backup-")), "{:?}", r.calls());
         assert!(sum.removed.is_empty() && del.is_empty() && reg.servers.len() == 1 && rig.saved == 0);
     }
 

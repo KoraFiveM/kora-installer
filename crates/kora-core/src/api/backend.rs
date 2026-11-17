@@ -146,6 +146,10 @@ pub trait Backend {
 
     /// Is `gh` signed in to GitHub?
     fn github_signed_in(&mut self) -> bool;
+    /// The GitHub login Kora acts as (what the audit log records for an operation that acts on GitHub). `None`: not known.
+    fn github_acting_as(&mut self) -> Option<String> {
+        None
+    }
     /// Report an issue about a resource of the server. Returns the issue address.
     fn report_issue(&mut self, e: &ServerEntry, resource: &str, title: &str, text: &str) -> Res<String>;
     /// Check that a pull request can be made from the resource's fork (development servers).

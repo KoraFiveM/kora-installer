@@ -97,9 +97,27 @@ fn session_allowed(st: &AppState, gs: &GateSession) -> bool {
     }
 }
 
-/// The peer rules the panel's guard applies to remote callers.
-fn peer_allowed(st: &AppState, peer: Option<SocketAddr>) -> Result<bool, Box<Response>> {
-    let remote = peer.is_some_and(|a| remote::is_remote_peer(a.ip()));
+/// The `Host` of a request that came through the trusted proxy: the proxy forwards the public name, with the gateway port (port
+/// mapping) or without any (host mapping), so the name alone is compared: one the panel answers to, or one the proxy configuration's
+/// txAdmin host template gives some server.
+fn proxied_host_ok(st: &AppState, host: &str, pc: &remote::proxy::ProxyConfig) -> bool {
+    let name = crate::tls::selfsigned::host_only(host);
+    st.remote.extra_hosts().iter().any(|e| crate::tls::selfsigned::host_only(e).eq_ignore_ascii_case(name)) || pc.matches_txadmin_template(host)
+}
+
+/// Behind a trusted proxy with a host name template, a name made for one server must not reach another's txAdmin: the host is either one
+/// of the panel's own names (port mapping) or exactly the name the template gives THIS server. Without a proxy nothing more is checked.
+fn host_belongs(st: &AppState, trusted: Option<&remote::proxy::ProxyConfig>, host: &str, server: &str, gateway: u16) -> bool {
+    let Some(pc) = trusted else { return true };
+    let name = crate::tls::selfsigned::host_only(host);
+    st.remote.extra_hosts().iter().any(|e| crate::tls::selfsigned::host_only(e).eq_ignore_ascii_case(name))
+        || pc.txadmin_host_for(&kora_core::installer::slug(server), gateway).is_some_and(|own| own.eq_ignore_ascii_case(name))
+}
+
+/// The peer rules the panel's guard applies to remote callers. `proxied`: the request came through the trusted proxy, so the
+/// visitor is always remote and `peer` is the address the proxy forwarded.
+fn peer_allowed(st: &AppState, peer: Option<SocketAddr>, proxied: bool) -> Result<bool, Box<Response>> {
+    let remote = proxied || peer.is_some_and(|a| remote::is_remote_peer(a.ip()));
     if remote && !st.remote.enabled() {
         return Err(Box::new(deny(StatusCode::FORBIDDEN, "Remote access is off", "Remote access is turned off on the computer that runs Kora.")));
     }
@@ -112,12 +130,33 @@ fn peer_allowed(st: &AppState, peer: Option<SocketAddr>) -> Result<bool, Box<Res
 async fn handle(State(ctx): State<Ctx>, peer: Option<ConnectInfo<SocketAddr>>, req: Request) -> Response {
     let st = &ctx.st;
     let h = req.headers();
-    if security::PROXY_HEADERS.iter().any(|p| h.contains_key(*p)) {
+    // A reverse proxy Kora was told to trust (its address AND the shared secret, exactly as for the panel itself): then the
+    // visitor is the forwarded address, always a remote one, and the scheme is the forwarded one. Anywhere else forwarded
+    // headers are refused, as ever.
+    let direct = peer.map(|p| p.0);
+    let mut peer = direct;
+    let mut secure = req.extensions().get::<crate::tls::serve::Transport>().is_some_and(|t| t.secure);
+    let mut trusted = None;
+    if let (Some(p), Some(pc)) = (direct, st.remote.trusted_proxy()) {
+        match pc.judge(p.ip(), h) {
+            remote::proxy::Verdict::Trusted { client, secure: s } => {
+                peer = Some(SocketAddr::new(client, 0));
+                secure = s;
+                trusted = Some(pc);
+            }
+            remote::proxy::Verdict::Refused(why) => return deny(StatusCode::FORBIDDEN, "Not through this proxy", why),
+            remote::proxy::Verdict::NotProxied => {}
+        }
+    }
+    if trusted.is_none() && security::PROXY_HEADERS.iter().any(|p| h.contains_key(*p)) {
         return deny(StatusCode::FORBIDDEN, "Not through a proxy", security::PROXY_REFUSED);
     }
-    let secure = req.extensions().get::<crate::tls::serve::Transport>().is_some_and(|t| t.secure);
     let host = h.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    if !host_allowed(st, &host, ctx.port) {
+    let host_fine = match &trusted {
+        Some(pc) => proxied_host_ok(st, &host, pc),
+        None => host_allowed(st, &host, ctx.port),
+    };
+    if !host_fine {
         return deny(StatusCode::FORBIDDEN, "Address not allowed", "This address is not one the Kora panel answers to.");
     }
     // Only origin-form targets (`/path?query`): an absolute-form target names another authority, and
@@ -125,12 +164,12 @@ async fn handle(State(ctx): State<Ctx>, peer: Option<ConnectInfo<SocketAddr>>, r
     if req.uri().authority().is_some() || req.uri().scheme().is_some() || !req.uri().path().starts_with('/') {
         return deny(StatusCode::BAD_REQUEST, "Bad request", "Unsupported request address.");
     }
-    let remote = match peer_allowed(st, peer.map(|p| p.0)) {
+    let remote = match peer_allowed(st, peer, trusted.is_some()) {
         Ok(r) => r,
         Err(r) => return *r,
     };
     if req.uri().path() == "/__kora/enter" {
-        return enter(&ctx, req, remote, secure).await;
+        return enter(&ctx, req, remote, secure, host, trusted).await;
     }
     // Who is this? The gateway cookie (every one of that name: another service on this host may set one).
     let cookie_name = gate_cookie_name(ctx.port);
@@ -147,11 +186,15 @@ async fn handle(State(ctx): State<Ctx>, peer: Option<ConnectInfo<SocketAddr>>, r
     if route.server != gs.server {
         return sign_in_again();
     }
+    if !host_belongs(st, trusted.as_ref(), &host, &route.server, ctx.port) {
+        return deny(StatusCode::FORBIDDEN, "Address not allowed", "This name does not belong to this server's txAdmin.");
+    }
     forward(&ctx, req, &host, route.txadmin_port, sid, secure).await
 }
 
 /// `/__kora/enter?t=<ticket>`: turn a ticket into a gateway cookie and send the person to txAdmin.
-async fn enter(ctx: &Ctx, req: Request, remote: bool, secure: bool) -> Response {
+async fn enter(ctx: &Ctx, req: Request, remote: bool, secure: bool, host: String, trusted: Option<remote::proxy::ProxyConfig>) -> Response {
+    // (`secure` is the scheme the visitor used: the forwarded one behind a trusted proxy.)
     if req.method() != Method::GET {
         return deny(StatusCode::METHOD_NOT_ALLOWED, "Not allowed", "Use the \"Open txAdmin\" button in the Kora panel.");
     }
@@ -170,6 +213,9 @@ async fn enter(ctx: &Ctx, req: Request, remote: bool, secure: bool) -> Response 
     let Some(route) = st.txgate.route(ctx.port) else { return sign_in_again() };
     if route.server != t.server {
         return sign_in_again();
+    }
+    if !host_belongs(st, trusted.as_ref(), &host, &route.server, ctx.port) {
+        return deny(StatusCode::FORBIDDEN, "Address not allowed", "This name does not belong to this server's txAdmin.");
     }
     let id = st.txgate.open_session(&t);
     let cookie = format!("{}={id}; HttpOnly; SameSite=Lax; Path=/{}", gate_cookie_name(ctx.port), if secure { "; Secure" } else { "" });

@@ -85,6 +85,11 @@ pub(crate) enum PanelCmd {
         #[command(subcommand)]
         cmd: RemoteActionsCmd,
     },
+    /// Remote sign-in settings that are not about one person.
+    Remote {
+        #[command(subcommand)]
+        cmd: crate::cmd::panel_remote::RemoteCmd,
+    },
 }
 
 /// Printed on Linux when `kora panel` is run as root: many rented servers only have the root account.
@@ -127,6 +132,7 @@ pub(crate) fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
         Some(PanelCmd::Proxy { cmd }) => return crate::cmd::panel_tls::proxy(cmd),
         Some(PanelCmd::Restart) => return panel_restart(&home),
         Some(PanelCmd::RemoteActions { cmd }) => return panel_remote_actions(*cmd, &kora_web::remote::config::default_path()),
+        Some(PanelCmd::Remote { cmd }) => return crate::cmd::panel_remote::panel_remote(cmd, &kora_web::remote::config::default_path()),
         None => {}
     }
     if a.new_token {

@@ -138,6 +138,7 @@ impl ProgressSink for NullSink {
 fn kind_word(k: Kind) -> &'static str {
     match k {
         Kind::UpdateTimer => "timer",
+        Kind::BackupJob => "backups",
         Kind::Service => "service",
         Kind::Firewall => "firewall",
         Kind::ServiceAccount => "account",
@@ -160,7 +161,8 @@ fn server_system_items(reg: &Registry, name: &str, dir: &Path, keep_files: bool)
     };
     let target = Target::from_request(&req);
     let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(reg, b, &[dir]));
-    let items = system::items_for(&target, &created, Platform::current(), &SystemRunner, keep_files, used).map_err(|e| e.lead(name))?;
+    let mut items = system::items_for(&target, &created, Platform::current(), &SystemRunner, keep_files, used).map_err(|e| e.lead(name))?;
+    items.extend(system::backup_job_item(&target, Platform::current(), &SystemRunner));
     Ok(items
         .into_iter()
         .map(|i| {

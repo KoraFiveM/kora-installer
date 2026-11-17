@@ -167,6 +167,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::UsersList
         // Who did what: names of remote users and what they changed.
         | Op::AuditList
+        | Op::AuditServiceList
         | Op::UserAdd
         | Op::UserRemove
         // Alert settings hold webhook addresses; the node list holds tokens.
@@ -347,6 +348,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::JobEvents
         | Op::JobsList
         | Op::AuditList
+        | Op::AuditServiceList
         | Op::Events
         | Op::SessionLogout
         | Op::SessionLink
@@ -493,6 +495,7 @@ pub fn installs(op: Op) -> bool {
         | Op::JobEvents
         | Op::JobsList
         | Op::AuditList
+        | Op::AuditServiceList
         | Op::Events
         | Op::SessionLogout
         | Op::SessionLink
@@ -735,6 +738,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::JobEvents
         | Op::JobsList
         | Op::AuditList
+        | Op::AuditServiceList
         | Op::Events
         | Op::SessionLogout
         | Op::MetricsGet

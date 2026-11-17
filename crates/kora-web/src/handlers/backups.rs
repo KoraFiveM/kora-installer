@@ -34,6 +34,13 @@ impl kora_core::backup::scheduler::Announce for MonitorAnnounce {
     fn recovered(&self, e: &kora_core::installer::registry::ServerEntry) {
         self.0.resolve_external(&e.name, kora_core::monitor::AlertKind::BackupFailed, kora_core::monitor::now_unix());
     }
+    // A failure that belongs to no server uses the machine-level path (same alert list, same notification settings).
+    fn machine_failed(&self, message: &str) {
+        self.0.raise_machine(kora_core::monitor::AlertKind::BackupFailed, message.to_string(), kora_core::monitor::now_unix());
+    }
+    fn machine_recovered(&self) {
+        self.0.resolve_machine(kora_core::monitor::AlertKind::BackupFailed, kora_core::monitor::now_unix());
+    }
 }
 
 /// Start looking for due scheduled backups (they only run while the panel runs, see

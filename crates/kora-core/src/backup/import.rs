@@ -1021,6 +1021,8 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         "Then remove it there: open the server's Danger zone tab and choose Remove (it also drops its database). Kora never does this for you from here.".into(),
         "Keep the moving file until you are sure everything is right: it holds your licence key and logins, so delete it afterwards.".into(),
     ];
+    // A new server has no account of its own yet; this covers one that does (see `handover`).
+    super::handover::note_into(super::handover::after_write(Path::new(&result.dir)), &mut result.notes, &mut result.problems);
     ev("done", "The server is imported", 100);
     Ok(result)
 }

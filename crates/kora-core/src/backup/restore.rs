@@ -314,6 +314,12 @@ pub fn restore(e: &ServerEntry, archive_path: &Path, o: &RestoreOptions, host: &
     }
     let mut report = RestoreReport { safety_backup: safety.clone(), database_restored: false, files_restored: 0, resources_restored: vec![], problems: vec![], notes: vec![], restarted: false };
     let result = apply(e, &manifest, &stage.0, tools, &mut ev, &mut report);
+    // 7b. the files were written as the person running Kora: a server with an account of its own gets them handed over
+    // BEFORE it starts again.
+    if result.is_ok() {
+        let (notes, problems) = (&mut report.notes, &mut report.problems);
+        super::handover::note_into(super::handover::after_write(&e.dir), notes, problems);
+    }
     // 8. start again, whatever happened
     if was_running {
         ev("start", "Starting the server again", 95);

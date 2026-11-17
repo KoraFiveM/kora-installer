@@ -258,6 +258,10 @@ impl Backend for FakeBackend {
         s.calls.push(format!("add_install {} {}", e.name, ids.join(",")));
         s.add_result.clone().unwrap_or_else(|| Ok(AddOutcome::default()))
     }
+    fn github_acting_as(&mut self) -> Option<String> {
+        Some("fake-login".into())
+    }
+
     fn github_signed_in(&mut self) -> bool {
         self.state().signed_in
     }
@@ -413,6 +417,7 @@ impl Backend for FakeBackend {
             undo: None,
             database: crate::api::wire::DatabaseNote { kind: crate::backup::DbKind::Dumped, note: "The server's own database is copied as one consistent snapshot.".into(), tool_missing: false },
             schedule_note: "Scheduled backups run while Kora's background service is running.".into(),
+            schedule_by_os: false,
         })
     }
     fn backups_overview(&mut self) -> Res<crate::api::wire::BackupsOverview> {
