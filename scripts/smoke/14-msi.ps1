@@ -25,6 +25,12 @@ $pf = [Environment]::GetFolderPath('ProgramFiles') + '\Kora'
 $koraExe = "$pf\kora.exe"
 $A = 'korasmokea'; $B = 'korasmokeb'; $C = 'korasmokec'
 
+# WiX writes the folder with a trailing backslash (`C:\Program Files\Kora\`): compare without it.
+function Test-OnMachinePath([string]$Folder) {
+    $want = $Folder.TrimEnd('\')
+    @([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | ForEach-Object { $_.TrimEnd('\') }) -contains $want
+}
+
 function Show-Diagnostics {
     Write-Host '----- diagnostics -----'
     foreach ($l in 'install.log', 'upgrade.log', 'uninstall.log') { if (Test-Path "$work\$l") { Write-Host "== $l (last 60 lines, errors first)"; Select-String -Path "$work\$l" -Pattern 'Error|Return value 3|failed' | Select-Object -First 15 | ForEach-Object { Write-Host $_.Line }; Get-Content "$work\$l" -Tail 60 } }
@@ -84,7 +90,7 @@ try {
     Assert-That ($qc -match [regex]::Escape("$koraExe`" service serve") -or $qc -match 'service serve') 'its command runs the program in Program Files with `service serve`'
     $acl = (& icacls $pf | Out-String); Write-Host $acl
     Assert-That ($acl -notmatch 'Everyone:.*\(F\)|Users:.*\((M|F)\)') 'ordinary users cannot change Program Files\Kora'
-    Assert-That (([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';') -contains $pf) 'Kora is on the machine PATH'
+    Assert-That (Test-OnMachinePath $pf) 'Kora is on the machine PATH'
     Assert-That (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk") 'the Start Menu shortcut exists'
     $policy = Get-Content "$pf\data\service.json" -Raw
     Assert-That ($policy -match [regex]::Escape($sidA) -and $policy -match [regex]::Escape($sidC)) 'A and C are on the list'
@@ -164,7 +170,7 @@ try {
     Assert-That ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) "msiexec /x succeeded (exit $($p.ExitCode))"
     Assert-That (-not (Get-Service KoraService -ErrorAction SilentlyContinue)) 'the service is gone'
     Assert-That (-not (Test-Path $pf)) 'Program Files\Kora is gone (program, settings, records, audit log)'
-    Assert-That (-not (([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';') -contains $pf)) 'the PATH entry is gone'
+    Assert-That (-not (Test-OnMachinePath $pf)) 'the PATH entry is gone'
     Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")) 'the Start Menu shortcut is gone'
     Assert-That (-not (Test-Path "$pf\kora-desktop.exe")) 'the desktop app is gone'
     Assert-That (-not (Test-Path '\\.\pipe\kora-service')) 'no pipe'
