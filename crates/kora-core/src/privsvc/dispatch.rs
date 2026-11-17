@@ -161,8 +161,8 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
         Op::ScheduleOff { dir } => (true, StepId::Schedule, Some(dir), None),
         _ => (false, StepId::Schedule, None, None),
     };
-    match (operation.dir(), dir) {
-        (Some(_), Some(dir)) => {
+    if let Some(dir) = dir {
+        {
             let owner = host.folder_owner(dir).map_err(|e| Rejected(format!("Kora's service will not work on {dir}: {e}.")))?;
             let rec = host.install_record(dir);
             // root may work on any folder with a record (root could do it all anyway); everyone else on their own.
@@ -194,7 +194,6 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
                 }
             }
         }
-        _ => {}
     }
     op::check_context(operation, &host.own_version(), ports)?;
     if !p.keys.is_empty() && !is_root {
