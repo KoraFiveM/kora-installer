@@ -23,6 +23,9 @@ impl kora_web::elevated::Broker for NoWorker {
     fn availability(&self) -> kora_core::privsvc::problems::Availability {
         kora_core::privsvc::problems::Availability::Missing
     }
+    fn handles(&self, verb: &str) -> bool {
+        kora_core::privsvc::op::VERBS.contains(&verb)
+    }
     fn call(&self, _: &str, _: &[String], _: &[(String, String)], _: &mut dyn FnMut(&str)) -> Result<kora_web::elevated::StepOutcome, kora_core::privsvc::conn::ClientError> {
         unreachable!("the administrator service is absent in this test file")
     }
