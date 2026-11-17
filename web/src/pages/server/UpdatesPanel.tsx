@@ -29,6 +29,7 @@ export const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'orang
   up_to_date: { tone: 'plain', text: 'Up to date' },
   clean: { tone: 'info', text: 'Ready to update' },
   dirty: { tone: 'orange', text: 'Needs attention', why: 'You changed files in this resource, so Kora left it alone and did not update it. Your changes are untouched. What to do: open the resource folder in a terminal and run "git stash" to set your changes aside, then check again. After the update, "git stash pop" brings them back. Saving them as a commit does not help: Kora never mixes your own commits with new ones.' },
+  other_branch: { tone: 'info', text: 'Not updated: on another branch', why: 'You put this resource on another branch or a pull request, so updates leave it alone. Nothing is lost and nothing is pulled in. To update it again, go back to the normal version in the GitHub tab.' },
   diverged: { tone: 'orange', text: 'Needs attention', why: 'This resource has saved changes of your own (commits) that the new version does not include, or Kora could not check it. Kora did not update it. It will not merge your commits or drop them for you. What to do: move your commits somewhere else or merge the new version by hand with git, then check again.' },
 }
 
@@ -61,8 +62,10 @@ export function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, 
               <span>{progress.done > 0 ? `Checked ${r.id}` : `Checking ${r.id}...`}</span>
             </div>
           )}
-          {r.status !== 'up_to_date' && <div className="mt-1 text-xs text-muted-foreground"><code className="font-mono">{shortSha(r.from)}</code> to <code className="font-mono">{shortSha(r.to)}</code>{r.behind ? `, ${r.behind} new change${r.behind === 1 ? '' : 's'}` : ''}</div>}
-          {info.why && <p className="mt-1 text-xs text-orange">{info.why}</p>}
+          {r.status !== 'up_to_date' && r.status !== 'other_branch' && <div className="mt-1 text-xs text-muted-foreground"><code className="font-mono">{shortSha(r.from)}</code> to <code className="font-mono">{shortSha(r.to)}</code>{r.behind ? `, ${r.behind} new change${r.behind === 1 ? '' : 's'}` : ''}</div>}
+          {r.status === 'other_branch'
+            ? <p className="mt-1 text-xs text-muted-foreground">{r.note ?? 'On another branch.'} Go back to the normal version in the GitHub tab to update it again.</p>
+            : info.why && <p className="mt-1 text-xs text-orange">{info.why}</p>}
           {r.changelog.length > 0 && (
             <details className="mt-1 text-xs text-muted-foreground">
               <summary className="cursor-pointer">What changed</summary>

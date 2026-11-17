@@ -3,6 +3,7 @@
 import type * as T from '../types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
+import { installBranchesMock } from './branches'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 
@@ -50,6 +51,7 @@ function init(name: ScenarioName) {
   paidAssets = {}
   uploads = new Map()
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
+  resetBranches?.()
   jobs.clear()
   busy.clear()
   paused.clear()
@@ -347,6 +349,7 @@ const route = (method: string, pattern: string, h: Handler) => {
 }
 const dec = (s: string) => decodeURIComponent(s)
 installHubMock(route, startJob, Fail, () => servers)
+const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
 

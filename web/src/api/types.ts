@@ -371,7 +371,7 @@ export interface AddOutcome {
 
 // ---- updates --------------------------------------------------------------------------------
 
-export type ChangeStatus = 'up_to_date' | 'clean' | 'dirty' | 'diverged'
+export type ChangeStatus = 'up_to_date' | 'clean' | 'dirty' | 'diverged' | 'other_branch'
 export interface ResourceChange {
   id: string
   from: string
@@ -380,6 +380,8 @@ export interface ResourceChange {
   changelog: string[]
   needs_restart: boolean
   status: ChangeStatus
+  /** A plain sentence when this is not a normal update ("trying pull request #12; not updated"). */
+  note?: string
 }
 export interface UpdatePreview {
   resources: ResourceChange[]
@@ -749,3 +751,127 @@ export interface AssetImportReport {
 }
 
 export type AssetImportEvent = { type: 'status'; message: string } | { type: 'asset'; name: string; state: 'imported' }
+
+// ---- branches and pull requests (Development servers) ---------------------------------------
+
+export type BranchState = 'default' | 'branch' | 'pr' | 'detached' | 'pinned' | 'unavailable'
+
+/** Where one resource is: its branch, in plain words (`label`). */
+export interface ResourceBranch {
+  id: string
+  folder: string
+  state: BranchState
+  branch?: string
+  pr?: number
+  /** The normal branch, e.g. `dev`. */
+  default_branch: string
+  /** "the normal version (dev)", "pull request #12", "branch fix-hud". */
+  label: string
+  changed_count: number
+  /** Sets of changes Kora kept aside in this folder. */
+  stashes: number
+  note?: string
+  problem?: Problem
+}
+
+/** Changes Kora kept aside; `index` is what "bring them back" sends. */
+export interface BranchStash {
+  index: number
+  message: string
+  branch: string
+}
+
+export interface BranchLists {
+  current: string | null
+  default_branch: string
+  /** Branches in the folder, on the person's fork, and on the original repository. */
+  local: string[]
+  fork: string[]
+  upstream: string[]
+}
+
+export interface BranchChoices {
+  resource: ResourceBranch
+  branches: BranchLists
+  stashes: BranchStash[]
+  notes: string[]
+}
+
+export type PrSource = 'upstream' | 'fork'
+
+export interface PullRequest {
+  number: number
+  title: string
+  author: string
+  /** Which repository it is on: the original, or the person's fork. */
+  source: PrSource
+  repo: string
+  branch: string
+  /** Where its branch is; null when that fork was deleted. */
+  from: string | null
+  draft: boolean
+  url: string
+  updated: string
+}
+
+export interface PrChoices {
+  prs: PullRequest[]
+  notes: string[]
+}
+
+/** What to do with changes of the person's own that are in the way. `ask` = do nothing and say which files. */
+export type ChangesChoice = 'ask' | 'stash' | 'discard'
+
+export type SwitchRequest =
+  | { action: 'default'; changes?: ChangesChoice }
+  | { action: 'branch'; branch: string; remote?: 'origin' | 'upstream'; changes?: ChangesChoice }
+  | { action: 'pr'; pr: string | number; source?: PrSource; changes?: ChangesChoice }
+
+export interface SwitchResult {
+  resource: string
+  status: 'switched' | 'already' | 'needs_choice'
+  now: { kind: 'default' | 'branch' | 'pr' | 'detached'; branch: string | null; pr?: number; changed_files: string[]; changed_count: number }
+  stashed?: BranchStash
+  saved_branch?: string
+  /** The pull request's title. */
+  title?: string
+  message: string
+  /** Files changed: a running server still has the old version until it is restarted. */
+  needs_restart: boolean
+  restart_note?: string
+}
+
+export interface BulkRow {
+  id: string
+  has: boolean
+  from?: 'origin' | 'upstream'
+  already: boolean
+  now: string
+  changed_count: number
+  note?: string
+}
+export interface BulkPreview {
+  branch: string
+  rows: BulkRow[]
+  have: number
+  missing: number
+  notes: string[]
+}
+export type BulkStatus = 'switched' | 'already' | 'needs_choice' | 'skipped' | 'failed'
+export interface BulkItem {
+  id: string
+  status: BulkStatus
+  message: string
+  stashed?: BranchStash
+  files?: string[]
+  problem?: Problem
+}
+export interface BulkResult {
+  items: BulkItem[]
+  switched: number
+  needs_choice: number
+  failed: number
+  skipped: number
+  needs_restart: boolean
+  restart_note?: string
+}
