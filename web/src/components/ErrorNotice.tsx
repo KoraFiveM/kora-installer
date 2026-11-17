@@ -6,6 +6,7 @@ import { api } from '@/api/client'
 import type { ProblemAction } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { SupportBundleLink } from '@/components/SupportBundleLink'
 import { CopyButton, CopyField } from '@/components/CopyButton'
 import { actionLabel, buttonActions, detailsText, isAdminCode, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
 
@@ -164,6 +165,7 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
         <details className="mt-2">
           <summary className="cursor-pointer text-xs text-muted-foreground">Show details</summary>
           <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-ink p-2 font-mono text-xs">{p.details}</pre>
+          {isFailure(p) && <p className="mt-1 text-xs text-muted-foreground">Still stuck? <SupportBundleLink /> to hand to whoever is helping. Nothing is uploaded.</p>}
         </details>
       )}
       {log && <LogBox job={log.job} path={log.path} />}

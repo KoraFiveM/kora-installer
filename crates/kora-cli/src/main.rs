@@ -8,6 +8,7 @@ use kora_core::elevate;
 use kora_core::installer::{self, host, registry};
 
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
+use crate::cmd::backup::BackupCmd;
 use crate::cmd::desktop::DesktopCmd;
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::install::{install, InstallArgs};
@@ -17,6 +18,7 @@ use crate::cmd::resources::{add_asset, add_resources, AddAssetArgs, AddResources
 use crate::cmd::schedule::{schedule, ScheduleCmd};
 use crate::cmd::server::{control, delete, status};
 use crate::cmd::store::{AuditArgs, StoreCmd};
+use crate::cmd::support::SupportCmd;
 use crate::cmd::toolchain::ToolsCmd;
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
@@ -66,6 +68,16 @@ enum Command {
     },
     /// Can players reach a server? A checklist (running, firewall, router, internet) and the fixes.
     Reach(ReachArgs),
+    /// Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule.
+    Backup {
+        #[command(subcommand)]
+        cmd: BackupCmd,
+    },
+    /// Make one file to hand to whoever is helping you: your Kora's state with every secret removed.
+    Support {
+        #[command(subcommand)]
+        cmd: SupportCmd,
+    },
     /// Discord notifications for update reports.
     Webhook {
         #[command(subcommand)]
@@ -231,6 +243,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Webhook { .. }
             | Command::Desktop { .. }
             | Command::Reach(_)
+            | Command::Backup { .. }
+            | Command::Support { .. }
             | Command::SelfUpdate { .. }
             | Command::Panel(_),
         ) => K::Other,
@@ -429,6 +443,8 @@ fn main() {
         Some(Command::Webhook { cmd }) => webhook(cmd),
         Some(Command::Desktop { cmd }) => cmd::desktop::run(cmd),
         Some(Command::Reach(a)) => cmd::reach::run(a),
+        Some(Command::Backup { cmd }) => cmd::backup::run(cmd),
+        Some(Command::Support { cmd }) => cmd::support::run(cmd),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
         Some(Command::Resource { cmd }) => resource::resource(cmd),

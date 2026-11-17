@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input, Textarea } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
@@ -23,7 +24,16 @@ export function IssuesPanel({ page }: { page: ResourcePage }) {
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const comment = useMutation({ mutationFn: (v: { n: number; text: string }) => api.resources.issueComment(s, id, v.n, v.text), onSuccess: () => { setReply(null); void issues.refetch() } })
-  const report = useMutation({ mutationFn: () => api.feedback.report(s, { resource: id, title: title.trim(), text }), onSuccess: () => { setTitle(''); setText(''); void issues.refetch() } })
+  const [attach, setAttach] = useState(false)
+  const summary = useQuery({ queryKey: ['support-summary', s], queryFn: () => api.support.summary(s), enabled: attach, staleTime: 60_000 })
+  const report = useMutation({
+    mutationFn: async () => {
+      // The summary is cleaned by Kora (the same removal of secrets as a support bundle); the bundle file itself is never attached.
+      const extra = attach ? (summary.data ?? (await api.support.summary(s))).text : ''
+      return api.feedback.report(s, { resource: id, title: title.trim(), text: extra ? `${text}\n\n${extra}` : text })
+    },
+    onSuccess: () => { setTitle(''); setText(''); void issues.refetch() },
+  })
   return (
     <Card>
       <CardHeader><CardTitle>Issues</CardTitle></CardHeader>
@@ -55,6 +65,8 @@ export function IssuesPanel({ page }: { page: ResourcePage }) {
           <h3 className="text-sm font-semibold">Report a new issue</h3>
           <Field label="Title"><Input value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
           <Field label="What happened?" hint="Kora adds its version and the resource's version. It never adds secrets or file paths."><Textarea value={text} onChange={(e) => setText(e.target.value)} /></Field>
+          <Checkbox checked={attach} onChange={(e) => setAttach(e.target.checked)} label="Add a short summary of this computer" hint="Your Kora version, system and tool versions, with secrets removed. The support bundle file is not attached. Issues are public." />
+          {attach && summary.data && <details><summary className="cursor-pointer text-xs text-muted-foreground">Show what will be added</summary><pre aria-label="Summary that will be added" className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-ink p-2 font-mono text-xs">{summary.data.text}</pre></details>}
           <Button type="submit" variant="default" disabled={!title.trim() || report.isPending || !!noAdmin} title={noAdmin ?? undefined}>Report issue</Button>
           <ActingAs />
           {report.data && <Alert tone="success" title="Issue reported"><a className="break-all text-info underline" href={report.data.url} target="_blank" rel="noopener noreferrer">{report.data.url}</a></Alert>}

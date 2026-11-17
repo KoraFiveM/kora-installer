@@ -13,6 +13,8 @@ Commands:
   status         Show registered servers
   self-update    Update the kora program itself to the newest stable release (checksum-verified)
   reach          Can players reach a server? A checklist (running, firewall, router, internet) and the fixes
+  backup         Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule
+  support        Make one file to hand to whoever is helping you: your Kora's state with every secret removed
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
@@ -146,11 +148,11 @@ Options:
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
   -y, --yes
           Do not ask anything (implied by any other option)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
   -h, --help
           Print help
@@ -904,6 +906,327 @@ Options:
 
       --json
           Print the result as JSON
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup =====
+Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule
+
+Usage: kora backup [OPTIONS] <COMMAND>
+
+Commands:
+  create    Make a backup of a server (database, settings, txAdmin data, resources)
+  list      List the backups of a server
+  archived  List the backups Kora kept of servers that were deleted (restore one as a new server with `backup import`)
+  verify    Check every file of a backup against its checksums
+  restore   Put a backup back on the server (a safety copy of the server as it is now is made first)
+  undo      Undo the last restore (puts the safety copy back)
+  delete    Delete one backup
+  prune     Remove old backups under the retention rules
+  import    Bring the server in a backup file onto THIS computer as a new server (made with `backup create --for-move`)
+  schedule  Show or change where backups go, how many are kept, and the schedule
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup create =====
+Make a backup of a server (database, settings, txAdmin data, resources)
+
+Usage: kora backup create [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --encrypt
+          Protect the file with a password (see --password-stdin; KORA_BACKUP_PASSWORD also works)
+
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --everything
+          Keep every resource in full (a bigger file that needs no internet to restore)
+
+      --stop-server
+          Stop the server while the backup runs (a strictly consistent copy), and start it again
+
+      --folder <DIR>
+          Keep this backup in another folder
+
+      --for-move
+          A copy to move the server to another computer: needs a password and is never removed by the retention rules
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup list =====
+List the backups of a server
+
+Usage: kora backup list [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup archived =====
+List the backups Kora kept of servers that were deleted (restore one as a new server with `backup import`)
+
+Usage: kora backup archived [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup verify =====
+Check every file of a backup against its checksums
+
+Usage: kora backup verify [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          The backup's number (see `kora backup list`), or `latest`
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup restore =====
+Put a backup back on the server (a safety copy of the server as it is now is made first)
+
+Usage: kora backup restore [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          The backup's number, or `latest`
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup undo =====
+Undo the last restore (puts the safety copy back)
+
+Usage: kora backup undo [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup delete =====
+Delete one backup
+
+Usage: kora backup delete [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          
+
+Options:
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup prune =====
+Remove old backups under the retention rules
+
+Usage: kora backup prune [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup import =====
+Bring the server in a backup file onto THIS computer as a new server (made with `backup create --for-move`)
+
+Usage: kora backup import [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>
+          The backup file (.tar.gz or .tar.gz.age)
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --name <NAME>
+          A name for the new server (default: the old name, made unique)
+
+      --dir <DIR>
+          The folder for the new server (default: the usual place for its name)
+
+      --game-port <GAME_PORT>
+          The game port (default: the old one, or the next free one)
+
+      --txadmin-port <TXADMIN_PORT>
+          The txAdmin port (default: the old one, or the next free one)
+
+      --licence-key <NAME>
+          Use this saved licence key instead of the one in the file (see `kora keys`)
+
+      --fork-choice <FORK_CHOICE>
+          A fork server whose GitHub account cannot be used here: keep the remotes as recorded (keep), make your own copies in the account signed in here (own), or use the original repositories (originals)
+          
+          [default: keep]
+          [possible values: keep, own, originals]
+
+      --start
+          Start the server when it is imported
+
+      --start-over
+          Remove what an earlier, failed import of this server made, and begin again
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup schedule =====
+Show or change where backups go, how many are kept, and the schedule
+
+Usage: kora backup schedule [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --daily <HH:MM>
+          Every day at HH:MM (24 hours, this computer's time)
+
+      --weekly <DAY> <HH:MM>
+          Every week on DAY (mon..sun) at HH:MM
+
+      --off
+          Turn scheduled backups off
+
+      --keep-last <N>
+          Keep this many of the newest backups (0 = no limit)
+
+      --keep-days <DAYS>
+          Also keep the newest backup of each day for this many days (0 = off)
+
+      --folder <DIR>
+          Keep backups in this folder (outside the server folder)
+
+      --default-folder
+          Go back to Kora's own backups folder
+
+      --stop <STOP>
+          Stop the server during scheduled backups
+          
+          [possible values: on, off]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora support =====
+Make one file to hand to whoever is helping you: your Kora's state with every secret removed
+
+Usage: kora support [OPTIONS] <COMMAND>
+
+Commands:
+  bundle  Prepare a support bundle, show what is in it, and save it on this computer after you agree
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora support bundle =====
+Prepare a support bundle, show what is in it, and save it on this computer after you agree
+
+Usage: kora support bundle [OPTIONS] [SERVER]
+
+Arguments:
+  [SERVER]
+          Only this server's files (default: every server)
+
+Options:
+      --show <FILE>
+          Print the cleaned text of one file of the bundle (for example servers/prod/server.cfg) and stop
+
+      --yes
+          Save it without asking
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

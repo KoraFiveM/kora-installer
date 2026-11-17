@@ -187,28 +187,10 @@ fn is_secret_file(path: &str) -> bool {
         || ["secret", "credential", "password"].iter().any(|w| name.contains(w))
 }
 
-/// Hide what looks like a secret in diff text: `cfxk_` licence keys anywhere, and the value after `=` or `:` on a line whose
-/// name says key, token, password, secret or licence.
+/// Hide what looks like a secret in diff text. There is ONE redaction in the code base ([`crate::support::redact`]); this
+/// only tells it the text is a diff (each line starts with `+`, `-` or a space).
 pub fn hide_secrets(diff: &str) -> String {
-    const WORDS: &[&str] =
-        &["password", "passwd", "secret", "token", "api_key", "apikey", "api-key", "licen", "private_key", "webhook", "authorization", "bearer", "connection_string", "mysql_connection"];
-    let cleaned = crate::store::jobs::redact_text(diff);
-    cleaned
-        .lines()
-        .map(|l| {
-            let low = l.to_ascii_lowercase();
-            let body = l.get(1..).unwrap_or("");
-            let changed_line = l.starts_with('+') || l.starts_with('-') || l.starts_with(' ');
-            if changed_line && WORDS.iter().any(|w| low.contains(w)) {
-                if let Some(i) = body.find(['=', ':']) {
-                    return format!("{}{}{} <hidden>", &l[..1], &body[..i], &body[i..=i]);
-                }
-            }
-            l.to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + if diff.ends_with('\n') { "\n" } else { "" }
+    crate::support::redact::scrub_diff(diff).text
 }
 
 pub fn local_changes(r: &dyn CommandRunner, dir: &Path, default_branch: &str) -> PResult<LocalChanges> {

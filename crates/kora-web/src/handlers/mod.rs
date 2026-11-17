@@ -2,6 +2,7 @@
 
 pub mod assets;
 pub mod auth;
+pub mod backups;
 pub mod branches;
 pub mod collab;
 pub mod console;
@@ -17,6 +18,7 @@ pub mod resource_page;
 pub mod resources;
 pub mod servers;
 pub mod settings;
+pub mod support;
 pub mod system;
 pub mod tls_api;
 pub mod toolchain;

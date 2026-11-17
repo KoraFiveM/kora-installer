@@ -130,6 +130,8 @@ Most things are in the panel (`kora`); these are the same operations for scripts
 | `kora keys list\|add\|replace\|rename\|remove\|use\|keychain status\|on\|off`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line; kept in the system keychain when there is one: Windows DPAPI, Linux Secret Service) and the remembered Cfx.re name and GitHub owner. |
 | `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers. |
 | `kora webhook ...` | Discord notifications for update reports. |
+| `kora backup create\|list\|verify\|restore\|undo\|delete\|prune\|schedule <server>`, `kora backup import <file>` | Back up a server (database, settings, txAdmin data, resources; optional password), check a backup, restore it (a safety copy is made first and can be undone), set where backups go and a schedule, or bring a server from a backup (or another computer) as a new one. The file holds secrets: a password is read from `--password-stdin` or `KORA_BACKUP_PASSWORD`, never an argument. |
+| `kora support bundle [<server>]` | One file to hand to whoever is helping you, with every secret removed. You see what is in it first; it is never uploaded. |
 | `kora app install\|status\|uninstall` | Kora's per-user shortcuts (Start Menu / Desktop, applications menu). `kora uninstall --app` removes the OLD machine-wide app of earlier versions. |
 | `kora self-update` | Update Kora to the newest stable release (checksum-verified). |
 | `kora delete <server>` | Delete a server and what the installer created for it. |

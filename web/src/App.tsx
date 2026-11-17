@@ -20,6 +20,7 @@ const ServerDetailPage = lazy(() => import('@/pages/ServerDetailPage'))
 const ResourcePage = lazy(() => import('@/pages/ResourcePage'))
 const InstallWizard = lazy(() => import('@/pages/InstallWizard'))
 const FleetPage = lazy(() => import('@/pages/FleetPage'))
+const ImportPage = lazy(() => import('@/pages/import/ImportPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const SystemCheckPage = lazy(() => import('@/pages/SystemCheckPage'))
 
@@ -107,6 +108,7 @@ export function App({ boot }: { boot: BootResult }) {
               <Route path="servers/:name" element={<ServerDetailPage />} />
               <Route path="servers/:name/resources/:resource" element={<ResourcePage />} />
               <Route path="install" element={<InstallWizard />} />
+              <Route path="import" element={<ImportPage />} />
               <Route path="fleet" element={<FleetPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="system" element={<SystemCheckPage />} />

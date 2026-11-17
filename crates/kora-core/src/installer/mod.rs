@@ -45,6 +45,7 @@ pub use http::HttpClient;
 pub use registry::{Registry, ServerEntry, ServerFile};
 pub use steps::check_db_admin;
 pub(crate) use steps::db_override;
+pub(crate) use steps::{admin_conn_for, db_client};
 
 /// Installer error: plain-language message, safe to show (never contains secrets).
 ///

@@ -11,6 +11,8 @@ import { installBranchesMock } from './branches'
 import { installResourceMock } from './resource'
 import { installCollabMock } from './collab'
 import { installReachMock } from './reach'
+import { installBackupsMock } from './backups'
+import { installSupportMock } from './support'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { installAuthMock } from './auth'
@@ -75,6 +77,7 @@ function init(name: ScenarioName) {
   paused.clear()
   keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
   reachMock.reset()
+  backupsMock.reset(name)
   storeMock.reset(name === 'restarted')
   if (name === 'restarted') {
     // The install that was running when the panel stopped, written down with its (saved) licence key by name.
@@ -407,6 +410,8 @@ const dec = (s: string) => decodeURIComponent(s)
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const reachMock = installReachMock(route, () => servers)
+installSupportMock(route, Fail)
+const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep)
 const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
 const resourceMock = installResourceMock(route, Fail, {
   find: (n) => find(n),

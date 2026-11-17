@@ -92,6 +92,7 @@ pub fn toast_for_alert(a: &AlertRow) -> Toast {
     match a.kind {
         AlertKind::Stopped => Toast { title: format!("{} stopped", a.server), body: "It stopped without being asked to. Open Kora to start it again.".into(), route, urgent: true },
         AlertKind::Recovered => Toast { title: format!("{} is back up", a.server), body: "It is running again.".into(), route, urgent: false },
+        AlertKind::BackupFailed => Toast { title: format!("{}: backup failed", a.server), body: clip(&a.message, 200), route: format!("{route}?tab=backups"), urgent: true },
         _ => Toast { title: if a.title.is_empty() { "Kora needs a look".into() } else { clip(&a.title, 80) }, body: clip(&a.message, 200), route, urgent },
     }
 }
@@ -209,6 +210,17 @@ mod tests {
         assert_eq!((t[0].title.as_str(), t[0].route.as_str(), t[0].urgent), ("my server stopped", "/servers/my%20server", true));
         n.on_alerts(NOW + 20, &[alert(1, "my server", AlertKind::Stopped, Tone::Danger, NOW + 9)]);
         assert!(n.drain(NOW + 40, 600).is_empty(), "the same alert is never shown twice");
+    }
+
+    #[test]
+    fn a_failed_backup_is_an_urgent_toast_that_opens_the_backups_tab() {
+        let mut n = Notifier::default();
+        n.on_alerts(NOW, &[]);
+        n.on_alerts(NOW + 10, &[alert(7, "my server", AlertKind::BackupFailed, Tone::Danger, NOW + 9)]);
+        let t = n.drain(NOW + 16, 600);
+        assert_eq!(t.len(), 1);
+        assert_eq!((t[0].title.as_str(), t[0].route.as_str(), t[0].urgent), ("my server: backup failed", "/servers/my%20server?tab=backups", true));
+        assert!(crate::nav::safe_route(&t[0].route));
     }
 
     #[test]

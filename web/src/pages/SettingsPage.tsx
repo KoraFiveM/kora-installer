@@ -11,6 +11,7 @@ import { AccountCard } from '@/components/auth/AccountCard'
 import { TlsCard } from '@/components/TlsCard'
 import { AuditLogCard } from '@/components/AuditLog'
 import { JobHistoryCard } from '@/components/JobHistory'
+import { SupportBundleLink } from '@/components/SupportBundleLink'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -144,6 +145,13 @@ export default function SettingsPage() {
       <JobHistoryCard />
       <AuditLogCard />
       <Card><CardHeader><CardTitle>GitHub account</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>
+      <Card>
+        <CardHeader><CardTitle>Get help</CardTitle></CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p>When something goes wrong, make one file to hand to whoever is helping you. It holds your Kora version, your system, the System check, your servers' settings, recent jobs and problems, and logs, with every secret removed. You see exactly what is in it before it is saved, and Kora never uploads it.</p>
+          {role.can('admin') ? <SupportBundleLink label="Create a support bundle" /> : <p className="text-muted-foreground">Ask an administrator to make one.</p>}
+        </CardContent>
+      </Card>
       <Uninstall />
       <Card>
         <CardHeader><CardTitle>About</CardTitle></CardHeader>

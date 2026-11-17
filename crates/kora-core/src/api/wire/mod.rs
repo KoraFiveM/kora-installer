@@ -8,8 +8,10 @@
 
 mod audit;
 mod auth;
+mod backups;
 mod collab;
 mod common;
+mod imports;
 mod install;
 mod keys;
 mod more;
@@ -17,13 +19,16 @@ mod reach;
 mod resource;
 mod servers;
 mod session;
+mod support;
 mod system;
 mod updates;
 
 pub use audit::*;
 pub use auth::*;
+pub use backups::*;
 pub use collab::*;
 pub use common::*;
+pub use imports::*;
 pub use install::*;
 pub use keys::*;
 pub use more::*;
@@ -31,5 +36,6 @@ pub use reach::*;
 pub use resource::*;
 pub use servers::*;
 pub use session::*;
+pub use support::*;
 pub use system::*;
 pub use updates::*;

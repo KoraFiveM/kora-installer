@@ -150,7 +150,7 @@ fn db_used_elsewhere(reg: &Registry, st: &ProvisionState, dir: &Path) -> Option<
     })
 }
 
-fn db_client() -> String {
+pub(crate) fn db_client() -> String {
     let ok = |c: &str| crate::sysexe::command(c).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
     let saved = if cfg!(windows) { windows_db::saved_record().map(|r| r.client).filter(|c| c.is_file()) } else { None };
     pick_db_client(cfg!(windows), crate::elevate::is_elevated(), &ok, saved, &|| windows_client_candidates().into_iter().find(|c| c.is_file()))
@@ -217,7 +217,7 @@ fn admin_conn(req: &InstallRequest) -> AdminConn {
     admin_conn_for(req.db_admin.as_ref())
 }
 
-fn admin_conn_for(db_admin: Option<&DbAdmin>) -> AdminConn {
+pub(crate) fn admin_conn_for(db_admin: Option<&DbAdmin>) -> AdminConn {
     let client = db_client();
     let env_pw = std::env::var("KORA_DB_ADMIN_PASSWORD").ok().filter(|s| !s.is_empty());
     if let Some(a) = db_admin {

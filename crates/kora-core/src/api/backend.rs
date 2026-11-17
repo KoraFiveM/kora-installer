@@ -214,6 +214,68 @@ pub trait Backend {
     fn asset_remove(&mut self, _e: &ServerEntry, _name: &str) -> Res<Vec<String>> {
         Err(NO_PAID_ASSETS.into())
     }
+
+    // ---- backups of a server (see `crate::backup`). The defaults ARE the real thing, written over this trait
+    // (they stop and start the server through `control`); a test double overrides them.
+    /// The backups of a server, their settings and the "last backup" line.
+    fn backups_view(&mut self, e: &ServerEntry) -> Res<crate::api::wire::BackupsView> {
+        crate::backup::service::view(self, e)
+    }
+    /// The "last backup" line of every server.
+    fn backups_overview(&mut self) -> Res<crate::api::wire::BackupsOverview> {
+        crate::backup::service::overview(self)
+    }
+    /// Make a backup. `admin`: the caller may choose a folder.
+    fn backup_create(&mut self, e: &ServerEntry, req: &crate::api::wire::BackupCreateRequest, admin: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::BackupCreated> {
+        crate::backup::service::create_backup(self, e, req, admin, say)
+    }
+    fn backup_settings_set(&mut self, e: &ServerEntry, s: &crate::backup::BackupSettings) -> Res<crate::backup::BackupSettings> {
+        crate::backup::service::settings_set(self, e, s)
+    }
+    fn backup_verify(&mut self, e: &ServerEntry, id: &str, passphrase: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::VerifyResult> {
+        crate::backup::service::verify(self, e, id, passphrase, say)
+    }
+    fn backup_preview(&mut self, e: &ServerEntry, id: &str, passphrase: Option<&str>) -> Res<crate::backup::restore::RestorePreview> {
+        crate::backup::service::preview(self, e, id, passphrase)
+    }
+    fn backup_restore(&mut self, e: &ServerEntry, id: &str, passphrase: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::restore::RestoreReport> {
+        crate::backup::service::restore_backup(self, e, id, passphrase, say)
+    }
+    fn backup_undo(&mut self, e: &ServerEntry, passphrase: Option<&str>, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::restore::RestoreReport> {
+        crate::backup::service::undo(self, e, passphrase, say)
+    }
+    fn backup_delete(&mut self, e: &ServerEntry, id: &str) -> Res<()> {
+        crate::backup::service::delete(self, e, id)
+    }
+    fn backup_prune(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
+        crate::backup::service::prune(self, e)
+    }
+    /// Backups of deleted servers.
+    fn backups_archived(&mut self) -> Res<crate::api::wire::ArchivedBackups> {
+        Ok(crate::backup::service::archived_view())
+    }
+
+    // ---- bringing a server from a backup (see `crate::backup::import`). `allow_path`: a file on this computer may be named
+    // (a local session); a remote one must upload.
+    fn import_inspect(&mut self, src: &crate::backup::import::ImportSource, passphrase: Option<&str>, allow_path: bool) -> Res<crate::backup::import::ImportPreview> {
+        let servers = self.list()?;
+        crate::backup::service::import_inspect(src, passphrase, allow_path, &servers)
+    }
+    fn import_run(&mut self, req: &crate::backup::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::import::ImportResult> {
+        crate::backup::service::import_run(self, req, allow_path, say)
+    }
+
+    // ---- the support bundle (see `crate::support`)
+    fn support_preview(&mut self, server: Option<&str>) -> Res<crate::api::wire::BundleListing> {
+        crate::support::service::preview(self, server)
+    }
+    fn support_summary(&mut self, server: Option<&str>) -> Res<String> {
+        Ok(crate::support::service::summary(self, server))
+    }
+    /// The archive file of a backup, to download it (it holds secrets: administrators only).
+    fn backup_file(&mut self, e: &ServerEntry, id: &str) -> Res<PathBuf> {
+        crate::backup::service::file(self, e, id)
+    }
 }
 
 /// What a front end without the reachability check answers.

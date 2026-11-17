@@ -349,6 +349,35 @@ impl Monitor {
         }
     }
 
+    /// Raise an alert that does not come from sampling (a failed backup): it shows in the panel and goes to
+    /// the same Discord / webhook as the others. One open alert per kind and server: a second failure while
+    /// the first is open is not announced again.
+    pub fn raise_external(&self, e: &ServerEntry, kind: AlertKind, message: String, now: u64) {
+        let alert = {
+            let mut st = self.state();
+            let st = &mut *st;
+            if st.alerts.iter().any(|a| a.server == e.name && a.kind == kind && a.resolved.is_none()) {
+                return;
+            }
+            st.next_id += 1;
+            let alert = Alert { id: st.next_id, server: e.name.clone(), kind, tone: kind.tone(), title: kind.title(), message, raised: now, resolved: None, acked: false };
+            st.alerts.push_back(alert.clone());
+            while st.alerts.len() > MAX_ALERTS {
+                let pos = st.alerts.iter().position(|a| a.resolved.is_some() || a.acked).unwrap_or(0);
+                st.alerts.remove(pos);
+            }
+            alert
+        };
+        self.inner.sink.deliver(e, &alert, &alerts::load_settings(&e.dir));
+    }
+
+    /// Close the open alerts of `kind` for a server (the condition is over).
+    pub fn resolve_external(&self, server: &str, kind: AlertKind, now: u64) {
+        for a in self.state().alerts.iter_mut().filter(|a| a.server == server && a.kind == kind && a.resolved.is_none()) {
+            a.resolved = Some(now);
+        }
+    }
+
     /// Newest first.
     pub fn alerts(&self) -> Vec<Alert> {
         self.state().alerts.iter().rev().cloned().collect()

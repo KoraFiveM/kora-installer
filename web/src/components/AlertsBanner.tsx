@@ -18,7 +18,7 @@ export function AlertsBanner() {
     <div className="space-y-3" aria-label="Server alerts">
       {open.slice(0, 5).map((a) => (
         <div key={a.id} className="relative">
-          <Alert tone={a.tone} title={<>{a.title}: <Link className="underline" to={`/servers/${encodeURIComponent(a.server)}?tab=${a.kind === 'update_attention' ? 'resources' : 'monitoring'}`}>{a.server}</Link></>}>
+          <Alert tone={a.tone} title={<>{a.title}: <Link className="underline" to={`/servers/${encodeURIComponent(a.server)}?tab=${a.kind === 'update_attention' ? 'resources' : a.kind === 'backup_failed' ? 'backups' : 'monitoring'}`}>{a.server}</Link></>}>
             {a.message}
           </Alert>
           {canAck && (

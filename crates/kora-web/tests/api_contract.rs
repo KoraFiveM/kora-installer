@@ -721,6 +721,32 @@ fn cases() -> Vec<Case> {
         case(Op::ReachSettingsSet, &[], Some(json!({"cfx_list": true}))),
         case(Op::ForwardingSet, s, Some(json!({"enabled": true}))),
         case(Op::ReachFirewallOpen, s, None),
+        case(Op::BackupsList, s, None),
+        case(Op::BackupsOverview, &[], None),
+        case(Op::BackupsArchived, &[], None),
+        case(Op::BackupImportInspect, &[], Some(json!({"source": {"path": "/tmp/old.tar.gz.age"}, "passphrase": "x"}))),
+        case(
+            Op::BackupImportStart,
+            &[],
+            Some(
+                json!({"source": {"path": "/tmp/old.tar.gz.age"}, "passphrase": "x", "choices": {"name": "Old server", "dir": "/home/me/kora/old", "game_port": 30121, "txadmin_port": 40121}, "start": false, "start_over": false}),
+            ),
+        ),
+        case(Op::SupportBundlePreview, &[], Some(json!({}))),
+        case(Op::SupportSummary, &[], Some(json!({"server": "prod"}))),
+        case(Op::BackupCreate, s, Some(json!({"passphrase": "a long passphrase", "everything": false, "stop_server": false}))),
+        case(
+            Op::BackupSettingsSet,
+            s,
+            Some(
+                json!({"folder": "", "retention": {"keep_last": 7, "keep_daily_days": 0}, "schedule": {"enabled": true, "cadence": "daily", "time": "03:30"}, "resources": "auto", "stop_for_scheduled": false}),
+            ),
+        ),
+        case(Op::BackupPrune, s, None),
+        case(Op::BackupUndo, s, Some(json!({}))),
+        case(Op::BackupVerify, &[("s", "prod"), ("id", "20260317-041507")], Some(json!({}))),
+        case(Op::BackupPreview, &[("s", "prod"), ("id", "20260317-041507")], Some(json!({"passphrase": "x"}))),
+        case(Op::BackupRestore, &[("s", "prod"), ("id", "20260317-041507")], Some(json!({}))),
     ]
 }
 
@@ -738,6 +764,12 @@ const UNVERIFIED: &[(Op, &str)] = &[
     (Op::TlsCa, "needs a local certificate authority; covered by the tls tests"),
     (Op::KeychainSet, "moves the keys of the Kora home; covered by the keychain tests in kora-core and tests/keys.rs"),
     (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
+    (Op::BackupDelete, "204"),
+    (Op::BackupImportUpload, "the backup file itself is the request body (binary); covered by tests/import.rs"),
+    (Op::SupportBundleFile, "needs the id of a bundle prepared moments before; covered by tests/support.rs"),
+    (Op::SupportBundleCreate, "needs the id of a bundle prepared moments before; covered by tests/support.rs"),
+    (Op::SupportBundleDownload, "the saved zip itself (binary), not JSON"),
+    (Op::BackupDownload, "the archive file itself (binary), not JSON"),
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),
     (Op::PanelRestart, "would restart the process"),

@@ -107,11 +107,12 @@ mod tests {
 
     #[test]
     fn saves_answers_but_never_the_license_key_or_the_database_password() {
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("KORA_HOME", home.path());
+        // The test process's own Kora folder. Never point `KORA_HOME` at a folder that goes away with this test:
+        // the variable is shared by every test in the process, and the others would lose their home mid-run.
+        let home = crate::installer::registry::use_test_home();
         save(&req()).unwrap();
         // not a single secret anywhere in the database file or its write-ahead log
-        let s = Store::open(home.path()).unwrap();
+        let s = Store::open(&home).unwrap();
         let text: String = s.read(|c| Ok(c.query_row("SELECT req_json FROM saved_answers", [], |r| r.get(0))?)).unwrap();
         assert!(!text.contains("SECRETKEY") && !text.contains("hunter2"), "{text}");
         let back = load().unwrap();

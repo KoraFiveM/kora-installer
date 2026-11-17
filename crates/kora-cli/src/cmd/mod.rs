@@ -2,6 +2,7 @@
 //! See CONTRIBUTING.md ("Adding a command").
 pub(crate) mod admin_step;
 pub(crate) mod app;
+pub(crate) mod backup;
 pub(crate) mod bare;
 pub(crate) mod branch;
 pub(crate) mod desktop;
@@ -21,6 +22,7 @@ pub(crate) mod schedule;
 pub(crate) mod server;
 pub(crate) mod service_cmd;
 pub(crate) mod store;
+pub(crate) mod support;
 pub(crate) mod toolchain;
 pub(crate) mod uninstall;
 pub(crate) mod update;

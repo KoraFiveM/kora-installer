@@ -228,6 +228,46 @@ pub enum Op {
     TlsCa,
     /// Use the system keychain for saved licence keys (and move them in), or keep them all in Kora's private file.
     KeychainSet,
+    /// The backups of a server: the list, where they go, the schedule and the "last backup" line.
+    BackupsList,
+    /// Make a backup of a server (a job with progress).
+    BackupCreate,
+    /// Change where backups go, how many are kept and the backup schedule (administrators).
+    BackupSettingsSet,
+    /// Remove old backups under the retention rules (administrators).
+    BackupPrune,
+    /// Undo the last restore by restoring the safety copy taken before it (a job; administrators).
+    BackupUndo,
+    /// Check every file of a backup against its checksums (a job).
+    BackupVerify,
+    /// What restoring a backup would change. Reads only.
+    BackupPreview,
+    /// Restore a backup onto its server (a job; administrators).
+    BackupRestore,
+    /// Delete a backup (administrators).
+    BackupDelete,
+    /// Download the archive file: it holds secrets (administrators).
+    BackupDownload,
+    /// The "last backup" line of every server, for the servers list.
+    BackupsOverview,
+    /// Prepare a support bundle and show what is in it (nothing is saved or sent).
+    SupportBundlePreview,
+    /// One file of a prepared support bundle, as it will be saved.
+    SupportBundleFile,
+    /// Save the prepared support bundle on this computer.
+    SupportBundleCreate,
+    /// Download a saved support bundle.
+    SupportBundleDownload,
+    /// The short cleaned text a bug report may attach.
+    SupportSummary,
+    /// Upload a backup file to this computer, to bring its server in (administrators).
+    BackupImportUpload,
+    /// Look at a backup file: the server in it, what would be created, what is in the way. Reads only.
+    BackupImportInspect,
+    /// Bring the server in a backup onto this computer as a new server (a job; administrators).
+    BackupImportStart,
+    /// Backups of servers that were deleted (kept, restorable as a new server; administrators).
+    BackupsArchived,
 }
 
 impl Op {
@@ -376,6 +416,26 @@ impl Op {
         Op::TlsRenew,
         Op::TlsCa,
         Op::KeychainSet,
+        Op::BackupsList,
+        Op::BackupCreate,
+        Op::BackupSettingsSet,
+        Op::BackupPrune,
+        Op::BackupUndo,
+        Op::BackupVerify,
+        Op::BackupPreview,
+        Op::BackupRestore,
+        Op::BackupDelete,
+        Op::BackupDownload,
+        Op::BackupsOverview,
+        Op::SupportBundlePreview,
+        Op::SupportBundleFile,
+        Op::SupportBundleCreate,
+        Op::SupportBundleDownload,
+        Op::SupportSummary,
+        Op::BackupImportUpload,
+        Op::BackupImportInspect,
+        Op::BackupImportStart,
+        Op::BackupsArchived,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -525,6 +585,26 @@ impl Op {
             Op::TlsRenew => "tls_renew",
             Op::TlsCa => "tls_ca",
             Op::KeychainSet => "keychain_set",
+            Op::BackupsList => "backups_list",
+            Op::BackupCreate => "backup_create",
+            Op::BackupSettingsSet => "backup_settings_set",
+            Op::BackupPrune => "backup_prune",
+            Op::BackupUndo => "backup_undo",
+            Op::BackupVerify => "backup_verify",
+            Op::BackupPreview => "backup_preview",
+            Op::BackupRestore => "backup_restore",
+            Op::BackupDelete => "backup_delete",
+            Op::BackupDownload => "backup_download",
+            Op::BackupsOverview => "backups_overview",
+            Op::SupportBundlePreview => "support_bundle_preview",
+            Op::SupportBundleFile => "support_bundle_file",
+            Op::SupportBundleCreate => "support_bundle_create",
+            Op::SupportBundleDownload => "support_bundle_download",
+            Op::SupportSummary => "support_summary",
+            Op::BackupImportUpload => "backup_import_upload",
+            Op::BackupImportInspect => "backup_import_inspect",
+            Op::BackupImportStart => "backup_import_start",
+            Op::BackupsArchived => "backups_archived",
         }
     }
 
@@ -677,6 +757,26 @@ impl Op {
             Op::TlsRenew => (Method::Post, "/tls/renew"),
             Op::TlsCa => (Method::Get, "/tls/ca"),
             Op::KeychainSet => (Method::Put, "/keys/keychain"),
+            Op::BackupsList => (Method::Get, "/servers/{s}/backups"),
+            Op::BackupCreate => (Method::Post, "/servers/{s}/backups"),
+            Op::BackupSettingsSet => (Method::Put, "/servers/{s}/backups/settings"),
+            Op::BackupPrune => (Method::Post, "/servers/{s}/backups/prune"),
+            Op::BackupUndo => (Method::Post, "/servers/{s}/backups/undo"),
+            Op::BackupVerify => (Method::Post, "/servers/{s}/backups/{id}/verify"),
+            Op::BackupPreview => (Method::Post, "/servers/{s}/backups/{id}/preview"),
+            Op::BackupRestore => (Method::Post, "/servers/{s}/backups/{id}/restore"),
+            Op::BackupDelete => (Method::Delete, "/servers/{s}/backups/{id}"),
+            Op::BackupDownload => (Method::Get, "/servers/{s}/backups/{id}/file"),
+            Op::BackupsOverview => (Method::Get, "/backups"),
+            Op::SupportBundlePreview => (Method::Post, "/support/bundle/preview"),
+            Op::SupportBundleFile => (Method::Post, "/support/bundle/file"),
+            Op::SupportBundleCreate => (Method::Post, "/support/bundle"),
+            Op::SupportBundleDownload => (Method::Get, "/support/bundle/{file}"),
+            Op::SupportSummary => (Method::Post, "/support/summary"),
+            Op::BackupImportUpload => (Method::Post, "/backups/import/upload"),
+            Op::BackupImportInspect => (Method::Post, "/backups/import/inspect"),
+            Op::BackupImportStart => (Method::Post, "/backups/import"),
+            Op::BackupsArchived => (Method::Get, "/backups/archived"),
         }
     }
 
@@ -704,13 +804,18 @@ impl Op {
                 | Op::DbStart
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::BackupCreate
+                | Op::BackupUndo
+                | Op::BackupVerify
+                | Op::BackupRestore
+                | Op::BackupImportStart
                 | Op::ResourcesFork
         )
     }
 
     /// Jobs that only read: they may run next to a mutating job of the same server.
     pub fn is_read_only_job(self) -> bool {
-        matches!(self, Op::UpdatePreview | Op::ServersScan | Op::BranchBulkPreview)
+        matches!(self, Op::UpdatePreview | Op::ServersScan | Op::BranchBulkPreview | Op::BackupVerify)
     }
 
     /// True when [`super::Backend`] (or the api helpers) can serve it today.
@@ -938,13 +1043,33 @@ mod tests {
             | Op::TlsStatus
             | Op::TlsRenew
             | Op::TlsCa
-            | Op::KeychainSet => Op::ALL.contains(&op),
+            | Op::KeychainSet
+            | Op::BackupsList
+            | Op::BackupCreate
+            | Op::BackupSettingsSet
+            | Op::BackupPrune
+            | Op::BackupUndo
+            | Op::BackupVerify
+            | Op::BackupPreview
+            | Op::BackupRestore
+            | Op::BackupDelete
+            | Op::BackupDownload
+            | Op::BackupsOverview
+            | Op::SupportBundlePreview
+            | Op::SupportBundleFile
+            | Op::SupportBundleCreate
+            | Op::SupportBundleDownload
+            | Op::SupportSummary
+            | Op::BackupImportUpload
+            | Op::BackupImportInspect
+            | Op::BackupImportStart
+            | Op::BackupsArchived => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 144);
+        assert_eq!(Op::ALL.len(), 164);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

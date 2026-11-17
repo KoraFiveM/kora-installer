@@ -611,6 +611,8 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         println!("Press Ctrl+C to stop.");
         // Sample the servers and raise alerts for as long as the panel runs.
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
+        // Make the backups the schedules ask for (only while the panel runs).
+        let backup_scheduler = handlers::backups::start_scheduler(state.backend.clone(), monitor.clone());
         // Forward the game port on the router for servers that have it switched on (and run without a service).
         let port_keeper = kora_core::reach::forward::keeper::spawn_panel_keeper();
         // Loopback is plain HTTP by default; any other address serves HTTPS once there is a certificate.
@@ -622,6 +624,7 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         })
         .await;
         monitor.stop();
+        backup_scheduler.stop();
         port_keeper.stop();
         served?;
         Ok(())

@@ -39,7 +39,8 @@ pub struct GithubActor(pub String);
 
 /// Does a request for `op` with `method` belong in the log?
 pub fn audited(op: Op, method: &Method) -> bool {
-    if method == Method::GET || method == Method::HEAD {
+    // Downloading a backup hands out the secrets inside it: that is always written down.
+    if (method == Method::GET || method == Method::HEAD) && !matches!(op, Op::BackupDownload | Op::SupportBundleDownload) {
         return false;
     }
     !matches!(
@@ -65,6 +66,11 @@ pub fn audited(op: Op, method: &Method) -> bool {
             | Op::AssetInspect
             | Op::AlertsAck
             | Op::BranchBulkPreview
+            | Op::BackupPreview
+            | Op::SupportBundlePreview
+            | Op::SupportBundleFile
+            | Op::SupportSummary
+            | Op::BackupImportInspect
     )
 }
 

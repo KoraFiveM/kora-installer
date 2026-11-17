@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
@@ -353,6 +354,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               </>
             )}
             {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
+            {run.phase === 'done' && run.result?.name && <BackupSuggestion server={run.result.name} compact />}
             {run.phase === 'failed' && (
               <div className="space-y-4">
                 <ErrorNotice error={run.error} title="The install could not finish" actions={installActions} onFixed={retryAfterFix} />
@@ -400,6 +402,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       </div>
       {at === 0 && !editing && (
         <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline underline-offset-4">Add an existing server</Link> instead.</p>
+      )}
+      {at === 0 && !editing && (
+        <p className="text-sm text-muted-foreground">Moving a server from another computer, or restoring one? <Link to="/import" className="text-info underline underline-offset-4">Bring a server from a backup or another machine</Link>.</p>
       )}
       {saved && !defaults.resumable?.some((r) => r.name === saved.name) && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">

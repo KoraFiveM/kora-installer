@@ -27,13 +27,15 @@ pub enum AlertKind {
     DiskLow,
     RamHigh,
     UpdateAttention,
+    /// A backup (usually a scheduled one) did not work.
+    BackupFailed,
 }
 
 impl AlertKind {
     /// The tone the UI shows: `danger`, `warning` or `success`.
     pub fn tone(self) -> &'static str {
         match self {
-            AlertKind::Stopped => "danger",
+            AlertKind::Stopped | AlertKind::BackupFailed => "danger",
             AlertKind::Recovered => "success",
             AlertKind::DiskLow | AlertKind::RamHigh | AlertKind::UpdateAttention => "warning",
         }
@@ -45,6 +47,7 @@ impl AlertKind {
             AlertKind::DiskLow => "Disk space is low",
             AlertKind::RamHigh => "Memory is nearly full",
             AlertKind::UpdateAttention => "Updates need attention",
+            AlertKind::BackupFailed => "Backup failed",
         }
     }
 }

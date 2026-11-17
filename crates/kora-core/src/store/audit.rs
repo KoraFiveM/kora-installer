@@ -249,7 +249,7 @@ mod tests {
         record(&s, &n).unwrap();
         let r = &list(&s, &Query { limit: 5, ..Default::default() }).unwrap()[0];
         let d = r.detail.as_deref().unwrap();
-        assert!(!d.contains("SECRETSECRET") && d.contains("<hidden key>") && !d.contains('\n') && d.chars().count() <= MAX_DETAIL, "{d}");
+        assert!(!d.contains("SECRETSECRET") && d.contains("<hidden: licence key>") && !d.contains('\n') && d.chars().count() <= MAX_DETAIL, "{d}");
     }
 
     #[test]
