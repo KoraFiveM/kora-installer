@@ -748,8 +748,12 @@ impl InstallStep {
         use git::owners::{begin_login, GhAuth, SystemLogin};
         let ctx = &*self.ctx;
         ctx.emit(self.id, StepStatus::Running, "Starting the GitHub sign-in...", 0.2);
-        let session = begin_login(&SystemLogin, false)
-            .map_err(|e| Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.").with_message_id("errors.problems.githubSignInNotStarted", &[]).with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))?;
+        let session = begin_login(&SystemLogin, false).map_err(|e| {
+            Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.")
+                .with_message_id("errors.problems.githubSignInNotStarted", &[])
+                .with_details(e.to_string())
+                .with_action(Action::SignInGithub { scopes: vec![] })
+        })?;
         let opened = open_github_page(&session.url);
         let msg = format!("Sign in to GitHub: {} {} and enter this code: {}  (waiting for you, up to 15 minutes)", if opened { "your browser is opening" } else { "open" }, session.url, session.code);
         ctx.note(format!("GitHub sign-in code {} at {}", session.code, session.url));
@@ -760,8 +764,13 @@ impl InstallStep {
                 ctx.emit(self.id, StepStatus::Running, format!("Signed in to GitHub as {login}"), 0.8);
                 Ok(())
             }
-            Ok(_) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).").with_message_id("errors.problems.githubSignInNotCompleted", &[]).with_action(Action::SignInGithub { scopes: vec![] })),
-            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_message_id("errors.problems.githubSignInUnfinished", &[]).with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] })),
+            Ok(_) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).")
+                .with_message_id("errors.problems.githubSignInNotCompleted", &[])
+                .with_action(Action::SignInGithub { scopes: vec![] })),
+            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
+                .with_message_id("errors.problems.githubSignInUnfinished", &[])
+                .with_details(e.to_string())
+                .with_action(Action::SignInGithub { scopes: vec![] })),
         }
     }
 
@@ -821,7 +830,9 @@ impl InstallStep {
                 self.sign_in_to_github()?;
                 st = git::auth_status(&r).map_err(|e| Problem::generic(e.to_string()))?;
                 if !st.logged_in {
-                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_message_id("errors.problems.githubSignInUnfinished", &[]).with_action(Action::SignInGithub { scopes: vec![] }));
+                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
+                        .with_message_id("errors.problems.githubSignInUnfinished", &[])
+                        .with_action(Action::SignInGithub { scopes: vec![] }));
                 }
             }
             let missing = st.missing_scopes(false);

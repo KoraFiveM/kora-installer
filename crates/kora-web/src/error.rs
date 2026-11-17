@@ -45,7 +45,7 @@ impl ApiError {
     pub fn problem(status: StatusCode, p: Problem) -> Self {
         let mut e = Self::new(status, &p.code, p.message);
         if p.details.is_some() || !p.actions.is_empty() || p.i18n.is_some() {
-            e.extra = Some(Box::new(Extra { details: p.details, actions: p.actions, i18n: p.i18n }));
+            e.extra = Some(Box::new(Extra { details: p.details, actions: p.actions, i18n: p.i18n.map(|b| *b) }));
         }
         if e.code == codes::NEEDS_ELEVATION {
             e.command = e.actions().iter().find_map(|a| match a {
@@ -62,7 +62,7 @@ impl ApiError {
             message: self.message.clone(),
             details: self.details().map(String::from),
             actions: self.actions().to_vec(),
-            i18n: self.extra.as_ref().and_then(|x| x.i18n.clone()),
+            i18n: self.extra.as_ref().and_then(|x| x.i18n.clone()).map(Box::new),
         }
     }
     pub fn with_action(mut self, a: Action) -> Self {

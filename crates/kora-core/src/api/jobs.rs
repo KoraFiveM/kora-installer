@@ -28,12 +28,12 @@ use crate::problem::Problem;
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobFailure {
     pub problem: Problem,
-    pub extra: serde_json::Map<String, Value>,
+    pub extra: Box<serde_json::Map<String, Value>>,
 }
 
 impl JobFailure {
     pub fn new(problem: Problem) -> Self {
-        Self { problem, extra: serde_json::Map::new() }
+        Self { problem, extra: Box::default() }
     }
     /// Add an extra field (never overrides the Problem's own fields).
     pub fn with(mut self, key: &str, value: Value) -> Self {
@@ -50,7 +50,7 @@ impl JobFailure {
             if self.problem.actions.is_empty() {
                 m.remove("actions");
             }
-            for (k, x) in &self.extra {
+            for (k, x) in self.extra.iter() {
                 m.insert(k.clone(), x.clone());
             }
         }

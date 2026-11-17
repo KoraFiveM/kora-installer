@@ -42,7 +42,7 @@ pub struct ErrorBody {
 
 impl From<Problem> for ErrorBody {
     fn from(p: Problem) -> Self {
-        ErrorBody { code: p.code, message: p.message, details: p.details, actions: p.actions, command: None, i18n: p.i18n }
+        ErrorBody { code: p.code, message: p.message, details: p.details, actions: p.actions, command: None, i18n: p.i18n.map(|b| *b) }
     }
 }
 
