@@ -89,7 +89,8 @@ SUDO=""; if [ "${KORA_SUDO:-}" = "1" ]; then SUDO="sudo"; fi
 $SUDO mkdir -p "$KORA_HOME"
 printf '%s' "$PANEL_TOKEN" | $SUDO tee "$KORA_HOME/panel-token" >/dev/null
 $SUDO chmod 600 "$KORA_HOME/panel-token"
-run_kora panel --foreground --no-open --port "$PANEL_PORT" >"$SMOKE_ROOT/panel.log" 2>&1 &
+# The panel refuses to run as root (on purpose); this job made the Kora home as root, so the test opts in.
+KORA_ALLOW_ROOT_PANEL=1 run_kora panel --foreground --no-open --port "$PANEL_PORT" >"$SMOKE_ROOT/panel.log" 2>&1 &
 PANEL_PID=$!
 panel_up() { curl -fsS --max-time 3 "http://127.0.0.1:$PANEL_PORT/api/v1/meta" >/dev/null; }
 wait_for "panel" 40 panel_up || { cat "$SMOKE_ROOT/panel.log" || true; $SUDO kill "$PANEL_PID" 2>/dev/null || true; fail "the panel did not start"; }

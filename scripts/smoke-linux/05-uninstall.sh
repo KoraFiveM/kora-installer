@@ -17,16 +17,13 @@ DB="$(jget "$D/database.json" database)"; DBUSER="$(jget "$D/database.json" user
 assert_eq "database and user exist" 2 "$(db_rows)"
 
 step "2. uninstall with nothing registered"
-# The server list is in Kora's data file. Take a copy in the old servers.json format, then put an EMPTY old-format file in the
-# Kora folder: Kora imports a servers.json that turns up there (and keeps a backup of its data file first), which is also how an
-# older Kora's changes come back after a downgrade.
-registry_json > "$SMOKE_ROOT/servers.json.bak"
-echo '{"servers":[]}' > "$KORA_HOME/servers.json"
-kora uninstall --dry-run
+# The server list lives in Kora's data file (store/kora.db), and a servers.json dropped next to it does not empty it, so
+# "nothing registered" is a second, empty Kora folder for this one command.
+EMPTY_HOME="$SMOKE_ROOT/empty-home"; rm -rf "$EMPTY_HOME"; mkdir -p "$EMPTY_HOME"
+KORA_HOME="$EMPTY_HOME" kora uninstall --dry-run
 assert_eq "exit 0" 0 "$CODE"
 assert_contains "says there is nothing to do" "$OUT" "Nothing to do"
-cp "$SMOKE_ROOT/servers.json.bak" "$KORA_HOME/servers.json"
-assert "the server list is imported back" registry_has $NAME
+assert "the real server list is untouched" registry_has $NAME
 
 step "3. uninstall --dry-run changes nothing"
 kora uninstall --dry-run
