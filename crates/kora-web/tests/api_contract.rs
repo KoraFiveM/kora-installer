@@ -511,6 +511,8 @@ fn cases() -> Vec<Case> {
         case(Op::SystemCheck, &[], None),
         case(Op::DbStart, &[], None),
         case(Op::KeysList, &[], None),
+        case(Op::JobsList, &[], None),
+        case(Op::AuditList, &[], None),
         case(Op::KeyAdd, &[], Some(json!({"name": "Main", "license_key": "cfxk_0123456789abcdef0123456789abcdef_ab12cd"}))),
         case(Op::ProfileGet, &[], None),
         case(Op::ProfileSet, &[], Some(json!({"github_owner": null}))),

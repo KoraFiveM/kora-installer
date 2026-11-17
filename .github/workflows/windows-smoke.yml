@@ -60,7 +60,7 @@ jobs:
       - name: "11. Kora's own git and gh (download, checksum, run without PATH, uninstall)"
         timeout-minutes: 15
         run: ./scripts/smoke/11-tools.ps1
-      - name: "12. Saved licence keys (secrets.json permissions, masking, named install)"
+      - name: "12. Saved licence keys (private data file, masking, named install, import of the old secrets.json)"
         timeout-minutes: 10
         run: ./scripts/smoke/12-keys.ps1
       - name: "13. Panel's administrator worker without the prompt (pipe security, peer checks, protocol, allow-list, a step child)"

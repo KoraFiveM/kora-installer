@@ -362,6 +362,11 @@ export const api = {
     get: () => call('system_check', {}),
     startDatabase: () => call('db_start', {}),
   },
+  /** The audit log (administrators only). `before` is the id of the oldest row already shown. */
+  audit: {
+    list: (q: { limit?: number; before?: number; server?: string; op?: string; actor?: string; result?: string } = {}) =>
+      call('audit_list', { query: { limit: q.limit, before: q.before, server: q.server || undefined, op: q.op || undefined, actor: q.actor || undefined, result: q.result || undefined } }),
+  },
   keys: {
     list: () => call('keys_list', {}),
     add: (name: string, license_key: string) => call('key_add', { body: { name, license_key } }),
@@ -413,6 +418,8 @@ export const api = {
     run: (body: { answers: { item: string; remove: boolean }[]; delete_files: boolean; delete_databases: boolean; only: string[] }) => call('uninstall_run', { body }),
   },
   jobs: {
+    /** Recent jobs, also from before the panel last restarted (newest first, without events). */
+    list: (limit = 50) => call('jobs_list', { query: { limit } }).then((r) => r.jobs),
     get: <R = unknown, E = unknown>(id: string) => call('jobs_get', { params: { id } }) as Promise<T.Job<R, E>>,
     eventsUrl: (id: string) => streamOf('job_events', { id }),
   },

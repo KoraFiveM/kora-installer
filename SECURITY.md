@@ -51,8 +51,12 @@ reasonable time to release a fix before you disclose publicly.
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
   `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - Licence keys, database passwords and webhook addresses are accepted but never returned. Saved licence keys live in
-  `secrets.json` in the Kora folder (plain text, readable only by you: `0600` from creation on Linux, inherited permissions
-  removed on Windows, atomic writes, never replaced when unreadable); the API shows only a key's name and last four characters.
+  Kora's data file (`store/kora.db` in the Kora folder, see [docs/store.md](docs/store.md); plain text, not encrypted, as private as `secrets.json`
+  was: the `store` folder is `0700` and its files `0600` from creation on Linux, including SQLite's `-wal`/`-shm` files, and on
+  Windows its inherited permissions are removed so everything created in it inherits that; links are refused, files made by `sudo`
+  inside someone else's folder go back to its owner; every change is one transaction, so two programs cannot overwrite each
+  other, and a file that cannot be read is never replaced). The key values have their own table so they can move to the system
+  keychain later. The API shows only a key's name and last four characters.
   A stopped install or the saved answers refer to a saved key by name and never contain the key. Only admins and this
   computer can add, rename, replace or delete keys.
 - The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, a
@@ -101,7 +105,8 @@ reasonable time to release a fix before you disclose publicly.
   searched. On Linux it is searched if you put it on your `PATH` (`~/.local/bin` often is), like any other program there.
 - Switching a Development resource to another branch or a pull request (`kora branch`, `kora pr`, the GitHub tab) runs `git` and `gh` as the installing user, only inside the server's `resources` folder (a folder that points elsewhere is refused), and only with checked values: branch names and pull request numbers are validated before they reach a command line, and an address is only accepted when it is the resource's own repository or your fork. It never pushes, never forces, never deletes a branch or a stash, and never touches changes you have not saved without your explicit choice. A pull request is other people's code that then runs on your server (the pull request dialog says so): trying one needs the admin role, like other changes to the server (adding resources, rolling back), and that includes a remote administrator signed in with a token, who can therefore make the server run code from any open pull request of that resource's repository or your fork. Kora itself runs nothing from a resource's files: `git` only uses the hooks and settings in the folder's own `.git`, which a checkout does not change, and credentials are only offered to github.com. Production servers cannot be switched.
 - Remote operators can list the saved licence keys (name and last four characters, and which servers use them) and point a server at one of them by name; they cannot see, paste, add or change a key. Remote administrators (token or Tailscale) can also choose the folder of a new server, anywhere the panel's user can write.
-- A stopped install is kept in memory for six hours, with its licence key and database password. When it used a saved key it is also written to `paused-installs/` in the Kora folder for three days without any secret, so it can carry on after a restart.
+- A stopped install is kept in memory for six hours, with its licence key and database password. When it used a saved key it is also written to Kora's data file for three days without any secret, so it can carry on after a restart (an install that was running when the panel died is written the same way and offered after the restart); a pasted key that was not saved never leaves memory. Job records and their events are kept in the data file for 30 days and never hold a secret (key-shaped text and fields called key, password, token or secret are blanked when written).
+- Every change made through the panel or a `kora` command is recorded in an append-only audit log in the data file (when, operation, server, who with provider and role, result; never a secret or request contents; shown to administrators in Settings and by `kora audit`; kept 365 days). It is not tamper-proof against someone who can open the private data file.
 - `kora panel` and a bare `kora` print a sign-in link with a one-time code. If the running panel cannot give one (an older version, or it does not answer), the link carries the panel's own token instead: do not paste that link into chats or tickets.
 
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
@@ -144,7 +149,7 @@ Kora Installer is pre-release software. Only the newest release receives securit
 ## In scope
 
 - **Privilege elevation:** UAC / `sudo` handling, anything that runs with more rights than needed, services and scheduled tasks.
-- **Secrets handling:** the txAdmin password, database passwords, licence key and tokens (files, permissions, logs, clipboard), including the saved-keys file `secrets.json`.
+- **Secrets handling:** the txAdmin password, database passwords, licence key and tokens (files, permissions, logs, clipboard), including the saved keys in the data file `store/kora.db` and its permissions.
 - **Download verification:** SHA-256 checks and HTTPS enforcement in `kora` and in `install.sh` / `install.ps1`, and the release artifacts.
 - **The panel:** authentication, session handling, the `Host` / `Origin` / `X-Kora` checks, the Content-Security-Policy, anything that lets a web page or another local user act on your servers, and anything that returns a secret to the browser.
 - Overwriting or deleting files the installer should not touch.

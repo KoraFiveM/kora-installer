@@ -72,3 +72,15 @@ function Test-TxAdminThroughPanel([string]$Kora, [string]$ServerName, [int]$TxPo
         if ($hadToken) { Set-Content -Path $tokenPath -Value $oldToken -NoNewline } else { Remove-Item $tokenPath -Force -ErrorAction SilentlyContinue }
     }
 }
+
+# The server list lives in Kora's data file now (<Kora folder>\store\kora.db), not in servers.json. `kora store export-json`
+# writes it out in the old servers.json format: this returns that text ('' when no server is registered).
+function Get-RegistryText([hashtable]$Env = @{}) {
+  $out = Join-Path ([IO.Path]::GetTempPath()) ("kora-reg-" + [guid]::NewGuid().ToString('N'))
+  try {
+    [void](Invoke-Native (Get-KoraExe) @('store', 'export-json', '--to', $out) $Env)
+    $f = Join-Path $out 'servers.json'
+    if (Test-Path $f) { return (Get-Content $f -Raw) }
+    return ''
+  } finally { if (Test-Path $out) { Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue } }
+}

@@ -74,7 +74,7 @@ kora delete $NAME -y
 assert_eq "delete exits 0" 0 "$CODE"
 assert_eq "database and user are gone" 0 "$(sql "SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$DB') + (SELECT COUNT(*) FROM mysql.user WHERE user='$DBUSER')")"
 assert "server folder is gone" test ! -e "$D"
-if [ -f "$KORA_HOME/servers.json" ]; then assert "registry entry is gone" bash -c "! grep -q '\"name\": \"$NAME\"' '$KORA_HOME/servers.json'"; else assert "registry removed" true; fi
+assert "registry entry is gone" registry_lacks "$NAME"
 assert_eq "the database server itself is untouched" 1 "$(sql 'SELECT 1')"
 
 echo; echo "install-prod: $PASS assertions passed"

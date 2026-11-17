@@ -326,6 +326,80 @@ export type AssetProblem = {
 export type AssetProblemKind = "not_a_zip" | "no_resources" | "no_fxmanifest" | "missing_fxap" | "unsafe_path" | "skipped_entry" | "too_big" | "zip_bomb" | "encrypted" | "name_taken" | "bad_name" | "duplicate" | "no_folder";
 
 /**
+ * `GET /audit`.
+ */
+export type AuditPage = {
+  /**
+   * Newest first.
+   */
+  entries: Array<AuditRow>,
+  /**
+   * There are older rows than these.
+   */
+  more: boolean,
+  retention_days: number,
+};
+
+/**
+ * The filters and paging of `GET /audit`; every one is optional.
+ */
+export type AuditQuery = {
+  /**
+   * At most this many (default 100, at most 500).
+   */
+  limit?: number,
+  /**
+   * Only rows older than this id (to show more).
+   */
+  before?: number,
+  server?: string,
+  op?: string,
+  /**
+   * Part of the actor's name.
+   */
+  actor?: string,
+  result?: string,
+  /**
+   * Only rows at or after this time (unix seconds).
+   */
+  since?: number,
+};
+
+/**
+ * One row: who did what, when. Never a secret or a request body.
+ */
+export type AuditRow = {
+  id: number,
+  /**
+   * Unix seconds.
+   */
+  at: number,
+  /**
+   * The operation's name (`Op::name`).
+   */
+  op: string,
+  server: string | null,
+  /**
+   * `local` (the person on this computer), `remote` (signed in from another device) or `cli` (a `kora` command).
+   */
+  actor_kind: string,
+  actor_name: string | null,
+  /**
+   * For remote: `token` or `tailscale`.
+   */
+  provider: string | null,
+  role: string | null,
+  /**
+   * `ok`, `failed`, `refused` or `started`.
+   */
+  result: string,
+  /**
+   * A short note Kora wrote (a job id, an error code).
+   */
+  detail: string | null,
+};
+
+/**
  * The small update badge of a server (`None` on the server = not known yet).
  */
 export type Badge = {
@@ -1236,6 +1310,14 @@ export type JobRecord<R = JsonValue, E = JsonValue> = {
   events: Array<E>,
   result: R | null,
   error: JobError | null,
+  /**
+   * Unix seconds.
+   */
+  started: number,
+  /**
+   * Unix seconds; `null` while it runs.
+   */
+  ended: number | null,
 };
 
 /**
@@ -1245,7 +1327,37 @@ export type JobStarted = {
   job: string,
 };
 
-export type JobState = "running" | "done" | "failed";
+export type JobState = "running" | "done" | "failed" | "interrupted";
+
+/**
+ * One job in `GET /jobs`: this run's and, after a restart, the remembered ones (newest first, no events).
+ * `state` can be `interrupted`: the panel stopped while it ran, and `error` says what to do (`resume` when an install can carry on).
+ */
+export type JobSummary = {
+  id: string,
+  op: string,
+  server: string | null,
+  state: JobState,
+  events: Array<JsonValue>,
+  result: JsonValue | null,
+  error: JobError | null,
+  started: number,
+  ended: number | null,
+};
+
+/**
+ * `GET /jobs`.
+ */
+export type JobsList = {
+  jobs: Array<JobSummary>,
+};
+
+/**
+ * `?limit=` of `GET /jobs` (default 50, at most 300).
+ */
+export type JobsQuery = {
+  limit?: number,
+};
 
 export type JsonValue = number
   | string

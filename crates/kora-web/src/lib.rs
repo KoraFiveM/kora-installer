@@ -1,4 +1,6 @@
 //! Kora Panel HTTP server: security middleware, sessions, jobs/SSE, embedded UI.
+#[doc(hidden)]
+pub mod audit;
 pub mod elevated;
 mod error;
 pub mod handlers;
@@ -97,6 +99,9 @@ pub struct AppState {
     pub fleet_cache: Arc<handlers::hub::FleetCache>,
     /// txAdmin through the panel: tickets, sessions and the per-server gateway listeners.
     pub txgate: Arc<txgate::Gate>,
+    /// The Kora folder whose store gets an audit row for every state-changing request. `None` (the default: tests and
+    /// embedders) records nothing and never touches the disk; the real panel sets it ([`AppState::with_audit`]).
+    pub audit_home: Option<std::path::PathBuf>,
 }
 
 impl AppState {
@@ -122,7 +127,13 @@ impl AppState {
             events: Arc::default(),
             fleet_cache: Arc::default(),
             txgate: Arc::default(),
+            audit_home: None,
         }
+    }
+    /// Record state-changing requests in the audit log of the store in this Kora folder.
+    pub fn with_audit(mut self, home: std::path::PathBuf) -> Self {
+        self.audit_home = Some(home);
+        self
     }
     /// A one-time code for a sign-in link: `http://127.0.0.1:<port>/#code=<code>`. Works once, for ten
     /// minutes, from this computer only.
@@ -188,8 +199,14 @@ impl AppState {
             cache.clear();
             r
         };
+        let server_name = server.clone();
         match self.registry.spawn(op, server, body) {
-            Ok(id) => Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response()),
+            Ok(id) => {
+                let mut resp = (StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response();
+                // The guard follows the job to its end for the audit log.
+                resp.extensions_mut().insert(audit::JobStarted { id: id.0.clone(), server: server_name });
+                Ok(resp)
+            }
             Err(c) => Err(ApiError::conflict(conflict_message(&c))),
         }
     }
@@ -461,7 +478,9 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let listener = bind_retrying(addr).await.map_err(|source| PanelError::Bind { addr, source })?;
         let addr = listener.local_addr()?;
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
-        let state = AppState::system(token.clone(), addr).with_remote(rem);
+        // The real panel keeps its jobs in the store: history survives a restart, and what was running when the last panel died is
+        // marked interrupted. (Tests use `AppState::system` with the in-memory registry and never touch the Kora folder.)
+        let state = AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem);
         for w in &warnings {
             eprintln!("{w}");
         }

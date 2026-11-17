@@ -255,15 +255,19 @@ impl Backend for SystemBackend {
 
     fn unregister(&mut self, e: &ServerEntry) -> Res<()> {
         crate::reach::forward::release_for_dir(&e.dir);
-        let mut r = Registry::load().map_err(err)?;
-        r.remove(&e.name);
-        r.save_or_clean_to(&registry::registry_path()).map_err(err)
+        Registry::update(|r| {
+            r.remove(&e.name);
+            Ok(())
+        })
+        .map_err(err)
     }
 
     fn register(&mut self, e: ServerEntry) -> Res<()> {
-        let mut r = Registry::load().map_err(err)?;
-        r.upsert(e);
-        r.save().map_err(err)
+        Registry::update(|r| {
+            r.upsert(e);
+            Ok(())
+        })
+        .map_err(err)
     }
 
     fn scan_roots(&self) -> Vec<PathBuf> {

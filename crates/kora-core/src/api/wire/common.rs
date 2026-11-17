@@ -93,6 +93,43 @@ pub struct JobRecord<R = Value, E = Value> {
     pub events: Vec<E>,
     pub result: Option<R>,
     pub error: Option<JobError>,
+    /// Unix seconds.
+    pub started: u64,
+    /// Unix seconds; `null` while it runs.
+    pub ended: Option<u64>,
+}
+
+/// One job in `GET /jobs`: this run's and, after a restart, the remembered ones (newest first, no events).
+/// `state` can be `interrupted`: the panel stopped while it ran, and `error` says what to do (`resume` when an install can carry on).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct JobSummary {
+    pub id: String,
+    pub op: String,
+    pub server: Option<String>,
+    pub state: JobState,
+    pub events: Vec<Value>,
+    #[cfg_attr(feature = "ts", ts(as = "Option<serde_json::Value>"))]
+    pub result: Option<Value>,
+    pub error: Option<JobError>,
+    pub started: u64,
+    pub ended: Option<u64>,
+}
+
+/// `?limit=` of `GET /jobs` (default 50, at most 300).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct JobsQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub limit: Option<u32>,
+}
+
+/// `GET /jobs`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct JobsList {
+    pub jobs: Vec<JobSummary>,
 }
 
 /// Data of the `failed` event of `GET /jobs/{id}/events`.

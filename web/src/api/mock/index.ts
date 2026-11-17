@@ -6,6 +6,7 @@ import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
 import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
 import { installKeysMock } from './keys'
+import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
 import { installReachMock } from './reach'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
@@ -62,6 +63,17 @@ function init(name: ScenarioName) {
   paused.clear()
   keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
   reachMock.reset()
+  storeMock.reset(name === 'restarted')
+  if (name === 'restarted') {
+    // The install that was running when the panel stopped, written down with its (saved) licence key by name.
+    paused.set('old-3', {
+      req: { mode: 'production', name: 'Staging', dir: '/srv/fivem/staging', hostname: 'Staging', license_key_name: 'Main', ports: { game: 30122, txadmin: 40122 }, txadmin_public: false, resources: 'all', db: 'install_if_missing', service: false, firewall: false, dry_run: false, start: true } as unknown as T.InstallRequest,
+      failed: '',
+      attempt: 1,
+      done: [],
+      skip: new Set(),
+    })
+  }
   nextId = 1
   consoleTick = 0
   resetToolchainMock(beh.trouble)
@@ -121,6 +133,8 @@ interface MJob {
   events: unknown[]
   result: unknown
   error: T.JobError | null
+  started: number
+  ended: number | null
   subs: Set<Fn>
 }
 const jobs = new Map<string, MJob>()
@@ -131,7 +145,7 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
     if (busy.has(server)) throw new Fail(409, 'conflict', `Another job is already running on "${server}". Wait for it to finish and try again.`)
     busy.add(server)
   }
-  const job: MJob = { id: `job-${nextId++}`, op, server, state: 'running', events: [], result: null, error: null, subs: new Set() }
+  const job: MJob = { id: `job-${nextId++}`, op, server, state: 'running', events: [], result: null, error: null, started: Math.floor(Date.now() / 1000), ended: null, subs: new Set() }
   jobs.set(job.id, job)
   const emit = (e: unknown) => {
     job.events.push(e)
@@ -142,8 +156,10 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
     try {
       job.result = await run(emit)
       job.state = 'done'
+      job.ended = Math.floor(Date.now() / 1000)
     } catch (e) {
       job.state = 'failed'
+      job.ended = Math.floor(Date.now() / 1000)
       job.error = e instanceof Fail ? { code: e.code, message: e.message, command: e.command, ...e.extra } : { code: 'internal', message: e instanceof Error ? e.message : 'Something went wrong.' }
     }
     if (server) busy.delete(server)
@@ -152,7 +168,7 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
   return { job: job.id }
 }
 
-const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: j.events, result: j.result, error: j.error })
+const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: j.events, result: j.result, error: j.error, started: j.started, ended: j.ended })
 
 // ---- helpers --------------------------------------------------------------------------------
 
@@ -398,6 +414,7 @@ const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const reachMock = installReachMock(route, () => servers)
+const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: viewer.identity?.provider === 'tailscale' }) satisfies T.Meta)

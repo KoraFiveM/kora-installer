@@ -2,7 +2,7 @@
 //!
 //! * Per server, `<server>/.kora/reach.json` (like the webhook and alert settings): whether Kora may
 //!   ask the router to forward the game port, and the last thing that happened. No secrets.
-//! * For the whole computer, `<kora home>/reach-consent.json`: which outside services the person
+//! * For the whole computer, in Kora's store (document `reach-consent`): which outside services the person
 //!   allowed the reachability check to contact. Both default to "no".
 
 use std::path::{Path, PathBuf};
@@ -91,17 +91,21 @@ pub fn consent_path() -> PathBuf {
     kora_home().join("reach-consent.json")
 }
 
+/// The choices live in Kora's store (document `reach-consent`); `p` only names the Kora folder, as with the profile.
+/// An old `reach-consent.json` is imported by the store the first time it opens (`store::legacy::EXTRA_HOME_FILES`).
 pub fn load_consent_at(p: &Path) -> Consent {
-    std::fs::read(p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    let Ok(Some(s)) = crate::store::Store::open_existing_beside(p) else { return Consent::default() };
+    crate::store::documents::get(&s, CONSENT_DOC).ok().flatten().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }
 
 pub fn save_consent_at(p: &Path, c: &Consent) -> Result<(), String> {
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot save the setting: {e}"))?;
-    }
-    let text = serde_json::to_string_pretty(c).map_err(|e| e.to_string())?;
-    crate::monitor::write_private(p, &text).map_err(|e| format!("Cannot save the setting: {e}"))
+    let fail = |e: crate::problem::Problem| format!("Cannot save the setting: {}", e.message);
+    let s = crate::store::Store::open_beside(p).map_err(fail)?;
+    let doc = serde_json::to_value(c).map_err(|e| e.to_string())?;
+    crate::store::documents::put(&s, CONSENT_DOC, &doc).map_err(fail)
 }
+
+const CONSENT_DOC: &str = "reach-consent";
 
 pub fn load_consent() -> Consent {
     load_consent_at(&consent_path())

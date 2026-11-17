@@ -144,6 +144,7 @@ async fn rig(github: GithubUser) -> Rig {
     gh_seam::set_env(Some(Arc::new(Gh(github))));
     set_helper_override(Some(Arc::new(NoHelper)));
     let fb = FakeBackend::sample();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(fb.clone())));
     Rig { app: router(st), fake, _turn: turn }
 }

@@ -61,6 +61,6 @@ $r = Invoke-Native $kora @('delete', $name, '-y'); Show 'kora delete (server run
 Assert-That ($r.Code -eq 0) 'kora delete exits 0 while the server runs'
 Assert-That ($null -eq (Get-Process -Id $pid2 -ErrorAction SilentlyContinue)) 'delete stopped the running FXServer'
 Assert-That (-not (Test-Path $srv)) 'the server folder is gone'
-$reg = Get-Content "$env:LOCALAPPDATA\Kora\servers.json" -Raw -ErrorAction SilentlyContinue
+$reg = Get-RegistryText
 Assert-That (-not $reg -or $reg -notmatch [regex]::Escape($name)) 'the registry entry is gone'
 exit 0

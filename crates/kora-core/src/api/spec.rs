@@ -252,6 +252,8 @@ pub fn spec(op: Op) -> OpSpec {
         Op::UninstallRun => OpSpec::start_job_with::<w::UninstallRequest>().events::<w::StatusEvent>().result::<w::UninstallResult>(),
         Op::JobsGet => OpSpec::get::<w::JobRecord>(),
         Op::JobEvents => OpSpec::stream::<w::JobFailedData>("failed"),
+        Op::JobsList => OpSpec::get::<w::JobsList>().with_query::<w::JobsQuery>(),
+        Op::AuditList => OpSpec::get::<w::AuditPage>().with_query::<w::AuditQuery>(),
         Op::Events => OpSpec::stream::<w::ServersList>("servers"),
         Op::MetricsGet => OpSpec::get::<w::Metrics>().with_query::<w::MetricsQuery>(),
         Op::AlertsList => OpSpec::get::<w::AlertsList>(),

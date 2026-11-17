@@ -32,6 +32,7 @@ pub mod self_update;
 pub mod service;
 pub mod space;
 pub mod steps;
+pub mod store;
 pub mod sysexe;
 pub mod tools;
 pub mod txadmin;

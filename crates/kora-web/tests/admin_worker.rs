@@ -228,6 +228,7 @@ async fn rig(broker: Arc<FakeBroker>) -> Rig {
     install_seam::set_env(Some(env.clone()));
     let fake = FakeBackend::sample();
     let f = fake.clone();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone())));
     Rig { app: router(st), fake, maint, env, _turn: turn }
 }

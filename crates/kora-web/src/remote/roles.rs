@@ -69,6 +69,8 @@ pub fn min_role(op: Op) -> Role {
         | Op::AppStatus
         | Op::JobsGet
         | Op::JobEvents
+        // The list only holds the jobs the caller could start (the handler filters).
+        | Op::JobsList
         | Op::Events
         | Op::SessionLogout
         // Monitoring charts are status, like the server list.
@@ -145,6 +147,8 @@ pub fn min_role(op: Op) -> Role {
         | Op::RemoteGet
         | Op::RemoteSet
         | Op::UsersList
+        // Who did what: names of remote users and what they changed.
+        | Op::AuditList
         | Op::UserAdd
         | Op::UserRemove
         // Alert settings hold webhook addresses; the node list holds tokens.
@@ -266,6 +270,8 @@ pub fn destructive(op: Op) -> bool {
         | Op::UninstallPlan
         | Op::JobsGet
         | Op::JobEvents
+        | Op::JobsList
+        | Op::AuditList
         | Op::Events
         | Op::SessionLogout
         | Op::SessionLink
@@ -379,6 +385,8 @@ pub fn installs(op: Op) -> bool {
         | Op::UninstallRun
         | Op::JobsGet
         | Op::JobEvents
+        | Op::JobsList
+        | Op::AuditList
         | Op::Events
         | Op::SessionLogout
         | Op::SessionLink
@@ -549,6 +557,8 @@ pub fn local_only(op: Op) -> bool {
         | Op::UninstallRun
         | Op::JobsGet
         | Op::JobEvents
+        | Op::JobsList
+        | Op::AuditList
         | Op::Events
         | Op::SessionLogout
         | Op::MetricsGet
