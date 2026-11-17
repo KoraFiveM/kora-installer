@@ -20,7 +20,7 @@ export function AlertsBanner() {
     <div className="space-y-3" aria-label={t('core.alertsBanner.serverAlerts')}>
       {open.slice(0, 5).map((a) => (
         <div key={a.id} className="relative">
-          <Alert tone={a.tone} title={a.server ? <>{a.title}: <Link className="underline" to={`/servers/${encodeURIComponent(a.server)}?tab=${a.kind === 'update_attention' ? 'resources' : a.kind === 'backup_failed' ? 'backups' : 'monitoring'}`}>{a.server}</Link></> : <>{a.title}: <Link className="underline" to="/settings">{t('core.alertsBanner.whatDo')}</Link></>}>
+          <Alert data-i18n-skip="server text: alert titles and messages come from the server in English" tone={a.tone} title={a.server ? <>{a.title}: <Link className="underline" to={`/servers/${encodeURIComponent(a.server)}?tab=${a.kind === 'update_attention' ? 'resources' : a.kind === 'backup_failed' ? 'backups' : 'monitoring'}`}>{a.server}</Link></> : <>{a.title}: <Link className="underline" to="/settings">{t('core.alertsBanner.whatDo')}</Link></>}>
             {a.message}
           </Alert>
           {canAck && (
