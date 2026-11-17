@@ -873,6 +873,35 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             ..Default::default()
         };
         let _ = crate::installer::save_created_to(&dir, &created);
+        // The install record `kora delete` / roll-back reads (`.kora/request.json`, no secrets): without it an imported server
+        // could be started and used but never removed again ("has no Kora install record").
+        let record = crate::installer::InstallRequest {
+            mode: sf.mode,
+            source: Some(new_source),
+            versions: Some(m.server.versions),
+            name: c.name.clone(),
+            dir: dir.clone(),
+            hostname: String::new(),
+            license_key: None,
+            license_key_name: None,
+            cfx_identifier: None,
+            ports: crate::installer::Ports { game: c.game_port, txadmin: c.txadmin_port },
+            txadmin_public: false,
+            artifact_url: None,
+            game_build: Some(m.server.game_build).filter(|b| *b != 0),
+            resources: crate::installer::ResourceSelection::All,
+            db: if creds.is_some() { crate::installer::DbChoice::UseExisting } else { crate::installer::DbChoice::Skip },
+            service: false,
+            firewall: false,
+            github_owner: new_owner.clone(),
+            catalog: None,
+            dry_run: false,
+            db_admin: None,
+            start: false,
+            app: None,
+        };
+        let record_bytes = serde_json::to_vec_pretty(&record).map_err(|e| Problem::generic(e.to_string()))?;
+        crate::fsutil::write_no_follow(&crate::installer::meta_dir(&dir).join("request.json"), &record_bytes, 0o644).map_err(|e| io_problem("saving the install record", e))?;
         let entry = ServerEntry {
             name: c.name.clone(),
             dir: dir.clone(),
@@ -1094,6 +1123,7 @@ mod tests {
         // the database came across into the NEW database
         assert_eq!(new_db.0.tables.borrow()[0].1, vec!["alice".to_string(), "bob".to_string()]);
         // the old login is not reused: the new one is in database.json and secrets.cfg, the licence key came from the file
+        assert!(target.join(".kora/request.json").is_file(), "an imported server needs its install record, or `kora delete` cannot remove it");
         let dbj = std::fs::read_to_string(target.join("database.json")).unwrap();
         assert!(dbj.contains("kora_new1") && !dbj.contains("s3cr3t-pass"));
         let sec = std::fs::read_to_string(target.join("secrets.cfg")).unwrap();
