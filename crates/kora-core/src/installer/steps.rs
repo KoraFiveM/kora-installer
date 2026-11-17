@@ -145,14 +145,25 @@ fn db_used_elsewhere(reg: &Registry, st: &ProvisionState, dir: &Path) -> Option<
 
 fn db_client() -> String {
     let ok = |c: &str| crate::sysexe::command(c).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
-    if ok("mariadb") {
-        return "mariadb".into();
+    let saved = if cfg!(windows) { windows_db::saved_record().map(|r| r.client).filter(|c| c.is_file()) } else { None };
+    pick_db_client(cfg!(windows), crate::elevate::is_elevated(), &ok, saved, &|| windows_client_candidates().into_iter().find(|c| c.is_file()))
+}
+
+/// Which database client to run. An elevated Kora on Windows never takes one from PATH (a folder
+/// on it may be the person's own, and a `mysql.exe` planted there would run as administrator):
+/// only Kora's own MariaDB's client (its record lives in an administrators-only folder) or one
+/// in Program Files.
+fn pick_db_client(windows: bool, elevated: bool, on_path: &dyn Fn(&str) -> bool, saved: Option<PathBuf>, installed: &dyn Fn() -> Option<PathBuf>) -> String {
+    let path_allowed = !(windows && elevated);
+    if path_allowed {
+        for c in ["mariadb", "mysql"] {
+            if on_path(c) {
+                return c.into();
+            }
+        }
     }
-    if ok("mysql") {
-        return "mysql".into();
-    }
-    if cfg!(windows) {
-        if let Some(c) = windows_db::saved_record().map(|r| r.client).filter(|c| c.is_file()).or_else(|| windows_client_candidates().into_iter().find(|c| c.is_file())) {
+    if windows {
+        if let Some(c) = saved.or_else(installed) {
             return c.to_string_lossy().into_owned();
         }
     }
@@ -1791,6 +1802,16 @@ pub(crate) fn finish_rollback(ctx: &Ctx) -> Result<()> {
 #[cfg(test)]
 mod db_admin_tests {
     use super::*;
+
+    #[test]
+    fn an_elevated_kora_on_windows_never_takes_the_database_client_from_path() {
+        let everywhere = |_: &str| true;
+        let saved = Some(PathBuf::from(r"C:\ProgramData\Kora\mariadb\11.4\bin\mariadb.exe"));
+        assert_eq!(pick_db_client(true, true, &everywhere, saved.clone(), &|| None), r"C:\ProgramData\Kora\mariadb\11.4\bin\mariadb.exe");
+        assert_eq!(pick_db_client(true, true, &everywhere, None, &|| Some(PathBuf::from(r"C:\Program Files\MariaDB 11\bin\mysql.exe"))), r"C:\Program Files\MariaDB 11\bin\mysql.exe");
+        assert_eq!(pick_db_client(true, false, &everywhere, saved, &|| None), "mariadb", "not elevated: PATH as before");
+        assert_eq!(pick_db_client(false, true, &everywhere, None, &|| None), "mariadb", "Linux root: sudo's secure PATH");
+    }
 
     fn admin(pw: Option<&str>) -> DbAdmin {
         DbAdmin { host: "10.0.0.5".into(), port: 33061, user: "dba".into(), password: pw.map(String::from) }
