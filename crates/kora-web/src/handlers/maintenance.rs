@@ -274,8 +274,23 @@ pub async fn uninstall_run(
     };
     let admin = blocking(|| Ok(maint::current().is_admin())).await?;
     if !admin {
+        // The administrator part never deletes files: the folders are the person's, and this
+        // process deletes them afterwards (an elevated delete in a folder others can change is a
+        // risk). Which ones is decided now, before the server list changes.
+        // (Windows only: on Linux the folders belong to the servers' own accounts, so the root
+        // helper deletes them as before.)
+        let split = crate::elevated::worker_supported();
+        let folders = if split {
+            blocking({
+                let r = UninstallRequest { answers: r.answers.clone(), delete_files: r.delete_files, delete_databases: r.delete_databases, only: r.only.clone() };
+                move || Ok(maint::current().uninstall_folders(&r))
+            })
+            .await?
+        } else {
+            Vec::new()
+        };
         let mut c = cmd(&["uninstall", "--yes"]);
-        if r.delete_files {
+        if r.delete_files && !split {
             c.push("--delete-files".into());
         }
         if r.delete_databases {
@@ -291,7 +306,15 @@ pub async fn uninstall_run(
         return st.spawn_job(Op::UninstallRun, server, move |h| {
             let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
                 .map_err(job_error)?;
-            Ok(json!({"notes": ["Your server folders and databases were kept unless you chose to delete them."], "output": out["output"]}))
+            let mut notes = vec!["Your server folders and databases were kept unless you chose to delete them.".to_string()];
+            for (name, dir) in &folders {
+                h.event(json!({"type": "status", "message": format!("Deleting the server folder of {name}")}));
+                match maint::current().delete_server_files(dir) {
+                    Ok(n) => notes.extend(n),
+                    Err(e) => notes.push(format!("{name}: the server folder could not be deleted ({e}). Delete {} yourself if you no longer need it.", dir.display())),
+                }
+            }
+            Ok(json!({"notes": notes, "output": out["output"]}))
         });
     }
     let server = if let [one] = r.only.as_slice() {

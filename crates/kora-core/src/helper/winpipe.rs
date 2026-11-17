@@ -37,12 +37,25 @@ pub fn child_env(u: &PanelUser) -> Vec<(String, String)> {
         ("USERNAME".into(), u.name.clone()),
         ("USERDOMAIN".into(), u.domain.clone()),
         ("KORA_WORKER_USER_SID".into(), u.sid.clone()),
+        ("KORA_WORKER_ADMIN_MEMBER".into(), if u.admin_member { "1" } else { "0" }.into()),
         ("KORA_HELPER".into(), "1".into()),
     ]
 }
 
 #[cfg(windows)]
-pub use imp::{open_session, path_owner_sid, run_worker, selftest};
+pub use imp::{open_session, path_owner_sid, profile_dir, run_worker, selftest, system_dirs};
+
+/// The system folders as Windows reports them (elsewhere: empty).
+#[cfg(not(windows))]
+pub fn system_dirs() -> super::worker::SystemDirs {
+    super::worker::SystemDirs::default()
+}
+
+/// The profile folder of the account `sid` (`ProfileImagePath`), elsewhere `None`.
+#[cfg(not(windows))]
+pub fn profile_dir(_sid: &str) -> Option<String> {
+    None
+}
 
 #[cfg(not(windows))]
 pub fn open_session(_kora_home: Option<&str>, _limit: Duration) -> Result<Session, OpenError> {
@@ -77,7 +90,7 @@ mod imp {
     use std::os::windows::io::{FromRawHandle, RawHandle};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use std::time::Instant;
 
     type Handle = *mut c_void;
     const INVALID: Handle = -1isize as Handle;
@@ -131,6 +144,8 @@ mod imp {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
         fn QueryFullProcessImageNameW(h: Handle, flags: u32, buf: *mut u16, len: *mut u32) -> i32;
         fn LocalFree(p: *mut c_void) -> *mut c_void;
+        fn GetSystemWindowsDirectoryW(buf: *mut u16, size: u32) -> u32;
+        fn GetFileInformationByHandle(file: Handle, info: *mut ByHandleFileInformation) -> i32;
     }
 
     #[link(name = "advapi32")]
@@ -140,17 +155,105 @@ mod imp {
         fn OpenProcessToken(process: Handle, access: u32, token: *mut Handle) -> i32;
         fn GetTokenInformation(token: Handle, class: u32, info: *mut c_void, len: u32, ret: *mut u32) -> i32;
         fn LookupAccountSidW(system: *const u16, sid: *mut c_void, name: *mut u16, name_len: *mut u32, domain: *mut u16, domain_len: *mut u32, sid_use: *mut u32) -> i32;
+        fn RegGetValueW(key: isize, sub: *const u16, value: *const u16, flags: u32, kind: *mut u32, data: *mut c_void, len: *mut u32) -> i32;
         fn GetNamedSecurityInfoW(name: *const u16, object_type: u32, info: u32, owner: *mut *mut c_void, group: *mut *mut c_void, dacl: *mut *mut c_void, sacl: *mut *mut c_void, sd: *mut *mut c_void) -> u32;
     }
 
     #[link(name = "shell32")]
     extern "system" {
         fn ShellExecuteExW(info: *mut ShellExecuteInfoW) -> i32;
+        fn SHGetKnownFolderPath(id: *const Guid, flags: u32, token: Handle, path: *mut *mut u16) -> i32;
     }
 
     #[link(name = "ole32")]
     extern "system" {
         fn CoInitializeEx(reserved: *mut c_void, flags: u32) -> i32;
+        fn CoTaskMemFree(p: *mut c_void);
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct ByHandleFileInformation {
+        attributes: u32,
+        times: [u32; 6],
+        volume_serial: u32,
+        size_high: u32,
+        size_low: u32,
+        links: u32,
+        index_high: u32,
+        index_low: u32,
+    }
+
+    /// Open `path` for reading so that nobody can write, rename or delete it while the returned
+    /// file is open (no write or delete sharing). Running programs may still start it.
+    pub(super) fn lock_exe(path: &Path) -> std::io::Result<File> {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).share_mode(1 /* FILE_SHARE_READ */).open(path)
+    }
+
+    fn handle_file_id(f: &File) -> Option<worker::FileId> {
+        use std::os::windows::io::AsRawHandle;
+        let mut info = ByHandleFileInformation::default();
+        // SAFETY: an open file handle and a correctly sized struct.
+        if unsafe { GetFileInformationByHandle(f.as_raw_handle() as Handle, &mut info) } == 0 {
+            return None;
+        }
+        Some((info.volume_serial, (u64::from(info.index_high) << 32) | u64::from(info.index_low)))
+    }
+
+    /// The identity of the file at `path` (opened for its attributes only, sharing everything).
+    pub(super) fn file_id(path: &Path) -> Option<worker::FileId> {
+        use std::os::windows::fs::OpenOptionsExt;
+        let f = std::fs::OpenOptions::new().access_mode(0x80 /* FILE_READ_ATTRIBUTES */).share_mode(7).open(path).ok()?;
+        handle_file_id(&f)
+    }
+
+    #[repr(C)]
+    struct Guid(u32, u16, u16, [u8; 8]);
+    const FOLDERID_PROGRAM_FILES: Guid = Guid(0x905e63b6, 0xc1bf, 0x494e, [0xb2, 0xdc, 0x28, 0xd6, 0xe0, 0xda, 0xd5, 0xc8]);
+    const FOLDERID_PROGRAM_FILES_X86: Guid = Guid(0x7c5a40ef, 0xa0fb, 0x4bfc, [0x87, 0x4a, 0xc0, 0xf2, 0xe0, 0xb9, 0xfa, 0x8e]);
+    const FOLDERID_PROGRAM_DATA: Guid = Guid(0x62ab5d82, 0xfdc1, 0x4dc3, [0xa9, 0xdd, 0x07, 0x0d, 0x1d, 0x49, 0x5d, 0x97]);
+    const HKEY_LOCAL_MACHINE: isize = 0x8000_0002u32 as i32 as isize;
+
+    fn known_folder(id: &Guid) -> Option<String> {
+        let mut p: *mut u16 = std::ptr::null_mut();
+        // SAFETY: valid GUID and out pointer; the string is freed with CoTaskMemFree.
+        let hr = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut p) };
+        let s = if hr == 0 { Some(from_wide(p)) } else { None };
+        if !p.is_null() {
+            // SAFETY: allocated by SHGetKnownFolderPath.
+            unsafe { CoTaskMemFree(p.cast()) };
+        }
+        s.filter(|s| !s.is_empty())
+    }
+
+    /// The system folders from Windows itself (not from this process's variables).
+    pub fn system_dirs() -> worker::SystemDirs {
+        let mut buf = vec![0u16; 1024];
+        // SAFETY: buffer and size match.
+        let n = unsafe { GetSystemWindowsDirectoryW(buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        let root = if n > 0 && n < buf.len() { String::from_utf16_lossy(&buf[..n]) } else { r"C:\Windows".to_string() };
+        let drive: String = root.chars().take(2).collect();
+        worker::SystemDirs {
+            program_files: known_folder(&FOLDERID_PROGRAM_FILES).unwrap_or_else(|| format!(r"{drive}\Program Files")),
+            program_files_x86: known_folder(&FOLDERID_PROGRAM_FILES_X86).unwrap_or_default(),
+            program_data: known_folder(&FOLDERID_PROGRAM_DATA).unwrap_or_else(|| format!(r"{drive}\ProgramData")),
+            system_root: root,
+        }
+    }
+
+    /// `HKLM\...\ProfileList\<sid>\ProfileImagePath` (expanded).
+    pub fn profile_dir(sid: &str) -> Option<String> {
+        if sid.is_empty() || !sid.bytes().all(|b| b == b'S' || b == b'-' || b.is_ascii_digit()) {
+            return None;
+        }
+        let key = wide(&format!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}"));
+        let value = wide("ProfileImagePath");
+        let mut buf = vec![0u16; 1024];
+        let mut len = (buf.len() * 2) as u32;
+        // SAFETY: valid strings, buffer and length in bytes; REG_SZ | REG_EXPAND_SZ (expanded).
+        let r = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), value.as_ptr(), 0x2 | 0x4, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut len) };
+        (r == 0).then(|| from_wide(buf.as_ptr())).filter(|s| !s.is_empty())
     }
 
     const PIPE_ACCESS_DUPLEX: u32 = 3;
@@ -166,6 +269,7 @@ mod imp {
     const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     const TOKEN_QUERY: u32 = 8;
+    const SYNCHRONIZE: u32 = 0x0010_0000;
     const TOKEN_USER: u32 = 1;
     const SE_FILE_OBJECT: u32 = 1;
     const OWNER_SECURITY_INFORMATION: u32 = 1;
@@ -199,14 +303,11 @@ mod imp {
     /// An earlier prompt is still on screen (its thread has not returned yet).
     static PROMPT_OPEN: AtomicBool = AtomicBool::new(false);
 
-    fn random16() -> [u8; 16] {
+    /// 128 random bits for the pipe name; no fallback (a predictable name is refused, not used).
+    fn random16() -> Result<[u8; 16], OpenError> {
         let mut b = [0u8; 16];
-        if getrandom::fill(&mut b).is_err() {
-            // Never expected; the name is not the protection (the DACL and the peer checks are).
-            let t = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-            b = t.to_le_bytes();
-        }
-        b
+        getrandom::fill(&mut b).map_err(|e| OpenError::Failed(format!("Windows gave Kora no random numbers for the connection ({e})")))?;
+        Ok(b)
     }
 
     fn create_pipe(name: &str) -> std::io::Result<Owned> {
@@ -315,6 +416,8 @@ mod imp {
     }
 
     fn open_with(kora_home: Option<&str>, limit: Duration, launch: Launch) -> Result<(Session, Launched), OpenError> {
+        // One session at a time: kept until the session ends (or this attempt fails).
+        let slot = worker::SESSION_SLOT.try_take().ok_or(OpenError::InUse)?;
         if PROMPT_OPEN.swap(true, Ordering::SeqCst) {
             return Err(OpenError::Busy);
         }
@@ -325,8 +428,24 @@ mod imp {
                 return Err(OpenError::Failed(format!("cannot find the kora program: {e}")));
             }
         };
+        // Nobody may replace or rename our program file from now until the session ends: the
+        // prompt starts exactly the file this panel runs, and every elevated child after it.
+        let lock = match lock_exe(&exe) {
+            Ok(l) => l,
+            Err(e) => {
+                PROMPT_OPEN.store(false, Ordering::SeqCst);
+                return Err(OpenError::Failed(format!("cannot lock Kora's program file ({e}); another program may be changing it")));
+            }
+        };
         let me = std::process::id();
-        let name = pipe_name(me, &random16());
+        let rnd = match random16() {
+            Ok(r) => r,
+            Err(e) => {
+                PROMPT_OPEN.store(false, Ordering::SeqCst);
+                return Err(e);
+            }
+        };
+        let name = pipe_name(me, &rnd);
         let pipe = match create_pipe(&name) {
             Ok(p) => p,
             Err(e) => {
@@ -376,12 +495,15 @@ mod imp {
         }
         let wait = PIPE_WAIT;
         // SAFETY: our pipe handle; back to blocking reads and writes.
-        unsafe { SetNamedPipeHandleState(pipe.0, &wait, std::ptr::null(), std::ptr::null()) };
+        if unsafe { SetNamedPipeHandleState(pipe.0, &wait, std::ptr::null(), std::ptr::null()) } == 0 {
+            return Err(OpenError::Failed(format!("cannot set up the connection to the administrator helper: {}", std::io::Error::last_os_error())));
+        }
         // SAFETY: the handle is ours and handed over to `File`, which closes it.
         let file = unsafe { File::from_raw_handle(pipe.0 as RawHandle) };
         std::mem::forget(pipe);
         let reader = file.try_clone().map_err(|e| OpenError::Failed(e.to_string()))?;
-        let s = Session::begin(Box::new(BufReader::new(reader)), Box::new(file), kora_home).map_err(|e| OpenError::Failed(e.to_string()))?;
+        let mut s = Session::begin(Box::new(BufReader::new(reader)), Box::new(file), kora_home).map_err(|e| OpenError::Failed(e.to_string()))?;
+        s.hold(Box::new((lock, slot)));
         Ok((s, process))
     }
 
@@ -563,8 +685,13 @@ mod imp {
         if unsafe { GetNamedPipeServerProcessId(h, &mut server) } == 0 {
             return Err("cannot see who made the connection".into());
         }
-        let own = std::env::current_exe().map_err(|e| e.to_string())?;
-        check_server_peer(parent, server, process_image(server).as_deref(), &own)?;
+        // Our own program as Windows started it (the same API as for the panel: 8.3 names, subst
+        // drives and junctions compare equal), locked against replacement while we run.
+        let own = process_image(std::process::id()).ok_or("cannot see this program's own file")?;
+        let own_lock = lock_exe(&own).map_err(|e| format!("cannot lock this program's file: {e}"))?;
+        let panel_image = process_image(server);
+        let panel_id = panel_image.as_deref().and_then(file_id);
+        check_server_peer(parent, server, panel_id, handle_file_id(&own_lock), &panel_image.map(|p| p.display().to_string()).unwrap_or_default())?;
         let user = process_user(server).ok_or("cannot see which account runs Kora Panel")?;
         let _ = PANEL_USER.set(user.clone());
         // Idle watchdog: a worker nobody talks to goes away.
@@ -587,8 +714,27 @@ mod imp {
         };
         let mut reader = BufReader::new(file.try_clone().map_err(|e| e.to_string())?);
         let mut writer = file;
-        let exec = worker::ChildExecutor { exe: own };
-        worker::serve(&mut reader, &mut writer, validator.as_ref(), &exec, &child_env(&user), &touch).map_err(|e| e.to_string())
+        let exec = Arc::new(worker::ChildExecutor::new(own));
+        // The panel's process ends (crash, closed): stop a running child at once instead of
+        // letting it finish for nobody.
+        {
+            let exec = exec.clone();
+            // SAFETY: plain call; the handle is closed by `Owned` in the thread.
+            let h = Owned(unsafe { OpenProcess(SYNCHRONIZE, 0, parent) });
+            if !h.0.is_null() {
+                std::thread::spawn(move || {
+                    let h = h;
+                    // SAFETY: a process handle we own.
+                    unsafe { WaitForSingleObject(h.0, u32::MAX) };
+                    worker::Executor::cancel(exec.as_ref());
+                });
+            }
+        }
+        // The children's whole environment, built from nothing (never this process's inherited one).
+        let base = worker::elevated_child_env(&system_dirs(), &user, profile_dir(&user.sid).as_deref(), None);
+        let r = worker::serve(&mut reader, &mut writer, validator.as_ref(), exec.as_ref(), &base, &touch).map_err(|e| e.to_string());
+        drop(own_lock);
+        r
     }
 }
 

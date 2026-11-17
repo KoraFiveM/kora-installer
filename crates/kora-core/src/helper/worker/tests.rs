@@ -53,11 +53,13 @@ fn exe_paths_compare_like_windows_does() {
 
 #[test]
 fn peers_must_be_exactly_the_processes_we_expect() {
-    let own = PathBuf::from(r"C:\k\kora.exe");
-    assert!(check_server_peer(10, 10, Some(&own), &own).is_ok());
-    assert!(check_server_peer(10, 11, Some(&own), &own).is_err(), "another process owns the pipe");
-    assert!(check_server_peer(10, 10, Some(Path::new(r"C:\evil\kora.exe")), &own).is_err(), "pid reused by another program");
-    assert!(check_server_peer(10, 10, None, &own).is_err());
+    let own: FileId = (0xabcd, 42);
+    assert!(check_server_peer(10, 10, Some(own), Some(own), "x").is_ok(), "the same file, whatever the paths look like");
+    assert!(check_server_peer(10, 11, Some(own), Some(own), "x").is_err(), "another process owns the pipe");
+    assert!(check_server_peer(10, 10, Some((0xabcd, 43)), Some(own), r"C:\evil\kora.exe").unwrap_err().contains("evil"), "pid reused by another program, or a copy");
+    assert!(check_server_peer(10, 10, Some((0xabce, 42)), Some(own), "x").is_err(), "same index on another volume");
+    assert!(check_server_peer(10, 10, None, Some(own), "x").is_err());
+    assert!(check_server_peer(10, 10, Some(own), None, "x").is_err());
     assert!(check_client_peer(5, 5).is_ok());
     assert!(check_client_peer(5, 6).is_err() && check_client_peer(0, 0).is_err());
 }
@@ -269,8 +271,47 @@ mod stream {
     }
 
     #[test]
+    fn a_child_that_runs_too_long_or_for_nobody_is_stopped() {
+        let mut ex = ChildExecutor::new("/bin/sh".into());
+        ex.limit = Duration::from_millis(300);
+        let t = std::time::Instant::now();
+        let e = ex.run(&["-c".into(), "echo started; sleep 30".into()], &[], &mut |_, _| {}).unwrap_err();
+        assert!(e.to_string().contains("longer than") && t.elapsed() < Duration::from_secs(10), "{e}");
+        let ex = Arc::new(ChildExecutor::new("/bin/sh".into()));
+        let e2 = ex.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            e2.cancel();
+        });
+        let t = std::time::Instant::now();
+        let e = ex.run(&["-c".into(), "sleep 30".into()], &[], &mut |_, _| {}).unwrap_err();
+        canceller.join().unwrap();
+        assert!(e.to_string().contains("went away") && t.elapsed() < Duration::from_secs(10), "{e}");
+        assert!(ex.run(&["-c".into(), "true".into()], &[], &mut |_, _| {}).is_err(), "a cancelled executor starts nothing more");
+    }
+
+    #[test]
+    fn a_grandchild_holding_the_output_open_does_not_keep_the_step_waiting() {
+        let ex = ChildExecutor::new("/bin/sh".into());
+        let t = std::time::Instant::now();
+        let code = ex.run(&["-c".into(), "(sleep 20 &) ; echo done; exit 0".into()], &[], &mut |_, _| {}).unwrap();
+        assert_eq!(code, 0);
+        assert!(t.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn the_child_gets_only_the_environment_it_is_given() {
+        std::env::set_var("KORA_MARIADB_HOME_TEST_LEAK", "/tmp/evil");
+        let ex = ChildExecutor::new("/bin/sh".into());
+        let mut out = Vec::new();
+        let code = ex.run(&["-c".into(), "echo \"leak=$KORA_MARIADB_HOME_TEST_LEAK home=$HOME given=$GIVEN\"".into()], &[("GIVEN".into(), "yes".into())], &mut |_, l| out.push(l.to_string())).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(out, ["leak= home= given=yes"], "nothing of the worker's own environment reaches the elevated child");
+    }
+
+    #[test]
     fn the_child_executor_runs_without_a_shell_and_keeps_result_lines_whole() {
-        let ex = ChildExecutor { exe: "/bin/sh".into() };
+        let ex = ChildExecutor::new("/bin/sh".into());
         let mut out = Vec::new();
         let long = "x".repeat(10_000);
         let script = format!("echo \"$KORA_T\"; echo 'KORA-ADMIN-RESULT {{\"v\":\"{long}\"}}'; echo err >&2; exit 3");
@@ -281,4 +322,50 @@ mod stream {
         let res = out.iter().find_map(|(_, l)| result_line(l)).unwrap();
         assert_eq!(res["v"].as_str().unwrap().len(), 10_000);
     }
+}
+
+#[test]
+fn elevated_children_get_system_folders_from_windows_and_the_panel_users_profile() {
+    let sys = SystemDirs { system_root: r"C:\Windows".into(), program_files: r"C:\Program Files".into(), program_files_x86: r"C:\Program Files (x86)".into(), program_data: r"C:\ProgramData".into() };
+    let u = crate::helper::winpipe::PanelUser { sid: "S-1-5-21-1-2-3-1001".into(), domain: "PC".into(), name: "jo".into(), admin_member: true };
+    let e = elevated_child_env(&sys, &u, Some(r"C:\Users\jo"), Some(r"C:\Users\jo\AppData\Local\Kora"));
+    let get = |k: &str| e.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    assert_eq!(get("PATH"), Some(r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0"), "system folders only");
+    assert_eq!(get("ProgramFiles"), Some(r"C:\Program Files"));
+    assert_eq!(get("ProgramData"), Some(r"C:\ProgramData"));
+    assert_eq!(get("TEMP"), Some(r"C:\Windows\Temp"));
+    assert_eq!(get("USERNAME"), Some("jo"));
+    assert_eq!(get("LOCALAPPDATA"), Some(r"C:\Users\jo\AppData\Local"), "the panel user's profile, not the administrator's who answered");
+    assert_eq!(get("APPDATA"), Some(r"C:\Users\jo\AppData\Roaming"));
+    assert_eq!(get("KORA_HOME"), Some(r"C:\Users\jo\AppData\Local\Kora"));
+    for k in OVERRIDE_VARS {
+        assert!(get(k).is_none(), "{k}");
+    }
+    assert!(e.iter().all(|(k, _)| !crate::helper::SECRET_ENV.contains(&k.as_str())), "secrets come per request only");
+    let e = elevated_child_env(&sys, &u, None, None);
+    assert!(!e.iter().any(|(k, _)| k == "USERPROFILE" || k == "KORA_HOME"));
+}
+
+#[test]
+fn the_worker_forgets_override_variables_at_start() {
+    let sys = SystemDirs { system_root: r"C:\Windows".into(), program_files: r"C:\Program Files".into(), program_files_x86: String::new(), program_data: r"C:\ProgramData".into() };
+    let (remove, set) = worker_env_changes(&sys);
+    for k in ["KORA_MARIADB_HOME", "KORA_SELF_UPDATE_API", "KORA_TEST_ARTIFACT_MIRROR", "KORA_CATALOG", "KORA_SERVICE_USER", "KORA_DB_HOST"] {
+        assert!(remove.contains(&k), "{k}");
+    }
+    assert!(set.contains(&("ProgramFiles", r"C:\Program Files".to_string())) && set.contains(&("TEMP", r"C:\Windows\Temp".to_string())));
+    let (_, none) = worker_env_changes(&SystemDirs::default());
+    assert!(none.is_empty(), "nothing invented when Windows did not answer");
+}
+
+#[test]
+fn only_one_session_at_a_time_and_the_slot_comes_back() {
+    static SLOT: SessionSlot = SessionSlot::new();
+    let first = SLOT.try_take().expect("free at first");
+    assert!(SLOT.try_take().is_none(), "a second session waits");
+    drop(first);
+    assert!(SLOT.try_take().is_some(), "free again once the first ended");
+    let p = open_problem(&OpenError::InUse, &Context::default());
+    assert_eq!(p.code, codes::ADMIN_BUSY);
+    assert!(p.message.contains("already doing administrator work"), "{}", p.message);
 }

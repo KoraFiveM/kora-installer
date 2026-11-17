@@ -272,8 +272,16 @@ fn root_mode(sudo_user: bool) -> Option<bool> {
     #[cfg(not(unix))]
     {
         let _ = sudo_user;
-        None
+        windows_root_mode(crate::elevate::is_elevated())
     }
+}
+
+/// Windows: an elevated Kora hardens every git call like root's on Linux (no hooks, no fsmonitor,
+/// no repository-chosen programs), because the repositories are in folders the person and the
+/// server's own account can change. The person's own git settings are not isolated (their files
+/// are theirs), but the hardening settings beat them too.
+pub fn windows_root_mode(elevated: bool) -> Option<bool> {
+    elevated.then_some(false)
 }
 
 /// The account behind `sudo`, `runuser` and the account's session bus (all `None` when not under sudo).
@@ -1531,6 +1539,17 @@ pub fn move_pinned(r: &dyn CommandRunner, repo: &Path, commit: &str) -> Result<S
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_elevated_kora_on_windows_hardens_git_like_root_on_linux() {
+        assert_eq!(windows_root_mode(true), Some(false));
+        assert_eq!(windows_root_mode(false), None);
+        let inv = Invocation { program: "git".into(), args: vec!["pull".into()], cwd: None, env: vec![] };
+        let h = harden_for_root(inv, windows_root_mode(true), None, None);
+        let v = h.env.iter().find(|(k, _)| k == "GIT_CONFIG_PARAMETERS" || k.starts_with("GIT_CONFIG_VALUE_") || k.starts_with("GIT_CONFIG_KEY_")).is_some();
+        assert!(v, "{:?}", h.env);
+        assert!(h.env.iter().any(|(_, val)| val == "core.fsmonitor") || h.env.iter().any(|(_, val)| val.contains("fsmonitor")), "{:?}", h.env);
+    }
     use super::*;
     use std::cell::RefCell;
 

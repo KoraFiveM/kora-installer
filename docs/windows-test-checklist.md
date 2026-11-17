@@ -222,6 +222,57 @@ A9. [ ] **Windows Server 2022** with a normal administrator account. (The built-
 A10. [ ] **Restart the panel mid-install** with a saved key: Carry on asks again only when an administrator step runs.
 A11. [ ] **Task Manager:** the worker never shows a window and exits after each action.
 
+## Elevated worker safety (things only a real Windows run can settle)
+
+These check the hardening of the administrator worker. Each says what a harmful program running as you might try and
+what must happen now. Use a normal administrator account unless the step says otherwise.
+
+W1. [ ] **Environment variables cannot steer the elevated side.** In a normal PowerShell run
+    `[Environment]::SetEnvironmentVariable('KORA_MARIADB_HOME','C:\Users\Public\evil','User')` and the same for
+    `KORA_SELF_UPDATE_API` (`http://127.0.0.1:9`), `ProgramFiles` (`C:\Users\Public\pf`) and `TEMP`
+    (`C:\Users\Public\t`). Sign out and in, open the panel, and do System check > "Start it for me" and an install
+    with "set up the database for me". *Should happen:* everything works as without the variables; nothing is created
+    under `C:\Users\Public`; Kora's MariaDB stays in `C:\ProgramData\Kora\mariadb`. Remove the four variables afterwards.
+    *If not, copy back:* what appeared under `C:\Users\Public`, and the install log.
+W2. [ ] **A planted database client is never run elevated.** Put any `mysql.exe` and `mariadb.exe` (for example a copy
+    of `notepad.exe` renamed) in a folder on your **user** PATH. Install with "set up the database for me". *Should
+    happen:* no Notepad window and no `mysql.exe` from that folder in Task Manager (Details > Command line); the database
+    is created. Remove the files.
+W3. [ ] **The program cannot be swapped after the prompt.** Start an install; when the prompt shows, try in a normal
+    PowerShell: `Rename-Item "$env:LOCALAPPDATA\Kora\bin\kora.exe" kora-old.exe`. *Should happen:* it fails ("being
+    used by another process") until the install's administrator steps are finished. Answer Yes; the install finishes.
+W4. [ ] **8.3 and subst paths.** `subst K: "$env:LOCALAPPDATA\Kora\bin"`, run `K:\kora.exe` and install from that
+    panel; also start it once through its short name (`dir /x` shows it, for example `KORA~1.EXE`). *Should happen:*
+    one prompt, the install finishes (no "process ... runs ..., which is not this program"). `subst K: /d` afterwards.
+W5. [ ] **Standard account, another administrator's password.** On a standard account, install from the panel and type
+    an administrator's password at the prompt. *Should happen:* the install finishes; Settings > Uninstall and "Tidy up
+    old shortcuts" act on **your** shortcuts and server list, not the administrator's (check that the administrator's
+    own Kora shortcuts, if any, are untouched).
+W6. [ ] **Connecting to the worker's pipe unelevated.** While an install's prompt has been answered, in a normal
+    PowerShell: `[System.IO.Directory]::GetFiles('\\.\pipe\') | Select-String kora-admin` shows the pipe; then
+    `$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '<name without \\.\pipe\>', 'InOut'); $p.Connect(2000)`.
+    *Should happen:* "Access to the path is denied" (or a timeout); the install is not disturbed.
+W7. [ ] **The update task runs without elevation.** After a Development install, Task Scheduler > `Kora` task >
+    General: "Run with highest privileges" is **not** ticked; it runs as you. Run it (right click > Run): it finishes,
+    and if it restarts the server, the restart works. *Also on an upgraded 0.6.x machine:* an old task still has the
+    tick until the schedule is changed once (Settings or `kora schedule set`); after that it is gone.
+W8. [ ] **Server services keep no "impersonate" right.** `sc.exe qprivs kora-<name>` lists only
+    `SeChangeNotifyPrivilege` and `SeIncreaseWorkingSetPrivilege`; the server starts and txAdmin answers;
+    `sc.exe sdshow kora-<name>` ends with an entry for your SID (you may start and stop it): from a normal window
+    `sc.exe stop kora-<name>` and `sc.exe start kora-<name>` work.
+W9. [ ] **Two administrator actions at once.** During an install's administrator steps, press System check > "Start it
+    for me". *Should happen:* "Kora is already doing administrator work for something else", no second prompt; it works
+    when the install has finished.
+W10. [ ] **Closing the panel mid-step.** During the database or service step, end the panel's `kora.exe` (not the
+    worker) in Task Manager. *Should happen:* within a few seconds no `kora.exe admin-worker` and no `kora.exe
+    admin-step` is left. Start the panel again and **Try this step again**: it finishes (a service made just before is
+    used again, no "already exists").
+W11. [ ] **Uninstall with "delete the server folders".** Settings > Uninstall, tick a server folder. *Should happen:* one
+    prompt; services and rules go; the folder is deleted afterwards **without** a second prompt (by the panel, as you).
+W12. [ ] **Unusual ports.** Make a server with game port `3389` (wizard, advanced ports). *Should happen:* the firewall step
+    stops with "Kora does not open port 3389 in the firewall from the panel" and offers to skip that step; no
+    firewall rule for 3389 exists (`Get-NetFirewallRule -DisplayName "*kora*"`).
+
 ## 7. Upgrade delta: a machine that has 0.6.x with the old machine-wide app
 
 Do this **instead of** section 1 on a machine that already has 0.6.x, or on a second VM that has it. To make that

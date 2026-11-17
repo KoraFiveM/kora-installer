@@ -9,10 +9,14 @@
 //! 2. It starts ITS OWN program (`std::env::current_exe()`) elevated with `ShellExecuteExW`
 //!    (verb `runas`): `kora.exe admin-worker --pipe <name> --parent <panel pid>` ([`worker_args`]).
 //!    That is the Windows prompt. No secret is ever on that command line.
-//! 3. The worker refuses to run unless it is elevated, connects to the pipe, and checks that the
-//!    process at the other end ([`check_server_peer`]) is the panel pid it was given AND runs the
-//!    very same program file as itself. The panel checks that the client is the process it just
-//!    started ([`check_client_peer`]). Only then does anything else travel.
+//! 3. Before asking, the panel opens its own program file so that nobody can write, rename or
+//!    delete it until the session ends (no write or delete sharing): the prompt and every
+//!    elevated child start exactly the file the panel runs. The worker refuses to run unless it is
+//!    elevated, locks its own file the same way, connects to the pipe, and checks that the process
+//!    at the other end ([`check_server_peer`]) is the panel pid it was given AND runs the very same
+//!    FILE as itself (volume serial and file index, not path text). The panel checks that the
+//!    client is the process it just started ([`check_client_peer`]). Only then does anything else
+//!    travel.
 //! 4. The conversation is the Linux helper's protocol ([`super::Request`] / [`super::Message`],
 //!    one JSON object per line), with three additions: the worker first says [`super::Message::Hello`];
 //!    one connection carries MANY requests (a whole install, or one action), ended by `bye` or by
@@ -38,9 +42,15 @@
 //! * **Another process of the same user, not elevated** (malware running as the person). It cannot
 //!   open the pipe (it lacks the enabled Administrators group). It could start its own `runas`
 //!   prompt, or tamper with the panel's memory, but both are true of any program the person runs;
-//!   Windows itself does not treat UAC as a boundary against the same user. What we guarantee is
-//!   that our prompt only ever starts our own `kora.exe`, that the elevated process takes orders
-//!   only from the panel process that started it, and only allow-listed ones.
+//!   Windows itself does not treat UAC as a boundary against the same user. What we guarantee:
+//!   from the moment the panel asks until the session ends, the program file it runs cannot be
+//!   replaced, so the prompt and every elevated child start that file; the elevated process takes
+//!   orders only from the panel process that started it, and only allow-listed ones; its children
+//!   get an environment built from nothing ([`elevated_child_env`]), so the person's own
+//!   environment variables cannot steer them. What we cannot guarantee: a program running as the
+//!   person BEFORE the panel starts can replace `kora.exe` in their own folder (that is true of
+//!   every program a person installs for themselves), and one that injects code into the running
+//!   panel can use an open session until it ends.
 //! * **Another elevated process.** Is already administrator; nothing to win.
 //! * **A process racing to be "the worker".** The panel serves only the pid `ShellExecuteExW`
 //!   returned; anything else that connects is dropped and the session fails without sending a byte.
@@ -73,7 +83,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use super::client::HelperError;
-use super::server::{Executor, Validator};
+pub use super::server::Executor;
+use super::server::Validator;
 use super::{check_request_in, mask_secrets, Message, Request, MAX_ARG_BYTES, MAX_REQUEST_BYTES, PING};
 use crate::problem::{codes, Action, Problem};
 
@@ -134,15 +145,21 @@ pub fn same_exe(a: &Path, b: &Path) -> bool {
     !x.is_empty() && x == y
 }
 
-/// Worker side: is the pipe's server the panel we were started for?
-pub fn check_server_peer(expected_pid: u32, server_pid: u32, server_image: Option<&Path>, own_image: &Path) -> Result<(), String> {
+/// A file's identity on Windows: (volume serial number, file index). Two paths name the same
+/// file exactly when these are equal (8.3 names, `subst` drives, junctions and case all resolve).
+pub type FileId = (u32, u64);
+
+/// Worker side: is the pipe's server the panel we were started for? The panel's program file and
+/// the worker's own (both taken from the running processes, then opened) must be the very same
+/// file; `server_image` is only for the message.
+pub fn check_server_peer(expected_pid: u32, server_pid: u32, server: Option<FileId>, own: Option<FileId>, server_image: &str) -> Result<(), String> {
     if server_pid != expected_pid {
         return Err(format!("the pipe belongs to process {server_pid}, not to Kora Panel ({expected_pid})"));
     }
-    match server_image {
-        Some(img) if same_exe(img, own_image) => Ok(()),
-        Some(img) => Err(format!("process {server_pid} runs {}, not {}", img.display(), own_image.display())),
-        None => Err(format!("cannot see which program process {server_pid} runs")),
+    match (server, own) {
+        (Some(a), Some(b)) if a == b => Ok(()),
+        (Some(_), Some(_)) => Err(format!("process {server_pid} runs {server_image}, which is not this program")),
+        _ => Err(format!("cannot see which program process {server_pid} runs")),
     }
 }
 
@@ -220,6 +237,39 @@ fn read_line_capped(r: &mut dyn BufRead) -> io::Result<Option<String>> {
 /// `bye` or the end of the pipe. `base_env` = what every child gets (the panel user's name, ...);
 /// `touch` is called around every request (`true` = busy) so a watchdog can see idleness.
 pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn Validator, executor: &dyn Executor, base_env: &[(String, String)], touch: &dyn Fn(bool)) -> io::Result<()> {
+    serve_with(reader, writer, validator, executor, base_env, touch, &ServeOptions::default())
+}
+
+/// How one served connection differs between the worker and the persistent helper.
+pub struct ServeOptions<'a> {
+    /// The verbs at all (the worker's [`WORKER_VERBS`], the helper's `winhelper::SERVICE_VERBS`).
+    pub verbs: &'a [&'a str],
+    /// The helper: the only Kora folder a `session` may name (recorded at install time).
+    pub fixed_home: Option<&'a str>,
+    /// Called after every request that ran: (verb, step or sub-command, ok). For the log (never
+    /// arguments or environment values) and for the helper's restart after updating itself.
+    pub on_done: &'a dyn Fn(&str, &str, bool),
+}
+
+impl Default for ServeOptions<'_> {
+    fn default() -> Self {
+        ServeOptions { verbs: WORKER_VERBS, fixed_home: None, on_done: &|_, _, _| {} }
+    }
+}
+
+/// What a request is about, for the log: the `--step` of an `admin-step`, else the first argument
+/// when it is a plain word (`start`, `refresh`), else nothing. Never a path or a value.
+pub fn log_label(verb: &str, args: &[String]) -> String {
+    if verb == "admin-step" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        let step = args.iter().position(|a| a == "--step").and_then(|i| args.get(i + 1)).map(String::as_str).unwrap_or("");
+        return format!("{action} {step}").trim().to_string();
+    }
+    args.first().filter(|a| !a.is_empty() && a.len() <= 24 && a.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')).cloned().unwrap_or_default()
+}
+
+/// [`serve`] with [`ServeOptions`].
+pub fn serve_with(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn Validator, executor: &dyn Executor, base_env: &[(String, String)], touch: &dyn Fn(bool), opts: &ServeOptions) -> io::Result<()> {
     if !send(writer, &Message::Hello { version: env!("CARGO_PKG_VERSION").into(), pid: std::process::id() }) {
         return Err(io::Error::new(io::ErrorKind::BrokenPipe, "the panel went away"));
     }
@@ -249,8 +299,12 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
         }
         if req.verb == SESSION {
             match parse_session(&req.args) {
+                Ok(home) if req.env.is_empty() && opts.fixed_home.is_some_and(|f| !super::winhelper::session_home_ok(home.as_deref(), f)) => {
+                    send(writer, &Message::Error { message: "Kora's helper works only with the Kora folder it was turned on for.".into() });
+                }
                 Ok(home) if req.env.is_empty() => {
-                    if let Some(h) = home {
+                    // The helper's children get the recorded folder from their base environment.
+                    if let (Some(h), None) = (home, opts.fixed_home) {
                         session_env.insert("KORA_HOME".into(), h);
                     }
                     send(writer, &Message::Result { ok: true, code: 0, message: None, version: None, data: None });
@@ -264,7 +318,7 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
             }
             continue;
         }
-        let argv = match check_request_in(&req, WORKER_VERBS, &|v, a| validator.validate(v, a)) {
+        let argv = match check_request_in(&req, opts.verbs, &|v, a| validator.validate(v, a)) {
             Ok(a) => a,
             Err(r) => {
                 send(writer, &Message::Error { message: r.0 });
@@ -286,8 +340,13 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
             }
             if alive {
                 alive = send(writer, &Message::Progress { stream: stream.to_string(), line: mask_secrets(text, &secrets) });
+                if !alive {
+                    // Nobody is listening any more: do not leave an elevated child running for nobody.
+                    executor.cancel();
+                }
             }
         });
+        (opts.on_done)(&req.verb, &log_label(&req.verb, &req.args), matches!(res, Ok(0)));
         let sent = match res {
             Ok(code) => send(writer, &Message::Result { ok: code == 0, code, message: None, version: None, data }),
             Err(e) => send(writer, &Message::Error { message: format!("The administrator helper could not start Kora: {e}") }),
@@ -298,17 +357,152 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
     }
 }
 
-/// Runs `exe argv` as a child with the worker's environment plus `env`, no shell, no window, and
-/// streams its output lines. Works on every platform (tests run it on Linux).
+/// Folders as Windows itself reports them (system directory and known-folder APIs), never from
+/// inherited variables: a user can set `ProgramFiles` or `TEMP` in their own environment, and an
+/// elevated child must not take its trust roots from there.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SystemDirs {
+    /// `C:\Windows`
+    pub system_root: String,
+    /// `C:\Program Files`
+    pub program_files: String,
+    /// `C:\Program Files (x86)` (may be empty)
+    pub program_files_x86: String,
+    /// `C:\ProgramData`
+    pub program_data: String,
+}
+
+/// Variables that steer Kora (test seams and overrides). Never honoured by an elevated child of the
+/// worker or the helper: [`elevated_child_env`] does not pass them, and the child removes them
+/// again at start ([`scrub_overrides`]) as a second fence.
+pub const OVERRIDE_VARS: &[&str] = &[
+    "KORA_SELF_UPDATE_API",
+    "KORA_TEST_ARTIFACT_MIRROR",
+    "KORA_TEST_FAIL_HEALTH",
+    "KORA_MARIADB_HOME",
+    "KORA_CATALOG",
+    "KORA_SERVICE_USER",
+    "KORA_DB_HOST",
+    "KORA_DB_PORT",
+    "KORA_DB_ADMIN_USER",
+    "KORA_APP_PREFIX",
+    "KORA_SKIP_SPACE_CHECK",
+    "KORA_ALLOW_ROOT_PANEL",
+    "KORA_UPDATE_AS",
+];
+
+/// The complete environment of an elevated child, built from nothing (the child is started with
+/// an empty environment plus this): system folders from Windows, a PATH of system folders only,
+/// who "you" is (the panel's account, also when another administrator answered the prompt) with
+/// that account's own profile folders (`profile` = its `ProfileImagePath`), the Kora folder, and
+/// nothing else. The request's two secret variables are added per request.
+pub fn elevated_child_env(sys: &SystemDirs, user: &super::winpipe::PanelUser, profile: Option<&str>, kora_home: Option<&str>) -> Vec<(String, String)> {
+    let root = sys.system_root.trim_end_matches(['\\', '/']);
+    let s32 = format!("{root}\\System32");
+    let drive: String = root.chars().take(2).collect();
+    let mut v: Vec<(String, String)> = vec![
+        ("SystemRoot".into(), root.into()),
+        ("windir".into(), root.into()),
+        ("SystemDrive".into(), drive),
+        ("ComSpec".into(), format!("{s32}\\cmd.exe")),
+        ("PATHEXT".into(), ".COM;.EXE;.BAT;.CMD".into()),
+        ("PATH".into(), format!("{s32};{root};{s32}\\Wbem;{s32}\\WindowsPowerShell\\v1.0")),
+        ("TEMP".into(), format!("{root}\\Temp")),
+        ("TMP".into(), format!("{root}\\Temp")),
+        ("ProgramFiles".into(), sys.program_files.clone()),
+        ("ProgramW6432".into(), sys.program_files.clone()),
+        ("CommonProgramFiles".into(), format!("{}\\Common Files", sys.program_files)),
+        ("ProgramData".into(), sys.program_data.clone()),
+        ("ALLUSERSPROFILE".into(), sys.program_data.clone()),
+    ];
+    if !sys.program_files_x86.is_empty() {
+        v.push(("ProgramFiles(x86)".into(), sys.program_files_x86.clone()));
+    }
+    v.extend(super::winpipe::child_env(user));
+    if let Some(p) = profile.map(|p| p.trim_end_matches(['\\', '/'])).filter(|p| !p.is_empty()) {
+        v.push(("USERPROFILE".into(), p.into()));
+        v.push(("APPDATA".into(), format!("{p}\\AppData\\Roaming")));
+        v.push(("LOCALAPPDATA".into(), format!("{p}\\AppData\\Local")));
+    }
+    if let Some(h) = kora_home {
+        v.push(("KORA_HOME".into(), h.into()));
+    }
+    v
+}
+
+/// The worker itself (elevated by the prompt, started with the person's environment): forget
+/// [`OVERRIDE_VARS`] and take the system folders from Windows before anything else runs. Its
+/// children get their own environment built from nothing anyway ([`elevated_child_env`]).
+pub fn sanitize_worker_env(sys: &SystemDirs) {
+    let (remove, set) = worker_env_changes(sys);
+    for k in remove {
+        std::env::remove_var(k);
+    }
+    for (k, v) in set {
+        std::env::set_var(k, v);
+    }
+}
+
+/// What [`sanitize_worker_env`] removes and sets.
+pub fn worker_env_changes(sys: &SystemDirs) -> (Vec<&'static str>, Vec<(&'static str, String)>) {
+    let mut set = Vec::new();
+    if !sys.system_root.is_empty() {
+        let root = sys.system_root.trim_end_matches(['\\', '/']);
+        for (k, v) in [("SystemRoot", root.to_string()), ("windir", root.to_string()), ("SystemDrive", root.chars().take(2).collect()), ("ProgramFiles", sys.program_files.clone()), ("ProgramData", sys.program_data.clone()), ("TEMP", format!("{root}\\Temp")), ("TMP", format!("{root}\\Temp"))] {
+            if !v.is_empty() {
+                set.push((k, v));
+            }
+        }
+    }
+    (OVERRIDE_VARS.to_vec(), set)
+}
+
+/// In an elevated child of the worker or the helper (`KORA_HELPER=1`): forget [`OVERRIDE_VARS`]
+/// before anything reads them. Call first thing in `main`, before any thread starts.
+pub fn scrub_overrides() {
+    if std::env::var("KORA_HELPER").is_ok_and(|v| v == "1") && crate::elevate::is_elevated() {
+        for k in OVERRIDE_VARS {
+            std::env::remove_var(k);
+        }
+    }
+}
+
+/// How long one elevated child may run (an install of Kora's MariaDB downloads for a while).
+pub const STEP_LIMIT: Duration = Duration::from_secs(45 * 60);
+
+/// One elevated child at a time in this process (the worker's sessions, the helper's connections).
+static CHILD_RUNS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Runs `exe argv` as a child with ONLY `env` (the environment is cleared first), no shell, no
+/// window, and streams its output lines. One child at a time per process; a child is killed when
+/// it runs longer than `limit` or when [`Executor::cancel`] was called (the panel went away).
+/// Works on every platform (tests run it on Linux).
 pub struct ChildExecutor {
     pub exe: std::path::PathBuf,
+    pub limit: Duration,
+    pub cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ChildExecutor {
+    pub fn new(exe: std::path::PathBuf) -> Self {
+        ChildExecutor { exe, limit: STEP_LIMIT, cancelled: Default::default() }
+    }
 }
 
 impl Executor for ChildExecutor {
+    fn cancel(&self) {
+        self.cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn run(&self, argv: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str, &str)) -> io::Result<i32> {
         use std::process::{Command, Stdio};
+        use std::sync::atomic::Ordering;
+        let _one_at_a_time = CHILD_RUNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "Kora Panel went away"));
+        }
         let mut cmd = Command::new(&self.exe);
-        cmd.args(argv).envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(argv).env_clear().envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -316,13 +510,13 @@ impl Executor for ChildExecutor {
         }
         let mut child = cmd.spawn()?;
         let (tx, rx) = std::sync::mpsc::channel::<(&'static str, String)>();
-        let mut readers = Vec::new();
         let pipes: [(&'static str, Option<Box<dyn Read + Send>>); 2] =
             [("stdout", child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>)), ("stderr", child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>))];
         for (name, pipe) in pipes {
             if let Some(p) = pipe {
                 let tx = tx.clone();
-                readers.push(std::thread::spawn(move || {
+                // Not joined: a grandchild that keeps the pipe open must not keep us waiting.
+                std::thread::spawn(move || {
                     for chunk in io::BufReader::new(p).split(b'\n').map_while(Result::ok) {
                         // A result line is JSON that may be long: never cut or split it.
                         if chunk.starts_with(RESULT_PREFIX.as_bytes()) {
@@ -337,15 +531,38 @@ impl Executor for ChildExecutor {
                             }
                         }
                     }
-                }));
+                });
             }
         }
         drop(tx);
-        for (name, line) in rx {
-            on_line(name, &line);
-        }
-        for r in readers {
-            let _ = r.join();
+        let deadline = std::time::Instant::now() + self.limit;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok((name, line)) => on_line(name, &line),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    let why = if self.cancelled.load(Ordering::SeqCst) {
+                        Some("Kora Panel went away, so the step was stopped".to_string())
+                    } else if std::time::Instant::now() > deadline {
+                        Some(format!("the step took longer than {} minutes and was stopped", self.limit.as_secs() / 60))
+                    } else {
+                        None
+                    };
+                    if let Some(why) = why {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, why));
+                    }
+                    if let Ok(Some(st)) = child.try_wait() {
+                        // Exited; give the readers a moment for the last lines, then stop waiting.
+                        let grace = std::time::Instant::now() + Duration::from_secs(2);
+                        while let Ok((name, line)) = rx.recv_timeout(grace.saturating_duration_since(std::time::Instant::now())) {
+                            on_line(name, &line);
+                        }
+                        return Ok(st.code().unwrap_or(-1));
+                    }
+                }
+            }
         }
         Ok(child.wait()?.code().unwrap_or(-1))
     }
@@ -364,12 +581,16 @@ pub struct StepOutcome {
     pub data: Option<serde_json::Value>,
 }
 
+static PANEL_RUNS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The panel's end of a session (any byte stream: the real pipe, or a socket pair in tests).
 pub struct Session {
     reader: Box<dyn BufRead + Send>,
     writer: Box<dyn Write + Send>,
     /// The worker's process id (from its hello).
     pub worker_pid: u32,
+    /// Kept for as long as the session lives (the lock on the program file).
+    guard: Option<Box<dyn Send>>,
 }
 
 fn lost(e: impl std::fmt::Display) -> HelperError {
@@ -379,7 +600,7 @@ fn lost(e: impl std::fmt::Display) -> HelperError {
 impl Session {
     /// Read the worker's hello (it must be this very version) and tell it the Kora folder.
     pub fn begin(reader: Box<dyn BufRead + Send>, writer: Box<dyn Write + Send>, kora_home: Option<&str>) -> Result<Session, HelperError> {
-        let mut s = Session { reader, writer, worker_pid: 0 };
+        let mut s = Session { reader, writer, worker_pid: 0, guard: None };
         match s.next()? {
             Message::Hello { version, pid } if version == env!("CARGO_PKG_VERSION") => s.worker_pid = pid,
             Message::Hello { version, .. } => return Err(HelperError::Protocol(format!("The administrator helper is Kora {version}, not {}.", env!("CARGO_PKG_VERSION")))),
@@ -392,6 +613,11 @@ impl Session {
             Message::Error { message } => Err(HelperError::Rejected(message)),
             _ => Err(HelperError::Protocol("Kora's administrator helper did not accept the session.".into())),
         }
+    }
+
+    /// Keep `g` alive until the session ends.
+    pub fn hold(&mut self, g: Box<dyn Send>) {
+        self.guard = Some(g);
     }
 
     fn send(&mut self, req: &Request) -> Result<(), HelperError> {
@@ -410,8 +636,10 @@ impl Session {
         super::client::parse_message(&line)
     }
 
-    /// Run one allow-listed command; `on_line` gets every output line.
+    /// Run one allow-listed command; `on_line` gets every output line. One elevated run at a time
+    /// in the panel, however many sessions are open (an install's and a separate action's).
     pub fn run(&mut self, verb: &str, args: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, HelperError> {
+        let _one_at_a_time = PANEL_RUNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         self.send(&Request { verb: verb.into(), args: args.to_vec(), env: env.iter().cloned().collect() })?;
         loop {
             match self.next()? {
@@ -433,9 +661,42 @@ impl Session {
 // Asking: outcomes and what the person reads
 // ---------------------------------------------------------------------------------------------
 
+/// At most one worker session per panel: taken before the prompt, given back when the session
+/// (or the failed attempt) ends.
+pub struct SessionSlot(std::sync::atomic::AtomicBool);
+
+/// Holding it = the panel's one session; dropping it frees the slot.
+pub struct SlotGuard(&'static SessionSlot);
+
+impl SessionSlot {
+    pub const fn new() -> Self {
+        SessionSlot(std::sync::atomic::AtomicBool::new(false))
+    }
+    pub fn try_take(&'static self) -> Option<SlotGuard> {
+        (!self.0.swap(true, std::sync::atomic::Ordering::SeqCst)).then_some(SlotGuard(self))
+    }
+}
+
+impl Default for SessionSlot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.0 .0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The panel's slot.
+pub static SESSION_SLOT: SessionSlot = SessionSlot::new();
+
 /// Why no session could be opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenError {
+    /// Another session (an install's, or another change's) is still open.
+    InUse,
     /// "No" at the prompt.
     Declined,
     /// Nobody answered within [`PROMPT_LIMIT`].
@@ -495,6 +756,10 @@ pub fn open_problem(e: &OpenError, ctx: &Context) -> Problem {
             format!("Nobody answered the Windows permission prompt in time, so Kora could not {what}. Nothing that needs administrator rights was changed."),
         )
         .with_details("The prompt appears on the computer that runs Kora. If you did not see it, look for a flashing shield icon in the taskbar there."),
+        OpenError::InUse => Problem::new(
+            codes::ADMIN_BUSY,
+            "Kora is already doing administrator work for something else (an install or another change). Try again when that has finished.",
+        ),
         OpenError::Busy => Problem::new(
             codes::ADMIN_BUSY,
             "Windows is still showing an earlier permission prompt from Kora. Answer it on the computer that runs Kora (No is fine), then try again.",

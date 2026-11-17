@@ -18,6 +18,8 @@ impl<F: Fn(&str, &[String]) -> Result<(), String> + Send + Sync> Validator for F
 /// Runs the child. `on_line(stream, line)` is called for each output line; returns the exit code.
 pub trait Executor: Send + Sync {
     fn run(&self, argv: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str, &str)) -> io::Result<i32>;
+    /// The other end went away: stop the running child (if the executor can).
+    fn cancel(&self) {}
 }
 
 /// Could a file with this owner and mode be changed by someone other than root?

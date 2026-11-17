@@ -112,6 +112,8 @@ pub fn admin_worker(a: &AdminWorkerArgs) -> i32 {
             }
         };
     }
+    // Started by the prompt with the person's environment: nothing in it may steer us.
+    kora_core::helper::worker::sanitize_worker_env(&kora_core::helper::winpipe::system_dirs());
     let args = vec!["--pipe".to_string(), a.pipe.clone().unwrap_or_default(), "--parent".to_string(), a.parent.unwrap_or(0).to_string()];
     match kora_core::helper::winpipe::run_worker(&args, std::sync::Arc::new(worker_validate)) {
         Ok(()) => 0,
@@ -156,11 +158,25 @@ pub fn worker_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&Path
             Err(format!("Kora's administrator helper only updates Kora to a newer version. To go back to {v}, run `kora self-update --version {v}` yourself from an administrator terminal."))
         }
         Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
-        Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
+        // Servers by their name on the person's list only, never a folder path (a folder's own
+        // record could name another server's update task); the child checks the folder again.
+        Some(Command::Schedule { cmd: ScheduleCmd::Set { server, .. } | ScheduleCmd::Off { server } }) if verb == "schedule" => name_only(&server),
         Some(Command::App { cmd: AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
-        Some(Command::Uninstall { .. }) if verb == "uninstall" => Ok(()),
+        // Never deletes files elevated: Kora Panel deletes the folders itself, as the person.
+        Some(Command::Uninstall { delete_files: true, .. }) if verb == "uninstall" => {
+            Err("Kora's administrator helper does not delete server folders; Kora Panel deletes them itself.".into())
+        }
+        Some(Command::Uninstall { server, .. }) if verb == "uninstall" => server.as_deref().map_or(Ok(()), name_only),
         _ => deny(),
     }
+}
+
+/// A server named by its name on the person's list, not by a folder path.
+fn name_only(server: &str) -> Result<(), String> {
+    if server.is_empty() || server.contains(['/', '\\', ':']) || server.starts_with('.') {
+        return Err("Kora's administrator helper takes a server's name from your server list, not a folder.".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -209,6 +225,11 @@ mod tests {
             ("admin-db", vec!["start", "--other"]),
             ("check", vec![]),
             ("tools", vec!["install", "git"]),
+            ("schedule", vec!["off", r"C:\Users\jo\kora\other"]),
+            ("schedule", vec!["set", "/srv/x", "--daily", "04:00"]),
+            ("schedule", vec!["off", ".."]),
+            ("uninstall", vec!["--yes", r"C:\Users\other\srv"]),
+            ("uninstall", vec!["--yes", "--delete-files"]),
         ] {
             assert!(v(verb, &args).is_err(), "{verb} {args:?}");
         }

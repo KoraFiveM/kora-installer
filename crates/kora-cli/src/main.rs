@@ -1338,8 +1338,14 @@ fn start_and_report(server: &str, past: &str) -> i32 {
 /// `kora schedule show|set|off`.
 fn schedule(cmd: ScheduleCmd) -> i32 {
     use kora_core::service as svc;
+    // Working for Kora Panel's person in the elevated worker: only servers on their list, in a
+    // folder that is theirs, and never another Windows account's update task (see `panel_task_check`).
+    let for_panel = installer::system_ops::panel_user().is_some();
     let find = |server: &str| -> Option<registry::ServerEntry> {
         let reg = registry::Registry::load().unwrap_or_default();
+        if for_panel {
+            return reg.find(server).cloned();
+        }
         reg.find(server).cloned().or_else(|| {
             let dir = PathBuf::from(server);
             let sf = registry::ServerFile::load(&dir).ok()?;
@@ -1386,8 +1392,13 @@ fn schedule(cmd: ScheduleCmd) -> i32 {
                 eprintln!("error: {e}");
                 return 1;
             }
+            if let Err(e) = panel_task_check(&rec, false) {
+                eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
+                return 1;
+            }
             match svc::set(&rec, &cfg) {
                 Ok(()) => {
+                    installer::system_ops::ledger_note(&panel_task_keys(&rec), true);
                     println!("{}: {}", rec.name, svc::describe(&cfg));
                     0
                 }
@@ -1399,8 +1410,13 @@ fn schedule(cmd: ScheduleCmd) -> i32 {
         }
         ScheduleCmd::Off { server } => {
             let Some(rec) = find(&server) else { return missing(&server) };
+            if let Err(e) = panel_task_check(&rec, true) {
+                eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
+                return 1;
+            }
             match svc::remove(&rec) {
                 Ok(()) => {
+                    installer::system_ops::ledger_note(&panel_task_keys(&rec), false);
                     println!("{}: automatic updates are off", rec.name);
                     0
                 }
@@ -1411,6 +1427,17 @@ fn schedule(cmd: ScheduleCmd) -> i32 {
             }
         }
     }
+}
+
+fn panel_task_keys(rec: &registry::ServerEntry) -> Vec<String> {
+    kora_core::helper::winhelper::ledger_keys("system.schedule", &installer::slug(&rec.name), None)
+}
+
+/// In the elevated worker (no-op elsewhere): the server folder is the panel person's, and the
+/// update task's name is not another Windows account's.
+fn panel_task_check(rec: &registry::ServerEntry, undo: bool) -> installer::Result<()> {
+    installer::system_ops::check_panel_dir(&rec.dir)?;
+    installer::system_ops::ledger_check(&panel_task_keys(rec), undo)
 }
 
 fn update(a: UpdateArgs) -> i32 {
@@ -1816,7 +1843,12 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
     let env = un::Env { platform: kora_core::service::Platform::current(), runner: &runner, admin };
     let opts = un::Options { dry_run, only: server, delete_files, delete_databases };
     let mut say = |s: &str| println!("{s}");
-    let mut delete = |dir: &std::path::Path, o: &RollbackOptions| installer::rollback(dir, o, &mut Printer { last: None });
+    let mut delete = |dir: &std::path::Path, o: &RollbackOptions| {
+        // In the elevated worker: only folders that are the panel person's (checked here, in the
+        // child, right before anything is removed).
+        installer::system_ops::check_panel_dir(dir)?;
+        installer::rollback(dir, o, &mut Printer { last: None })
+    };
     let mut save = |r: &registry::Registry| r.save_or_clean_to(&registry::registry_path());
     let summary = if yes {
         un::run(&mut reg, &opts, &env, &mut un::Defaults, &mut say, &mut delete, &mut save)
@@ -2675,6 +2707,8 @@ fn elevate_if_needed(cli: &Cli, effective: &Option<Command>) {
 }
 
 fn main() {
+    // An elevated child of the Windows worker or helper: drop every override variable first.
+    kora_core::helper::worker::scrub_overrides();
     if std::env::args_os().any(|a| a == "--license-key" || a.to_string_lossy().starts_with("--license-key=")) {
         eprintln!("Note: a licence key on the command line is visible to other programs on this computer (process list) and stays in your shell history. Prefer the CFX_LICENSE_KEY environment variable.");
     }

@@ -145,14 +145,25 @@ fn db_used_elsewhere(reg: &Registry, st: &ProvisionState, dir: &Path) -> Option<
 
 fn db_client() -> String {
     let ok = |c: &str| crate::sysexe::command(c).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
-    if ok("mariadb") {
-        return "mariadb".into();
+    let saved = if cfg!(windows) { windows_db::saved_record().map(|r| r.client).filter(|c| c.is_file()) } else { None };
+    pick_db_client(cfg!(windows), crate::elevate::is_elevated(), &ok, saved, &|| windows_client_candidates().into_iter().find(|c| c.is_file()))
+}
+
+/// Which database client to run. An elevated Kora on Windows never takes one from PATH (a folder
+/// on it may be the person's own, and a `mysql.exe` planted there would run as administrator):
+/// only Kora's own MariaDB's client (its record lives in an administrators-only folder) or one
+/// in Program Files.
+fn pick_db_client(windows: bool, elevated: bool, on_path: &dyn Fn(&str) -> bool, saved: Option<PathBuf>, installed: &dyn Fn() -> Option<PathBuf>) -> String {
+    let path_allowed = !(windows && elevated);
+    if path_allowed {
+        for c in ["mariadb", "mysql"] {
+            if on_path(c) {
+                return c.into();
+            }
+        }
     }
-    if ok("mysql") {
-        return "mysql".into();
-    }
-    if cfg!(windows) {
-        if let Some(c) = windows_db::saved_record().map(|r| r.client).filter(|c| c.is_file()).or_else(|| windows_client_candidates().into_iter().find(|c| c.is_file())) {
+    if windows {
+        if let Some(c) = saved.or_else(installed) {
             return c.to_string_lossy().into_owned();
         }
     }
@@ -1086,8 +1097,12 @@ impl InstallStep {
             db::rollback(&db::SystemRunner, &admin, &mut old).map_err(|e| InstallError(e.to_string()))?;
             res.clear_old_state = true;
         }
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let tmp = std::env::temp_dir().join(format!("kora-db-state-{}-{nanos}.json", std::process::id()));
+        // A scratch file only administrators can touch (the person's TEMP is theirs to change
+        // between the write and the read): Kora's MariaDB folder, under an unguessable name.
+        let mut rnd = [0u8; 16];
+        getrandom::fill(&mut rnd).map_err(|e| InstallError(format!("no random numbers: {e}")))?;
+        let scratch = windows_db::base_dir().filter(|b| b.is_dir()).unwrap_or_else(std::env::temp_dir);
+        let tmp = scratch.join(format!("kora-db-state-{}.json", hex::encode(rnd)));
         ctx.emit(self.id, StepStatus::Running, "Creating database and user", 0.4);
         let made = db::provision(&db::SystemRunner, &admin, "127.0.0.1", "127.0.0.1", &tmp);
         let state = ProvisionState::load(&tmp).ok();
@@ -1315,7 +1330,16 @@ impl InstallStep {
 
     fn service(&self) -> Result<String> {
         if self.helper().is_some() {
-            return self.via_helper(false, "system.service").map(|r| r.detail);
+            let r = self.via_helper(false, "system.service")?;
+            if r.grants_left {
+                // The opt-in helper registers the service but never changes permissions inside a
+                // folder the person controls: the folder's owner (this process) grants them.
+                let ctx = &*self.ctx;
+                let server = managed_server(ctx, &format!("kora-{}", slug(&ctx.req.name)), "kora.exe")?;
+                ctx.emit(self.id, StepStatus::Running, "Letting the service into the server folder", 0.9);
+                service::apply_plan(&service::windows_grant_plan(&server), &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+            }
+            return Ok(r.detail);
         }
         let ctx = &*self.ctx;
         let platform = svc_platform();
@@ -1371,7 +1395,29 @@ impl InstallStep {
             tail.push(service::SystemStep::write("Save the server's non-secret environment (txAdmin data folder and port)", &server.env_file_path(), txadmin_env_text(ctx), 0o600));
             tail.push(service::SystemStep::run(format!("Give '{account}' ownership of the server folder (and only that folder)"), "chown", &["-R", &format!("{account}:{account}"), &server.dir]));
         }
-        tail.extend(service::install_plan(&server, platform).map_err(|e| InstallError(e.to_string()))?.steps);
+        if platform == SvcPlatform::Windows {
+            server.validate().map_err(|e| InstallError(e.to_string()))?;
+            let sid = service::windows_installing_sid(&rn);
+            let mut reg = service::windows_register_plan_for(&server, sid.as_deref());
+            match service::windows_existing_service(&rn, &server) {
+                service::Existing::Missing => {}
+                // An earlier attempt registered it and stopped before recording it: use it.
+                service::Existing::Ours => reg.steps.retain(|s| !s.command_line().is_some_and(|l| l.starts_with("sc.exe create "))),
+                service::Existing::Other(bin) => {
+                    return err(format!(
+                        "A Windows service called '{}' already exists and runs something else ({bin}). Kora will not change it. Choose another server name, or remove that service yourself.",
+                        server.service_name()
+                    ))
+                }
+            }
+            tail.extend(reg.steps);
+            // In the opt-in helper the person's own process grants the folder rights (see above).
+            if !crate::helper::winhelper::in_service() {
+                tail.extend(service::windows_grant_plan(&server).steps);
+            }
+        } else {
+            tail.extend(service::install_plan(&server, platform).map_err(|e| InstallError(e.to_string()))?.steps);
+        }
 
         if !ctx.admin {
             let all: Vec<String> = head.iter().chain(tail.iter()).map(|s| s.description.clone()).collect();
@@ -1772,6 +1818,16 @@ pub(crate) fn finish_rollback(ctx: &Ctx) -> Result<()> {
 #[cfg(test)]
 mod db_admin_tests {
     use super::*;
+
+    #[test]
+    fn an_elevated_kora_on_windows_never_takes_the_database_client_from_path() {
+        let everywhere = |_: &str| true;
+        let saved = Some(PathBuf::from(r"C:\ProgramData\Kora\mariadb\11.4\bin\mariadb.exe"));
+        assert_eq!(pick_db_client(true, true, &everywhere, saved.clone(), &|| None), r"C:\ProgramData\Kora\mariadb\11.4\bin\mariadb.exe");
+        assert_eq!(pick_db_client(true, true, &everywhere, None, &|| Some(PathBuf::from(r"C:\Program Files\MariaDB 11\bin\mysql.exe"))), r"C:\Program Files\MariaDB 11\bin\mysql.exe");
+        assert_eq!(pick_db_client(true, false, &everywhere, saved, &|| None), "mariadb", "not elevated: PATH as before");
+        assert_eq!(pick_db_client(false, true, &everywhere, None, &|| None), "mariadb", "Linux root: sudo's secure PATH");
+    }
 
     fn admin(pw: Option<&str>) -> DbAdmin {
         DbAdmin { host: "10.0.0.5".into(), port: 33061, user: "dba".into(), password: pw.map(String::from) }
