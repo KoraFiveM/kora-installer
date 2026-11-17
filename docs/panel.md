@@ -18,6 +18,7 @@ the hub); you can skip them. Everything else describes the base panel.
 4. [A server's tabs](#4-a-servers-tabs)
 5. [Installing a server (the wizard)](#5-installing-a-server-the-wizard)
 6. [Settings](#6-settings)
+   (and the [System check](#the-system-check))
 7. [Actions that need administrator rights](#7-actions-that-need-administrator-rights)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Optional: monitoring and alerts](#9-optional-monitoring-and-alerts)
@@ -207,6 +208,25 @@ where you left off" the next time. The wizard also checks free disk space before
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
   and databases are kept unless you tick them.
 - **About:** the version, platform, and links. The settings page makes no requests to other websites.
+
+### The System check
+
+**System check** in the side menu (or `kora check` in a terminal) lists what Kora needs on this computer, each line in plain
+words with a button where something is wrong:
+
+- **Git** and **GitHub CLI**: *Install it for me* downloads Kora's own copy into its own folder (a known, checksum-verified
+  release from GitHub; no administrator rights; nothing else on the computer changes). If you already have Git or the
+  GitHub CLI Kora uses yours. If the download fails (no internet, a proxy, GitHub busy) you get *Try again* and a link to
+  install it by hand. Git on Linux is your system's package, which needs administrator rights (the helper does it, or the
+  panel shows the command). `kora tools status` shows which copy is used and where it is; `kora tools install` sets them up.
+- **GitHub sign-in**: *Sign in to GitHub* (or *Sign in again* when only some permissions are missing).
+- **Database**: when a database server is installed but not running, *Start it for me*. Starting a service needs
+  administrator rights: with the helper (Linux) it just works, otherwise the panel shows the command (`kora check
+  --start-database`; Windows asks for administrator permission).
+- **Administrator rights** and **Background service**: what Kora can do without asking, for your information.
+
+The same buttons appear wherever an error offers them (the install wizard, the GitHub account card), and those errors link here.
+`kora uninstall` also removes Kora's own copies of Git and the GitHub CLI.
 
 ## 7. Actions that need administrator rights
 

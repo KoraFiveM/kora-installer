@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link, useInRouterContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
@@ -43,6 +44,18 @@ function refusalCommand(n: Notice): string | null {
 /** Text with `commands` between backticks drawn as code. */
 function WithCode({ text }: { text: string }) {
   return <>{text.split('`').map((part, i) => (i % 2 ? <code key={i} className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">{part}</code> : part))}</>
+}
+
+/** Problems the System check page can help with (tools, GitHub, the database). */
+export function systemCheckHelps(code: string): boolean {
+  return code.startsWith('tools.') || code.startsWith('github.') || code === 'install.tool_missing' || code === 'install.tool_not_found_yet' || code === 'install.db_stopped' || code === 'db.start_failed'
+}
+
+/** "Open the System check": a router link when there is a router (the page is the whole app), a plain link otherwise. */
+function SystemCheckLink() {
+  const inRouter = useInRouterContext()
+  const cls = 'text-info underline'
+  return <p className="mt-2 text-xs">{inRouter ? <Link className={cls} to="/system">Open the System check</Link> : <a className={cls} href="/system">Open the System check</a>} to see what Kora needs on this computer.</p>
 }
 
 /** Errors where "Copy details" helps when nothing better is offered: real failures, not answers to a bad request. */
@@ -116,6 +129,7 @@ export function ErrorNotice({ error, title, actions, onRetry }: {
         </details>
       )}
       {log && <LogBox job={log.job} path={log.path} />}
+      {systemCheckHelps(p.code) && !location.pathname.startsWith('/system') && <SystemCheckLink />}
       {(buttons.length > 0 || fallback) && (
         <div className="mt-3 flex flex-wrap gap-2">
           {buttons.map((a, i) => (

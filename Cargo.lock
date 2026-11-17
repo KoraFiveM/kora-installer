@@ -757,6 +757,7 @@ name = "kora-core"
 version = "0.6.5"
 dependencies = [
  "bcrypt",
+ "flate2",
  "getrandom 0.4.3",
  "hex",
  "libc",

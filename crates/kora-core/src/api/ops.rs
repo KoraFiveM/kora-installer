@@ -113,6 +113,14 @@ pub enum Op {
     AssetImport,
     AssetRemove,
     AssetDownloads,
+    /// Git and the GitHub CLI: found, version, Kora's own copy or the system's.
+    ToolsStatus,
+    /// Install Kora's own copy of git or gh (a job with progress).
+    ToolInstall,
+    /// The System check: git, gh, GitHub sign-in, database, administrator rights.
+    SystemCheck,
+    /// Start the installed database server (a job; may need administrator rights).
+    DbStart,
 }
 
 impl Op {
@@ -204,6 +212,10 @@ impl Op {
         Op::AssetImport,
         Op::AssetRemove,
         Op::AssetDownloads,
+        Op::ToolsStatus,
+        Op::ToolInstall,
+        Op::SystemCheck,
+        Op::DbStart,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -296,6 +308,10 @@ impl Op {
             Op::AssetImport => "asset_import",
             Op::AssetRemove => "asset_remove",
             Op::AssetDownloads => "asset_downloads",
+            Op::ToolsStatus => "tools_status",
+            Op::ToolInstall => "tool_install",
+            Op::SystemCheck => "system_check",
+            Op::DbStart => "db_start",
         }
     }
 
@@ -391,6 +407,10 @@ impl Op {
             Op::AssetImport => (Method::Post, "/servers/{s}/assets"),
             Op::AssetRemove => (Method::Delete, "/servers/{s}/assets/{name}"),
             Op::AssetDownloads => (Method::Get, "/assets/downloads"),
+            Op::ToolsStatus => (Method::Get, "/tools"),
+            Op::ToolInstall => (Method::Post, "/tools/{tool}/install"),
+            Op::SystemCheck => (Method::Get, "/system/check"),
+            Op::DbStart => (Method::Post, "/system/database/start"),
         }
     }
 
@@ -413,6 +433,8 @@ impl Op {
                 | Op::UninstallRun
                 | Op::NodeServerControl
                 | Op::AssetImport
+                | Op::ToolInstall
+                | Op::DbStart
         )
     }
 
@@ -567,13 +589,17 @@ mod tests {
             | Op::AssetInspect
             | Op::AssetImport
             | Op::AssetRemove
-            | Op::AssetDownloads => Op::ALL.contains(&op),
+            | Op::AssetDownloads
+            | Op::ToolsStatus
+            | Op::ToolInstall
+            | Op::SystemCheck
+            | Op::DbStart => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 87);
+        assert_eq!(Op::ALL.len(), 91);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

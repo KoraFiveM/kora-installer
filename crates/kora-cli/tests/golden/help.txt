@@ -17,6 +17,8 @@ Commands:
   schedule       Show or change when a development server updates itself
   app            The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
   github         GitHub helpers for development mode
+  tools          Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
+  check          Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
   start          Start a server's background service
   stop           Stop a server's background service
   restart        Restart a server's background service
@@ -99,11 +101,11 @@ Options:
       --db-admin-port <DB_ADMIN_PORT>
           Database server port for the admin login (default 3306)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --start
           Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --no-start
           Do not start the server after installing (start it later with `kora start <name>`)
@@ -830,6 +832,65 @@ List the GitHub accounts and organisations your forks can go into
 Usage: kora github owners [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora tools =====
+Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
+
+Usage: kora tools [OPTIONS] <COMMAND>
+
+Commands:
+  status   Show which Git and GitHub CLI Kora uses (the one on this computer, or its own copy)
+  install  Download Kora's own copy of Git (Windows) and the GitHub CLI, checked against a pinned checksum. No administrator rights, nothing else on the computer changes
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora tools status =====
+Show which Git and GitHub CLI Kora uses (the one on this computer, or its own copy)
+
+Usage: kora tools status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora tools install =====
+Download Kora's own copy of Git (Windows) and the GitHub CLI, checked against a pinned checksum. No administrator rights, nothing else on the computer changes
+
+Usage: kora tools install [OPTIONS] [TOOL]
+
+Arguments:
+  [TOOL]
+          `git`, `gh` or `all` (the default: whatever is missing)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora check =====
+Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
+
+Usage: kora check [OPTIONS]
+
+Options:
+      --start-database
+          Start the database server if it is installed but not running (needs administrator rights)
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

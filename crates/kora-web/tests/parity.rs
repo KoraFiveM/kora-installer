@@ -145,7 +145,7 @@ mod offline {
     use kora_core::firewall::ports::PortProber;
     use kora_core::installer::{DbAdmin, InstallOutcome, InstallRequest, ProgressSink};
     use kora_core::space::DiskInfo;
-    use kora_web::handlers::{assets, github, hub, install, resources, servers, system, updates};
+    use kora_web::handlers::{assets, github, hub, install, resources, servers, system, toolchain, updates};
 
     struct Env;
     impl PortProber for Env {
@@ -209,7 +209,26 @@ mod offline {
         }
     }
 
+    impl kora_core::api::toolchain::ToolchainEnv for Env {
+        fn tools(&self) -> Vec<kora_core::tools::ToolStatus> {
+            vec![]
+        }
+        fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, String> {
+            Err("offline".into())
+        }
+        fn database(&self) -> kora_core::api::toolchain::DbState {
+            Default::default()
+        }
+        fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, String> {
+            Err("offline".into())
+        }
+        fn admin(&self) -> kora_core::api::toolchain::AdminState {
+            Default::default()
+        }
+    }
+
     pub fn install() {
+        toolchain::set_env(Some(Arc::new(Env)));
         install::set_env(Some(Arc::new(Env)));
         github::set_env(Some(Arc::new(Env)));
         resources::set_catalog_loader(Some(Arc::new(|| Err("offline".into()))));
@@ -224,6 +243,7 @@ mod offline {
     }
 
     pub fn remove() {
+        toolchain::set_env(None);
         install::set_env(None);
         github::set_env(None);
         resources::set_catalog_loader(None);

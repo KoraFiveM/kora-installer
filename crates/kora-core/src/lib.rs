@@ -22,6 +22,7 @@ pub mod service;
 pub mod space;
 pub mod steps;
 pub mod sysexe;
+pub mod tools;
 pub mod txadmin;
 pub mod update;
 pub mod userhome;

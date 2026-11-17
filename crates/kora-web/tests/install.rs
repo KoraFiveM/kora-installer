@@ -498,6 +498,40 @@ async fn database_login_test_never_echoes_the_password() {
     assert_eq!(s, 400);
 }
 
+/// A computer whose database server is installed but stopped.
+struct StoppedDb;
+impl kora_core::api::toolchain::ToolchainEnv for StoppedDb {
+    fn tools(&self) -> Vec<kora_core::tools::ToolStatus> {
+        vec![]
+    }
+    fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, String> {
+        Err("no".into())
+    }
+    fn database(&self) -> kora_core::api::toolchain::DbState {
+        kora_core::api::toolchain::DbState { installed: true, running: false, name: Some("mariadb".into()), version: None, unknown: false }
+    }
+    fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, String> {
+        Err("no".into())
+    }
+    fn admin(&self) -> kora_core::api::toolchain::AdminState {
+        Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_failed_database_login_offers_to_start_a_stopped_database() {
+    let r = rig().await;
+    kora_web::handlers::toolchain::set_env(Some(Arc::new(StoppedDb)));
+    let (_, v) = r.call("POST", "/checks/db-login", Some(json!({"admin": {"user": "root", "password": "wrong", "host": "127.0.0.1", "port": 3306}}))).await;
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["problem"]["code"], "install.db_stopped");
+    assert_eq!(v["problem"]["actions"], json!([{"kind": "start_database"}]));
+    // A database on another computer is not ours to start.
+    let (_, v) = r.call("POST", "/checks/db-login", Some(json!({"admin": {"user": "root", "password": "wrong", "host": "db.example.com", "port": 3306}}))).await;
+    assert!(v["problem"].is_null(), "{v}");
+    kora_web::handlers::toolchain::set_env(None);
+}
+
 #[tokio::test]
 async fn artifacts_are_listed_without_broken_builds() {
     let r = rig().await;

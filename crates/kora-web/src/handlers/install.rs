@@ -145,10 +145,17 @@ pub async fn check_db_login(Json(body): Json<Value>) -> Result<Json<Value>, ApiE
     }
     let e = env();
     let automatic = admin.is_none();
+    let local = admin.as_ref().is_none_or(|a| matches!(a.host.as_str(), "127.0.0.1" | "localhost" | "::1"));
     let v = blocking(move || {
         Ok(match e.db_login(admin.as_ref()) {
             Ok(()) => json!({"ok": true, "message": if automatic { "Kora can log in to the database automatically." } else { "Logged in to the database." }}),
-            Err(m) => json!({"ok": false, "message": m}),
+            Err(m) => {
+                // A failed login is often just "the database is installed but not running": say so, with the
+                // "start it for me" button (`problem`, shown by the wizard).
+                let db = if local { super::toolchain::env().database() } else { Default::default() };
+                let problem = (db.installed && !db.running).then(|| kora_core::problem::known::db_stopped(db.name.as_deref().unwrap_or("the database")).to_json());
+                json!({"ok": false, "message": m, "problem": problem})
+            }
         })
     })
     .await?;

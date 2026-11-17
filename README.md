@@ -157,7 +157,7 @@ gh attestation verify kora-linux-x86_64 --repo KoraFiveM/kora-installer
 
 Details: [CODE_SIGNING.md](CODE_SIGNING.md).
 
-- **Privacy:** Kora contacts nothing unless you ask it to: GitHub releases (self-update), the public resource catalog, runtime.fivem.net (FXServer downloads) and GitHub through `gh` (development mode forks).
+- **Privacy:** Kora contacts nothing unless you ask it to: GitHub releases (self-update), the public resource catalog, runtime.fivem.net (FXServer downloads) and GitHub through `gh` (development mode forks). Development mode needs Git and the GitHub CLI: if they are not on the computer Kora downloads its own copies (MinGit and `gh`) from the official GitHub releases when you press *Install it for me* (or during the install), verified against checksums pinned in the source, into its own folder, with no administrator rights (see the System check in [docs/panel.md](docs/panel.md#the-system-check)).
 
 ## License
 
