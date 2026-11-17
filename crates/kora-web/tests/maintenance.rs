@@ -212,7 +212,7 @@ async fn tidy_up_without_administrator_rights_makes_the_shortcuts_and_asks_for_t
     let (s, j) = call(&app, "PUT", "/api/v1/app", Some(json!({"desktop_shortcut": true}))).await;
     assert_eq!(s, 403, "{j}");
     assert_eq!(j["error"]["code"], "needs_elevation");
-    assert_eq!(j["error"]["command"], json!(["kora", "app", "uninstall", "--yes"]));
+    assert_eq!(j["error"]["command"], json!(["kora", "uninstall", "--app", "--yes"]));
     assert!(j["error"]["message"].as_str().unwrap().contains("old ones keep working"), "{j}");
     assert_eq!(m.calls(), ["app_install shortcut=true force=false dry=false"], "the per-user half is done; the old copy is untouched");
 }

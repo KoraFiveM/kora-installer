@@ -41,7 +41,7 @@ Assert-That ($r.Output -match 'shortcut_start_menu: yes' -and $r.Output -match '
 $r = Invoke-Native $kora @('app', 'install', '--yes'); Show 'app install again' $r
 Assert-That ($r.Code -eq 0 -and $r.Output -match 'already in place') 'second install changes nothing'
 
-# ---- the old machine-wide app is found, and removed by `app uninstall` ----
+# ---- the old machine-wide app is found, and removed by `uninstall --app` ----
 $dir = Join-Path $env:ProgramFiles 'Kora'
 $old = Join-Path $dir 'kora.exe'
 $oldStart = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Kora.lnk'
@@ -56,12 +56,22 @@ Set-ItemProperty -LiteralPath $regPath -Name DisplayName -Value 'Kora'
 Set-ItemProperty -LiteralPath $regPath -Name Publisher -Value 'Kora'
 $r = Invoke-Native $kora @('app', 'status'); Show 'app status (old app present)' $r
 Assert-That ($r.Output -match 'old_app_present: yes') 'the old app is detected'
-$r = Invoke-Native $kora @('app', 'uninstall', '--yes'); Show 'app uninstall' $r
-Assert-That ($r.Code -eq 0) 'app uninstall exits 0'
+$r = Invoke-Native $kora @('uninstall', '--app', '--yes'); Show 'uninstall --app' $r
+Assert-That ($r.Code -eq 0) 'uninstall --app exits 0'
 Assert-That (-not (Test-Path $old) -and -not (Test-Path $oldStart) -and -not (Test-Path $regPath)) 'the old copy, its shortcut and its Apps & features entry are gone'
 Assert-That (Test-Path $startLnk) 'the per-user shortcut is still there'
-$r = Invoke-Native $kora @('app', 'uninstall', '--yes'); Show 'app uninstall (nothing left)' $r
+$r = Invoke-Native $kora @('uninstall', '--app', '--yes'); Show 'uninstall --app (nothing left)' $r
 Assert-That ($r.Code -eq 0 -and $r.Output -match 'nothing to remove') 'with nothing old left it is a no-op'
+
+# ---- `app uninstall` removes Kora's own per-user shortcuts (and leaves the program) ----
+$r = Invoke-Native $kora @('app', 'uninstall', '--dry-run'); Show 'app uninstall --dry-run' $r
+Assert-That ($r.Code -eq 0 -and (Test-Path $startLnk)) 'a dry run removes nothing'
+$r = Invoke-Native $kora @('app', 'uninstall', '--yes'); Show 'app uninstall' $r
+Assert-That ($r.Code -eq 0) 'app uninstall exits 0'
+Assert-That (-not (Test-Path $startLnk) -and -not (Test-Path $deskLnk)) 'the Start Menu and Desktop shortcuts are gone'
+Assert-That (Test-Path $kora) 'the program itself is still there'
+$r = Invoke-Native $kora @('app', 'uninstall', '--yes'); Show 'app uninstall (nothing left)' $r
+Assert-That ($r.Code -eq 0 -and $r.Output -match 'nothing to remove') 'with no shortcuts left it is a no-op'
 
 Remove-Item $startLnk, $deskLnk -Force -ErrorAction SilentlyContinue
 Write-Host 'Kora shortcuts smoke test passed.'

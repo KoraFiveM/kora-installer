@@ -895,7 +895,7 @@ route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.v
 route('PUT', '/app', (_m, b) => {
   prefs.shortcuts = true
   prefs.desktopShortcut = !!b.desktop_shortcut
-  if (beh.trouble) throw elevate('Your new Kora shortcuts are ready. Removing the old copy of Kora', ['app', 'uninstall', '--yes'])
+  if (beh.trouble) throw elevate('Your new Kora shortcuts are ready. Removing the old copy of Kora', ['uninstall', '--app', '--yes'])
   prefs.app = false
   return { message: 'Done. Kora now opens from your own shortcuts. Your servers were not touched.' }
 })
@@ -916,7 +916,7 @@ route('POST', '/uninstall/plan', (_m, b) => {
       { item: `${s.name}/database`, description: `Drop the database and database user Kora created for '${s.name}'`, kind: 'database', remove: false },
     )
   }
-  if (!only && prefs.app) items.push({ item: 'app', description: 'The Kora app (the `kora` command, shortcuts and the installed program)', kind: 'app', remove: false })
+  if (!only && prefs.app) items.push({ item: 'app', description: "Kora's shortcuts (and the old machine-wide Kora app, if it is still installed). Your servers are not touched", kind: 'app', remove: false })
   return { items } satisfies T.UninstallPlan
 })
 route('POST', '/uninstall', (_m, b) => {

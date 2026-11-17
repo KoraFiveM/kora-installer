@@ -149,6 +149,6 @@ jobs:
         run: |
           cargo build --release --locked -p kora-cli
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
-      - name: "9. The Kora app: install, status, shortcuts (Run as administrator), PATH, Apps & features, uninstall"
+      - name: "9. Kora shortcuts: per-user install, status, uninstall; tidying up the old machine-wide app"
         timeout-minutes: 10
         run: ./scripts/smoke/09-app.ps1

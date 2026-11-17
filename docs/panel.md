@@ -37,7 +37,7 @@ kora
 
 Kora makes sure the panel runs in the background (so monitoring and alerts keep working), then opens your browser at it.
 It never asks for administrator rights. With no servers yet the panel opens straight into the install wizard.
-`kora manager` does the same, and `kora install` (with no options) opens the install page.
+`kora install` (with no options) opens the install page. (The old name `kora manager` still works and does the same as `kora`.)
 
 What `kora` does when things are not simple:
 
@@ -144,11 +144,24 @@ waiting, and buttons to start, stop and restart. From here you can:
 
 If a server's folder has gone missing, the list says so rather than hiding it.
 
+Each server in the list (and its Overview) has three buttons:
+
+- **Open txAdmin:** opens txAdmin in a new tab. From the computer that runs Kora it uses `localhost`; from another
+  computer it uses the name you reached the panel by plus txAdmin's port. txAdmin's port is closed to other computers by
+  default, so if the page does not load, forward it like the panel's own (`ssh -L 40120:localhost:40120 ...`). Through an
+  SSH tunnel to the panel, `localhost` is your own computer, so add that port to the tunnel too.
+- **Open folder** / **Copy path:** at the computer that runs Kora, with a desktop in front of it, it opens the server's
+  folder in the file manager. From anywhere else (Tailscale, a token sign-in, an SSH tunnel, a computer with no desktop)
+  it is **Copy path** instead, because opening a window nobody is looking at would do nothing useful.
+- **Copy connect address:** this computer's address on your network with the server's game port, for players on the same
+  network. Players on the internet need your public address (or domain name) with the same port, and the port forwarded
+  on your router or opened with your hosting provider. Kora cannot see your public address.
+
 ## 4. A server's tabs
 
 | Tab | What it is for |
 |---|---|
-| Overview | State, ports, the update badge, start / stop / restart, open the server folder (only when you are on that computer). |
+| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin and the connect address. |
 | Console | Live server output and a box to send commands. The first time, Kora offers to add a small resource called `kora_console`; it loads on the next server start. |
 | Logs | Pick a log file and read its latest lines. |
 | Resources | **Updates** at the top: check for newer versions, pick what to update, choose what happens about restarts, and roll back to an earlier snapshot (same as `kora update`). Below it the installed resources, each with buttons to check it for updates and to start, stop or restart it on a running server (needs the live console from the Console tab), and the catalogue of resources you can add (same as `kora add-resources`). What the tab shows stays when you open another tab and come back. |
@@ -189,7 +202,7 @@ where you left off" the next time. The wizard also checks free disk space before
   Files or /opt/kora, and shortcuts that ask for administrator rights) it offers **Tidy up old shortcuts**, also as a
   notice on the servers screen. That makes the new shortcuts first, so the old ones keep working until the end, then removes
   the old copy. Removing the old copy needs administrator rights: the panel shows the command to run
-  (`kora app uninstall --yes`) or, with the helper installed, does it itself.
+  (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
   and databases are kept unless you tick them.

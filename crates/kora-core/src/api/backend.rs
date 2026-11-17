@@ -1,5 +1,5 @@
-//! Everything a front end (TUI, CLI, web panel) does to the outside world, behind one trait so
-//! the screens can be tested with a fake. The real implementation is `super::system::SystemBackend`.
+//! Everything a front end (the web panel, the CLI) does to the outside world, behind one trait so
+//! the pages can be tested with a fake. The real implementation is `super::system::SystemBackend`.
 
 use std::path::{Path, PathBuf};
 

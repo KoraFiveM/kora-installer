@@ -52,7 +52,7 @@ pub fn diagnostics(server: &ServerFile, res: &ResourceRecord, commit: Option<&st
         Mode::Production => "production",
         Mode::Development => "development",
     };
-    let mut s = String::from("---\nReported from the Kora manager.\n");
+    let mut s = String::from("---\nReported from Kora Panel.\n");
     s.push_str(&format!(
         "- Kora installer: {}\n",
         env!("CARGO_PKG_VERSION")

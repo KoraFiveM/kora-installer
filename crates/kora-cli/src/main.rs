@@ -502,7 +502,7 @@ enum Command {
         /// Also drop the databases and database users Kora created.
         #[arg(long)]
         delete_databases: bool,
-        /// Remove only the Kora app (shortcuts, PATH entry, the installed copy); servers and databases are never touched.
+        /// Remove only the OLD machine-wide Kora app (its shortcuts, PATH entry, the installed copy); servers and databases are never touched. (`kora app uninstall` removes Kora's own shortcuts.)
         #[arg(long)]
         app: bool,
     },
@@ -779,8 +779,9 @@ enum AppCmd {
     },
     /// Show the shortcuts and whether the old machine-wide app is still here (`key: value` lines).
     Status,
-    /// Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights
-    /// only when there is something to remove. Servers and databases are never touched.
+    /// Remove Kora's shortcuts (Start Menu / Desktop on Windows, the applications-menu launcher on Linux). If the
+    /// OLD machine-wide app is also installed it is removed too when you run this as administrator; otherwise
+    /// `kora uninstall --app` (as administrator) does that. Servers and databases are never touched.
     Uninstall {
         #[arg(long, short = 'y')]
         yes: bool,
@@ -810,7 +811,7 @@ fn app_install(no_desktop_shortcut: bool, dry_run: bool) -> i32 {
             print_lines("  - ", &out.changes);
             print_lines("  note: ", &out.notes);
             if user::legacy_present().present() {
-                println!("The old machine-wide Kora app is still installed. Remove it with `kora app uninstall` (as administrator), or use \"Tidy up old shortcuts\" in the panel.");
+                println!("The old machine-wide Kora app is still installed. Remove it with `kora uninstall --app` (as administrator), or use \"Tidy up old shortcuts\" in the panel.");
             }
             0
         }
@@ -835,38 +836,71 @@ fn app_status() -> i32 {
     0
 }
 
-fn app_uninstall(yes: bool, dry_run: bool) -> i32 {
+/// `kora app uninstall` (`shortcuts`: also Kora's own per-user shortcuts, no administrator rights) and
+/// `kora uninstall --app` (only the OLD machine-wide app, which is what "Tidy up old shortcuts" runs as administrator).
+fn app_uninstall(yes: bool, dry_run: bool, shortcuts: bool) -> i32 {
     use kora_core::app_install as app;
-    if !app::user::legacy_present().present() {
-        println!("The old machine-wide Kora app is not installed: nothing to remove. Your servers and databases were not touched.");
+    let legacy = app::user::legacy_present().present();
+    let mine = shortcuts && app::user::user_status().any();
+    if !legacy && !mine {
+        println!(
+            "{} Your servers and databases were not touched.",
+            if shortcuts { "There are no Kora shortcuts and no old machine-wide Kora app: nothing to remove." } else { "The old machine-wide Kora app is not installed: nothing to remove." }
+        );
         return 0;
     }
-    if !dry_run && !installer::is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none() {
+    let admin = installer::is_admin() || std::env::var_os("KORA_APP_PREFIX").is_some();
+    // The old app can only go with administrator rights. With `--app` that is the whole job; otherwise the
+    // shortcuts are still removed and the old app is explained.
+    if legacy && !admin && !dry_run && !shortcuts {
         eprintln!("error: removing the old Kora app needs administrator rights: run this as Administrator (Windows) or with sudo (Linux).");
         return 1;
     }
+    let remove_legacy = legacy && (admin || dry_run);
     if !yes && !dry_run {
         if !std::io::stdin().is_terminal() {
-            eprintln!("error: pass --yes to remove the old Kora app without a terminal to ask in (or --dry-run to preview).");
+            eprintln!("error: pass --yes to remove Kora's shortcuts or the old Kora app without a terminal to ask in (or --dry-run to preview).");
             return 2;
         }
-        if !installer::uninstall::Asker::ask(&mut Terminal, "Remove the old Kora app (its shortcuts, PATH entry and installed program)? Your servers and databases are not touched.", true) {
+        let what = match (mine, remove_legacy) {
+            (true, true) => "Remove Kora's shortcuts and the old Kora app (its PATH entry and installed program)?",
+            (true, false) => "Remove Kora's shortcuts?",
+            _ => "Remove the old Kora app (its shortcuts, PATH entry and installed program)?",
+        };
+        if !installer::uninstall::Asker::ask(&mut Terminal, &format!("{what} Your servers and databases are not touched."), true) {
             println!("Cancelled. Nothing was changed.");
             return 0;
         }
     }
-    match app::uninstall_app_opts(dry_run) {
-        Ok(lines) => {
-            println!("{}", if dry_run { "Dry run: nothing was changed. Removing the old Kora app would:" } else { "The old Kora app was removed:" });
-            print_lines("  - ", &lines);
-            println!("Your servers and databases were not touched.");
-            0
-        }
-        Err(e) => {
-            eprintln!("error: {e}");
-            1
+    let mut code = 0;
+    if mine {
+        match app::user::uninstall_user(dry_run) {
+            Ok(lines) => {
+                println!("{}", if dry_run { "Dry run: nothing was changed. Removing Kora's shortcuts would:" } else { "Kora's shortcuts were removed:" });
+                print_lines("  - ", &lines);
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                code = 1;
+            }
         }
     }
+    if remove_legacy {
+        match app::uninstall_app_opts(dry_run) {
+            Ok(lines) => {
+                println!("{}", if dry_run { "Dry run: nothing was changed. Removing the old Kora app would:" } else { "The old Kora app was removed:" });
+                print_lines("  - ", &lines);
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                code = 1;
+            }
+        }
+    } else if legacy {
+        println!("The old machine-wide Kora app is still installed. Remove it with `kora uninstall --app`, run as Administrator (Windows) or with sudo (Linux).");
+    }
+    println!("Your servers and databases were not touched.");
+    code
 }
 
 #[derive(Subcommand)]
@@ -1529,7 +1563,7 @@ fn add_asset(a: &AddAssetArgs) -> i32 {
 }
 
 /// `kora add-resources <server> --resource ID...`. Browsing the catalog sections
-/// (with per-creator drill-in) is in the manager: `kora manager` > Add resources.
+/// (with per-creator drill-in) is in the panel: a server's Resources tab.
 fn add_resources(a: AddResourcesArgs) -> i32 {
     if a.code.is_some() {
         eprintln!("{CODE_REMOVED}");
@@ -1545,7 +1579,7 @@ fn add_resources(a: AddResourcesArgs) -> i32 {
         }
     };
     let ids: Vec<String> = if a.resource.is_empty() {
-        eprintln!("error: say what to add: --resource <ID> (repeatable). To browse the catalog, open `kora manager` and choose Add resources, or use `kora panel`.");
+        eprintln!("error: say what to add: --resource <ID> (repeatable). To browse the catalog, run `kora` and use the server's Resources tab.");
         return 2;
     } else {
         a.resource.clone()
@@ -1718,6 +1752,22 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
             un::mariadb_cleanup(&reg, &opts, admin, record, &mut Terminal, &mut say, &mut remove, &mut summary);
         }
     }
+    // Kora's own shortcuts (per user). Under `sudo` they belong to the person who typed it, not to root.
+    let under_sudo = cfg!(unix) && kora_core::userhome::sudo_account().is_some();
+    if under_sudo {
+        if kora_core::app_install::user::user_status().any() || kora_core::app_install::user::legacy_present().present() {
+            println!("\nKora's shortcuts belong to your own account: run `kora app uninstall` without sudo to remove them.");
+        }
+    } else {
+        match kora_core::app_install::user::uninstall_user(dry_run) {
+            Ok(lines) if !lines.is_empty() => {
+                println!("\n{}", if dry_run { "Kora's shortcuts would be removed:" } else { "Kora's shortcuts were removed:" });
+                print_lines("  - ", &lines);
+            }
+            Ok(_) => {}
+            Err(e) => summary.failed.push(format!("Kora's shortcuts: {e}")),
+        }
+    }
     if dry_run {
         println!("\nDry run: nothing was changed.");
         if kora_core::app_install::status().installed {
@@ -1759,7 +1809,7 @@ fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
     // SECURITY.md: the panel runs as the installing user, never as administrator/root. A root panel
     // would keep its token and state in root's home and run every action with full rights.
     if kora_core::elevate::is_elevated() && std::env::var_os("KORA_ALLOW_ROOT_PANEL").is_none_or(|v| v != "1") {
-        eprintln!("error: Kora Panel does not run as administrator/root. Run `kora panel` from your normal account (without sudo). It asks for administrator rights only when an action needs them.");
+        eprintln!("error: Kora Panel does not run as administrator/root: it keeps your servers and your sign-in safe. Run `kora` from your normal account, without sudo. It asks for administrator rights only when an action needs them.");
         if cfg!(target_os = "linux") {
             for line in ROOT_ONLY_HELP {
                 eprintln!("{line}");
@@ -2389,9 +2439,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Restart { .. }) => K::Restart,
         Some(Command::Uninstall { dry_run, .. }) => K::Uninstall { dry_run: *dry_run },
         Some(Command::App { cmd }) => match cmd {
-            AppCmd::Uninstall { dry_run, .. } => K::Uninstall { dry_run: *dry_run },
-            // The per-user shortcuts need no administrator rights.
-            AppCmd::Install { .. } | AppCmd::Status => K::Status,
+            // The per-user shortcuts need no administrator rights; the old machine-wide app, if there, is
+            // removed only when this is already run as administrator (`kora uninstall --app` asks for it).
+            AppCmd::Install { .. } | AppCmd::Uninstall { .. } | AppCmd::Status => K::Status,
         },
     }
 }
@@ -2425,7 +2475,6 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) => one("change the automatic-update schedule"),
         Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
-        Some(Command::App { cmd: AppCmd::Uninstall { dry_run: false, .. } }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
         _ => vec![],
     }
@@ -2561,12 +2610,12 @@ fn main() {
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
         Some(Command::Helper { cmd }) => helper(cmd),
-        Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run),
+        Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run, false),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
             AppCmd::Install { no_desktop_shortcut, dry_run, .. } => app_install(no_desktop_shortcut, dry_run),
             AppCmd::Status => app_status(),
-            AppCmd::Uninstall { yes, dry_run } => app_uninstall(yes, dry_run),
+            AppCmd::Uninstall { yes, dry_run } => app_uninstall(yes, dry_run, true),
         },
     };
     if let Some(line) = pending.and_then(|p| p.finish(std::time::Duration::from_secs(2))) {
@@ -2760,8 +2809,9 @@ mod tests {
         use elevate::CmdKind as K;
         let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
         assert_eq!(command_kind(&parse(&["app", "install", "--yes"])), K::Status, "per-user shortcuts: no administrator rights");
-        assert_eq!(command_kind(&parse(&["app", "uninstall", "--yes"])), K::Uninstall { dry_run: false });
-        assert_eq!(command_kind(&parse(&["app", "uninstall", "--dry-run"])), K::Uninstall { dry_run: true });
+        assert_eq!(command_kind(&parse(&["app", "uninstall", "--yes"])), K::Status, "Kora's own shortcuts: no administrator rights, and never run as root's home");
+        assert_eq!(command_kind(&parse(&["app", "uninstall", "--dry-run"])), K::Status);
+        assert_eq!(command_kind(&parse(&["uninstall", "--app", "--yes"])), K::Uninstall { dry_run: false }, "the old machine-wide app needs them");
         assert_eq!(command_kind(&parse(&["app", "status"])), K::Status);
         assert!(matches!(parse(&["uninstall", "--app", "-y"]), Some(Command::Uninstall { app: true, yes: true, .. })));
     }
