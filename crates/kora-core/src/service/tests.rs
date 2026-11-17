@@ -363,6 +363,21 @@ fn windows_service_runs_as_its_virtual_account_with_access_to_its_folder_only() 
 }
 
 #[test]
+fn windows_service_keeps_only_ordinary_user_privileges_and_grants_are_a_separate_plan() {
+    let mut s = server();
+    s.dir = "C:\\Kora\\main".into();
+    let reg: Vec<_> = windows_register_plan(&s).steps.iter().filter_map(|s| s.command_line()).collect();
+    let privs = reg.iter().find(|l| l.contains(" privs ")).expect("the privilege list is set");
+    assert_eq!(*privs, "sc.exe privs kora-main SeChangeNotifyPrivilege/SeIncreaseWorkingSetPrivilege");
+    assert!(!privs.contains("Impersonate"));
+    assert!(reg.iter().all(|l| !l.starts_with("icacls")), "registering needs no folder rights: {reg:?}");
+    let grants: Vec<_> = windows_grant_plan(&s).steps.iter().filter_map(|s| s.command_line()).collect();
+    assert!(grants.iter().all(|l| l.starts_with("icacls.exe")) && grants.len() == 4);
+    let all = install_plan(&s, Platform::Windows).unwrap().steps.len();
+    assert_eq!(all, reg.len() + grants.len());
+}
+
+#[test]
 fn copy_and_rmdir_actions_go_through_the_runner() {
     let r = FakeRunner::default();
     let p = Plan::new(vec![
