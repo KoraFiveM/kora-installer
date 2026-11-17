@@ -70,8 +70,10 @@ pre-release or a draft); see the [Releases page](https://github.com/KoraFiveM/ko
 4. **Install:** downloads and verifies FXServer, sets up the database, clones/installs resources, creates the service and firewall rules.
 5. **Done:** the server is started and the last screen offers Open txAdmin, Copy connect address and Stop server.
 
-If an install is interrupted, run `kora install` again to resume it. Scripts can use flags instead of the wizard
-(`kora install --help`, `kora install --dry-run` to preview).
+If a step fails, the install stops there and the page offers **Try this step again** (or **Skip this step** when it is
+safe: firewall, schedule, starting the server) instead of starting over. An install that was stopped, for example by
+restarting the panel, can be carried on from the install page when it used a saved licence key. Scripts can use flags
+instead of the wizard (`kora install --help`, `kora install --dry-run` to preview).
 
 ### Production vs development mode
 
@@ -82,7 +84,9 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 ## Requirements
 
 - Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+ (x86-64).
-- Administrator rights: Kora asks for them itself (a UAC prompt, or `sudo`).
+- Administrator rights are **not** needed to install Kora, open the panel or get started. Setting up a server's
+  service, firewall rules or a database server does need them: on Linux the panel shows the `sudo` command to run (or does
+  it for you once the optional helper is installed); on Windows <!-- windows-admin: to be filled in -->
 - Server folder (suggested by default): Windows `C:\Kora\<name>`; Linux `~/kora/<name>` in your own home folder, also
   when Kora runs with `sudo`. Logged in as root (common on rented servers), it is `/home/kora/<name>`: Kora creates a
   normal `kora` user account that owns it. On Linux the background service runs as its own account, which cannot enter
@@ -94,9 +98,26 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 
 ## Everyday commands
 
-`kora status`, `kora start|stop|restart`, `kora schedule show|set|off <server>`, `kora delete <server>`,
-`kora keys list|add|replace|rename|remove|use` (saved licence keys; a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line; `kora install --license-key-name <name>` uses one), `kora profile show|forget` (the remembered Cfx.re name and GitHub owner),
-`kora panel` (web panel), `kora branch list|show|switch|default|all|restore <server> ...` and `kora pr list|checkout <server> <resource> ...` (Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise; your saved keys are kept unless you say yes).
+Most things are in the panel (`kora`); these are the same operations for scripts and terminals. `kora --help` and
+`kora <command> --help` list every option.
+
+| Command | What it does |
+|---|---|
+| `kora` (also `kora manager`, `kora install` with no options) | Make sure the panel runs in the background and open it (the install page for `kora install`). |
+| `kora panel` | The panel in this window, or set up and manage it: `--tailscale`, `--setup`, `--print-link`, `--new-token`, `--remove-service`, `restart`, `remote-actions on\|off\|status`, `user ...` (remote users), `tailscale allow\|remove\|list\|off`. |
+| `kora install --name ... --mode prod\|dev ...` | Install a server without asking (`--dry-run` to preview, `--license-key-name` to use a saved key). |
+| `kora status`, `kora start\|stop\|restart <server>` | List servers; control a server's background service. |
+| `kora update <server>` | Preview, apply and roll back updates (`--auto` is for schedulers). `kora schedule show\|set\|off <server>` sets when a Development server updates itself. |
+| `kora add-resources`, `kora add-asset <server> <zip>...` | Add catalogue resources, or paid assets downloaded from the Cfx.re Portal. |
+| `kora branch list\|show\|switch\|default\|all\|restore <server> ...`, `kora pr list\|checkout <server> <resource> ...` | Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone. |
+| `kora keys list\|add\|replace\|rename\|remove\|use`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line) and the remembered Cfx.re name and GitHub owner. |
+| `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers for Development mode. |
+| `kora webhook ...` | Discord notifications for update reports. |
+| `kora app install\|status\|uninstall` | Kora's per-user shortcuts (Start Menu / Desktop, applications menu). `kora uninstall --app` removes the OLD machine-wide app of earlier versions. |
+| `kora self-update` | Update Kora to the newest stable release (checksum-verified). |
+| `kora delete <server>` | Delete a server and what the installer created for it. |
+| `kora uninstall [--dry-run]` | Remove the system changes Kora made. Asks item by item; your server folders and databases are kept unless you say otherwise, and so are your saved keys. |
+| `kora helper install\|uninstall\|status` | The optional helper that lets the panel do the few things that need administrator rights. |
 
 ## Status and limits
 

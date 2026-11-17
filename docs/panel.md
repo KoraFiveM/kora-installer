@@ -63,6 +63,12 @@ Options:
 | `--setup` | Makes sure the background panel is set up and running, opens it in your browser (where there is a screen) and prints the sign-in link. The install scripts run this. It never reads what is piped in; on a server with no screen and Tailscale running it asks once, on the terminal, whether to use Tailscale (`KORA_TAILSCALE=1` or `0` answers in advance, for example in automation). |
 | `--no-open` | Do not open a browser; print the address and sign-in link instead. This is automatic over SSH or when the computer has no desktop. |
 | `--tailscale` | Open the panel to your own devices over Tailscale (see below). Run once; it keeps running in the background. |
+| `--admin <LOGIN>` | With `--tailscale`: the Tailscale account (`name@example.com`) that becomes the panel's admin. Without it Kora uses the account you are connected from, else the one that added the computer to Tailscale. |
+| `--bind <ADDRESS>`, `--remote` | Listen on another address than `127.0.0.1` (plain HTTP: only on a private network such as Tailscale or WireGuard); needs remote access (`--remote` for this run, or the saved setting). |
+| `--allow-public` | Let `--bind` be a public address or every interface. Not recommended: use `--tailscale` or an SSH tunnel. |
+| `--foreground` | Run in this window only; do not offer or use the background panel. |
+| `--install-service`, `--remove-service` | Keep the panel running in the background (starts at sign-in, no administrator rights), or stop and remove it. |
+| `--print-link` | Print the sign-in link of the background panel. |
 | `--new-token` | Make a new sign-in token: links shown before stop working. |
 | `--no-elevate` | Do not ask Windows or `sudo` for administrator permission (for developers and CI). |
 
@@ -260,6 +266,8 @@ The same buttons appear wherever an error offers them (the install wizard, the G
 `kora uninstall` also removes Kora's own copies of Git and the GitHub CLI.
 
 ## 7. Actions that need administrator rights
+
+<!-- windows-admin: to be filled in -->
 
 The panel runs as you, not as an administrator. A few things need more rights: creating or changing services, firewall
 rules, update timers and scheduled tasks, installing MariaDB, and removing the old machine-wide Kora app.
