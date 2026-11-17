@@ -23,6 +23,8 @@ import { useBranches } from './branches/useBranches'
 import { VersionBadge } from './branches/VersionBadge'
 import { useUpdates, type Updates } from './useUpdates'
 import { VersionsCard } from './VersionsCard'
+import { t } from '@/i18n'
+import '@/i18n/en/resources'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
   const [name, setName] = useState('')
@@ -31,12 +33,12 @@ export function EnsureForm({ server: s, installed }: { server: ServerDetail; ins
   const no = whyNot(useRole(), 'operator')
   return (
     <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (name.trim()) m.mutate() }}>
-      <Field label="Resource name" hint="Adds the resource to server.cfg, so it starts every time the server starts.">
+      <Field label={t('resources.resourcesTab.resourceName')} hint={t('resources.resourcesTab.addsResourceServerCfg')}>
         <Input list="installed-resources" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
       </Field>
       <datalist id="installed-resources">{installed.map((r) => <option key={r} value={r} />)}</datalist>
-      <Checkbox label="Restart the server now" hint="Otherwise the resource loads the next time the server restarts." checked={restart} onChange={(e) => setRestart(e.target.checked)} />
-      <Button type="submit" variant="default" disabled={!name.trim() || m.isPending || no !== null} title={no ?? undefined}>Add to server.cfg</Button>
+      <Checkbox label={t('resources.resourcesTab.restartServerNow')} hint={t('resources.resourcesTab.otherwiseResourceLoadsNext')} checked={restart} onChange={(e) => setRestart(e.target.checked)} />
+      <Button type="submit" variant="default" disabled={!name.trim() || m.isPending || no !== null} title={no ?? undefined}>{t('resources.resourcesTab.addServerCfg')}</Button>
       {no && <p className="text-xs text-muted-foreground">{no}</p>}
       {m.isSuccess && <Alert tone="success">{m.data.message}</Alert>}
       <ErrorNotice error={m.error} />
@@ -47,27 +49,27 @@ export function EnsureForm({ server: s, installed }: { server: ServerDetail; ins
 function PlanView({ plan, dev }: { plan: AddPlan; dev: boolean }) {
   return (
     <div className="space-y-3">
-      {plan.already.length > 0 && <p className="text-sm text-muted-foreground">Already installed, so skipped: {plan.already.join(', ')}</p>}
-      {plan.items.length === 0 ? <Alert tone="info">Nothing new to install.</Alert> : (
+      {plan.already.length > 0 && <p className="text-sm text-muted-foreground">{t('resources.resourcesTab.alreadyInstalledSkippedJoin', { join: plan.already.join(', ') })}</p>}
+      {plan.items.length === 0 ? <Alert tone="info">{t('resources.resourcesTab.nothingNewInstall')}</Alert> : (
         <ul className="divide-y divide-border rounded-md border border-border">
           {plan.items.map((i) => (
             <li key={i.id} className="flex flex-wrap items-center gap-2 p-3 text-sm">
               <span className="font-mono text-xs">{i.id}</span>
-              {i.dependency && <Badge tone="info">Needed by another resource</Badge>}
-              {i.fork ? <Badge tone="plain">Your own fork (follows the latest changes)</Badge> : <Badge tone="plain">{i.commit ? `Fixed version ${i.commit.slice(0, 7)}` : `Latest on ${i.branch}`}</Badge>}
-              {i.third_party && <Badge tone="orange">Made by someone else</Badge>}
-              <span className="ml-auto font-mono text-xs text-muted-foreground">resources/{i.rel}</span>
+              {i.dependency && <Badge tone="info">{t('resources.resourcesTab.neededAnotherResource')}</Badge>}
+              {i.fork ? <Badge tone="plain">{t('resources.resourcesTab.ownForkFollowsLatest')}</Badge> : <Badge tone="plain">{i.commit ? t('resources.resourcesTab.fixedVersionSlice', { slice: i.commit.slice(0, 7) }) : t('resources.resourcesTab.latestBranch', { branch: i.branch })}</Badge>}
+              {i.third_party && <Badge tone="orange">{t('resources.resourcesTab.madeSomeoneElse')}</Badge>}
+              <span className="ml-auto font-mono text-xs text-muted-foreground">{t('resources.resourcesTab.resourcesRel', { rel: i.rel })}</span>
             </li>
           ))}
         </ul>
       )}
       {plan.ensure.length > 0 && (
         <div className="space-y-1">
-          <div className="text-sm font-semibold">Lines added to server.cfg</div>
+          <div className="text-sm font-semibold">{t('resources.resourcesTab.linesAddedServerCfg')}</div>
           <pre className="rounded-md border border-border bg-ink p-3 font-mono text-xs">{plan.ensure.map((e) => `ensure ${e}`).join('\n')}</pre>
         </div>
       )}
-      {dev && <p className="text-xs text-muted-foreground">Resources you add are made into your own copies on GitHub (forks), like the rest, so you can change them.</p>}
+      {dev && <p className="text-xs text-muted-foreground">{t('resources.resourcesTab.resourcesAddMadeInto')}</p>}
     </div>
   )
 }
@@ -91,35 +93,35 @@ function AddResources({ server: s }: { server: ServerDetail }) {
   const installed = new Set(cat.data?.installed ?? [])
   const toggle = (id: string) => { setPlan(null); setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n }) }
   if (!s.managed) {
-    return <p className="text-sm text-muted-foreground">This server was added from an existing folder, so Kora did not install it and has no record of how it was set up. Adding resources from the catalogue only works for servers that Kora installed. Resources already in the folder are listed above.</p>
+    return <p className="text-sm text-muted-foreground">{t('resources.resourcesTab.serverAddedFromExisting')}</p>
   }
   return (
     <div className="space-y-4">
       {cat.data?.note && <p className="text-sm text-muted-foreground">{cat.data.note}</p>}
       <ErrorNotice error={cat.error} />
-      <Field label="Search the catalogue"><Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="For example: inventory" /></Field>
+      <Field label={t('resources.resourcesTab.searchCatalogue')}><Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('resources.resourcesTab.exampleInventory')} /></Field>
       <div className="max-h-96 space-y-4 overflow-y-auto rounded-md border border-border p-3">
-        {groups.length === 0 && !cat.isLoading && <p className="text-sm text-muted-foreground">Nothing matches your search.</p>}
+        {groups.length === 0 && !cat.isLoading && <p className="text-sm text-muted-foreground">{t('resources.resourcesTab.nothingMatchesSearch')}</p>}
         {groups.map(([g, items]) => (
           <fieldset key={g} className="space-y-2">
             <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{GROUP_LABEL[g]}</legend>
             {items.map((r) => (
-              <Checkbox key={r.id} label={<>{r.title ?? r.id} <span className="font-mono text-xs text-muted-foreground">{r.id}</span> {installed.has(r.id) && <Badge tone="success">Installed</Badge>}</>} hint={r.description} checked={picked.has(r.id)} disabled={installed.has(r.id)} onChange={() => toggle(r.id)} />
+              <Checkbox key={r.id} label={<>{r.title ?? r.id} <span className="font-mono text-xs text-muted-foreground">{r.id}</span> {installed.has(r.id) && <Badge tone="success">{t('resources.resourcesTab.installed')}</Badge>}</>} hint={r.description} checked={picked.has(r.id)} disabled={installed.has(r.id)} onChange={() => toggle(r.id)} />
             ))}
           </fieldset>
         ))}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button disabled={picked.size === 0} onClick={async () => { setErr(null); try { setPlan(await api.resources.plan(s.name, [...picked])) } catch (e) { setErr(e) } }}>Preview what will be added</Button>
-        {plan && plan.items.length > 0 && <Button variant="default" disabled={run.phase === 'running' || no !== null} title={no ?? undefined} onClick={async () => { setErr(null); try { setJob((await api.resources.add(s.name, [...picked])).job) } catch (e) { setErr(e) } }}>Install {plan.items.length} resource{plan.items.length === 1 ? '' : 's'}</Button>}
+        <Button disabled={picked.size === 0} onClick={async () => { setErr(null); try { setPlan(await api.resources.plan(s.name, [...picked])) } catch (e) { setErr(e) } }}>{t('resources.resourcesTab.previewWhatAdded')}</Button>
+        {plan && plan.items.length > 0 && <Button variant="default" disabled={run.phase === 'running' || no !== null} title={no ?? undefined} onClick={async () => { setErr(null); try { setJob((await api.resources.add(s.name, [...picked])).job) } catch (e) { setErr(e) } }}>{t('resources.resourcesTab.installCountResourceValue', { count: plan.items.length })}</Button>}
       </div>
       {no && <p className="text-xs text-muted-foreground">{no}</p>}
       {plan && <PlanView plan={plan} dev={s.source === 'fork'} />}
       <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
       {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
       {run.phase === 'done' && run.result && (
-        <Alert tone={run.result.failed.length ? 'warning' : 'success'} title={run.result.failed.length ? 'Some resources could not be installed' : 'Resources installed'}>
-          {run.result.installed.length > 0 && <p>Installed: {run.result.installed.join(', ')}</p>}
+        <Alert tone={run.result.failed.length ? 'warning' : 'success'} title={run.result.failed.length ? t('resources.resourcesTab.someResourcesCouldInstalled') : t('resources.resourcesTab.resourcesInstalled')}>
+          {run.result.installed.length > 0 && <p>{t('resources.resourcesTab.installedJoin', { join: run.result.installed.join(', ') })}</p>}
           {run.result.failed.map(([id, why]) => <p key={id}>{id}: {why}</p>)}
           {run.result.notes.map((n, i) => <p key={i}>{n}</p>)}
         </Alert>
@@ -160,16 +162,16 @@ function InstalledResource({ id, serverName, updates: u, branch, noCheck, noCont
   return (
     <li className="py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Link className="min-w-0 flex-1 break-all font-mono text-sm underline-offset-2 hover:underline" to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} aria-label={`Open the page of ${id}`}>{id}</Link>
+        <Link className="min-w-0 flex-1 break-all font-mono text-sm underline-offset-2 hover:underline" to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} aria-label={t('resources.resourcesTab.openPageId', { id })}>{id}</Link>
         {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <VersionBadge branch={branch} to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} />}
-        {checking ? <span className="text-xs text-muted-foreground" role="status">Checking...</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
+        {checking ? <span className="text-xs text-muted-foreground" role="status">{t('resources.resourcesTab.checking')}</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" className="size-8" disabled={u.busy || noCheck !== null} aria-busy={checking} aria-label={`Check ${id} for updates`} title={noCheck ?? 'Check for updates'} onClick={() => void u.checkOne(id)}>
+          <Button size="icon" variant="ghost" className="size-8" disabled={u.busy || noCheck !== null} aria-busy={checking} aria-label={t('resources.resourcesTab.checkIdUpdates', { id })} title={noCheck ?? t('resources.resourcesTab.checkUpdates')} onClick={() => void u.checkOne(id)}>
             {checking ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
           </Button>
           {(Object.keys(CONTROL) as ControlAction[]).map((a) => {
             const { label, Icon } = CONTROL[a]
-            const why = noControl ?? (a === 'stop' && id === CONSOLE_RESOURCE ? 'Kora uses this resource to send commands to the server, so it cannot be stopped from here.' : null)
+            const why = noControl ?? (a === 'stop' && id === CONSOLE_RESOURCE ? t('resources.resourcesTab.koraUsesResourceSend') : null)
             return (
               <Button key={a} size="icon" variant="ghost" className="size-8" disabled={why !== null || pending !== undefined} aria-label={`${label} ${id}`} title={why ?? label} onClick={() => onControl(a)}>
                 {pending === a ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />}
@@ -188,15 +190,15 @@ function InstalledList({ server: s, installed, updates: u }: { server: ServerDet
   const role = useRole()
   const noOperator = whyNot(role, 'operator')
   const noControl = noOperator
-    ?? (!s.running ? 'The server is not running. Start the server first; its resources start with it.' : null)
-    ?? (!s.console_enabled ? 'Turn on the live console in the Console tab first. Kora sends these commands through it.' : null)
+    ?? (!s.running ? t('resources.resourcesTab.serverRunningStartServer') : null)
+    ?? (!s.console_enabled ? t('resources.resourcesTab.turnLiveConsoleConsole') : null)
   const [filter, setFilter] = useState('')
   const [ask, setAsk] = useState<{ id: string; action: ControlAction } | null>(null)
   const [said, setSaid] = useKept<Record<string, { ok: boolean; text: string }>>(`control:${s.name}:said`, {})
   const control = useMutation({
     mutationFn: (v: { id: string; action: ControlAction }) => api.resources.control(s.name, v.id, v.action),
     onSuccess: (r, v) => setSaid((x) => ({ ...x, [v.id]: { ok: true, text: r.message } })),
-    onError: (e, v) => setSaid((x) => ({ ...x, [v.id]: { ok: false, text: (e as { message?: string } | null)?.message ?? `Could not ${v.action} ${v.id}.` } })),
+    onError: (e, v) => setSaid((x) => ({ ...x, [v.id]: { ok: false, text: (e as { message?: string } | null)?.message ?? t('resources.resourcesTab.couldActionId', { action: v.action, id: v.id }) } })),
   })
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -205,10 +207,10 @@ function InstalledList({ server: s, installed, updates: u }: { server: ServerDet
   return (
     <div className="space-y-3">
       {installed.length > 8 && (
-        <Input type="search" aria-label="Filter installed resources" placeholder="Filter by name" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <Input type="search" aria-label={t('resources.resourcesTab.filterInstalledResources')} placeholder={t('resources.resourcesTab.filterName')} value={filter} onChange={(e) => setFilter(e.target.value)} />
       )}
-      {noControl && installed.length > 0 && <p className="text-xs text-muted-foreground">Start, stop and restart are off: {noControl}</p>}
-      {shown.length === 0 && installed.length > 0 && <p className="text-sm text-muted-foreground">No resource matches "{filter.trim()}".</p>}
+      {noControl && installed.length > 0 && <p className="text-xs text-muted-foreground">{t('resources.resourcesTab.startStopRestartOff', { noControl })}</p>}
+      {shown.length === 0 && installed.length > 0 && <p className="text-sm text-muted-foreground">{t('resources.resourcesTab.noResourceMatchesTrim', { trim: filter.trim() })}</p>}
       <ul className="divide-y divide-border">
         {shown.map((r) => (
           <InstalledResource
@@ -229,11 +231,11 @@ function InstalledList({ server: s, installed, updates: u }: { server: ServerDet
       <ConfirmDialog
         open={!!ask}
         onOpenChange={(o) => { if (!o) setAsk(null) }}
-        title={ask?.action === 'stop' ? `Stop ${ask.id}?` : `Restart ${ask?.id ?? ''}?`}
+        title={ask?.action === 'stop' ? t('resources.resourcesTab.stopId', { id: ask.id }) : t('resources.resourcesTab.restartValue', { value: ask?.id ?? '' })}
         description={ask?.action === 'stop'
-          ? 'The resource stops for everyone on the server until it is started again. Other resources that need it may stop working. The server itself keeps running.'
-          : 'The resource stops and starts again. Players may notice a short interruption in what it does. The server itself keeps running.'}
-        confirmLabel={ask?.action === 'stop' ? 'Stop resource' : 'Restart resource'}
+          ? t('resources.resourcesTab.resourceStopsEveryoneServer')
+          : t('resources.resourcesTab.resourceStopsStartsAgain')}
+        confirmLabel={ask?.action === 'stop' ? t('resources.resourcesTab.stopResource') : t('resources.resourcesTab.restartResource')}
         destructive={ask?.action === 'stop'}
         onConfirm={() => {
           if (ask) control.mutate(ask)
@@ -254,23 +256,23 @@ export function ResourcesTab({ server: s }: { server: ServerDetail }) {
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="space-y-5">
           <Card>
-            <CardHeader><CardTitle>Installed resources ({installed.length})</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t('resources.resourcesTab.installedResourcesCount', { count: installed.length })}</CardTitle></CardHeader>
             <CardContent>
               <ErrorNotice error={list.error} />
-              {list.isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
-              {list.data?.length === 0 && <p className="text-sm text-muted-foreground">No resources are installed yet. Add some from the catalogue.</p>}
+              {list.isLoading && <p className="text-sm text-muted-foreground">{t('resources.resourcesTab.loading')}</p>}
+              {list.data?.length === 0 && <p className="text-sm text-muted-foreground">{t('resources.resourcesTab.noResourcesInstalledYet')}</p>}
               <InstalledList server={s} installed={installed} updates={updates} />
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>Start a resource with the server</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t('resources.resourcesTab.startResourceServer')}</CardTitle></CardHeader>
             <CardContent><EnsureForm server={s} installed={installed} /></CardContent>
           </Card>
         </div>
         <div className="space-y-5">
           <VersionsCard server={s} />
           <Card>
-            <CardHeader><CardTitle>Add resources</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t('resources.resourcesTab.addResources')}</CardTitle></CardHeader>
             <CardContent><AddResources server={s} /></CardContent>
           </Card>
         </div>

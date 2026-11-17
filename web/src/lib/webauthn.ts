@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 // Passkeys in the browser: the panel sends WebAuthn options as JSON with base64url strings, the browser API wants
 // ArrayBuffers, and the answer goes back as JSON with base64url strings again (what the Rust side, webauthn-rs, reads).
 // Nothing here is cryptography: the browser and the authenticator do it all.
@@ -44,14 +46,14 @@ function revive(o: PublicKeyOptions): PublicKeyCredentialCreationOptions & Publi
 
 function publicKey(options: unknown): PublicKeyOptions {
   const pk = (options as { publicKey?: PublicKeyOptions } | null)?.publicKey
-  if (!pk) throw new Error('The panel did not send passkey options.')
+  if (!pk) throw new Error(t('core.webauthn.panelDidSendPasskey'))
   return pk
 }
 
 /** Register a passkey: the answer for `finish` steps (`credential`). */
 export async function createPasskey(options: unknown): Promise<unknown> {
   const cred = (await navigator.credentials.create({ publicKey: revive(publicKey(options)) })) as PublicKeyCredential | null
-  if (!cred) throw new Error('No passkey was made.')
+  if (!cred) throw new Error(t('core.webauthn.noPasskeyMade'))
   const r = cred.response as AuthenticatorAttestationResponse
   return {
     id: cred.id,
@@ -65,7 +67,7 @@ export async function createPasskey(options: unknown): Promise<unknown> {
 /** Sign with a passkey: the answer for `finish` steps (`credential`). */
 export async function getPasskey(options: unknown): Promise<unknown> {
   const cred = (await navigator.credentials.get({ publicKey: revive(publicKey(options)) })) as PublicKeyCredential | null
-  if (!cred) throw new Error('No passkey was used.')
+  if (!cred) throw new Error(t('core.webauthn.noPasskeyUsed'))
   const r = cred.response as AuthenticatorAssertionResponse
   return {
     id: cred.id,
@@ -86,16 +88,16 @@ export function passkeyErrorText(e: unknown): string {
   const name = e instanceof DOMException ? e.name : ''
   switch (name) {
     case 'NotAllowedError':
-      return 'The passkey prompt was closed, timed out or refused. Try again.'
+      return t('core.webauthn.passkeyPromptClosedTimed')
     case 'InvalidStateError':
-      return 'This device already has a passkey for you here.'
+      return t('core.webauthn.deviceAlreadyPasskeyHere')
     case 'SecurityError':
-      return 'The browser would not use a passkey on this address. Open the panel by its name over https://, or sign in with a one-time code.'
+      return t('core.webauthn.browserWouldUsePasskey')
     case 'NotSupportedError':
-      return 'This browser or device cannot make this kind of passkey. Try another device, or use one-time codes.'
+      return t('core.webauthn.browserDeviceCannotMake')
     case 'AbortError':
-      return 'The passkey prompt was cancelled.'
+      return t('core.webauthn.passkeyPromptCancelled')
     default:
-      return e instanceof Error && e.message ? e.message : 'The passkey did not work.'
+      return e instanceof Error && e.message ? e.message : t('core.webauthn.passkeyDidWork')
   }
 }

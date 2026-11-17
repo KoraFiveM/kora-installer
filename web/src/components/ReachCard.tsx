@@ -11,6 +11,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { useRole, whyNot } from '@/hooks/useRole'
+import { t } from '@/i18n'
+import '@/i18n/en/servers'
 
 const TONE: Record<ReachState, Tone> = { ok: 'success', likely: 'success', problem: 'danger', unknown: 'neutral' }
 const LABEL: Record<ReachState, string> = { ok: 'OK', likely: 'Probably OK', problem: 'Problem', unknown: 'Not known' }
@@ -32,14 +34,14 @@ export function MoreAddresses({ name }: { name: string }) {
     <div className="space-y-1.5">
       {r.connect.public && (
         <>
-          <div className="text-sm text-muted-foreground">From the internet (needs the router and firewall steps above to be right)</div>
-          <CopyField value={r.connect.public} label="Internet address" />
+          <div className="text-sm text-muted-foreground">{t('servers.reachCard.fromInternetNeedsRouter')}</div>
+          <CopyField value={r.connect.public} label={t('servers.reachCard.internetAddress')} />
         </>
       )}
       {r.connect.cfx && (
         <>
-          <div className="text-sm text-muted-foreground">Cfx.re join link</div>
-          <CopyField value={r.connect.cfx} label="Cfx.re join link" />
+          <div className="text-sm text-muted-foreground">{t('servers.reachCard.cfxReJoinLink')}</div>
+          <CopyField value={r.connect.cfx} label={t('servers.reachCard.cfxReJoinLink')} />
         </>
       )}
     </div>
@@ -130,13 +132,13 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
           return (
             <div key={f.id} className="space-y-2">
               {asking === key ? (
-                <Alert tone="info" title={`This will contact ${CONSENT_TEXT[key].what}`}>
+                <Alert tone="info" title={t('servers.reachCard.contactWhat', { what: CONSENT_TEXT[key].what })}>
                   <p>{CONSENT_TEXT[key].learns}</p>
-                  <p className="mt-1">Your choice is remembered; you can turn it off again at the bottom of this card.</p>
+                  <p className="mt-1">{t('servers.reachCard.choiceRememberedTurnOff')}</p>
                   <div className="mt-2 flex gap-2">
                     <Button size="sm" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate(f)}>{CONSENT_TEXT[key].button}</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>Not now</Button>
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setAsking(null); check.mutate({ [key]: true }) }}>Just this once</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>{t('servers.reachCard.notNow')}</Button>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setAsking(null); check.mutate({ [key]: true }) }}>{t('servers.reachCard.justOnce')}</Button>
                   </div>
                 </Alert>
               ) : (
@@ -149,11 +151,11 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
           return (
             <div key={f.id} className="space-y-2">
               {asking === 'forwarding' ? (
-                <Alert tone="warning" title="Let Kora change your router?">
+                <Alert tone="warning" title={t('servers.reachCard.letKoraChangeRouter')}>
                   <p>{FORWARDING_RISK}</p>
                   <div className="mt-2 flex gap-2">
-                    <Button size="sm" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate(f)}>Turn on port forwarding</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>Not now</Button>
+                    <Button size="sm" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate(f)}>{t('servers.reachCard.turnPortForwarding')}</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>{t('servers.reachCard.notNow')}</Button>
                   </div>
                 </Alert>
               ) : (
@@ -171,18 +173,16 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
 
   return (
     <Card>
-      <CardHeader><CardTitle>Can players reach this server?</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('servers.reachCard.playersReachServer')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         {!report && !check.isPending && (
-          <p className="text-sm text-muted-foreground">
-            Kora checks four things in turn: is the server listening, does this computer's firewall let players in, does your router send them here, and can the internet reach it. It only looks at this computer and your router. Nothing outside is contacted unless you allow it.
-          </p>
+          <p className="text-sm text-muted-foreground">{t('servers.reachCard.koraChecksFourThings')}</p>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <Button size="default" disabled={busy || checkOff !== null} title={checkOff ?? undefined} onClick={() => check.mutate(undefined)}>
-            {check.isPending ? <Loader2 className="animate-spin" /> : null} {report ? 'Check again' : 'Check now'}
+            {check.isPending ? <Loader2 className="animate-spin" /> : null} {report ? t('servers.reachCard.checkAgain') : t('servers.reachCard.checkNow')}
           </Button>
-          {check.isPending && <span className="text-sm text-muted-foreground">Looking at the server, the firewall and your router (a few seconds)…</span>}
+          {check.isPending && <span className="text-sm text-muted-foreground">{t('servers.reachCard.lookingServerFirewallRouter')}</span>}
         </div>
         {check.error && <ErrorNotice error={check.error} onRetry={() => check.mutate(undefined)} />}
         {act.error && <ErrorNotice error={act.error} onRetry={() => act.reset()} />}
@@ -195,26 +195,26 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
             </ul>
             {report.forwarding.enabled && (
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-muted-foreground">Automatic port forwarding is on.</span>
-                <Button size="sm" variant="ghost" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate('forwarding_off')}>Turn it off</Button>
+                <span className="text-muted-foreground">{t('servers.reachCard.automaticPortForwarding')}</span>
+                <Button size="sm" variant="ghost" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate('forwarding_off')}>{t('servers.reachCard.turnOff')}</Button>
               </div>
             )}
             {!compact && (report.connect.lan || report.connect.public || report.connect.cfx) && (
               <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">Addresses to give people</div>
-                {report.connect.lan && <CopyField value={report.connect.lan} label="Address on your own network" />}
-                {report.connect.public && <CopyField value={report.connect.public} label="Address on the internet" />}
-                {report.connect.cfx && <CopyField value={report.connect.cfx} label="Cfx.re join link" />}
+                <div className="text-sm text-muted-foreground">{t('servers.reachCard.addressesGivePeople')}</div>
+                {report.connect.lan && <CopyField value={report.connect.lan} label={t('servers.reachCard.addressOwnNetwork')} />}
+                {report.connect.public && <CopyField value={report.connect.public} label={t('servers.reachCard.addressInternet')} />}
+                {report.connect.cfx && <CopyField value={report.connect.cfx} label={t('servers.reachCard.cfxReJoinLink')} />}
               </div>
             )}
             <div className="space-y-1.5 border-t border-border pt-3">
-              <div className="text-sm text-muted-foreground">Outside lookups Kora may do for this check (off unless you allow them)</div>
-              <Checkbox label="Cfx.re's public server list" hint="Asks frontend.cfx-services.net about this server's own join code." checked={report.consent.cfx_list} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void api.reach.setSettings({ cfx_list: e.target.checked }).then(() => check.mutate(undefined)) }} />
-              <Checkbox label="A public-address website (api.ipify.org)" hint="Only used when the router cannot tell Kora the public address. It sees this computer's public address." checked={report.consent.ip_echo} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void api.reach.setSettings({ ip_echo: e.target.checked }).then(() => check.mutate(undefined)) }} />
+              <div className="text-sm text-muted-foreground">{t('servers.reachCard.outsideLookupsKoraMay')}</div>
+              <Checkbox label={t('servers.reachCard.cfxResPublicServer')} hint={t('servers.reachCard.asksFrontendCfxservicesNet')} checked={report.consent.cfx_list} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void api.reach.setSettings({ cfx_list: e.target.checked }).then(() => check.mutate(undefined)) }} />
+              <Checkbox label={t('servers.reachCard.publicaddressWebsiteApiIpify')} hint={t('servers.reachCard.onlyUsedWhenRouter')} checked={report.consent.ip_echo} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void api.reach.setSettings({ ip_echo: e.target.checked }).then(() => check.mutate(undefined)) }} />
             </div>
             {report.contacted.length > 0 && (
               <ul className="space-y-1 text-xs text-muted-foreground">
-                {report.contacted.map((c, i) => <li key={i}>This check asked {c.what}; it learned {c.learned}.</li>)}
+                {report.contacted.map((c, i) => <li key={i}>{t('servers.reachCard.checkAskedWhatLearned', { what: c.what, learned: c.learned })}</li>)}
               </ul>
             )}
           </>

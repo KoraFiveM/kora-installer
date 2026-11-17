@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 /**
  * A live region for screen readers that is not drawn. Put it next to whatever changes (a progress bar, a list of steps)
@@ -29,5 +31,5 @@ export function milestoneOf(percent: number, done = false): 'start' | 25 | 50 | 
 /** "Backup progress: started / 25 per cent / ... / finished" at the start, each quarter and the end; the same words in between, so nothing new is said. */
 export function progressSentence(label: string, percent: number, done = false): string {
   const m = milestoneOf(percent, done)
-  return m === null ? '' : m === 'done' ? `${label}: finished` : m === 'start' ? `${label}: started` : `${label}: ${m} per cent`
+  return m === null ? '' : m === 'done' ? `${label}: finished` : m === 'start' ? `${label}: started` : t('core.announcer.labelMPerCent', { label, m })
 }

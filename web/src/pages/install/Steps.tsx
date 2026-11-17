@@ -14,6 +14,9 @@ import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { slug, validatePorts } from '@/lib/utils'
 import { dbLoginProblem, defaultVersions, dirBase, folderFor, type WizardForm } from './form'
 import type { PortsChecked } from './ports'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/install'
 
 export interface StepProps {
   f: WizardForm
@@ -30,9 +33,9 @@ export function sourcePatch(f: WizardForm, source: Source): Partial<WizardForm> 
 export function SourceStep({ f, set }: StepProps) {
   return (
     <fieldset className="space-y-3">
-      <legend className="mb-2 text-sm text-muted-foreground">Where should the resources come from?</legend>
-      <Radio name="source" checked={f.source === 'clone'} onChange={() => set(sourcePatch(f, 'clone'))} label="Use Kora's resources as they are" hint="Plain copies (clones) of the original repositories. You do not need a GitHub account." />
-      <Radio name="source" checked={f.source === 'fork'} onChange={() => set(sourcePatch(f, 'fork'))} label="Make my own copies on GitHub so I can change them" hint="Kora forks each resource into your GitHub account or an organisation you belong to. You can then change them, send pull requests and keep them up to date with the originals." />
+      <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whereShouldResourcesCome')}</legend>
+      <Radio name="source" checked={f.source === 'clone'} onChange={() => set(sourcePatch(f, 'clone'))} label={t('install.steps.useKorasResourcesThey')} hint={t('install.steps.plainCopiesClonesOriginal')} />
+      <Radio name="source" checked={f.source === 'fork'} onChange={() => set(sourcePatch(f, 'fork'))} label={t('install.steps.makeMyOwnCopies')} hint={t('install.steps.koraForksEachResource')} />
     </fieldset>
   )
 }
@@ -40,10 +43,10 @@ export function SourceStep({ f, set }: StepProps) {
 export function VersionsStep({ f, set }: StepProps) {
   return (
     <fieldset className="space-y-3">
-      <legend className="mb-2 text-sm text-muted-foreground">Which versions should the server follow?</legend>
-      <Radio name="versions" checked={f.versions === 'released'} onChange={() => set({ versions: 'released', versionsTouched: true })} label="Released versions (recommended, stable)" hint="Every resource is pinned to a tested release. You choose when to move to a newer one." />
-      <Radio name="versions" checked={f.versions === 'latest'} onChange={() => set({ versions: 'latest', versionsTouched: true })} label="Latest changes (the main branch)" hint="Every resource follows the newest changes, including things that are not released yet. Good for building and testing." />
-      <p className="text-xs text-muted-foreground">You can change this later in the server's settings, and put any single resource on another branch or pull request to try it.</p>
+      <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whichVersionsShouldServer')}</legend>
+      <Radio name="versions" checked={f.versions === 'released'} onChange={() => set({ versions: 'released', versionsTouched: true })} label={t('install.steps.releasedVersionsRecommendedSta')} hint={t('install.steps.everyResourcePinnedTested')} />
+      <Radio name="versions" checked={f.versions === 'latest'} onChange={() => set({ versions: 'latest', versionsTouched: true })} label={t('install.steps.latestChangesMainBranch')} hint={t('install.steps.everyResourceFollowsNewest')} />
+      <p className="text-xs text-muted-foreground">{t('install.steps.changeLaterServersSettings')}</p>
     </fieldset>
   )
 }
@@ -56,21 +59,18 @@ export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & {
   const showKind = kindOpen || f.source === 'fork'
   return (
     <div className="space-y-4">
-      <Field label="Server name" hint={`Used for the folder, the service and the database. Saved as "${slug(f.name) || '...'}".`}>
+      <Field label={t('install.steps.serverName')} hint={t('install.steps.usedFolderServiceDatabase', { value: slug(f.name) || '...' })}>
         <Input value={f.name} onChange={(e) => set({ name: e.target.value, ...(f.dirTouched ? {} : { dir: folderFor(base, e.target.value) }) })} autoComplete="off" />
       </Field>
       {showFolder ? (
-        <Field label="Server folder" hint="Where the server files go. It is suggested from the name.">
+        <Field label={t('install.steps.serverFolder')} hint={t('install.steps.whereServerFilesGo')}>
           <Input value={f.dir} onChange={(e) => set({ dir: e.target.value, dirTouched: true })} autoComplete="off" />
         </Field>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          The server files go in <code className="break-all font-mono text-xs text-foreground">{f.dir}</code>.{' '}
-          <Button variant="link" className="h-auto p-0" onClick={() => setFolderOpen(true)}>Use another folder</Button>
-        </p>
+        <p className="text-sm text-muted-foreground">{rich('install.steps.serverFilesGoCode', { code: <code className="break-all font-mono text-xs text-foreground">{f.dir}</code>, button: (c) => <Button variant="link" className="h-auto p-0" onClick={() => setFolderOpen(true)}>{c}</Button> })}</p>
       )}
       {advanced && (
-        <Field label="Server name shown to players (hostname)" hint="Shown in the FiveM server list.">
+        <Field label={t('install.steps.serverNameShownPlayers')} hint={t('install.steps.shownFivemServerList')}>
           <Input value={f.hostname} onChange={(e) => set({ hostname: e.target.value })} />
         </Field>
       )}
@@ -80,10 +80,7 @@ export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & {
           <VersionsStep f={f} set={set} advanced={advanced} defaultsDir={defaultsDir} />
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          The resources are plain copies of the originals, at released versions.{' '}
-          <Button variant="link" className="h-auto p-0" onClick={() => setKindOpen(true)}>Choose where they come from</Button>
-        </p>
+        <p className="text-sm text-muted-foreground">{rich('install.steps.resourcesPlainCopiesOriginals', { button: (c) => <Button variant="link" className="h-auto p-0" onClick={() => setKindOpen(true)}>{c}</Button> })}</p>
       ))}
     </div>
   )
@@ -100,7 +97,7 @@ export function PortsStep({ f, set, ports }: StepProps & { ports: PortsChecked }
         {l && (
           <div className="flex flex-wrap items-center gap-2 text-sm" aria-live="polite">
             <span className={l.ok ? 'text-success' : 'text-danger-text'}>{l.text}</span>
-            {l.suggestion && <Button size="sm" onClick={() => set({ [field]: String(l.suggestion) } as Partial<WizardForm>)}>Use {l.suggestion}</Button>}
+            {l.suggestion && <Button size="sm" onClick={() => set({ [field]: String(l.suggestion) } as Partial<WizardForm>)}>{t('install.steps.useSuggestion', { suggestion: l.suggestion })}</Button>}
           </div>
         )}
       </div>
@@ -108,14 +105,14 @@ export function PortsStep({ f, set, ports }: StepProps & { ports: PortsChecked }
   }
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Players connect to the game port. txAdmin, the web page where you manage the server, uses the second port. Kora checks they are free.</p>
+      <p className="text-sm text-muted-foreground">{t('install.steps.playersConnectGamePort')}</p>
       <div className="grid gap-4 sm:grid-cols-2">
-        {line('Game port', 'game', 'game')}
+        {line(t('install.steps.gamePort'), 'game', 'game')}
         {line('txAdmin port', 'txadmin', 'tx')}
       </div>
       {problem && <p role="alert" className="text-sm text-danger-text">{problem}</p>}
       <ErrorNotice error={ports.error} />
-      {ports.state === 'unknown' && <Button onClick={ports.retry}>Check the ports again</Button>}
+      {ports.state === 'unknown' && <Button onClick={ports.retry}>{t('install.steps.checkPortsAgain')}</Button>}
     </div>
   )
 }
@@ -125,22 +122,22 @@ export function BuildStep({ f, set, advanced }: StepProps) {
   return (
     <div className="space-y-4">
       <fieldset className="space-y-3">
-        <legend className="mb-2 text-sm text-muted-foreground">Which version of the FiveM server should be installed?</legend>
-        <Radio name="art" checked={f.artifact === 'recommended'} onChange={() => set({ artifact: 'recommended' })} label="The recommended build" hint={arts.data?.recommended ? `Build ${arts.data.recommended}. The one Cfx.re suggests.` : 'The one Cfx.re suggests.'} />
-        <Radio name="art" checked={f.artifact === 'pick'} onChange={() => set({ artifact: 'pick' })} label="Pick a build from the list" />
+        <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whichVersionFivemServer')}</legend>
+        <Radio name="art" checked={f.artifact === 'recommended'} onChange={() => set({ artifact: 'recommended' })} label={t('install.steps.recommendedBuild')} hint={arts.data?.recommended ? t('install.steps.buildRecommendedOneCfx', { recommended: arts.data.recommended }) : t('install.steps.oneCfxReSuggests')} />
+        <Radio name="art" checked={f.artifact === 'pick'} onChange={() => set({ artifact: 'pick' })} label={t('install.steps.pickBuildFromList')} />
         {f.artifact === 'pick' && (
-          <Field label="Build">
+          <Field label={t('install.steps.build')}>
             <Select value={f.artifactBuild ?? ''} onChange={(e) => set({ artifactBuild: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">Choose a build</option>
-              {(arts.data?.items ?? []).map((a) => <option key={a.build} value={a.build}>{a.build}{a.build === arts.data?.recommended ? ' (recommended)' : ''}</option>)}
+              <option value="">{t('install.steps.chooseBuild')}</option>
+              {(arts.data?.items ?? []).map((a) => <option key={a.build} value={a.build}>{a.build}{a.build === arts.data?.recommended ? t('install.steps.recommended') : ''}</option>)}
             </Select>
           </Field>
         )}
-        <Radio name="art" checked={f.artifact === 'custom'} onChange={() => set({ artifact: 'custom' })} label="Use my own download address" />
-        {f.artifact === 'custom' && <Field label="Download address" hint="The link to a server.zip (Windows) or fx.tar.xz (Linux) from Cfx.re."><Input value={f.artifactUrl} onChange={(e) => set({ artifactUrl: e.target.value })} placeholder="https://..." /></Field>}
+        <Radio name="art" checked={f.artifact === 'custom'} onChange={() => set({ artifact: 'custom' })} label={t('install.steps.useMyOwnDownload')} />
+        {f.artifact === 'custom' && <Field label={t('install.steps.downloadAddress')} hint={t('install.steps.linkServerZipWindows')}><Input value={f.artifactUrl} onChange={(e) => set({ artifactUrl: e.target.value })} placeholder={t('install.steps.https')} /></Field>}
       </fieldset>
       <ErrorNotice error={arts.error} />
-      {advanced && <Field label="Game build (optional)" hint="Forces a GTA V game build, for example 3095. Leave empty to use the default."><Input inputMode="numeric" value={f.gameBuild} onChange={(e) => set({ gameBuild: e.target.value })} /></Field>}
+      {advanced && <Field label={t('install.steps.gameBuildOptional')} hint={t('install.steps.forcesGtaVGame')}><Input inputMode="numeric" value={f.gameBuild} onChange={(e) => set({ gameBuild: e.target.value })} /></Field>}
     </div>
   )
 }
@@ -153,13 +150,13 @@ export function ResourcesStep({ f, set }: StepProps) {
   return (
     <div className="space-y-4">
       <fieldset className="space-y-3">
-        <legend className="mb-2 text-sm text-muted-foreground">Which Kora resources should be installed?</legend>
-        <Radio name="res" checked={f.resourcesAll} onChange={() => set({ resourcesAll: true })} label="Everything" hint="All Kora resources and the things they need. The easiest choice." />
-        <Radio name="res" checked={!f.resourcesAll} onChange={() => set({ resourcesAll: false })} label="Let me pick" hint="The core and what it depends on are always installed. You choose the extras." />
+        <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whichKoraResourcesShould')}</legend>
+        <Radio name="res" checked={f.resourcesAll} onChange={() => set({ resourcesAll: true })} label={t('install.steps.everything')} hint={t('install.steps.allKoraResourcesThings')} />
+        <Radio name="res" checked={!f.resourcesAll} onChange={() => set({ resourcesAll: false })} label={t('install.steps.letMePick')} hint={t('install.steps.coreWhatDependsAlways')} />
       </fieldset>
       {!f.resourcesAll && (
         <div className="space-y-3">
-          <Field label="Search"><Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
+          <Field label={t('install.steps.search')}><Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
           <div className="max-h-80 space-y-4 overflow-y-auto rounded-md border border-border p-3">
             {groups.map(([g, items]) => (
               <fieldset key={g} className="space-y-2">
@@ -168,7 +165,7 @@ export function ResourcesStep({ f, set }: StepProps) {
               </fieldset>
             ))}
           </div>
-          <p className="text-sm text-muted-foreground">{f.resourceIds.length} picked.</p>
+          <p className="text-sm text-muted-foreground">{t('install.steps.countPicked', { count: f.resourceIds.length })}</p>
         </div>
       )}
       <ErrorNotice error={cat.error} />
@@ -202,26 +199,26 @@ export function DatabaseStep({ f, set }: StepProps) {
   return (
     <div className="space-y-4">
       <fieldset className="space-y-3">
-        <legend className="mb-2 text-sm text-muted-foreground">Where should the server keep its data?</legend>
+        <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whereShouldServerKeep')}</legend>
         {DB_OPTIONS.map((o) => <Radio key={o.v} name="db" checked={f.db === o.v} onChange={() => set({ db: o.v })} label={o.label} hint={o.hint} />)}
       </fieldset>
       {f.db !== 'skip' && (
         <fieldset className="space-y-3">
-          <legend className="mb-2 text-sm font-semibold">Database administrator login</legend>
-          <Radio name="dbadmin" checked={!f.dbCustom} onChange={() => set({ dbCustom: false })} label="Automatic" hint="Kora tries the normal local login. Works on most fresh installs." />
-          <Radio name="dbadmin" checked={f.dbCustom} onChange={() => set({ dbCustom: true })} label="I will type the login" hint="Used once to create the new database and user, and not kept." />
+          <legend className="mb-2 text-sm font-semibold">{t('install.steps.databaseAdministratorLogin')}</legend>
+          <Radio name="dbadmin" checked={!f.dbCustom} onChange={() => set({ dbCustom: false })} label={t('install.steps.automatic')} hint={t('install.steps.koraTriesNormalLocal')} />
+          <Radio name="dbadmin" checked={f.dbCustom} onChange={() => set({ dbCustom: true })} label={t('install.steps.iTypeLogin')} hint={t('install.steps.usedOnceCreateNew')} />
           {f.dbCustom && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="User"><Input value={f.dbUser} onChange={(e) => set({ dbUser: e.target.value })} autoComplete="off" /></Field>
+              <Field label={t('install.steps.user')}><Input value={f.dbUser} onChange={(e) => set({ dbUser: e.target.value })} autoComplete="off" /></Field>
               <div />
-              <Field label="Password"><Input type="password" value={f.dbPass} onChange={(e) => set({ dbPass: e.target.value })} autoComplete="new-password" /></Field>
-              <Field label="Type the password again"><Input type="password" value={f.dbPass2} onChange={(e) => set({ dbPass2: e.target.value })} autoComplete="new-password" /></Field>
-              <Field label="Host"><Input value={f.dbHost} onChange={(e) => set({ dbHost: e.target.value })} /></Field>
-              <Field label="Port"><Input inputMode="numeric" value={f.dbPort} onChange={(e) => set({ dbPort: e.target.value })} /></Field>
+              <Field label={t('install.steps.password')}><Input type="password" value={f.dbPass} onChange={(e) => set({ dbPass: e.target.value })} autoComplete="new-password" /></Field>
+              <Field label={t('install.steps.typePasswordAgain')}><Input type="password" value={f.dbPass2} onChange={(e) => set({ dbPass2: e.target.value })} autoComplete="new-password" /></Field>
+              <Field label={t('install.steps.host')}><Input value={f.dbHost} onChange={(e) => set({ dbHost: e.target.value })} /></Field>
+              <Field label={t('install.steps.port')}><Input inputMode="numeric" value={f.dbPort} onChange={(e) => set({ dbPort: e.target.value })} /></Field>
               {problem && <p role="alert" className="text-sm text-danger-text sm:col-span-2">{problem}</p>}
             </div>
           )}
-          <Button disabled={busy || !!problem} onClick={test}>Test login</Button>
+          <Button disabled={busy || !!problem} onClick={test}>{t('install.steps.testLogin')}</Button>
           {result && !result.ok && result.problem
             // The database is installed but stopped: the same "Start it for me" as everywhere, then the test runs again by itself.
             ? <ErrorNotice error={result.problem} onFixed={test} />
@@ -236,9 +233,9 @@ export function DatabaseStep({ f, set }: StepProps) {
 export function OptionsStep({ f, set, advanced }: StepProps) {
   return (
     <div className="space-y-4">
-      <Checkbox label="Open the game port in the firewall" hint="Lets players outside this computer connect. Needs administrator rights." checked={f.firewall} onChange={(e) => set({ firewall: e.target.checked })} />
-      {advanced && <Checkbox label="Also open the txAdmin port" hint="You do not need this to use txAdmin from other devices: the panel's Open txAdmin button reaches it for you, signed in with the panel (it uses one more port on the panel's own address). Open txAdmin's own port only if you want to reach it directly, without the panel. Anyone who can reach it can try to sign in, so leave this off unless you need it." checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
-      <Checkbox label="Install as a background service" hint="The server starts with the computer and restarts if it crashes. Needs administrator rights." checked={f.service} onChange={(e) => set({ service: e.target.checked })} />
+      <Checkbox label={t('install.steps.openGamePortFirewall')} hint={t('install.steps.letsPlayersOutsideComputer')} checked={f.firewall} onChange={(e) => set({ firewall: e.target.checked })} />
+      {advanced && <Checkbox label={t('install.steps.alsoOpenTxadminPort')} hint={t('install.steps.doNeedUseTxadmin')} checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
+      <Checkbox label={t('install.steps.installBackgroundService')} hint={t('install.steps.serverStartsComputerRestarts')} checked={f.service} onChange={(e) => set({ service: e.target.checked })} />
     </div>
   )
 }
@@ -267,45 +264,45 @@ export function LicenceStep({ f, set }: StepProps) {
   const noKeysForYou = keys.isSuccess && saved.length === 0 && !canManage
   return (
     <div className="space-y-4">
-      {goneName && <Alert tone="warning">The saved licence key &quot;{goneName}&quot; is not there any more (it was renamed or deleted). Pick another one{canManage ? ' or add it again' : ''}.</Alert>}
-      {keys.isError && <ErrorNotice error={keys.error} title="Kora cannot read your saved licence keys" />}
+      {goneName && <Alert tone="warning">{t('install.steps.savedLicenceKeyGonename', { goneName, value: canManage ? ' or add it again' : '' })}</Alert>}
+      {keys.isError && <ErrorNotice error={keys.error} title={t('install.steps.koraCannotReadSaved')} />}
       {saved.length > 0 && (
         <fieldset className="space-y-2">
-          <legend className="mb-1 text-sm text-muted-foreground">Which licence key should this server use?</legend>
+          <legend className="mb-1 text-sm text-muted-foreground">{t('install.steps.whichLicenceKeyShould')}</legend>
           {saved.map((k) => (
             <Radio key={k.name} name="licence-pick" checked={picking && f.licenceName === k.name} onChange={() => set({ licenceChoice: 'saved', licenceName: k.name })}
-              label={k.name} hint={`Key ending ${k.last4}${k.servers.length > 0 ? `. Used by ${k.servers.join(', ')}.` : '.'}`} />
+              label={k.name} hint={t('install.steps.keyEndingLastValue', { last4: k.last4, value: k.servers.length > 0 ? t('install.steps.usedJoin', { join: k.servers.join(', ') }) : '.' })} />
           ))}
-          {canManage && <Radio name="licence-pick" checked={f.licenceChoice === 'new'} onChange={() => set({ licenceChoice: 'new' })} label="Add a new licence key" hint="Paste a key you have not used here before." />}
+          {canManage && <Radio name="licence-pick" checked={f.licenceChoice === 'new'} onChange={() => set({ licenceChoice: 'new' })} label={t('install.steps.addNewLicenceKey')} hint={t('install.steps.pasteKeyUsedHere')} />}
         </fieldset>
       )}
-      {noKeysForYou && <Alert tone="info">There are no saved licence keys yet. Only an administrator can add one: ask them to add it in Settings, under Licence keys.</Alert>}
+      {noKeysForYou && <Alert tone="info">{t('install.steps.thereNoSavedLicence')}</Alert>}
       {f.licenceChoice === 'new' && !noKeysForYou && (
         <>
-          <p className="text-sm text-muted-foreground">Every FiveM server needs its own licence key. It is free. To get one:</p>
+          <p className="text-sm text-muted-foreground">{t('install.steps.everyFivemServerNeeds')}</p>
           <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>Open the Cfx.re portal and sign in.</li>
-            <li>Choose &quot;Server keys&quot;, then register a new key.</li>
-            <li>Copy the key and paste it below.</li>
+            <li>{t('install.steps.openCfxRePortal')}</li>
+            <li>{t('install.steps.chooseServerKeysRegister')}</li>
+            <li>{t('install.steps.copyKeyPasteBelow')}</li>
           </ol>
-          <Button asChild><a href={CFX_KEYS_URL} target="_blank" rel="noreferrer">Open the Cfx.re portal <ExternalLink /></a></Button>
+          <Button asChild><a href={CFX_KEYS_URL} target="_blank" rel="noreferrer">{rich('install.steps.openCfxRePortal2', { externalLink: <ExternalLink /> })}</a></Button>
           <div className="space-y-1.5">
-            <Label htmlFor="licence-key">Licence key</Label>
+            <Label htmlFor="licence-key">{t('install.steps.licenceKey')}</Label>
             <div className="flex gap-2">
               <Input id="licence-key" aria-describedby="licence-hint" type={show ? 'text' : 'password'} value={f.license} onChange={(e) => set({ license: e.target.value })} autoComplete="off" spellCheck={false} />
-              <Button size="icon" aria-label={show ? 'Hide the licence key' : 'Show the licence key'} aria-pressed={show} onClick={() => setShow((x) => !x)}>{show ? <EyeOff /> : <Eye />}</Button>
+              <Button size="icon" aria-label={show ? t('install.steps.hideLicenceKey') : t('install.steps.showLicenceKey')} aria-pressed={show} onClick={() => setShow((x) => !x)}>{show ? <EyeOff /> : <Eye />}</Button>
             </div>
-            <p id="licence-hint" className="text-xs text-muted-foreground">Kora only ever shows the last 4 characters of a key.</p>
+            <p id="licence-hint" className="text-xs text-muted-foreground">{t('install.steps.koraOnlyEverShows')}</p>
           </div>
           <Checkbox
-            label="Save this key on this computer for next time"
+            label={t('install.steps.saveKeyComputerNext')}
             hint={f.saveKey
-              ? 'Kept in a private file in the Kora folder that only you can read. Next time you pick it by name instead of pasting it, and an install that stops can carry on even if Kora Panel is restarted.'
-              : 'Not saved. You will paste it again next time, and an install that stops can only carry on while Kora Panel keeps running.'}
+              ? t('install.steps.keptPrivateFileKora')
+              : t('install.steps.savedPasteAgainNext')}
             checked={f.saveKey} disabled={keys.isError} onChange={(e) => set({ saveKey: e.target.checked })}
           />
           {f.saveKey && (
-            <Field label="Name for this key" hint='Something you will recognise, for example "Main" or "Test server".'>
+            <Field label={t('install.steps.nameKey')} hint={t('install.steps.somethingRecogniseExampleMain')}>
               <Input value={f.saveKeyName} maxLength={40} onChange={(e) => set({ saveKeyName: e.target.value })} autoComplete="off" />
             </Field>
           )}
@@ -342,23 +339,23 @@ export function CfxStep({ f, set }: StepProps) {
   const found = f.cfxFound
   return (
     <div className="space-y-4">
-      <p className="text-sm font-semibold">Sign in to txAdmin with your Cfx.re account</p>
-      <p className="text-sm text-muted-foreground">txAdmin is the web page where you manage the server. Give your Cfx.re username and you can sign in there with your Cfx.re account. Only the username is sent, to forum.cfx.re, to look up which account it belongs to.</p>
+      <p className="text-sm font-semibold">{t('install.steps.signTxadminCfxRe')}</p>
+      <p className="text-sm text-muted-foreground">{t('install.steps.txadminWebPageWhere')}</p>
       <div className="space-y-1.5">
-        <Label htmlFor="cfx-username">Cfx.re username</Label>
+        <Label htmlFor="cfx-username">{t('install.steps.cfxReUsername')}</Label>
         <div className="flex gap-2">
           <Input id="cfx-username" value={f.cfxUsername} onChange={(e) => edit(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && name && !busy) void check() }} autoComplete="off" spellCheck={false} />
-          <Button disabled={busy || !name} onClick={check}>Check</Button>
+          <Button disabled={busy || !name} onClick={check}>{t('install.steps.check')}</Button>
         </div>
       </div>
       <div aria-live="polite" className="space-y-2">
-        {found && <Alert tone="success">{found.username ? `Found ${found.username} (${found.identifier}). This account will be the txAdmin admin.` : `Kept from your earlier answers: ${found.identifier}. This account will be the txAdmin admin.`}</Alert>}
-        {found && f.cfxRemembered && <p className="text-xs text-muted-foreground">Remembered from your last install. Type another username and press Check to change it, or use Skip below.</p>}
+        {found && <Alert tone="success">{found.username ? t('install.steps.foundUsernameIdentifierAccount', { username: found.username, identifier: found.identifier }) : t('install.steps.keptFromEarlierAnswers', { identifier: found.identifier })}</Alert>}
+        {found && f.cfxRemembered && <p className="text-xs text-muted-foreground">{t('install.steps.rememberedFromLastInstall')}</p>}
         {failure && <Alert tone="danger">{failure}</Alert>}
-        {!found && !failure && !name && <p className="text-sm text-muted-foreground">Without it, Kora creates a local admin with a generated password.</p>}
+        {!found && !failure && !name && <p className="text-sm text-muted-foreground">{t('install.steps.withoutKoraCreatesLocal')}</p>}
       </div>
       <ErrorNotice error={err} />
-      <Button disabled={!f.cfxUsername && !found} onClick={() => edit('')}>Skip: use a generated local admin instead (password saved in the server folder)</Button>
+      <Button disabled={!f.cfxUsername && !found} onClick={() => edit('')}>{t('install.steps.skipUseGeneratedLocal')}</Button>
     </div>
   )
 }
@@ -374,37 +371,35 @@ export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signe
   const shown = where ?? (chosenOrg ? 'org' : f.githubOwner && personal?.login === f.githubOwner ? 'personal' : null)
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Each resource gets your own copy (a fork) on GitHub, so you can change it and share your changes. Where should the copies go?</p>
+      <p className="text-sm text-muted-foreground">{t('install.steps.eachResourceGetsOwn')}</p>
       <GithubSignIn onSignedIn={onSignedIn} />
       {signedIn && owners.isLoading && (
-        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" aria-hidden /> Loading your GitHub accounts and organisations. This can take a few seconds.
-        </p>
+        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{rich('install.steps.loaderNodeLoadingGithub', { loader2: <Loader2 className="size-4 animate-spin" aria-hidden /> })}</p>
       )}
       {signedIn && !owners.isLoading && !owners.error && (
         <fieldset className="space-y-3">
-          <legend className="sr-only">Where the copies go</legend>
+          <legend className="sr-only">{t('install.steps.whereCopiesGo')}</legend>
           <Radio
             name="fork-where"
             checked={shown === 'personal'}
             disabled={!personal}
             onChange={() => { setWhere('personal'); if (personal) set({ githubOwner: personal.login, githubRemembered: false }) }}
-            label={personal ? `My personal account (${personal.login})` : 'My personal account'}
-            hint={f.githubRemembered && f.githubOwner && personal?.login === f.githubOwner ? 'Remembered from your last install: pick another to change it.' : undefined}
+            label={personal ? t('install.steps.myPersonalAccountLogin', { login: personal.login }) : t('install.steps.myPersonalAccount')}
+            hint={f.githubRemembered && f.githubOwner && personal?.login === f.githubOwner ? t('install.steps.rememberedFromLastInstall2') : undefined}
           />
           <Radio
             name="fork-where"
             checked={shown === 'org'}
             disabled={usable.length === 0}
             onChange={() => { setWhere('org'); if (!chosenOrg) set({ githubOwner: '', githubRemembered: false }) }}
-            label="An organisation I belong to"
-            hint={orgs.length === 0 ? 'You do not belong to an organisation that Kora can put copies in. Ask an owner of the organisation to let you create repositories, then sign in to GitHub again.' : usable.length === 0 ? `You belong to ${orgs.map((o) => o.login).join(', ')}, but you may not create repositories there: ${orgs[0].reason ?? 'not allowed'}. Ask an owner to allow it, then sign in to GitHub again.` : undefined}
+            label={t('install.steps.organisationIBelong')}
+            hint={orgs.length === 0 ? t('install.steps.doBelongOrganisationKora') : usable.length === 0 ? t('install.steps.belongJoinButMay', { join: orgs.map((o) => o.login).join(', '), value: orgs[0].reason ?? 'not allowed' }) : undefined}
           />
           {shown === 'org' && usable.length > 0 && (
-            <Field label="Which organisation?" hint={f.githubRemembered && chosenOrg ? 'Remembered from your last install: pick another to change it.' : 'Your own copies are created there, so you need the right to create repositories in it.'}>
+            <Field label={t('install.steps.whichOrganisation')} hint={f.githubRemembered && chosenOrg ? t('install.steps.rememberedFromLastInstall2') : t('install.steps.ownCopiesCreatedThere')}>
               <Select value={chosenOrg ? f.githubOwner : ''} onChange={(e) => set({ githubOwner: e.target.value, githubRemembered: false })}>
-                <option value="">Choose...</option>
-                {orgs.map((o) => <option key={o.login} value={o.login} disabled={!o.can_fork}>{o.can_fork ? o.login : `${o.login} (you may not create repositories here)`}</option>)}
+                <option value="">{t('install.steps.choose')}</option>
+                {orgs.map((o) => <option key={o.login} value={o.login} disabled={!o.can_fork}>{o.can_fork ? o.login : t('install.steps.loginMayCreateRepositories', { login: o.login })}</option>)}
               </Select>
             </Field>
           )}

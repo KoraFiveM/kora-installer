@@ -7,6 +7,9 @@ import { CopyButton } from '@/components/CopyButton'
 import { toNotice } from '@/components/ErrorNotice'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { txAdminLink, type TxAdminLink } from '@/lib/serverLinks'
+import { t as tt } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/servers'
 
 type Size = 'sm' | 'default'
 
@@ -28,15 +31,13 @@ export function OpenFolderButton({ name, dir, size = 'sm' }: { name: string; dir
   if (!canOpen || failed) {
     return (
       <span className="inline-flex flex-wrap items-center gap-2">
-        <CopyButton text={dir} label="Copy path" size={size} />
-        {failed && <span className="text-xs text-muted-foreground">Could not open it here: {failed}</span>}
+        <CopyButton text={dir} label={tt('servers.serverLinks.copyPath')} size={size} />
+        {failed && <span className="text-xs text-muted-foreground">{tt('servers.serverLinks.couldOpenHereFailed', { failed })}</span>}
       </span>
     )
   }
   return (
-    <Button size={size} onClick={async () => { try { await api.servers.openFolder(name) } catch (e) { setFailed(toNotice(e)?.message ?? 'unknown error') } }}>
-      <FolderOpen /> Open folder
-    </Button>
+    <Button size={size} onClick={async () => { try { await api.servers.openFolder(name) } catch (e) { setFailed(toNotice(e)?.message ?? 'unknown error') } }}>{rich('servers.serverLinks.folderopenNodeOpenFolder', { folderOpen: <FolderOpen /> })}</Button>
   )
 }
 
@@ -57,11 +58,11 @@ export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; p
   const role = useRole()
   const [failed, setFailed] = useState<string | null>(null)
   const [note, setNote] = useState<{ username: string | null; url: string | null } | null>(null)
-  if (!up) return <Button size={size} variant="default" disabled title="txAdmin answers once the server is running."><ExternalLink /> Open txAdmin</Button>
+  if (!up) return <Button size={size} variant="default" disabled title={tt('servers.serverLinks.txadminAnswersOnceServer')}>{rich('servers.serverLinks.externallinkNodeOpenTxadmin', { externalLink: <ExternalLink /> })}</Button>
   if (!link.viaPanel && link.url) {
     return (
       <Button asChild size={size} variant="default">
-        <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.hint ?? undefined}><ExternalLink /> Open txAdmin</a>
+        <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.hint ?? undefined}>{rich('servers.serverLinks.externallinkNodeOpenTxadmin', { externalLink: <ExternalLink /> })}</a>
       </Button>
     )
   }
@@ -88,11 +89,11 @@ export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; p
   }
   return (
     <span className="inline-flex flex-col items-start gap-1">
-      <Button size={size} variant="default" disabled={off !== null} title={off ?? link.hint ?? undefined} onClick={() => void open()}><ExternalLink /> Open txAdmin</Button>
+      <Button size={size} variant="default" disabled={off !== null} title={off ?? link.hint ?? undefined} onClick={() => void open()}>{rich('servers.serverLinks.externallinkNodeOpenTxadmin', { externalLink: <ExternalLink /> })}</Button>
       {off && <span className="max-w-sm text-xs text-muted-foreground">{off}</span>}
       {failed && <span className="max-w-sm text-xs text-destructive">{failed}</span>}
-      {note?.url && <a className="text-xs underline" href={note.url} target="_blank" rel="noopener noreferrer">Your browser blocked the new tab: click here to open txAdmin.</a>}
-      {note && <span className="max-w-sm text-xs text-muted-foreground">txAdmin has its own sign-in{note.username ? <>: use the account <strong>{note.username}</strong> that Kora made when it installed the server (its password is in <code className="font-mono">secrets/txadmin-admin.txt</code> in the server folder)</> : '.'}. The panel cannot sign you in to it.</span>}
+      {note?.url && <a className="text-xs underline" href={note.url} target="_blank" rel="noopener noreferrer">{tt('servers.serverLinks.browserBlockedNewTab')}</a>}
+      {note && <span className="max-w-sm text-xs text-muted-foreground">{rich('servers.serverLinks.txadminItsOwnSignin', { node: note.username ? <>{rich('servers.serverLinks.useAccountStrongNode', { strong: <strong>{note.username}</strong>, code: (c) => <code className="font-mono">{c}</code> })}</> : '.' })}</span>}
     </span>
   )
 }
@@ -100,5 +101,5 @@ export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; p
 /** Copies the address players on the network type to join. Nothing when Kora could not work it out. */
 export function CopyConnectButton({ connect, size = 'sm' }: { connect: string | null | undefined; size?: Size }) {
   if (!connect) return null
-  return <CopyButton text={connect} label="Copy connect address" size={size} />
+  return <CopyButton text={connect} label={tt('servers.serverLinks.copyConnectAddress')} size={size} />
 }

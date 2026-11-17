@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { validatePorts } from '@/lib/utils'
+import { t } from '@/i18n'
+import '@/i18n/en/servers'
 
 export function PortsForm({ name, ports, running }: { name: string; ports: Ports; running: boolean }) {
   const qc = useQueryClient()
@@ -24,17 +26,17 @@ export function PortsForm({ name, ports, running }: { name: string; ports: Ports
   const unchanged = Number(game) === ports.game && Number(tx) === ports.txadmin
   return (
     <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (!problem && !running && !blocked) m.mutate() }}>
-      {running && <Alert tone="warning">Stop the server before changing its ports.</Alert>}
+      {running && <Alert tone="warning">{t('servers.portsTab.stopServerBeforeChanging')}</Alert>}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Game port" hint="Players connect to this port."><Input inputMode="numeric" value={game} disabled={running || !!blocked} onChange={(e) => setGame(e.target.value)} /></Field>
-        <Field label="txAdmin port" hint="The txAdmin web page uses this port."><Input inputMode="numeric" value={tx} disabled={running || !!blocked} onChange={(e) => setTx(e.target.value)} /></Field>
+        <Field label={t('servers.portsTab.gamePort')} hint={t('servers.portsTab.playersConnectPort')}><Input inputMode="numeric" value={game} disabled={running || !!blocked} onChange={(e) => setGame(e.target.value)} /></Field>
+        <Field label={t('servers.portsTab.txadminPort')} hint={t('servers.portsTab.txadminWebPageUses')}><Input inputMode="numeric" value={tx} disabled={running || !!blocked} onChange={(e) => setTx(e.target.value)} /></Field>
       </div>
       {problem && <p role="alert" className="text-sm text-danger-text">{problem}</p>}
-      <Button type="submit" variant="default" disabled={running || !!problem || unchanged || m.isPending || !!blocked} title={blocked ?? undefined}>Change ports</Button>
+      <Button type="submit" variant="default" disabled={running || !!problem || unchanged || m.isPending || !!blocked} title={blocked ?? undefined}>{t('servers.portsTab.changePorts')}</Button>
       {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
-      <p className="text-xs text-muted-foreground">Kora does not change your firewall. Open the new ports and close the old ones yourself.</p>
+      <p className="text-xs text-muted-foreground">{t('servers.portsTab.koraDoesChangeFirewall')}</p>
       {m.isSuccess && (
-        <Alert tone="success" title="Ports changed">
+        <Alert tone="success" title={t('servers.portsTab.portsChanged')}>
           <ul className="list-disc pl-5">{m.data.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
         </Alert>
       )}
@@ -46,7 +48,7 @@ export function PortsForm({ name, ports, running }: { name: string; ports: Ports
 export function PortsTab({ server: s }: { server: ServerDetail }) {
   return (
     <Card className="max-w-2xl">
-      <CardHeader><CardTitle>Ports</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('servers.portsTab.ports')}</CardTitle></CardHeader>
       <CardContent><PortsForm key={`${s.ports.game}-${s.ports.txadmin}`} name={s.name} ports={s.ports} running={s.status === 'running'} /></CardContent>
     </Card>
   )

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel, destructive, busy, onConfirm, children }: {
   open: boolean
@@ -18,7 +20,7 @@ export function ConfirmDialog({ open, onOpenChange, title, description, confirmL
       <DialogContent title={title} description={description}>
         {children}
         <div className="mt-5 flex justify-end gap-2">
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => onOpenChange(false)}>{t('core.confirmDialog.cancel')}</Button>
           <Button variant={destructive ? 'destructive' : 'default'} disabled={busy} onClick={onConfirm}>
             {confirmLabel}
           </Button>

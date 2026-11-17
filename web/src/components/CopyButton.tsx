@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 /** Copies text to the clipboard. Falls back to a hidden textarea where the clipboard API is unavailable (plain http). */
 export async function copyText(text: string): Promise<boolean> {
@@ -39,7 +41,7 @@ export function CopyButton({ text, label = 'Copy', size = 'sm' }: { text: string
       }}
     >
       {state === 'copied' ? <Check /> : <Copy />}
-      <span aria-live="polite">{state === 'copied' ? 'Copied' : state === 'failed' ? 'Press Ctrl+C' : label}</span>
+      <span aria-live="polite">{state === 'copied' ? t('core.copyButton.copied') : state === 'failed' ? t('core.copyButton.pressCtrlC') : label}</span>
     </Button>
   )
 }

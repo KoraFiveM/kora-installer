@@ -1,4 +1,6 @@
 import { useRole, whyNot } from '@/hooks/useRole'
+import { t } from '@/i18n'
+import '@/i18n/en/install'
 
 /**
  * The command that lets token sign-ins delete servers (and use the other "destructive" actions).
@@ -23,5 +25,5 @@ export function useInstallBlock(): InstallBlock | null {
   const role = useRole()
   const why = whyNot(role, 'admin')
   if (!why) return null
-  return { kind: 'role', reason: why, short: 'Needs an administrator account.' }
+  return { kind: 'role', reason: why, short: t('install.access.needsAdministratorAccount') }
 }

@@ -23,6 +23,9 @@ import { downloadFile } from '@/lib/download'
 import { browseForFolder, inShell } from '@/lib/shell'
 import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { fileSize } from './PaidAssetsTab'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/backups'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const MIN_PASSWORD = 8
@@ -62,7 +65,7 @@ function MakeBackup({ server: s, onDone }: { server: ServerDetail; onDone: () =>
   const [err, setErr] = useState<unknown>(null)
   const run = useJob<BackupCreated, BackupEvent>(job, () => onDone())
   const busy = run.phase === 'running'
-  const pwProblem = protect && (pw.length < MIN_PASSWORD ? `Use at least ${MIN_PASSWORD} characters.` : pw !== pw2 ? 'The two passwords are not the same.' : null)
+  const pwProblem = protect && (pw.length < MIN_PASSWORD ? t('backups.backupsTab.useLeastMinPassword', { MIN_PASSWORD }) : pw !== pw2 ? t('backups.backupsTab.twoPasswordsSame') : null)
   const start = async () => {
     setErr(null)
     try {
@@ -73,41 +76,41 @@ function MakeBackup({ server: s, onDone }: { server: ServerDetail; onDone: () =>
   }
   return (
     <Card>
-      <CardHeader><CardTitle>Back up now</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('backups.backupsTab.backUpNow')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <Alert tone="info">{SECRETS_NOTE}</Alert>
         <Checkbox
           checked={protect}
           onChange={(e) => setProtect(e.target.checked)}
           disabled={busy}
-          label="Protect the file with a password"
-          hint="Recommended when the file leaves this computer (a USB stick, a cloud drive, an email). Without one, the file is only as private as its folder."
+          label={t('backups.backupsTab.protectFilePassword')}
+          hint={t('backups.backupsTab.recommendedWhenFileLeaves')}
         />
         {protect && (
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Password" error={pw && pwProblem ? pwProblem : null}><Input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} disabled={busy} /></Field>
-            <Field label="Password again"><Input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} disabled={busy} /></Field>
-            <Alert tone="warning" className="sm:col-span-2">Kora does not keep this password and nobody can recover it. If you lose it, this backup cannot be opened. Write it down somewhere safe.</Alert>
+            <Field label={t('backups.backupsTab.password')} error={pw && pwProblem ? pwProblem : null}><Input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} disabled={busy} /></Field>
+            <Field label={t('backups.backupsTab.passwordAgain')}><Input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} disabled={busy} /></Field>
+            <Alert tone="warning" className="sm:col-span-2">{t('backups.backupsTab.koraDoesKeepPassword')}</Alert>
           </div>
         )}
         <Checkbox
           checked={stop}
           onChange={(e) => setStop(e.target.checked)}
           disabled={busy || !s.running}
-          label="Stop the server while the backup runs"
-          hint={s.running ? 'The copy is then perfectly consistent, but players are disconnected. The server starts again afterwards. Without this, the database is one consistent snapshot and the other files are copied one by one while the server runs.' : 'The server is stopped, so the copy is consistent already.'}
+          label={t('backups.backupsTab.stopServerWhileBackup')}
+          hint={s.running ? t('backups.backupsTab.copyPerfectlyConsistentBut') : t('backups.backupsTab.serverStoppedCopyConsistent')}
         />
-        <Checkbox checked={everything} onChange={(e) => setEverything(e.target.checked)} disabled={busy} label="Keep every resource in full" hint="A bigger file that does not need the internet to restore. Normally resources are saved as a reference (where they come from and the exact version) and fetched again; only changed, kept-aside and paid ones are kept in full." />
+        <Checkbox checked={everything} onChange={(e) => setEverything(e.target.checked)} disabled={busy} label={t('backups.backupsTab.keepEveryResourceFull')} hint={t('backups.backupsTab.biggerFileDoesNeed')} />
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="default" disabled={busy || !!pwProblem} onClick={() => void start()}>{busy ? 'Backing up…' : 'Back up now'}</Button>
+          <Button variant="default" disabled={busy || !!pwProblem} onClick={() => void start()}>{busy ? t('backups.backupsTab.backingUp') : t('backups.backupsTab.backUpNow')}</Button>
         </div>
-        {busy && <JobBar events={run.events} label="Backup progress" />}
+        {busy && <JobBar events={run.events} label={t('backups.backupsTab.backupProgress')} />}
         <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
         {run.phase === 'done' && run.result && (
-          <Alert tone="success" title="Backup finished">
-            <p>{run.result.info.file} · {fileSize(run.result.info.bytes)} · {run.result.info.by_reference} resources by reference, {run.result.info.in_full} in full.</p>
-            <p className="mt-1">Kept in <span className="font-mono text-xs">{run.result.path}</span></p>
-            {run.result.info.encrypted && <p className="mt-1 font-medium">Keep the password safe: it cannot be recovered.</p>}
+          <Alert tone="success" title={t('backups.backupsTab.backupFinished')}>
+            <p>{t('backups.backupsTab.fileFilesizeReferenceResources', { file: run.result.info.file, fileSize: fileSize(run.result.info.bytes), by_reference: run.result.info.by_reference, in_full: run.result.info.in_full })}</p>
+            <p className="mt-1">{rich('backups.backupsTab.keptSpanNode', { span: <span className="font-mono text-xs">{run.result.path}</span> })}</p>
+            {run.result.info.encrypted && <p className="mt-1 font-medium">{t('backups.backupsTab.keepPasswordSafeCannot')}</p>}
             {run.result.notes.map((n, i) => <p key={i} className="mt-1 text-muted-foreground">{n}</p>)}
           </Alert>
         )}
@@ -119,7 +122,7 @@ function MakeBackup({ server: s, onDone }: { server: ServerDetail; onDone: () =>
 // ---- check / restore -------------------------------------------------------------------------------------------
 
 function PasswordField({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: string | null }) {
-  return <Field label="This backup's password" error={error}><Input type="password" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)} /></Field>
+  return <Field label={t('backups.backupsTab.backupsPassword')} error={error}><Input type="password" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)} /></Field>
 }
 
 function VerifyDialog({ server, backup, onClose }: { server: string; backup: BackupInfo; onClose: () => void }) {
@@ -137,15 +140,15 @@ function VerifyDialog({ server, backup, onClose }: { server: string; backup: Bac
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title="Check this backup" description="Kora opens the whole file and compares every file inside with its checksum. Nothing on the server changes.">
+      <DialogContent title={t('backups.backupsTab.checkBackup')} description={t('backups.backupsTab.koraOpensWholeFile')}>
         <div className="space-y-4">
           {backup.encrypted && run.phase === 'idle' && <PasswordField value={pw} onChange={setPw} />}
-          {run.phase === 'running' && <JobBar events={run.events} label="Check progress" />}
+          {run.phase === 'running' && <JobBar events={run.events} label={t('backups.backupsTab.checkProgress')} />}
           <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
-          {run.phase === 'done' && run.result && <Alert tone="success" title="This backup is good">{run.result.summary}</Alert>}
+          {run.phase === 'done' && run.result && <Alert tone="success" title={t('backups.backupsTab.backupGood')}>{run.result.summary}</Alert>}
           <div className="flex justify-end gap-2">
-            <Button onClick={onClose}>Close</Button>
-            {run.phase !== 'done' && <Button variant="default" disabled={run.phase === 'running' || (backup.encrypted && !pw)} onClick={() => void start()}>Check it</Button>}
+            <Button onClick={onClose}>{t('backups.backupsTab.close')}</Button>
+            {run.phase !== 'done' && <Button variant="default" disabled={run.phase === 'running' || (backup.encrypted && !pw)} onClick={() => void start()}>{t('backups.backupsTab.checkIt')}</Button>}
           </div>
         </div>
       </DialogContent>
@@ -156,12 +159,12 @@ function VerifyDialog({ server, backup, onClose }: { server: string; backup: Bac
 function Report({ r }: { r: RestoreReport }) {
   return (
     <div className="space-y-3">
-      <Alert tone={r.problems.length ? 'warning' : 'success'} title={r.problems.length ? 'Restored, with some things to look at' : 'Restore finished'}>
-        <p>{r.database_restored ? 'The database was put back. ' : ''}{r.files_restored} files were put back.{r.restarted ? ' The server was started again.' : ''}</p>
+      <Alert tone={r.problems.length ? 'warning' : 'success'} title={r.problems.length ? t('backups.backupsTab.restoredSomeThingsLook') : t('backups.backupsTab.restoreFinished')}>
+        <p>{t('backups.backupsTab.valueFilesRestoredFiles', { value: r.database_restored ? t('backups.backupsTab.databasePutBack') : '', files_restored: r.files_restored, value2: r.restarted ? t('backups.backupsTab.serverStartedAgain') : '' })}</p>
         {r.resources_restored.length > 0 && <ul className="mt-1 list-disc pl-5">{r.resources_restored.map((m, i) => <li key={i}>{m}</li>)}</ul>}
         {r.notes.map((m, i) => <p key={i} className="mt-1 text-muted-foreground">{m}</p>)}
       </Alert>
-      {r.problems.length > 0 && <Alert tone="danger" title="What did not work"><ul className="list-disc pl-5">{r.problems.map((m, i) => <li key={i}>{m}</li>)}</ul></Alert>}
+      {r.problems.length > 0 && <Alert tone="danger" title={t('backups.backupsTab.whatDidWork')}><ul className="list-disc pl-5">{r.problems.map((m, i) => <li key={i}>{m}</li>)}</ul></Alert>}
     </div>
   )
 }
@@ -193,31 +196,31 @@ function RestoreDialog({ server, backup, canRestore, why, onClose, onChanged }: 
   const ready = preview && !preview.needs_passphrase
   return (
     <Dialog open onOpenChange={(o) => !o && run.phase !== 'running' && onClose()}>
-      <DialogContent title="Restore this backup" description={`Backup of ${when(backup.created_unix)}`}>
+      <DialogContent title={t('backups.backupsTab.restoreBackup')} description={t('backups.backupsTab.backupWhen', { when: when(backup.created_unix) })}>
         <div className="space-y-4">
           {why && <Alert tone="info">{why}</Alert>}
           {backup.encrypted && !ready && (
             <div className="space-y-3">
               <PasswordField value={pw ?? ''} onChange={setPw} />
-              <Button variant="default" disabled={!pw || look.isPending} onClick={() => look.mutate()}>Open the backup</Button>
+              <Button variant="default" disabled={!pw || look.isPending} onClick={() => look.mutate()}>{t('backups.backupsTab.openBackup')}</Button>
             </div>
           )}
-          {look.isPending && <p className="text-sm text-muted-foreground">Reading the backup…</p>}
+          {look.isPending && <p className="text-sm text-muted-foreground">{t('backups.backupsTab.readingBackup')}</p>}
           {ready && run.phase === 'idle' && (
-            <div className="space-y-3" aria-label="What a restore will do">
-              <p className="text-sm font-semibold">This will:</p>
+            <div className="space-y-3" aria-label={t('backups.backupsTab.whatRestoreDo')}>
+              <p className="text-sm font-semibold">{t('backups.backupsTab.thisWill')}</p>
               <ul className="list-disc space-y-1 pl-5 text-sm">{preview.will_change.map((l, i) => <li key={i}>{l}</li>)}</ul>
-              <p className="text-sm font-semibold">This stays as it is:</p>
+              <p className="text-sm font-semibold">{t('backups.backupsTab.thisStaysAsIt')}</p>
               <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">{preview.will_keep.map((l, i) => <li key={i}>{l}</li>)}</ul>
               {preview.warnings.map((w, i) => <Alert key={i} tone="warning">{w}</Alert>)}
             </div>
           )}
-          {run.phase === 'running' && <JobBar events={run.events} label="Restore progress" />}
+          {run.phase === 'running' && <JobBar events={run.events} label={t('backups.backupsTab.restoreProgress')} />}
           <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
           {run.phase === 'done' && run.result && <Report r={run.result} />}
           <div className="flex justify-end gap-2">
-            <Button disabled={run.phase === 'running'} onClick={onClose}>{run.phase === 'done' ? 'Close' : 'Cancel'}</Button>
-            {ready && run.phase === 'idle' && <Button variant="destructive" disabled={!canRestore} title={why ?? undefined} onClick={() => void start()}>Restore now</Button>}
+            <Button disabled={run.phase === 'running'} onClick={onClose}>{run.phase === 'done' ? t('backups.backupsTab.close') : t('backups.backupsTab.cancel')}</Button>
+            {ready && run.phase === 'idle' && <Button variant="destructive" disabled={!canRestore} title={why ?? undefined} onClick={() => void start()}>{t('backups.backupsTab.restoreNow')}</Button>}
           </div>
         </div>
       </DialogContent>
@@ -243,19 +246,19 @@ function UndoBanner({ server, undo, onChanged, onDismiss, canRestore }: { server
     return (
       <div className="space-y-3">
         <Report r={run.result} />
-        <Button size="sm" onClick={onDismiss}>Close</Button>
+        <Button size="sm" onClick={onDismiss}>{t('backups.backupsTab.close')}</Button>
       </div>
     )
   }
   return (
-    <Alert tone="info" title="The last restore can be undone">
-      <p>Just before it, Kora saved the server as it was ({when(undo.created_unix)}). You can put that back.</p>
+    <Alert tone="info" title={t('backups.backupsTab.lastRestoreUndone')}>
+      <p>{t('backups.backupsTab.justBeforeKoraSaved', { when: when(undo.created_unix) })}</p>
       {!open ? (
-        <Button className="mt-2" size="sm" disabled={!canRestore} onClick={() => setOpen(true)}><Undo2 /> Undo this restore</Button>
+        <Button className="mt-2" size="sm" disabled={!canRestore} onClick={() => setOpen(true)}>{rich('backups.backupsTab.undoNodeUndoRestore', { undo2: <Undo2 /> })}</Button>
       ) : (
         <div className="mt-3 space-y-3">
           {undo.encrypted && <PasswordField value={pw} onChange={setPw} />}
-          {run.phase === 'running' ? <JobBar events={run.events} label="Undo progress" /> : <Button variant="destructive" size="sm" disabled={undo.encrypted && !pw} onClick={() => void start()}>Put the server back as it was</Button>}
+          {run.phase === 'running' ? <JobBar events={run.events} label={t('backups.backupsTab.undoProgress')} /> : <Button variant="destructive" size="sm" disabled={undo.encrypted && !pw} onClick={() => void start()}>{t('backups.backupsTab.putServerBack')}</Button>}
           <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
         </div>
       )}
@@ -276,20 +279,20 @@ function Row({ server, b, canAdmin, remote, onVerify, onRestore, onChanged }: { 
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{when(b.created_unix)}</span>
         <Badge tone="plain">{fileSize(b.bytes)}</Badge>
-        {b.encrypted ? <Badge tone="success"><Lock className="size-3" /> Password protected</Badge> : <Badge tone="neutral">Not password protected</Badge>}
+        {b.encrypted ? <Badge tone="success">{rich('backups.backupsTab.lockNodePasswordProtected', { lock: <Lock className="size-3" /> })}</Badge> : <Badge tone="neutral">{t('backups.backupsTab.passwordProtected')}</Badge>}
         <Badge tone="plain">{LABEL_TEXT[b.label]}</Badge>
-        {b.stopped && <Badge tone="plain">Server stopped</Badge>}
-        {b.too_new && <Badge tone="danger">Made by a newer Kora</Badge>}
+        {b.stopped && <Badge tone="plain">{t('backups.backupsTab.serverStopped')}</Badge>}
+        {b.too_new && <Badge tone="danger">{t('backups.backupsTab.madeNewerKora')}</Badge>}
         <span className="ml-auto flex flex-wrap gap-2">
-          <Button size="sm" onClick={onVerify}><ShieldCheck /> Check</Button>
-          <Button size="sm" variant="outline" disabled={!canAdmin || b.too_new} onClick={onRestore}>Restore…</Button>
-          {remote && <Button size="sm" disabled={!canAdmin || dl.isPending} onClick={() => dl.mutate()}><Download /> Download</Button>}
-          <Button size="sm" variant="outline" disabled={!canAdmin} onClick={() => setConfirm(true)} aria-label={`Delete the backup of ${when(b.created_unix)}`}><Trash2 /></Button>
+          <Button size="sm" onClick={onVerify}>{rich('backups.backupsTab.shieldcheckNodeCheck', { shieldCheck: <ShieldCheck /> })}</Button>
+          <Button size="sm" variant="outline" disabled={!canAdmin || b.too_new} onClick={onRestore}>{t('backups.backupsTab.restore')}</Button>
+          {remote && <Button size="sm" disabled={!canAdmin || dl.isPending} onClick={() => dl.mutate()}>{rich('backups.backupsTab.downloadNodeDownload', { download: <Download /> })}</Button>}
+          <Button size="sm" variant="outline" disabled={!canAdmin} onClick={() => setConfirm(true)} aria-label={t('backups.backupsTab.deleteBackupWhen', { when: when(b.created_unix) })}><Trash2 /></Button>
         </span>
       </div>
-      <p className="text-xs text-muted-foreground">{b.by_reference} resources by reference, {b.in_full} in full · database: {b.database === 'dumped' ? 'included' : b.database === 'external' ? 'included (on another computer)' : b.database === 'none' ? 'none to back up' : 'not included'} · Kora {b.kora_version}</p>
+      <p className="text-xs text-muted-foreground">{t('backups.backupsTab.referenceResourcesReferenceFul', { by_reference: b.by_reference, in_full: b.in_full, value: b.database === 'dumped' ? 'included' : b.database === 'external' ? 'included (on another computer)' : b.database === 'none' ? 'none to back up' : 'not included', kora_version: b.kora_version })}</p>
       <ErrorNotice error={del.error ?? dl.error} />
-      <ConfirmDialog open={confirm} onOpenChange={setConfirm} title="Delete this backup?" description="The file is removed from the disk. It cannot be brought back." confirmLabel="Delete" destructive busy={del.isPending} onConfirm={() => del.mutate()} />
+      <ConfirmDialog open={confirm} onOpenChange={setConfirm} title={t('backups.backupsTab.deleteBackup')} description={t('backups.backupsTab.fileRemovedFromDisk')} confirmLabel={t('backups.backupsTab.delete')} destructive busy={del.isPending} onConfirm={() => del.mutate()} />
     </li>
   )
 }
@@ -306,46 +309,46 @@ function Settings({ server, view, canChange, why, onSaved }: { server: string; v
   const badTime = sch.enabled && !/^([01]\d|2[0-3]):[0-5]\d$/.test(sch.time)
   return (
     <Card>
-      <CardHeader><CardTitle>Where backups go, and when</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('backups.backupsTab.whereBackupsGoWhen')}</CardTitle></CardHeader>
       <CardContent className="space-y-5">
         {why && <Alert tone="info">{why}</Alert>}
         <div className="space-y-2">
-          <div className="text-sm font-semibold">Backups are kept in</div>
-          <CopyField value={view.folder} label="Backups folder" />
-          <p className="text-xs text-muted-foreground">{view.default_folder ? "This is Kora's own backups folder. It is outside the server's folder, so deleting the server does not delete its backups, but it is on the same disk as Kora. " : ''}For a backup that survives a dead disk, keep one on another disk or a mounted share.{view.free_bytes != null ? ` ${fileSize(view.free_bytes)} free.` : ''}</p>
-          <Field label="Use another folder (full path; leave empty for Kora's own)"><Input value={s.folder} disabled={!canChange} placeholder="/mnt/backups or D:\Backups" onChange={(e) => setS({ ...s, folder: e.target.value })} /></Field>
-          {inShell() && <Button type="button" disabled={!canChange} onClick={async () => { const d = await browseForFolder('Choose a folder for backups'); if (d) setS({ ...s, folder: d }) }}>Browse...</Button>}
+          <div className="text-sm font-semibold">{t('backups.backupsTab.backupsKept')}</div>
+          <CopyField value={view.folder} label={t('backups.backupsTab.backupsFolder')} />
+          <p className="text-xs text-muted-foreground">{t('backups.backupsTab.valueBackupSurvivesDead', { value: view.default_folder ? t('backups.backupsTab.korasOwnBackupsFolder') : '', value2: view.free_bytes != null ? ` ${fileSize(view.free_bytes)} free.` : '' })}</p>
+          <Field label={t('backups.backupsTab.useAnotherFolderFull')}><Input value={s.folder} disabled={!canChange} placeholder={t('backups.backupsTab.mntBackupsDBackups')} onChange={(e) => setS({ ...s, folder: e.target.value })} /></Field>
+          {inShell() && <Button type="button" disabled={!canChange} onClick={async () => { const d = await browseForFolder(t('backups.backupsTab.chooseFolderBackups')); if (d) setS({ ...s, folder: d }) }}>{t('backups.backupsTab.browse')}</Button>}
         </div>
         <fieldset className="space-y-2">
-          <legend className="mb-1 text-sm font-semibold">Scheduled backups</legend>
-          <Radio name="when" checked={!sch.enabled} disabled={!canChange} onChange={() => setSch({ enabled: false })} label="Off" hint="Backups only happen when you press the button." />
-          <Radio name="when" checked={sch.enabled && sch.cadence === 'daily'} disabled={!canChange} onChange={() => setSch({ enabled: true, cadence: 'daily', weekday: undefined })} label="Every day" />
-          <Radio name="when" checked={sch.enabled && sch.cadence === 'weekly'} disabled={!canChange} onChange={() => setSch({ enabled: true, cadence: 'weekly', weekday: sch.weekday ?? 6 })} label="Once a week" />
+          <legend className="mb-1 text-sm font-semibold">{t('backups.backupsTab.scheduledBackups')}</legend>
+          <Radio name="when" checked={!sch.enabled} disabled={!canChange} onChange={() => setSch({ enabled: false })} label={t('backups.backupsTab.off')} hint={t('backups.backupsTab.backupsOnlyHappenWhen')} />
+          <Radio name="when" checked={sch.enabled && sch.cadence === 'daily'} disabled={!canChange} onChange={() => setSch({ enabled: true, cadence: 'daily', weekday: undefined })} label={t('backups.backupsTab.everyDay')} />
+          <Radio name="when" checked={sch.enabled && sch.cadence === 'weekly'} disabled={!canChange} onChange={() => setSch({ enabled: true, cadence: 'weekly', weekday: sch.weekday ?? 6 })} label={t('backups.backupsTab.onceWeek')} />
         </fieldset>
         {sch.enabled && (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-4">
-              {sch.cadence === 'weekly' && <div className="w-44"><Field label="Day"><Select value={sch.weekday ?? 6} disabled={!canChange} onChange={(e) => setSch({ weekday: Number(e.target.value) })}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field></div>}
-              <div className="w-32"><Field label="Time (24 hours)" error={badTime ? 'Use the form HH:MM, for example 03:30.' : null}><Input value={sch.time} disabled={!canChange} onChange={(e) => setSch({ time: e.target.value })} inputMode="numeric" placeholder="03:30" /></Field></div>
+              {sch.cadence === 'weekly' && <div className="w-44"><Field label={t('backups.backupsTab.day')}><Select value={sch.weekday ?? 6} disabled={!canChange} onChange={(e) => setSch({ weekday: Number(e.target.value) })}>{DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</Select></Field></div>}
+              <div className="w-32"><Field label={t('backups.backupsTab.timeHours')} error={badTime ? t('backups.backupsTab.useFormHhMm') : null}><Input value={sch.time} disabled={!canChange} onChange={(e) => setSch({ time: e.target.value })} inputMode="numeric" placeholder="03:30" /></Field></div>
             </div>
-            <Checkbox checked={s.stop_for_scheduled} disabled={!canChange} onChange={(e) => setS({ ...s, stop_for_scheduled: e.target.checked })} label="Stop the server during scheduled backups" hint="A perfectly consistent copy, but players are disconnected at that time." />
+            <Checkbox checked={s.stop_for_scheduled} disabled={!canChange} onChange={(e) => setS({ ...s, stop_for_scheduled: e.target.checked })} label={t('backups.backupsTab.stopServerDuringScheduled')} hint={t('backups.backupsTab.perfectlyConsistentCopyBut')} />
             <Alert tone="info">{view.schedule_note}</Alert>
           </div>
         )}
         <fieldset className="space-y-2">
-          <legend className="mb-1 text-sm font-semibold">How many to keep</legend>
+          <legend className="mb-1 text-sm font-semibold">{t('backups.backupsTab.howManyKeep')}</legend>
           <div className="flex flex-wrap gap-4">
-            <div className="w-44"><Field label="Newest backups (0 = all)"><Input type="number" min={0} max={1000} value={s.retention.keep_last} disabled={!canChange} onChange={(e) => setS({ ...s, retention: { ...s.retention, keep_last: Math.max(0, Number(e.target.value) || 0) } })} /></Field></div>
-            <div className="w-56"><Field label="Also one per day for this many days"><Input type="number" min={0} max={3650} value={s.retention.keep_daily_days} disabled={!canChange} onChange={(e) => setS({ ...s, retention: { ...s.retention, keep_daily_days: Math.max(0, Number(e.target.value) || 0) } })} /></Field></div>
+            <div className="w-44"><Field label={t('backups.backupsTab.newestBackupsAll')}><Input type="number" min={0} max={1000} value={s.retention.keep_last} disabled={!canChange} onChange={(e) => setS({ ...s, retention: { ...s.retention, keep_last: Math.max(0, Number(e.target.value) || 0) } })} /></Field></div>
+            <div className="w-56"><Field label={t('backups.backupsTab.alsoOnePerDay')}><Input type="number" min={0} max={3650} value={s.retention.keep_daily_days} disabled={!canChange} onChange={(e) => setS({ ...s, retention: { ...s.retention, keep_daily_days: Math.max(0, Number(e.target.value) || 0) } })} /></Field></div>
           </div>
-          <p className="text-xs text-muted-foreground">Older ones are removed after each backup. A copy made to move the server, and the safety copy a restore can be undone from, are not removed.</p>
+          <p className="text-xs text-muted-foreground">{t('backups.backupsTab.olderOnesRemovedAfter')}</p>
         </fieldset>
         <div className="flex flex-wrap gap-2">
-          <Button variant="default" disabled={!canChange || save.isPending || badTime} title={why ?? undefined} onClick={() => save.mutate()}>Save</Button>
-          <Button disabled={!canChange || prune.isPending} onClick={() => prune.mutate()}>Remove old backups now</Button>
+          <Button variant="default" disabled={!canChange || save.isPending || badTime} title={why ?? undefined} onClick={() => save.mutate()}>{t('backups.backupsTab.save')}</Button>
+          <Button disabled={!canChange || prune.isPending} onClick={() => prune.mutate()}>{t('backups.backupsTab.removeOldBackupsNow')}</Button>
         </div>
-        {save.isSuccess && <Alert tone="success">Saved.</Alert>}
-        {prune.data && <Alert tone="success">{prune.data.removed.length ? `Removed ${prune.data.removed.length} old backup${prune.data.removed.length === 1 ? '' : 's'}.` : 'Nothing to remove.'}</Alert>}
+        {save.isSuccess && <Alert tone="success">{t('backups.backupsTab.saved')}</Alert>}
+        {prune.data && <Alert tone="success">{prune.data.removed.length ? t('backups.backupsTab.removedCountOldBackup', { count: prune.data.removed.length }) : t('backups.backupsTab.nothingRemove')}</Alert>}
         <ErrorNotice error={save.error ?? prune.error} />
       </CardContent>
     </Card>
@@ -362,7 +365,7 @@ function MoveCard({ server: s, canMake, onDone }: { server: ServerDetail; canMak
   const [err, setErr] = useState<unknown>(null)
   const run = useJob<BackupCreated, BackupEvent>(job, () => onDone())
   const busy = run.phase === 'running'
-  const problem = pw.length < MIN_PASSWORD ? `Use at least ${MIN_PASSWORD} characters.` : pw !== pw2 ? 'The two passwords are not the same.' : null
+  const problem = pw.length < MIN_PASSWORD ? t('backups.backupsTab.useLeastMinPassword', { MIN_PASSWORD }) : pw !== pw2 ? t('backups.backupsTab.twoPasswordsSame') : null
   const start = async () => {
     setErr(null)
     try {
@@ -373,27 +376,27 @@ function MoveCard({ server: s, canMake, onDone }: { server: ServerDetail; canMak
   }
   return (
     <Card>
-      <CardHeader><CardTitle>Move this server to another computer</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('backups.backupsTab.moveServerAnotherComputer')}</CardTitle></CardHeader>
       <CardContent className="space-y-4 text-sm">
         <ol className="list-decimal space-y-1 pl-5">
-          <li>Make the file here (below). It holds your database, settings, txAdmin data and licence key, so it needs a password.</li>
-          <li>Copy the file to the new computer (a USB stick, a share, or download it from here).</li>
-          <li>On the new computer open Kora and choose &quot;Bring a server from a backup or another machine&quot; in the install wizard. It works between Linux and Windows.</li>
-          <li>When the server runs there, stop it here and remove it (Danger zone). Kora never touches the other computer for you.</li>
+          <li>{t('backups.backupsTab.makeFileHereBelow')}</li>
+          <li>{t('backups.backupsTab.copyFileNewComputer')}</li>
+          <li>{t('backups.backupsTab.newComputerOpenKora')}</li>
+          <li>{t('backups.backupsTab.whenServerRunsThere')}</li>
         </ol>
-        <Alert tone="warning">The licence key moves with the server, but Cfx.re ties a key to your account and the address the server runs on. Kora cannot make Cfx.re accept it on a new computer: check the key at portal.cfx.re if the new server says the licence is not valid, or pick another saved key while importing.</Alert>
+        <Alert tone="warning">{t('backups.backupsTab.licenceKeyMovesServer')}</Alert>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Password for the file" error={pw && problem ? problem : null}><Input type="password" autoComplete="new-password" value={pw} disabled={busy} onChange={(e) => setPw(e.target.value)} /></Field>
-          <Field label="Password again"><Input type="password" autoComplete="new-password" value={pw2} disabled={busy} onChange={(e) => setPw2(e.target.value)} /></Field>
+          <Field label={t('backups.backupsTab.passwordFile')} error={pw && problem ? problem : null}><Input type="password" autoComplete="new-password" value={pw} disabled={busy} onChange={(e) => setPw(e.target.value)} /></Field>
+          <Field label={t('backups.backupsTab.passwordAgain')}><Input type="password" autoComplete="new-password" value={pw2} disabled={busy} onChange={(e) => setPw2(e.target.value)} /></Field>
         </div>
-        <p className="text-xs text-muted-foreground">Kora does not keep this password and nobody can recover it. You need it on the new computer.</p>
-        <Button variant="default" disabled={!canMake || busy || !!problem} onClick={() => void start()}>{busy ? 'Making the file…' : 'Make the file to move'}</Button>
-        {busy && <JobBar events={run.events} label="Export progress" />}
+        <p className="text-xs text-muted-foreground">{t('backups.backupsTab.koraDoesKeepPassword2')}</p>
+        <Button variant="default" disabled={!canMake || busy || !!problem} onClick={() => void start()}>{busy ? t('backups.backupsTab.makingFile') : t('backups.backupsTab.makeFileMove')}</Button>
+        {busy && <JobBar events={run.events} label={t('backups.backupsTab.exportProgress')} />}
         <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
         {run.phase === 'done' && run.result && (
-          <Alert tone="success" title="The file is ready">
+          <Alert tone="success" title={t('backups.backupsTab.fileReady')}>
             <p>{run.result.info.file} · {fileSize(run.result.info.bytes)}</p>
-            <p className="mt-1">It is on the computer that runs Kora, in <span className="font-mono text-xs">{run.result.path}</span>. Copy it to the new computer, and keep the password for the other end.</p>
+            <p className="mt-1">{rich('backups.backupsTab.computerRunsKoraSpan', { span: <span className="font-mono text-xs">{run.result.path}</span> })}</p>
           </Alert>
         )}
       </CardContent>
@@ -436,7 +439,7 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
             <CardContent className="space-y-3 text-sm">
               {v.summary.warning && <Alert tone="warning">{v.summary.warning}</Alert>}
               <p className="text-muted-foreground">{v.database.note}</p>
-              {v.database.tool_missing && <Alert tone="warning" title="The database tools are missing">Kora needs mariadb-dump (or mysqldump) to copy the database. Install the MariaDB client tools, then try again.</Alert>}
+              {v.database.tool_missing && <Alert tone="warning" title={t('backups.backupsTab.databaseToolsMissing')}>{t('backups.backupsTab.koraNeedsMariadbdumpMysqldump')}</Alert>}
             </CardContent>
           </Card>
         )}
@@ -444,9 +447,9 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
         {undo && <UndoBanner server={s.name} undo={undo} onChanged={changed} onDismiss={() => setUndo(null)} canRestore={!whyAdmin} />}
         <MakeBackup server={s} onDone={changed} />
         <Card>
-          <CardHeader><CardTitle>Your backups{v ? ` (${v.backups.length})` : ''}</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t('backups.backupsTab.backupsValue', { value: v ? ` (${v.backups.length})` : '' })}</CardTitle></CardHeader>
           <CardContent>
-            {v && v.backups.length === 0 && <p className="text-sm text-muted-foreground">No backup yet. Press "Back up now": it takes a minute or two.</p>}
+            {v && v.backups.length === 0 && <p className="text-sm text-muted-foreground">{t('backups.backupsTab.noBackupYetPress')}</p>}
             {v && v.backups.length > 0 && (
               <ul className="divide-y divide-border rounded-md border border-border">
                 {v.backups.map((b) => <Row key={b.id} server={s.name} b={b} canAdmin={!whyAdmin} remote={role.remote} onVerify={() => setVerify(b)} onRestore={() => setRestore(b)} onChanged={changed} />)}

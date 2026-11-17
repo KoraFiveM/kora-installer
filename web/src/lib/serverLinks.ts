@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 // Where the per-server buttons point, worked out from how the person reached the panel.
 
 /** Is this the name of the computer the browser is on (so `localhost` means the same machine as Kora)? */
@@ -42,13 +44,13 @@ export function txAdminLink(host: string, port: number, local: boolean): TxAdmin
     return {
       url: null,
       viaPanel: true,
-      hint: `You reached this panel through a tunnel. txAdmin opens through the panel on port ${gw ?? 'its own'}, so add -L ${gw}:localhost:${gw} to your ssh command, then press the button.`,
+      hint: gw === null ? t('core.serverLinks.reachedPanelThroughTunnelOwn') : t('core.serverLinks.reachedPanelThroughTunnel', { gw }),
     }
   }
   return {
     url: null,
     viaPanel: true,
-    hint: `Opens txAdmin through this panel (you stay signed in with your panel sign-in), on port ${gw ?? 'its own'} of ${host}. If the page does not load, a firewall is blocking that port: allow TCP port ${gw ?? ''} for the devices that use the panel.`,
+    hint: gw === null ? t('core.serverLinks.opensTxadminThroughPanelOwn', { host }) : t('core.serverLinks.opensTxadminThroughPanel', { gw, host }),
   }
 }
 

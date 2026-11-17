@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { DoneStep, FileStep, PasswordStep, PreviewStep, RunStep } from './steps'
+import { t } from '@/i18n'
+import '@/i18n/en/backups'
 
 /** "Bring a server from a backup or another machine": its own page and steps, next to (not inside) the install wizard. */
 export default function ImportPage() {
@@ -60,22 +62,22 @@ export default function ImportPage() {
   if (!role.can('admin')) {
     return (
       <div className="mx-auto max-w-2xl space-y-5">
-        <h1 className="font-heading text-2xl font-bold">Bring a server from a backup or another machine</h1>
-        <Alert tone="info">Your account ({role.role}) cannot bring a server in. Ask an administrator.</Alert>
-        <Button asChild><Link to="/">Back to your servers</Link></Button>
+        <h1 className="font-heading text-2xl font-bold">{t('backups.importPage.bringServerFromBackup')}</h1>
+        <Alert tone="info">{t('backups.importPage.accountRoleCannotBring', { role: role.role })}</Alert>
+        <Button asChild><Link to="/">{t('backups.importPage.backServers')}</Link></Button>
       </div>
     )
   }
   const stage = run.phase === 'done' ? 'done' : job ? 'run' : preview && !preview.needs_passphrase && choices ? 'preview' : preview?.needs_passphrase ? 'password' : 'file'
   return (
     <div className="mx-auto max-w-2xl space-y-5">
-      <h1 className="font-heading text-2xl font-bold">Bring a server from a backup or another machine</h1>
-      <p className="text-sm text-muted-foreground">Restore a server from a backup file, or move one here from another computer (Linux or Windows). On the old computer open the server's Backups tab and choose &quot;Move this server&quot; to make the file. Nothing leaves your computers except the file you carry yourself.</p>
+      <h1 className="font-heading text-2xl font-bold">{t('backups.importPage.bringServerFromBackup')}</h1>
+      <p className="text-sm text-muted-foreground">{t('backups.importPage.restoreServerFromBackup')}</p>
       <Card>
-        <CardHeader><CardTitle>{stage === 'file' ? '1. The file' : stage === 'password' ? '2. The password' : stage === 'preview' ? '3. What will happen' : stage === 'run' ? '4. Bringing it in' : 'Done'}</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{stage === 'file' ? t('backups.importPage.theFile') : stage === 'password' ? t('backups.importPage.thePassword') : stage === 'preview' ? t('backups.importPage.whatHappen') : stage === 'run' ? t('backups.importPage.bringingItIn') : t('backups.importPage.done')}</CardTitle></CardHeader>
         <CardContent>
           {stage === 'file' && <FileStep local={!role.remote} busy={upload.isPending || look.isPending} error={upload.error ?? look.error} archived={archived.data?.servers ?? []} onArchived={(a: ArchivedServer, id) => { setFileName(`${a.name} (deleted)`); look.mutate({ src: { archived: { name: a.name, deleted_unix: a.deleted_unix, backup: id } } }) }} onFile={(f) => upload.mutate(f)} onPath={(path) => { setFileName(path); look.mutate({ src: { path } }) }} />}
-          {stage === 'password' && <PasswordStep name={fileName || preview?.file_name || 'The file'} error={look.error} busy={look.isPending} onPassword={(pw) => source && look.mutate({ src: source, pw })} />}
+          {stage === 'password' && <PasswordStep name={fileName || preview?.file_name || t('backups.importPage.theFile2')} error={look.error} busy={look.isPending} onPassword={(pw) => source && look.mutate({ src: source, pw })} />}
           {stage === 'preview' && preview && choices && <PreviewStep preview={preview} choices={choices} setChoices={setChoices} key_={keyName} setKey={setKeyName} forkChoice={forkChoice} setForkChoice={setForkChoice} admin={admin} setAdmin={setAdmin} start={start} setStart={setStart} busy={false} onGo={() => void go(false)} />}
           {stage === 'preview' && startErr != null && <div className="mt-3"><ErrorNotice error={startErr} /></div>}
           {stage === 'run' && <RunStep events={run.events} failed={run.phase === 'failed' ? run.error : null} onRetry={() => void go(false)} onStartOver={() => void go(true)} />}

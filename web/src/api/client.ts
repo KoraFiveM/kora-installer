@@ -1,5 +1,7 @@
 import type * as T from './types'
 import { ROUTES, type OpName, type OpTypes } from './generated/routes'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 export interface ApiErrorBody {
   code: string
@@ -102,7 +104,7 @@ async function readError(res: Response): Promise<ApiError> {
   } catch {
     /* not JSON */
   }
-  return new ApiError(res.status, body ?? { code: res.status === 401 ? 'unauthorized' : 'internal', message: `The server answered with an unexpected error (${res.status}).` })
+  return new ApiError(res.status, body ?? { code: res.status === 401 ? 'unauthorized' : 'internal', message: t('core.client.serverAnsweredUnexpectedError', { status: res.status }) })
 }
 
 export interface RequestOptions {
@@ -145,7 +147,7 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
     res = await fetch(url, { method, headers, body, credentials: 'same-origin', signal: opts.signal })
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw e
-    throw new ApiError(0, { code: 'network', message: 'Could not reach Kora. Check that it is still running, then try again.' })
+    throw new ApiError(0, { code: 'network', message: t('core.client.couldReachKoraCheck') })
   }
   if (!res.ok) {
     const err = await readError(res)
@@ -389,7 +391,7 @@ export const api = {
     undo: (name: string, passphrase?: string) => call('backup_undo', { params: { s: name }, body: { passphrase } }),
     remove: (name: string, id: string) => call('backup_delete', { params: { s: name, id } }),
     /** The address of the archive (a download; it holds secrets: administrators only). Fetched with the session header, see `downloadBackup`. */
-    fileUrl: (name: string, id: string) => `${BASE}/servers/${encodeURIComponent(name)}/backups/${encodeURIComponent(id)}/file`,
+    fileUrl: (name: string, id: string) => t('core.client.baseServersEncodeuricomponentB', { BASE, encodeURIComponent: encodeURIComponent(name), encodeURIComponent2: encodeURIComponent(id) }),
   },
   imports: {
     /** Upload a backup file (the file itself is the body, streamed): it waits on the computer that runs Kora. */

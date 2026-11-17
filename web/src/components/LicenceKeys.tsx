@@ -13,6 +13,8 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
+import { t } from '@/i18n'
+import '@/i18n/en/settings'
 
 /** A key field that hides what is typed until the eye is pressed. */
 export function SecretInput({ label, value, onChange, hint }: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {
@@ -28,7 +30,7 @@ function SecretBox({ value, onChange, show, toggle, id, ...rest }: { value: stri
   return (
     <div className="flex gap-2">
       <Input id={id} {...rest} type={show ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value)} autoComplete="off" spellCheck={false} />
-      <Button type="button" size="icon" aria-label={show ? 'Hide the licence key' : 'Show the licence key'} aria-pressed={show} onClick={toggle}>{show ? <EyeOff /> : <Eye />}</Button>
+      <Button type="button" size="icon" aria-label={show ? t('settings.licenceKeys.hideLicenceKey') : t('settings.licenceKeys.showLicenceKey')} aria-pressed={show} onClick={toggle}>{show ? <EyeOff /> : <Eye />}</Button>
     </div>
   )
 }
@@ -46,7 +48,7 @@ function KeychainLine({ data }: { data: SavedKeys }) {
   const set = useMutation({
     mutationFn: (on: boolean) => api.keys.keychain(on),
     onSuccess: (r) => {
-      setResult([`Moved ${r.moved} ${r.moved === 1 ? 'key' : 'keys'}.`, ...r.left.map((l) => `Could not move: ${l}`)])
+      setResult([`Moved ${r.moved} ${r.moved === 1 ? 'key' : 'keys'}.`, ...r.left.map((l) => t('settings.licenceKeys.couldMoveL', { l }))])
       void qc.invalidateQueries({ queryKey: ['keys'] })
     },
   })
@@ -57,9 +59,9 @@ function KeychainLine({ data }: { data: SavedKeys }) {
       {!role.remote && role.can('admin') && (
         <div className="flex flex-wrap gap-3">
           {kc.mode === 'off' || !kc.available ? (
-            <Button size="sm" variant="secondary" disabled={set.isPending || !kc.available && kc.mode !== 'off'} onClick={() => set.mutate(true)}>Use the system keychain</Button>
+            <Button size="sm" variant="secondary" disabled={set.isPending || !kc.available && kc.mode !== 'off'} onClick={() => set.mutate(true)}>{t('settings.licenceKeys.useSystemKeychain')}</Button>
           ) : (
-            <Button size="sm" variant="secondary" disabled={set.isPending} onClick={() => set.mutate(false)}>Keep keys in Kora&apos;s private file instead</Button>
+            <Button size="sm" variant="secondary" disabled={set.isPending} onClick={() => set.mutate(false)}>{t('settings.licenceKeys.keepKeysKorasPrivate')}</Button>
           )}
         </div>
       )}
@@ -85,45 +87,42 @@ export function LicenceKeysCard() {
   }
   const add = useMutation({
     mutationFn: () => api.keys.add(name, key),
-    onSuccess: (r) => { setName(''); setKey(''); done([`Saved the key ending ${r.key.last4} as "${r.key.name}".`]) },
+    onSuccess: (r) => { setName(''); setKey(''); done([t('settings.licenceKeys.savedKeyEndingLast', { last4: r.key.last4, name: r.key.name })]) },
   })
   const keys = q.data?.keys ?? []
   const can = q.data?.can_manage ?? false
   return (
     <Card>
-      <CardHeader><CardTitle>Licence keys</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('settings.licenceKeys.licenceKeys')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Keys you save here can be picked by name when you install a server or change a server&apos;s key, so you never paste them twice.
-          They stay on this computer, and Kora only ever shows the last 4 characters.
-        </p>
+        <p className="text-sm text-muted-foreground">{t('settings.licenceKeys.keysSaveHerePicked')}</p>
         {q.data && <KeychainLine data={q.data} />}
-        <ErrorNotice error={q.error} title="Kora cannot read your saved licence keys" />
-        {q.isSuccess && keys.length === 0 && <p className="text-sm">No keys saved yet.{can ? ' Add one below, or tick "Save this key" when you install a server.' : ' Ask an administrator to add one.'}</p>}
+        <ErrorNotice error={q.error} title={t('settings.licenceKeys.koraCannotReadSaved')} />
+        {q.isSuccess && keys.length === 0 && <p className="text-sm">{t('settings.licenceKeys.noKeysSavedYet', { value: can ? t('settings.licenceKeys.addOneBelowTick') : t('settings.licenceKeys.askAdministratorAddOne') })}</p>}
         {keys.length > 0 && (
-          <ul className="divide-y divide-border rounded-md border border-border" aria-label="Saved licence keys">
+          <ul className="divide-y divide-border rounded-md border border-border" aria-label={t('settings.licenceKeys.savedLicenceKeys')}>
             {keys.map((k) => (
               <li key={k.name} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
                 <div className="min-w-0 space-y-1">
-                  <div className="font-medium">{k.name} <span className="font-normal text-muted-foreground">key ending {k.last4}</span></div>
+                  <div className="font-medium">{k.name} <span className="font-normal text-muted-foreground">{t('settings.licenceKeys.keyEndingLast', { last4: k.last4 })}</span></div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {k.servers.length > 0 ? k.servers.map((s) => <Badge key={s} tone="neutral">Used by {s}</Badge>) : <span>Not used by any server yet</span>}
-                    {k.stopped_installs > 0 && <Badge tone="amber">Needed by an unfinished install</Badge>}
-                    {when(k.added) && <span>Saved {when(k.added)}</span>}
-                    <span>Kept in {k.kept}</span>
+                    {k.servers.length > 0 ? k.servers.map((s) => <Badge key={s} tone="neutral">{t('settings.licenceKeys.usedS', { s })}</Badge>) : <span>{t('settings.licenceKeys.usedAnyServerYet')}</span>}
+                    {k.stopped_installs > 0 && <Badge tone="amber">{t('settings.licenceKeys.neededUnfinishedInstall')}</Badge>}
+                    {when(k.added) && <span>{t('settings.licenceKeys.savedWhen', { when: when(k.added) ?? '' })}</span>}
+                    <span>{t('settings.licenceKeys.keptKept', { kept: k.kept })}</span>
                   </div>
                   {k.problem && (
-                    <Alert tone="warning" title="This key cannot be read from here">
+                    <Alert tone="warning" title={t('settings.licenceKeys.keyCannotReadFrom')}>
                       {k.problem}
-                      {can && <div className="mt-2"><Button size="sm" aria-label={`Enter it again: ${k.name}`} onClick={() => { setDialog({ kind: 'replace', key: k }); setKey('') }}>Enter it again</Button></div>}
+                      {can && <div className="mt-2"><Button size="sm" aria-label={t('settings.licenceKeys.enterAgainName', { name: k.name })} onClick={() => { setDialog({ kind: 'replace', key: k }); setKey('') }}>{t('settings.licenceKeys.enterAgain')}</Button></div>}
                     </Alert>
                   )}
                 </div>
                 {can && (
                   <div className="flex gap-2">
-                    <Button size="sm" aria-label={`Rename ${k.name}`} onClick={() => { setDialog({ kind: 'rename', key: k }); setName(k.name) }}>Rename</Button>
-                    <Button size="sm" aria-label={`Replace key of ${k.name}`} onClick={() => { setDialog({ kind: 'replace', key: k }); setKey('') }}>Replace key</Button>
-                    <Button size="sm" variant="destructive" aria-label={`Delete ${k.name}`} onClick={() => setDialog({ kind: 'delete', key: k })}>Delete</Button>
+                    <Button size="sm" aria-label={t('settings.licenceKeys.renameName', { name: k.name })} onClick={() => { setDialog({ kind: 'rename', key: k }); setName(k.name) }}>{t('settings.licenceKeys.rename')}</Button>
+                    <Button size="sm" aria-label={t('settings.licenceKeys.replaceKeyName', { name: k.name })} onClick={() => { setDialog({ kind: 'replace', key: k }); setKey('') }}>{t('settings.licenceKeys.replaceKey')}</Button>
+                    <Button size="sm" variant="destructive" aria-label={t('settings.licenceKeys.deleteName', { name: k.name })} onClick={() => setDialog({ kind: 'delete', key: k })}>{t('settings.licenceKeys.delete')}</Button>
                   </div>
                 )}
               </li>
@@ -131,15 +130,15 @@ export function LicenceKeysCard() {
           </ul>
         )}
         {notes.map((n) => <Alert key={n} tone="success">{n}</Alert>)}
-        {q.isSuccess && !can && <p className="text-xs text-muted-foreground">Only an administrator can add, rename, replace or delete keys. You can pick any of these when you install a server.</p>}
+        {q.isSuccess && !can && <p className="text-xs text-muted-foreground">{t('settings.licenceKeys.onlyAdministratorAddRename')}</p>}
         {can && (
           <form className="space-y-3 border-t border-border pt-4" onSubmit={(e) => { e.preventDefault(); add.mutate() }}>
-            <p className="text-sm font-semibold">Add a key</p>
+            <p className="text-sm font-semibold">{t('settings.licenceKeys.addKey')}</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Name" hint='For example "Main" or "Test server".'><Input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} autoComplete="off" /></Field>
-              <Field label="Licence key" hint="Get one at portal.cfx.re, under Server keys."><SecretBox value={key} onChange={setKey} show={show} toggle={() => setShow((x) => !x)} /></Field>
+              <Field label={t('settings.licenceKeys.name')} hint={t('settings.licenceKeys.exampleMainTestServer')}><Input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} autoComplete="off" /></Field>
+              <Field label={t('settings.licenceKeys.licenceKey')} hint={t('settings.licenceKeys.getOnePortalCfx')}><SecretBox value={key} onChange={setKey} show={show} toggle={() => setShow((x) => !x)} /></Field>
             </div>
-            <Button type="submit" variant="default" disabled={add.isPending || !name.trim() || !key.trim() || q.isError}>Save key</Button>
+            <Button type="submit" variant="default" disabled={add.isPending || !name.trim() || !key.trim() || q.isError}>{t('settings.licenceKeys.saveKey')}</Button>
             <ErrorNotice error={add.error} />
           </form>
         )}
@@ -154,17 +153,17 @@ export function LicenceKeysCard() {
 function RenameDialog({ d, name, setName, onClose, onDone }: { d: Dialogue; name: string; setName: (v: string) => void; onClose: () => void; onDone: (n: string[]) => void }) {
   const m = useMutation({
     mutationFn: () => api.keys.update(d!.key.name, { new_name: name }),
-    onSuccess: (r) => { onClose(); onDone([`Renamed to "${r.key.name}".`, ...r.notes]) },
+    onSuccess: (r) => { onClose(); onDone([t('settings.licenceKeys.renamedName', { name: r.key.name }), ...r.notes]) },
   })
   return (
     <Dialog open={d?.kind === 'rename'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }}>
-      <DialogContent title="Rename this key" description="Servers that were installed with it are not affected. Unfinished installs follow the new name.">
+      <DialogContent title={t('settings.licenceKeys.renameKey')} description={t('settings.licenceKeys.serversWereInstalledAffected')}>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); m.mutate() }}>
-          <Field label="New name"><Input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} autoComplete="off" /></Field>
+          <Field label={t('settings.licenceKeys.newName')}><Input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} autoComplete="off" /></Field>
           <ErrorNotice error={m.error} />
           <div className="flex justify-end gap-2">
-            <Button type="button" onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="default" disabled={m.isPending || !name.trim() || name.trim() === d?.key.name}>Rename</Button>
+            <Button type="button" onClick={onClose}>{t('settings.licenceKeys.cancel')}</Button>
+            <Button type="submit" variant="default" disabled={m.isPending || !name.trim() || name.trim() === d?.key.name}>{t('settings.licenceKeys.rename')}</Button>
           </div>
         </form>
       </DialogContent>
@@ -175,17 +174,17 @@ function RenameDialog({ d, name, setName, onClose, onDone }: { d: Dialogue; name
 function ReplaceDialog({ d, value, setValue, onClose, onDone }: { d: Dialogue; value: string; setValue: (v: string) => void; onClose: () => void; onDone: (n: string[]) => void }) {
   const m = useMutation({
     mutationFn: () => api.keys.update(d!.key.name, { license_key: value }),
-    onSuccess: (r) => { onClose(); setValue(''); onDone([`"${r.key.name}" now holds the key ending ${r.key.last4}.`, ...r.notes]) },
+    onSuccess: (r) => { onClose(); setValue(''); onDone([t('settings.licenceKeys.nameNowHoldsKey', { name: r.key.name, last4: r.key.last4 }), ...r.notes]) },
   })
   return (
     <Dialog open={d?.kind === 'replace'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }}>
-      <DialogContent title={`Replace key of "${d?.key.name ?? ''}"`} description="Put a different key under this name. Servers already installed keep the key they have; use Change licence key on a server to switch it.">
+      <DialogContent title={t('settings.licenceKeys.replaceKeyValue', { value: d?.key.name ?? '' })} description={t('settings.licenceKeys.putDifferentKeyUnder')}>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); m.mutate() }}>
-          <SecretInput label="New licence key" value={value} onChange={setValue} />
+          <SecretInput label={t('settings.licenceKeys.newLicenceKey')} value={value} onChange={setValue} />
           <ErrorNotice error={m.error} />
           <div className="flex justify-end gap-2">
-            <Button type="button" onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="default" disabled={m.isPending || !value.trim()}>Replace key</Button>
+            <Button type="button" onClick={onClose}>{t('settings.licenceKeys.cancel')}</Button>
+            <Button type="submit" variant="default" disabled={m.isPending || !value.trim()}>{t('settings.licenceKeys.replaceKey')}</Button>
           </div>
         </form>
       </DialogContent>
@@ -200,11 +199,11 @@ function DeleteDialog({ d, onClose, onDone }: { d: Dialogue; onClose: () => void
   })
   const k = d?.key
   return (
-    <ConfirmDialog open={d?.kind === 'delete'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }} title={`Delete "${k?.name ?? ''}"?`}
-      description="This forgets the key on this computer. You can add it again from the Cfx.re portal." confirmLabel="Delete key" destructive busy={m.isPending} onConfirm={() => m.mutate()}>
+    <ConfirmDialog open={d?.kind === 'delete'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }} title={t('settings.licenceKeys.deleteValue', { value: k?.name ?? '' })}
+      description={t('settings.licenceKeys.forgetsKeyComputerAdd')} confirmLabel={t('settings.licenceKeys.deleteKey')} destructive busy={m.isPending} onConfirm={() => m.mutate()}>
       <div className="space-y-3 text-sm">
-        <p>Servers that were installed with this key keep working: they have their own copy.</p>
-        {k && k.stopped_installs > 0 && <Alert tone="warning">An unfinished install uses this key. It will need another key picked before it can carry on.</Alert>}
+        <p>{t('settings.licenceKeys.serversWereInstalledKey')}</p>
+        {k && k.stopped_installs > 0 && <Alert tone="warning">{t('settings.licenceKeys.unfinishedInstallUsesKey')}</Alert>}
         <ErrorNotice error={m.error} />
       </div>
     </ConfirmDialog>
@@ -226,16 +225,16 @@ export function RememberedCard() {
   const any = !!p && (p.cfx_username || p.cfx_identifier || p.github_owner)
   return (
     <Card>
-      <CardHeader><CardTitle>Remembered answers</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('settings.licenceKeys.rememberedAnswers')}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">To save you typing, Kora remembers your Cfx.re name and your GitHub owner after you first use them, and fills them in on the install page. You can change them there at any time. Nothing here is secret.</p>
-        {q.isSuccess && !any && <p className="text-sm">Nothing is remembered yet.</p>}
+        <p className="text-sm text-muted-foreground">{t('settings.licenceKeys.saveTypingKoraRemembers')}</p>
+        {q.isSuccess && !any && <p className="text-sm">{t('settings.licenceKeys.nothingRememberedYet')}</p>}
         {p && any && (
           <dl className="divide-y divide-border text-sm">
             {LABELS.filter(([k]) => p[k]).map(([k, label]) => (
               <div key={k} className="flex items-center justify-between gap-3 py-2">
                 <div><dt className="text-muted-foreground">{label}</dt><dd>{p[k]}</dd></div>
-                {role.can('admin') && <Button size="sm" aria-label={`Forget ${label}`} disabled={forget.isPending} onClick={() => forget.mutate(k === 'cfx_username' || k === 'cfx_identifier' ? { cfx_username: null, cfx_identifier: null } : { [k]: null })}>Forget</Button>}
+                {role.can('admin') && <Button size="sm" aria-label={t('settings.licenceKeys.forgetLabel', { label })} disabled={forget.isPending} onClick={() => forget.mutate(k === 'cfx_username' || k === 'cfx_identifier' ? { cfx_username: null, cfx_identifier: null } : { [k]: null })}>{t('settings.licenceKeys.forget')}</Button>}
               </div>
             ))}
           </dl>

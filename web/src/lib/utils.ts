@@ -1,5 +1,7 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { t as tt } from '@/i18n'
+import '@/i18n/en/core'
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))
@@ -31,8 +33,8 @@ export function validatePorts(game: string | number, txadmin: string | number): 
   const g = Number(game)
   const t = Number(txadmin)
   const ok = (n: number) => Number.isInteger(n) && n >= 1024 && n <= 65535
-  if (String(game).trim() === '' || String(txadmin).trim() === '' || !ok(g) || !ok(t)) return 'Ports must be whole numbers from 1024 to 65535.'
-  if (g === t) return 'The game port and the txAdmin port must be different.'
+  if (String(game).trim() === '' || String(txadmin).trim() === '' || !ok(g) || !ok(t)) return tt('core.utils.portsMustWholeNumbers')
+  if (g === t) return tt('core.utils.gamePortTxadminPort')
   return null
 }
 

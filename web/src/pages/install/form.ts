@@ -1,5 +1,7 @@
 import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
+import { t } from '@/i18n'
+import '@/i18n/en/install'
 
 export type ArtifactChoice = 'recommended' | 'pick' | 'custom'
 
@@ -210,12 +212,12 @@ export function buildRequest(f: WizardForm, opts: { artifactUrl?: string | null 
 
 export function dbLoginProblem(f: WizardForm): string | null {
   if (f.db === 'skip' || !f.dbCustom) return null
-  if (!f.dbUser.trim()) return 'Type the database administrator user name.'
-  if (!f.dbPass) return 'Type the database administrator password.'
-  if (f.dbPass !== f.dbPass2) return 'The two passwords are not the same.'
+  if (!f.dbUser.trim()) return t('install.form.typeDatabaseAdministratorUser')
+  if (!f.dbPass) return t('install.form.typeDatabaseAdministratorPassw')
+  if (f.dbPass !== f.dbPass2) return t('install.form.twoPasswordsSame')
   const p = Number(f.dbPort)
-  if (!Number.isInteger(p) || p < 1 || p > 65535) return 'The database port must be a number from 1 to 65535.'
-  if (!f.dbHost.trim()) return 'Type the database host.'
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return t('install.form.databasePortMustNumber')
+  if (!f.dbHost.trim()) return t('install.form.typeDatabaseHost')
   return null
 }
 
@@ -238,29 +240,29 @@ const PORTS_MESSAGE: Record<PortsState, string | null> = {
 export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): string | null {
   switch (step) {
     case 'name':
-      if (!slug(f.name)) return 'Give the server a name.'
-      if (!f.dir.trim()) return 'Choose a folder for the server.'
+      if (!slug(f.name)) return t('install.form.giveServerName')
+      if (!f.dir.trim()) return t('install.form.chooseFolderServer')
       return null
     case 'ports':
       return validatePorts(f.game, f.tx) ?? PORTS_MESSAGE[ctx.ports]
     case 'build':
-      if (f.artifact === 'custom' && !/^https:\/\/\S+$/.test(f.artifactUrl.trim())) return 'Type a download address that starts with https://.'
-      if (f.artifact === 'pick' && f.artifactBuild === null) return 'Pick a build from the list.'
-      if (f.gameBuild.trim() && !/^\d+$/.test(f.gameBuild.trim())) return 'The game build must be a number.'
+      if (f.artifact === 'custom' && !/^https:\/\/\S+$/.test(f.artifactUrl.trim())) return t('install.form.typeDownloadAddressStarts')
+      if (f.artifact === 'pick' && f.artifactBuild === null) return t('install.form.pickBuildFromList')
+      if (f.gameBuild.trim() && !/^\d+$/.test(f.gameBuild.trim())) return t('install.form.gameBuildMustNumber')
       return null
     case 'resources':
-      return !f.resourcesAll && f.resourceIds.length === 0 ? 'Pick at least one resource, or choose to install everything.' : null
+      return !f.resourcesAll && f.resourceIds.length === 0 ? t('install.form.pickLeastOneResource') : null
     case 'database':
       return dbLoginProblem(f)
     case 'licence':
-      if (f.licenceChoice === 'saved') return f.licenceName ? null : 'Pick one of your saved keys, or add a new one.'
-      if (f.license.trim().length < 8) return 'Paste your licence key. It is a long string of letters and numbers.'
-      return f.saveKey && !f.saveKeyName.trim() ? 'Give the key a name so you can find it next time, or turn off "Save this key".' : null
+      if (f.licenceChoice === 'saved') return f.licenceName ? null : t('install.form.pickOneSavedKeys')
+      if (f.license.trim().length < 8) return t('install.form.pasteLicenceKeyLong')
+      return f.saveKey && !f.saveKeyName.trim() ? t('install.form.giveKeyNameFind') : null
     case 'cfx':
-      return f.cfxFound || !f.cfxUsername.trim() ? null : 'Check the Cfx.re username, or clear the box to skip this step.'
+      return f.cfxFound || !f.cfxUsername.trim() ? null : t('install.form.checkCfxReUsername')
     case 'github':
-      if (!ctx.githubSignedIn) return 'Sign in to GitHub to continue.'
-      return f.githubOwner ? null : 'Choose where your own copies go.'
+      if (!ctx.githubSignedIn) return t('install.form.signGithubContinue')
+      return f.githubOwner ? null : t('install.form.chooseWhereOwnCopies')
     default:
       return null
   }

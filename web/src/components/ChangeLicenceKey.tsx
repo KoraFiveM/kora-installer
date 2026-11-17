@@ -12,6 +12,9 @@ import { Input } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { SecretInput } from '@/components/LicenceKeys'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/settings'
 
 /** Overview tab: which licence key this server uses, and a way to change it. */
 export function LicenceKeyCard({ server, restart, busy }: { server: ServerDetail; restart: () => void; busy: boolean }) {
@@ -23,17 +26,14 @@ export function LicenceKeyCard({ server, restart, busy }: { server: ServerDetail
   const using = q.data?.keys.find((k) => k.servers.includes(server.name))
   return (
     <Card>
-      <CardHeader><CardTitle>Licence key</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('settings.changeLicenceKey.licenceKey')}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          {using ? <>This server uses your saved licence key <strong>{using.name}</strong> (ending {using.last4}).</> : 'The licence key is part of this server’s own configuration.'}{' '}
-          Change it here if you got a new key or want to move this server to another one.
-        </p>
-        <Button onClick={() => { setDone(null); setOpen(true) }}>Change licence key</Button>
+        <p className="text-sm text-muted-foreground">{rich('settings.changeLicenceKey.nodeNodeChangeHere', { node: using ? <>{rich('settings.changeLicenceKey.serverUsesSavedLicence', { strong: <strong>{using.name}</strong>, last4: using.last4 })}</> : t('settings.changeLicenceKey.licenceKeyPartServers') })}</p>
+        <Button onClick={() => { setDone(null); setOpen(true) }}>{t('settings.changeLicenceKey.changeLicenceKey')}</Button>
         {done && (
-          <Alert tone={done.restart_needed ? 'warning' : 'success'} title={`Licence key changed (now ending ${done.last4})`}>
+          <Alert tone={done.restart_needed ? 'warning' : 'success'} title={t('settings.changeLicenceKey.licenceKeyChangedNow', { last4: done.last4 })}>
             <p>{done.message}</p>
-            {done.restart_needed && <div className="mt-2"><Button size="sm" variant="default" disabled={busy} onClick={restart}>Restart the server now</Button></div>}
+            {done.restart_needed && <div className="mt-2"><Button size="sm" variant="default" disabled={busy} onClick={restart}>{t('settings.changeLicenceKey.restartServerNow')}</Button></div>}
           </Alert>
         )}
       </CardContent>
@@ -62,37 +62,37 @@ function ChangeDialog({ server, open, onClose, onDone }: { server: ServerDetail;
       onDone(r)
     },
   })
-  const problem = choice === null ? 'Pick one of the saved licence keys.' : choice === 'new' ? (key.trim().length < 8 ? 'Paste the new licence key.' : save && !saveName.trim() ? 'Give the key a name, or turn off "Save this key".' : null) : null
+  const problem = choice === null ? t('settings.changeLicenceKey.pickOneSavedLicence') : choice === 'new' ? (key.trim().length < 8 ? t('settings.changeLicenceKey.pasteNewLicenceKey') : save && !saveName.trim() ? t('settings.changeLicenceKey.giveKeyNameTurn') : null) : null
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }}>
-      <DialogContent title="Change licence key" description={`Choose the key ${server.name} should use. Kora writes it into the server's own configuration.`}>
+      <DialogContent title={t('settings.changeLicenceKey.changeLicenceKey')} description={t('settings.changeLicenceKey.chooseKeyNameShould', { name: server.name })}>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (!problem) m.mutate() }}>
-          <ErrorNotice error={q.error} title="Kora cannot read your saved licence keys" />
+          <ErrorNotice error={q.error} title={t('settings.changeLicenceKey.koraCannotReadSaved')} />
           {saved.length > 0 && (
             <fieldset className="space-y-2">
-              <legend className="mb-1 text-sm text-muted-foreground">Saved keys</legend>
+              <legend className="mb-1 text-sm text-muted-foreground">{t('settings.changeLicenceKey.savedKeys')}</legend>
               {saved.map((k) => (
                 <Radio key={k.name} name="server-key" checked={choice === k.name} onChange={() => setPick(k.name)} label={k.name}
-                  hint={`Key ending ${k.last4}${k.servers.includes(server.name) ? '. This server uses it now.' : '.'}`} />
+                  hint={t('settings.changeLicenceKey.keyEndingLastValue', { last4: k.last4, value: k.servers.includes(server.name) ? t('settings.changeLicenceKey.serverUsesNow') : '.' })} />
               ))}
-              {canManage && <Radio name="server-key" checked={choice === 'new'} onChange={() => { setPick('new'); setSaveName(saveName || `Key ${saved.length + 1}`) }} label="A new key" hint="Paste a key you have not saved yet." />}
+              {canManage && <Radio name="server-key" checked={choice === 'new'} onChange={() => { setPick('new'); setSaveName(saveName || `Key ${saved.length + 1}`) }} label={t('settings.changeLicenceKey.newKey')} hint={t('settings.changeLicenceKey.pasteKeySavedYet')} />}
             </fieldset>
           )}
-          {q.isSuccess && saved.length === 0 && !canManage && <Alert tone="info">There are no saved licence keys to pick from. Ask an administrator to add one in Settings.</Alert>}
+          {q.isSuccess && saved.length === 0 && !canManage && <Alert tone="info">{t('settings.changeLicenceKey.thereNoSavedLicence')}</Alert>}
           {choice === 'new' && (
             <div className="space-y-3">
-              <SecretInput label="New licence key" value={key} onChange={setKey} hint="Get one at portal.cfx.re, under Server keys." />
-              <Checkbox label="Save this key on this computer" hint="So you can pick it by name next time." checked={save} disabled={q.isError} onChange={(e) => { setSave(e.target.checked); if (e.target.checked && !saveName) setSaveName('Main') }} />
-              {save && <Field label="Name for this key"><Input value={saveName} maxLength={40} onChange={(e) => setSaveName(e.target.value)} autoComplete="off" /></Field>}
+              <SecretInput label={t('settings.changeLicenceKey.newLicenceKey')} value={key} onChange={setKey} hint={t('settings.changeLicenceKey.getOnePortalCfx')} />
+              <Checkbox label={t('settings.changeLicenceKey.saveKeyComputer')} hint={t('settings.changeLicenceKey.pickNameNextTime')} checked={save} disabled={q.isError} onChange={(e) => { setSave(e.target.checked); if (e.target.checked && !saveName) setSaveName('Main') }} />
+              {save && <Field label={t('settings.changeLicenceKey.nameKey')}><Input value={saveName} maxLength={40} onChange={(e) => setSaveName(e.target.value)} autoComplete="off" /></Field>}
             </div>
           )}
           {server.status === 'running'
-            ? <p className="text-sm text-muted-foreground">This server is running. It only reads its key when it starts, so you will be asked to restart it after the change.</p>
-            : <p className="text-sm text-muted-foreground">This server is stopped, so no restart is needed: it uses the new key next time it starts.</p>}
+            ? <p className="text-sm text-muted-foreground">{t('settings.changeLicenceKey.serverRunningOnlyReads')}</p>
+            : <p className="text-sm text-muted-foreground">{t('settings.changeLicenceKey.serverStoppedNoRestart')}</p>}
           <ErrorNotice error={m.error} />
           <div className="flex justify-end gap-2">
-            <Button type="button" onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="default" disabled={m.isPending || !!problem} title={problem ?? undefined}>Change licence key</Button>
+            <Button type="button" onClick={onClose}>{t('settings.changeLicenceKey.cancel')}</Button>
+            <Button type="submit" variant="default" disabled={m.isPending || !!problem} title={problem ?? undefined}>{t('settings.changeLicenceKey.changeLicenceKey')}</Button>
           </div>
         </form>
       </DialogContent>

@@ -23,6 +23,9 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { useRole } from '@/hooks/useRole'
 import { ProblemActions, type ActionHandlers } from '@/lib/problemActions'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/errors'
 
 type Request = (
   | { kind: 'install'; tool: 'git' | 'gh' }
@@ -57,8 +60,8 @@ export function ToolchainActions({ children }: { children: ReactNode }) {
       <Dialog open={!!req} onOpenChange={(o) => !o && setReq(null)}>
         {req && (
           <DialogContent title={titleOf(req)} description={descriptionOf(req)}>
-            {req.kind === 'install' && <RunJob key={req.id} start={() => api.tools.install(req.tool)} working={`Setting up ${TOOL_NAME[req.tool]}`} done={`${cap(TOOL_NAME[req.tool])} is ready.`} afterFix={req.afterFix} onClose={() => setReq(null)} />}
-            {req.kind === 'database' && <RunJob key={req.id} start={() => api.systemCheck.startDatabase()} working="Starting the database server" done="The database server is running." afterFix={req.afterFix} onClose={() => setReq(null)} />}
+            {req.kind === 'install' && <RunJob key={req.id} start={() => api.tools.install(req.tool)} working={t('errors.toolchainActions.settingUpToolName', { TOOL_NAME: TOOL_NAME[req.tool] })} done={`${cap(TOOL_NAME[req.tool])} is ready.`} afterFix={req.afterFix} onClose={() => setReq(null)} />}
+            {req.kind === 'database' && <RunJob key={req.id} start={() => api.systemCheck.startDatabase()} working={t('errors.toolchainActions.startingDatabaseServer')} done={t('errors.toolchainActions.databaseServerRunning')} afterFix={req.afterFix} onClose={() => setReq(null)} />}
             {req.kind === 'signin' && <SignIn key={req.id} afterFix={req.afterFix} onClose={() => setReq(null)} />}
           </DialogContent>
         )}
@@ -71,12 +74,12 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 function titleOf(r: Request): string {
   if (r.kind === 'install') return `Install ${TOOL_NAME[r.tool]}`
-  return r.kind === 'signin' ? 'Sign in to GitHub' : 'Start the database'
+  return r.kind === 'signin' ? t('errors.toolchainActions.signGithub') : t('errors.toolchainActions.startDatabase')
 }
 
 function descriptionOf(r: Request): string | undefined {
-  if (r.kind === 'install') return 'Kora keeps its own copy in its own folder. It is checked against a known checksum first, needs no administrator rights, and changes nothing else on this computer.'
-  if (r.kind === 'database') return 'The database server is installed but not running. Starting it may need administrator rights.'
+  if (r.kind === 'install') return t('errors.toolchainActions.koraKeepsItsOwn')
+  if (r.kind === 'database') return t('errors.toolchainActions.databaseServerInstalledBut')
   return undefined
 }
 
@@ -120,15 +123,15 @@ function RunJob({ start, working, done, afterFix, onClose }: { start: () => Prom
     return (
       <div className="space-y-3">
         <ErrorNotice error={error} actions={retry} onRetry={retry.retry} onFixed={() => {}} />
-        <div className="flex justify-end"><Button onClick={onClose}>Close</Button></div>
+        <div className="flex justify-end"><Button onClick={onClose}>{t('errors.toolchainActions.close')}</Button></div>
       </div>
     )
   }
   if (job.phase === 'done') {
     return (
       <div className="space-y-4">
-        <Alert tone="success" title="Done">{done}{afterFix ? ' Carrying on with what you were doing.' : ' If something was waiting for it, you can try that again now.'}</Alert>
-        <div className="flex justify-end"><Button onClick={onClose}>Close</Button></div>
+        <Alert tone="success" title={t('errors.toolchainActions.done')}>{done}{afterFix ? t('errors.toolchainActions.carryingWhatWereDoing') : t('errors.toolchainActions.somethingWaitingTryAgain')}</Alert>
+        <div className="flex justify-end"><Button onClick={onClose}>{t('errors.toolchainActions.close')}</Button></div>
       </div>
     )
   }
@@ -140,7 +143,7 @@ function RunJob({ start, working, done, afterFix, onClose }: { start: () => Prom
       <Announcer message={progressSentence(working, Math.round((fraction ?? 0) * 100))} />
       <p className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin text-info" aria-hidden />{last?.message ?? working}</p>
       <Progress value={Math.round((fraction ?? 0.02) * 100)} label={working} />
-      <p className="text-xs text-muted-foreground">You can keep this page open; it carries on by itself.</p>
+      <p className="text-xs text-muted-foreground">{t('errors.toolchainActions.keepPageOpenCarries')}</p>
     </div>
   )
 }
@@ -160,11 +163,11 @@ function SignIn({ afterFix, onClose }: { afterFix?: () => void | Promise<void>; 
       }} />
       {done && (
         <div className="flex items-center justify-between gap-3">
-          <p className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-success" aria-hidden />You are signed in.{afterFix ? ' Carrying on with what you were doing.' : ' If something was waiting for it, you can try that again now.'}</p>
-          <Button onClick={onClose}>Close</Button>
+          <p className="flex items-center gap-2 text-sm">{rich('errors.toolchainActions.checkcircleNodeSignedValue', { checkCircle2: <CheckCircle2 className="size-4 text-success" aria-hidden />, value: afterFix ? t('errors.toolchainActions.carryingWhatWereDoing') : t('errors.toolchainActions.somethingWaitingTryAgain') })}</p>
+          <Button onClick={onClose}>{t('errors.toolchainActions.close')}</Button>
         </div>
       )}
-      {!done && <div className="flex justify-end"><Button variant="secondary" onClick={onClose}>Close</Button></div>}
+      {!done && <div className="flex justify-end"><Button variant="secondary" onClick={onClose}>{t('errors.toolchainActions.close')}</Button></div>}
     </div>
   )
 }

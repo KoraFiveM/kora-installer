@@ -18,6 +18,8 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { ApiError } from '@/api/client'
 import type { JobError, Problem, ProblemAction, ProblemActionKind } from '@/api/types'
+import { t } from '@/i18n'
+import '@/i18n/en/errors'
 
 export type ActionOf<K extends ProblemActionKind> = Extract<ProblemAction, { kind: K }>
 /**
@@ -71,33 +73,33 @@ export function isAdminCode(code: string): boolean {
 export function actionLabel(a: ProblemAction): string {
   switch (a.kind) {
     case 'retry':
-      return 'Try again'
+      return t('errors.problemActions.tryAgain')
     case 'retry_step':
-      return 'Try this step again'
+      return t('errors.problemActions.tryStepAgain')
     case 'skip_step':
-      return 'Skip this step'
+      return t('errors.problemActions.skipStep')
     case 'change_answers':
-      return a.section && SECTION_LABEL[a.section] ? `Change ${SECTION_LABEL[a.section]}` : 'Change my answers'
+      return a.section && SECTION_LABEL[a.section] ? `Change ${SECTION_LABEL[a.section]}` : t('errors.problemActions.changeMyAnswers')
     case 'sign_in_github':
-      return a.scopes?.length ? 'Sign in to GitHub again' : 'Sign in to GitHub'
+      return a.scopes?.length ? t('errors.problemActions.signGithubAgain') : t('errors.problemActions.signGithub')
     case 'install_tool':
-      return `Install ${TOOL_LABEL[a.tool] ?? 'it'} for me`
+      return t('errors.problemActions.installValueMe', { value: TOOL_LABEL[a.tool] ?? 'it' })
     case 'install_admin_service':
-      return "Install Kora's administrator service"
+      return t('errors.problemActions.installKorasAdministratorServi')
     case 'continue_without_admin':
-      return 'Continue without the administrator parts'
+      return t('errors.problemActions.continueWithoutAdministratorPa')
     case 'show_command':
-      return a.elevated ? 'Command to run as administrator' : 'Command to run'
+      return a.elevated ? t('errors.problemActions.commandRunAdministrator') : t('errors.problemActions.commandRun')
     case 'open_link':
       return `Open ${hostOf(a.url)}`
     case 'open_log':
-      return 'Show the log'
+      return t('errors.problemActions.showLog')
     case 'copy_details':
-      return 'Copy details'
+      return t('errors.problemActions.copyDetails')
     case 'start_database':
-      return 'Start it for me'
+      return t('errors.problemActions.startMe')
     case 'make_fork':
-      return 'Make my own copy (fork)'
+      return t('errors.problemActions.makeMyOwnCopy')
     case 'unknown':
     default:
       // A kind from a newer Kora (or the Rust `Action::Unknown`): never shown, see `hasHandler`.
@@ -134,7 +136,7 @@ export function toProblem(e: unknown): NoticeProblem | null {
     const j = e as JobError
     return { code: j.code ?? 'failed', message: j.message, details: j.details, actions: (Array.isArray(j.actions) ? j.actions : []).filter(isAction), command: j.command }
   }
-  return { code: 'failed', message: 'Something went wrong. Please try again.', actions: [] }
+  return { code: 'failed', message: t('errors.problemActions.somethingWentWrongPlease'), actions: [] }
 }
 
 /** The text "Copy details" puts on the clipboard: everything someone helping would ask for. */

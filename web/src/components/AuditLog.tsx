@@ -11,6 +11,9 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { useRole } from '@/hooks/useRole'
 import { when } from '@/components/JobHistory'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/settings'
 
 const RESULT: Record<string, { label: string; tone: Tone }> = {
   ok: { label: 'Done', tone: 'success' },
@@ -49,35 +52,35 @@ export function AuditLogCard() {
   const days = q.data?.pages[0]?.retention_days
   return (
     <Card>
-      <CardHeader><CardTitle>Activity log</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('settings.auditLog.activityLog')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">Who changed what, from this panel (on this computer or from another device) and from <code>kora</code> commands. Passwords, licence keys and what was typed are never recorded. What Kora&apos;s administrator service did with administrator rights (services, firewall rules, databases, updates) is kept in its own log that only administrators can read: <code>%ProgramFiles%\Kora\data\audit.log</code> on Windows, <code>/var/log/kora/audit.log</code> on Linux.{days ? ` Entries are kept for ${days} days.` : ''}</p>
+        <p className="text-sm text-muted-foreground">{rich('settings.auditLog.whoChangedWhatFrom', { value: days ? t('settings.auditLog.entriesKeptDaysDays', { days }) : '', code: (c) => <code>{c}</code>, code2: (c) => <code>{c}</code>, code3: (c) => <code>{c}</code> })}</p>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Server"><Input value={server} onChange={(e) => setServer(e.target.value)} placeholder="Any server" /></Field>
-          <Field label="Who"><Input value={actor} onChange={(e) => setActor(e.target.value)} placeholder="Any name" /></Field>
-          <Field label="Result">
+          <Field label={t('settings.auditLog.server')}><Input value={server} onChange={(e) => setServer(e.target.value)} placeholder={t('settings.auditLog.anyServer')} /></Field>
+          <Field label={t('settings.auditLog.who')}><Input value={actor} onChange={(e) => setActor(e.target.value)} placeholder={t('settings.auditLog.anyName')} /></Field>
+          <Field label={t('settings.auditLog.result')}>
             <Select value={result} onChange={(e) => setResult(e.target.value)}>
-              <option value="">Any</option>
-              <option value="ok">Done</option>
-              <option value="started">Started</option>
-              <option value="failed">Failed</option>
-              <option value="refused">Not allowed</option>
+              <option value="">{t('settings.auditLog.any')}</option>
+              <option value="ok">{t('settings.auditLog.done')}</option>
+              <option value="started">{t('settings.auditLog.started')}</option>
+              <option value="failed">{t('settings.auditLog.failed')}</option>
+              <option value="refused">{t('settings.auditLog.notAllowed')}</option>
             </Select>
           </Field>
         </div>
-        {q.isPending && <p role="status" className="text-sm text-muted-foreground">Loading...</p>}
+        {q.isPending && <p role="status" className="text-sm text-muted-foreground">{t('settings.auditLog.loading')}</p>}
         <ErrorNotice error={q.error} />
-        {q.data && rows.length === 0 && <p className="text-sm">Nothing matches. {server || actor || result ? 'Clear the filters to see everything.' : 'Changes will appear here.'}</p>}
+        {q.data && rows.length === 0 && <p className="text-sm">{t('settings.auditLog.nothingMatchesValue', { value: server || actor || result ? t('settings.auditLog.clearFiltersSeeEverything') : t('settings.auditLog.changesAppearHere') })}</p>}
         {rows.length > 0 && (
-          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Activity log entries">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={t('settings.auditLog.activityLogEntries')}>
             <table className="w-full text-left">
-              <caption className="sr-only">Activity log, newest first</caption>
-              <thead><tr className="text-xs text-muted-foreground"><th scope="col" className="pb-1 pr-3 font-medium">When</th><th scope="col" className="pb-1 pr-3 font-medium">Who</th><th scope="col" className="pb-1 pr-3 font-medium">What</th><th scope="col" className="pb-1 font-medium">Result</th></tr></thead>
+              <caption className="sr-only">{t('settings.auditLog.activityLogNewestFirst')}</caption>
+              <thead><tr className="text-xs text-muted-foreground"><th scope="col" className="pb-1 pr-3 font-medium">{t('settings.auditLog.when')}</th><th scope="col" className="pb-1 pr-3 font-medium">{t('settings.auditLog.who')}</th><th scope="col" className="pb-1 pr-3 font-medium">{t('settings.auditLog.what')}</th><th scope="col" className="pb-1 font-medium">{t('settings.auditLog.result')}</th></tr></thead>
               <tbody className="divide-y divide-border">{rows.map((r) => <Line key={r.id} r={r} />)}</tbody>
             </table>
           </div>
         )}
-        {q.hasNextPage && <Button size="sm" onClick={() => void q.fetchNextPage()} disabled={q.isFetchingNextPage}>Show older entries</Button>}
+        {q.hasNextPage && <Button size="sm" onClick={() => void q.fetchNextPage()} disabled={q.isFetchingNextPage}>{t('settings.auditLog.showOlderEntries')}</Button>}
       </CardContent>
     </Card>
   )

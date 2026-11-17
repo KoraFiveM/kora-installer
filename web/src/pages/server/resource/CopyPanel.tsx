@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { ActingAs } from './ActingAs'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/resources'
 
 /**
  * "Make my own copy (fork)" for a resource that is a plain clone, and for the whole server. Features that need your own
@@ -28,26 +31,26 @@ export function CopyPanel({ page }: { page: ResourcePage }) {
   }
   if (page.repos?.fork) {
     return (
-      <p className="text-sm text-muted-foreground">Your own copy: <a className="text-info underline" href={`https://github.com/${page.repos.fork}`} target="_blank" rel="noopener noreferrer">{page.repos.fork}</a>{page.repos.original ? <>, a copy of {page.repos.original}</> : null}.</p>
+      <p className="text-sm text-muted-foreground">{rich('resources.copyPanel.ownCopyNodeNode', { a: <a className="text-info underline" href={`https://github.com/${page.repos.fork}`} target="_blank" rel="noopener noreferrer">{page.repos.fork}</a>, node: page.repos.original ? <>{t('resources.copyPanel.copyOriginal', { original: page.repos.original })}</> : null })}</p>
     )
   }
   if (!page.repos) return null
   return (
     <Card id="own-copy">
-      <CardHeader><CardTitle>Your own copy</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('resources.copyPanel.ownCopy')}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">This resource is a plain copy of <strong>{page.repos.original ?? 'the original'}</strong>, so you cannot send changes anywhere or open a pull request from it. Making your own copy (a fork on GitHub) keeps what you have: the same version, the same branch and any changes you made.</p>
+        <p className="text-sm text-muted-foreground">{rich('resources.copyPanel.resourcePlainCopyStrong', { strong: <strong>{page.repos.original ?? 'the original'}</strong> })}</p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="default" disabled={run.phase === 'running' || !!noAdmin} title={noAdmin ?? undefined} onClick={() => void start([page.id])}>{run.phase === 'running' && <Loader2 className="animate-spin" aria-hidden />}Make my own copy (fork)</Button>
-          <Button disabled={run.phase === 'running' || !!noAdmin} title={noAdmin ?? undefined} onClick={() => void start()}>Do it for the whole server</Button>
+          <Button variant="default" disabled={run.phase === 'running' || !!noAdmin} title={noAdmin ?? undefined} onClick={() => void start([page.id])}>{rich('resources.copyPanel.nodeNodeMakeMy', { node: run.phase === 'running' && <Loader2 className="animate-spin" aria-hidden /> })}</Button>
+          <Button disabled={run.phase === 'running' || !!noAdmin} title={noAdmin ?? undefined} onClick={() => void start()}>{t('resources.copyPanel.doWholeServer')}</Button>
         </div>
         <ActingAs />
         <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
         {run.phase === 'done' && run.result && (
-          <Alert tone={run.result.failed.length ? 'warning' : 'success'} title={run.result.failed.length ? 'Some could not be copied' : 'Done'}>
+          <Alert tone={run.result.failed.length ? 'warning' : 'success'} title={run.result.failed.length ? t('resources.copyPanel.someCouldCopied') : t('resources.copyPanel.done')}>
             {run.result.forked.map((f) => <p key={f.resource}>{f.message}</p>)}
             {run.result.failed.map((f) => <p key={f.resource}>{f.resource}: {f.problem.message}</p>)}
-            {run.result.server_is_fork && <p>This server now uses your own copies.</p>}
+            {run.result.server_is_fork && <p>{t('resources.copyPanel.serverNowUsesOwn')}</p>}
           </Alert>
         )}
       </CardContent>

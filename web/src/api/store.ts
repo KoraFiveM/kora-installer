@@ -1,6 +1,8 @@
 // Plain words for the job history and the audit log. The types (`JobSummary`, `AuditRow`, ...) are generated from
 // the Rust side (`crates/kora-core/src/api/wire/`); the calls are `api.jobs.list` and `api.audit.list`.
 import type { AuditRow } from './types'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 /** Plain words for an operation name; anything unknown reads as its name with spaces. */
 const LABELS: Record<string, string> = {
@@ -72,7 +74,7 @@ export function opLabel(op: string): string {
 /** Who did it, in words. */
 export function whoLabel(r: Pick<AuditRow, 'actor_kind' | 'actor_name' | 'provider' | 'role'>): string {
   const n = r.actor_name ?? 'someone'
-  if (r.actor_kind === 'remote') return `${n} (signed in from another device${r.provider ? ` with ${r.provider}` : ''}${r.role ? `, ${r.role}` : ''})`
-  if (r.actor_kind === 'cli') return `${n} (a kora command)`
-  return `${n} (on this computer)`
+  if (r.actor_kind === 'remote') return t('core.store.nSignedFromAnother', { n, value: r.provider ? ` with ${r.provider}` : '', value2: r.role ? `, ${r.role}` : '' })
+  if (r.actor_kind === 'cli') return t('core.store.nKoraCommand', { n })
+  return t('core.store.nComputer', { n })
 }

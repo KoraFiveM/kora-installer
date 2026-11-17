@@ -1,4 +1,6 @@
 import { sessionSecret } from '@/api/client'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 /** Largest file saved through memory when the browser cannot save a stream straight to disk. */
 export const BLOB_LIMIT = 1024 * 1024 * 1024
@@ -14,10 +16,10 @@ interface SaveFilePicker {
  */
 export async function downloadFile(url: string, fileName: string, size: number): Promise<void> {
   const picker = (window as unknown as SaveFilePicker).showSaveFilePicker
-  if (!picker && size > BLOB_LIMIT) throw new Error('This file is too big for this browser to download. Copy it from the folder on the computer that runs Kora, or use Chrome or Edge.')
+  if (!picker && size > BLOB_LIMIT) throw new Error(t('core.download.fileTooBigBrowser'))
   const secret = sessionSecret()
   const res = await fetch(url, { headers: secret ? { 'X-Kora-Session': secret } : {} })
-  if (!res.ok || !res.body) throw new Error(res.status === 403 ? 'Your account may not download backups.' : `The download failed (${res.status}).`)
+  if (!res.ok || !res.body) throw new Error(res.status === 403 ? t('core.download.accountMayDownloadBackups') : t('core.download.downloadFailedStatus', { status: res.status }))
   if (picker) {
     const handle = await picker.call(window, { suggestedName: fileName })
     const out = await handle.createWritable()

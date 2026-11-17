@@ -24,6 +24,9 @@ import { useUpdates } from './server/useUpdates'
 import { RestartNotice } from './server/resource/RestartNotice'
 import { controlBlock, ResourceActions } from './server/resource/ResourceActions'
 import { useRole, whyNot } from '@/hooks/useRole'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/resources'
 
 /** `/servers/:name/resources/:resource`: the one place to see and do everything about a resource. */
 export default function ResourcePage() {
@@ -40,7 +43,7 @@ export default function ResourcePage() {
   const control = useMutation({
     mutationFn: (a: ControlAction) => api.resources.control(name, resource, a),
     onSuccess: (r) => setSaid((x) => ({ ...x, [resource]: { ok: true, text: r.message } })),
-    onError: (e, a) => setSaid((x) => ({ ...x, [resource]: { ok: false, text: (e as { message?: string } | null)?.message ?? `Could not ${a} ${resource}.` } })),
+    onError: (e, a) => setSaid((x) => ({ ...x, [resource]: { ok: false, text: (e as { message?: string } | null)?.message ?? t('resources.resourcePage.couldResource', { a, resource }) } })),
     onSettled: () => void qc.invalidateQueries({ queryKey: key }),
   })
 
@@ -55,19 +58,15 @@ export default function ResourcePage() {
   return (
     <ProblemActions handlers={handlers}>
     <div className="space-y-5">
-      <Link to={`/servers/${encodeURIComponent(name)}?tab=resources`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> Resources of {name}</Link>
+      <Link to={`/servers/${encodeURIComponent(name)}?tab=resources`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">{rich('resources.resourcePage.arrowleftNodeResourcesName', { arrowLeft: <ArrowLeft className="size-4" />, name })}</Link>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="break-all font-heading text-2xl font-bold">{page.id}</h1>
         {page.branch.state !== 'pinned' && <VersionBadge branch={page.branch} />}
         <StatusChip status={page.server.running ? 'running' : 'stopped'} pending={ctl.pending} />
       </div>
-      <p className="text-sm text-muted-foreground">
-        {page.repository && /^https:\/\/github\.com\//.test(page.repository)
+      <p className="text-sm text-muted-foreground">{rich('resources.resourcePage.nodeNodeResourcesFolder', { node: page.repository && /^https:\/\/github\.com\//.test(page.repository)
           ? <a className="inline-flex items-center gap-1 underline" href={page.repository.replace(/\.git$/, '')} target="_blank" rel="noreferrer">{page.repository.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')} <ExternalLink className="size-3" aria-hidden /></a>
-          : page.repository}
-        {' · '}resources/{page.folder}
-        {page.pinned_commit ? ` · pinned to release ${page.pinned_commit.slice(0, 7)}` : page.branch.state === 'pinned' ? '' : ` · follows ${page.default_branch}`}
-      </p>
+          : page.repository, folder: page.folder, value: page.pinned_commit ? t('resources.resourcePage.pinnedReleaseSlice', { slice: page.pinned_commit.slice(0, 7) }) : page.branch.state === 'pinned' ? '' : ` · follows ${page.default_branch}` })}</p>
       <RestartNotice
         info={page.restart}
         pending={control.isPending || ctl.busy}
@@ -76,7 +75,7 @@ export default function ResourcePage() {
         onRestartServer={() => ctl.run('restart')}
       />
       <Card>
-        <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t('resources.resourcePage.actions')}</CardTitle></CardHeader>
         <CardContent>
           <ResourceActions
             page={page}
@@ -92,7 +91,7 @@ export default function ResourcePage() {
       {page.repos && <CopyPanel page={page} />}
       {page.branch.state !== 'pinned' && page.branch.state !== 'unavailable' && (
         <Card>
-          <CardHeader><CardTitle>Which version of the code</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t('resources.resourcePage.whichVersionCode')}</CardTitle></CardHeader>
           <CardContent><BranchControls server={page.server} resource={page.branch} /></CardContent>
         </Card>
       )}
@@ -107,11 +106,11 @@ export default function ResourcePage() {
       <ConfirmDialog
         open={ask !== null}
         onOpenChange={(o) => { if (!o) setAsk(null) }}
-        title={ask === 'stop' ? `Stop ${page.id}?` : `Restart ${page.id}?`}
+        title={ask === 'stop' ? t('resources.resourcePage.stopId', { id: page.id }) : t('resources.resourcePage.restartId', { id: page.id })}
         description={ask === 'stop'
-          ? 'The resource stops for everyone on the server until it is started again. Other resources that need it may stop working. The server itself keeps running.'
-          : 'The resource stops and starts again. Players may notice a short interruption in what it does. The server itself keeps running.'}
-        confirmLabel={ask === 'stop' ? 'Stop resource' : 'Restart resource'}
+          ? t('resources.resourcePage.resourceStopsEveryoneServer')
+          : t('resources.resourcePage.resourceStopsStartsAgain')}
+        confirmLabel={ask === 'stop' ? t('resources.resourcePage.stopResource') : t('resources.resourcePage.restartResource')}
         destructive={ask === 'stop'}
         onConfirm={() => {
           if (ask) control.mutate(ask)

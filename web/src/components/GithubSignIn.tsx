@@ -10,6 +10,9 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { CopyButton } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/resources'
 
 /** GitHub sign-in status plus the device-code flow (show the one-time code and link, wait for approval). */
 export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
@@ -33,16 +36,16 @@ export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
       setError(e)
     }
   }
-  if (status.isLoading) return <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden /> Checking GitHub...</p>
+  if (status.isLoading) return <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{rich('resources.githubSignIn.loaderNodeCheckingGithub', { loader2: <Loader2 className="size-4 animate-spin" aria-hidden /> })}</p>
   const state = status.data?.state ?? (status.data?.signed_in ? 'ready' : 'signed_out')
-  if (status.data?.signed_in && state !== 'missing_scopes') return <div className="flex items-center gap-2 text-sm"><Badge tone="success" dot>Signed in</Badge><span>as {status.data.user}</span></div>
+  if (status.data?.signed_in && state !== 'missing_scopes') return <div className="flex items-center gap-2 text-sm"><Badge tone="success" dot>{t('resources.githubSignIn.signedIn')}</Badge><span>{t('resources.githubSignIn.asUser', { user: status.data.user ?? '' })}</span></div>
   // `gh` itself is missing: signing in cannot work yet. Say so, with what the panel offers to fix it.
   if (state === 'gh_missing') {
     return (
       <div className="space-y-3">
-        <div className="flex items-center gap-2 text-sm"><Badge tone="amber" dot>GitHub CLI not installed</Badge></div>
-        <ErrorNotice error={status.data?.problem ?? 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.'} />
-        <Button onClick={() => void status.refetch()}>Check again</Button>
+        <div className="flex items-center gap-2 text-sm"><Badge tone="amber" dot>{t('resources.githubSignIn.githubCliInstalled')}</Badge></div>
+        <ErrorNotice error={status.data?.problem ?? t('resources.githubSignIn.githubCliGhInstalled')} />
+        <Button onClick={() => void status.refetch()}>{t('resources.githubSignIn.checkAgain')}</Button>
       </div>
     )
   }
@@ -50,25 +53,25 @@ export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
     <div className="space-y-3">
       {state === 'missing_scopes' ? (
         <>
-          <div className="flex items-center gap-2 text-sm"><Badge tone="amber" dot>More permissions needed</Badge><span>signed in as {status.data?.user}</span></div>
-          <p className="text-sm text-muted-foreground">{status.data?.problem?.message ?? 'Sign in again to give Kora the permissions it needs.'}</p>
+          <div className="flex items-center gap-2 text-sm"><Badge tone="amber" dot>{t('resources.githubSignIn.morePermissionsNeeded')}</Badge><span>{t('resources.githubSignIn.signedUser', { user: status.data?.user ?? '' })}</span></div>
+          <p className="text-sm text-muted-foreground">{status.data?.problem?.message ?? t('resources.githubSignIn.signAgainGiveKora')}</p>
         </>
       ) : (
-        <div className="flex items-center gap-2 text-sm"><Badge tone="neutral" dot>Not signed in</Badge></div>
+        <div className="flex items-center gap-2 text-sm"><Badge tone="neutral" dot>{t('resources.githubSignIn.notSignedIn')}</Badge></div>
       )}
-      {!start && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>{state === 'missing_scopes' ? 'Sign in to GitHub again' : 'Sign in to GitHub'}</Button>}
+      {!start && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>{state === 'missing_scopes' ? t('resources.githubSignIn.signGithubAgain') : t('resources.githubSignIn.signGithub')}</Button>}
       {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
       {start && job.phase === 'running' && (
-        <Alert tone="info" title="Finish signing in on GitHub">
+        <Alert tone="info" title={t('resources.githubSignIn.finishSigningGithub')}>
           <ol className="list-decimal space-y-1 pl-5">
-            <li>Open <a className="text-info underline" href={start.url} target="_blank" rel="noopener noreferrer">{start.url}</a></li>
-            <li>Type this one-time code: <code className="mx-1 rounded bg-ink px-2 py-0.5 font-mono text-base tracking-widest">{start.code}</code> <CopyButton text={start.code} /></li>
-            <li>Come back here. This page notices by itself when you have approved it.</li>
+            <li>{rich('resources.githubSignIn.openNode', { a: <a className="text-info underline" href={start.url} target="_blank" rel="noopener noreferrer">{start.url}</a> })}</li>
+            <li>{rich('resources.githubSignIn.typeOnetimeCodeCode', { code2: <code className="mx-1 rounded bg-ink px-2 py-0.5 font-mono text-base tracking-widest">{start.code}</code>, copyButton: <CopyButton text={start.code} /> })}</li>
+            <li>{t('resources.githubSignIn.comeBackHerePage')}</li>
           </ol>
         </Alert>
       )}
-      {job.phase === 'failed' && <ErrorNotice error={job.error} title="Sign-in did not finish" />}
-      {job.phase === 'failed' && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>Try again</Button>}
+      {job.phase === 'failed' && <ErrorNotice error={job.error} title={t('resources.githubSignIn.signinDidFinish')} />}
+      {job.phase === 'failed' && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>{t('resources.githubSignIn.tryAgain')}</Button>}
       <ErrorNotice error={error} />
     </div>
   )

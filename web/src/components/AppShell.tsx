@@ -13,6 +13,9 @@ import { KoraLogo } from '@/components/KoraLogo'
 import { useInstallBlock } from '@/pages/install/access'
 import { cn } from '@/lib/utils'
 import { useRouteAnnouncer } from '@/hooks/useRouteAnnouncer'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/core'
 
 const nav = [
   { to: '/', label: 'Servers', icon: Server, end: true },
@@ -32,10 +35,10 @@ export function AppShell() {
   const unreachable = meta.isError
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <a href="#main" onClick={(e) => { e.preventDefault(); mainRef.current?.focus() }} className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground">Skip to the main content</a>
+      <a href="#main" onClick={(e) => { e.preventDefault(); mainRef.current?.focus() }} className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground">{t('core.appShell.skipMainContent')}</a>
       <aside className="border-b border-border bg-card md:min-h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r">
         <div className="px-5 py-4"><KoraLogo className="h-7 w-auto text-foreground" /></div>
-        <nav aria-label="Main" className="flex flex-wrap gap-1 px-3 pb-3 md:flex-col md:flex-nowrap md:pb-0">
+        <nav aria-label={t('core.appShell.main')} className="flex flex-wrap gap-1 px-3 pb-3 md:flex-col md:flex-nowrap md:pb-0">
           {/* The fleet uses the tokens of other panels stored here, so it is only offered on this computer. */}
           {nav.filter((n) => !(n.to === '/fleet' && meta.data?.remote)).map(({ to, label, icon: Icon, end }) => {
             // Installing would be refused for this sign-in: say why here instead of after the whole wizard.
@@ -70,11 +73,11 @@ export function AppShell() {
         </header>
         <main id="main" ref={mainRef} tabIndex={-1} className="p-6 outline-none">
           <div className="mb-4 space-y-3 empty:hidden">
-            {unreachable && <Alert tone="danger" title="Kora is not answering">This page cannot reach Kora. Check that <code>kora panel</code> is still running. This page keeps trying.</Alert>}
+            {unreachable && <Alert tone="danger" title={t('core.appShell.koraAnswering')}>{rich('core.appShell.pageCannotReachKora', { code: (c) => <code>{c}</code> })}</Alert>}
             {alerts.map((a) => (
               <div key={a.id} className="relative">
                 <Alert tone={a.tone}>{a.text}</Alert>
-                <button className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground hover:text-foreground" aria-label="Dismiss this notice" onClick={() => dismiss(a.id)}>
+                <button className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground hover:text-foreground" aria-label={t('core.appShell.dismissNotice')} onClick={() => dismiss(a.id)}>
                   <X className="size-4" aria-hidden />
                 </button>
               </div>
@@ -83,9 +86,7 @@ export function AppShell() {
           <div className="mb-4 empty:hidden"><AlertsBanner /></div>
           {meta.data?.auth_upgrade && location.pathname !== '/settings' && (
             <div className="mb-4">
-              <Alert tone="warning" title="Replace your token link">
-                You signed in with a token: a secret link that works for whoever holds it. <NavLink className="underline" to="/settings">Set up a passkey or one-time codes</NavLink> in Settings; after that the token link stops working for signing in.
-              </Alert>
+              <Alert tone="warning" title={t('core.appShell.replaceTokenLink')}>{rich('core.appShell.signedTokenSecretLink', { navLink: (c) => <NavLink className="underline" to="/settings">{c}</NavLink> })}</Alert>
             </div>
           )}
           <ErrorBoundary resetKey={loc.pathname}>

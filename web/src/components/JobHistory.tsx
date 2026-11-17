@@ -6,6 +6,8 @@ import { opLabel } from '@/api/store'
 import { Badge, type Tone } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 const STATE: Record<JobState, { label: string; tone: Tone }> = {
   running: { label: 'Running', tone: 'info' },
@@ -29,7 +31,7 @@ function Row({ j }: { j: JobSummary }) {
       {(j.state === 'failed' || j.state === 'interrupted') && j.error && <ErrorNotice error={j.error} />}
       {j.state === 'interrupted' && j.error?.resume && (
         <p className="text-sm">
-          <Link className="text-info underline" to="/install">Open Install to carry on</Link>
+          <Link className="text-info underline" to="/install">{t('core.jobHistory.openInstallCarry')}</Link>
         </p>
       )}
     </li>
@@ -41,12 +43,12 @@ export function JobHistoryCard() {
   const q = useQuery({ queryKey: ['job-history'], queryFn: () => api.jobs.list(30), refetchInterval: 15_000 })
   return (
     <Card>
-      <CardHeader><CardTitle>Recent jobs</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('core.jobHistory.recentJobs')}</CardTitle></CardHeader>
       <CardContent className="space-y-2">
-        <p className="text-sm text-muted-foreground">Updates, installs and other jobs you started. They are kept when Kora Panel restarts. A job that was still running when the panel stopped shows as stopped by a restart, with what to do next.</p>
-        {q.isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
+        <p className="text-sm text-muted-foreground">{t('core.jobHistory.updatesInstallsOtherJobs')}</p>
+        {q.isPending && <p className="text-sm text-muted-foreground">{t('core.jobHistory.loading')}</p>}
         <ErrorNotice error={q.error} />
-        {q.data && q.data.length === 0 && <p className="text-sm">Nothing has run yet.</p>}
+        {q.data && q.data.length === 0 && <p className="text-sm">{t('core.jobHistory.nothingRunYet')}</p>}
         {q.data && q.data.length > 0 && <ul className="divide-y divide-border">{q.data.map((j) => <Row key={j.id} j={j} />)}</ul>}
       </CardContent>
     </Card>

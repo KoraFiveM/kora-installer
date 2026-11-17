@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils'
+import { t as tt } from '@/i18n'
+import '@/i18n/en/core'
 
 export interface ChartPoint {
   t: number
@@ -44,12 +46,12 @@ export function LineChart({ title, points, max, format, tone = 'text-info', clas
   const y = (v: number) => H - Math.min(1, v / top) * (H - 6) - 3
   const last = [...points].reverse().find((p) => p.v !== null)?.v ?? null
   const peak = vals.length ? Math.max(...vals) : null
-  const label = vals.length ? `${title}: now ${format(last ?? 0)}, highest ${format(peak ?? 0)}.` : `${title}: no measurements yet.`
+  const label = vals.length ? tt('core.lineChart.titleNowFormatHighest', { title, format: format(last ?? 0), format2: format(peak ?? 0) }) : tt('core.lineChart.titleNoMeasurementsYet', { title })
   return (
     <figure className={cn('space-y-1', className)}>
       <figcaption className="flex items-baseline justify-between text-sm">
         <span className="font-medium">{title}</span>
-        <span className="text-xs text-muted-foreground">{vals.length ? `now ${format(last ?? 0)} · highest ${format(peak ?? 0)}` : 'no data'}</span>
+        <span className="text-xs text-muted-foreground">{vals.length ? tt('core.lineChart.nowFormatHighestFormat', { format: format(last ?? 0), format2: format(peak ?? 0) }) : tt('core.lineChart.noData')}</span>
       </figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} className={cn('h-28 w-full rounded-md border border-border bg-ink', tone)} preserveAspectRatio="none">
         {[0.25, 0.5, 0.75].map((f) => (
@@ -68,7 +70,7 @@ export function LineChart({ title, points, max, format, tone = 'text-info', clas
       </svg>
       <div className="flex justify-between text-[11px] text-muted-foreground">
         <span>{points.length ? new Date(t0 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
-        <span>top of scale {format(top)}</span>
+        <span>{tt('core.lineChart.topScaleFormat', { format: format(top) })}</span>
         <span>{points.length ? new Date(t1 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
       </div>
     </figure>

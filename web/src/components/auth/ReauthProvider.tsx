@@ -6,6 +6,8 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { getPasskey, passkeyErrorText, passkeysSupported } from '@/lib/webauthn'
+import { t } from '@/i18n'
+import '@/i18n/en/auth'
 
 const Ctx = createContext<() => Promise<boolean>>(() => Promise.resolve(false))
 /** Ask the person to confirm it is them (passkey or one-time code). Resolves true when they did. */
@@ -52,7 +54,7 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
     setErr(null)
     try {
       const begin = await api.auth.reauth({ step: 'passkey_begin' })
-      if (begin.step !== 'challenge') throw new Error('The panel did not start the check.')
+      if (begin.step !== 'challenge') throw new Error(t('auth.reauthProvider.panelDidStartCheck'))
       const credential = await getPasskey(begin.options)
       await api.auth.reauth({ step: 'passkey_finish', handle: begin.handle, credential })
       settle(true)
@@ -82,20 +84,20 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={ask}>
       {children}
       <Dialog open={open} onOpenChange={(o) => { if (!o) settle(false) }}>
-        <DialogContent title="Confirm it is you" description="This is a sensitive action. Use your passkey or a one-time code, and Kora carries on.">
+        <DialogContent title={t('auth.reauthProvider.confirmItIsYou')} description={t('auth.reauthProvider.sensitiveActionUsePasskey')}>
           {err && <Alert tone="danger">{err}</Alert>}
           {!useCode ? (
             <div className="flex flex-wrap gap-3">
-              <Button disabled={busy} onClick={() => void withPasskey()}>Use my passkey</Button>
-              <Button variant="ghost" onClick={() => setUseCode(true)}>Use a one-time code instead</Button>
+              <Button disabled={busy} onClick={() => void withPasskey()}>{t('auth.reauthProvider.useMyPasskey')}</Button>
+              <Button variant="ghost" onClick={() => setUseCode(true)}>{t('auth.reauthProvider.useOnetimeCodeInstead')}</Button>
             </div>
           ) : (
             <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void withCode() }}>
-              <Field label="Password"><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-              <Field label="One-time code"><Input autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+              <Field label={t('auth.reauthProvider.password')}><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+              <Field label={t('auth.reauthProvider.onetimeCode')}><Input autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
               <div className="flex gap-3">
-                <Button type="submit" disabled={busy || !password || !code.trim()}>Confirm</Button>
-                {passkeysSupported() && <Button type="button" variant="ghost" onClick={() => setUseCode(false)}>Use my passkey instead</Button>}
+                <Button type="submit" disabled={busy || !password || !code.trim()}>{t('auth.reauthProvider.confirm')}</Button>
+                {passkeysSupported() && <Button type="button" variant="ghost" onClick={() => setUseCode(false)}>{t('auth.reauthProvider.useMyPasskeyInstead')}</Button>}
               </div>
             </form>
           )}

@@ -3,6 +3,8 @@ import type { ProgressEvent, StepStatus } from '@/api/types'
 import { Progress } from '@/components/ui/progress'
 import { Announcer, progressSentence } from '@/components/Announcer'
 import { cn } from '@/lib/utils'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 const STATUS_TEXT: Record<StepStatus, string> = { pending: 'Waiting', running: 'In progress', done: 'Done', skipped: 'Skipped', failed: 'Failed' }
 
@@ -41,12 +43,12 @@ export function StepProgress({ events, planned }: { events: ProgressEvent[]; pla
   const failed = rows.find((r) => r.status === 'failed')
   const running = rows.find((r) => r.status === 'running')
   const allDone = rows.length > 0 && rows.every((r) => r.status === 'done' || r.status === 'skipped')
-  const said = failed ? `${failed.title}: ${STATUS_TEXT.failed}` : allDone ? 'All steps are finished.' : running ? `${running.title}: ${STATUS_TEXT.running}` : ''
+  const said = failed ? `${failed.title}: ${STATUS_TEXT.failed}` : allDone ? t('core.jobProgress.allStepsFinished') : running ? `${running.title}: ${STATUS_TEXT.running}` : ''
   return (
     <div className="space-y-4">
       <Announcer message={said} />
       <div className="flex items-center gap-3">
-        <Progress value={percent} label="Overall progress" className="flex-1" />
+        <Progress value={percent} label={t('core.jobProgress.overallProgress')} className="flex-1" />
         <span className="w-10 text-right text-sm tabular-nums text-muted-foreground">{percent}%</span>
       </div>
       <ol className="space-y-2">
@@ -114,7 +116,7 @@ export function ResourceProgress({ events }: { events: unknown[] }) {
   let progress: string | undefined
   for (const e of evs) {
     if (e.type === 'resource' && e.id) rows.set(e.id, e.state ?? '')
-    else if (e.type === 'snapshot' && e.id) notes.push(`Safety copy saved (${e.id}). You can roll back to it.`)
+    else if (e.type === 'snapshot' && e.id) notes.push(t('core.jobProgress.safetyCopySavedId', { id: e.id }))
     else if (e.type === 'health' && e.message) notes.push(e.message)
     else if (e.type === 'status' && e.message) notes.push(e.message)
     else if (e.type === 'progress' && e.message) progress = e.message
@@ -122,7 +124,7 @@ export function ResourceProgress({ events }: { events: unknown[] }) {
   if (progress && rows.size === 0) notes.unshift(progress)
   return (
     <div className="space-y-3">
-      <Announcer message={rows.size ? `${[...rows.values()].filter((st) => /updated|installed|rolled|^skipped|^failed/.test(st)).length} of ${rows.size} resources finished` : ''} />
+      <Announcer message={rows.size ? t('core.jobProgress.countSizeResourcesFinished', { count: [...rows.values()].filter((st) => /updated|installed|rolled|^skipped|^failed/.test(st)).length, size: rows.size }) : ''} />
       {[...rows].map(([id, state]) => {
         const done = /updated|installed|rolled/.test(state)
         // Finished, but not as hoped: skipped, failed, waiting for a quiet server, never reached.

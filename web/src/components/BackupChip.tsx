@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { BackupSummary } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
+import { t } from '@/i18n'
+import '@/i18n/en/core'
 
 /** The last backup of every server, one request for the whole list. A panel that cannot answer (an older one) leaves the line out. */
 export function useBackupLines() {
@@ -18,7 +20,7 @@ export function BackupChip({ server, summary }: { server: string; summary: Backu
   const tone = summary.warning ? 'amber' : summary.last_ok_unix ? 'plain' : 'neutral'
   return (
     <Link to={to} className="inline-block" title={summary.warning ?? undefined}>
-      <Badge tone={tone}>{summary.warning ? `${summary.text} (needs a look)` : summary.text}</Badge>
+      <Badge tone={tone}>{summary.warning ? t('core.backupChip.textNeedsLook', { text: summary.text }) : summary.text}</Badge>
     </Link>
   )
 }
