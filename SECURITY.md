@@ -28,6 +28,11 @@ reasonable time to release a fix before you disclose publicly.
   the open internet. Roles are viewer / operator / admin. Delete, uninstall and console input are disabled for remote sessions unless
   enabled, and need the server name typed. Tailscale identity is checked with the local Tailscale service, never from request headers.
 - Hub nodes authenticate with bearer tokens; treat them like passwords.
+- Kora's own Git (MinGit, Windows) and GitHub CLI are downloaded only from `https://github.com/` release assets at a version
+  and SHA-256 pinned in the source (`crates/kora-core/src/tools/pins.rs`, updated with `scripts/update-tool-pins.sh`).
+  The file is verified before anything is unpacked, unpacked without links or paths that leave the folder, and moved into
+  place in one step. They live in the user's own Kora folder and need no administrator rights; a Git or GitHub CLI already on
+  the computer is preferred, and the folder Kora itself runs from is never searched for them.
 
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
 as any other (see above). Include the version, your platform, and whether the panel was local or remote.

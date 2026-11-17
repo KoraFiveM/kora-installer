@@ -16,15 +16,16 @@ fn tool_from(name: &str) -> Option<Tool> {
 }
 
 fn describe(s: &kora_core::tools::ToolStatus) -> String {
+    let label = if s.tool == Tool::Git { "Git" } else { "GitHub CLI" };
     if !s.installed {
-        return if s.broken { format!("{}: found, but it does not run", s.label) } else { format!("{}: not installed", s.label) };
+        return if s.broken { format!("{label}: found, but it does not run") } else { format!("{label}: not installed") };
     }
     let from = match s.source {
         Some(Source::Private) => "Kora's own copy",
         _ => "on this computer",
     };
     let at = s.path.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
-    format!("{}: {} ({from}){at}", s.label, s.version.as_deref().unwrap_or("installed"))
+    format!("{label}: {} ({from}){at}", s.version.as_deref().unwrap_or("installed"))
 }
 
 /// `kora tools status`

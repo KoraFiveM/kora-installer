@@ -282,7 +282,13 @@ fn manual_url(tool: Tool) -> &'static str {
 }
 
 fn download_failed(tool: Tool, why: &str) -> Problem {
-    Problem::new(codes::TOOLS_DOWNLOAD_FAILED, format!("Kora could not download {}. Check your internet connection (or proxy) and try again.", tool.label()))
+    let slow_down = why.contains("429") || why.to_ascii_lowercase().contains("rate limit");
+    let message = if slow_down {
+        format!("GitHub asked Kora to slow down, so {} was not downloaded. Wait a minute and try again.", tool.label())
+    } else {
+        format!("Kora could not download {}. Check your internet connection (or proxy) and try again.", tool.label())
+    };
+    Problem::new(codes::TOOLS_DOWNLOAD_FAILED, message)
         .with_details(why)
         .with_action(Action::Retry)
         .with_action(Action::open_link(manual_url(tool)))
@@ -476,3 +482,20 @@ pub fn remove_private_in(root: &Path) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+
+    #[test]
+    fn download_failures_read_in_plain_words_and_always_offer_retry() {
+        let off = download_failed(Tool::Gh, "github.com: connection refused");
+        assert!(off.message.contains("internet connection (or proxy)"), "{}", off.message);
+        let busy = download_failed(Tool::Git, "the server answered HTTP 429");
+        assert!(busy.message.contains("slow down"), "{}", busy.message);
+        for p in [off, busy] {
+            assert_eq!(p.actions[0], Action::Retry);
+            assert!(p.actions.iter().any(|a| matches!(a, Action::OpenLink { url } if url.starts_with("https://"))));
+        }
+    }
+}
