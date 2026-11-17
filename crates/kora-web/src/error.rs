@@ -17,10 +17,15 @@ pub struct ApiError {
     pub message: String,
     /// Only for `needs_elevation`: the `kora ...` command the user must run as admin/root.
     pub command: Option<Vec<String>>,
-    /// Technical details for the "Show details" box.
-    pub details: Option<String>,
-    /// What the user can do (see [`kora_core::problem::Action`]). Empty: the UI's generic choices.
-    pub actions: Vec<Action>,
+    /// A [`Problem`]'s details and actions (boxed: most errors have neither, and `ApiError` is
+    /// returned everywhere). Read them with [`ApiError::details`] and [`ApiError::actions`].
+    extra: Option<Box<Extra>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct Extra {
+    details: Option<String>,
+    actions: Vec<Action>,
 }
 
 impl ApiError {
@@ -30,17 +35,25 @@ impl ApiError {
             code: code.to_string(),
             message: message.into(),
             command: None,
-            details: None,
-            actions: Vec::new(),
+            extra: None,
         }
+    }
+    /// Technical details for the "Show details" box.
+    pub fn details(&self) -> Option<&str> {
+        self.extra.as_ref().and_then(|x| x.details.as_deref())
+    }
+    /// What the user can do (see [`kora_core::problem::Action`]). Empty: the UI's generic choices.
+    pub fn actions(&self) -> &[Action] {
+        self.extra.as_ref().map_or(&[], |x| x.actions.as_slice())
     }
     /// A [`Problem`] with this HTTP status.
     pub fn problem(status: StatusCode, p: Problem) -> Self {
         let mut e = Self::new(status, &p.code, p.message);
-        e.details = p.details;
-        e.actions = p.actions;
+        if p.details.is_some() || !p.actions.is_empty() {
+            e.extra = Some(Box::new(Extra { details: p.details, actions: p.actions }));
+        }
         if e.code == codes::NEEDS_ELEVATION {
-            e.command = e.actions.iter().find_map(|a| match a {
+            e.command = e.actions().iter().find_map(|a| match a {
                 Action::ShowCommand { command, .. } => Some(command.clone()),
                 _ => None,
             });
@@ -49,11 +62,12 @@ impl ApiError {
     }
     /// The error as a [`Problem`] (for job errors and tests).
     pub fn to_problem(&self) -> Problem {
-        Problem { code: self.code.clone(), message: self.message.clone(), details: self.details.clone(), actions: self.actions.clone() }
+        Problem { code: self.code.clone(), message: self.message.clone(), details: self.details().map(String::from), actions: self.actions().to_vec() }
     }
     pub fn with_action(mut self, a: Action) -> Self {
-        if !self.actions.contains(&a) {
-            self.actions.push(a);
+        let x = self.extra.get_or_insert_with(Box::default);
+        if !x.actions.contains(&a) {
+            x.actions.push(a);
         }
         self
     }
@@ -149,11 +163,11 @@ impl IntoResponse for ApiError {
         if let Some(c) = &self.command {
             err["command"] = json!(c);
         }
-        if let Some(d) = &self.details {
+        if let Some(d) = self.details() {
             err["details"] = json!(d);
         }
-        if !self.actions.is_empty() {
-            err["actions"] = json!(self.actions);
+        if !self.actions().is_empty() {
+            err["actions"] = json!(self.actions());
         }
         (self.status, Json(json!({ "error": err }))).into_response()
     }
