@@ -9,6 +9,7 @@
 //! loads it on its next start. Names are validated like the installer does (letters, digits,
 //! `_ . -`, optionally wrapped in `[ ]` for a category folder).
 
+use crate::problem::Problem;
 use std::path::{Path, PathBuf};
 
 use crate::addresources::{self as add, AddOutcome, AddPlan};
@@ -87,11 +88,7 @@ pub fn read_badge(dir: &Path) -> Option<UpdateBadge> {
 
 /// The record the manual update engine wants (it reads `kora-server.json`).
 fn record(e: &ServerEntry) -> Res<manual::ServerRecord> {
-    manual::load_server(&e.dir.to_string_lossy()).map_err(err)
-}
-
-fn err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+    manual::load_server(&e.dir.to_string_lossy()).map_err(Problem::from)
 }
 
 struct Quiet;
@@ -102,10 +99,10 @@ impl crate::installer::ProgressSink for Quiet {
 /// What `control` needs from the machine (fakeable).
 trait ControlOps {
     fn has_service(&self, server: &str) -> bool;
-    fn start(&self, server: &str) -> Result<launch::Report, String>;
+    fn start(&self, server: &str) -> Result<launch::Report, Problem>;
     /// `Ok(true)` when something was stopped.
-    fn stop_detached(&self, server: &str) -> Result<bool, String>;
-    fn service_control(&self, server: &str, a: ControlAction) -> Result<(), String>;
+    fn stop_detached(&self, server: &str) -> Result<bool, Problem>;
+    fn service_control(&self, server: &str, a: ControlAction) -> Result<(), Problem>;
 }
 
 struct SystemControl;
@@ -114,35 +111,35 @@ impl ControlOps for SystemControl {
     fn has_service(&self, server: &str) -> bool {
         !matches!(host::service_state(server), Ok(ServiceState::NotInstalled) | Err(_))
     }
-    fn start(&self, server: &str) -> Result<launch::Report, String> {
+    fn start(&self, server: &str) -> Result<launch::Report, Problem> {
         launch::start_named(server, &mut |_, _| {})
     }
-    fn stop_detached(&self, server: &str) -> Result<bool, String> {
+    fn stop_detached(&self, server: &str) -> Result<bool, Problem> {
         launch::stop_named_detached(server)
     }
-    fn service_control(&self, server: &str, a: ControlAction) -> Result<(), String> {
-        host::service_control(server, a).map_err(err)
+    fn service_control(&self, server: &str, a: ControlAction) -> Result<(), Problem> {
+        host::service_control(server, a)
     }
 }
 
-fn start_result(server: &str, r: Result<launch::Report, String>) -> Res<()> {
-    let r = r.map_err(|e| format!("could not start '{server}': {e}"))?;
+fn start_result(server: &str, r: Result<launch::Report, Problem>) -> Res<()> {
+    let r = r.map_err(|e| e.lead(&format!("could not start '{server}'")))?;
     if r.running() {
         return Ok(());
     }
-    let mut m = format!("'{server}' did not start properly: {}", r.message);
+    let mut log = String::new();
     let skip = r.log_tail.len().saturating_sub(8);
     for l in r.log_tail.iter().skip(skip) {
-        m.push_str("\n  | ");
-        m.push_str(l);
+        log.push_str("\n  | ");
+        log.push_str(l);
     }
-    Err(m)
+    Err(Problem::generic(format!("'{server}' did not start properly: {}", r.message)).with_details(log.trim_start_matches('\n')))
 }
 
 /// The CLI's rules (`kora start|stop|restart`): no OS service means Kora runs FXServer itself
 /// (detached); with a service, Start still goes through the launcher, Stop/Restart through the service.
 fn control_with(ops: &dyn ControlOps, server: &str, a: ControlAction) -> Res<()> {
-    let stop_err = |e: String| format!("could not stop '{server}': {e}");
+    let stop_err = |e: Problem| e.lead(&format!("could not stop '{server}'"));
     if !ops.has_service(server) {
         if matches!(a, ControlAction::Stop | ControlAction::Restart) {
             // `Ok(false)`: nothing started by Kora was running; fine for Stop and Restart alike.
@@ -157,7 +154,7 @@ fn control_with(ops: &dyn ControlOps, server: &str, a: ControlAction) -> Res<()>
         return start_result(server, ops.start(server));
     }
     let verb = if a == ControlAction::Stop { "stop" } else { "restart" };
-    ops.service_control(server, a).map_err(|e| format!("could not {verb} '{server}': {e}"))
+    ops.service_control(server, a).map_err(|e| e.lead(&format!("could not {verb} '{server}'")))
 }
 
 /// The folder name (last part of the recorded path) of the resource with this id.
@@ -168,7 +165,7 @@ fn folder_of(sf: &ServerFile, id: &str) -> Option<String> {
 
 impl Backend for SystemBackend {
     fn list(&mut self) -> Res<Vec<ServerEntry>> {
-        Registry::load().map(|r| r.servers).map_err(|e| format!("Can't read the server list ({}): {e}", registry::registry_path().display()))
+        Registry::load().map(|r| r.servers).map_err(|e| Problem::from(e).lead(&format!("Can't read the server list ({})", registry::registry_path().display())))
     }
 
     fn status(&mut self, e: &ServerEntry) -> Status {
@@ -221,16 +218,16 @@ impl Backend for SystemBackend {
 
     fn ensure(&mut self, e: &ServerEntry, name: &str, restart: bool) -> Res<String> {
         if !valid_resource_name(name) {
-            return Err(format!("'{name}' is not a resource name (letters, digits, _ . - only)."));
+            return Err(Problem::generic(format!("'{name}' is not a resource name (letters, digits, _ . - only).")));
         }
         // The panel lists resources by their catalog id (`kora-lib`); server.cfg needs the folder (`kora_lib`).
         let folder = self.resource_folder(e, name);
         let name = folder.as_deref().unwrap_or(name);
         let cfg_path = e.dir.join("server.cfg");
-        let cfg = std::fs::read_to_string(&cfg_path).map_err(|x| format!("Can't read {}: {x}", cfg_path.display()))?;
+        let cfg = std::fs::read_to_string(&cfg_path).map_err(|x| Problem::from(x).lead(&format!("Can't read {}", cfg_path.display())))?;
         let mut said = match with_ensure(&cfg, name) {
             Some(new) => {
-                std::fs::write(&cfg_path, new).map_err(|x| format!("Can't write {}: {x}", cfg_path.display()))?;
+                std::fs::write(&cfg_path, new).map_err(|x| Problem::from(x).lead(&format!("Can't write {}", cfg_path.display())))?;
                 format!("Added 'ensure {name}' to server.cfg.")
             }
             None => format!("'ensure {name}' is already in server.cfg."),
@@ -247,18 +244,18 @@ impl Backend for SystemBackend {
     }
 
     fn delete(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool) -> Res<Vec<String>> {
-        installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet).map_err(err).inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
+        installer::rollback(&e.dir, &RollbackOptions { keep_files, keep_db }, &mut Quiet).map_err(Problem::from).inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
     }
 
     fn delete_with_db_password(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>) -> Res<Vec<String>> {
         installer::rollback_with_db_password(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, &mut Quiet)
-            .map_err(err)
+            .map_err(Problem::from)
             .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
     }
 
     fn delete_with_admin(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>, admin: Option<installer::system_ops::SharedAdmin>) -> Res<Vec<String>> {
         installer::rollback_with_admin(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, admin, &mut Quiet)
-            .map_err(err)
+            .map_err(Problem::from)
             .inspect(|_| crate::backup::settings::archive_server(&e.name, crate::monitor::now_unix()))
     }
 
@@ -268,7 +265,7 @@ impl Backend for SystemBackend {
             r.remove(&e.name);
             Ok(())
         })
-        .map_err(err)
+        .map_err(Problem::from)
     }
 
     fn register(&mut self, e: ServerEntry) -> Res<()> {
@@ -276,7 +273,7 @@ impl Backend for SystemBackend {
             r.upsert(e);
             Ok(())
         })
-        .map_err(err)
+        .map_err(Problem::from)
     }
 
     fn scan_roots(&self) -> Vec<PathBuf> {
@@ -294,20 +291,20 @@ impl Backend for SystemBackend {
     }
 
     fn preview(&mut self, e: &ServerEntry, scope: Scope) -> Res<UpdatePreview> {
-        manual::preview(&record(e)?, scope).map_err(err)
+        manual::preview(&record(e)?, scope).map_err(Problem::from)
     }
 
     fn preview_events(&mut self, e: &ServerEntry, scope: Scope, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdatePreview> {
-        manual::preview_events(&record(e)?, scope, on).map_err(err)
+        manual::preview_events(&record(e)?, scope, on).map_err(Problem::from)
     }
 
     fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
         // `manual::apply` sends the Discord notification itself: not a second time here.
-        manual::apply(&record(e)?, scope, o, on).map_err(err)
+        manual::apply(&record(e)?, scope, o, on).map_err(Problem::from)
     }
 
     fn rollback(&mut self, e: &ServerEntry, snapshot: &str, force: bool) -> Res<()> {
-        manual::rollback(&record(e)?, snapshot, force).map_err(err)
+        manual::rollback(&record(e)?, snapshot, force).map_err(Problem::from)
     }
 
     fn snapshots(&mut self, e: &ServerEntry) -> Vec<SnapshotInfo> {
@@ -315,25 +312,25 @@ impl Backend for SystemBackend {
     }
 
     fn add_catalog(&mut self, e: &ServerEntry) -> Res<(Catalog, Vec<String>, Option<String>)> {
-        let sf = ServerFile::load(&e.dir).map_err(|x| format!("Can't read {}: {x}", e.dir.join("kora-server.json").display()))?;
-        let (cat, note) = add::load_catalog().map_err(err)?;
+        let sf = ServerFile::load(&e.dir).map_err(|x| Problem::from(x).lead(&format!("Can't read {}", e.dir.join("kora-server.json").display())))?;
+        let (cat, note) = add::load_catalog().map_err(Problem::from)?;
         Ok((cat, add::installed_ids(&sf), note))
     }
 
     fn add_plan(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddPlan> {
-        let sf = ServerFile::load(&e.dir).map_err(err)?;
-        let (cat, _) = add::load_catalog().map_err(err)?;
-        add::plan(&cat, &sf, ids).map_err(err)
+        let sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
+        let (cat, _) = add::load_catalog().map_err(Problem::from)?;
+        add::plan(&cat, &sf, ids).map_err(Problem::from)
     }
 
     fn add_install(&mut self, e: &ServerEntry, ids: &[String]) -> Res<AddOutcome> {
-        let mut sf = ServerFile::load(&e.dir).map_err(err)?;
-        let (cat, _) = add::load_catalog().map_err(err)?;
-        let plan = add::plan(&cat, &sf, ids).map_err(err)?;
+        let mut sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
+        let (cat, _) = add::load_catalog().map_err(Problem::from)?;
+        let plan = add::plan(&cat, &sf, ids).map_err(Problem::from)?;
         if plan.items.iter().any(|i| i.fork) {
-            feedback::require_sign_in(&SystemRunner).map_err(err)?;
+            feedback::require_sign_in(&SystemRunner).map_err(Problem::from)?;
         }
-        add::execute(&add::GitCloner(&SystemRunner), &mut sf, &plan, &mut |_| {}).map_err(err)
+        add::execute(&add::GitCloner(&SystemRunner), &mut sf, &plan, &mut |_| {}).map_err(Problem::from)
     }
 
     fn github_signed_in(&mut self) -> bool {
@@ -341,17 +338,17 @@ impl Backend for SystemBackend {
     }
 
     fn report_issue(&mut self, e: &ServerEntry, resource: &str, title: &str, text: &str) -> Res<String> {
-        let sf = ServerFile::load(&e.dir).map_err(err)?;
-        feedback::report_issue(&SystemRunner, &sf, resource, title, text).map_err(err)
+        let sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
+        feedback::report_issue(&SystemRunner, &sf, resource, title, text).map_err(Problem::from)
     }
 
     fn pr_plan(&mut self, e: &ServerEntry, resource: &str) -> Res<PrPlan> {
-        let sf = ServerFile::load(&e.dir).map_err(err)?;
-        feedback::plan_pr(&SystemRunner, &sf, resource).map_err(err)
+        let sf = ServerFile::load(&e.dir).map_err(Problem::from)?;
+        feedback::plan_pr(&SystemRunner, &sf, resource).map_err(Problem::from)
     }
 
     fn pr_open(&mut self, plan: &PrPlan, title: &str, text: &str) -> Res<String> {
-        feedback::open_pr(&SystemRunner, plan, title, text).map_err(err)
+        feedback::open_pr(&SystemRunner, plan, title, text).map_err(Problem::from)
     }
 
     fn notify_load(&mut self, e: &ServerEntry) -> NotifyConfig {
@@ -359,11 +356,11 @@ impl Backend for SystemBackend {
     }
 
     fn notify_save(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()> {
-        notify::save(e, c).map_err(err)
+        notify::save(e, c).map_err(Problem::from)
     }
 
     fn notify_test(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()> {
-        notify::send_test(c, &e.name).map_err(err)
+        notify::send_test(c, &e.name).map_err(Problem::from)
     }
 
     fn schedule_get(&mut self, e: &ServerEntry) -> Option<ScheduleConfig> {
@@ -371,19 +368,19 @@ impl Backend for SystemBackend {
     }
 
     fn schedule_set(&mut self, e: &ServerEntry, c: &ScheduleConfig) -> Res<()> {
-        schedule::set(e, c).map_err(err)
+        schedule::set(e, c).map_err(Problem::from)
     }
 
     fn schedule_remove(&mut self, e: &ServerEntry) -> Res<()> {
-        schedule::remove(e).map_err(err)
+        schedule::remove(e).map_err(Problem::from)
     }
 
     fn ports_set(&mut self, e: &ServerEntry, p: crate::installer::Ports) -> Res<Vec<String>> {
         // Only a stopped server: changing the ports under a running process would leave it on the old ones.
         if self.status(e) != Status::Stopped {
-            return Err("Stop the server first, then change its ports.".into());
+            return Err(Problem::generic("Stop the server first, then change its ports."));
         }
-        crate::installer::change_ports::change_ports(&e.dir, &e.name, p, &SystemProber).map(|c| c.notes).map_err(err)
+        crate::installer::change_ports::change_ports(&e.dir, &e.name, p, &SystemProber).map(|c| c.notes).map_err(Problem::from)
     }
 
     fn schedule_elevation(&mut self, e: &ServerEntry, set: Option<&ScheduleConfig>) -> Option<Vec<String>> {
@@ -433,13 +430,13 @@ impl Backend for SystemBackend {
     }
 
     fn collab(&mut self, e: &ServerEntry, req: &crate::collab::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
-        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
-        crate::installer::gitops::with_runner(&e.dir, |r| crate::collab::run_on(r, &sf, req, say)).map_err(String::from)
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| Problem::from(err).lead(&format!("cannot read {}", e.dir.join("kora-server.json").display())))?;
+        crate::installer::gitops::with_runner(&e.dir, |r| crate::collab::run_on(r, &sf, req, say))
     }
 
     fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
-        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
-        crate::installer::gitops::with_runner(&e.dir, |r| crate::branches::run(r, &sf, req, say)).map_err(String::from)
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| Problem::from(err).lead(&format!("cannot read {}", e.dir.join("kora-server.json").display())))?;
+        crate::installer::gitops::with_runner(&e.dir, |r| crate::branches::run(r, &sf, req, say))
     }
 }
 
@@ -545,7 +542,7 @@ mod tests {
         fn has_service(&self, _: &str) -> bool {
             self.service
         }
-        fn start(&self, _: &str) -> Result<launch::Report, String> {
+        fn start(&self, _: &str) -> Result<launch::Report, Problem> {
             self.calls.borrow_mut().push("start".into());
             Ok(launch::Report {
                 method: launch::Method::Detached,
@@ -557,11 +554,11 @@ mod tests {
                 log_tail: if self.started_ok { vec![] } else { vec!["boom 1".into(), "boom 2".into()] },
             })
         }
-        fn stop_detached(&self, _: &str) -> Result<bool, String> {
+        fn stop_detached(&self, _: &str) -> Result<bool, Problem> {
             self.calls.borrow_mut().push("stop_detached".into());
             Ok(false)
         }
-        fn service_control(&self, _: &str, a: ControlAction) -> Result<(), String> {
+        fn service_control(&self, _: &str, a: ControlAction) -> Result<(), Problem> {
             self.calls.borrow_mut().push(format!("service_{a:?}"));
             Ok(())
         }

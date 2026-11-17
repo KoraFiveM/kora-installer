@@ -44,10 +44,10 @@ pub trait ToolchainEnv: Send + Sync {
     fn tools(&self) -> Vec<ToolStatus>;
     /// Install `tool` (Kora's own copy; on Linux Git the system package, which needs administrator rights).
     /// `say(message, fraction 0..1)`. Errors are packed [`Problem`]s.
-    fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, String>;
+    fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, Problem>;
     fn database(&self) -> DbState;
     /// Start the installed database server; `Err` is a packed [`Problem`] (administrator rights needed, or it did not start).
-    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, String>;
+    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, Problem>;
     fn admin(&self) -> AdminState;
 }
 
@@ -59,7 +59,7 @@ impl ToolchainEnv for SystemToolchain {
         [Tool::Git, Tool::Gh].iter().map(|t| tools::status(&crate::git::SystemRunner, *t)).collect()
     }
 
-    fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, String> {
+    fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, Problem> {
         if tool == Tool::Git && !cfg!(windows) {
             install_system_git(say)?;
         } else if tool == Tool::Git || tool == Tool::Gh {
@@ -84,7 +84,7 @@ impl ToolchainEnv for SystemToolchain {
         }
     }
 
-    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, String> {
+    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, Problem> {
         let found = db::detect(&db::SystemRunner, db::Os::current()).map_err(|e| Problem::generic(format!("Kora could not look for the database server: {e}")).to_string())?;
         start_database_with(&db::SystemRunner, &found, crate::elevate::is_elevated(), cfg!(windows), Duration::from_secs(45), say).map_err(String::from)
     }
@@ -95,7 +95,7 @@ impl ToolchainEnv for SystemToolchain {
 }
 
 /// Git on Linux: the system package manager, which needs root (the caller checked or went through the helper).
-fn install_system_git(say: &mut dyn FnMut(&str, f32)) -> Result<(), String> {
+fn install_system_git(say: &mut dyn FnMut(&str, f32)) -> Result<(), Problem> {
     let tools = crate::git::Tools { git: None, gh: None };
     let plan = crate::git::plan_bootstrap(crate::git::Os::current(), &tools).map_err(|e| e.to_string())?;
     if plan.is_empty() {

@@ -14,16 +14,42 @@
 //! assert_eq!(p.actions.len(), 2);
 //! ```
 //!
-//! # Carrying it through code that only knows `String` errors
+//! # One error convention (typed errors)
 //!
-//! Most of Kora's errors are still `String`s (`api::Res<T>`, `InstallError`, job errors). A Problem
-//! goes through them unchanged: `String::from(problem)` (or [`Problem::encode`]) packs it into a
-//! string, and [`Problem::decode`] (or `Problem::from(string)`) unpacks it again. A plain string
-//! that never was a Problem decodes to a generic one ([`codes::FAILED`], no actions), so every
-//! existing error keeps working; the panel then offers its generic "Try again / Copy details".
+//! An error that can reach a person is a [`Problem`] from where it is raised to where it is shown.
+//! Nothing packs a Problem into a string any more: functions return `Result<T, Problem>`
+//! ([`Res`]), the web panel turns it into its JSON error envelope, and the command line prints it
+//! in one place (`kora_cli::fail`, which uses `Display`: message, details, one hint per action).
 //!
-//! Code that shows an error in a terminal must use [`plain_text`] (or `Problem::to_string()`), never
-//! the packed string itself.
+//! * Raise one with [`Problem::new`] (+ details and actions), or [`Problem::generic`] for a plain
+//!   sentence. A bare `String` or `&str` converts into a generic Problem (`?` and `.into()` work),
+//!   so a sentence written for a person needs no ceremony.
+//! * Low-level errors (`std::io::Error`, `serde_json::Error`, `ureq::Error`,
+//!   [`crate::git::GitError`]) convert into a Problem whose message is a generic sentence and whose
+//!   `details` hold the low-level text (never the message: a person does not need `os error 13`).
+//! * Add context with [`Problem::context`] / [`Context::context`] (`.context("saving the server
+//!   list")`) instead of `format!("...: {e}")`: the code, the actions and the details survive.
+//! * Error codes are the constants in [`codes`]; there are no string literals for codes outside
+//!   this file (a test greps for it).
+//! * Internal enums that callers `match` on (`GitError`, `DbError`, ...) stay enums and convert
+//!   into a Problem where a person could see them (`impl From<X> for Problem`).
+//! * Old data: job errors and step records written by v0.7.0 may hold a packed string; the one
+//!   function that still reads that form is `store::legacy_problem::from_packed` (read only, never
+//!   written). A test greps the tree for the packed marker and the removed helper names.
+//!
+//! # Plan this module followed (the order of the conversion)
+//!
+//! | Area | Before | After |
+//! |---|---|---|
+//! | `api::Res<T>` and the `Backend` trait, `SystemBackend`, `FakeBackend` | `Result<T, String>` (maybe packed) | `Result<T, Problem>` |
+//! | `paidassets::Res`, `support::service`, `backup::service`, `backup::host` | `String` | `Problem` |
+//! | `InstallError`, `installer::Result`, `StepError` | wrapper over a (maybe packed) string | `InstallError(Problem)`, `StepError::Failed(Problem)` |
+//! | step records / plan state | error string (maybe packed) | `error: Option<String>` stays on disk (message text), the live value is a Problem |
+//! | job bodies (`kora-web` `start_job`), job rows in the store | `Err(String)`, string column | `Err(Problem)`; the column holds the Problem as JSON (plus `resume`/`kept`/`log_path`) as before |
+//! | `ApiError::core`, handlers | `is_encoded` / `decode` | `ApiError::from(Problem)` |
+//! | CLI | `plain_text(&string)` at each print | `Problem` printed in one place |
+//! | privileged service protocol | see `privsvc` docs | the Problem as JSON |
+//! | removed | `encode`, `decode`, `is_encoded`, `plain_text`, `message_of`, `From<Problem> for String`, the packed marker | |
 //!
 //! # Adding an action
 //!
@@ -34,6 +60,8 @@
 //! 3. In the panel, add a handler for the `kind` in `web/src/lib/problemActions.ts` (an action
 //!    without a handler is not shown, so an older panel ignores newer actions safely).
 
+mod convert;
+
 use serde::{Deserialize, Serialize};
 
 /// Stable machine codes. Front ends and tests branch on these; never change an existing one.
@@ -41,6 +69,20 @@ use serde::{Deserialize, Serialize};
 pub mod codes {
     /// Anything without a more specific code (also every plain string error).
     pub const FAILED: &str = "failed";
+    /// A git or GitHub command failed (made from `git::GitError`).
+    pub const GIT_FAILED: &str = "git.failed";
+    /// A file or folder could not be read or written (made from `std::io::Error`).
+    pub const IO: &str = "io";
+    /// Saved data could not be read (from `serde_json` errors; `rusqlite` errors have their own codes in `store`).
+    pub const DATA: &str = "data";
+    /// An internet request failed (from `ureq::Error`).
+    pub const NETWORK: &str = "network";
+
+    /// Codes made by the automatic conversions from low-level errors; `Problem::context` rewrites
+    /// the (generic) message of these.
+    pub fn is_low_level(code: &str) -> bool {
+        matches!(code, IO | DATA | NETWORK)
+    }
     /// Administrator / root rights are needed and Kora does not have them.
     pub const NEEDS_ELEVATION: &str = "needs_elevation";
     /// Kora's administrator service is installed but not turned on for this account.
@@ -296,10 +338,6 @@ pub struct Problem {
     pub actions: Vec<Action>,
 }
 
-/// Marks a string that holds a packed [`Problem`]. Starts with a control character so no
-/// ordinary message can look like one.
-const PACKED: &str = "\u{1}kora-problem:";
-
 impl Problem {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
         Self { code: code.to_string(), message: message.into(), details: None, actions: Vec::new() }
@@ -340,26 +378,6 @@ impl Problem {
         self.code == code
     }
 
-    /// Pack into a string that [`Problem::decode`] turns back into this problem.
-    pub fn encode(&self) -> String {
-        // Serialising plain strings and enums cannot fail.
-        format!("{PACKED}{}", serde_json::to_string(self).unwrap_or_default())
-    }
-
-    /// Unpack a string from [`Problem::encode`]; any other string becomes [`Problem::generic`].
-    pub fn decode(s: &str) -> Self {
-        Self::unpack(s).unwrap_or_else(|| Self::generic(s))
-    }
-
-    /// Is `s` a packed problem?
-    pub fn is_encoded(s: &str) -> bool {
-        Self::unpack(s).is_some()
-    }
-
-    fn unpack(s: &str) -> Option<Self> {
-        serde_json::from_str(s.strip_prefix(PACKED)?).ok()
-    }
-
     /// The JSON the panel reads.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
@@ -392,38 +410,85 @@ impl std::fmt::Display for Problem {
 
 impl std::error::Error for Problem {}
 
-/// Packs the problem (see [`Problem::encode`]).
-impl From<Problem> for String {
-    fn from(p: Problem) -> String {
-        p.encode()
-    }
-}
+/// `Result<T, Problem>`: what every function that can fail in front of a person returns.
+pub type Res<T> = Result<T, Problem>;
 
+/// A sentence written for a person becomes a generic problem.
 impl From<String> for Problem {
     fn from(s: String) -> Self {
-        Self::decode(&s)
+        Self::generic(s)
     }
 }
 
 impl From<&str> for Problem {
     fn from(s: &str) -> Self {
-        Self::decode(s)
+        Self::generic(s)
     }
 }
 
-/// The text to show a person for an error string that may hold a packed [`Problem`].
-pub fn plain_text(s: &str) -> String {
-    match Problem::unpack(s) {
-        Some(p) => p.to_string(),
-        None => s.to_string(),
+impl Problem {
+    /// A low-level failure: a generic message for the person, the technical text in `details`.
+    fn low_level(code: &str, message: &str, e: &dyn std::fmt::Display) -> Self {
+        Self::new(code, message).with_details(e.to_string())
+    }
+
+    /// Say what Kora was doing when this failed (`"saving the server list"`), keeping the code and
+    /// the actions. A problem that came from a low-level error ([`codes::IO`] and friends) gets the
+    /// friendly sentence "Kora hit a problem while ..."; any other problem gets a "While ..." line
+    /// at the start of its details.
+    pub fn context(mut self, doing: &str) -> Self {
+        let doing = doing.trim().trim_end_matches('.');
+        if codes::is_low_level(&self.code) {
+            self.message = format!("Kora hit a problem while {doing}.");
+        } else {
+            let line = format!("While {doing}.");
+            self.details = Some(match self.details.take() {
+                Some(d) => format!("{line}\n{d}"),
+                None => line,
+            });
+        }
+        self
+    }
+
+    /// Put a short lead-in before the message: the replacement for `format!("could not save: {e}")`
+    /// that keeps the code, the details and the actions (`"could not save"` -> "could not save: <message>").
+    pub fn lead(mut self, lead: &str) -> Self {
+        self.message = format!("{}: {}", lead.trim_end_matches([':', ' ']), self.message);
+        self
+    }
+
+    /// Like [`Problem::context`] but takes the text from a closure (only built on the error path).
+    pub fn context_with(self, doing: impl FnOnce() -> String) -> Self {
+        self.context(&doing())
     }
 }
 
-/// Just the message of an error string that may hold a packed [`Problem`] (no details, no hints).
-pub fn message_of(s: &str) -> String {
-    match Problem::unpack(s) {
-        Some(p) => p.message,
-        None => s.to_string(),
+/// `.context("saving the server list")` on any `Result` whose error converts into a [`Problem`].
+pub trait Context<T> {
+    fn context(self, doing: &str) -> Res<T>;
+}
+
+impl<T, E: Into<Problem>> Context<T> for Result<T, E> {
+    fn context(self, doing: &str) -> Res<T> {
+        self.map_err(|e| e.into().context(doing))
+    }
+}
+
+impl From<std::io::Error> for Problem {
+    fn from(e: std::io::Error) -> Self {
+        Self::low_level(codes::IO, "Kora could not read or write a file.", &e)
+    }
+}
+
+impl From<serde_json::Error> for Problem {
+    fn from(e: serde_json::Error) -> Self {
+        Self::low_level(codes::DATA, "Kora could not read some of its saved data.", &e)
+    }
+}
+
+impl From<ureq::Error> for Problem {
+    fn from(e: ureq::Error) -> Self {
+        Self::low_level(codes::NETWORK, "Kora could not reach the internet address it needed.", &e)
     }
 }
 
@@ -506,28 +571,36 @@ mod tests {
     }
 
     #[test]
-    fn strings_carry_a_problem_and_plain_strings_still_work() {
-        let p = sample();
-        let s: String = p.clone().into();
-        assert!(Problem::is_encoded(&s));
-        assert_eq!(Problem::decode(&s), p);
-        assert_eq!(Problem::from(s.clone()), p);
-        // Any old error string is a generic problem with no actions.
-        let plain = Problem::decode("disk full");
-        assert_eq!((plain.code.as_str(), plain.message.as_str(), plain.actions.len()), (codes::FAILED, "disk full", 0));
-        assert!(!Problem::is_encoded("disk full") && !Problem::is_encoded("{\"code\":\"x\",\"message\":\"m\"}"));
-        // A broken packed string is shown as it is rather than lost.
-        assert_eq!(Problem::decode("\u{1}kora-problem:{oops").message, "\u{1}kora-problem:{oops");
-        assert_eq!(message_of(&s), p.message);
-        assert_eq!(message_of("plain"), "plain");
+    fn strings_become_generic_problems() {
+        let p = Problem::from("disk full");
+        assert_eq!((p.code.as_str(), p.message.as_str(), p.actions.len()), (codes::FAILED, "disk full", 0));
     }
 
     #[test]
     fn terminals_get_readable_text() {
-        let t = plain_text(&sample().encode());
+        let t = sample().to_string();
         assert_eq!(t, "Your GitHub sign-in is missing a permission.\nmissing: read:org\nSign in again with more permissions: gh auth refresh -h github.com -s read:org\nRun: gh auth refresh");
         assert!(!t.contains("kora-problem") && !t.contains('{'));
-        assert_eq!(plain_text("as it was"), "as it was");
+    }
+
+    #[test]
+    fn low_level_errors_keep_their_text_in_the_details() {
+        let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let p: Problem = e.into();
+        assert_eq!(p.code, codes::IO);
+        assert!(!p.message.contains("denied") && p.details.as_deref() == Some("denied"));
+        let p = Err::<(), _>(std::io::Error::other("full")).context("saving the server list").unwrap_err();
+        assert_eq!(p.message, "Kora hit a problem while saving the server list.");
+        assert_eq!(p.details.as_deref(), Some("full"));
+    }
+
+    #[test]
+    fn context_keeps_the_code_and_the_actions() {
+        let p = sample().context("updating a resource");
+        assert_eq!(p.code, codes::GH_MISSING_SCOPES);
+        assert_eq!(p.actions.len(), 3);
+        assert_eq!(p.message, sample().message);
+        assert_eq!(p.details.as_deref(), Some("While updating a resource.\nmissing: read:org"));
     }
 
     #[test]

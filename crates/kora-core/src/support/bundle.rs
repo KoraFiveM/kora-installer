@@ -284,7 +284,7 @@ pub fn build(m: &dyn Machine, server: Option<&str>) -> Bundle {
         .into_iter()
         .take(60)
         .map(|j| {
-            let err = j.error.as_deref().map(crate::problem::plain_text).unwrap_or_default();
+            let err = j.error.as_deref().map(|e| crate::store::jobs::problem_of_row(e).message).unwrap_or_default();
             format!("{}  {:<22} {:<16} {:<10} {}", crate::backup::clock::utc_text(j.started), j.op, j.server.unwrap_or_default(), j.state, err.replace('\n', " "))
         })
         .collect();

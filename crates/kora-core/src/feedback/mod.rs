@@ -12,7 +12,8 @@ use std::path::PathBuf;
 use crate::catalog;
 use crate::git::{self, CommandRunner};
 use crate::installer::registry::{ResourceRecord, ServerFile};
-use crate::installer::{repo_slug, InstallError, Result, Source, Versions};
+use crate::installer::{repo_slug, Result, Source, Versions};
+use crate::problem::Problem;
 
 pub const SIGN_IN_HINT: &str = "You are not signed in to GitHub. Sign in first (the manager offers it, or run `gh auth login`), then try again.";
 
@@ -20,21 +21,21 @@ pub fn require_sign_in(r: &dyn CommandRunner) -> Result<()> {
     if git::is_signed_in(r) {
         Ok(())
     } else {
-        Err(InstallError(SIGN_IN_HINT.into()))
+        Err(Problem::generic(SIGN_IN_HINT))
     }
 }
 
 fn find<'a>(server: &'a ServerFile, id: &str) -> Result<&'a ResourceRecord> {
     let n = catalog::normalize_id(id);
-    let r = server.resources.iter().find(|r| catalog::normalize_id(&r.id) == n).ok_or_else(|| InstallError(format!("this server has no resource named '{id}'")))?;
+    let r = server.resources.iter().find(|r| catalog::normalize_id(&r.id) == n).ok_or_else(|| Problem::generic(format!("this server has no resource named '{id}'")))?;
     if r.is_portal() {
-        return Err(InstallError(format!("'{id}' is a paid asset from the Cfx.re Portal; report problems with it to the creator who sold it.")));
+        return Err(Problem::generic(format!("'{id}' is a paid asset from the Cfx.re Portal; report problems with it to the creator who sold it.")));
     }
     Ok(r)
 }
 
-fn gh_err(e: git::GitError) -> InstallError {
-    InstallError(match e {
+fn gh_err(e: git::GitError) -> Problem {
+    Problem::generic(match e {
         git::GitError::Spawn(..) => {
             "GitHub's `gh` program could not be started. Run `kora tools install gh` to get Kora's own copy, or use 'Install it for me' on the System check page in the panel.".to_string()
         }
@@ -91,28 +92,28 @@ pub struct PrPlan {
 /// commits upstream does not have. Fetches `upstream`; changes nothing else.
 pub fn plan_pr(r: &dyn CommandRunner, server: &ServerFile, resource_id: &str) -> Result<PrPlan> {
     if server.source() != Source::Fork {
-        return Err(InstallError(
+        return Err(Problem::generic(
             "A pull request is made from your own copy of the resource on GitHub, and this server uses plain copies of the originals. Choose \"Make my own copy (fork)\" for this resource first."
                 .into(),
         ));
     }
     let res = find(server, resource_id)?;
     if res.third_party {
-        return Err(InstallError(format!("{} belongs to someone else and is a pinned copy, not your fork, so no pull request can be made from it. Use 'Report an issue' instead.", res.id)));
+        return Err(Problem::generic(format!("{} belongs to someone else and is a pinned copy, not your fork, so no pull request can be made from it. Use 'Report an issue' instead.", res.id)));
     }
     let dir = server.dir.join("resources").join(&res.path);
     if !dir.join(".git").exists() {
-        return Err(InstallError(format!("{} is not installed as a git checkout.", res.id)));
+        return Err(Problem::generic(format!("{} is not installed as a git checkout.", res.id)));
     }
     let upstream = repo_slug(&res.repository);
     let head_owner = git::remote_owner(r, &dir, "origin").map_err(gh_err)?;
     if upstream.split('/').next() == Some(head_owner.as_str()) {
-        return Err(InstallError(format!("{} is not a fork of yours (its origin is the Kora repository itself).", res.id)));
+        return Err(Problem::generic(format!("{} is not a fork of yours (its origin is the Kora repository itself).", res.id)));
     }
-    let head_branch = git::current_branch(r, &dir).map_err(gh_err)?.ok_or_else(|| InstallError(format!("{} is not on a branch (detached). Check out a branch with your changes first.", res.id)))?;
+    let head_branch = git::current_branch(r, &dir).map_err(gh_err)?.ok_or_else(|| Problem::generic(format!("{} is not on a branch (detached). Check out a branch with your changes first.", res.id)))?;
     let ahead = git::ahead_of_upstream(r, &dir, &res.branch).map_err(gh_err)?;
     if ahead == 0 {
-        return Err(InstallError(format!("{} has no commits that {upstream} (branch {}) lacks, so there is nothing to propose. Commit your change first.", res.id, res.branch)));
+        return Err(Problem::generic(format!("{} has no commits that {upstream} (branch {}) lacks, so there is nothing to propose. Commit your change first.", res.id, res.branch)));
     }
     Ok(PrPlan { resource: res.id.clone(), upstream, base: res.branch.clone(), head_owner, head_branch, ahead, dir })
 }

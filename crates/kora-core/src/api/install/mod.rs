@@ -26,11 +26,11 @@ pub trait InstallEnv: Send + Sync {
     fn prober(&self) -> &dyn PortProber;
     fn disk(&self) -> &dyn DiskInfo;
     /// Try a database admin login (`None` = automatic: environment / root socket).
-    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), String>;
+    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), Problem>;
     /// The FiveM server builds that can be installed.
-    fn artifacts(&self) -> Result<artifacts::ArtifactList, String>;
+    fn artifacts(&self) -> Result<artifacts::ArtifactList, Problem>;
     /// Look a Cfx.re username up on forum.cfx.re (the real lookup unless a test replaces it).
-    fn cfx_lookup(&self, name: &str) -> Result<crate::cfx::CfxAccount, String> {
+    fn cfx_lookup(&self, name: &str) -> Result<crate::cfx::CfxAccount, Problem> {
         crate::cfx::lookup(name)
     }
     /// Does this process have administrator / root rights?
@@ -45,12 +45,11 @@ pub trait InstallEnv: Send + Sync {
     fn skip_step(&self, req: &InstallRequest, step: &str) -> Result<(), Problem> {
         installer::skip_step(req, step)
     }
-    /// Run the installer (a dry run when `req.dry_run`). The error text may be a packed
-    /// [`Problem`] ([`Problem::decode`] reads both).
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String>;
+    /// Run the installer (a dry run when `req.dry_run`). A failure is a [`Problem`].
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, Problem>;
     /// [`InstallEnv::run`] with an administrator helper for the steps that need one (the Windows
     /// panel's worker, see `installer::system_ops`). Fakes may ignore it.
-    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, String> {
+    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, Problem> {
         let _ = admin;
         self.run(req, sink)
     }
@@ -66,10 +65,10 @@ impl InstallEnv for SystemInstallEnv {
     fn disk(&self) -> &dyn DiskInfo {
         &SystemDisk
     }
-    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), Problem> {
         installer::check_db_admin(admin)
     }
-    fn artifacts(&self) -> Result<artifacts::ArtifactList, String> {
+    fn artifacts(&self) -> Result<artifacts::ArtifactList, Problem> {
         let http = installer::Hooks::from_env().http;
         artifacts::list_artifacts(&http, Platform::current()).map_err(|e| e.to_string())
     }
@@ -88,13 +87,13 @@ impl InstallEnv for SystemInstallEnv {
     fn saved_clear(&self) {
         installer::saved::clear();
     }
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
-        // The raw text: it may be a packed Problem (see `installer::InstallError`).
-        installer::run(req, sink).map_err(|e| e.0)
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, Problem> {
+        // The raw text: it may be a packed Problem (see `installer::Problem`).
+        installer::run(req, sink)
     }
-    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, String> {
+    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, Problem> {
         let hooks = installer::Hooks { admin, ..installer::Hooks::from_env() };
-        installer::run_with(req, sink, &hooks).map_err(|e| e.0)
+        installer::run_with(req, sink, &hooks)
     }
 }
 
@@ -221,7 +220,7 @@ pub fn default_dir(name: &str) -> String {
 }
 
 /// The wizard's name rules.
-pub fn validate_name(name: &str) -> Result<(), String> {
+pub fn validate_name(name: &str) -> Result<(), Problem> {
     let n = name.trim();
     if n.is_empty() {
         return Err("Please give your server a name.".into());
@@ -246,7 +245,7 @@ fn valid_resource_id(s: &str) -> bool {
 /// Check the UI's request and turn it into an [`InstallRequest`]: the CLI's `into_request`
 /// defaults (folder, hostname, catalogue from `KORA_CATALOG`, no app on a dry run) plus the
 /// installer's own validation, so a bad request is refused before anything starts.
-pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
+pub fn build_request(w: &WireInstall) -> Result<InstallRequest, Problem> {
     validate_name(&w.name)?;
     let name = w.name.trim().to_string();
     let dir_text = w.dir.trim();
@@ -417,7 +416,7 @@ pub fn port_lines(game: u16, txadmin: u16, servers: &[ServerEntry], prober: &dyn
 /// Check the requested ports against this machine (and the other servers). With `auto`, move
 /// taken ports to the next free ones and return what changed; without, a taken port is an error
 /// naming the port and the next free one. (The CLI's `settle_ports_avoiding`.)
-pub fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber, avoid: &[u16]) -> Result<Vec<String>, String> {
+pub fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber, avoid: &[u16]) -> Result<Vec<String>, Problem> {
     let (game, tx) = (req.ports.game, req.ports.txadmin);
     let report = ports::check_ports(game, tx, avoid, prober);
     if report.all_free() {
@@ -702,8 +701,8 @@ impl<F: FnMut(&ProgressEvent) + Send> ProgressSink for FnSink<F> {
 
 /// How a finished run ended, ready for the job result / error.
 pub struct Finished {
-    /// The outcome, or the installer's error text when it failed (may be a packed [`Problem`]).
-    pub outcome: Result<InstallOutcome, String>,
+    /// The outcome, or the installer's problem when it failed.
+    pub outcome: Result<InstallOutcome, Problem>,
     /// The log file (when one could be written).
     pub log_path: Option<PathBuf>,
     /// After a failure: what was kept on disk (folder, saved answers) and how to carry on.
@@ -751,7 +750,7 @@ pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Optio
             done(Ok(out), log_path)
         }
         Err(msg) => {
-            let log_path = write_install_log(req, &log, Some(&crate::problem::plain_text(&msg)));
+            let log_path = write_install_log(req, &log, Some(&msg.to_string()));
             let saved = env.saved_save(req);
             let mut kept = Vec::new();
             if req.dir.join(".kora").is_dir() {
@@ -760,7 +759,7 @@ pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Optio
             if saved {
                 kept.push("Your answers (not the licence key or database password)".to_string());
             }
-            let problem = failure_problem(req, &msg, failed_step.as_deref());
+            let problem = failure_problem(req, msg.clone(), failed_step.as_deref());
             Finished { outcome: Err(msg), log_path, kept, next: failure_next_steps(req, saved), failed_step, problem: Some(problem) }
         }
     }
@@ -770,8 +769,8 @@ pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Optio
 /// text as a generic one) followed by the ways on: retry the failed step (or the whole install when
 /// it stopped before the first step), skip the step when it is safe to ([`installer::SKIPPABLE`]),
 /// and change the answers.
-pub fn failure_problem(req: &InstallRequest, error: &str, failed_step: Option<&str>) -> Problem {
-    let mut p = Problem::decode(error);
+pub fn failure_problem(req: &InstallRequest, error: Problem, failed_step: Option<&str>) -> Problem {
+    let mut p = error;
     match failed_step {
         Some(step) => {
             if p.code == codes::FAILED {

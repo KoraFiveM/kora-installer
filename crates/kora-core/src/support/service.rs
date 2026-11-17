@@ -8,7 +8,7 @@ use crate::api::wire::{BundleListing, BundleSaved};
 use crate::api::Backend;
 use crate::problem::Problem;
 
-type Res<T> = Result<T, String>;
+type Res<T> = Result<T, Problem>;
 
 /// The sentence shown wherever a bundle is offered.
 pub const NEVER_UPLOADED: &str = "Kora never uploads this file anywhere. It is saved on this computer, and it leaves only if you send it yourself.";

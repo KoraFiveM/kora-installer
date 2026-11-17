@@ -16,7 +16,8 @@ use crate::catalog::{self, Catalog, Picker};
 use crate::git::{self, CommandRunner};
 use crate::installer::registry::{ResourceRecord, ServerFile};
 use crate::installer::{layout, pinned};
-use crate::installer::{repo_slug, InstallError, Result, Source, Versions};
+use crate::installer::{repo_slug, Result, Source, Versions};
+use crate::problem::Problem;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -63,7 +64,7 @@ pub fn installed_ids(server: &ServerFile) -> Vec<String> {
 /// Load the catalog (remote, with the embedded snapshot as fallback). The note says when the
 /// bundled copy was used.
 pub fn load_catalog() -> Result<(Catalog, Option<String>)> {
-    let (c, origin) = catalog::load(&crate::installer::HttpClient::default(), catalog::CATALOG_URL).map_err(|e| InstallError(e.to_string()))?;
+    let (c, origin) = catalog::load(&crate::installer::HttpClient::default(), catalog::CATALOG_URL).map_err(|e| Problem::generic(e.to_string()))?;
     let note = match origin {
         catalog::CatalogOrigin::Remote => None,
         catalog::CatalogOrigin::Embedded(why) => Some(format!("Used the catalog bundled with this installer ({why}).")),
@@ -73,7 +74,7 @@ pub fn load_catalog() -> Result<(Catalog, Option<String>)> {
 
 /// What to install for `ids` (plus dependencies) on `server`.
 pub fn plan(cat: &Catalog, server: &ServerFile, ids: &[String]) -> Result<AddPlan> {
-    let picker = Picker::with_ids(cat, installed_ids(server), server.versions() == Versions::Latest, ids).map_err(|e| InstallError(e.to_string()))?;
+    let picker = Picker::with_ids(cat, installed_ids(server), server.versions() == Versions::Latest, ids).map_err(|e| Problem::generic(e.to_string()))?;
     plan_from_picker(&picker, server, ids)
 }
 
@@ -193,16 +194,16 @@ fn inside_another_clone(resources: &Path, dest: &Path) -> Option<PathBuf> {
 pub fn execute(cloner: &dyn Cloner, server: &mut ServerFile, plan: &AddPlan, say: &mut dyn FnMut(&str)) -> Result<AddOutcome> {
     let mut out = AddOutcome::default();
     let resources = server.dir.join("resources");
-    std::fs::create_dir_all(&resources).map_err(|e| InstallError(format!("cannot create the resources folder: {e}")))?;
+    std::fs::create_dir_all(&resources).map_err(|e| Problem::generic(format!("cannot create the resources folder: {e}")))?;
     let owner = server.github_owner.clone();
     let fork_repos: Vec<String> = plan.items.iter().filter(|i| i.fork).map(|i| i.repo.clone()).collect();
     let mut forks: Option<git::ForkState> = None;
     if !fork_repos.is_empty() {
         let Some(o) = &owner else {
-            return Err(InstallError("this development server has no GitHub account recorded, so its resources cannot be forked".into()));
+            return Err(Problem::generic("this development server has no GitHub account recorded, so its resources cannot be forked"));
         };
         say(&format!("Looking for your forks in {o} and forking what is missing (this can take a while)"));
-        let st = cloner.prepare_forks(o, &fork_repos).map_err(InstallError)?;
+        let st = cloner.prepare_forks(o, &fork_repos).map_err(Problem::generic)?;
         let text = st.counts_text();
         say(&format!("Forks in {o}: {text}"));
         out.notes.push(format!("GitHub forks in {o}: {text}."));
@@ -263,7 +264,7 @@ pub fn execute(cloner: &dyn Cloner, server: &mut ServerFile, plan: &AddPlan, say
             Err(e) => out.failed.push((item.id.clone(), e)),
         }
     }
-    server.save().map_err(|e| InstallError(format!("cannot write kora-server.json: {e}")))?;
+    server.save().map_err(|e| Problem::generic(format!("cannot write kora-server.json: {e}")))?;
     // Only folders that now really hold something new.
     let folders = layout::folders_for(done_rels.iter().map(String::as_str));
     match append_ensures_to_cfg(&server.dir.join("server.cfg"), &folders) {

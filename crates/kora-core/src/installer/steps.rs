@@ -68,8 +68,8 @@ struct InstallStep {
     title: &'static str,
 }
 
-fn fail(e: impl std::fmt::Display) -> StepError {
-    StepError::Failed(e.to_string())
+fn fail(e: impl Into<Problem>) -> StepError {
+    StepError::Failed(e.into())
 }
 
 impl Step for InstallStep {
@@ -93,8 +93,8 @@ impl Step for InstallStep {
             }
             Err(e) => {
                 // The progress line gets the plain message; the error keeps the whole Problem (if it is one).
-                self.ctx.emit(self.id, StepStatus::Failed, e.problem().message, 0.0);
-                Err(StepError::Failed(e.0))
+                self.ctx.emit(self.id, StepStatus::Failed, e.message.clone(), 0.0);
+                Err(StepError::Failed(e))
             }
         }
     }
@@ -119,7 +119,7 @@ impl Step for InstallStep {
 // ---------------------------------------------------------------------------------------------
 
 fn io<T>(r: std::io::Result<T>, what: &str) -> Result<T> {
-    r.map_err(|e| InstallError(format!("{what}: {e}")))
+    r.map_err(|e| Problem::generic(format!("{what}: {e}")))
 }
 
 fn res_dir(ctx: &Ctx) -> PathBuf {
@@ -324,9 +324,9 @@ fn forks_path(ctx: &Ctx) -> PathBuf {
 /// or signed out could not check it up front). Nothing is created on failure.
 fn verify_requested_owner(r: &dyn git::CommandRunner, requested: Option<&str>) -> Result<()> {
     let Some(want) = requested.map(str::trim).filter(|o| !o.is_empty()) else { return Ok(()) };
-    git::owners::check_login_syntax(want).map_err(|m| InstallError::from(Problem::new(codes::GH_OWNER_INVALID, m).with_action(Action::change_answers("github"))))?;
+    git::owners::check_login_syntax(want).map_err(|m| Problem::from(Problem::new(codes::GH_OWNER_INVALID, m).with_action(Action::change_answers("github"))))?;
     let all = git::owners::list_owners(r).map_err(|e| {
-        InstallError::from(
+        Problem::from(
             Problem::new(codes::GH_UNAVAILABLE, "Kora could not read your GitHub accounts. Nothing was forked.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }),
         )
     })?;
@@ -382,7 +382,7 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
     let root = res_dir(ctx);
     let fork_state = if ctx.req.source() == Source::Fork {
         let st = std::fs::read(forks_path(ctx)).ok().and_then(|b| serde_json::from_slice::<git::ForkState>(&b).ok());
-        Some(st.ok_or_else(|| InstallError("fork state missing".into()))?)
+        Some(st.ok_or_else(|| Problem::generic("fork state missing"))?)
     } else {
         None
     };
@@ -397,7 +397,7 @@ fn items(ctx: &Ctx) -> Result<Vec<CloneItem>> {
             };
             let rel = r.install_rel();
             // The catalog is checked when loaded; this keeps a bad path from ever leaving `resources/`.
-            let dest = crate::fsutil::join_inside(&root, &rel).ok_or_else(|| InstallError(format!("{}: unsafe path {rel}", r.id)))?;
+            let dest = crate::fsutil::join_inside(&root, &rel).ok_or_else(|| Problem::generic(format!("{}: unsafe path {rel}", r.id)))?;
             Ok(CloneItem {
                 id: r.id.clone(),
                 dest,
@@ -544,7 +544,7 @@ fn clone_one(ctx: &Ctx, it: &CloneItem) -> Result<()> {
         let _ = std::fs::remove_dir_all(&partial);
         return err(e.to_string());
     }
-    pinned::place(&partial, &it.dest, it.subpath.as_deref(), &it.repo, it.commit.as_deref()).map_err(InstallError)
+    pinned::place(&partial, &it.dest, it.subpath.as_deref(), &it.repo, it.commit.as_deref()).map_err(Problem::generic)
 }
 
 fn artifact_store(ctx: &Ctx) -> ArtifactStore {
@@ -566,7 +566,7 @@ fn service_user_override() -> Option<String> {
 /// when it really is Kora's root-owned pinned copy, else this program when it is safe, else a copy
 /// of it that has to be made first.
 fn root_exe_for(created: &Created) -> Result<service::binary::RootExe> {
-    service::binary::root_exe(created.binary.as_deref()).map_err(InstallError)
+    service::binary::root_exe(created.binary.as_deref()).map_err(Problem::generic)
 }
 
 fn managed_server(ctx: &Ctx, user: &str, kora_exe: &str) -> Result<ManagedServer> {
@@ -589,7 +589,7 @@ fn linux_service_account(recorded: Option<&str>, expected: &str, runner: &dyn se
     use service::account::{is_system_uid, user_status, UserStatus};
     let note =
         recorded.filter(|r| *r != expected).map(|r| format!("Kora's records named the account '{r}' for this server; that is not the account Kora makes for it, so '{expected}' is used instead."));
-    match user_status(runner, expected).map_err(|e| InstallError(e.to_string()))? {
+    match user_status(runner, expected).map_err(|e| Problem::generic(e.to_string()))? {
         UserStatus::Exists(0) => err(format!("'{expected}' is the root account: refusing to run a server as it. Remove it or choose another server name.")),
         // A system account with this server's name: the one Kora made in an earlier attempt.
         UserStatus::Exists(uid) if is_system_uid(uid, uid_min) => Ok((expected.to_string(), false, note)),
@@ -728,7 +728,7 @@ impl InstallStep {
         let ctx = &*self.ctx;
         ctx.emit(self.id, StepStatus::Running, "Starting the GitHub sign-in...", 0.2);
         let session = begin_login(&SystemLogin, false).map_err(|e| {
-            InstallError::from(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))
+            Problem::from(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))
         })?;
         let opened = open_github_page(&session.url);
         let msg = format!("Sign in to GitHub: {} {} and enter this code: {}  (waiting for you, up to 15 minutes)", if opened { "your browser is opening" } else { "open" }, session.url, session.code);
@@ -768,7 +768,7 @@ impl InstallStep {
         tools = git::detect(&r);
         // Linux Git: the system package, which needs administrator rights.
         if tools.git.is_none() {
-            let plan = git::plan_bootstrap(git::Os::current(), &tools).map_err(|e| InstallError(e.to_string()))?;
+            let plan = git::plan_bootstrap(git::Os::current(), &tools).map_err(|e| Problem::generic(e.to_string()))?;
             if !ctx.admin {
                 let what: Vec<String> = plan.iter().map(|s| format!("- {}", s.description)).collect();
                 let mut p = git_needs_admin().with_details(format!("Kora would:\n{}", what.join("\n")));
@@ -780,7 +780,7 @@ impl InstallStep {
             for s in &plan {
                 ctx.emit(self.id, StepStatus::Running, s.description.clone(), 0.1);
                 let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
-                let failed = |why: String| InstallError::from(Problem::new(codes::INSTALL_TOOL_MISSING, format!("This did not work: {}.", s.description)).with_details(why));
+                let failed = |why: String| Problem::from(Problem::new(codes::INSTALL_TOOL_MISSING, format!("This did not work: {}.", s.description)).with_details(why));
                 let o = git::CommandRunner::run(&r, &s.program, &args, None).map_err(|e| failed(e.to_string()))?;
                 if !o.ok() {
                     return Err(failed(o.stderr.trim().to_string()));
@@ -798,11 +798,11 @@ impl InstallStep {
                     .with_action(Action::change_answers("source"))
                     .into());
             }
-            let mut st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
+            let mut st = git::auth_status(&r).map_err(|e| Problem::generic(e.to_string()))?;
             if !st.logged_in {
                 // Just installed (or never signed in): do the browser sign-in now instead of failing.
                 self.sign_in_to_github()?;
-                st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
+                st = git::auth_status(&r).map_err(|e| Problem::generic(e.to_string()))?;
                 if !st.logged_in {
                     return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_action(Action::SignInGithub { scopes: vec![] }).into());
                 }
@@ -817,7 +817,7 @@ impl InstallStep {
         let preq = PortRequest { server: slug(&ctx.req.name), game_port: ctx.req.ports.game, txadmin_port: ctx.req.ports.txadmin, expose_txadmin: ctx.req.txadmin_public };
         let already_installed = ctx.req.dir.join("kora-server.json").is_file();
         if !already_installed {
-            preq.validate().map_err(|e| InstallError(e.to_string()))?;
+            preq.validate().map_err(|e| Problem::generic(e.to_string()))?;
             let conflicts = firewall::ports::install_conflicts(&ctx.req.name, &ctx.req.dir, preq.game_port, preq.txadmin_port, &firewall::ports::SystemProber);
             if !conflicts.is_empty() {
                 return Err(super::ports_busy(&conflicts).into());
@@ -842,7 +842,7 @@ impl InstallStep {
             if db_override(&ctx.req) {
                 check_admin_login(&admin_conn(&ctx.req))?;
             } else {
-                let found = db::detect(&db::SystemRunner, db::Os::current()).map_err(|e| InstallError(e.to_string()))?;
+                let found = db::detect(&db::SystemRunner, db::Os::current()).map_err(|e| Problem::generic(e.to_string()))?;
                 if found.is_empty() {
                     match ctx.req.db {
                         DbChoice::InstallIfMissing => self.install_db_server()?,
@@ -911,7 +911,7 @@ impl InstallStep {
         for s in &plan.steps {
             ctx.emit(self.id, StepStatus::Running, s.description.clone(), 0.5);
             if let db::StepAction::Run(spec) = &s.action {
-                let o = db::CommandRunner::run(&db::SystemRunner, spec).map_err(|e| InstallError(e.to_string()))?;
+                let o = db::CommandRunner::run(&db::SystemRunner, spec).map_err(|e| Problem::generic(e.to_string()))?;
                 if !o.ok() {
                     return err(format!("{} failed: {}", s.description, o.stderr.trim()));
                 }
@@ -955,7 +955,7 @@ impl InstallStep {
             ctx.emit(self.id, StepStatus::Running, format!("{what} ({}/{total})", s.done.len()), s.done.len() as f32 / total as f32);
         };
         let cfg = git::ForkConfig { sync_existing: true, cache_path: Some(git::forkfind::default_cache_path()), ..git::ForkConfig::default() };
-        let out = git::run_forks(&r, &mut state, &cfg, &mut on_progress).map_err(|e| InstallError(e.to_string()))?;
+        let out = git::run_forks(&r, &mut state, &cfg, &mut on_progress).map_err(|e| Problem::generic(e.to_string()))?;
         match out {
             git::ForkOutcome::Paused => {
                 Err(Problem::new(codes::GH_RATE_LIMITED, "GitHub asked Kora to slow down. The forks made so far are kept: wait a few minutes, then try this step again.").into())
@@ -1029,7 +1029,7 @@ impl InstallStep {
     fn database_via_helper(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let r = self.via_helper(false, "build.db")?;
-        let db = r.db.ok_or_else(|| InstallError("Kora's administrator helper did not hand back the new database login.".into()))?;
+        let db = r.db.ok_or_else(|| Problem::generic("Kora's administrator helper did not hand back the new database login."))?;
         let state_path = db_state_path(ctx);
         if db.clear_old_state {
             let _ = std::fs::remove_file(&state_path);
@@ -1038,11 +1038,11 @@ impl InstallStep {
             return err("Kora's administrator helper did not hand back the new database login.");
         };
         io(std::fs::create_dir_all(ctx.meta_dir()), "cannot create state folder")?;
-        state.save(&state_path).map_err(|e| InstallError(e.to_string()))?;
-        let json = serde_json::to_string_pretty(&creds).map_err(|e| InstallError(e.to_string()))?;
+        state.save(&state_path).map_err(|e| Problem::generic(e.to_string()))?;
+        let json = serde_json::to_string_pretty(&creds).map_err(|e| Problem::generic(e.to_string()))?;
         let path = ctx.req.dir.join("database.json");
         ctx.update_created(|c| c.files.push("database.json".into()))?;
-        db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, windows_user().as_deref()).map_err(|e| InstallError(e.to_string()))?;
+        db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, windows_user().as_deref()).map_err(|e| Problem::generic(e.to_string()))?;
         ctx.shared.lock().unwrap().db_name = Some(creds.database.clone());
         Ok(r.detail)
     }
@@ -1056,13 +1056,13 @@ impl InstallStep {
         let mut res = super::system_ops::DbResult::default();
         if let Ok(mut old) = ProvisionState::load(&db_state_path(ctx)) {
             ctx.emit(self.id, StepStatus::Running, "Cleaning up an unfinished earlier attempt", 0.1);
-            db::rollback(&db::SystemRunner, &admin, &mut old).map_err(|e| InstallError(e.to_string()))?;
+            db::rollback(&db::SystemRunner, &admin, &mut old).map_err(|e| Problem::generic(e.to_string()))?;
             res.clear_old_state = true;
         }
         // A scratch file only administrators can touch (the person's TEMP is theirs to change
         // between the write and the read): Kora's MariaDB folder, under an unguessable name.
         let mut rnd = [0u8; 16];
-        getrandom::fill(&mut rnd).map_err(|e| InstallError(format!("no random numbers: {e}")))?;
+        getrandom::fill(&mut rnd).map_err(|e| Problem::generic(format!("no random numbers: {e}")))?;
         let scratch = windows_db::base_dir().filter(|b| b.is_dir()).unwrap_or_else(std::env::temp_dir);
         let tmp = scratch.join(format!("kora-db-state-{}.json", hex::encode(rnd)));
         ctx.emit(self.id, StepStatus::Running, "Creating database and user", 0.4);
@@ -1076,7 +1076,7 @@ impl InstallStep {
                 if let Some(mut st) = state {
                     let _ = db::rollback(&db::SystemRunner, &admin, &mut st);
                 }
-                return Err(InstallError(e.to_string()));
+                return Err(Problem::generic(e.to_string()));
             }
         };
         ctx.emit(self.id, StepStatus::Running, "Testing the new login", 0.8);
@@ -1097,16 +1097,16 @@ impl InstallStep {
         // A previous attempt that never produced usable credentials: drop its objects first.
         if let Ok(mut old) = ProvisionState::load(&state_path) {
             ctx.emit(self.id, StepStatus::Running, "Cleaning up an unfinished earlier attempt", 0.1);
-            db::rollback(&db::SystemRunner, &admin, &mut old).map_err(|e| InstallError(e.to_string()))?;
+            db::rollback(&db::SystemRunner, &admin, &mut old).map_err(|e| Problem::generic(e.to_string()))?;
             let _ = std::fs::remove_file(&state_path);
         }
         io(std::fs::create_dir_all(ctx.meta_dir()), "cannot create state folder")?;
         ctx.emit(self.id, StepStatus::Running, "Creating database and user", 0.4);
-        let creds = db::provision(&db::SystemRunner, &admin, "127.0.0.1", "127.0.0.1", &state_path).map_err(|e| InstallError(e.to_string()))?;
-        let json = serde_json::to_string_pretty(&creds).map_err(|e| InstallError(e.to_string()))?;
+        let creds = db::provision(&db::SystemRunner, &admin, "127.0.0.1", "127.0.0.1", &state_path).map_err(|e| Problem::generic(e.to_string()))?;
+        let json = serde_json::to_string_pretty(&creds).map_err(|e| Problem::generic(e.to_string()))?;
         let path = ctx.req.dir.join("database.json");
         ctx.update_created(|c| c.files.push("database.json".into()))?;
-        db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, windows_user().as_deref()).map_err(|e| InstallError(e.to_string()))?;
+        db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, windows_user().as_deref()).map_err(|e| Problem::generic(e.to_string()))?;
         // Prove the new account works over TCP, the way oxmysql will connect.
         ctx.emit(self.id, StepStatus::Running, "Testing the new login", 0.8);
         verify_login(&admin.client, &creds)?;
@@ -1119,13 +1119,13 @@ impl InstallStep {
         let platform = ArtPlatform::current();
         let (url, build) = match &ctx.req.artifact_url {
             Some(u) => {
-                artifacts::validate_url(u, platform).map_err(|e| InstallError(e.to_string()))?;
+                artifacts::validate_url(u, platform).map_err(|e| Problem::generic(e.to_string()))?;
                 (u.clone(), artifacts::build_from_url(u).unwrap_or(0))
             }
             None => {
                 ctx.emit(self.id, StepStatus::Running, "Looking up the recommended build", 0.02);
-                let list = artifacts::list_artifacts(&ctx.hooks.http, platform).map_err(|e| InstallError(format!("could not look up server builds: {e}")))?;
-                let b = list.pick(Channel::Recommended).ok_or_else(|| InstallError("no recommended server build available".into()))?;
+                let list = artifacts::list_artifacts(&ctx.hooks.http, platform).map_err(|e| Problem::generic(format!("could not look up server builds: {e}")))?;
+                let b = list.pick(Channel::Recommended).ok_or_else(|| Problem::generic("no recommended server build available"))?;
                 if let Some(why) = &b.broken {
                     ctx.note(format!("Build {} is marked as problematic: {why}", b.build));
                 }
@@ -1145,7 +1145,7 @@ impl InstallStep {
         let file = dl.join(url.rsplit('/').next().unwrap_or("artifact"));
         let _ = std::fs::remove_file(&file);
         ctx.emit(self.id, StepStatus::Running, format!("Downloading build {build} (this can take a few minutes)"), 0.1);
-        artifacts::download_verified(&ctx.hooks.http, &url, platform, &file, &Verify::default()).map_err(|e| InstallError(e.to_string()))?;
+        artifacts::download_verified(&ctx.hooks.http, &url, platform, &file, &Verify::default()).map_err(|e| Problem::generic(e.to_string()))?;
         ctx.emit(self.id, StepStatus::Running, format!("Unpacking build {build}"), 0.7);
         match store.swap(build, &file, platform) {
             Ok(()) => {}
@@ -1171,7 +1171,7 @@ impl InstallStep {
             None
         } else {
             let b = io(std::fs::read(req.dir.join("database.json")), "cannot read database.json")?;
-            Some(serde_json::from_slice(&b).map_err(|e| InstallError(format!("corrupt database.json: {e}")))?)
+            Some(serde_json::from_slice(&b).map_err(|e| Problem::generic(format!("corrupt database.json: {e}")))?)
         };
         let dbc = match &creds {
             Some(c) => DbConnection { user: c.user.clone(), password: txadmin::Secret::new(c.password.expose()), host: c.host.clone(), port: c.port, database: c.database.clone() },
@@ -1197,30 +1197,30 @@ impl InstallStep {
         })?;
         let dir = &req.dir;
         if creds.is_some() {
-            txadmin::write_server_files(dir, &cfg).map_err(|e| InstallError(e.to_string()))?;
+            txadmin::write_server_files(dir, &cfg).map_err(|e| Problem::generic(e.to_string()))?;
         } else {
             let (s, p) = (txadmin::server_cfg(&cfg), txadmin::permissions_cfg(cfg.master.as_ref()));
-            let (s, p) = (s.map_err(|e| InstallError(e.to_string()))?, p.map_err(|e| InstallError(e.to_string()))?);
+            let (s, p) = (s.map_err(|e| Problem::generic(e.to_string()))?, p.map_err(|e| Problem::generic(e.to_string()))?);
             let secrets = format!(
                 "# Kora secrets. Restricted permissions, git-ignored, never share.\nsv_licenseKey \"{}\"\n# No database was set up: add your connection string here:\n# set mysql_connection_string \"mysql://user:password@host/database?charset=utf8mb4\"\n",
                 cfg.license_key.expose()
             );
-            txadmin::write_file(&dir.join("secrets.cfg"), &secrets, true).map_err(|e| InstallError(e.to_string()))?;
-            txadmin::write_file(&dir.join("server.cfg"), &s, false).map_err(|e| InstallError(e.to_string()))?;
-            txadmin::write_file(&dir.join("permissions.cfg"), &p, false).map_err(|e| InstallError(e.to_string()))?;
+            txadmin::write_file(&dir.join("secrets.cfg"), &secrets, true).map_err(|e| Problem::generic(e.to_string()))?;
+            txadmin::write_file(&dir.join("server.cfg"), &s, false).map_err(|e| Problem::generic(e.to_string()))?;
+            txadmin::write_file(&dir.join("permissions.cfg"), &p, false).map_err(|e| Problem::generic(e.to_string()))?;
             ctx.note("No database was created: set mysql_connection_string in secrets.cfg before starting.");
         }
         let txdata = dir.join("txData");
-        txadmin::write_profile(&txdata, "default", dir, "server.cfg").map_err(|e| InstallError(e.to_string()))?;
+        txadmin::write_profile(&txdata, "default", dir, "server.cfg").map_err(|e| Problem::generic(e.to_string()))?;
         // txAdmin only auto-starts the game server once an admin exists (verified in txAdmin 8.1.2).
         let seed = match master {
             Some(m) => txadmin::MasterSeed::Cfx(m),
             None => {
-                let pw = txadmin::Secret::new(txadmin::random_token(20).map_err(|e| InstallError(e.to_string()))?);
+                let pw = txadmin::Secret::new(txadmin::random_token(20).map_err(|e| Problem::generic(e.to_string()))?);
                 txadmin::MasterSeed::Local { username: txadmin::LOCAL_ADMIN_USER.into(), password: pw }
             }
         };
-        if txadmin::write_admins(&txdata, &seed).map_err(|e| InstallError(e.to_string()))? {
+        if txadmin::write_admins(&txdata, &seed).map_err(|e| Problem::generic(e.to_string()))? {
             if let txadmin::MasterSeed::Local { username, password } = &seed {
                 let sdir = dir.join("secrets");
                 #[cfg(unix)]
@@ -1231,7 +1231,7 @@ impl InstallStep {
                 #[cfg(not(unix))]
                 io(std::fs::create_dir_all(&sdir), "cannot create the secrets folder")?;
                 let f = sdir.join("txadmin-admin.txt");
-                txadmin::write_file(&f, &txadmin::local_admin_note(username, password, req.ports.txadmin), true).map_err(|e| InstallError(e.to_string()))?;
+                txadmin::write_file(&f, &txadmin::local_admin_note(username, password, req.ports.txadmin), true).map_err(|e| Problem::generic(e.to_string()))?;
                 // The password itself is never put in a note or log: it is in the file, and the final screen shows it.
                 ctx.note(format!("txAdmin login (no Cfx.re account was linked): user '{username}', password in {}. Change it after the first login.", f.display()));
             }
@@ -1276,13 +1276,13 @@ impl InstallStep {
             }
             return Ok("No active firewall detected: nothing to open".into());
         };
-        let plan = firewall::open_plan(&preq, kind).map_err(|e| InstallError(e.to_string()))?;
+        let plan = firewall::open_plan(&preq, kind).map_err(|e| Problem::generic(e.to_string()))?;
         if !ctx.admin {
             ctx.note(format!("Firewall NOT changed (needs administrator rights). Re-run as root/Administrator to: {}", plan.descriptions().join("; ")));
             return Ok("Skipped (needs admin); see notes".into());
         }
         ctx.update_created(|c| c.firewall = true)?;
-        service::apply_plan(&plan, &rn).map_err(|e| InstallError(e.to_string()))?;
+        service::apply_plan(&plan, &rn).map_err(|e| Problem::generic(e.to_string()))?;
         Ok(format!("Opened port {} in the firewall", ctx.req.ports.game))
     }
 
@@ -1295,7 +1295,7 @@ impl InstallStep {
                 let ctx = &*self.ctx;
                 let server = managed_server(ctx, &format!("kora-{}", slug(&ctx.req.name)), "kora.exe")?;
                 ctx.emit(self.id, StepStatus::Running, "Letting the service into the server folder", 0.9);
-                service::apply_plan(&service::windows_grant_plan(&server), &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+                service::apply_plan(&service::windows_grant_plan(&server), &service::SystemRunner).map_err(|e| Problem::generic(e.to_string()))?;
             }
             return Ok(r.detail);
         }
@@ -1321,7 +1321,7 @@ impl InstallStep {
 
         // Which program does the service run? Not one in a folder ordinary users can write to, and
         // not simply the one `created.json` names (that file is in the server folder; see root_exe_for).
-        let exe = std::env::current_exe().map_err(|e| InstallError(format!("cannot find the kora program: {e}")))?;
+        let exe = std::env::current_exe().map_err(|e| Problem::generic(format!("cannot find the kora program: {e}")))?;
         let choice = root_exe_for(&created)?;
         let own_copy = match &choice {
             service::binary::RootExe::Ready(p) if *p == exe => None,
@@ -1343,7 +1343,7 @@ impl InstallStep {
             head.extend(service::binary::traverse_plan(&blocked).steps);
         }
         if create_account {
-            head.extend(service::account::create_plan(&account).map_err(|e| InstallError(e.to_string()))?.steps);
+            head.extend(service::account::create_plan(&account).map_err(|e| Problem::generic(e.to_string()))?.steps);
         }
         if let service::binary::RootExe::Copy { src, dest } = &choice {
             head.extend(service::binary::install_plan(&src.to_string_lossy(), dest).steps);
@@ -1353,7 +1353,7 @@ impl InstallStep {
             tail.push(service::SystemStep::write("Save the server's non-secret environment (txAdmin data folder and port)", &server.env_file_path(), txadmin_env_text(ctx), 0o600));
         }
         if platform == SvcPlatform::Windows {
-            server.validate().map_err(|e| InstallError(e.to_string()))?;
+            server.validate().map_err(|e| Problem::generic(e.to_string()))?;
             let sid = service::windows_installing_sid(&rn);
             let mut reg = service::windows_register_plan_for(&server, sid.as_deref());
             match service::windows_existing_service(&rn, &server) {
@@ -1373,7 +1373,7 @@ impl InstallStep {
                 tail.extend(service::windows_grant_plan(&server).steps);
             }
         } else {
-            tail.extend(service::install_plan(&server, platform).map_err(|e| InstallError(e.to_string()))?.steps);
+            tail.extend(service::install_plan(&server, platform).map_err(|e| Problem::generic(e.to_string()))?.steps);
         }
 
         if !ctx.admin {
@@ -1383,7 +1383,7 @@ impl InstallStep {
         }
 
         // Stage 1: account and program copy. Recorded as soon as they exist, so delete can remove exactly these.
-        service::apply_plan(&service::Plan::new(head), &rn).map_err(|e| InstallError(e.to_string()))?;
+        service::apply_plan(&service::Plan::new(head), &rn).map_err(|e| Problem::generic(e.to_string()))?;
         let dir_owner = owner_of(&ctx.req.dir);
         ctx.update_created(|c| {
             c.service_account = Some(account.clone());
@@ -1402,11 +1402,11 @@ impl InstallStep {
         if platform == SvcPlatform::Linux {
             // Hand the server folder (and only it) to the server's own account, through open folder
             // handles: `chown -R <path>` would follow a link swapped in after the check above.
-            let (uid, gid) = crate::userhome::account_ids(&account).ok_or_else(|| InstallError(format!("cannot find the account '{account}'")))?;
+            let (uid, gid) = crate::userhome::account_ids(&account).ok_or_else(|| Problem::generic(format!("cannot find the account '{account}'")))?;
             ctx.emit(self.id, StepStatus::Running, format!("Giving '{account}' ownership of the server folder (and only that folder)"), 0.8);
-            crate::fsutil::chown_tree_no_follow(&ctx.req.dir, uid, gid).map_err(|e| InstallError(format!("cannot give '{account}' the server folder: {e}")))?;
+            crate::fsutil::chown_tree_no_follow(&ctx.req.dir, uid, gid).map_err(|e| Problem::generic(format!("cannot give '{account}' the server folder: {e}")))?;
         }
-        service::apply_plan(&service::Plan::new(tail), &rn).map_err(|e| InstallError(e.to_string()))?;
+        service::apply_plan(&service::Plan::new(tail), &rn).map_err(|e| Problem::generic(e.to_string()))?;
         if create_account {
             ctx.note(format!("Created the system account '{account}' (no login, no home folder) for the server; `kora delete` removes it again."));
         }
@@ -1423,7 +1423,7 @@ impl InstallStep {
         if self.helper().is_some() {
             let r = self.via_helper(false, "system.schedule")?;
             // The helper made the task; the schedule's record is the person's file.
-            service::save_schedule(&ctx.req.dir, &service::ScheduleConfig::default_for_install(), &service::installing_user()).map_err(|e| InstallError(e.to_string()))?;
+            service::save_schedule(&ctx.req.dir, &service::ScheduleConfig::default_for_install(), &service::installing_user()).map_err(|e| Problem::generic(e.to_string()))?;
             return Ok(r.detail);
         }
         let created = ctx.load_created();
@@ -1437,7 +1437,7 @@ impl InstallStep {
         if let service::binary::RootExe::Copy { src, dest } = &exe {
             plan.extend(service::binary::install_plan(&src.to_string_lossy(), dest));
         }
-        plan.extend(service::schedule_install_plan(&server, &cfg, &who, svc_platform()).map_err(|e| InstallError(e.to_string()))?);
+        plan.extend(service::schedule_install_plan(&server, &cfg, &who, svc_platform()).map_err(|e| Problem::generic(e.to_string()))?);
         if !ctx.admin {
             ctx.note(format!("Auto-update schedule NOT created (needs administrator rights). Re-run as root/Administrator to: {}", plan.descriptions().join("; ")));
             return Ok("Skipped (needs admin); see notes".into());
@@ -1448,10 +1448,10 @@ impl InstallStep {
                 c.binary = Some(dest.to_string_lossy().into_owned());
             }
         })?;
-        service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+        service::apply_plan(&plan, &service::SystemRunner).map_err(|e| Problem::generic(e.to_string()))?;
         // In the administrator helper's child the person's own process writes this file.
         if ctx.shadow.is_none() {
-            service::save_schedule(&ctx.req.dir, &cfg, &who).map_err(|e| InstallError(e.to_string()))?;
+            service::save_schedule(&ctx.req.dir, &cfg, &who).map_err(|e| Problem::generic(e.to_string()))?;
         }
         Ok(format!("Auto-update scheduled: {} (change it with `kora schedule set {}`)", service::describe_for(&cfg, &who), server.name))
     }
@@ -1538,7 +1538,7 @@ impl InstallStep {
         if ctx.admin && !req.service && ctx.plan.iter().any(|p| p.id == "prepare.account") {
             super::check_dir_links(&req.dir)?;
             let plan = crate::userhome::chown_to_kora_plan(std::slice::from_ref(&req.dir), true);
-            service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+            service::apply_plan(&plan, &service::SystemRunner).map_err(|e| Problem::generic(e.to_string()))?;
         }
         Ok(format!("Registered '{}' in Kora's server list", req.name))
     }
@@ -1560,7 +1560,7 @@ impl InstallStep {
             return Ok(("Database kept".into(), None));
         }
         let admin = admin_conn(&ctx.req);
-        db::rollback(&db::SystemRunner, &admin, &mut st).map_err(|e| InstallError(format!("could not remove database '{dbn}' / user '{usr}': {e}")))?;
+        db::rollback(&db::SystemRunner, &admin, &mut st).map_err(|e| Problem::generic(format!("could not remove database '{dbn}' / user '{usr}': {e}")))?;
         Ok((format!("Dropped database {dbn} and user {usr}"), Some(super::system_ops::DbResult { state: Some(st), remove_secret_file: true, ..Default::default() })))
     }
 
@@ -1597,7 +1597,7 @@ impl InstallStep {
             if any && self.id == "build.db" {
                 let r = self.via_helper(true, "build.db")?;
                 if let Some(st) = r.db.as_ref().and_then(|d| d.state.as_ref()) {
-                    st.save(&db_state_path(ctx)).map_err(|e| InstallError(e.to_string()))?;
+                    st.save(&db_state_path(ctx)).map_err(|e| Problem::generic(e.to_string()))?;
                 }
                 if r.db.as_ref().is_some_and(|d| d.remove_secret_file) {
                     let _ = std::fs::remove_file(ctx.req.dir.join("database.json"));
@@ -1654,13 +1654,13 @@ impl InstallStep {
                 }
                 let admin = admin_conn(&ctx.req);
                 db::rollback(&db::SystemRunner, &admin, &mut st).map_err(|e| {
-                    InstallError(format!(
+                    Problem::generic(format!(
                         "could not remove database '{dbn}' / user '{usr}': {e}. Everything else was already removed. Kora needs the database admin login again to drop them: \
                          set KORA_DB_ADMIN_PASSWORD to the admin password (host/port/user are remembered from the install) or run as root with socket auth, then run `kora delete {}` again.",
                         ctx.req.dir.display()
                     ))
                 })?;
-                st.save(&path).map_err(|e| InstallError(e.to_string()))?;
+                st.save(&path).map_err(|e| Problem::generic(e.to_string()))?;
                 let _ = std::fs::remove_file(ctx.req.dir.join("database.json"));
                 Ok(format!("Dropped database {dbn} and user {usr}"))
             }
@@ -1693,12 +1693,12 @@ impl InstallStep {
                 let rn = service::SystemRunner;
                 if let Some(kind) = firewall::detect(svc_platform(), &rn) {
                     let ssh = if svc_platform() == SvcPlatform::Linux { firewall::ssh_ports() } else { vec![] };
-                    let (plan, note) = firewall::close_plan_checked(&preq, kind, &rn, &ssh).map_err(|e| InstallError(e.to_string()))?;
+                    let (plan, note) = firewall::close_plan_checked(&preq, kind, &rn, &ssh).map_err(|e| Problem::generic(e.to_string()))?;
                     if let Some(n) = note {
                         ctx.note(n);
                     }
                     if ctx.admin {
-                        service::apply_plan(&plan, &rn).map_err(|e| InstallError(e.to_string()))?;
+                        service::apply_plan(&plan, &rn).map_err(|e| Problem::generic(e.to_string()))?;
                     } else {
                         ctx.note(format!("Firewall rules NOT removed (needs admin): {}", plan.descriptions().join("; ")));
                     }
@@ -1728,7 +1728,7 @@ impl InstallStep {
                         ctx.note(format!("NOT removed (needs administrator rights): {}", item.plan.descriptions().join("; ")));
                         continue;
                     }
-                    service::apply_plan(&item.plan, &rn).map_err(|e| InstallError(format!("{}: {e}", item.title)))?;
+                    service::apply_plan(&item.plan, &rn).map_err(|e| Problem::generic(format!("{}: {e}", item.title)))?;
                     if system::clears_record(&item) {
                         ctx.update_created(|c| system::clear_record(c, item.kind))?;
                     }
@@ -1764,7 +1764,7 @@ fn verify_login(client: &str, c: &Credentials) -> Result<()> {
         env: vec![("MYSQL_PWD".into(), c.password.expose().to_string())],
         stdin: Some("SELECT 1;".into()),
     };
-    let o = db::CommandRunner::run(&db::SystemRunner, &spec).map_err(|e| InstallError(e.to_string()))?;
+    let o = db::CommandRunner::run(&db::SystemRunner, &spec).map_err(|e| Problem::generic(e.to_string()))?;
     if o.ok() {
         Ok(())
     } else {
@@ -2006,13 +2006,13 @@ mod problem_tests {
 
     #[test]
     fn a_problem_reads_as_plain_text_in_a_terminal() {
-        let e = InstallError::from(known::github_missing_scopes(&["read:org".to_string()]));
+        let e = Problem::from(known::github_missing_scopes(&["read:org".to_string()]));
         let t = e.to_string();
         assert!(t.starts_with("Your GitHub sign-in does not give Kora") && t.contains("gh auth refresh -h github.com -s read:org"), "{t}");
         assert!(!t.contains("kora-problem"));
         assert_eq!(e.problem().code, codes::GH_MISSING_SCOPES);
         // Through the step engine too.
         let se = StepError::Failed(e.0.clone());
-        assert_eq!(InstallError::from(se).problem().code, codes::GH_MISSING_SCOPES);
+        assert_eq!(Problem::from(se).problem().code, codes::GH_MISSING_SCOPES);
     }
 }

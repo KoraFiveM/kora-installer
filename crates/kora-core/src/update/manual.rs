@@ -22,7 +22,8 @@ use crate::installer::gitops::{online_players, service_health, with_git};
 use crate::installer::http::HttpClient;
 use crate::installer::registry::{now_unix, Registry, ServerFile};
 use crate::installer::types::{Source, Versions};
-use crate::installer::{InstallError, Result};
+use crate::installer::Result;
+use crate::problem::Problem;
 
 /// A registered server as recorded in its `kora-server.json`.
 pub type ServerRecord = ServerFile;
@@ -168,7 +169,7 @@ pub struct SnapshotInfo {
 }
 
 fn err<T>(m: impl Into<String>) -> Result<T> {
-    Err(InstallError(m.into()))
+    Err(Problem::generic(m))
 }
 
 /// Process exit code for a finished update: 0 ok, 1 rolled back, 3 needs attention.
@@ -188,10 +189,10 @@ pub fn load_server(server: &str) -> Result<ServerRecord> {
     let dir = if as_dir.is_absolute() && as_dir.join("kora-server.json").is_file() {
         as_dir.to_path_buf()
     } else {
-        let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
-        reg.find(server).ok_or_else(|| InstallError(format!("no registered server named '{server}' (see `kora status`)")))?.dir.clone()
+        let reg = Registry::load().map_err(|e| Problem::generic(format!("cannot read the server registry: {e}")))?;
+        reg.find(server).ok_or_else(|| Problem::generic(format!("no registered server named '{server}' (see `kora status`)")))?.dir.clone()
     };
-    ServerFile::load(&dir).map_err(|e| InstallError(format!("cannot read {}: {e}", dir.join("kora-server.json").display())))
+    ServerFile::load(&dir).map_err(|e| Problem::generic(format!("cannot read {}: {e}", dir.join("kora-server.json").display())))
 }
 
 fn snapshot_dir(server: &ServerRecord) -> std::path::PathBuf {
@@ -200,7 +201,7 @@ fn snapshot_dir(server: &ServerRecord) -> std::path::PathBuf {
 
 /// Take the server's update lock (see [`lock`]); busy is a plain error.
 fn locked(server: &ServerRecord) -> Result<lock::UpdateLock> {
-    lock::acquire(&server.dir).map_err(|e| InstallError(e.to_string()))
+    lock::acquire(&server.dir).map_err(|e| Problem::generic(e.to_string()))
 }
 
 fn valid_snapshot_id(id: &str) -> bool {
@@ -318,7 +319,7 @@ fn select(server: &ServerRecord, scope: &Scope, skip: &[String], catalog: Option
     let skip: Vec<String> = skip.iter().map(|s| normalize_id(s)).collect();
     let planned: Option<BTreeMap<String, String>> = planned.map(|m| m.iter().map(|(k, v)| (normalize_id(k), v.trim().to_ascii_lowercase())).collect());
     let prod = server.versions() == Versions::Released;
-    let cat = if prod { Some(catalog.ok_or_else(|| InstallError("could not read the release catalog, so releases cannot be compared".into()))?) } else { None };
+    let cat = if prod { Some(catalog.ok_or_else(|| Problem::generic("could not read the release catalog, so releases cannot be compared"))?) } else { None };
     let mut sel = Selection { targets: Vec::new(), versions: Vec::new(), gone: Vec::new(), rejected: Vec::new(), planned_dev: Vec::new() };
     for r in &server.resources {
         let n = normalize_id(&r.id);
@@ -528,7 +529,7 @@ fn load_catalog_if_needed(server: &ServerRecord) -> Result<(Option<Catalog>, Opt
     if server.versions() != Versions::Released {
         return Ok((None, None));
     }
-    let (c, origin) = catalog::load(&HttpClient::default(), catalog::CATALOG_URL).map_err(|e| InstallError(e.to_string()))?;
+    let (c, origin) = catalog::load(&HttpClient::default(), catalog::CATALOG_URL).map_err(|e| Problem::generic(e.to_string()))?;
     Ok((Some(c), catalog_note(&origin)))
 }
 
@@ -734,7 +735,7 @@ pub fn apply_with_hints(
             RunEvent::Planned(ids) => sink(UpdateEvent::Planned(ids)),
             RunEvent::Skipped(id, state) => sink(UpdateEvent::Resource { id, state }),
         };
-        run_update_with(g, &ph, &NoMigrations, &the_plan, &run, &mut on).map_err(|e| InstallError(e.to_string()))?
+        run_update_with(g, &ph, &NoMigrations, &the_plan, &run, &mut on).map_err(|e| Problem::generic(e.to_string()))?
     };
 
     super::add_fork_sync(&mut report, fork_sync);
@@ -883,7 +884,7 @@ fn rollback_locked(server: &ServerRecord, snapshot_id: &str, git: &dyn GitOps, f
     if !file.is_file() {
         return err(format!("no snapshot '{snapshot_id}' for this server (see --list-snapshots)"));
     }
-    let snap = Snapshot::load(&file).map_err(|e| InstallError(e.to_string()))?;
+    let snap = Snapshot::load(&file).map_err(|e| Problem::generic(e.to_string()))?;
     if !force {
         let dirty: Vec<&str> = snap.entries.iter().filter(|e| git.is_dirty(&e.path).unwrap_or(false)).map(|e| e.id.as_str()).collect();
         if !dirty.is_empty() {

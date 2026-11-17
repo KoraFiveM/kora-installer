@@ -347,21 +347,5 @@ pub fn meta_delete(c: &Connection, key: &str) -> Result<(), Problem> {
     Ok(())
 }
 
-/// What the domain modules with an `io::Error` signature return for a store problem.
-pub fn problem_to_io(p: Problem) -> std::io::Error {
-    match &p.details {
-        Some(d) if !d.is_empty() => std::io::Error::other(format!("{} ({d})", p.message)),
-        _ => std::io::Error::other(p.message),
-    }
-}
-
-/// What the domain modules with a `String` signature return for a store problem.
-pub fn problem_to_string(p: Problem) -> String {
-    match &p.details {
-        Some(d) if !d.is_empty() => format!("{} ({d})", p.message),
-        _ => p.message,
-    }
-}
-
 #[cfg(test)]
 mod tests;

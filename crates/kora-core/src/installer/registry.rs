@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::types::{Mode, Ports, Source, Versions};
-use crate::store::{problem_to_io, Store};
+use crate::store::Store;
 
 /// Directory holding the registry. `KORA_HOME` overrides (tests, portable installs).
 pub fn kora_home() -> PathBuf {
@@ -146,32 +146,32 @@ pub struct Registry {
 impl Registry {
     /// The servers in the store of the Kora folder that holds `path` (the file name is only used to find
     /// the folder: the data lives in the database, see [`crate::store`]). Nothing registered: empty.
-    pub fn load_from(path: &Path) -> std::io::Result<Self> {
-        let Some(s) = Store::open_existing_beside(path).map_err(problem_to_io)? else { return Ok(Self::default()) };
+    pub fn load_from(path: &Path) -> crate::problem::Res<Self> {
+        let Some(s) = Store::open_existing_beside(path)? else { return Ok(Self::default()) };
         blocked(&s)?;
-        s.read(read_servers).map(|servers| Self { servers }).map_err(problem_to_io)
+        s.read(read_servers).map(|servers| Self { servers })
     }
 
-    pub fn load() -> std::io::Result<Self> {
+    pub fn load() -> crate::problem::Res<Self> {
         Self::load_from(&registry_path())
     }
 
     /// Replace the whole list in one transaction. (Two programs that each load, change and save can still
     /// overwrite each other's change: use [`Registry::update_at`] for a change that must not be lost.)
-    pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-        let s = Store::open_beside(path).map_err(problem_to_io)?;
+    pub fn save_to(&self, path: &Path) -> crate::problem::Res<()> {
+        let s = Store::open_beside(path)?;
         blocked(&s)?;
-        s.write(|tx| write_servers(tx, &self.servers)).map_err(problem_to_io)
+        s.write(|tx| write_servers(tx, &self.servers))
     }
 
-    pub fn save(&self) -> std::io::Result<()> {
+    pub fn save(&self) -> crate::problem::Res<()> {
         self.save_to(&registry_path())
     }
 
     /// The old name of [`save_to`](Self::save_to): the registry used to be a file that was deleted when it
     /// became empty. There is no such file any more, so this is the same.
-    pub fn save_or_clean_to(&self, path: &Path) -> std::io::Result<()> {
-        if self.servers.is_empty() && Store::open_existing_beside(path).map_err(problem_to_io)?.is_none() {
+    pub fn save_or_clean_to(&self, path: &Path) -> crate::problem::Res<()> {
+        if self.servers.is_empty() && Store::open_existing_beside(path)?.is_none() {
             return Ok(());
         }
         self.save_to(path)
@@ -179,32 +179,19 @@ impl Registry {
 
     /// Read, change and write the list inside ONE transaction, so two programs changing it at the same
     /// moment cannot lose each other's change. `f` returns whether it changed anything.
-    pub fn update_at<R>(path: &Path, f: impl FnOnce(&mut Registry) -> std::io::Result<R>) -> std::io::Result<R> {
-        let s = Store::open_beside(path).map_err(problem_to_io)?;
+    pub fn update_at<R>(path: &Path, f: impl FnOnce(&mut Registry) -> crate::problem::Res<R>) -> crate::problem::Res<R> {
+        let s = Store::open_beside(path)?;
         blocked(&s)?;
-        let mut inner: Option<std::io::Error> = None;
-        let r = s.write(|tx| {
+        s.write(|tx| {
             let mut reg = Registry { servers: read_servers(tx)? };
-            match f(&mut reg) {
-                Ok(out) => {
-                    write_servers(tx, &reg.servers)?;
-                    Ok(out)
-                }
-                Err(e) => {
-                    let p = crate::problem::Problem::generic(e.to_string());
-                    inner = Some(e);
-                    Err(p)
-                }
-            }
-        });
-        match r {
-            Ok(v) => Ok(v),
-            Err(p) => Err(inner.unwrap_or_else(|| problem_to_io(p))),
-        }
+            let out = f(&mut reg)?;
+            write_servers(tx, &reg.servers)?;
+            Ok(out)
+        })
     }
 
     /// [`update_at`](Self::update_at) for the Kora home of this process.
-    pub fn update<R>(f: impl FnOnce(&mut Registry) -> std::io::Result<R>) -> std::io::Result<R> {
+    pub fn update<R>(f: impl FnOnce(&mut Registry) -> crate::problem::Res<R>) -> crate::problem::Res<R> {
         Self::update_at(&registry_path(), f)
     }
 
@@ -249,9 +236,13 @@ fn read_servers(c: &rusqlite::Connection) -> Result<Vec<ServerEntry>, crate::pro
 }
 
 /// The server list is waiting on an old `servers.json` that could not be imported: say so, never start empty.
-fn blocked(s: &Store) -> std::io::Result<()> {
+fn blocked(s: &Store) -> crate::problem::Res<()> {
     match s.blocked("servers") {
-        Some(b) => Err(std::io::Error::other(format!("Kora cannot read its old server list {} ({}); it was left exactly as it was. Fix or move that file and try again", b.file.display(), b.why))),
+        Some(b) => Err(crate::problem::Problem::new(
+            crate::store::codes::STORE_UNREADABLE,
+            format!("Kora cannot read its old server list {}; it was left exactly as it was. Fix or move that file and try again.", b.file.display()),
+        )
+        .with_details(b.why.clone())),
         None => Ok(()),
     }
 }
@@ -386,10 +377,10 @@ impl ServerFile {
     pub fn versions(&self) -> Versions {
         super::style(self.mode, self.source, self.versions).1
     }
-    pub fn load(dir: &Path) -> std::io::Result<Self> {
-        serde_json::from_slice(&fs::read(server_file_path(dir))?).map_err(std::io::Error::other)
+    pub fn load(dir: &Path) -> crate::problem::Res<Self> {
+        serde_json::from_slice(&fs::read(server_file_path(dir))?)
     }
-    pub fn save(&self) -> std::io::Result<()> {
+    pub fn save(&self) -> crate::problem::Res<()> {
         let p = server_file_path(&self.dir);
         let tmp = p.with_extension("json.tmp");
         // Both spellings are written; the old one follows the new (see `style`).
@@ -397,7 +388,7 @@ impl ServerFile {
         if out.versions.is_some() {
             out.mode = super::compat_mode(out.versions());
         }
-        fs::write(&tmp, serde_json::to_vec_pretty(&out).map_err(std::io::Error::other)?)?;
+        fs::write(&tmp, serde_json::to_vec_pretty(&out)?)?;
         fs::rename(tmp, p)
     }
 }

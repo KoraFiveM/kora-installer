@@ -16,7 +16,7 @@ use crate::db::SystemRunner;
 use crate::installer::registry::ServerEntry;
 use crate::problem::Problem;
 
-type Res<T> = Result<T, String>;
+type Res<T> = Result<T, Problem>;
 
 fn pack(p: Problem) -> String {
     p.into()
@@ -219,7 +219,7 @@ pub fn overview<B: Backend + ?Sized>(b: &mut B) -> Res<crate::api::wire::Backups
 
 // ---- importing a server from a backup (see `super::import`)
 
-fn open_source(src: &super::import::ImportSource, allow_path: bool) -> Result<PathBuf, String> {
+fn open_source(src: &super::import::ImportSource, allow_path: bool) -> Result<PathBuf, Problem> {
     super::import::resolve_source(src, allow_path).map_err(pack)
 }
 

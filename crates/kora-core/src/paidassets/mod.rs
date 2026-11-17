@@ -47,7 +47,7 @@ const MAX_RATIO: u64 = 100;
 /// Backups kept per asset.
 pub const KEEP_BACKUPS: usize = 3;
 
-pub type Res<T> = Result<T, String>;
+pub type Res<T> = Result<T, crate::problem::Problem>;
 
 /// What a problem is about. `blocking` problems stop the import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

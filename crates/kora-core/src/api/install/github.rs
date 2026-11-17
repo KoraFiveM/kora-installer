@@ -87,18 +87,18 @@ pub struct LoginFlow {
     pub code: String,
     pub url: String,
     /// Blocks until the sign-in is approved (the user's login name) or fails (a plain message).
-    pub wait: Box<dyn FnOnce() -> Result<Option<String>, String> + Send>,
+    pub wait: Box<dyn FnOnce() -> Result<Option<String>, Problem> + Send>,
 }
 
 /// Everything the panel does with GitHub that touches `gh` or the network.
 pub trait GithubEnv: Send + Sync {
     fn auth(&self) -> GithubUser;
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String>;
-    fn begin_login(&self) -> Result<LoginFlow, String>;
+    fn owners(&self) -> Result<Vec<OwnerChoice>, Problem>;
+    fn begin_login(&self) -> Result<LoginFlow, Problem>;
     /// The fork target for a development install (what `kora install --mode dev` decides):
     /// a named owner is checked (or deferred when `gh` is not ready yet); with none, the personal
     /// account is used only when it is the only usable choice.
-    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, String>;
+    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, Problem>;
 }
 
 /// The real `gh`.
@@ -111,17 +111,17 @@ impl GithubEnv for SystemGithub {
         auth_with(&SystemRunner)
     }
 
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
-        let list = owners::list_owners(&SystemRunner).map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
+    fn owners(&self) -> Result<Vec<OwnerChoice>, Problem> {
+        let list = owners::list_owners(&SystemRunner).map_err(|e| Problem::new(codes::GH_UNAVAILABLE, format!("Could not read your GitHub accounts. {GH_HELP}")).with_details(e.to_string()))?;
         Ok(list.into_iter().map(|o| OwnerChoice { login: o.login, is_org: o.kind == OwnerKind::Org, can_fork: o.can_fork, reason: o.reason }).collect())
     }
 
-    fn begin_login(&self) -> Result<LoginFlow, String> {
+    fn begin_login(&self) -> Result<LoginFlow, Problem> {
         let session = owners::begin_login(&SystemLogin, false).map_err(|e| {
             if owners::gh_auth(&SystemRunner) == GhAuth::Missing {
-                return known::gh_missing().encode();
+                return known::gh_missing();
             }
-            format!("Could not start the GitHub sign-in ({e}). {GH_HELP}")
+            Problem::new(codes::GH_SIGN_IN_INCOMPLETE, format!("Could not start the GitHub sign-in. {GH_HELP}")).with_details(e.to_string())
         })?;
         let (code, url) = (session.code.clone(), session.url.clone());
         Ok(LoginFlow {
@@ -131,16 +131,16 @@ impl GithubEnv for SystemGithub {
                 Ok(GhAuth::LoggedIn { login }) => Ok(Some(login)),
                 Ok(GhAuth::LoggedOut) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "GitHub did not confirm the sign-in. Start it again and approve it in your browser.")
                     .with_action(Action::SignInGithub { scopes: vec![] })
-                    .encode()),
-                Ok(GhAuth::Missing) => Err(known::gh_missing().encode()),
+                    ),
+                Ok(GhAuth::Missing) => Err(known::gh_missing()),
                 Err(e) => {
-                    Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }).encode())
+                    Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))
                 }
             }),
         })
     }
 
-    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, String> {
+    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, Problem> {
         resolve_owner_with(&SystemRunner, requested)
     }
 }
@@ -164,7 +164,7 @@ pub fn auth_with(runner: &dyn crate::git::CommandRunner) -> GithubUser {
 }
 
 /// Same rules as the CLI's `resolve_github_owner_with`.
-pub fn resolve_owner_with(runner: &dyn crate::git::CommandRunner, requested: Option<&str>) -> Result<String, String> {
+pub fn resolve_owner_with(runner: &dyn crate::git::CommandRunner, requested: Option<&str>) -> Result<String, Problem> {
     if let Some(want) = requested {
         return match owners::check_requested_owner(runner, want)? {
             owners::OwnerCheck::Verified(l) | owners::OwnerCheck::Deferred(l) => Ok(l),
@@ -172,8 +172,8 @@ pub fn resolve_owner_with(runner: &dyn crate::git::CommandRunner, requested: Opt
     }
     // Nothing named: the accounts must be read, so say exactly what is missing first.
     match owners::gh_auth(runner) {
-        GhAuth::Missing => return Err(known::gh_missing().with_action(Action::change_answers("source")).encode()),
-        GhAuth::LoggedOut => return Err(known::github_signed_out().encode()),
+        GhAuth::Missing => return Err(known::gh_missing().with_action(Action::change_answers("source"))),
+        GhAuth::LoggedOut => return Err(known::github_signed_out()),
         GhAuth::LoggedIn { .. } => {}
     }
     let all = owners::list_owners(runner).map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;

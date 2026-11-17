@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::{err, InstallError, Result};
+use super::{err, Problem, Result};
 use crate::artifacts::ArtifactSource as _;
 use crate::db::{self, AdminConn, CommandSpec, Secret, StepAction};
 
@@ -174,13 +174,13 @@ pub fn pick_port_with(prober: &dyn crate::firewall::ports::PortProber, avoid: &[
 /// Unpack a MariaDB zip into `dest`, dropping the single top-level folder (`mariadb-x.y.z-winx64/`).
 /// Rejects absolute paths, `..`, drive letters and backslashes; refuses to overwrite.
 pub fn extract_zip_stripped(archive: &Path, dest: &Path) -> Result<()> {
-    let io_err = |e: std::io::Error| InstallError(format!("cannot unpack MariaDB: {e}"));
-    let mut z = zip::ZipArchive::new(std::io::BufReader::new(std::fs::File::open(archive).map_err(io_err)?)).map_err(|e| InstallError(format!("the MariaDB download is not a valid zip: {e}")))?;
+    let io_err = |e: std::io::Error| Problem::generic(format!("cannot unpack MariaDB: {e}"));
+    let mut z = zip::ZipArchive::new(std::io::BufReader::new(std::fs::File::open(archive).map_err(io_err)?)).map_err(|e| Problem::generic(format!("the MariaDB download is not a valid zip: {e}")))?;
     std::fs::create_dir_all(dest).map_err(io_err)?;
     let mut total: u64 = 0;
     for i in 0..z.len() {
-        let mut f = z.by_index(i).map_err(|e| InstallError(format!("bad MariaDB zip entry: {e}")))?;
-        let name = f.name().map_err(|e| InstallError(format!("bad MariaDB zip entry name: {e}")))?.into_owned();
+        let mut f = z.by_index(i).map_err(|e| Problem::generic(format!("bad MariaDB zip entry: {e}")))?;
+        let name = f.name().map_err(|e| Problem::generic(format!("bad MariaDB zip entry name: {e}")))?.into_owned();
         let Some(rel) = strip_first_component(&name)? else { continue };
         let out = dest.join(&rel);
         if f.is_dir() {
@@ -235,7 +235,7 @@ pub fn admin_only_acl_args(path: &Path, is_dir: bool) -> Vec<String> {
 }
 
 fn run_checked(spec: &CommandSpec, what: &str) -> Result<db::CommandOutput> {
-    let out = db::CommandRunner::run(&db::SystemRunner, spec).map_err(|e| InstallError(format!("{what}: {e}")))?;
+    let out = db::CommandRunner::run(&db::SystemRunner, spec).map_err(|e| Problem::generic(format!("{what}: {e}")))?;
     if !out.ok() {
         let detail = format!("{}{}", out.stderr, out.stdout);
         let first: Vec<&str> = detail.lines().filter(|l| !l.trim().is_empty()).take(4).collect();
@@ -274,7 +274,7 @@ pub fn secure_dirs(runner: &dyn db::CommandRunner, dirs: &[PathBuf]) -> Result<(
         if crate::fsutil::is_symlink(d) {
             return err(format!("{} is a link, so Kora will not put the database server there. Delete it (as administrator) and try again.", d.display()));
         }
-        let out = runner.run(&owner_sid_command(d)).map_err(|e| InstallError(format!("cannot read the owner of {}: {e}", d.display())))?;
+        let out = runner.run(&owner_sid_command(d)).map_err(|e| Problem::generic(format!("cannot read the owner of {}: {e}", d.display())))?;
         let sid = out.stdout.trim();
         if !out.ok() || sid.is_empty() {
             return err(format!("cannot read the owner of {} ({}).", d.display(), out.stderr.lines().next().unwrap_or("").trim()));
@@ -286,14 +286,14 @@ pub fn secure_dirs(runner: &dyn db::CommandRunner, dirs: &[PathBuf]) -> Result<(
             ));
         }
         let own = CommandSpec::new("icacls", &[&d.to_string_lossy(), "/setowner", "*S-1-5-32-544"]);
-        let o = runner.run(&own).map_err(|e| InstallError(format!("setting the owner of {}: {e}", d.display())))?;
+        let o = runner.run(&own).map_err(|e| Problem::generic(format!("setting the owner of {}: {e}", d.display())))?;
         if !o.ok() {
             return err(format!("setting the owner of {} to Administrators failed: {}", d.display(), o.stdout.lines().next().unwrap_or("").trim()));
         }
     }
     if let Some(inner) = dirs.last() {
         let spec = CommandSpec { program: "icacls".into(), args: admin_only_acl_args(inner, true), ..CommandSpec::default() };
-        let o = runner.run(&spec).map_err(|e| InstallError(format!("restricting the MariaDB folder to administrators: {e}")))?;
+        let o = runner.run(&spec).map_err(|e| Problem::generic(format!("restricting the MariaDB folder to administrators: {e}")))?;
         if !o.ok() {
             return err(format!("restricting the MariaDB folder to administrators failed: {}", o.stdout.lines().next().unwrap_or("").trim()));
         }
@@ -317,12 +317,12 @@ pub(super) fn restrict(path: &Path, is_dir: bool, what: &str) -> Result<()> {
 }
 
 fn write_json_restricted<T: Serialize>(path: &Path, value: &T, secret: bool) -> Result<()> {
-    let text = serde_json::to_string_pretty(value).map_err(|e| InstallError(e.to_string()))?;
-    std::fs::File::create(path).map_err(|e| InstallError(format!("cannot write {}: {e}", path.display())))?;
+    let text = serde_json::to_string_pretty(value).map_err(|e| Problem::generic(e.to_string()))?;
+    std::fs::File::create(path).map_err(|e| Problem::generic(format!("cannot write {}: {e}", path.display())))?;
     if secret {
         restrict(path, false, "restricting database-admin.json to administrators")?;
     }
-    std::fs::write(path, text).map_err(|e| InstallError(format!("cannot write {}: {e}", path.display())))
+    std::fs::write(path, text).map_err(|e| Problem::generic(format!("cannot write {}: {e}", path.display())))
 }
 
 /// Wait until `client` can log in as `admin` (a freshly started service needs a few seconds).
@@ -351,17 +351,17 @@ pub fn list_service_names() -> Vec<String> {
 /// Download + verify + unpack + initialise + start. Returns the saved record. Needs administrator rights.
 /// `say` receives plain-language progress lines.
 pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Record> {
-    let base = base_dir().ok_or_else(|| InstallError("cannot find %ProgramData% for the MariaDB folder".into()))?;
+    let base = base_dir().ok_or_else(|| Problem::generic("cannot find %ProgramData% for the MariaDB folder"))?;
     check_ascii_path(&base)?;
     let root = base.join(MARIADB_VERSION);
     let port = pick_port();
-    let plan = db::plan_install_windows(MARIADB_VERSION, &root, port, &list_service_names()).map_err(|e| InstallError(e.to_string()))?;
-    let service = plan.service_name.clone().ok_or_else(|| InstallError("internal error: no service name planned".into()))?;
-    let password = plan.admin_password.clone().ok_or_else(|| InstallError("internal error: no admin password planned".into()))?;
+    let plan = db::plan_install_windows(MARIADB_VERSION, &root, port, &list_service_names()).map_err(|e| Problem::generic(e.to_string()))?;
+    let service = plan.service_name.clone().ok_or_else(|| Problem::generic("internal error: no service name planned"))?;
+    let password = plan.admin_password.clone().ok_or_else(|| Problem::generic("internal error: no admin password planned"))?;
     if root.join("database").exists() || root.join("database-data").exists() {
         return err(format!("{} already holds a MariaDB folder that is not registered with Kora. Move or delete it (or install MariaDB yourself and use --db existing).", root.display()));
     }
-    std::fs::create_dir_all(&root).map_err(|e| InstallError(format!("cannot create {}: {e}", root.display())))?;
+    std::fs::create_dir_all(&root).map_err(|e| Problem::generic(format!("cannot create {}: {e}", root.display())))?;
     secure_dirs(&db::SystemRunner, &base_and_parent(&base))?;
     let client = root.join("database").join("bin").join("mariadb.exe");
     let datadir = root.join("database-data");
@@ -376,8 +376,8 @@ pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Re
                 let want = match pinned_sha256(MARIADB_VERSION) {
                     Some(h) => h.to_string(),
                     None => {
-                        let list = http.fetch_text(sums_url).map_err(|e| InstallError(format!("cannot fetch MariaDB's checksum list: {e}")))?;
-                        db::sha256_from_sums(&list, name).map_err(|e| InstallError(format!("MariaDB download rejected: {e}. Nothing was installed.")))?
+                        let list = http.fetch_text(sums_url).map_err(|e| Problem::generic(format!("cannot fetch MariaDB's checksum list: {e}")))?;
+                        db::sha256_from_sums(&list, name).map_err(|e| Problem::generic(format!("MariaDB download rejected: {e}. Nothing was installed.")))?
                     }
                 };
                 let cfg = super::http::FetchConfig::default();
@@ -394,23 +394,23 @@ pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Re
                     let mut notes = |m: &str| (say.borrow_mut())(m);
                     http.download_verified(sources, dest, &want, &cfg, &mut progress, &mut notes)
                 }
-                .map_err(|e| InstallError(format!("MariaDB download failed: {e}")))?;
+                .map_err(|e| Problem::generic(format!("MariaDB download failed: {e}")))?;
                 say(&format!("Downloaded MariaDB {MARIADB_VERSION} from {} (SHA-256 verified)", used.split_once("://").map_or(used.as_str(), |(_, r)| r).split('/').next().unwrap_or("")));
             }
             StepAction::ExtractZip { archive, dest } => {
-                extract_zip_stripped(archive, dest).map_err(|e| InstallError(format!("{e}. {AV_HINT}")))?;
+                extract_zip_stripped(archive, dest).map_err(|e| Problem::generic(format!("{e}. {AV_HINT}")))?;
                 let _ = std::fs::remove_file(archive);
                 if !dest.join("bin").join("mariadb-install-db.exe").is_file() {
                     return err(format!("the MariaDB zip does not contain bin\\mariadb-install-db.exe. {AV_HINT}"));
                 }
             }
             StepAction::Run(spec) if spec.program.ends_with("mariadb-install-db.exe") => {
-                run_checked(spec, "creating the MariaDB data folder and service").map_err(|e| InstallError(format!("{e}. {AV_HINT}")))?;
+                run_checked(spec, "creating the MariaDB data folder and service").map_err(|e| Problem::generic(format!("{e}. {AV_HINT}")))?;
                 // Loopback only, whatever install-db wrote.
                 let p = datadir.join("my.ini");
                 let text = std::fs::read_to_string(&p).unwrap_or_default();
                 let new = if text.trim().is_empty() { config_text(&datadir, port) } else { harden_ini(&text, port) };
-                std::fs::write(&p, new).map_err(|e| InstallError(format!("cannot write {}: {e}", p.display())))?;
+                std::fs::write(&p, new).map_err(|e| Problem::generic(format!("cannot write {}: {e}", p.display())))?;
                 // Save the login right away: if a later step fails the service is still reachable.
                 let saved = SavedAdmin { host: "127.0.0.1".into(), port, user: "root".into(), password: password.clone(), client: client.clone() };
                 write_json_restricted(&admin_path(&base), &saved, true)?;
@@ -423,8 +423,8 @@ pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Re
             }
         }
     }
-    let rec = load_record(&base).ok_or_else(|| InstallError("the MariaDB record was not written".into()))?;
-    let saved = load_admin(&base).ok_or_else(|| InstallError("the MariaDB admin file was not written".into()))?;
+    let rec = load_record(&base).ok_or_else(|| Problem::generic("the MariaDB record was not written"))?;
+    let saved = load_admin(&base).ok_or_else(|| Problem::generic("the MariaDB admin file was not written"))?;
     say("Waiting for MariaDB to accept connections");
     wait_for_login(&saved.to_conn(), Duration::from_secs(90))?;
     Ok(rec)
@@ -432,7 +432,7 @@ pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Re
 
 /// Make sure Kora's MariaDB (if one was installed earlier) is running; used before provisioning.
 pub fn ensure_running(rec: &Record) -> Result<()> {
-    let q = crate::sysexe::command("sc.exe").args(["query", &rec.service]).output().map_err(|e| InstallError(format!("sc.exe: {e}")))?;
+    let q = crate::sysexe::command("sc.exe").args(["query", &rec.service]).output().map_err(|e| Problem::generic(format!("sc.exe: {e}")))?;
     let text = String::from_utf8_lossy(&q.stdout).to_uppercase();
     if text.contains("RUNNING") {
         return Ok(());

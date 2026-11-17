@@ -9,7 +9,7 @@ use crate::problem::{codes, Action, Problem};
 use crate::service::{self, Platform, SystemRunner};
 
 /// Needs administrator rights (the caller checks and asks for them first).
-pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, String> {
+pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, Problem> {
     if !crate::privsvc::op::port_ok(e.ports.game) {
         return Err(format!("Kora does not open port {} in the firewall: Windows, remote administration or databases use it. Choose another game port first.", e.ports.game));
     }
@@ -18,7 +18,7 @@ pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, String> {
         return Ok(vec!["No active firewall was found, so there was nothing to open.".into()]);
     };
     let req = PortRequest { server: crate::installer::slug(&e.name), game_port: e.ports.game, txadmin_port: e.ports.txadmin, expose_txadmin: false };
-    let plan = firewall::open_plan(&req, kind).map_err(|x| x.to_string())?;
+    let plan = firewall::open_plan(&req, kind)?;
     if !crate::elevate::is_elevated() {
         // The command to run as administrator (the panel goes through the administrator service instead).
         let command = vec!["kora".to_string(), "reach".into(), e.name.clone(), "--open-firewall".into()];
@@ -30,9 +30,9 @@ pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, String> {
     let mut created = crate::installer::load_created_from(&e.dir).unwrap_or_default();
     if !created.firewall {
         created.firewall = true;
-        std::fs::create_dir_all(e.dir.join(".kora")).map_err(|x| x.to_string())?;
-        crate::installer::save_created_to(&e.dir, &created).map_err(|x| x.0)?;
+        std::fs::create_dir_all(e.dir.join(".kora"))?;
+        crate::installer::save_created_to(&e.dir, &created)?;
     }
-    service::apply_plan(&plan, &rn).map_err(|x| x.to_string())?;
+    service::apply_plan(&plan, &rn)?;
     Ok(vec![format!("Opened port {} (TCP and UDP) in the firewall.", e.ports.game)])
 }

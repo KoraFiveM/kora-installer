@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::installer::registry::kora_home;
 use crate::problem::Problem;
-use crate::store::{problem_to_io, Store};
+use crate::store::Store;
 
 pub const FILE_NAME: &str = "profile.json";
 
@@ -132,13 +132,13 @@ impl ProfileStore {
 
     /// Change the given fields (in one transaction: two programs changing different fields keep both).
     /// Best effort for the caller: a failure to remember never blocks an install.
-    pub fn update(&self, cfx_username: Field, cfx_identifier: Field, github_owner: Field) -> std::io::Result<Profile> {
+    pub fn update(&self, cfx_username: Field, cfx_identifier: Field, github_owner: Field) -> crate::problem::Res<Profile> {
         // Nothing to remember and nothing saved: nothing to do, and nothing is created.
         let only_forgetting = !matches!(cfx_username, Field::Set(_)) && !matches!(cfx_identifier, Field::Set(_)) && !matches!(github_owner, Field::Set(_));
-        if only_forgetting && Store::open_existing_beside(&self.legacy).map_err(problem_to_io)?.is_none() {
+        if only_forgetting && Store::open_existing_beside(&self.legacy)?.is_none() {
             return Ok(Profile::default());
         }
-        let s = Store::open_beside(&self.legacy).map_err(problem_to_io)?;
+        let s = Store::open_beside(&self.legacy)?;
         s.write(|tx| {
             let mut p = read(tx)?;
             cfx_username.apply(&mut p.cfx_username);
@@ -147,7 +147,7 @@ impl ProfileStore {
             write(tx, &p)?;
             Ok(p)
         })
-        .map_err(problem_to_io)
+        
     }
 
     /// Remember a Cfx.re account that was just found.
@@ -160,13 +160,13 @@ impl ProfileStore {
         let _ = self.update(Field::Keep, Field::Keep, Field::Set(owner.to_string()));
     }
 
-    pub fn forget_all(&self) -> std::io::Result<()> {
-        let Some(s) = Store::open_existing_beside(&self.legacy).map_err(problem_to_io)? else { return Ok(()) };
+    pub fn forget_all(&self) -> crate::problem::Res<()> {
+        let Some(s) = Store::open_existing_beside(&self.legacy)? else { return Ok(()) };
         s.write(|tx| {
             tx.execute("DELETE FROM profile", [])?;
             Ok(())
         })
-        .map_err(problem_to_io)
+        
     }
 }
 

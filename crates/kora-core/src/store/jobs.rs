@@ -199,6 +199,29 @@ pub fn interrupted_problem(op: &str, server: Option<&str>, resumable: bool) -> P
     Problem::new(CODE_INTERRUPTED, message)
 }
 
+/// The Problem behind the `error` column of a job row.
+///
+/// New rows hold the Problem as JSON (`{code, message, details?, actions?, ...}`). Older rows may hold
+/// plain text, or the packed form v0.7.0 wrote for a Problem. Reading those is the ONLY thing
+/// [`read_legacy_packed`] is for.
+pub fn problem_of_row(raw: &str) -> Problem {
+    if let Some(p) = read_legacy_packed(raw) {
+        return p;
+    }
+    match serde_json::from_str::<Value>(raw) {
+        Ok(v) => Problem::from_json(&v).unwrap_or_else(|| Problem::generic(raw)),
+        Err(_) => Problem::generic(raw),
+    }
+}
+
+/// COMPATIBILITY, read only, never written: v0.7.0 stored a job's [`Problem`] packed into the error
+/// text as `\u{1}kora-problem:<json>`. Rows written by it (and by builds of this branch before the
+/// typed-errors change) can still be in a person's database, so they are read here. This is the only
+/// place in the tree that knows the marker (a test in `problem.rs` keeps it that way).
+pub fn read_legacy_packed(raw: &str) -> Option<Problem> {
+    serde_json::from_str(raw.strip_prefix("\u{1}kora-problem:")?).ok()
+}
+
 /// The error text stored and shown for an interrupted job (the Problem as JSON, with `resume` when it can carry on).
 pub fn interrupted_error(op: &str, server: Option<&str>, resumable: bool) -> String {
     let mut v = interrupted_problem(op, server, resumable).to_json();
