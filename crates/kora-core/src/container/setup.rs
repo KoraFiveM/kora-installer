@@ -71,7 +71,9 @@ pub fn new_record(dir: &Path, slug: &str, engine: &Engine, status: Option<&Engin
         memory_mb: want.memory_mb,
         cpu_tenths: want.cpu_tenths,
         selinux_label: status.is_some_and(|s| s.selinux),
-        read_only_root: false,
+        // A developer override for the CI smoke test, which reports whether FXServer tolerates a read-only root file
+        // system: the default stays read-write until that shows it is.
+        read_only_root: std::env::var("KORA_CONTAINER_READ_ONLY").is_ok_and(|v| v == "1"),
         host_network: false,
         db: with_db.then(|| DbRecord { container: super::db_container_name(slug), volume: super::volume_name(slug), network: super::network_name(slug), image: pins::MARIADB.reference() }),
     };
