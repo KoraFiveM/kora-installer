@@ -30,8 +30,11 @@
 //! background service) · `import` (move a server to this computer) · `support` (the support bundle).
 
 pub mod archive;
+pub mod clock;
 pub mod crypt;
 pub mod dbdump;
+pub mod dest;
+pub mod settings;
 pub mod types;
 
 pub use types::*;
