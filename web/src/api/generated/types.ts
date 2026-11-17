@@ -2135,7 +2135,7 @@ export type ProgressEvent = {
  * How a session proved who it is: the launch link, Tailscale, a passkey, a password with a one-time code, the old
  * user token, or (requests only) an API token.
  */
-export type Provider = "local" | "tailscale" | "token" | "passkey" | "code" | "apitoken";
+export type Provider = "local" | "tailscale" | "token" | "passkey" | "code" | "api_token";
 
 export type PublicSource = "router" | "cfx" | "ip_echo";
 

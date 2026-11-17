@@ -38,6 +38,7 @@ pub enum Provider {
     /// A password and a one-time code.
     Code,
     /// A token made for a script (`Authorization: Bearer` only, never a session).
+    #[serde(rename = "api_token")]
     ApiToken,
 }
 

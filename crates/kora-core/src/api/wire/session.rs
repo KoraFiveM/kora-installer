@@ -23,6 +23,7 @@ pub enum Provider {
     Token,
     Passkey,
     Code,
+    #[serde(rename = "api_token")]
     ApiToken,
 }
 
