@@ -412,7 +412,15 @@ fn main() {
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
         command,
-        Some(Command::ServiceHost { .. } | Command::ContainerLogs { .. } | Command::SelfUpdate { .. } | Command::Service { .. } | Command::AdminStep(_) | Command::AdminDb(_) | Command::Update(UpdateArgs { auto: true, .. }))
+        Some(
+            Command::ServiceHost { .. }
+                | Command::ContainerLogs { .. }
+                | Command::SelfUpdate { .. }
+                | Command::Service { .. }
+                | Command::AdminStep(_)
+                | Command::AdminDb(_)
+                | Command::Update(UpdateArgs { auto: true, .. })
+        )
     );
     // The worker has a hidden window and its step children no terminal: never wait for a key.
     match &command {

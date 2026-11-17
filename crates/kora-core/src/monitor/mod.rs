@@ -271,6 +271,11 @@ impl Monitor {
             return;
         }
         let detail = backend.status_detail(e);
+        // A container server restarted by its engine (a crash, a reboot) has lost the process that copies its output to
+        // the console log: start it again. Does nothing for any other server, or when one runs.
+        if detail.running {
+            crate::container::logs::ensure_follower(&e.dir);
+        }
         let game = if detail.running { probe.game_info(e.ports.game) } else { None };
         let proc_ = if detail.running { probe.process(e) } else { None };
         let mem = probe.memory();

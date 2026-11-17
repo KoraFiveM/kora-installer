@@ -352,6 +352,27 @@ pub fn quick_label() -> Option<String> {
     c.engine_for(None).map(|e| e.label())
 }
 
+/// [`check_system`], remembered for a few minutes: the System check page is opened often and the test container
+/// takes a second. A failed check is not remembered for long, so fixing the problem shows at once.
+pub fn check_cached() -> ContainerCheck {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static LAST: Mutex<Option<(Instant, ContainerCheck)>> = Mutex::new(None);
+    if let Ok(g) = LAST.lock() {
+        if let Some((at, c)) = g.as_ref() {
+            let ttl = if c.available { Duration::from_secs(300) } else { Duration::from_secs(20) };
+            if at.elapsed() < ttl {
+                return c.clone();
+            }
+        }
+    }
+    let c = check_system();
+    if let Ok(mut g) = LAST.lock() {
+        *g = Some((Instant::now(), c.clone()));
+    }
+    c
+}
+
 /// The real check.
 pub fn check_system() -> ContainerCheck {
     let r = crate::service::SystemRunner;

@@ -467,7 +467,17 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 "originals" => kora_core::backup::import::ForkChoice::Originals,
                 _ => kora_core::backup::import::ForkChoice::Keep,
             };
-            let req = ImportRequest { source, passphrase, choices, licence_key_name: licence_key, db_admin: None, fork_choice, start, start_over, run_mode: run_mode.as_deref().map(|m| if m == "container" { kora_core::container::RunMode::Container } else { kora_core::container::RunMode::Service }) };
+            let req = ImportRequest {
+                source,
+                passphrase,
+                choices,
+                licence_key_name: licence_key,
+                db_admin: None,
+                fork_choice,
+                start,
+                start_over,
+                run_mode: run_mode.as_deref().map(|m| if m == "container" { kora_core::container::RunMode::Container } else { kora_core::container::RunMode::Service }),
+            };
             match b.import_run(&req, true, &mut |ev| show(&ev)) {
                 Ok(r) => {
                     println!("Done: \"{}\" is in {}.", r.name, r.dir);
