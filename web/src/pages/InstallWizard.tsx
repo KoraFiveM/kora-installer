@@ -72,6 +72,34 @@ export function AdminPromptNotice({ needs, onWithout }: { needs: string[]; onWit
   )
 }
 
+/** The administrator service: what it does for this install (ready), or that it is not there (a per-user install). */
+export function AdminServiceNotice({ state, needs, onWithout }: { state: 'ready' | 'missing' | 'not_allowed'; needs: string[]; onWithout?: () => void }) {
+  if (needs.length === 0) return null
+  const list = <ul className="mt-1 list-disc pl-5">{needs.map((n) => <li key={n}>{n}</li>)}</ul>
+  if (state === 'ready') {
+    return (
+      <Alert tone="info" title="Kora's administrator service will do these parts">
+        <p>These parts need administrator rights, and Kora&apos;s administrator service does them for you. There is nothing to approve:</p>
+        {list}
+      </Alert>
+    )
+  }
+  return (
+    <Alert tone="warning" title={state === 'missing' ? "Kora's administrator service is not installed" : "Kora's administrator service is not turned on for you"}>
+      <p>These parts need administrator rights:</p>
+      {list}
+      <p className="mt-2">
+        {state === 'missing'
+          ? 'Install the administrator service once (it asks an administrator for approval one time) and Kora does these parts, now and later, without asking again. The install can also carry on without them.'
+          : 'An administrator can turn the service on for your account with the command shown if you go on. The install can also carry on without these parts.'}
+      </p>
+      {onWithout && (
+        <p className="mt-2"><Button variant="link" className="h-auto p-0" onClick={onWithout}>Install without these parts</Button> (no firewall change, no background service, and an existing database only).</p>
+      )}
+    </Alert>
+  )
+}
+
 function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutAdmin }: {
   rows: ReviewRow[]
   req: InstallRequest
@@ -113,7 +141,8 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
       {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!/Gi?B/.test(disk.data.message) && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
       <ErrorNotice error={disk.error ?? plan.error} />
       {plan.data?.admin_prompt && <AdminPromptNotice needs={plan.data.needs_admin} onWithout={onWithoutAdmin} />}
-      {plan.data && !plan.data.admin_prompt && (
+      {plan.data && !plan.data.admin_prompt && plan.data.admin_service && plan.data.needs_admin.length > 0 && <AdminServiceNotice state={plan.data.admin_service} needs={plan.data.needs_admin} onWithout={onWithoutAdmin} />}
+      {plan.data && !plan.data.admin_prompt && !(plan.data.admin_service && plan.data.needs_admin.length > 0) && (
         <Alert tone={plan.data.needs_admin.length ? 'warning' : 'info'} title="Administrator rights">
           {plan.data.needs_admin.length === 0 ? 'Nothing in this install needs administrator rights.' : (
             <>

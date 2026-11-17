@@ -198,8 +198,10 @@ pub const ADMIN_PROMPT_NOTE: &str = "Windows will ask you once for permission wh
 
 fn with_admin_prompt(mut v: Value, worker: bool) -> Value {
     let needs = v["needs_admin"].as_array().is_some_and(|a| !a.is_empty());
-    let prompt = worker && needs && v["elevated"] != json!(true);
+    let prompt = worker && crate::elevated::prompts() && needs && v["elevated"] != json!(true);
     v["admin_prompt"] = json!(prompt);
+    // Kora's administrator service for this account (see `GET /system`): `ready` = it does the parts by itself.
+    v["admin_service"] = crate::elevated::service_state()["state"].clone();
     if prompt {
         for key in ["warnings", "notes"] {
             if let Some(list) = v[key].as_array_mut() {

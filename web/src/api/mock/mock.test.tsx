@@ -132,7 +132,7 @@ describe('scenarios', () => {
   })
 
   it('every scenario name is known to the switcher', () => {
-    expect([...SCENARIOS]).toEqual(['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows'])
+    expect([...SCENARIOS]).toEqual(['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows', 'service', 'noservice'])
   })
 })
 

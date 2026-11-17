@@ -58,7 +58,10 @@ function adminTitle(code: string): string {
     case 'admin.busy':
       return 'Windows is still asking'
     case 'admin.lost':
+    case 'service.lost':
       return 'The administrator part stopped'
+    case 'service.not_allowed':
+      return "Kora's administrator service is not turned on for you"
     default:
       return 'This needs administrator rights'
   }
@@ -121,7 +124,9 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   const log = p.actions.find((a): a is Extract<ProblemAction, { kind: 'open_log' }> => a.kind === 'open_log')
   const buttons = buttonActions(p, handlers)
   // Windows can be asked (a "request_admin" button): the command is the last resort, folded away.
-  const canAsk = buttons.some((a) => a.kind === 'request_admin')
+  const canAsk = buttons.some((a) => a.kind === 'request_admin' || a.kind === 'install_admin_service')
+  // Without a handler that can launch the installer, say how to install the service (one administrator approval).
+  const explainInstall = p.actions.some((a) => a.kind === 'install_admin_service') && !buttons.some((a) => a.kind === 'install_admin_service')
   const fallback = buttons.length === 0 && (!!onRetry || isFailure(p))
   const copy = p.actions.some((a) => a.kind === 'copy_details') || fallback
   const run = async (a: ProblemAction) => {
@@ -136,7 +141,13 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
     <Alert tone={elevation ? 'warning' : 'danger'} title={title ?? (elevation ? adminTitle(p.code) : undefined)}>
       <p><WithCode text={message} /></p>
       {step && <p className="mt-2">{step}</p>}
-      {elevation && commands.length > 0 && !canAsk && (
+      {explainInstall && (
+        <div className="mt-2">
+          <p>To install Kora&apos;s administrator service, open a terminal as administrator on the computer that runs Kora and run this command. It asks for administrator approval once; after that Kora does this without asking.</p>
+          <CommandField command={['kora', 'service', 'install']} elevated />
+        </div>
+      )}
+      {elevation && commands.length > 0 && !canAsk && !explainInstall && (
         <p className="mt-2">Kora is running without administrator rights, so it cannot do this itself. Run the command below as administrator (on Windows, open a terminal with &quot;Run as administrator&quot;; on Linux, run it as root, for example with sudo), then come back here.</p>
       )}
       {canAsk && commands.length > 0 ? (

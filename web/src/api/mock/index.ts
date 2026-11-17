@@ -8,7 +8,7 @@ import { installKeysMock } from './keys'
 import { installBranchesMock } from './branches'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
-import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
+import { ADMIN_STEP, adminNeeds, installCommand, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
 
 const BASE = '/api/v1'
 
@@ -84,7 +84,7 @@ const find = (name: string): T.ServerSummary => {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms * speed))
 const elevate = (what: string, cmd: string[]) =>
   new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd], {
-    actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
+    actions: [beh.service === 'missing' ? { kind: 'install_admin_service' } : { kind: 'request_admin' }, { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
   })
 
 // ---- buses ----------------------------------------------------------------------------------
@@ -427,7 +427,9 @@ route('POST', '/session/link', () => {
 })
 route('GET', '/system', () => (beh.windows
   ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
-  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
+  : beh.service !== 'none'
+    ? { admin: false, elevated: false, platform: 'linux', helper_installed: beh.service === 'ready', headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true, admin_service: { state: beh.service } }
+    : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -891,6 +893,7 @@ route('POST', '/installs/plan', (_m, b) => {
     const w = adminNeeds(r)
     return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: w, notes: [], admin_prompt: w.length > 0 } satisfies T.InstallPlan
   }
+  if (beh.service !== 'none') return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: needs, notes: [], admin_service: beh.service } satisfies T.InstallPlan
   return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: needs, notes: [] } satisfies T.InstallPlan
 })
 route('POST', '/installs', (_m, b) => {
@@ -904,6 +907,12 @@ route('POST', '/installs', (_m, b) => {
   if (beh.windows && r.name.toLowerCase().startsWith('remote') && adminNeeds(r).length > 0 && !askedAdmin()) {
     const p = remoteProblem(r)
     throw new Fail(403, p.code ?? 'admin.remote', p.message, undefined, { actions: p.actions })
+  }
+  // A per-user install without the administrator service: no automatic path, so the choices.
+  if (beh.service === 'missing' && adminNeeds(r).length > 0 && !r.name.toLowerCase().startsWith('without')) {
+    throw new Fail(403, 'needs_elevation', `Kora needs administrator rights to ${adminNeeds(r).map((n) => n[0].toLowerCase() + n.slice(1)).join(' and ')}, and its administrator service is not installed on this computer. Install it once (one administrator approval) and Kora can do this, and the next time, without asking again. Or run the command yourself as administrator.`, ['kora', 'install'], {
+      actions: [{ kind: 'install_admin_service' }, { kind: 'continue_without_admin' }, { kind: 'show_command', command: installCommand(r), elevated: true }],
+    })
   }
   let id = ''
   const started = startJob('install', null, (emit) => runInstall(r, emit, () => id))
