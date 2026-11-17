@@ -117,6 +117,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::BackupCreate
         | Op::BackupVerify
         | Op::BackupPreview
+        | Op::BackupsOverview
         | Op::ReachCheck => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
@@ -335,6 +336,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::BackupCreate
         | Op::BackupVerify
         | Op::BackupPreview
+        | Op::BackupsOverview
         | Op::ReachFirewallOpen => false,
     }
 }
@@ -465,6 +467,7 @@ pub fn installs(op: Op) -> bool {
         | Op::BackupRestore
         | Op::BackupDelete
         | Op::BackupDownload
+        | Op::BackupsOverview
         | Op::TxAdminTicket => false,
     }
 }
@@ -628,6 +631,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::BackupRestore
         | Op::BackupDelete
         | Op::BackupDownload
+        | Op::BackupsOverview
         | Op::TxAdminTicket => false,
     }
 }

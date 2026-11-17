@@ -536,6 +536,13 @@ export type BackupSummary = {
 };
 
 /**
+ * `GET /backups`: the last backup of every server.
+ */
+export type BackupsOverview = {
+  servers: Array<ServerBackupLine>,
+};
+
+/**
  * Which backups an operation removed.
  */
 export type BackupsRemoved = {
@@ -2528,6 +2535,14 @@ export type SelfUpdateRequest = {
 export type SelfUpdateResult = {
   version: string,
   output?: JsonValue,
+};
+
+/**
+ * One line of the servers list: the last backup of one server.
+ */
+export type ServerBackupLine = {
+  server: string,
+  summary: BackupSummary,
 };
 
 /**

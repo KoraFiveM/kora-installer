@@ -404,6 +404,12 @@ impl Backend for FakeBackend {
             schedule_note: "Scheduled backups run while Kora's background service is running.".into(),
         })
     }
+    fn backups_overview(&mut self) -> Res<crate::api::wire::BackupsOverview> {
+        let servers = self.state().servers.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
+        Ok(crate::api::wire::BackupsOverview {
+            servers: servers.into_iter().map(|server| crate::api::wire::ServerBackupLine { server, summary: crate::backup::BackupSummary { last_ok_unix: None, text: "No backup yet".into(), warning: None, scheduled: false } }).collect(),
+        })
+    }
     fn backup_create(&mut self, e: &ServerEntry, req: &crate::api::wire::BackupCreateRequest, admin: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::BackupCreated> {
         self.state().calls.push(format!("backup_create {} encrypted={} everything={} stop={} admin={admin}", e.name, req.passphrase.is_some(), req.everything, req.stop_server));
         say(crate::backup::BackupEvent { step: "database".into(), message: "Copying the database".into(), percent: 30 });

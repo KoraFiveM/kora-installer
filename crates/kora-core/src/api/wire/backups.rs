@@ -106,3 +106,18 @@ pub struct VerifyResult {
 pub struct BackupsRemoved {
     pub removed: Vec<String>,
 }
+
+/// One line of the servers list: the last backup of one server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ServerBackupLine {
+    pub server: String,
+    pub summary: BackupSummary,
+}
+
+/// `GET /backups`: the last backup of every server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct BackupsOverview {
+    pub servers: Vec<ServerBackupLine>,
+}

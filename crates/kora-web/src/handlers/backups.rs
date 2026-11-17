@@ -63,6 +63,14 @@ fn check_id(id: &str) -> Result<(), ApiError> {
     }
 }
 
+pub async fn backups_overview(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
+    blocking(move || {
+        let v = st.backend().backups_overview().map_err(ApiError::core)?;
+        Ok(Json(to_json(&v)?))
+    })
+    .await
+}
+
 pub async fn backups_list(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;

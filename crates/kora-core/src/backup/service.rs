@@ -202,3 +202,17 @@ pub fn prune<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry) -> Res<Vec<String
 pub fn file<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, id: &str) -> Res<PathBuf> {
     find(e, id).map(|(_, p)| p).map_err(pack)
 }
+
+/// The "last backup" line of every server (reads each server's backup folder).
+pub fn overview<B: Backend + ?Sized>(b: &mut B) -> Res<crate::api::wire::BackupsOverview> {
+    let now = crate::monitor::now_unix();
+    let servers = b
+        .list()?
+        .iter()
+        .map(|e| {
+            let list = destination(e).list();
+            crate::api::wire::ServerBackupLine { server: e.name.clone(), summary: settings::summary(&list, &settings::load_settings(&e.name), &settings::load_status(&e.name), now) }
+        })
+        .collect();
+    Ok(crate::api::wire::BackupsOverview { servers })
+}

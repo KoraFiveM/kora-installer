@@ -185,6 +185,8 @@ pub enum Op {
     BackupDelete,
     /// Download the archive file: it holds secrets (administrators).
     BackupDownload,
+    /// The "last backup" line of every server, for the servers list.
+    BackupsOverview,
 }
 
 impl Op {
@@ -312,6 +314,7 @@ impl Op {
         Op::BackupRestore,
         Op::BackupDelete,
         Op::BackupDownload,
+        Op::BackupsOverview,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -440,6 +443,7 @@ impl Op {
             Op::BackupRestore => "backup_restore",
             Op::BackupDelete => "backup_delete",
             Op::BackupDownload => "backup_download",
+            Op::BackupsOverview => "backups_overview",
         }
     }
 
@@ -571,6 +575,7 @@ impl Op {
             Op::BackupRestore => (Method::Post, "/servers/{s}/backups/{id}/restore"),
             Op::BackupDelete => (Method::Delete, "/servers/{s}/backups/{id}"),
             Op::BackupDownload => (Method::Get, "/servers/{s}/backups/{id}/file"),
+            Op::BackupsOverview => (Method::Get, "/backups"),
         }
     }
 
@@ -798,13 +803,14 @@ mod tests {
             | Op::BackupPreview
             | Op::BackupRestore
             | Op::BackupDelete
-            | Op::BackupDownload => Op::ALL.contains(&op),
+            | Op::BackupDownload
+            | Op::BackupsOverview => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 123);
+        assert_eq!(Op::ALL.len(), 124);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

@@ -217,6 +217,10 @@ pub trait Backend {
     fn backups_view(&mut self, e: &ServerEntry) -> Res<crate::api::wire::BackupsView> {
         crate::backup::service::view(self, e)
     }
+    /// The "last backup" line of every server.
+    fn backups_overview(&mut self) -> Res<crate::api::wire::BackupsOverview> {
+        crate::backup::service::overview(self)
+    }
     /// Make a backup. `admin`: the caller may choose a folder.
     fn backup_create(&mut self, e: &ServerEntry, req: &crate::api::wire::BackupCreateRequest, admin: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::api::wire::BackupCreated> {
         crate::backup::service::create_backup(self, e, req, admin, say)

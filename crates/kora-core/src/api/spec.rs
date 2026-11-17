@@ -310,6 +310,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::BackupVerify => OpSpec::start_job_with::<w::PassphraseRequest>().events::<crate::backup::BackupEvent>().result::<w::VerifyResult>(),
         Op::BackupPreview => OpSpec::call::<w::PassphraseRequest, crate::backup::restore::RestorePreview>(),
         Op::BackupRestore => OpSpec::start_job_with::<w::PassphraseRequest>().events::<crate::backup::BackupEvent>().result::<crate::backup::restore::RestoreReport>(),
+        Op::BackupsOverview => OpSpec::get::<w::BackupsOverview>(),
         Op::BackupDelete => OpSpec::nothing(),
         // The archive file itself (binary): not JSON, so the generated client does not call it; the panel opens it as a download.
         Op::BackupDownload => OpSpec::nothing(),

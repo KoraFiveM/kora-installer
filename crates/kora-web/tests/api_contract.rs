@@ -532,6 +532,7 @@ fn cases() -> Vec<Case> {
         case(Op::ForwardingSet, s, Some(json!({"enabled": true}))),
         case(Op::ReachFirewallOpen, s, None),
         case(Op::BackupsList, s, None),
+        case(Op::BackupsOverview, &[], None),
         case(Op::BackupCreate, s, Some(json!({"passphrase": "a long passphrase", "everything": false, "stop_server": false}))),
         case(
             Op::BackupSettingsSet,
