@@ -10,6 +10,11 @@ use crate::installer::registry::Registry;
 use crate::privsvc::ownership::Ledger;
 
 /// What an account looks like to the migration.
+///
+/// The server list (`registry`) is the one thing read from a person's Kora home on the privileged side, only here and only
+/// to find folders to look at (each one is then checked from the system: owner, links, what exists). A missing file (the
+/// SQLite store moved the list into `store/kora.db`) means "nothing to adopt", never an error; the migration runs when the
+/// package or the MSI is installed, before the store has converted anything.
 #[derive(Debug, Clone)]
 pub struct Person {
     pub id: AccountId,
@@ -259,6 +264,14 @@ mod tests {
     fn me() -> AccountId {
         let d = tempfile::tempdir().unwrap();
         AccountId::uid(std::fs::metadata(d.path()).unwrap().uid())
+    }
+
+    #[test]
+    fn a_missing_server_list_adopts_nothing_and_is_not_an_error() {
+        let d = tempfile::tempdir().unwrap();
+        let person = Person { id: me(), home: d.path().to_path_buf(), registry: d.path().join(".kora").join("servers.json") };
+        let none = gather(&[person], &|_| None, &|_| false, &|_, _| true, true);
+        assert!(none.is_empty(), "the store may have moved servers.json away");
     }
 
     #[test]

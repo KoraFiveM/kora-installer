@@ -284,7 +284,11 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     // Removing system-wide things: the name and ports come from the server list, not from the
     // folder's own (changeable) record, exactly as `kora delete` does.
     let trusted = if undo {
-        match known.or_else(|| registered(dir).map(|(n, p)| (n, p.game, p.txadmin))) {
+        // In the administrator service the name and ports come in the request (the panel read them from the
+        // person's own list); the child never opens the person's server list itself (a file, or the store's
+        // database, that the person controls and root must not read or create files next to).
+        let fallback = if in_service { None } else { registered(dir).map(|(n, p)| (n, p.game, p.txadmin)) };
+        match known.or(fallback) {
             Some((name, game, txadmin)) => {
                 req.name = name;
                 (req.ports.game, req.ports.txadmin) = (game, txadmin);
