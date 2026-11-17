@@ -347,11 +347,11 @@ pub fn windows_git_env(windows: bool, existing_count: Option<&str>) -> Vec<(&'st
     vec![("GIT_CONFIG_COUNT", "1".into()), ("GIT_CONFIG_KEY_0", "core.longpaths".into()), ("GIT_CONFIG_VALUE_0", "true".into())]
 }
 
-fn run(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output> {
+pub(crate) fn run(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output> {
     r.run(prog, args, cwd).map_err(|e| GitError::Spawn(format!("{prog} {}", args.join(" ")), e.to_string()))
 }
 
-fn run_ok(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output> {
+pub(crate) fn run_ok(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output> {
     let o = run(r, prog, args, cwd)?;
     if o.ok() {
         Ok(o)
@@ -384,7 +384,7 @@ fn valid_ref(s: &str) -> bool {
     !s.is_empty() && !s.starts_with('-') && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
 }
 
-fn valid_commit(s: &str) -> bool {
+pub(crate) fn valid_commit(s: &str) -> bool {
     (7..=64).contains(&s.len()) && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 

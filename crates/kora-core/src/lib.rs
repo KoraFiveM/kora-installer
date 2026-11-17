@@ -9,6 +9,7 @@ pub mod app_install;
 pub mod artifacts;
 pub mod branches;
 pub mod catalog;
+pub mod collab;
 pub mod cfx;
 pub mod console;
 pub mod db;

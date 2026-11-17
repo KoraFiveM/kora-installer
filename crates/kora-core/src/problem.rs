@@ -239,6 +239,12 @@ pub enum Action {
     CopyDetails,
     /// Start the installed (but stopped) database server for the user.
     StartDatabase,
+    /// Make your own copy (a fork) of a resource that is a plain clone; `None` = every resource of the server.
+    MakeFork {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        resource: Option<String>,
+    },
     /// An action this build does not know (sent by a newer Kora). Never shown.
     #[serde(other)]
     Unknown,

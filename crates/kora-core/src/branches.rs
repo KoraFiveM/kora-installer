@@ -75,12 +75,12 @@ fn release_pin<'a>(sf: &ServerFile, rec: &'a ResourceRecord) -> Option<&'a str> 
     (sf.versions() == Versions::Released && !rec.third_party).then_some(rec.commit.as_deref()).flatten()
 }
 
-fn find<'a>(sf: &'a ServerFile, name: &str) -> PResult<&'a ResourceRecord> {
+pub(crate) fn find<'a>(sf: &'a ServerFile, name: &str) -> PResult<&'a ResourceRecord> {
     let n = normalize_id(name);
     sf.resources.iter().find(|r| normalize_id(&r.id) == n || r.path == name).ok_or_else(|| Problem::generic(format!("This server has no resource called '{name}'.")))
 }
 
-fn lock_for(sf: &ServerFile) -> PResult<lock::UpdateLock> {
+pub(crate) fn lock_for(sf: &ServerFile) -> PResult<lock::UpdateLock> {
     lock::acquire(&sf.dir).map_err(|e| match e {
         lock::LockError::Busy => Problem::new(codes::BUSY, "An update is running for this server right now. Try again when it has finished.").with_action(Action::Retry),
         other => Problem::generic(other.to_string()),
@@ -232,7 +232,7 @@ pub struct Choices {
     pub notes: Vec<String>,
 }
 
-fn folder(sf: &ServerFile, rec: &ResourceRecord) -> PResult<PathBuf> {
+pub(crate) fn folder(sf: &ServerFile, rec: &ResourceRecord) -> PResult<PathBuf> {
     tracked(sf, rec).map_err(|why| Problem::new(codes::UNSUPPORTED, format!("{}: {why}", rec.id)))?;
     let p = folder_of(sf, rec)?;
     if !p.is_dir() {
