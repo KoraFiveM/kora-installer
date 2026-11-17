@@ -159,6 +159,7 @@ pub mod known {
 /// A tool Kora can install or point to. `#[non_exhaustive]`: new tools may be added.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Tool {
     Git,
@@ -188,6 +189,7 @@ impl Tool {
 /// [`Action::Unknown`], which front ends do not show.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
     /// Do the same thing again (the generic "Try again").
@@ -271,6 +273,7 @@ impl Action {
 ///
 /// JSON: `{"code", "message", "details"?, "actions": [..]}` (`details` left out when empty).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Problem {
     /// Stable machine code ([`codes`]).
     pub code: String,
