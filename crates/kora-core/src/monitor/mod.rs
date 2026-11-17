@@ -12,6 +12,7 @@ pub mod alerts;
 pub mod history;
 pub mod panel_service;
 pub mod probe;
+pub mod wintime;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;

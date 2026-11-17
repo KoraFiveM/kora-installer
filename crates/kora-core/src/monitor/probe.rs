@@ -50,8 +50,8 @@ pub trait Probe: Send + Sync {
     fn memory(&self) -> Option<MemUsage>;
 }
 
-/// When the game server of this folder started (seconds since 1970), when it can be told. `None` on Windows and when
-/// the process cannot be found.
+/// When the game server of this folder started (seconds since 1970), when it can be told: Linux reads `/proc`, Windows asks
+/// for the creation time of the folder's `FXServer.exe` (`wintime`). `None` when the process cannot be found.
 pub fn server_started_unix(dir: &Path) -> Option<u64> {
     os::server_started_unix(dir)
 }
@@ -342,9 +342,90 @@ mod os {
         None
     }
 
-    /// Not read on Windows yet: the notice then only clears through Kora's own restarts.
-    pub fn server_started_unix(_dir: &Path) -> Option<u64> {
-        None
+    // The documented Win32 calls (kernel32), declared here so no extra dependency is needed.
+    #[repr(C)]
+    struct ProcessEntry32W {
+        size: u32,
+        usage: u32,
+        pid: u32,
+        heap_id: usize,
+        module_id: u32,
+        threads: u32,
+        parent_pid: u32,
+        priority: i32,
+        flags: u32,
+        exe_file: [u16; 260],
+    }
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> isize;
+        fn Process32FirstW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
+        fn Process32NextW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+        fn QueryFullProcessImageNameW(process: isize, flags: u32, name: *mut u16, size: *mut u32) -> i32;
+        fn GetProcessTimes(process: isize, creation: *mut FileTime, exit: *mut FileTime, kernel: *mut FileTime, user: *mut FileTime) -> i32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    const TH32CS_SNAPPROCESS: u32 = 0x2;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const INVALID_HANDLE: isize = -1;
+
+    /// The processes named `FXServer.exe` (their ids).
+    fn fxserver_pids() -> Vec<u32> {
+        let mut out = Vec::new();
+        // SAFETY: a snapshot handle is closed below; `entry` is a correctly laid out PROCESSENTRY32W with `size` set.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap == INVALID_HANDLE || snap == 0 {
+                return out;
+            }
+            let mut entry: ProcessEntry32W = std::mem::zeroed();
+            entry.size = std::mem::size_of::<ProcessEntry32W>() as u32;
+            let mut more = Process32FirstW(snap, &mut entry) != 0;
+            while more {
+                let len = entry.exe_file.iter().position(|c| *c == 0).unwrap_or(entry.exe_file.len());
+                if String::from_utf16_lossy(&entry.exe_file[..len]).eq_ignore_ascii_case("fxserver.exe") {
+                    out.push(entry.pid);
+                }
+                more = Process32NextW(snap, &mut entry) != 0;
+            }
+            CloseHandle(snap);
+        }
+        out
+    }
+
+    /// The program path of a process and when it was created (a FILETIME), when the process can be looked at.
+    fn image_and_creation(pid: u32) -> Option<(String, u64)> {
+        // SAFETY: the handle is closed before returning; the buffers are as long as the sizes we pass say.
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h == 0 {
+                return None;
+            }
+            let mut buf = [0u16; 1024];
+            let mut size = buf.len() as u32;
+            let named = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut size) != 0;
+            let (mut c, mut e, mut k, mut u) = (FileTime::default(), FileTime::default(), FileTime::default(), FileTime::default());
+            let timed = GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) != 0;
+            CloseHandle(h);
+            (named && timed).then(|| (String::from_utf16_lossy(&buf[..size as usize]), (u64::from(c.high) << 32) | u64::from(c.low)))
+        }
+    }
+
+    /// When the folder's game server started: the oldest creation time of its `FXServer.exe` processes (`wintime`).
+    pub fn server_started_unix(dir: &Path) -> Option<u64> {
+        let times = fxserver_pids()
+            .into_iter()
+            .filter_map(image_and_creation)
+            .filter(|(image, _)| crate::monitor::wintime::is_fxserver_of(image, dir))
+            .map(|(_, ft)| crate::monitor::wintime::filetime_to_unix(ft));
+        crate::monitor::wintime::oldest(times)
     }
 
     pub fn disk_total(p: &Path) -> Option<u64> {
