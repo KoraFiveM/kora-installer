@@ -1,0 +1,43 @@
+[package]
+name = "kora-desktop"
+description = "Kora desktop app: a tray icon and a native window that shows Kora Panel (a thin client of the panel)"
+version = "0.7.0"
+edition = "2021"
+rust-version = "1.93"
+license = "Apache-2.0"
+publish = false
+
+# Its own workspace root, on purpose: the GUI toolkit (wry, tao, tray-icon and what they pull in) stays out of the main
+# workspace's Cargo.lock, so `cargo build`/`cargo test --workspace`/`cargo deny` for the `kora` program and the main CI
+# never see it. Built only by .github/workflows/desktop.yml. See docs/desktop-app.md ("Why a separate crate").
+[workspace]
+
+[[bin]]
+name = "kora-desktop"
+path = "src/main.rs"
+
+[dependencies]
+# All decisions (navigation allow-list, bridge, tray menu, notifications, autostart, single instance) live here,
+# are tested on every machine, and have no GUI dependency.
+kora-shell = { path = "../kora-shell" }
+serde_json = "1"
+# Window: WebView2 on Windows, WebKitGTK 4.1 on Linux.
+wry = "0.57"
+tao = "0.37"
+# Tray icon and its menu (Windows notification area; Linux AppIndicator/StatusNotifier).
+tray-icon = "0.26"
+# Native notifications (Windows toasts, freedesktop notifications) with click callbacks.
+notify-rust = "4.19"
+# Native "choose a file/folder" dialogs. GTK3 on Linux (already there for the window); Win32 on Windows.
+rfd = { version = "0.18", default-features = false, features = ["gtk3"] }
+# HTTP to the loopback panel only: no TLS stack at all.
+ureq = { version = "2", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_System_Console", "Win32_System_SystemInformation"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
