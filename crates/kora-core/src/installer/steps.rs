@@ -1391,7 +1391,7 @@ impl InstallStep {
             // Hand the server folder (and only it) to the server's own account, through open folder
             // handles: `chown -R <path>` would follow a link swapped in after the check above.
             let (uid, gid) = crate::userhome::account_ids(&account).ok_or_else(|| InstallError(format!("cannot find the account '{account}'")))?;
-            ctx.emit(self.id, StepStatus::Running, &format!("Giving '{account}' ownership of the server folder (and only that folder)"), 0.8);
+            ctx.emit(self.id, StepStatus::Running, format!("Giving '{account}' ownership of the server folder (and only that folder)"), 0.8);
             crate::fsutil::chown_tree_no_follow(&ctx.req.dir, uid, gid).map_err(|e| InstallError(format!("cannot give '{account}' the server folder: {e}")))?;
         }
         service::apply_plan(&service::Plan::new(tail), &rn).map_err(|e| InstallError(e.to_string()))?;
