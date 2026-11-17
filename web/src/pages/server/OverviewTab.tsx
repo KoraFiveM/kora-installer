@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CopyField } from '@/components/CopyButton'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton, useCanOpenFolder, useTxAdminLink } from '@/components/ServerLinks'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
+import { LicenceKeyCard } from '@/components/ChangeLicenceKey'
 import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
 
@@ -52,6 +53,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
           </div>
         </CardContent>
       </Card>
+      <LicenceKeyCard server={s} busy={ctl.busy} restart={() => void ctl.run('restart')} />
     </div>
   )
 }

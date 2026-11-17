@@ -118,6 +118,13 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::ToolInstall => on_op(op, handlers::toolchain::tool_install),
         Op::SystemCheck => on_op(op, handlers::toolchain::system_check_get),
         Op::DbStart => on_op(op, handlers::toolchain::db_start),
+        Op::KeysList => on_op(op, handlers::keys::keys_list),
+        Op::KeyAdd => on_op(op, handlers::keys::key_add),
+        Op::KeyUpdate => on_op(op, handlers::keys::key_update),
+        Op::KeyRemove => on_op(op, handlers::keys::key_remove),
+        Op::ServerKeySet => on_op(op, handlers::keys::server_key_set),
+        Op::ProfileGet => on_op(op, handlers::keys::profile_get),
+        Op::ProfileSet => on_op(op, handlers::keys::profile_set),
     }
 }
 

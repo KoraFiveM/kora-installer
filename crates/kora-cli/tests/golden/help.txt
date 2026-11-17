@@ -16,6 +16,8 @@ Commands:
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
   app            The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
+  keys           Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
+  profile        What Kora remembers between installs (your Cfx.re name and GitHub owner)
   github         GitHub helpers for development mode
   tools          Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
   check          Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
@@ -56,6 +58,12 @@ Options:
           Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable)
           
           [env: CFX_LICENSE_KEY]
+
+      --license-key-name <NAME>
+          Use the saved licence key with this name (see `kora keys list`) instead of passing a key
+
+      --save-license-key <NAME>
+          Also save the key from CFX_LICENSE_KEY under this name, so the next install can pick it with --license-key-name
 
       --game-port <GAME_PORT>
           
@@ -805,6 +813,167 @@ Options:
       --dry-run
           
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys =====
+Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
+
+Usage: kora keys [OPTIONS] <COMMAND>
+
+Commands:
+  list     List the saved keys (name and the last 4 characters only) and which servers use them
+  add      Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
+  replace  Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
+  rename   Give a saved key another name
+  remove   Forget a saved key. Servers installed with it keep working: they have their own copy
+  use      Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys list =====
+List the saved keys (name and the last 4 characters only) and which servers use them
+
+Usage: kora keys list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys add =====
+Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
+
+Usage: kora keys add [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          A name you will recognise, e.g. "Main" or "Test server"
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys replace =====
+Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
+
+Usage: kora keys replace [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys rename =====
+Give a saved key another name
+
+Usage: kora keys rename [OPTIONS] <NAME> <NEW_NAME>
+
+Arguments:
+  <NAME>
+          
+
+  <NEW_NAME>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys remove =====
+Forget a saved key. Servers installed with it keep working: they have their own copy
+
+Usage: kora keys remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          
+
+Options:
+  -y, --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys use =====
+Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
+
+Usage: kora keys use [OPTIONS] <SERVER> <NAME>
+
+Arguments:
+  <SERVER>
+          Registry name of the server
+
+  <NAME>
+          The saved key to use
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora profile =====
+What Kora remembers between installs (your Cfx.re name and GitHub owner)
+
+Usage: kora profile [OPTIONS] <COMMAND>
+
+Commands:
+  show    Show what Kora remembers between installs (Cfx.re name, its identifier, GitHub owner). Nothing secret
+  forget  Forget it all: the next install asks again
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora profile show =====
+Show what Kora remembers between installs (Cfx.re name, its identifier, GitHub owner). Nothing secret
+
+Usage: kora profile show [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora profile forget =====
+Forget it all: the next install asks again
+
+Usage: kora profile forget [OPTIONS]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

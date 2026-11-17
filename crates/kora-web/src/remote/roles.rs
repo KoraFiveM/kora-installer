@@ -98,7 +98,13 @@ pub fn min_role(op: Op) -> Role {
         | Op::AssetsList
         // Read-only machine checks: which tools and database are here, and where.
         | Op::ToolsStatus
-        | Op::SystemCheck => Operator,
+        | Op::SystemCheck
+        // Names and last four characters of the saved licence keys, so an install can pick one; and what
+        // the wizard pre-fills. Changing a server's key by NAME is day-to-day; pasting a new key or saving
+        // one needs an admin (the handler checks that).
+        | Op::KeysList
+        | Op::ServerKeySet
+        | Op::ProfileGet => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
         | Op::ServerUnregister
@@ -153,7 +159,12 @@ pub fn min_role(op: Op) -> Role {
         | Op::AssetRemove
         | Op::AssetDownloads
         | Op::ToolInstall
-        | Op::DbStart => Admin,
+        | Op::DbStart
+        // Adding, renaming, replacing and deleting saved licence keys.
+        | Op::KeyAdd
+        | Op::KeyUpdate
+        | Op::KeyRemove
+        | Op::ProfileSet => Admin,
     }
 }
 
@@ -258,7 +269,15 @@ pub fn destructive(op: Op) -> bool {
         | Op::ToolsStatus
         | Op::ToolInstall
         | Op::SystemCheck
-        | Op::DbStart => false,
+        | Op::DbStart
+        // A saved key can be added again; servers installed with it are not touched.
+        | Op::KeysList
+        | Op::KeyAdd
+        | Op::KeyUpdate
+        | Op::KeyRemove
+        | Op::ServerKeySet
+        | Op::ProfileGet
+        | Op::ProfileSet => false,
     }
 }
 
@@ -356,7 +375,14 @@ pub fn installs(op: Op) -> bool {
         | Op::ToolsStatus
         | Op::ToolInstall
         | Op::SystemCheck
-        | Op::DbStart => false,
+        | Op::DbStart
+        | Op::KeysList
+        | Op::KeyAdd
+        | Op::KeyUpdate
+        | Op::KeyRemove
+        | Op::ServerKeySet
+        | Op::ProfileGet
+        | Op::ProfileSet => false,
     }
 }
 
@@ -485,7 +511,16 @@ pub fn local_only(op: Op) -> bool {
         | Op::ToolsStatus
         | Op::ToolInstall
         | Op::SystemCheck
-        | Op::DbStart => false,
+        | Op::DbStart
+        // Saved keys are managed by admins remotely too (the handlers check the role); nothing here is
+        // about this computer's desktop.
+        | Op::KeysList
+        | Op::KeyAdd
+        | Op::KeyUpdate
+        | Op::KeyRemove
+        | Op::ServerKeySet
+        | Op::ProfileGet
+        | Op::ProfileSet => false,
     }
 }
 

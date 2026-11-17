@@ -53,6 +53,12 @@ struct InstallArgs {
     /// Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable).
     #[arg(long, env = "CFX_LICENSE_KEY", hide_env_values = true)]
     license_key: Option<String>,
+    /// Use the saved licence key with this name (see `kora keys list`) instead of passing a key.
+    #[arg(long, alias = "licence-key-name", value_name = "NAME")]
+    license_key_name: Option<String>,
+    /// Also save the key from CFX_LICENSE_KEY under this name, so the next install can pick it with --license-key-name.
+    #[arg(long, alias = "save-licence-key", value_name = "NAME")]
+    save_license_key: Option<String>,
     #[arg(long)]
     game_port: Option<u16>,
     #[arg(long)]
@@ -138,6 +144,8 @@ impl InstallArgs {
             || self.game_build.is_some()
             || self.mode.is_some()
             || self.license_key.is_some()
+            || self.license_key_name.is_some()
+            || self.save_license_key.is_some()
             || self.game_port.is_some()
             || self.txadmin_port.is_some()
             || self.txadmin_public
@@ -191,6 +199,7 @@ impl InstallArgs {
             name,
             dir,
             license_key: self.license_key,
+            license_key_name: self.license_key_name,
             cfx_identifier: self.cfx_identifier,
             txadmin_public: self.txadmin_public,
             ports: Ports { game: self.game_port.unwrap_or(defaults.game), txadmin: self.txadmin_port.unwrap_or(defaults.txadmin) },
@@ -458,6 +467,16 @@ enum Command {
     App {
         #[command(subcommand)]
         cmd: AppCmd,
+    },
+    /// Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key.
+    Keys {
+        #[command(subcommand)]
+        cmd: keys_cmd::KeysCmd,
+    },
+    /// What Kora remembers between installs (your Cfx.re name and GitHub owner).
+    Profile {
+        #[command(subcommand)]
+        cmd: keys_cmd::ProfileCmd,
     },
     /// GitHub helpers for development mode.
     Github {
@@ -1109,6 +1128,7 @@ fn install(args: InstallArgs) -> i32 {
         match kora_core::cfx::lookup(&name) {
             Ok(a) => {
                 println!("Cfx.re account {} is {}: it will be the txAdmin admin.", a.username, a.identifier());
+                kora_core::profile::ProfileStore::default().remember_cfx(&a.username, &a.identifier());
                 args.cfx_identifier = Some(a.identifier());
             }
             Err(e) => {
@@ -1117,12 +1137,29 @@ fn install(args: InstallArgs) -> i32 {
             }
         }
     }
+    // A saved key by name, or a pasted one to save: the request then names it (a name is not a secret).
+    match keys_cmd::resolve_install_key(args.license_key.take(), args.license_key_name.as_deref(), args.save_license_key.as_deref()) {
+        Ok((key, name)) => {
+            if args.save_license_key.is_some() && args.license_key_name.is_none() {
+                println!("Saved the licence key as \"{}\" for next time.", name.as_deref().unwrap_or_default());
+            }
+            args.license_key = key;
+            args.license_key_name = name;
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    }
     let args_auto_ports = args.auto_ports;
     let fix_permissions = args.fix_permissions;
     let dev_mode = matches!(args.mode, Some(ModeArg::Dev));
     if dev_mode && !args.dry_run {
         match resolve_github_owner(args.github_owner.as_deref()) {
-            Ok(l) => args.github_owner = Some(l),
+            Ok(l) => {
+                kora_core::profile::ProfileStore::default().remember_github_owner(&l);
+                args.github_owner = Some(l);
+            }
             Err(e) => {
                 eprintln!("error: {e}");
                 return 2;
@@ -1744,6 +1781,7 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
         eprintln!("error: `kora uninstall` asks before each removal and needs a terminal. Use --dry-run to preview, or --yes to remove the system changes without questions (folders and databases are kept).");
         return 2;
     }
+    let all_servers = server.is_none();
     let mut reg = match registry::Registry::load() {
         Ok(r) => r,
         Err(e) => {
@@ -1816,6 +1854,16 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
                     summary.kept.push(format!("Kora's own copies of {what}"));
                 }
             }
+        }
+    }
+    if all_servers {
+        println!();
+        if dry_run {
+            keys_cmd::uninstall_note(true, None);
+        } else if yes {
+            keys_cmd::uninstall_note(false, None);
+        } else {
+            keys_cmd::uninstall_note(false, Some(&mut Terminal));
         }
     }
     if dry_run {
@@ -2478,7 +2526,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
         // The panel runs as the user; privileged actions report the command to run instead.
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Tools { .. } | Command::Check { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Tools { .. } | Command::Check { .. } | Command::Keys { .. } | Command::Profile { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
         Some(Command::Helper { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
@@ -2651,6 +2699,8 @@ fn main() {
         Some(Command::Tools { cmd: ToolsCmd::Status }) => toolchain::run_tools_status(),
         Some(Command::Tools { cmd: ToolsCmd::Install { tool } }) => toolchain::run_tools_install(tool.as_deref()),
         Some(Command::Check { start_database }) => toolchain::run_check(start_database),
+        Some(Command::Keys { cmd }) => keys_cmd::keys(cmd),
+        Some(Command::Profile { cmd }) => keys_cmd::profile(cmd),
         Some(Command::Delete { server, keep_files, keep_db, yes }) => delete(&server, keep_files, keep_db, yes),
         Some(Command::ServiceHost { name }) => match host::service_host(&name) {
             Ok(c) => c,
@@ -2678,6 +2728,7 @@ fn main() {
 }
 
 mod bare;
+mod keys_cmd;
 mod panel_tailscale;
 mod toolchain;
 
@@ -3031,6 +3082,7 @@ mod tests {
             txadmin_port: Some(41120),
             artifact_url: Some("https://runtime.fivem.net/x".into()),
             game_build: Some(3258),
+            license_key_name: None,
             cfx_identifier: Some("fivem:1".into()),
             ..Default::default()
         };

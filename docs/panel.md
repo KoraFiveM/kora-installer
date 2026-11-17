@@ -162,7 +162,7 @@ Each server in the list (and its Overview) has three buttons:
 
 | Tab | What it is for |
 |---|---|
-| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin and the connect address. |
+| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin and the connect address. **Licence key:** which saved key the server uses and **Change licence key** (pick a saved key or add a new one; it says whether a restart is needed and offers it). Same as `kora keys use`. |
 | Console | Live server output and a box to send commands. The first time, Kora offers to add a small resource called `kora_console`; it loads on the next server start. |
 | Logs | Pick a log file and read its latest lines. |
 | Resources | **Updates** at the top: check for newer versions, pick what to update, choose what happens about restarts, and roll back to an earlier snapshot (same as `kora update`). Below it the installed resources, each with buttons to check it for updates and to start, stop or restart it on a running server (needs the live console from the Console tab), and the catalogue of resources you can add (same as `kora add-resources`). What the tab shows stays when you open another tab and come back. |
@@ -185,15 +185,22 @@ Each server in the list (and its Overview) has three buttons:
 6. **Database:** use the MariaDB already on the machine, let Kora install it, or skip it. "Test login" checks the admin
    password before anything starts.
 7. **Options:** the background service and the firewall rule (the server is started when the install finishes).
-8. **Licence key:** your Cfx.re licence key. It is sent to Kora on this computer only and is never shown again.
+8. **Licence key:** pick one of your saved keys by name, or add a new one. A pasted key is saved on this computer by
+   default (under a name you can change, "Main" at first) so next time you only pick it; untick "Save this key" to use it
+   once. Kora only ever shows the last 4 characters of a key. Roles other than admin can only pick a saved key.
 9. **Your Cfx.re account:** type your Cfx.re username and press "Check". Kora asks forum.cfx.re (only the username is sent)
    which account owns it, and that account becomes the txAdmin admin, so you sign in to txAdmin with Cfx.re. Leave it
-   empty to skip: Kora then creates a local txAdmin admin with a generated password saved in the server folder.
+   empty to skip: Kora then creates a local txAdmin admin with a generated password saved in the server folder. After
+   the first time Kora remembers your name (and, in development mode, your GitHub owner) and fills them in; change them
+   on that page, or forget them in Settings.
 10. **GitHub** (development mode only): sign in with a short code and choose where the forks go.
 11. **Review and install.** Kora shows a dry-run plan first, then the install with live progress.
 
-If an install fails, the panel keeps your answers (never the licence key or the database password) and offers "Continue
-where you left off" the next time. The wizard also checks free disk space before it begins.
+If an install fails, the panel keeps your answers (never the licence key or the database password; only the name of a
+saved key) and offers "Continue where you left off" the next time. An install that stopped at a failed step and uses a
+saved key can also carry on after Kora Panel was restarted ("Carry on"); the database administrator password, if you
+typed one, is not kept and the install uses the automatic login or fails at that step again. A key you pasted without
+saving it is only remembered while the panel runs. The wizard also checks free disk space before it begins.
 
 ## 6. Settings
 
@@ -205,8 +212,16 @@ where you left off" the next time. The wizard also checks free disk space before
   the old copy. Removing the old copy needs administrator rights: the panel shows the command to run
   (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
+- **Licence keys:** the keys saved on this computer (`secrets.json` in the Kora folder: plain text, readable only by you,
+  not encrypted, like each server's `secrets.cfg`). Add, rename, replace and delete (admins and this computer only); each
+  shows its last 4 characters and the servers that use it. Deleting a key does not affect servers already installed with it
+  (they have their own copy); an unfinished install that used it needs another key. Same as `kora keys`.
+- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in `profile.json` (nothing secret), with a
+  button to forget each. Same as `kora profile`.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
-  and databases are kept unless you tick them.
+  and databases are kept unless you tick them. Your saved licence keys and remembered answers are never removed from here;
+  `kora uninstall` in a terminal asks about them (default: keep), or delete `secrets.json` and `profile.json` in the Kora
+  folder yourself.
 - **About:** the version, platform, and links. The settings page makes no requests to other websites.
 
 ### The System check
@@ -433,7 +448,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   requests).
 - **Strict page policy.** The page can only load its own files: no inline scripts, no other sites, no framing.
 - **Secrets are write-only.** Licence keys, database passwords and webhook addresses are accepted but never sent back to
-  the browser.
+  the browser. Saved licence keys show only their name and last 4 characters.
 - **No elevated panel.** The panel runs as you (as root only when you are signed in as root, see [section 10](#10-optional-remote-access)). Privileged actions are a command you run, or a helper that accepts only
   Kora's fixed actions.
 - **No telemetry.** The page makes no requests to other websites. Fonts and icons are built in.

@@ -121,6 +121,20 @@ pub enum Op {
     SystemCheck,
     /// Start the installed database server (a job; may need administrator rights).
     DbStart,
+    /// The saved licence keys: names and last four characters only.
+    KeysList,
+    /// Save a licence key under a name (admins).
+    KeyAdd,
+    /// Rename a saved key, or put a new key under its name (admins).
+    KeyUpdate,
+    /// Forget a saved key (admins). Servers installed with it are not touched.
+    KeyRemove,
+    /// Change the licence key of an installed server: a saved key by name, or a new one.
+    ServerKeySet,
+    /// What Kora remembers: the Cfx.re name, its identifier and the GitHub owner.
+    ProfileGet,
+    /// Change or forget those remembered answers.
+    ProfileSet,
 }
 
 impl Op {
@@ -216,6 +230,13 @@ impl Op {
         Op::ToolInstall,
         Op::SystemCheck,
         Op::DbStart,
+        Op::KeysList,
+        Op::KeyAdd,
+        Op::KeyUpdate,
+        Op::KeyRemove,
+        Op::ServerKeySet,
+        Op::ProfileGet,
+        Op::ProfileSet,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -312,6 +333,13 @@ impl Op {
             Op::ToolInstall => "tool_install",
             Op::SystemCheck => "system_check",
             Op::DbStart => "db_start",
+            Op::KeysList => "keys_list",
+            Op::KeyAdd => "key_add",
+            Op::KeyUpdate => "key_update",
+            Op::KeyRemove => "key_remove",
+            Op::ServerKeySet => "server_key_set",
+            Op::ProfileGet => "profile_get",
+            Op::ProfileSet => "profile_set",
         }
     }
 
@@ -411,6 +439,13 @@ impl Op {
             Op::ToolInstall => (Method::Post, "/tools/{tool}/install"),
             Op::SystemCheck => (Method::Get, "/system/check"),
             Op::DbStart => (Method::Post, "/system/database/start"),
+            Op::KeysList => (Method::Get, "/keys"),
+            Op::KeyAdd => (Method::Post, "/keys"),
+            Op::KeyUpdate => (Method::Put, "/keys/{name}"),
+            Op::KeyRemove => (Method::Delete, "/keys/{name}"),
+            Op::ServerKeySet => (Method::Put, "/servers/{s}/licence-key"),
+            Op::ProfileGet => (Method::Get, "/profile"),
+            Op::ProfileSet => (Method::Put, "/profile"),
         }
     }
 
@@ -593,13 +628,20 @@ mod tests {
             | Op::ToolsStatus
             | Op::ToolInstall
             | Op::SystemCheck
-            | Op::DbStart => Op::ALL.contains(&op),
+            | Op::DbStart
+            | Op::KeysList
+            | Op::KeyAdd
+            | Op::KeyUpdate
+            | Op::KeyRemove
+            | Op::ServerKeySet
+            | Op::ProfileGet
+            | Op::ProfileSet => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 91);
+        assert_eq!(Op::ALL.len(), 98);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

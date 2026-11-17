@@ -58,6 +58,9 @@ jobs:
       - name: "11. Kora's own git and gh (download, checksum, run without PATH, uninstall)"
         timeout-minutes: 15
         run: ./scripts/smoke/11-tools.ps1
+      - name: "12. Saved licence keys (secrets.json permissions, masking, named install)"
+        timeout-minutes: 10
+        run: ./scripts/smoke/11-keys.ps1
       - name: "10. kora self-update (local fake release: replace while running, checksum mismatch, no asset, offline, .old cleanup)"
         run: ./scripts/smoke/10-selfupdate.ps1
       - name: Collect logs

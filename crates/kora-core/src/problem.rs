@@ -67,6 +67,18 @@ pub mod codes {
 
     /// A remote sign-in made with a token asked for something that stays off until `remote actions` is on.
     pub const REMOTE_ACTIONS_OFF: &str = "remote.actions_off";
+    /// The saved licence keys file (`secrets.json`) cannot be read or is damaged: nothing is changed.
+    pub const KEYS_UNREADABLE: &str = "keys.unreadable";
+    /// No saved licence key has that name (never saved, renamed or deleted).
+    pub const KEYS_NOT_FOUND: &str = "keys.not_found";
+    /// A saved licence key already has that name.
+    pub const KEYS_NAME_TAKEN: &str = "keys.name_taken";
+    /// That licence key is already saved (under another name).
+    pub const KEYS_DUPLICATE: &str = "keys.duplicate";
+    /// The key name or the key itself is not acceptable.
+    pub const KEYS_INVALID: &str = "keys.invalid";
+    /// Kora could not find or change the licence key in the server's own configuration.
+    pub const KEYS_SERVER_CONFIG: &str = "keys.server_config";
 
     /// The GitHub CLI (`gh`) is not installed.
     pub const GH_MISSING: &str = "github.gh_missing";

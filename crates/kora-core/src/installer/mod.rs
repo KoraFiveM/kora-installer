@@ -18,6 +18,7 @@ pub mod host;
 pub mod http;
 pub mod layout;
 pub mod pinned;
+pub mod paused;
 pub mod registry;
 pub mod saved;
 mod steps;
@@ -860,6 +861,7 @@ mod tests {
             dir: dir.to_path_buf(),
             hostname: "My Server".into(),
             license_key: None,
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports::default(),
             txadmin_public: false,

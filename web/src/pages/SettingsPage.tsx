@@ -5,6 +5,7 @@ import type { UninstallItem } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { ShortcutsCard } from '@/components/Shortcuts'
+import { LicenceKeysCard, RememberedCard } from '@/components/LicenceKeys'
 import { RemoteAccessCard, SignedInCard } from '@/components/RemoteAccess'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -132,6 +133,8 @@ export default function SettingsPage() {
       {role.remote ? <SignedInCard /> : <RemoteAccessCard />}
       <SelfUpdate />
       <ShortcutsCard />
+      <LicenceKeysCard />
+      <RememberedCard />
       <Card><CardHeader><CardTitle>GitHub account</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>
       <Uninstall />
       <Card>
