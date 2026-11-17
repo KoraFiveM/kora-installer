@@ -295,7 +295,7 @@ fn moving_to_another_machine_carries_every_value_through_export() {
     r.keys.add("Main", K1).unwrap();
     r.vault.set(FakeState::Locked);
     r.keys.add("Second", K2).unwrap(); // in the file
-    // `kora store export-json` (the way back to v0.7) writes every key it can read, and names the ones it cannot.
+                                       // `kora store export-json` (the way back to v0.7) writes every key it can read, and names the ones it cannot.
     let out = tempfile::tempdir().unwrap();
     let files = crate::store::export::export_json(&r.store(), &out.path().join("e")).unwrap();
     let names: Vec<String> = files.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();

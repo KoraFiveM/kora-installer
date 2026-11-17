@@ -187,7 +187,11 @@ pub(crate) fn panel_user(cmd: &PanelUserCmd) -> i32 {
                 for p in &s.passkeys {
                     println!("  passkey {:<3} {:<24} for {}  added {}  last used {}", p.id, p.label, p.rp_id, when(p.created), when(p.last_used));
                 }
-                println!("  one-time codes: {}{}", if s.totp && s.password { "set up" } else { "not set up" }, if s.totp && s.password { format!(" ({} recovery codes left)", s.recovery_left) } else { String::new() });
+                println!(
+                    "  one-time codes: {}{}",
+                    if s.totp && s.password { "set up" } else { "not set up" },
+                    if s.totp && s.password { format!(" ({} recovery codes left)", s.recovery_left) } else { String::new() }
+                );
                 println!("  old token link: {}", if u.has_token() { "still works (for scripts)" } else { "none" });
             }
             PanelUserCmd::Reset { name, what } => {
@@ -223,7 +227,9 @@ pub(crate) fn panel_user(cmd: &PanelUserCmd) -> i32 {
                         let token = db::create_api_token(&store, name, role, *days, "cli")?;
                         println!("API token '{}' ({role}{}).", name.trim(), days.map_or(", never expires".to_string(), |d| format!(", expires in {d} days")));
                         println!("Token (shown once, keep it safe): {token}");
-                        println!("Use it as a header: Authorization: Bearer <token>. It is never accepted in an address, and deleting or uninstalling through it needs `kora panel remote-actions on`.");
+                        println!(
+                            "Use it as a header: Authorization: Bearer <token>. It is never accepted in an address, and deleting or uninstalling through it needs `kora panel remote-actions on`."
+                        );
                     }
                     ApiTokenCmd::List => {
                         let all = db::list_api_tokens(&store)?;
@@ -236,7 +242,10 @@ pub(crate) fn panel_user(cmd: &PanelUserCmd) -> i32 {
                     }
                     ApiTokenCmd::Revoke { token } => {
                         let all = db::list_api_tokens(&store)?;
-                        let found = all.iter().find(|t| t.name.eq_ignore_ascii_case(token) || t.id.to_string() == *token).ok_or_else(|| format!("There is no API token '{token}' (see `kora panel user api-token list`)."))?;
+                        let found = all
+                            .iter()
+                            .find(|t| t.name.eq_ignore_ascii_case(token) || t.id.to_string() == *token)
+                            .ok_or_else(|| format!("There is no API token '{token}' (see `kora panel user api-token list`)."))?;
                         db::revoke_api_token(&store, found.id)?;
                         println!("Revoked '{}'. It stopped working at once.", found.name);
                     }

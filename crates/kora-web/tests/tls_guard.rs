@@ -34,7 +34,7 @@ fn world(proxy: bool, with_hsts_cert: bool) -> W {
         secret = s;
     }
     let fake = FakeBackend::sample();
-    let mut st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(Arc::new(Remote::new(None, cfg)));
+    let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(Arc::new(Remote::new(None, cfg)));
     if with_hsts_cert {
         // A certificate "the person provided": HSTS follows it.
         let ca = kora_web::tls::selfsigned::new_ca("t").unwrap();

@@ -50,7 +50,8 @@ pub fn export_json(s: &Store, dir: &Path) -> Result<Vec<PathBuf>, Problem> {
     if !unreadable.is_empty() {
         let text: String = unreadable.iter().map(|(n, why)| format!("{n}: {why}\n")).collect();
         let path = dir.join("keys-not-exported.txt");
-        crate::fsutil::write_no_follow(&path, format!("These saved licence keys could not be read from here, so they are NOT in secrets.json:\n{text}").as_bytes(), 0o600).map_err(|e| failed("keys-not-exported.txt", e))?;
+        crate::fsutil::write_no_follow(&path, format!("These saved licence keys could not be read from here, so they are NOT in secrets.json:\n{text}").as_bytes(), 0o600)
+            .map_err(|e| failed("keys-not-exported.txt", e))?;
         out.push(path);
     }
     if !keys.is_empty() {

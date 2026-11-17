@@ -25,6 +25,9 @@ pub fn fold(name: &str) -> String {
     name.trim().to_lowercase()
 }
 
+/// The columns `state` reads: password hash, TOTP secret, confirmed, recovery hashes, locked until.
+type AuthRow = (Option<String>, Option<Vec<u8>>, i64, String, i64);
+
 /// What may be shown about one user's credentials.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UserState {
@@ -81,7 +84,7 @@ pub fn state(s: &Store, user: &str) -> Result<UserState, String> {
     let key = fold(user);
     s.read(|c| {
         let mut st = UserState::default();
-        let row: Option<(Option<String>, Option<Vec<u8>>, i64, String, i64)> = c
+        let row: Option<AuthRow> = c
             .query_row("SELECT password_hash, totp_secret, totp_confirmed, recovery_hashes, locked_until FROM remote_user_auth WHERE user = ?1", [&key], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
             })

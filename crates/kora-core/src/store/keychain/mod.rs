@@ -259,7 +259,10 @@ pub fn location(c: &Connection, id: i64) -> Result<(Place, String), Problem> {
 }
 
 fn set_location(c: &Connection, id: i64, place: Place, note: &str) -> Result<(), Problem> {
-    c.execute("INSERT INTO license_key_location (key_id, place, note) VALUES (?1, ?2, ?3) ON CONFLICT(key_id) DO UPDATE SET place = excluded.place, note = excluded.note", rusqlite::params![id, place.as_str(), note])?;
+    c.execute(
+        "INSERT INTO license_key_location (key_id, place, note) VALUES (?1, ?2, ?3) ON CONFLICT(key_id) DO UPDATE SET place = excluded.place, note = excluded.note",
+        rusqlite::params![id, place.as_str(), note],
+    )?;
     Ok(())
 }
 
