@@ -57,6 +57,16 @@ const hasText = (s) => {
   const w = words(s)
   return w.length > 0 && !w.every((x) => PROPER.test(x))
 }
+const endsInValuePosition = (n) => {
+  let cur = n
+  for (let p = cur.parent; p; cur = p, p = p.parent) {
+    if (ts.isParenthesizedExpression(p) || ts.isAsExpression(p)) continue
+    if (ts.isConditionalExpression(p) && p.condition !== cur) continue
+    if (ts.isBinaryExpression(p) && [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.AmpersandAmpersandToken].includes(p.operatorToken.kind)) continue
+    return (ts.isPropertyAssignment(p) && p.initializer === cur) || ts.isReturnStatement(p) || (ts.isArrowFunction(p) && p.body === cur) || (ts.isVariableDeclaration(p) && p.initializer === cur)
+  }
+  return false
+}
 const tableValue = (t) => /^[A-Z][a-z]+( [A-Za-z']+)*[.!?]?$/.test(t.trim()) && !PROPER.test(t.trim())
 const proseString = (t) => {
   const s = t.trim()
@@ -314,7 +324,7 @@ for (const file of files) {
         (ts.isBinaryExpression(p) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(p.operatorToken.kind)) ||
         (ts.isElementAccessExpression(p) && p.argumentExpression === n) ||
         (ts.isCallExpression(p) && /^(console\.|(\w+\.)?(getItem|setItem|removeItem|querySelector|querySelectorAll|getElementById|addEventListener|removeEventListener|matchMedia|postMessage|fetch|import|require|include|includes|startsWith|endsWith|test|match|split|replace|replaceAll|join)$|cn$|clsx$|cva$|t$|rich$)/.test(p.expression.getText(sf)))
-      if (!skip && text !== null && (proseString(text) || (ts.isPropertyAssignment(p) && p.initializer === n && tableValue(text))) && !(MODULE && ts.isTemplateExpression(n))) replaceLiteral(n)
+      if (!skip && text !== null && (proseString(text) || (endsInValuePosition(n) && tableValue(text))) && !(MODULE && ts.isTemplateExpression(n))) replaceLiteral(n)
       return
     }
     // a JSX expression child with string leaves, when it is not part of a bigger unit: handled by the unit below, or here alone

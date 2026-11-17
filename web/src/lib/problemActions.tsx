@@ -79,7 +79,7 @@ export function actionLabel(a: ProblemAction): string {
     case 'skip_step':
       return t('errors.problemActions.skipStep')
     case 'change_answers':
-      return a.section && SECTION_LABEL[a.section] ? `Change ${SECTION_LABEL[a.section]}` : t('errors.problemActions.changeMyAnswers')
+      return a.section && SECTION_LABEL[a.section] ? t('errors.problemActions.changeSectionLabel', { section: SECTION_LABEL[a.section] }) : t('errors.problemActions.changeMyAnswers')
     case 'sign_in_github':
       return a.scopes?.length ? t('errors.problemActions.signGithubAgain') : t('errors.problemActions.signGithub')
     case 'install_tool':
@@ -91,7 +91,7 @@ export function actionLabel(a: ProblemAction): string {
     case 'show_command':
       return a.elevated ? t('errors.problemActions.commandRunAdministrator') : t('errors.problemActions.commandRun')
     case 'open_link':
-      return `Open ${hostOf(a.url)}`
+      return t('errors.problemActions.openHostof', { host: hostOf(a.url) })
     case 'open_log':
       return t('errors.problemActions.showLog')
     case 'copy_details':

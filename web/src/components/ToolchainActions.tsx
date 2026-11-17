@@ -73,7 +73,7 @@ export function ToolchainActions({ children }: { children: ReactNode }) {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 function titleOf(r: Request): string {
-  if (r.kind === 'install') return `Install ${TOOL_NAME[r.tool]}`
+  if (r.kind === 'install') return t('errors.toolchainActions.installToolName', { tool: TOOL_NAME[r.tool] })
   return r.kind === 'signin' ? t('errors.toolchainActions.signGithub') : t('errors.toolchainActions.startDatabase')
 }
 

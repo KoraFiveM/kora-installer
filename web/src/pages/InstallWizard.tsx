@@ -39,21 +39,21 @@ interface ReviewRow {
 }
 
 function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
-  const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? t('install.installWizard.pickedYet') : `Build ${f.artifactBuild}`) : t('install.installWizard.customDownload')
+  const build = f.artifact === 'recommended' ? t('install.installWizard.recommended') : f.artifact === 'pick' ? (f.artifactBuild === null ? t('install.installWizard.pickedYet') : t('install.installWizard.buildArtifactbuild', { artifactBuild: f.artifactBuild })) : t('install.installWizard.customDownload')
   const rows: ReviewRow[] = [
     { label: t('install.installWizard.licenceKey'), value: f.licenceChoice === 'saved' ? (f.licenceName ? t('install.installWizard.savedLicenceKeyLicencename', { licenceName: f.licenceName }) : t('install.installWizard.pickedYet')) : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? t('install.installWizard.providedHiddenSavedTrim', { trim: f.saveKeyName.trim() }) : t('install.installWizard.providedHiddenSaved')) : t('install.installWizard.givenYet'), step: 'licence' },
     { label: t('install.installWizard.resourcesComeFrom'), value: f.source === 'clone' ? t('install.installWizard.korasResourcesTheyPlain') : t('install.installWizard.ownCopiesGithub'), step: 'source' },
-    { label: 'Versions', value: f.versions === 'released' ? t('install.installWizard.releasedVersionsStable') : t('install.installWizard.latestChangesMainBranch'), step: 'versions' },
-    { label: 'Name', value: req.name || t('install.installWizard.givenYet'), step: 'name' },
-    { label: 'Folder', value: req.dir || t('install.installWizard.givenYet'), step: 'name' },
+    { label: t('install.installWizard.versions'), value: f.versions === 'released' ? t('install.installWizard.releasedVersionsStable') : t('install.installWizard.latestChangesMainBranch'), step: 'versions' },
+    { label: t('install.installWizard.name'), value: req.name || t('install.installWizard.givenYet'), step: 'name' },
+    { label: t('install.installWizard.folder'), value: req.dir || t('install.installWizard.givenYet'), step: 'name' },
     { label: t('install.installWizard.serverNamePlayers'), value: req.hostname || '(default)', step: 'name', advanced: true },
-    { label: 'Ports', value: t('install.installWizard.gameValueTxadminValue', { value: f.game.trim() || '?', value2: f.tx.trim() || '?' }), step: 'ports' },
+    { label: t('install.installWizard.ports'), value: t('install.installWizard.gameValueTxadminValue', { value: f.game.trim() || '?', value2: f.tx.trim() || '?' }), step: 'ports' },
     { label: t('install.installWizard.fivemServerBuild'), value: f.gameBuild.trim() ? t('install.installWizard.buildGameBuildTrim', { build, trim: f.gameBuild.trim() }) : build, step: 'build' },
-    { label: 'Resources', value: f.resourcesAll ? 'Everything' : `${f.resourceIds.length} picked, plus what they need`, step: 'resources' },
-    { label: 'Database', value: f.db === 'use_existing' ? t('install.installWizard.useExistingDatabase') : f.db === 'install_if_missing' ? t('install.installWizard.setUpMe') : 'Skip', step: 'database' },
-    { label: t('install.installWizard.databaseLogin'), value: f.db === 'skip' ? t('install.installWizard.notNeeded') : f.dbCustom ? t('install.installWizard.typedUserDbuserPassword', { dbUser: f.dbUser }) : 'Automatic', step: 'database' },
-    { label: 'Firewall', value: req.firewall ? (req.txadmin_public ? t('install.installWizard.openGameTxadminPorts') : t('install.installWizard.openGamePort')) : t('install.installWizard.leaveClosed'), step: 'options' },
-    { label: t('install.installWizard.backgroundService'), value: req.service ? 'Yes' : 'No', step: 'options' },
+    { label: t('install.installWizard.resources'), value: f.resourcesAll ? t('install.installWizard.everything') : `${f.resourceIds.length} picked, plus what they need`, step: 'resources' },
+    { label: t('install.installWizard.database'), value: f.db === 'use_existing' ? t('install.installWizard.useExistingDatabase') : f.db === 'install_if_missing' ? t('install.installWizard.setUpMe') : t('install.installWizard.skip'), step: 'database' },
+    { label: t('install.installWizard.databaseLogin'), value: f.db === 'skip' ? t('install.installWizard.notNeeded') : f.dbCustom ? t('install.installWizard.typedUserDbuserPassword', { dbUser: f.dbUser }) : t('install.installWizard.automatic'), step: 'database' },
+    { label: t('install.installWizard.firewall'), value: req.firewall ? (req.txadmin_public ? t('install.installWizard.openGameTxadminPorts') : t('install.installWizard.openGamePort')) : t('install.installWizard.leaveClosed'), step: 'options' },
+    { label: t('install.installWizard.backgroundService'), value: req.service ? t('install.installWizard.yes') : t('install.installWizard.no'), step: 'options' },
   ]
   rows.push({
     label: t('install.installWizard.signTxadminCfxRe'),

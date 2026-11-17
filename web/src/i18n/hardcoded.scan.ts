@@ -56,6 +56,18 @@ export function looksLikeText(s: string, strict: boolean): boolean {
   return w.length >= 2 && /\s/.test(t)
 }
 
+/** Is this literal (possibly one branch of `a ? 'x' : 'y'`, `a || 'x'`) what a property, a variable, a return or an arrow body gets? */
+function endsInValuePosition(n: ts.Node): boolean {
+  let cur: ts.Node = n
+  for (let p = cur.parent; p; cur = p, p = p.parent) {
+    if (ts.isParenthesizedExpression(p) || ts.isAsExpression(p)) continue
+    if (ts.isConditionalExpression(p) && p.condition !== cur) continue
+    if (ts.isBinaryExpression(p) && [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.AmpersandAmpersandToken].includes(p.operatorToken.kind)) continue
+    return (ts.isPropertyAssignment(p) && p.initializer === cur) || ts.isReturnStatement(p) || (ts.isArrowFunction(p) && p.body === cur) || (ts.isVariableDeclaration(p) && p.initializer === cur)
+  }
+  return false
+}
+
 /** A value in a table of words for people: "Running", "Not allowed", "Needs a restart". */
 export function tableValue(text: string): boolean {
   return /^[A-Z][a-z]+( [A-Za-z']+)*[.!?]?$/.test(text.trim()) && !PROPER.test(text.trim())
@@ -124,7 +136,7 @@ export function scanSource(file: string, source: string): Finding[] {
       const text = literalText(n)
       if (!skip && text !== null && !inJsx(n) && looksLikeText(text, true)) add(n, text, 'string')
       // A label in a table of labels: one capitalised word is enough ({ running: 'Running' }).
-      else if (!skip && text !== null && ts.isPropertyAssignment(p) && p.initializer === n && tableValue(text)) add(n, text, 'string')
+      else if (!skip && text !== null && endsInValuePosition(n) && tableValue(text)) add(n, text, 'string')
     }
     ts.forEachChild(n, visit)
   }

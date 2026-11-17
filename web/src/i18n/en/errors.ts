@@ -83,6 +83,9 @@ const messages = {
   'errors.supportBundleDialog.close': 'Close',
   'errors.errorNotice.openSystemCheckNewTab': 'Open the System check in a new tab',
   'errors.errorNotice.koraPanelDidAnswer': 'Kora Panel did not answer. Check that it is still running on the server (`kora panel restart` restarts it), then reload this page.',
+  'errors.problemActions.changeSectionLabel': 'Change {section}',
+  'errors.problemActions.openHostof': 'Open {host}',
+  'errors.toolchainActions.installToolName': 'Install {tool}',
 } as const
 
 register('en', messages)

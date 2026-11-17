@@ -96,7 +96,7 @@ const messages = {
   'core.client.serverAnsweredUnexpectedError': 'The server answered with an unexpected error ({status}).',
   'core.client.couldReachKoraCheck': 'Could not reach Kora. Check that it is still running, then try again.',
   'core.client.baseServersEncodeuricomponentB': '{BASE}/servers/{encodeURIComponent}/backups/{encodeURIComponent2}/file',
-  'core.store.nSignedFromAnother': '{n} (signed in from another device{value}{value2})',
+  'core.store.nSignedFromAnother': '{n} (signed in from another device{kind, select, both { with {provider}, {role}} provider { with {provider}} role {, {role}} other {}})',
   'core.store.nKoraCommand': '{n} (a kora command)',
   'core.store.nComputer': '{n} (on this computer)',
   'core.notNormalBadge.tryingPullRequestTitle': 'Trying pull request #{pr}: {title}',
@@ -134,6 +134,7 @@ const messages = {
   'core.useServerControl.starting': 'Starting',
   'core.useServerControl.stopping': 'Stopping',
   'core.useServerControl.restarting': 'Restarting',
+  'core.store.someone': 'someone',
 } as const
 
 register('en', messages)

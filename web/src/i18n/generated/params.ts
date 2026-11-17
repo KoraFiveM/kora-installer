@@ -70,14 +70,16 @@ export interface MessageParams {
   'core.status.valueUpdates': { value: string | number }
   'core.store.nComputer': { n: string | number }
   'core.store.nKoraCommand': { n: string | number }
-  'core.store.nSignedFromAnother': { n: string | number; value: string | number; value2: string | number }
+  'core.store.nSignedFromAnother': { n: string | number; kind: string; provider: string | number; role: string | number }
   'core.useRole.accountRoleCannotDo': { role: string | number; min: string | number }
   'core.useRole.turnedOffSigninsDo': { ALLOW_REMOTE_COMMAND: string | number }
   'errors.errorNotice.linkSeeWhatKora': { link: ReactNode }
   'errors.errorNotice.logCodeNode': { code: ReactNode }
   'errors.errorNotice.savedCodeNode': { code: ReactNode }
   'errors.errorNotice.stillStuckSupportbundlelinkNod': { supportBundleLink: ReactNode }
+  'errors.problemActions.changeSectionLabel': { section: string | number }
   'errors.problemActions.installValueMe': { value: string | number }
+  'errors.problemActions.openHostof': { host: string | number }
   'errors.supportBundleDialog.accountRoleCannotMake': { role: string | number }
   'errors.supportBundleDialog.downloadNodeDownload': { download: ReactNode }
   'errors.supportBundleDialog.neverUploadedSavedSpan': { never_uploaded: string | number; span: ReactNode }
@@ -86,8 +88,11 @@ export interface MessageParams {
   'errors.supportBundleDialog.textOpen': { open: string | number }
   'errors.supportBundleDialog.whatFileHoldSize': { size: string | number }
   'errors.toolchainActions.checkcircleNodeSignedValue': { checkCircle2: ReactNode; value: string | number }
+  'errors.toolchainActions.installToolName': { tool: string | number }
   'errors.toolchainActions.settingUpToolName': { TOOL_NAME: string | number }
+  'install.form.keyN': { n: string | number }
   'install.installWizard.alreadyServerComputerLink': { link: Tag }
+  'install.installWizard.buildArtifactbuild': { artifactBuild: string | number }
   'install.installWizard.buildGameBuildTrim': { build: string | number; trim: string | number }
   'install.installWizard.buttonInstallWithoutThese': { button: Tag }
   'install.installWizard.changeLabel': { label: string | number }

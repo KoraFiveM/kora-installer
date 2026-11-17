@@ -107,9 +107,9 @@ export function dirBase(dir: string): string {
 
 /** The name offered for a key about to be saved: "Main" first, then "Key 2", "Key 3"... */
 export function suggestKeyName(keys: SavedKey[]): string {
-  if (keys.length === 0) return 'Main'
+  if (keys.length === 0) return t('install.form.main')
   for (let n = keys.length + 1; ; n++) {
-    const name = `Key ${n}`
+    const name = t('install.form.keyN', { n })
     if (!keys.some((k) => k.name.toLowerCase() === name.toLowerCase())) return name
   }
 }

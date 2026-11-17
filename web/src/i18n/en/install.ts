@@ -258,6 +258,22 @@ const messages = {
   'install.form.onePortsAlreadyUse': 'One of the ports is already in use. Pick a free one.',
   'install.form.koraCouldCheckPorts': 'Kora could not check that the ports are free.',
   'install.form.github': 'GitHub',
+  'install.installWizard.recommended': 'Recommended',
+  'install.installWizard.buildArtifactbuild': 'Build {artifactBuild}',
+  'install.installWizard.versions': 'Versions',
+  'install.installWizard.name': 'Name',
+  'install.installWizard.folder': 'Folder',
+  'install.installWizard.ports': 'Ports',
+  'install.installWizard.resources': 'Resources',
+  'install.installWizard.everything': 'Everything',
+  'install.installWizard.database': 'Database',
+  'install.installWizard.skip': 'Skip',
+  'install.installWizard.automatic': 'Automatic',
+  'install.installWizard.firewall': 'Firewall',
+  'install.installWizard.yes': 'Yes',
+  'install.installWizard.no': 'No',
+  'install.form.main': 'Main',
+  'install.form.keyN': 'Key {n}',
 } as const
 
 register('en', messages)
