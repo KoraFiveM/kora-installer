@@ -42,6 +42,8 @@ pub struct ResourcePage {
     pub version: Option<String>,
     /// Where its files are: the normal version, a branch, a pull request.
     pub branch: ResourceBranch,
+    /// The original repository and your own copy; `null` when it is not a git clone.
+    pub repos: Option<crate::collab::Repos>,
     pub restart: RestartInfo,
     pub server: ResourceServerState,
 }

@@ -343,6 +343,7 @@ fn resource_page(f: &FakeBackend) {
         source: None,
         version: None,
         branch: branch_state("kora_hud"),
+        repos: Some(kora_core::collab::Repos { original: Some("KoraFiveM/kora_hud".into()), fork: None }),
     }))));
 }
 
@@ -525,6 +526,9 @@ fn branches_prs(f: &FakeBackend) {
             draft: false,
             url: "https://github.com/x/y/pull/12".into(),
             updated: "2026-01-01".into(),
+            created: "2025-12-01".into(),
+            review: "APPROVED".into(),
+            checks: kora_core::collab::Checks::Passing,
         }],
         notes: vec![],
     })));

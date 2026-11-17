@@ -127,6 +127,9 @@ async fn pull_requests_come_back_labelled_and_sign_in_problems_keep_their_action
         draft: false,
         url: "https://github.com/KoraFiveM/kora_hud/pull/5".into(),
         updated: "2026-01-01T00:00:00Z".into(),
+        created: "2025-12-01T00:00:00Z".into(),
+        review: String::new(),
+        checks: kora_core::collab::Checks::None,
     };
     fake.state().branches = Some(Ok(Reply::Prs(PrChoices { prs: vec![pr], notes: vec![] })));
     let app = app(&fake);

@@ -276,6 +276,10 @@ pub struct Page {
     pub version: Option<String>,
     /// Where the files are on disk, in words (the git state), when it is a git clone Kora can read.
     pub branch: ResourceBranch,
+    /// The original repository and your own copy of it (`fork` is `None` for a plain clone). `None` when it is not a
+    /// git clone Kora can read.
+    #[serde(default)]
+    pub repos: Option<crate::collab::Repos>,
 }
 
 /// What the resource page shows for one resource.
@@ -291,6 +295,7 @@ pub fn page(r: &dyn CommandRunner, sf: &ServerFile, resource: &str) -> PResult<P
         source: rec.source.clone(),
         version: rec.version.clone(),
         branch: row_of(r, sf, rec),
+        repos: folder(sf, rec).ok().filter(|_| tracked(sf, rec).is_ok()).and_then(|d| crate::collab::repos(r, &d).ok()),
     })
 }
 

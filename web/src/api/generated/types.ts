@@ -1880,6 +1880,18 @@ export type PullRequest = {
   draft: boolean,
   url: string,
   updated: string,
+  /**
+   * When it was opened.
+   */
+  created: string,
+  /**
+   * `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or empty when GitHub did not say.
+   */
+  review: string,
+  /**
+   * Whether its checks pass, fail, are still running, or there are none.
+   */
+  checks: ChecksState,
 };
 
 export type Pushed = {
@@ -2074,6 +2086,10 @@ export type ResourcePage = {
    * Where its files are: the normal version, a branch, a pull request.
    */
   branch: ResourceBranch,
+  /**
+   * The original repository and your own copy; `null` when it is not a git clone.
+   */
+  repos: Repos | null,
   restart: RestartInfo,
   server: ResourceServerState,
 };

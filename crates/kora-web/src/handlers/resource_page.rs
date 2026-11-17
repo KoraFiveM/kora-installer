@@ -43,6 +43,7 @@ pub async fn resource_page(State(st): State<AppState>, Path((s, name)): Path<(St
             source: page.source.clone(),
             version: page.version.clone(),
             branch: page.branch.clone(),
+            repos: page.repos.clone(),
             restart,
             server: w::ResourceServerState {
                 name: e.name.clone(),

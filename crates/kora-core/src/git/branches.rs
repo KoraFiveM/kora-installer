@@ -208,6 +208,19 @@ pub struct PullRequest {
     pub draft: bool,
     pub url: String,
     pub updated: String,
+    /// When it was opened.
+    #[serde(default)]
+    pub created: String,
+    /// `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or empty when GitHub did not say.
+    #[serde(default)]
+    pub review: String,
+    /// Whether its checks pass, fail, are still running, or there are none.
+    #[serde(default = "no_checks")]
+    pub checks: crate::collab::Checks,
+}
+
+fn no_checks() -> crate::collab::Checks {
+    crate::collab::Checks::None
 }
 
 /// A pull request the person named: a number, or an address.
@@ -708,7 +721,18 @@ pub fn list_prs(r: &dyn CommandRunner, repo: &Path) -> PResult<(Vec<PullRequest>
     let mut first_error: Option<Problem> = None;
     let mut worked = 0;
     for (source, slug) in &sides {
-        let args = ["pr", "list", "--repo", slug.as_str(), "--state", "open", "--limit", "100", "--json", "number,title,author,headRefName,headRepository,headRepositoryOwner,isDraft,url,updatedAt"];
+        let args = [
+            "pr",
+            "list",
+            "--repo",
+            slug.as_str(),
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,author,headRefName,headRepository,headRepositoryOwner,isDraft,url,updatedAt,createdAt,reviewDecision,statusCheckRollup",
+        ];
         match run_ok(r, "gh", &args, None) {
             Ok(o) => {
                 worked += 1;
@@ -757,6 +781,9 @@ fn pr_from_json(v: &Value, source: PrSource, slug: &str) -> Option<PullRequest> 
         draft: v.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
         url: s("url"),
         updated: s("updatedAt"),
+        created: s("createdAt"),
+        review: s("reviewDecision"),
+        checks: crate::collab::rollup(&v.get("statusCheckRollup").and_then(Value::as_array).cloned().unwrap_or_default()).0,
     })
 }
 
