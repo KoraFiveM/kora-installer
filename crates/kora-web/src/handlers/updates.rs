@@ -134,7 +134,7 @@ pub async fn update_apply(State(st): State<AppState>, Path(s): Path<String>, bod
 pub async fn update_auto(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     let e = known(&st, s.clone()).await?;
     not_busy(&e).await?;
-    st.spawn_job(Op::UpdateAuto, Some(s), move |_h| run_auto(&e.name).map(|r| report_json(&r)))
+    st.spawn_job(Op::UpdateAuto, Some(s), move |_h| run_auto(&e.name).map(|r| report_json(&r)).map_err(Into::into))
 }
 
 fn snapshot_json(s: &SnapshotInfo) -> Value {

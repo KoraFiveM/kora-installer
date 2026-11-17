@@ -34,7 +34,7 @@ pub struct FakeState {
     pub list_error: Option<String>,
     pub control_error: Option<String>,
     pub ensure_error: Option<String>,
-    pub delete_error: Option<String>,
+    pub delete_error: Option<crate::problem::Problem>,
     pub resources: Vec<String>,
     /// Resource id -> folder name, for ids whose folder is named differently.
     pub resource_folders: HashMap<String, String>,
@@ -170,7 +170,7 @@ impl Backend for FakeBackend {
         let mut s = self.state();
         s.calls.push(format!("delete {} keep_files={keep_files} keep_db={keep_db}", e.name));
         if let Some(x) = &s.delete_error {
-            return Err(x.clone().into());
+            return Err(x.clone());
         }
         s.servers.retain(|x| x.name != e.name);
         Ok(vec!["Deleted.".into()])
@@ -183,8 +183,8 @@ impl Backend for FakeBackend {
         // Records that a password was given, never the password itself.
         s.calls.push(format!("delete {} keep_files={keep_files} keep_db={keep_db} db_password=set", e.name));
         if let Some(x) = &s.delete_error {
-            if !x.contains("KORA_DB_ADMIN_PASSWORD") || pw == "wrong" {
-                return Err(x.clone().into());
+            if x.code != crate::problem::codes::DB_NEEDS_PASSWORD || pw == "wrong" {
+                return Err(x.clone());
             }
         }
         s.servers.retain(|x| x.name != e.name);

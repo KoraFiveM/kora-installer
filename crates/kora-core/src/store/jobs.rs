@@ -253,3 +253,28 @@ pub fn recover(s: &Store, alive: &dyn Fn(u32) -> bool, my_pid: u32, my_instance:
         Ok(done)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::problem::{codes, Action};
+
+    #[test]
+    fn rows_written_by_v0_7_0_with_a_packed_problem_still_read() {
+        let p = Problem::new(codes::GH_SIGNED_OUT, "Sign in.").with_action(Action::SignInGithub { scopes: vec![] });
+        // The form v0.7.0 wrote.
+        let old = format!("\u{1}kora-problem:{}", serde_json::to_string(&p).unwrap());
+        assert_eq!(read_legacy_packed(&old), Some(p.clone()));
+        assert_eq!(problem_of_row(&old), p);
+        // Broken packed text is shown as it is, not lost.
+        assert_eq!(problem_of_row("\u{1}kora-problem:{oops").message, "\u{1}kora-problem:{oops");
+    }
+
+    #[test]
+    fn plain_and_json_rows_read() {
+        assert_eq!(problem_of_row("disk full"), Problem::generic("disk full"));
+        let j = crate::api::JobFailure::new(Problem::generic("m").with_details("d")).with("kept", serde_json::json!(["x"])).to_text();
+        let p = problem_of_row(&j);
+        assert_eq!((p.message.as_str(), p.details.as_deref()), ("m", Some("d")));
+    }
+}

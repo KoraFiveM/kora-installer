@@ -168,7 +168,7 @@ pub async fn resources_add(State(st): State<AppState>, Path(s): Path<String>, Js
         for id in &out.installed {
             h.event(json!({"type": "resource", "id": id, "state": "installed"}));
         }
-        serde_json::to_value(&out).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&out)?)
     })
 }
 

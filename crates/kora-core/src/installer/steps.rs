@@ -122,6 +122,19 @@ fn io<T, E: Into<Problem>>(r: std::result::Result<T, E>, what: &str) -> Result<T
     r.map_err(|e| e.into().lead(what))
 }
 
+/// Everything else was removed, but the database could not be dropped: Kora needs the database
+/// administrator's password ([`codes::DB_NEEDS_PASSWORD`]; the panel asks for it and tries again).
+fn db_drop_needs_password(dbn: &str, usr: &str, why: &str, dir: &Path) -> Problem {
+    Problem::new(
+        codes::DB_NEEDS_PASSWORD,
+        format!("Everything else was removed, but the database '{dbn}' / user '{usr}' could not be deleted: Kora needs the database administrator password. Enter it and try again, or keep the database and delete the server without it."),
+    )
+    .with_details(format!(
+        "{why}\nOn the command line: set KORA_DB_ADMIN_PASSWORD to the admin password (host/port/user are remembered from the install) or run as root with socket auth, then run `kora delete {}` again.",
+        dir.display()
+    ))
+}
+
 fn res_dir(ctx: &Ctx) -> PathBuf {
     ctx.req.dir.join("resources")
 }
@@ -1653,13 +1666,7 @@ impl InstallStep {
                     return Ok("Database kept".into());
                 }
                 let admin = admin_conn(&ctx.req);
-                db::rollback(&db::SystemRunner, &admin, &mut st).map_err(|e| {
-                    Problem::generic(format!(
-                        "could not remove database '{dbn}' / user '{usr}': {e}. Everything else was already removed. Kora needs the database admin login again to drop them: \
-                         set KORA_DB_ADMIN_PASSWORD to the admin password (host/port/user are remembered from the install) or run as root with socket auth, then run `kora delete {}` again.",
-                        ctx.req.dir.display()
-                    ))
-                })?;
+                db::rollback(&db::SystemRunner, &admin, &mut st).map_err(|e| db_drop_needs_password(&dbn, &usr, &e.to_string(), &ctx.req.dir))?;
                 st.save(&path).map_err(|e| Problem::generic(e.to_string()))?;
                 let _ = std::fs::remove_file(ctx.req.dir.join("database.json"));
                 Ok(format!("Dropped database {dbn} and user {usr}"))

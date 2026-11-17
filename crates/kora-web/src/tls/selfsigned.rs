@@ -137,7 +137,7 @@ pub fn load_ca(s: &Store) -> Result<Option<Ca>, String> {
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     })
-    .map_err(kora_core::store::problem_to_string)
+    .map_err(crate::error::store_text)
 }
 
 /// The saved CA, or a new one that is saved first. One transaction, so two programs never make two.
@@ -150,7 +150,7 @@ pub fn ensure_ca(s: &Store, label: &str) -> Result<Ca, String> {
         tx.execute("INSERT OR IGNORE INTO tls_local_ca (id, cert_pem, key_pem, created) VALUES (1, ?1, ?2, ?3)", rusqlite::params![fresh.cert_pem, fresh.key_pem, now_unix()])?;
         Ok(())
     })
-    .map_err(kora_core::store::problem_to_string)?;
+    .map_err(crate::error::store_text)?;
     load_ca(s)?.ok_or_else(|| "the local CA could not be saved".to_string())
 }
 
@@ -164,7 +164,7 @@ pub fn load_leaf(s: &Store) -> Result<Option<Leaf>, String> {
             Err(e) => Err(e.into()),
         }
     })
-    .map_err(kora_core::store::problem_to_string)
+    .map_err(crate::error::store_text)
 }
 
 pub fn save_leaf(s: &Store, l: &Leaf) -> Result<(), String> {
@@ -176,7 +176,7 @@ pub fn save_leaf(s: &Store, l: &Leaf) -> Result<(), String> {
         )?;
         Ok(())
     })
-    .map_err(kora_core::store::problem_to_string)
+    .map_err(crate::error::store_text)
 }
 
 pub fn forget(s: &Store) -> Result<(), String> {
@@ -185,7 +185,7 @@ pub fn forget(s: &Store) -> Result<(), String> {
         tx.execute("DELETE FROM tls_local_ca", [])?;
         Ok(())
     })
-    .map_err(kora_core::store::problem_to_string)
+    .map_err(crate::error::store_text)
 }
 
 /// The saved server certificate when it still covers every wanted name and has more than [`RENEW_DAYS`]

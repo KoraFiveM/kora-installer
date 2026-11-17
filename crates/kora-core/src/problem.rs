@@ -155,6 +155,8 @@ pub mod codes {
     pub const TOOLS_UNSUPPORTED: &str = "tools.unsupported";
     /// The download did not match the checksum Kora expects, so nothing was installed.
     pub const TOOLS_CHECKSUM: &str = "tools.checksum_mismatch";
+    /// A server was removed but its database could not be dropped: the database administrator's password is needed.
+    pub const DB_NEEDS_PASSWORD: &str = "needs_db_password";
     /// Starting the database server did not work.
     pub const DB_START_FAILED: &str = "db.start_failed";
 }

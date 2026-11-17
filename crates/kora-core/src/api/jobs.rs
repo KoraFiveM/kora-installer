@@ -62,19 +62,10 @@ impl JobFailure {
     }
 }
 
-impl From<Problem> for JobFailure {
-    fn from(p: Problem) -> Self {
-        Self::new(p)
-    }
-}
-impl From<String> for JobFailure {
-    fn from(s: String) -> Self {
-        Self::new(Problem::generic(s))
-    }
-}
-impl From<&str> for JobFailure {
-    fn from(s: &str) -> Self {
-        Self::new(Problem::generic(s))
+/// Anything that becomes a [`Problem`] (a Problem, a sentence, an io or JSON error) becomes a failure.
+impl<E: Into<Problem>> From<E> for JobFailure {
+    fn from(e: E) -> Self {
+        Self::new(e.into())
     }
 }
 

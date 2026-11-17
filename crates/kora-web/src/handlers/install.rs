@@ -374,19 +374,17 @@ fn finished_events(events: &[Value]) -> Vec<Value> {
 
 /// The job error of a stopped install: the Problem (`code`, `message`, `details`, `actions`) plus
 /// `kept`, `log_path`, `failed_step` and `resume: true` (`POST /installs/{job}/resume` works).
-fn stopped_error(job: &str, problem: Problem, kept: &[String], log_path: Option<&std::path::Path>, failed_step: Option<&str>) -> String {
+fn stopped_error(job: &str, problem: Problem, kept: &[String], log_path: Option<&std::path::Path>, failed_step: Option<&str>) -> kora_core::api::JobFailure {
     let path = log_path.map(|p| p.to_string_lossy().into_owned());
     let problem = problem.with_action(Action::OpenLog { job: Some(job.to_string()), path: path.clone() });
-    let mut err = problem.to_json();
-    err["kept"] = json!(kept);
-    err["resume"] = json!(true);
+    let mut err = kora_core::api::JobFailure::new(problem).with("kept", json!(kept)).with("resume", json!(true));
     if let Some(p) = path {
-        err["log_path"] = json!(p);
+        err = err.with("log_path", json!(p));
     }
     if let Some(s) = failed_step {
-        err["failed_step"] = json!(s);
+        err = err.with("failed_step", json!(s));
     }
-    err.to_string()
+    err
 }
 
 /// How an install gets its administrator rights.
@@ -451,7 +449,7 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
                 Ok(core::outcome_json(&out))
             }
             Err(msg) => {
-                let problem = fin.problem.unwrap_or_else(|| Problem::decode(&msg));
+                let problem = fin.problem.unwrap_or_else(|| msg.clone());
                 if !req.dry_run {
                     pause(
                         &id,
@@ -508,11 +506,11 @@ pub async fn install_start(State(st): State<AppState>, Extension(caller): Extens
             return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name)).with_action(Action::change_answers("name")));
         }
         if req.source() == kora_core::installer::Source::Fork {
-            let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|m| {
-                if Problem::is_encoded(&m) {
-                    ApiError::core(m)
+            let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|p| {
+                if p.code != codes::FAILED || p.details.is_some() || !p.actions.is_empty() {
+                    ApiError::core(p)
                 } else {
-                    ApiError::bad_request(m).with_action(Action::change_answers("github"))
+                    ApiError::bad_request(p).with_action(Action::change_answers("github"))
                 }
             })?;
             ProfileStore::default().remember_github_owner(&owner);

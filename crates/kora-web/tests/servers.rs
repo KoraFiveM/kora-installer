@@ -153,7 +153,13 @@ async fn a_failed_database_drop_asks_for_the_admin_password_and_a_retry_with_it_
     let f = FakeBackend::sample();
     managed_server(&f, "mine", Mode::Production, &d.path().join("mine"));
     let a = app(&f);
-    f.state().delete_error = Some("could not remove database 'kora_1' / user 'kora_1': command failed: database client exited with status 1. Everything else was already removed. Kora needs the database admin login again to drop them: set KORA_DB_ADMIN_PASSWORD to the admin password then run `kora delete /x` again.".into());
+    f.state().delete_error = Some(
+        kora_core::problem::Problem::new(
+            kora_core::problem::codes::DB_NEEDS_PASSWORD,
+            "Everything else was removed, but the database 'kora_1' / user 'kora_1' could not be deleted: Kora needs the database administrator password. Enter it and try again, or keep the database and delete the server without it.",
+        )
+        .with_details("command failed: database client exited with status 1\nOn the command line: set KORA_DB_ADMIN_PASSWORD to the admin password, then run `kora delete /x` again."),
+    );
     let first = json!({"confirm_name": "mine", "keep_files": false, "keep_db": false});
     let r = call(&a, "DELETE", "/servers/mine", Some(first)).await;
     let j = job(&a, r).await;

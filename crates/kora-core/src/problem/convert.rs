@@ -26,6 +26,7 @@ sentence!(
     crate::artifacts::ArtifactError,
     crate::app_install::AppError,
     crate::db::DbError,
+    crate::hub::remote::RemoteError,
 );
 
 impl From<crate::git::GitError> for Problem {

@@ -210,7 +210,7 @@ impl AppState {
     /// Start a job for `op`; `202 {"job": id}`, or `409 conflict` when the server is busy.
     pub fn spawn_job<F>(&self, op: Op, server: Option<String>, f: F) -> Result<Response, ApiError>
     where
-        F: FnOnce(&kora_core::api::JobHandle) -> Result<Value, String> + Send + 'static,
+        F: FnOnce(&kora_core::api::JobHandle) -> kora_core::api::JobResult + Send + 'static,
     {
         // A job changes what the fleet shows: forget the cached list when it starts and when it ends.
         self.fleet_cache.clear();
