@@ -67,6 +67,8 @@
 pub mod audit;
 pub mod conn;
 pub mod dispatch;
+pub mod exec;
+pub mod identity;
 pub mod install;
 pub mod manage;
 pub mod migrate;
@@ -79,7 +81,19 @@ pub mod problems;
 #[cfg(unix)]
 pub mod unixsvc;
 pub mod update;
+pub mod winapi;
 #[cfg(windows)]
 pub mod wininstall;
 #[cfg(windows)]
 pub mod winsvc;
+pub mod wire;
+
+/// Is the administrator service there and serving this account? (A short local call; `false` on any problem.)
+pub fn service_ready() -> bool {
+    #[cfg(unix)]
+    return unixsvc::probe(std::path::Path::new(paths::LINUX_SOCKET)).is_ok();
+    #[cfg(windows)]
+    return winsvc::probe().is_ok();
+    #[cfg(not(any(unix, windows)))]
+    return false;
+}

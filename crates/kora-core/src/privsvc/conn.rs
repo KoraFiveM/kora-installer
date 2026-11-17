@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use super::dispatch::{self, Host, Progress, Ran, Reply, RunSpec};
 use super::policy::{Caller, Policy};
-use crate::helper::{Message, Request, PING};
+use crate::privsvc::wire::{Message, Request, PING};
 
 /// What one served connection needs besides the OS facts.
 pub trait Svc: Send + Sync {
@@ -58,13 +58,13 @@ pub fn handle_stream(svc: &dyn Svc, reader: &mut dyn BufRead, out: &mut dyn Writ
     let run = |spec: &RunSpec<'_>, progress: Progress<'_>| svc.run(&caller, spec, progress, &cancel);
     let mut progress = |stream_name: &str, text: &str| {
         if stream_name == "stdout" {
-            if let Some(v) = crate::helper::worker::result_line(text) {
+            if let Some(v) = crate::privsvc::exec::result_line(text) {
                 data = Some(v);
                 return;
             }
         }
         if alive {
-            let masked = crate::helper::mask_secrets(text, &secrets.iter().map(String::as_str).collect::<Vec<_>>());
+            let masked = crate::privsvc::wire::mask_secrets(text, &secrets.iter().map(String::as_str).collect::<Vec<_>>());
             alive = send(out, &Message::Progress { stream: stream_name.to_string(), line: masked });
             if !alive {
                 cancel.store(true, Ordering::SeqCst);

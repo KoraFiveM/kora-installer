@@ -512,3 +512,8 @@ pub fn account_ids(name: &str) -> Option<(u32, u32)> {
 pub fn account_ids(_name: &str) -> Option<(u32, u32)> {
     None
 }
+
+/// Look a uid up in the passwd database.
+pub fn lookup_account(uid: u32) -> Option<Account> {
+    SystemUserEnv.by_uid(uid)
+}

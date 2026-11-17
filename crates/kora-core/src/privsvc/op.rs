@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::helper::Rejected;
+use crate::privsvc::wire::Rejected;
 
 /// A request line longer than this is refused unread.
 pub const MAX_LINE: usize = 16 * 1024;

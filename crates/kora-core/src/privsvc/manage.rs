@@ -7,7 +7,7 @@ use std::io;
 use std::path::Path;
 
 use super::policy::{AccountId, Policy};
-use crate::helper::Rejected;
+use crate::privsvc::wire::Rejected;
 
 /// The settings as they are (a missing file = nobody yet); a damaged file is an error, never silently replaced.
 pub fn load_or_new(path: &Path) -> Result<Policy, String> {

@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::helper::Rejected;
+use crate::privsvc::wire::Rejected;
 
 pub const MAX_ACCOUNTS: usize = 64;
 /// `SECURITY_MANDATORY_MEDIUM_RID`: lower-integrity (sandboxed) programs are refused.
@@ -22,11 +22,11 @@ impl AccountId {
     pub fn uid(n: u32) -> AccountId {
         AccountId(format!("uid:{n}"))
     }
-    /// An ordinary Windows account: see [`crate::helper::winhelper::valid_user_sid`]. Compared
+    /// An ordinary Windows account: see [`crate::privsvc::identity::valid_user_sid`]. Compared
     /// without case, stored upper case.
     pub fn sid(s: &str) -> Result<AccountId, Rejected> {
         let up = s.to_ascii_uppercase();
-        if crate::helper::winhelper::valid_user_sid(&up) {
+        if crate::privsvc::identity::valid_user_sid(&up) {
             Ok(AccountId(up))
         } else {
             Err(Rejected(format!("'{s}' is not an ordinary Windows account.")))
@@ -136,7 +136,7 @@ pub fn pipe_sddl(policy: &Result<Policy, String>) -> String {
     if let Ok(p) = policy {
         for a in &p.accounts {
             // only SIDs: a `uid:N` entry (a Linux file copied over) is skipped
-            if crate::helper::winhelper::valid_user_sid(a.id.as_str()) {
+            if crate::privsvc::identity::valid_user_sid(a.id.as_str()) {
                 // read data, write data, read attributes, read control, synchronize: not FILE_APPEND_DATA
                 // (= create a pipe instance), so an allowed account cannot make a look-alike pipe.
                 s.push_str(&format!("(A;;0x120083;;;{})", a.id));

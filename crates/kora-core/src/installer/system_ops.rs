@@ -101,7 +101,7 @@ pub struct DbResult {
 impl StepResult {
     /// The child's last output line (`helper::worker::RESULT_PREFIX` + JSON).
     pub fn to_line(&self) -> std::result::Result<String, String> {
-        serde_json::to_string(self).map(|j| format!("{}{j}", crate::helper::worker::RESULT_PREFIX)).map_err(|e| e.to_string())
+        serde_json::to_string(self).map(|j| format!("{}{j}", crate::privsvc::exec::RESULT_PREFIX)).map_err(|e| e.to_string())
     }
 }
 
@@ -179,7 +179,7 @@ pub fn panel_user() -> Option<PanelUser> {
         return None;
     }
     let sid = std::env::var("KORA_WORKER_USER_SID").ok().filter(|s| !s.is_empty())?;
-    let admin_folders = std::env::var("KORA_WORKER_ADMIN_MEMBER").is_ok_and(|v| v == "1") && !crate::helper::winhelper::in_service();
+    let admin_folders = std::env::var("KORA_WORKER_ADMIN_MEMBER").is_ok_and(|v| v == "1") && !crate::privsvc::paths::in_service();
     Some(PanelUser { sid, admin_folders })
 }
 
@@ -191,38 +191,8 @@ pub fn check_panel_dir(dir: &Path) -> Result<()> {
     let Some(u) = panel_user() else { return Ok(()) };
     check_dir_links(dir)?;
     let record = super::meta_dir(dir).join("request.json").is_file() || dir.join("kora-server.json").is_file();
-    let owner = crate::helper::winpipe::path_owner_sid(dir);
+    let owner = crate::privsvc::winapi::path_owner_sid(dir);
     check_dir_for(dir, &u.sid, owner.as_deref(), record, u.admin_folders).map_err(InstallError)
-}
-
-/// The ownership ledger (`%ProgramFiles%\\Kora\\owners.json`) as this elevated child sees it.
-fn ledger_path() -> Option<std::path::PathBuf> {
-    crate::helper::winhelper::program_files().map(|pf| crate::helper::winhelper::ledger_path(&pf))
-}
-
-/// Before an elevated child makes (`undo` = false) or removes (`undo` = true) the things behind
-/// `keys` for the panel's person. Making: never something the ledger gives to another account.
-/// Removing: in the opt-in helper only what the ledger gives to this person; through the prompt,
-/// anything not recorded for another account (things made before the ledger existed).
-pub fn ledger_check(keys: &[String], undo: bool) -> Result<()> {
-    let (Some(u), Some(p)) = (panel_user(), ledger_path()) else { return Ok(()) };
-    let l = crate::helper::winhelper::Ledger::load(&p);
-    let strict_undo = undo && crate::helper::winhelper::in_service();
-    crate::helper::winhelper::ledger_allows(&l, keys, &u.sid, strict_undo).map_err(InstallError)
-}
-
-/// After an elevated child made (`made` = true) or removed the things behind `keys`.
-pub fn ledger_note(keys: &[String], made: bool) {
-    let (Some(u), Some(p)) = (panel_user(), ledger_path()) else { return };
-    let mut l = crate::helper::winhelper::Ledger::load(&p);
-    for k in keys {
-        if made {
-            l.record(k.clone(), &u.sid);
-        } else {
-            l.forget(k);
-        }
-    }
-    let _ = l.save(&p);
 }
 
 /// The request of an `admin-step` must be a sane one, and an elevated step done for Kora Panel
@@ -236,7 +206,7 @@ pub fn check_step_request(req: &super::InstallRequest, step: &str, undo: bool, f
     super::validate_request(req)?;
     if for_panel && step == "system.firewall" {
         for p in [req.ports.game, req.ports.txadmin] {
-            if !crate::helper::winhelper::port_allowed(p) {
+            if !crate::privsvc::op::port_ok(p) {
                 return Err(InstallError(format!(
                     "Kora does not open port {p} in the firewall from the panel: Windows, remote administration or databases use it. Choose other ports for the server (30120 and 40120 are the usual ones)."
                 )));
@@ -302,7 +272,7 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     check_dir_links(dir)?;
     check_panel_dir(dir)?;
     let mut req = load_request_from(dir).ok_or_else(|| InstallError(format!("{} has no Kora install record", dir.display())))?;
-    let in_service = crate::helper::winhelper::in_service();
+    let in_service = crate::privsvc::paths::in_service();
     check_step_request(&req, step, undo, in_service || crate::privsvc::paths::in_service() || panel_user().is_some())?;
     // Removing system-wide things: the name and ports come from the server list, not from the
     // folder's own (changeable) record, exactly as `kora delete` does.
@@ -318,18 +288,12 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     } else {
         true
     };
-    // Which system-wide things this step touches, and whose they are (see `helper::winhelper::Ledger`).
-    let slug = super::slug(&req.name);
-    let old_db = crate::db::ProvisionState::load(&super::meta_dir(dir).join("db-provision.json")).ok().map(|s| s.database);
-    let keys_before = crate::helper::winhelper::ledger_keys(step, &slug, old_db.as_deref());
-    ledger_check(&keys_before, undo)?;
     let (tx, rx) = mpsc::channel();
     let mut ctx = new_ctx_trusted(&req, &Hooks::from_env(), true, tx, keep_db, keep_files, trusted);
     if let Some(c) = Arc::get_mut(&mut ctx) {
         c.shadow = Some(Mutex::new(super::load_created_from(dir).unwrap_or_default()));
     }
     let grants_left = !undo && step == "system.service" && in_service;
-    let step_name = step.to_string();
     let step = step.to_string();
     std::thread::scope(|s| {
         let h = s.spawn(move || {
@@ -344,14 +308,6 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
             }
         }
         let (r, created, notes) = h.join().map_err(|_| InstallError("the administrator step stopped unexpectedly".into()))?;
-        if let Ok((_, db)) = &r {
-            if undo {
-                ledger_note(&keys_before, false);
-            } else {
-                let new_db = db.as_ref().and_then(|d| d.state.as_ref()).map(|s| s.database.clone());
-                ledger_note(&crate::helper::winhelper::ledger_keys(&step_name, &slug, new_db.as_deref().or(old_db.as_deref())), true);
-            }
-        }
         Ok(match r {
             Ok((detail, db)) => StepResult { detail, notes, created, db, error: None, grants_left },
             Err(e) => StepResult { detail: String::new(), notes, created, db: None, error: Some(Problem::decode(&e.0)), grants_left: false },

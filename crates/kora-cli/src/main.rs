@@ -550,140 +550,12 @@ enum Command {
         #[command(subcommand)]
         cmd: service_cmd::ServiceCmd,
     },
-    /// The optional privileged helper: lets the panel do the few things that need administrator rights.
-    Helper {
-        #[command(subcommand)]
-        cmd: HelperCmd,
-    },
-    /// Windows: Kora Panel's short-lived administrator helper (started through the permission prompt).
+    /// One administrator step of an install or delete, run by Kora's administrator service.
     #[command(hide = true)]
-    AdminWorker(admin_worker::AdminWorkerArgs),
-    /// One administrator step of an install or delete, run by that helper.
+    AdminStep(admin_step::AdminStepArgs),
+    /// Start (or install) Kora's own MariaDB on Windows, run by Kora's administrator service.
     #[command(hide = true)]
-    AdminStep(admin_worker::AdminStepArgs),
-    /// Start (or install) Kora's own MariaDB on Windows, run by that helper.
-    #[command(hide = true)]
-    AdminDb(admin_worker::AdminDbArgs),
-}
-
-#[derive(Subcommand)]
-enum HelperCmd {
-    /// Run the helper (started by its system service; not for people).
-    #[command(hide = true)]
-    Serve,
-    /// Install the helper service for your user account (needs administrator rights; run with sudo).
-    Install,
-    /// Remove the helper service (needs administrator rights).
-    Uninstall,
-    /// Say whether the helper is installed and running.
-    Status,
-}
-
-/// The helper's allow-list, checked with this very command-line definition: the arguments must parse
-/// as one of the privileged commands the panel otherwise asks the user to run, and nothing else.
-/// The install folder must be one the helper's user could have made themselves (see
-/// `kora_core::helper::dirs`).
-fn helper_validate(verb: &str, args: &[String]) -> Result<(), String> {
-    use kora_core::helper as h;
-    let uid = h::server::load_config(std::path::Path::new(h::CONFIG_PATH)).map(|c| c.uid);
-    helper_validate_for(verb, args, &|dir| match &uid {
-        Ok(u) => h::dirs::check_install_dir(dir, *u, &h::dirs::kora_account()),
-        Err(e) => Err(e.clone()),
-    })
-}
-
-/// [`helper_validate`] with the folder check given (tests).
-fn helper_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&std::path::Path) -> Result<(), String>) -> Result<(), String> {
-    let deny = || Err("That command is not one the helper runs.".to_string());
-    let argv = ["kora", "--no-elevate", verb].into_iter().map(String::from).chain(args.iter().cloned());
-    let Ok(cli) = Cli::try_parse_from(argv) else { return deny() };
-    match cli.command {
-        Some(Command::Install(a)) if a.code.is_none() && verb == "install" => {
-            // Another catalogue is a list of repositories that root would clone and run setup for.
-            if a.catalog.is_some() {
-                return Err("The helper does not install from another catalogue (--catalog). Run the install command yourself with sudo to use one.".into());
-            }
-            match &a.dir {
-                Some(dir) => check_dir(dir),
-                None => Err("The helper needs the server folder (--dir).".into()),
-            }
-        }
-        // Going back to an older release (which may have known problems) is not something the
-        // panel's user may do as root on their own: they run it themselves with sudo.
-        Some(Command::SelfUpdate { version: Some(v), .. }) if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) => {
-            Err(format!("The helper only updates Kora to a newer version. To go back to {v}, run `sudo kora self-update --version {v}` yourself."))
-        }
-        Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
-        Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) if verb == "schedule" => Ok(()),
-        Some(Command::App { cmd: AppCmd::Install { .. } | AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
-        Some(Command::Uninstall { .. }) if verb == "uninstall" => Ok(()),
-        // Git on Linux (the system package) and starting the database: the only privileged parts of these two.
-        Some(Command::Tools { cmd: ToolsCmd::Install { tool: Some(t) } }) if verb == "tools" && t == "git" => Ok(()),
-        Some(Command::Check { start_database: true }) if verb == "check" => Ok(()),
-        _ => deny(),
-    }
-}
-
-fn helper(cmd: HelperCmd) -> i32 {
-    use kora_core::helper as h;
-    let fail = |m: String| {
-        eprintln!("error: {m}");
-        1
-    };
-    if cfg!(windows) {
-        return fail("the Kora helper is not available on Windows yet; the panel shows the command to run as administrator instead".into());
-    }
-    let apply = |plan: kora_core::service::Plan| -> i32 {
-        for d in plan.descriptions() {
-            println!("- {d}");
-        }
-        match kora_core::service::apply_plan(&plan, &kora_core::service::SystemRunner) {
-            Ok(()) => 0,
-            Err(e) => fail(e.to_string()),
-        }
-    };
-    match cmd {
-        HelperCmd::Serve => match h::server::run(std::sync::Arc::new(helper_validate)) {
-            Ok(()) => 0,
-            Err(e) => fail(e),
-        },
-        HelperCmd::Install => {
-            let cfg = match h::install::resolve_user(std::env::var("SUDO_UID").ok().as_deref(), std::env::var("KORA_HOME").ok(), &h::install::lookup_account) {
-                Ok(c) => c,
-                Err(e) => return fail(e),
-            };
-            let exe = match std::env::current_exe() {
-                Ok(e) => e.to_string_lossy().into_owned(),
-                Err(e) => return fail(e.to_string()),
-            };
-            let code = apply(h::install::install_plan(&cfg, &exe));
-            if code == 0 {
-                println!("The Kora helper is installed for the user '{}'. The panel can now do these actions itself.", cfg.user);
-            }
-            code
-        }
-        HelperCmd::Uninstall => {
-            let code = apply(h::install::uninstall_plan());
-            if code == 0 {
-                println!("The Kora helper is removed. The panel will show commands to run as administrator again.");
-            }
-            code
-        }
-        HelperCmd::Status => {
-            let cfg = h::server::load_config(std::path::Path::new(h::CONFIG_PATH)).ok();
-            let client = h::client::SocketClient::default();
-            let running = h::client::Helper::available(&client);
-            println!("installed: {}", if std::path::Path::new(h::UNIT_PATH).exists() { "yes" } else { "no" });
-            println!("running: {}", if running { "yes" } else { "no" });
-            if let Some(c) = cfg {
-                println!("user: {}", c.user);
-            }
-            if let Some(v) = client.version() {
-                println!("version: {v}");
-            }
-            0
-        }
-    }
+    AdminDb(admin_step::AdminDbArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -1349,7 +1221,7 @@ fn start_and_report(server: &str, past: &str) -> i32 {
 fn schedule(cmd: ScheduleCmd) -> i32 {
     use kora_core::service as svc;
     // Working for Kora Panel's person in the elevated worker: only servers on their list, in a
-    // folder that is theirs, and never another Windows account's update task (see `panel_task_check`).
+    // folder that is theirs, and never another Windows account's update task.
     let for_panel = installer::system_ops::panel_user().is_some();
     let find = |server: &str| -> Option<registry::ServerEntry> {
         let reg = registry::Registry::load().unwrap_or_default();
@@ -1402,13 +1274,8 @@ fn schedule(cmd: ScheduleCmd) -> i32 {
                 eprintln!("error: {e}");
                 return 1;
             }
-            if let Err(e) = panel_task_check(&rec, false) {
-                eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
-                return 1;
-            }
             match svc::set(&rec, &cfg) {
                 Ok(()) => {
-                    installer::system_ops::ledger_note(&panel_task_keys(&rec), true);
                     println!("{}: {}", rec.name, svc::describe(&cfg));
                     0
                 }
@@ -1420,13 +1287,8 @@ fn schedule(cmd: ScheduleCmd) -> i32 {
         }
         ScheduleCmd::Off { server } => {
             let Some(rec) = find(&server) else { return missing(&server) };
-            if let Err(e) = panel_task_check(&rec, true) {
-                eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
-                return 1;
-            }
             match svc::remove(&rec) {
                 Ok(()) => {
-                    installer::system_ops::ledger_note(&panel_task_keys(&rec), false);
                     println!("{}: automatic updates are off", rec.name);
                     0
                 }
@@ -1437,17 +1299,6 @@ fn schedule(cmd: ScheduleCmd) -> i32 {
             }
         }
     }
-}
-
-fn panel_task_keys(rec: &registry::ServerEntry) -> Vec<String> {
-    kora_core::helper::winhelper::ledger_keys("system.schedule", &installer::slug(&rec.name), None)
-}
-
-/// In the elevated worker (no-op elsewhere): the server folder is the panel person's, and the
-/// update task's name is not another Windows account's.
-fn panel_task_check(rec: &registry::ServerEntry, undo: bool) -> installer::Result<()> {
-    installer::system_ops::check_panel_dir(&rec.dir)?;
-    installer::system_ops::ledger_check(&panel_task_keys(rec), undo)
 }
 
 fn update(a: UpdateArgs) -> i32 {
@@ -2596,9 +2447,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Panel(_),
         ) => K::Other,
         // Already elevated (the worker) or run by it: never relaunched.
-        Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
-        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
-        Some(Command::Helper { .. }) => K::Other,
+        Some(Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
         Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. } }) => {
             K::Uninstall { dry_run: false }
         }
@@ -2654,7 +2503,6 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Schedule { cmd: ScheduleCmd::Set { .. } | ScheduleCmd::Off { .. } }) => one("change the automatic-update schedule"),
         Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
-        Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
         Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } }) => one("change which accounts may use Kora's administrator service"),
         Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => one("install or remove Kora's administrator service"),
         _ => vec![],
@@ -2736,8 +2584,8 @@ fn elevate_if_needed(cli: &Cli, effective: &Option<Command>) {
 }
 
 fn main() {
-    // An elevated child of the Windows worker or helper: drop every override variable first.
-    kora_core::helper::worker::scrub_overrides();
+    // A child of the administrator service: drop every override variable first.
+    kora_core::privsvc::exec::scrub_overrides();
     if std::env::args_os().any(|a| a == "--license-key" || a.to_string_lossy().starts_with("--license-key=")) {
         eprintln!(
             "Note: a licence key on the command line is visible to other programs on this computer (process list) and stays in your shell history. Prefer the CFX_LICENSE_KEY environment variable."
@@ -2753,22 +2601,12 @@ fn main() {
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
         command,
-        Some(
-            Command::ServiceHost { .. }
-                | Command::SelfUpdate { .. }
-                | Command::Helper { .. }
-                | Command::Service { .. }
-                | Command::AdminWorker(_)
-                | Command::AdminStep(_)
-                | Command::AdminDb(_)
-                | Command::Update(UpdateArgs { auto: true, .. })
-        )
+        Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Service { .. } | Command::AdminStep(_) | Command::AdminDb(_) | Command::Update(UpdateArgs { auto: true, .. }))
     );
     // The worker has a hidden window and its step children no terminal: never wait for a key.
     match &command {
-        Some(Command::AdminWorker(a)) => std::process::exit(admin_worker::admin_worker(a)),
-        Some(Command::AdminStep(a)) => std::process::exit(admin_worker::admin_step(a)),
-        Some(Command::AdminDb(a)) => std::process::exit(admin_worker::admin_db(a)),
+        Some(Command::AdminStep(a)) => std::process::exit(admin_step::admin_step(a)),
+        Some(Command::AdminDb(a)) => std::process::exit(admin_step::admin_db(a)),
         _ => {}
     }
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
@@ -2819,9 +2657,8 @@ fn main() {
         Some(Command::Start { server }) => control(&server, kora_core::service::ControlAction::Start),
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
-        Some(Command::Helper { cmd }) => helper(cmd),
         Some(Command::Service { cmd }) => service_cmd::service(cmd),
-        Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => unreachable!("handled above"),
+        Some(Command::AdminStep(_) | Command::AdminDb(_)) => unreachable!("handled above"),
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run, false),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
@@ -2836,7 +2673,7 @@ fn main() {
     finish(code);
 }
 
-mod admin_worker;
+mod admin_step;
 mod bare;
 mod branch;
 mod keys_cmd;
@@ -2956,69 +2793,44 @@ mod tests {
         assert!(p(&["webhook"]).is_err());
     }
 
+    /// The service never forwards a caller's text: it builds the child's arguments from its typed operation
+    /// (`privsvc::op::Op::child_args`). Every one of them must be understood by THIS command-line definition
+    /// as the command it stands for, so a changed flag breaks here and not in a customer's install.
     #[test]
-    fn the_helper_runs_only_the_privileged_commands() {
-        let any_dir = |_: &std::path::Path| Ok(());
-        let v = |verb: &str, a: &[&str]| helper_validate_for(verb, &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &any_dir);
-        for (verb, a) in [
-            ("install", &["--name", "a", "--dir", "/srv/a", "--mode", "prod", "--service", "--firewall"][..]),
-            ("self-update", &["--yes"]),
-            ("self-update", &["--yes", "--version", "v99.0.0"]),
-            ("schedule", &["set", "dev", "--daily", "04:00", "--as-user"]),
-            ("schedule", &["off", "dev"]),
-            ("app", &["install", "--yes", "--force"]),
-            ("app", &["uninstall", "--yes"]),
-            ("uninstall", &["--yes", "--delete-files"]),
-            ("uninstall", &["--app", "--yes"]),
-        ] {
-            assert!(v(verb, a).is_ok(), "{verb} {a:?}");
+    fn what_the_service_runs_is_understood_by_this_command_line() {
+        use kora_core::privsvc::op::{DbAction, Known, Op, StepId, When};
+        let cases = [
+            Op::Step { undo: false, step: StepId::Service, dir: "/srv/a".into(), known: None, keep_files: false, keep_db: false },
+            Op::Step { undo: true, step: StepId::Firewall, dir: "/srv/a".into(), known: Some(Known { name: "a".into(), game_port: 30120, txadmin_port: 40120 }), keep_files: true, keep_db: true },
+            Op::Step { undo: false, step: StepId::PrepareDb, dir: r"C:\Users\Jo Smith\kora\a".into(), known: None, keep_files: false, keep_db: false },
+            Op::DbServer(DbAction::Start),
+            Op::DbServer(DbAction::Install),
+            Op::StartDatabase,
+            Op::ScheduleSet { server: "a".into(), when: When::Default },
+            Op::ScheduleSet { server: "a".into(), when: When::Daily { hour: 3, minute: 5 } },
+            Op::ScheduleSet { server: "a".into(), when: When::Weekly { day: "fri", hour: 4, minute: 0 } },
+            Op::ScheduleOff { server: "a".into() },
+            Op::InstallGit,
+            Op::UpdateApply { version: None },
+            Op::UpdateApply { version: Some("v99.0.0".into()) },
+        ];
+        for op in cases {
+            let args = op.child_args();
+            let parsed = Cli::try_parse_from(std::iter::once("kora".to_string()).chain(args.iter().cloned()));
+            let cli = parsed.unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            assert!(cli.no_elevate, "{args:?}: the child never asks for administrator rights itself");
+            let ok = match (&op, cli.command) {
+                (Op::Step { undo, step, dir, .. }, Some(Command::AdminStep(a))) => a.action == if *undo { "undo" } else { "run" } && a.step == step.id() && a.dir == std::path::Path::new(dir),
+                (Op::DbServer(a), Some(Command::AdminDb(b))) => b.action == if *a == DbAction::Start { "start" } else { "install" },
+                (Op::StartDatabase, Some(Command::Check { start_database: true })) => true,
+                (Op::ScheduleSet { server, .. }, Some(Command::Schedule { cmd: ScheduleCmd::Set { server: s, as_user, as_system, .. } })) => s == *server && as_user && !as_system,
+                (Op::ScheduleOff { server }, Some(Command::Schedule { cmd: ScheduleCmd::Off { server: s } })) => s == *server,
+                (Op::InstallGit, Some(Command::Tools { cmd: ToolsCmd::Install { tool: Some(t) } })) => t == "git",
+                (Op::UpdateApply { version }, Some(Command::SelfUpdate { yes, version: v, .. })) => yes && v == *version,
+                _ => false,
+            };
+            assert!(ok, "{args:?} was not understood as {op:?}");
         }
-        for (verb, a) in [
-            ("delete", &["srv", "--yes"][..]),
-            ("service-host", &["srv"]),
-            ("start", &["srv"]),
-            ("panel", &[]),
-            ("helper", &["install"]),
-            ("webhook", &["show", "x"]),
-            ("install", &["--code", "KORA-7F3K-92QX"]),
-            ("install", &["--name", "a", "--bogus"]),
-            ("schedule", &["show", "dev"]),
-            ("app", &["status"]),
-            ("uninstall", &["--help"]),
-            ("self-update", &["--version"]),
-            ("--version", &[]),
-            ("install", &["--", "x"]),
-            // root would clone and set up whatever another catalogue lists
-            ("install", &["--name", "a", "--dir", "/srv/a", "--catalog", "https://evil.example/c.json"]),
-            ("install", &["--name", "a", "--dir", "/srv/a", "--catalog=/tmp/c.json"]),
-            // the folder must be given (so it can be checked)
-            ("install", &["--name", "a", "--mode", "prod"]),
-            // no going back to an older (or the same) release through the helper
-            ("self-update", &["--yes", "--version", "v0.3.4"]),
-            ("self-update", &["--yes", "--version", env!("CARGO_PKG_VERSION")]),
-            ("self-update", &["--yes", "--version", "nonsense"]),
-        ] {
-            assert!(v(verb, a).is_err(), "{verb} {a:?}");
-        }
-        assert!(v("self-update", &["--version", "v0.3.4"]).unwrap_err().contains("sudo kora self-update --version v0.3.4"));
-    }
-
-    #[test]
-    fn the_helper_installs_only_into_folders_the_check_accepts() {
-        let only_home = |d: &std::path::Path| if d.starts_with("/home/sam") { Ok(()) } else { Err(format!("not {}", d.display())) };
-        let v = |a: &[&str]| helper_validate_for("install", &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &only_home);
-        assert!(v(&["--name", "a", "--dir", "/home/sam/kora/a", "--mode", "prod"]).is_ok());
-        assert_eq!(v(&["--name", "a", "--dir", "/etc/systemd/system", "--mode", "prod"]), Err("not /etc/systemd/system".into()));
-        assert!(v(&["--name", "a", "--dir=/root/x", "--mode", "prod"]).is_err());
-    }
-
-    #[test]
-    fn the_helper_command_is_classified() {
-        use elevate::CmdKind as K;
-        let parse = |a: &[&str]| Cli::try_parse_from(std::iter::once("kora").chain(a.iter().copied())).unwrap().command;
-        assert_eq!(command_kind(&parse(&["helper", "install"])), K::Uninstall { dry_run: false });
-        assert_eq!(command_kind(&parse(&["helper", "status"])), K::Other);
-        assert_eq!(command_kind(&parse(&["helper", "serve"])), K::Other);
     }
 
     #[test]

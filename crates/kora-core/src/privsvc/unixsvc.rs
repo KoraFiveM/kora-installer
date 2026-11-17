@@ -23,16 +23,29 @@ use super::dispatch::{Host, InstallRecord, Progress, Ran, RunSpec};
 use super::op::MAX_LINE;
 use super::paths;
 use super::policy::{AccountId, Caller, Policy};
-use crate::helper::winhelper::Ledger;
-use crate::helper::PING;
+use crate::privsvc::ownership::Ledger;
+use crate::privsvc::wire::PING;
 
 const MAX_CONNECTIONS: usize = 16;
 
 pub use super::conn::Svc;
 
+/// The uid of the process at the other end of `s` (`SO_PEERCRED`).
+pub fn peer_uid_of(s: &UnixStream) -> io::Result<u32> {
+    use std::os::fd::AsRawFd;
+    let mut cred: libc::ucred = libc::ucred { pid: 0, uid: u32::MAX, gid: u32::MAX };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: `cred` and `len` are valid for the call and `len` is its real size.
+    let r = unsafe { libc::getsockopt(s.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&mut cred as *mut libc::ucred).cast(), &mut len) };
+    if r != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(cred.uid)
+}
+
 /// The caller from the connection (never from the request).
 pub fn caller_of(s: &UnixStream) -> Caller {
-    match crate::helper::server::peer_uid_of(s) {
+    match peer_uid_of(s) {
         Ok(0) => Caller { id: Some(AccountId::uid(0)), integrity: None, is_root: true, remote: false },
         Ok(u) => Caller { id: Some(AccountId::uid(u)), integrity: None, is_root: false, remote: false },
         Err(_) => Caller { id: None, integrity: None, is_root: false, remote: false },
@@ -168,7 +181,7 @@ impl Host for LinuxSvc {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
     }
     fn account_name(&self, id: &AccountId) -> String {
-        id.as_str().strip_prefix("uid:").and_then(|n| n.parse().ok()).and_then(crate::helper::install::lookup_account).map(|a| a.name).unwrap_or_default()
+        id.as_str().strip_prefix("uid:").and_then(|n| n.parse().ok()).and_then(crate::userhome::lookup_account).map(|a| a.name).unwrap_or_default()
     }
     fn folder_owner(&self, dir: &str) -> Result<Option<AccountId>, String> {
         let p = Path::new(dir);
@@ -184,7 +197,7 @@ impl Host for LinuxSvc {
         Ok(Some(AccountId::uid(m.uid())))
     }
     fn is_server_account(&self, id: &AccountId) -> bool {
-        let Some(a) = id.as_str().strip_prefix("uid:").and_then(|n| n.parse().ok()).and_then(crate::helper::install::lookup_account) else { return false };
+        let Some(a) = id.as_str().strip_prefix("uid:").and_then(|n| n.parse().ok()).and_then(crate::userhome::lookup_account) else { return false };
         (a.name == "kora" || a.name.starts_with("kora-")) && a.uid != 0 && a.uid < crate::service::account::uid_min()
     }
     fn install_record(&self, dir: &str) -> Option<InstallRecord> {
@@ -254,10 +267,10 @@ impl LinuxSvc {
     }
 
     fn run_child(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> io::Result<Ran> {
-        use crate::helper::worker::{ChildExecutor, Executor};
+        use crate::privsvc::exec::{ChildExecutor, Executor};
         let uid = caller.id.as_ref().and_then(|i| i.as_str().strip_prefix("uid:")).and_then(|n| n.parse::<u32>().ok()).ok_or_else(|| io::Error::other("no caller"))?;
-        let acct = crate::helper::install::lookup_account(uid).ok_or_else(|| io::Error::other("the caller's account has no passwd entry"))?;
-        let mut env = paths::linux_child_env(&acct.name, acct.uid, acct.gid, &acct.home, None);
+        let acct = crate::userhome::lookup_account(uid).ok_or_else(|| io::Error::other("the caller's account has no passwd entry"))?;
+        let mut env = paths::linux_child_env(&acct.name, acct.uid, acct.gid, &acct.home.to_string_lossy(), None);
         env.extend(spec.env.iter().map(|(k, v)| (k.clone(), v.clone())));
         let mut ex = ChildExecutor::new(self.exe.clone());
         ex.limit = spec.limit;
@@ -265,7 +278,7 @@ impl LinuxSvc {
         let mut data = None;
         let r = ex.run(spec.argv, &env, &mut |stream, line| {
             if stream == "stdout" {
-                if let Some(v) = crate::helper::worker::result_line(line) {
+                if let Some(v) = crate::privsvc::exec::result_line(line) {
                     data = Some(v);
                     return;
                 }

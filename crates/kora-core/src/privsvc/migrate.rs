@@ -14,7 +14,7 @@
 //! The decisions here are pure and tested on every OS; the OS layers gather the facts.
 
 use super::policy::AccountId;
-use crate::helper::winhelper::Ledger;
+use crate::privsvc::ownership::Ledger;
 
 // ---- update tasks ----------------------------------------------------------------------------------
 

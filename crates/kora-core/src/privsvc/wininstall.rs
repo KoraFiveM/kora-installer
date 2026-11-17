@@ -28,7 +28,7 @@ pub fn msi_success(code: u32) -> bool {
 /// allow as a public property (the MSI also allows the account that runs the installer).
 pub fn msi_params(msi: &str, allow_sid: Option<&str>) -> String {
     let mut p = format!("/i \"{msi}\" /passive /norestart");
-    if let Some(s) = allow_sid.filter(|s| crate::helper::winhelper::valid_user_sid(s)) {
+    if let Some(s) = allow_sid.filter(|s| crate::privsvc::identity::valid_user_sid(s)) {
         p.push_str(&format!(" ALLOWUSERS=\"{s}\""));
     }
     p
@@ -42,7 +42,7 @@ fn say(on: &mut dyn FnMut(&str), s: &str) {
 /// running this program is always added.
 pub fn install(allow: &[String], on: &mut dyn FnMut(&str)) -> Result<(), String> {
     let me = super::winsvc::current_user_sid();
-    let sid = me.clone().or_else(|| allow.iter().find_map(|a| crate::helper::winhelper::valid_user_sid(a).then(|| a.clone())));
+    let sid = me.clone().or_else(|| allow.iter().find_map(|a| crate::privsvc::identity::valid_user_sid(a).then(|| a.clone())));
     let src = self_update::Source::from_env();
     let rels = self_update::fetch_releases(&src).map_err(|e| e.to_string())?;
     let rel = release::pick_tag(&rels, env!("CARGO_PKG_VERSION"))
@@ -77,7 +77,7 @@ pub fn install(allow: &[String], on: &mut dyn FnMut(&str)) -> Result<(), String>
             return Err(format!("the installer does not match its checksum (expected {expected}, got {actual}). Nothing was installed."));
         }
         say(on, "Checksum OK. Windows will ask for administrator permission once: choose Yes.");
-        let system_root = crate::helper::winpipe::system_dirs().system_root;
+        let system_root = crate::privsvc::winapi::system_dirs().system_root;
         let msiexec = format!(r"{}\System32\msiexec.exe", system_root.trim_end_matches('\\'));
         let mut allow_sid = sid.clone();
         // an explicitly named account other than the caller is allowed by the MSI through ALLOWUSERS too

@@ -90,12 +90,7 @@ impl ToolchainEnv for SystemToolchain {
     }
 
     fn admin(&self) -> AdminState {
-        use crate::helper::client::Helper as _;
-        AdminState {
-            elevated: crate::elevate::is_elevated(),
-            helper: !cfg!(windows) && crate::helper::client::SocketClient::default().available(),
-            service: crate::monitor::panel_service::service_installed(crate::service::Platform::current()),
-        }
+        AdminState { elevated: crate::elevate::is_elevated(), helper: crate::privsvc::service_ready(), service: crate::monitor::panel_service::service_installed(crate::service::Platform::current()) }
     }
 }
 

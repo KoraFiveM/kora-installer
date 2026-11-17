@@ -28,7 +28,6 @@ Commands:
   restart        Restart a server's background service
   uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
   service        Kora's administrator service: who may use it, and whether it is running
-  helper         The optional privileged helper: lets the panel do the few things that need administrator rights
 
 Options:
       --no-elevate
@@ -124,14 +123,14 @@ Options:
       --auto-ports
           If a port is in use, silently use the next free one and say what changed
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
-
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
@@ -1574,94 +1573,8 @@ Options:
   -h, --help
           Print help
 
-===== kora helper =====
-The optional privileged helper: lets the panel do the few things that need administrator rights
-
-Usage: kora helper [OPTIONS] <COMMAND>
-
-Commands:
-  install    Install the helper service for your user account (needs administrator rights; run with sudo)
-  uninstall  Remove the helper service (needs administrator rights)
-  status     Say whether the helper is installed and running
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper serve =====
-Run the helper (started by its system service; not for people)
-
-Usage: kora helper serve [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper install =====
-Install the helper service for your user account (needs administrator rights; run with sudo)
-
-Usage: kora helper install [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper uninstall =====
-Remove the helper service (needs administrator rights)
-
-Usage: kora helper uninstall [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper status =====
-Say whether the helper is installed and running
-
-Usage: kora helper status [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora admin-worker =====
-Windows: Kora Panel's short-lived administrator helper (started through the permission prompt)
-
-Usage: kora admin-worker [OPTIONS]
-
-Options:
-      --pipe <PIPE>
-          The panel's pipe
-
-      --parent <PARENT>
-          The panel's process id
-
-      --selftest
-          CI only, on an account that is already elevated: run the panel's side and a worker without the prompt
-
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
 ===== kora admin-step =====
-One administrator step of an install or delete, run by that helper
+One administrator step of an install or delete, run by Kora's administrator service
 
 Usage: kora admin-step [OPTIONS] --step <STEP> --dir <DIR> <ACTION>
 
@@ -1702,7 +1615,7 @@ Options:
           Print help
 
 ===== kora admin-db =====
-Start (or install) Kora's own MariaDB on Windows, run by that helper
+Start (or install) Kora's own MariaDB on Windows, run by Kora's administrator service
 
 Usage: kora admin-db [OPTIONS] <ACTION>
 

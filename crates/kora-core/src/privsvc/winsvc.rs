@@ -17,9 +17,9 @@
 //!   service could not act as them anyway.
 //! * **Program.** Children are the protected `kora.exe`, started with an environment built from
 //!   nothing ([`crate::helper::worker::elevated_child_env`]) for the caller's account, whose profile
-//!   folder the service looks up itself ([`crate::helper::winpipe::profile_dir`]).
+//!   folder the service looks up itself ([`crate::privsvc::winapi::profile_dir`]).
 //! * **Client.** The panel checks that the pipe's owner is SYSTEM before sending a byte
-//!   ([`crate::helper::winhelper::check_server_owner`]): a program of an allowed account that made a
+//!   ([`crate::privsvc::identity::check_server_owner`]): a program of an allowed account that made a
 //!   pipe of its own is owned by that account.
 
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ use super::dispatch::{Host, InstallRecord, Progress, Ran, RunSpec};
 use super::op::MAX_LINE;
 use super::paths::{self, WinFiles};
 use super::policy::{self, AccountId, Caller, Policy};
-use crate::helper::winhelper::Ledger;
+use crate::privsvc::ownership::Ledger;
 
 type Handle = *mut c_void;
 const INVALID: Handle = -1isize as Handle;
@@ -212,13 +212,13 @@ fn read_thread_token() -> (Option<String>, Option<(String, String)>, u32) {
 
 pub struct WinSvc {
     pub files: WinFiles,
-    pub sys: crate::helper::worker::SystemDirs,
+    pub sys: crate::privsvc::winapi::SystemDirs,
     names: Mutex<HashMap<AccountId, (String, String)>>,
 }
 
 impl WinSvc {
     pub fn new() -> WinSvc {
-        let sys = crate::helper::winpipe::system_dirs();
+        let sys = crate::privsvc::winapi::system_dirs();
         WinSvc { files: paths::windows_files(&sys.program_files), sys, names: Mutex::new(HashMap::new()) }
     }
     fn remember(&self, id: &AccountId, who: Option<(String, String)>) {
@@ -236,7 +236,7 @@ impl Default for WinSvc {
 
 fn trusted_owner(path: &str) -> bool {
     // SYSTEM, Administrators, TrustedInstaller
-    crate::helper::winpipe::path_owner_sid(Path::new(path)).is_some_and(|o| matches!(o.as_str(), "S-1-5-18" | "S-1-5-32-544") || o.starts_with("S-1-5-80-"))
+    crate::privsvc::winapi::path_owner_sid(Path::new(path)).is_some_and(|o| matches!(o.as_str(), "S-1-5-18" | "S-1-5-32-544") || o.starts_with("S-1-5-80-"))
 }
 
 fn read_regular(path: &Path) -> Option<Vec<u8>> {
@@ -277,7 +277,7 @@ impl Host for WinSvc {
         if !m.is_dir() {
             return Err("it is not a folder".into());
         }
-        let owner = crate::helper::winpipe::path_owner_sid(Path::new(dir));
+        let owner = crate::privsvc::winapi::path_owner_sid(Path::new(dir));
         // An owner that is not an ordinary account (Administrators, SYSTEM): `uid:0`, never a caller's.
         Ok(owner.map(|o| AccountId::sid(&o).unwrap_or_else(|_| AccountId::uid(0))))
     }
@@ -343,11 +343,11 @@ impl Svc for WinSvc {
 
 impl WinSvc {
     fn run_child(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> std::io::Result<Ran> {
-        use crate::helper::worker::{elevated_child_env, ChildExecutor, Executor};
+        use crate::privsvc::exec::{elevated_child_env, ChildExecutor, Executor};
         let id = caller.id.clone().ok_or_else(|| std::io::Error::other("no caller"))?;
         let (domain, name) = self.names.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned().unwrap_or_default();
-        let user = crate::helper::winpipe::PanelUser { sid: id.to_string(), domain, name, admin_member: false };
-        let profile = crate::helper::winpipe::profile_dir(&user.sid);
+        let user = crate::privsvc::exec::PanelUser { sid: id.to_string(), domain, name, admin_member: false };
+        let profile = crate::privsvc::winapi::profile_dir(&user.sid);
         let mut env = elevated_child_env(&self.sys, &user, profile.as_deref(), None);
         env.push((paths::SERVICE_ENV.into(), "1".into()));
         env.extend(spec.env.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -357,7 +357,7 @@ impl WinSvc {
         let mut data = None;
         let r = ex.run(spec.argv, &env, &mut |stream, line| {
             if stream == "stdout" {
-                if let Some(v) = crate::helper::worker::result_line(line) {
+                if let Some(v) = crate::privsvc::exec::result_line(line) {
                     data = Some(v);
                     return;
                 }
@@ -621,7 +621,7 @@ fn open_client() -> Result<File, ClientError> {
         // SAFETY: allocated by GetSecurityInfo.
         unsafe { LocalFree(sd) };
     }
-    if let Err(why) = crate::helper::winhelper::check_server_owner(owner_sid.as_deref()) {
+    if let Err(why) = crate::privsvc::identity::check_server_owner(owner_sid.as_deref()) {
         // SAFETY: a handle we opened and have not handed on.
         unsafe { CloseHandle(h) };
         return Err(ClientError::Unavailable(format!("Nothing was sent: {why}.")));
@@ -637,7 +637,7 @@ pub fn call(verb: &str, args: &[String], env: &[(String, String)], on_line: &mut
 }
 
 pub fn probe() -> Result<String, ClientError> {
-    conn::interpret_ping(call(crate::helper::PING, &[], &[], &mut |_| {}))
+    conn::interpret_ping(call(crate::privsvc::wire::PING, &[], &[], &mut |_| {}))
 }
 
 // ---- helpers for the command line (`kora service install | allow | status`) ---------------------------------------
@@ -699,7 +699,7 @@ pub fn lookup_account_sid(name: &str) -> Option<String> {
 
 /// Where the settings file is (from `%ProgramFiles%` as Windows reports it).
 pub fn policy_path() -> std::path::PathBuf {
-    paths::windows_files(&crate::helper::winpipe::system_dirs().program_files).policy.into()
+    paths::windows_files(&crate::privsvc::winapi::system_dirs().program_files).policy.into()
 }
 
 #[repr(C)]

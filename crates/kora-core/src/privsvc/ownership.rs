@@ -3,16 +3,66 @@
 //! owner from the OS, read on the privileged side without following links).
 //!
 //! The record of what the service made for whom is the existing ownership ledger
-//! ([`crate::helper::winhelper::Ledger`], `owners.json`): keys `service:kora-<slug>`,
+//! ([`Ledger`], `owners.json`): keys `service:kora-<slug>`,
 //! `firewall:<slug>`, `task:<slug>`, `db:<name>`, value = the owning [`AccountId`]. This module only
 //! adds the service's strict rules and a loader that does not mistake an unreadable file for an
 //! empty one.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use super::policy::AccountId;
-use crate::helper::winhelper::{ledger_keys, Ledger};
-use crate::helper::Rejected;
+use serde::{Deserialize, Serialize};
+
+use super::wire::Rejected;
+
+/// Which Windows account each system-wide thing was made for: `"service:kora-main"`,
+/// `"firewall:main"`, `"task:main"`, `"db:kora_ab12"` → SID. Written by the elevated step children
+/// (worker and helper) after they made something; read by the helper before it removes anything.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ledger {
+    #[serde(default)]
+    pub owners: BTreeMap<String, String>,
+}
+
+impl Ledger {
+    pub fn load(path: &Path) -> Ledger {
+        std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    /// Write via a temporary file and a rename (no half-written ledger).
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(d) = path.parent() {
+            std::fs::create_dir_all(d)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
+        std::fs::rename(&tmp, path)
+    }
+
+    pub fn owner(&self, key: &str) -> Option<&str> {
+        self.owners.get(key).map(String::as_str)
+    }
+
+    pub fn record(&mut self, key: String, sid: &str) {
+        self.owners.insert(key, sid.to_string());
+    }
+
+    pub fn forget(&mut self, key: &str) {
+        self.owners.remove(key);
+    }
+}
+
+/// The ledger keys of one step for the server named `slug` (`db` = the database name, `build.db`).
+pub fn ledger_keys(step: &str, slug: &str, db: Option<&str>) -> Vec<String> {
+    match step {
+        "system.service" => vec![format!("service:kora-{slug}")],
+        "system.firewall" => vec![format!("firewall:{slug}")],
+        "system.schedule" => vec![format!("task:{slug}")],
+        "build.db" => db.map(|d| vec![format!("db:{d}")]).unwrap_or_default(),
+        _ => vec![],
+    }
+}
 
 /// The ledger for the service: a missing file is an empty ledger, an unreadable or damaged one is
 /// an error (the service then refuses to change anything rather than forgetting who owns what).

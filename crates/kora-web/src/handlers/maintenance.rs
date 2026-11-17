@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{blocking, ApiError, AppState};
-use kora_core::helper::worker::Context;
+use kora_core::privsvc::problems::Context;
 
 /// A job error that keeps a Problem's code and choices (the declined prompt's "Ask again", ...).
 fn job_error(e: ApiError) -> String {

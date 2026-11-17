@@ -17,7 +17,6 @@ pub mod feedback;
 pub mod firewall;
 pub mod fsutil;
 pub mod git;
-pub mod helper;
 pub mod hub;
 pub mod installer;
 pub mod keystore;

@@ -78,7 +78,7 @@ pub fn socket_owner_ok(owner_uid: u32) -> bool {
 
 /// The environment of a Linux child: built from nothing. System-only `PATH`, the caller's account
 /// (looked up by the service from the OS by uid, never from the request), `KORA_SERVICE=1` (turns on
-/// the stricter checks in the steps, see [`crate::helper::winhelper::in_service`]'s Linux twin
+/// the stricter checks in the steps, see [`crate::privsvc::paths::in_service`]'s Linux twin
 /// [`in_service`]). No `KORA_*` override, no `GIT_*`, no `LD_*`.
 pub fn linux_child_env(user: &str, uid: u32, gid: u32, home: &str, kora_home: Option<&str>) -> Vec<(String, String)> {
     let mut v = vec![

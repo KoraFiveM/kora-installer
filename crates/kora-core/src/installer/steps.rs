@@ -1357,7 +1357,7 @@ impl InstallStep {
             }
             tail.extend(reg.steps);
             // In the opt-in helper the person's own process grants the folder rights (see above).
-            if !crate::helper::winhelper::in_service() {
+            if !crate::privsvc::paths::in_service() {
                 tail.extend(service::windows_grant_plan(&server).steps);
             }
         } else {

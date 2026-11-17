@@ -216,7 +216,7 @@ fn migrate(quiet: bool, dry_run: bool) -> i32 {
     let r = kora_core::privsvc::migrate_os::unix::migrate(&kora_core::privsvc::unixsvc::Files::system(), dry_run, &mut say);
     #[cfg(windows)]
     let r = (|| -> Result<(), String> {
-        let sys = kora_core::helper::winpipe::system_dirs();
+        let sys = kora_core::privsvc::winapi::system_dirs();
         let files = paths_windows(&sys.program_files);
         let policy = manage::load_or_new(&policy_path())?;
         kora_core::privsvc::migrate_os::windows::unelevate_tasks(&sys.program_files, dry_run, &mut say)?;

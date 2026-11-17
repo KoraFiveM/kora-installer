@@ -19,8 +19,8 @@ use super::audit::{self, Outcome};
 use super::op::{self, Op, StepId};
 use super::ownership;
 use super::policy::{self, AccountId, Caller, Policy};
-use crate::helper::winhelper::Ledger;
-use crate::helper::Rejected;
+use crate::privsvc::ownership::Ledger;
+use crate::privsvc::wire::Rejected;
 
 /// What the service needs from the operating system. Everything the caller could influence is
 /// re-read through this, on the privileged side (implementations never follow links).

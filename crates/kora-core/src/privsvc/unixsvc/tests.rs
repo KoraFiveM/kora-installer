@@ -1,5 +1,5 @@
 use super::*;
-use crate::helper::{Message, Request};
+use crate::privsvc::wire::{Message, Request};
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::os::unix::fs::PermissionsExt;

@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use super::migrate::{adoption, Candidate};
 use super::policy::{AccountId, Policy};
-use crate::helper::winhelper::Ledger;
 use crate::installer::registry::Registry;
+use crate::privsvc::ownership::Ledger;
 
 /// What an account looks like to the migration.
 #[derive(Debug, Clone)]
@@ -91,21 +91,39 @@ pub fn adopt_for(
 #[cfg(unix)]
 pub mod unix {
     use super::*;
+
+    const OLD_UNIT_NAME: &str = "kora-helper.service";
+    const OLD_UNIT_PATH: &str = "/etc/systemd/system/kora-helper.service";
+    const OLD_CONFIG_PATH: &str = "/etc/kora/helper.json";
+    const OLD_PROGRAM: &str = "/usr/local/libexec/kora/kora";
+
+    /// What removes the old helper: stop and disable its unit, take away the unit, its copy of Kora and its settings.
+    fn old_helper_removal() -> crate::service::Plan {
+        use crate::service::{Plan, SystemStep};
+        Plan::new(vec![
+            SystemStep::run("Stop the old helper", "systemctl", &["disable", "--now", OLD_UNIT_NAME]).tolerant(),
+            SystemStep::remove("Remove the old helper service", OLD_UNIT_PATH),
+            SystemStep::run("Tell systemd the old service is gone", "systemctl", &["daemon-reload"]).tolerant(),
+            SystemStep::remove("Remove the old helper's copy of Kora", OLD_PROGRAM),
+            SystemStep::remove_dir_if_empty("Remove the old helper's folder", "/usr/local/libexec/kora"),
+            SystemStep::remove("Remove the old helper settings", OLD_CONFIG_PATH),
+        ])
+    }
     use crate::privsvc::unixsvc::{Files, LinuxSvc};
     use std::os::unix::fs::MetadataExt;
 
-    /// The old helper's unit, copy and settings (see `helper::install`).
+    /// The old (v0.7.0) Linux helper's unit, copy and settings.
     pub fn old_helper_present() -> bool {
-        Path::new(crate::helper::UNIT_PATH).exists() || Path::new(crate::helper::CONFIG_PATH).exists() || Path::new(crate::helper::HELPER_EXE).exists()
+        Path::new(OLD_UNIT_PATH).exists() || Path::new(OLD_CONFIG_PATH).exists() || Path::new(OLD_PROGRAM).exists()
     }
 
     /// Everything the Linux migration does. `say` gets one line per thing done.
     pub fn migrate(files: &Files, dry_run: bool, say: &mut dyn FnMut(&str)) -> Result<(), String> {
-        use crate::helper::install::{lookup_account, uninstall_plan};
+        use crate::userhome::lookup_account;
         let mut policy = super::super::manage::load_or_new(&files.policy)?;
         // 1. The old helper: its account stays allowed; its unit, copy and settings go.
         if old_helper_present() {
-            if let Some(id) = std::fs::read_to_string(crate::helper::CONFIG_PATH).ok().and_then(|t| super::super::migrate::old_helper_account(&t)) {
+            if let Some(id) = std::fs::read_to_string(OLD_CONFIG_PATH).ok().and_then(|t| super::super::migrate::old_helper_account(&t)) {
                 if !policy.contains(&id) {
                     say(&format!("The account that used the old helper ({id}) may use the new service."));
                     if !dry_run {
@@ -117,7 +135,7 @@ pub mod unix {
             }
             say("Removing the old Kora helper (its service, its copy of Kora and its settings).");
             if !dry_run {
-                crate::service::apply_plan(&uninstall_plan(), &crate::service::SystemRunner).map_err(|e| e.to_string())?;
+                crate::service::apply_plan(&old_helper_removal(), &crate::service::SystemRunner).map_err(|e| e.to_string())?;
             }
         }
         // 2. Things made before the ownership records existed: adopted for the accounts that can be shown to own them.
@@ -204,13 +222,13 @@ pub mod windows {
             .accounts
             .iter()
             .filter_map(|a| {
-                let home = PathBuf::from(crate::helper::winpipe::profile_dir(a.id.as_str())?);
+                let home = PathBuf::from(crate::privsvc::winapi::profile_dir(a.id.as_str())?);
                 Some(Person { id: a.id.clone(), registry: home.join("AppData").join("Local").join("Kora").join("servers.json"), home })
             })
             .collect();
         let owner_of = |d: &Path| -> Option<AccountId> {
             crate::fsutil::check_links(d).ok()?;
-            let o = crate::helper::winpipe::path_owner_sid(d)?;
+            let o = crate::privsvc::winapi::path_owner_sid(d)?;
             AccountId::sid(&o).ok()
         };
         let rn = SystemRunner;
@@ -313,7 +331,7 @@ pub fn own_copy_path() -> Option<PathBuf> {
 pub fn finish_upgrade_user(dry_run: bool) -> Vec<String> {
     let mut said = Vec::new();
     let Ok(me) = std::env::current_exe() else { return said };
-    let pf = if cfg!(windows) { Some(crate::helper::winpipe::system_dirs().program_files) } else { None };
+    let pf = if cfg!(windows) { Some(crate::privsvc::winapi::system_dirs().program_files) } else { None };
     if !super::paths::program_location_ok(&me.to_string_lossy(), cfg!(windows), pf.as_deref()) {
         return said;
     }
