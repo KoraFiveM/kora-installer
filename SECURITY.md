@@ -21,7 +21,11 @@ reasonable time to release a fix before you disclose publicly.
   matching `Origin` (when sent) and an `X-Kora` header (CSRF).
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
   `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
-- Licence keys, database passwords and webhook addresses are accepted but never returned.
+- Licence keys, database passwords and webhook addresses are accepted but never returned. Saved licence keys live in
+  `secrets.json` in the Kora folder (plain text, readable only by you: `0600` from creation on Linux, inherited permissions
+  removed on Windows, atomic writes, never replaced when unreadable); the API shows only a key's name and last four characters.
+  A stopped install or the saved answers refer to a saved key by name and never contain the key. Only admins and this
+  computer can add, rename, replace or delete keys.
 - The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, or a
   helper (`kora helper`, Linux) that accepts only Kora's fixed list of privileged actions and checks the calling user.
 - Remote access (`--bind <ip> --remote`) is off by default and uses plain HTTP: use Tailscale, WireGuard or an SSH tunnel, never
@@ -39,7 +43,7 @@ Kora Installer is pre-release software. Only the newest release receives securit
 ## In scope
 
 - **Privilege elevation:** UAC / `sudo` handling, anything that runs with more rights than needed, services and scheduled tasks.
-- **Secrets handling:** the txAdmin password, database passwords, licence key and tokens (files, permissions, logs, clipboard).
+- **Secrets handling:** the txAdmin password, database passwords, licence key and tokens (files, permissions, logs, clipboard), including the saved-keys file `secrets.json`.
 - **Download verification:** SHA-256 checks and HTTPS enforcement in `kora` and in `install.sh` / `install.ps1`, and the release artifacts.
 - **The panel:** authentication, session handling, the `Host` / `Origin` / `X-Kora` checks, the Content-Security-Policy, anything that lets a web page or another local user act on your servers, and anything that returns a secret to the browser.
 - Overwriting or deleting files the installer should not touch.

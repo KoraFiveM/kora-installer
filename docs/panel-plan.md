@@ -101,6 +101,13 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | install_start | POST /installs | body = `InstallRequest`; job with `ProgressEvent`s |
 | install_resume | POST /installs/{job}/resume | `{skip?}`: carry on with a stopped install (retry the failed step, or skip it when safe); job |
 | install_log | GET /installs/{job}/log | |
+| keys_list | GET /keys | saved licence keys: name, last 4, servers using it; never a full key; `can_manage` |
+| key_add | POST /keys | `{name, license_key}`; admins |
+| key_update | PUT /keys/{name} | `{new_name?, license_key?}`; admins |
+| key_remove | DELETE /keys/{name} | admins; installed servers are untouched |
+| server_key_set | PUT /servers/{s}/licence-key | `{name}` (a saved key) or `{license_key, save_as?}` (admins); answers whether a restart is needed |
+| profile_get | GET /profile | remembered Cfx.re name / identifier / GitHub owner (not secret) |
+| profile_set | PUT /profile | `null` forgets a field; admins |
 | self_update_check | GET /self-update | |
 | self_update_apply | POST /self-update | `{version?}`; job |
 | app_status | GET /app | |

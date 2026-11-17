@@ -95,7 +95,8 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 ## Everyday commands
 
 `kora status`, `kora start|stop|restart`, `kora schedule show|set|off <server>`, `kora delete <server>`,
-`kora panel` (web panel), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise).
+`kora keys list|add|replace|rename|remove|use` (saved licence keys; a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line; `kora install --license-key-name <name>` uses one), `kora profile show|forget` (the remembered Cfx.re name and GitHub owner),
+`kora panel` (web panel), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise; your saved keys are kept unless you say yes).
 
 ## Status and limits
 
