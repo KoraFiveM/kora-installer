@@ -1,6 +1,9 @@
 //! The privileged helper from the panel's side: without it every privileged action still answers
 //! `needs_elevation`; with a (fake) helper the action runs and succeeds. Linux/Unix helper only, but the
-//! "no helper" cases hold everywhere.
+//! "no helper" cases hold everywhere a panel is not already an administrator. On Windows the panel uses its
+//! administrator worker instead (tests/admin_worker.rs), and the CI runner there is elevated, so this file is
+//! for Unix.
+#![cfg(unix)]
 use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
