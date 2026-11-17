@@ -1,0 +1,161 @@
+/**
+ * Translations: `t('area.id', { params })`. See docs/translations.md for the whole picture.
+ *
+ *  - English (the catalogue in ./en/<area>.ts) is the source of truth. A file that uses ids of an area imports that
+ *    area's module (`import '@/i18n/en/servers'`), which registers it: the strings travel in the same chunk as the
+ *    page that uses them, so the first load carries only what the first screen needs.
+ *  - Other languages are one lazily loaded file each (./de/index.ts). A missing id falls back to English.
+ *  - `t` reads the current language from module state; the app re-renders from the top when it changes (App.tsx).
+ *    Do not call `t` while a module is being loaded (top-level constants): it would be fixed to the language at that
+ *    moment. Keep ids in the constant and call `t` where the text is shown.
+ */
+import { format, mapText, parse, type Context, type Node, type Value } from './icu'
+import { intlFor, intlLocale } from './format'
+import { DEFAULT_LOCALE, STORAGE_KEY, detect, infoOf, offered } from './locales'
+import { pseudo } from './pseudo'
+import type { MessageId, MessageParams, PlainId, RichId } from './types'
+
+export type { MessageId, MessageParams, PlainId, RichId } from './types'
+export { LOCALES, offered, infoOf, DEFAULT_LOCALE } from './locales'
+export { intlFor, clock } from './format'
+
+type Table = Record<string, string>
+
+const tables = new Map<string, Table>()
+const parsed = new Map<string, Node[]>()
+const warned = new Set<string>()
+let current = DEFAULT_LOCALE
+const listeners = new Set<() => void>()
+
+/** Development and the mock build (browser tests) have the pseudo-language and a `?lang=` switch; production does not. */
+export const DEV_LOCALES: boolean = typeof __KORA_MOCK__ !== 'undefined' && __KORA_MOCK__ ? true : import.meta.env.DEV
+
+/** Add messages of a language (called by the catalogue modules). */
+export function register(locale: string, messages: Table): void {
+  const t = tables.get(locale) ?? {}
+  Object.assign(t, messages)
+  tables.set(locale, t)
+}
+
+export function hasLocale(locale: string): boolean {
+  return tables.has(locale)
+}
+
+function warnOnce(key: string, text: string) {
+  if (!DEV_LOCALES || warned.has(key)) return
+  warned.add(key)
+  console.warn(`[i18n] ${text}`)
+}
+
+/** The parsed message in the current language (English when it has none; the id itself, as a last resort). */
+function lookup(id: string): { nodes: Node[]; locale: string } {
+  const key = `${current}\0${id}`
+  const hit = parsed.get(key)
+  if (hit) return { nodes: hit, locale: current }
+  let src: string | undefined
+  let from = current
+  if (current === 'en-XA') {
+    src = tables.get('en')?.[id]
+  } else {
+    src = tables.get(current)?.[id]
+    if (src === undefined && current !== 'en') {
+      src = tables.get('en')?.[id]
+      from = 'en'
+      if (src !== undefined) warnOnce(`${current}:${id}`, `"${id}" has no ${current} translation yet; showing English`)
+    }
+  }
+  if (src === undefined) {
+    warnOnce(`missing:${id}`, `unknown message id "${id}"`)
+    const nodes: Node[] = [id]
+    return { nodes, locale: from }
+  }
+  let nodes = parse(src)
+  if (current === 'en-XA') nodes = ['[', ...mapText(nodes, pseudo), ']']
+  parsed.set(key, nodes)
+  return { nodes, locale: current }
+}
+
+function context(params: Record<string, Value>, id: string): Context {
+  return { locale: current, params, intl: intlFor(current), warn: (w) => warnOnce(`${id}:${w}`, `${id}: ${w}`) }
+}
+
+type ArgsFor<K extends MessageId> = K extends keyof MessageParams ? [params: MessageParams[K]] : []
+
+/** The text of a message. Messages with <tags> need `rich()` (react.tsx). */
+export function t<K extends PlainId>(id: K, ...args: ArgsFor<K>): string {
+  const params = ((args as unknown[])[0] ?? {}) as Record<string, Value>
+  return format(lookup(id).nodes, context(params, id)).join('')
+}
+
+/** The pieces of a message with tags (strings and what the tag functions returned). `rich()` wraps this. */
+export function pieces<K extends RichId>(id: K, params: Record<string, Value>): unknown[] {
+  return format(lookup(id).nodes, context(params, id))
+}
+
+export function locale(): string {
+  return current
+}
+
+export function subscribe(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+// ---- choosing a language ------------------------------------------------------------------------------------------
+
+/** Languages other than English are separate files, fetched when chosen. */
+const loaders: Record<string, () => Promise<unknown>> = {
+  de: () => import('./de'),
+}
+
+export async function load(code: string): Promise<void> {
+  if (tables.has(code) || code === 'en' || code === 'en-XA') return
+  const l = loaders[code]
+  if (l) await l()
+}
+
+/** Show the panel in `code` (loading its messages first), remember it for this browser, and tell the page. */
+export async function setLocale(code: string, remember = true): Promise<void> {
+  const ok = offered(DEV_LOCALES).some((l) => l.code === code) ? code : DEFAULT_LOCALE
+  try {
+    await load(ok)
+  } catch {
+    // The file could not be fetched (offline, or the panel was updated meanwhile): stay as we are.
+    return
+  }
+  current = ok
+  parsed.clear()
+  if (typeof document !== 'undefined') {
+    const info = infoOf(ok)
+    document.documentElement.lang = ok === 'en' ? 'en-GB' : ok === 'en-XA' ? 'en-GB-x-pseudo' : intlLocale(ok)
+    document.documentElement.dir = info.dir
+  }
+  if (remember) {
+    try {
+      localStorage.setItem(STORAGE_KEY, ok)
+    } catch {
+      // Storage is blocked: the choice lasts until the page is closed.
+    }
+  }
+  for (const f of listeners) f()
+}
+
+/** The language to start in: `?lang=` (development and mock builds only), then what this browser remembered, then the browser's own list. */
+export function initialLocale(): string {
+  if (DEV_LOCALES && typeof location !== 'undefined') {
+    const q = new URLSearchParams(location.search).get('lang')
+    if (q && offered(true).some((l) => l.code === q)) return q
+  }
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved && offered(DEV_LOCALES).some((l) => l.code === saved)) return saved
+  } catch {
+    // no storage
+  }
+  return detect(typeof navigator !== 'undefined' ? (navigator.languages?.length ? navigator.languages : [navigator.language]) : [], DEV_LOCALES)
+}
+
+/** Called once before the first render: load and apply the starting language (not stored: only a choice in the picker is). */
+export async function boot(): Promise<void> {
+  await setLocale(initialLocale(), false)
+}
