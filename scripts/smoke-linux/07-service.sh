@@ -5,13 +5,15 @@
 # what it saw, and a failure prints the service's journal.
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLIENT="$HERE/svc_client.py"
 A=kora-smoke-a   # allowed
 B=kora-smoke-b   # on the machine, never allowed
 C=kora-smoke-c   # allowed, but not the owner of A's server
 D=kora-smoke-d   # used the OLD helper (v0.7.0), so it stays allowed after the upgrade
 WORK="$(mktemp -d)"
 DEB="$WORK/kora.deb"
+# The other accounts cannot read the runner's home (the repository is in it): give them a copy of the client to run.
+PUB="$(mktemp -d)"; chmod 755 "$PUB"; install -m 0644 "$HERE/svc_client.py" "$PUB/svc_client.py"
+CLIENT="$PUB/svc_client.py"
 
 diag() {
   echo "----- diagnostics -----"
