@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { DbChoice } from '@/api/types'
+import type { DbChoice, Problem } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
@@ -162,7 +162,7 @@ const DB_OPTIONS: { v: DbChoice; label: string; hint: string }[] = [
 ]
 
 export function DatabaseStep({ f, set }: StepProps) {
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; message: string; problem?: Problem | null } | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<unknown>(null)
   const problem = dbLoginProblem(f)
@@ -201,7 +201,10 @@ export function DatabaseStep({ f, set }: StepProps) {
             </div>
           )}
           <Button disabled={busy || !!problem} onClick={test}>Test login</Button>
-          {result && <Alert tone={result.ok ? 'success' : 'danger'}>{result.message}</Alert>}
+          {result && !result.ok && result.problem
+            // The database is installed but stopped: the same "Start it for me" as everywhere, then the test runs again by itself.
+            ? <ErrorNotice error={result.problem} onFixed={test} />
+            : result && <Alert tone={result.ok ? 'success' : 'danger'}>{result.message}</Alert>}
           <ErrorNotice error={err} />
         </fieldset>
       )}
@@ -243,8 +246,8 @@ export function LicenceStep({ f, set }: StepProps) {
   const noKeysForYou = keys.isSuccess && saved.length === 0 && !canManage
   return (
     <div className="space-y-4">
-      {goneName && <Alert tone="warning">The saved key &quot;{goneName}&quot; is not there any more (it was renamed or deleted). Pick another one{canManage ? ' or add it again' : ''}.</Alert>}
-      {keys.isError && <ErrorNotice error={keys.error} title="Kora cannot read your saved keys" />}
+      {goneName && <Alert tone="warning">The saved licence key &quot;{goneName}&quot; is not there any more (it was renamed or deleted). Pick another one{canManage ? ' or add it again' : ''}.</Alert>}
+      {keys.isError && <ErrorNotice error={keys.error} title="Kora cannot read your saved licence keys" />}
       {saved.length > 0 && (
         <fieldset className="space-y-2">
           <legend className="mb-1 text-sm text-muted-foreground">Which licence key should this server use?</legend>
@@ -252,7 +255,7 @@ export function LicenceStep({ f, set }: StepProps) {
             <Radio key={k.name} name="licence-pick" checked={picking && f.licenceName === k.name} onChange={() => set({ licenceChoice: 'saved', licenceName: k.name })}
               label={k.name} hint={`Key ending ${k.last4}${k.servers.length > 0 ? `. Used by ${k.servers.join(', ')}.` : '.'}`} />
           ))}
-          {canManage && <Radio name="licence-pick" checked={f.licenceChoice === 'new'} onChange={() => set({ licenceChoice: 'new' })} label="Add a new key" hint="Paste a key you have not used here before." />}
+          {canManage && <Radio name="licence-pick" checked={f.licenceChoice === 'new'} onChange={() => set({ licenceChoice: 'new' })} label="Add a new licence key" hint="Paste a key you have not used here before." />}
         </fieldset>
       )}
       {noKeysForYou && <Alert tone="info">There are no saved licence keys yet. Only an administrator can add one: ask them to add it in Settings, under Licence keys.</Alert>}

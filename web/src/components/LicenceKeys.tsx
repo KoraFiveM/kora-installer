@@ -66,7 +66,7 @@ export function LicenceKeysCard() {
           Keys you save here can be picked by name when you install a server or change a server&apos;s key, so you never paste them twice.
           They are kept in a private file on this computer{q.data?.path ? <> (<code className="font-mono text-xs">{q.data.path}</code>)</> : ''} that only you can read, and Kora only ever shows the last 4 characters.
         </p>
-        <ErrorNotice error={q.error} title="Kora cannot read your saved keys" />
+        <ErrorNotice error={q.error} title="Kora cannot read your saved licence keys" />
         {q.isSuccess && keys.length === 0 && <p className="text-sm">No keys saved yet.{can ? ' Add one below, or tick "Save this key" when you install a server.' : ' Ask an administrator to add one.'}</p>}
         {keys.length > 0 && (
           <ul className="divide-y divide-border rounded-md border border-border" aria-label="Saved licence keys">

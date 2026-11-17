@@ -844,7 +844,7 @@ route('POST', '/checks/disk', (_m, b) => {
 })
 route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
-  if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() } satisfies T.DbLoginCheck
+  if (beh.trouble || mockDbStoppedProblem() || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() } satisfies T.DbLoginCheck
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
 })
 route('POST', '/checks/cfx', (_m, b) => {
