@@ -8,6 +8,8 @@ use kora_core::elevate;
 use kora_core::firewall::ports::{self, PortProber, SystemProber};
 use kora_core::installer::{self, gitops, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, RollbackOptions, StepStatus};
 use kora_core::launch;
+// auto-imports
+use crate::ui::{ask_yes_no, confirm, print_lines, server_dir, Terminal};
 
 #[derive(Parser)]
 #[command(name = "kora", version, about = "Kora installer and server manager")]
@@ -839,12 +841,6 @@ enum AppCmd {
     },
 }
 
-fn print_lines(prefix: &str, lines: &[String]) {
-    for l in lines {
-        println!("{prefix}{l}");
-    }
-}
-
 /// `kora app install`: the per-user shortcuts that open the panel. No administrator rights.
 fn app_install(no_desktop_shortcut: bool, dry_run: bool) -> i32 {
     use kora_core::app_install::user;
@@ -1566,27 +1562,6 @@ fn update(a: UpdateArgs) -> i32 {
     }
 }
 
-fn confirm(question: &str) -> bool {
-    use std::io::Write;
-    print!("{question} [y/N] ");
-    let _ = std::io::stdout().flush();
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line).is_ok() && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-}
-
-/// The folder of `server` (a registered name or a folder).
-fn server_dir(server: &str) -> Result<std::path::PathBuf, String> {
-    let reg = registry::Registry::load().unwrap_or_default();
-    if let Some(e) = reg.find(server) {
-        return Ok(e.dir.clone());
-    }
-    let p = std::path::Path::new(server);
-    if p.join("server.cfg").is_file() || p.join("kora-server.json").is_file() {
-        return Ok(p.to_path_buf());
-    }
-    Err(format!("there is no server called '{server}' (see `kora status`), and it is not a server folder"))
-}
-
 fn print_asset_plan(p: &kora_core::paidassets::ImportPlan) {
     use kora_core::paidassets::{human, CATEGORY};
     println!("{}:", p.zip_name);
@@ -1807,26 +1782,6 @@ fn delete(server: &str, keep_files: bool, keep_db: bool, yes: bool) -> i32 {
         Err(e) => {
             eprintln!("error: {e}");
             1
-        }
-    }
-}
-
-/// Asks on the terminal; an empty answer takes the default.
-struct Terminal;
-
-impl installer::uninstall::Asker for Terminal {
-    fn ask(&mut self, question: &str, default_yes: bool) -> bool {
-        use std::io::Write;
-        print!("{question} {} ", if default_yes { "[Y/n]" } else { "[y/N]" });
-        let _ = std::io::stdout().flush();
-        let mut line = String::new();
-        if std::io::stdin().read_line(&mut line).is_err() {
-            return false;
-        }
-        match line.trim().to_ascii_lowercase().as_str() {
-            "" => default_yes,
-            "y" | "yes" => true,
-            _ => false,
         }
     }
 }
@@ -2222,18 +2177,6 @@ fn print_running(r: &Running) {
         Running::Background { .. } => println!("(`kora panel --remove-service` stops and removes it; `kora panel --foreground` runs a separate one in this window.)"),
         Running::Window { .. } => println!("(It stops when that window closes. `kora panel --install-service` keeps one running in the background instead.)"),
     }
-}
-
-/// Ask a yes/no question on the terminal; an empty answer means yes.
-fn ask_yes_no(question: &str) -> bool {
-    use std::io::Write;
-    print!("{question}");
-    let _ = std::io::stdout().flush();
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).is_err() {
-        return false;
-    }
-    !matches!(line.trim().to_lowercase().as_str(), "n" | "no")
 }
 
 /// The port for a new background panel: the asked-for one, else the saved one, else the default; when
@@ -2817,9 +2760,11 @@ fn main() {
 mod admin_worker;
 mod bare;
 mod branch;
+mod cmd;
 mod keys_cmd;
 mod panel_tailscale;
 mod toolchain;
+mod ui;
 
 #[cfg(test)]
 mod parity;
