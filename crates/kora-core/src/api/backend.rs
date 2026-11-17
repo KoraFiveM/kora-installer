@@ -206,6 +206,10 @@ pub trait Backend {
     fn branches(&mut self, _e: &ServerEntry, _req: &crate::branches::Request, _say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
         Err(NO_BRANCHES.into())
     }
+    /// The GitHub loop for one resource, forking, and the "which versions" setting (see [`crate::collab`]).
+    fn collab(&mut self, _e: &ServerEntry, _req: &crate::collab::Request, _say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
+        Err(NO_BRANCHES.into())
+    }
     /// Take an imported paid asset off the server (it is kept as a backup). Returns notes to show.
     fn asset_remove(&mut self, _e: &ServerEntry, _name: &str) -> Res<Vec<String>> {
         Err(NO_PAID_ASSETS.into())

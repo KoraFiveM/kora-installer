@@ -89,7 +89,7 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
               <li key={r.id} className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
                 <span className="min-w-0 flex-1 break-all font-mono text-xs">{r.id}</span>
                 {r.note ? <Badge tone="orange">Could not check</Badge> : r.already ? <Badge tone="plain">Already on it</Badge> : r.has ? <Badge tone="success">Has it</Badge> : <Badge tone="plain">Does not have it</Badge>}
-                <span className="text-xs text-muted-foreground">now: {r.now}</span>
+                {r.now.startsWith('the normal version') ? <span className="text-xs text-muted-foreground">now: {r.now}</span> : <Badge tone="amber" title="Not on its normal version">now: {r.now}</Badge>}
                 {r.changed_count > 0 && <Badge tone="amber">{r.changed_count} changed file{r.changed_count === 1 ? '' : 's'}</Badge>}
                 {r.note && <span className="w-full text-xs text-muted-foreground">{r.note}</span>}
               </li>

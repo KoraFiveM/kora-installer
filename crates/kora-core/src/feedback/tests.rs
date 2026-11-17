@@ -1,6 +1,8 @@
 use super::*;
 use crate::git::Output;
 use crate::installer::registry::PortsRecord;
+#[allow(unused_imports)]
+use crate::installer::{Mode, Source, Versions};
 use std::cell::RefCell;
 use std::path::Path;
 use std::time::Duration;
@@ -48,6 +50,8 @@ impl CommandRunner for Fake {
 fn server(dir: &Path, mode: Mode, third_party: bool) -> ServerFile {
     std::fs::create_dir_all(dir.join("resources/[kora]/kora_lib/.git")).unwrap();
     ServerFile {
+        source: None,
+        versions: None,
         name: "s".into(),
         mode,
         dir: dir.to_path_buf(),
@@ -99,10 +103,10 @@ fn nothing_is_sent_when_not_signed_in_or_unknown() {
 }
 
 #[test]
-fn a_pr_is_dev_mode_only_and_never_for_third_party_copies() {
+fn a_pr_needs_your_own_copy_and_never_for_third_party_copies() {
     let d = tempfile::tempdir().unwrap();
     let e = plan_pr(&Fake::new(), &server(d.path(), Mode::Production, false), "kora-lib").unwrap_err();
-    assert!(e.to_string().contains("development servers"));
+    assert!(e.to_string().contains("Make my own copy"), "{e}");
     let e = plan_pr(&Fake::new(), &server(d.path(), Mode::Development, true), "kora-lib").unwrap_err();
     assert!(e.to_string().contains("belongs to someone else"));
 }

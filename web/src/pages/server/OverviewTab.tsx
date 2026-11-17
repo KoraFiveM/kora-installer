@@ -1,6 +1,7 @@
 import type { ServerDetail } from '@/api/types'
 import type { useServerControl } from '@/hooks/useServerControl'
 import { Badge } from '@/components/ui/badge'
+import { OffNormalSummary } from '@/components/OffNormalSummary'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CopyField } from '@/components/CopyButton'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton, useCanOpenFolder, useTxAdminLink } from '@/components/ServerLinks'
@@ -32,6 +33,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
             {backup && <><dt className="text-muted-foreground">Backups</dt><dd><BackupChip server={s.name} summary={backup} /></dd></>}
           </dl>
           <ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} size="default" />
+          <OffNormalSummary server={s} list />
           {s.status === 'missing' && <p className="text-sm text-amber">The server folder cannot be found. It may have been moved or deleted. You can remove this entry on the Danger zone tab.</p>}
         </CardContent>
       </Card>

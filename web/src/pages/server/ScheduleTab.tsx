@@ -49,7 +49,7 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
     <Card className="max-w-2xl">
       <CardHeader><CardTitle>Automatic updates</CardTitle></CardHeader>
       <CardContent className="space-y-5">
-        <p className="text-sm text-muted-foreground">A development server can update itself on a schedule: Kora fetches your forks, updates what is safe to update and checks the server still starts.</p>
+        <p className="text-sm text-muted-foreground">Every server can update itself on a schedule. Kora checks for newer versions (released versions or the latest changes, whichever the server follows), updates what is safe to update and checks the server still starts. It is off until you turn it on.</p>
         {q.data?.description && <Alert tone="info" title="Current schedule">{q.data.description}</Alert>}
         <fieldset className="space-y-2">
           <legend className="mb-1 text-sm font-semibold">How often</legend>

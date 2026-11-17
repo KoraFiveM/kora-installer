@@ -8,6 +8,8 @@ import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMiss
 import { installKeysMock } from './keys'
 import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
+import { installResourceMock } from './resource'
+import { installCollabMock } from './collab'
 import { installReachMock } from './reach'
 import { installBackupsMock } from './backups'
 import { installSupportMock } from './support'
@@ -16,6 +18,9 @@ import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
 
 const BASE = '/api/v1'
+
+/** The old `mode` word for an install request (what older Kora versions read). */
+const compatMode = (req: T.InstallRequest): T.Mode => (req.versions ? (req.versions === 'latest' ? 'development' : 'production') : req.mode ?? 'production')
 
 // ---- state (rebuilt by `init`, so a scenario starts from a clean world) ------------------------
 
@@ -59,7 +64,9 @@ function init(name: ScenarioName) {
   paidAssets = {}
   uploads = new Map()
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
-  resetBranches?.()
+  branchesMock?.()
+  collabMock?.reset()
+  resourceMock?.reset()
   jobs.clear()
   busy.clear()
   paused.clear()
@@ -336,7 +343,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     await sleep(step === 'build.fxserver' ? 1800 : 900)
     if (step === failAt) {
       emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null, txadmin_public: req.txadmin_public, artifact_url: req.artifact_url, game_build: req.game_build, github_owner: req.github_owner, start: req.start }
+      prefs.savedInstall = { mode: compatMode(req), source: req.source, versions: req.versions, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null, txadmin_public: req.txadmin_public, artifact_url: req.artifact_url, game_build: req.game_build, github_owner: req.github_owner, start: req.start }
       const id = jobId()
       paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
       const common: Partial<T.JobError> = {
@@ -378,7 +385,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
   }
   prefs.savedInstall = null
-  servers.push({ name: req.name, dir: req.dir, mode: req.mode, ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null })
+  servers.push({ name: req.name, dir: req.dir, mode: compatMode(req), source: req.source ?? (req.mode === 'development' ? 'fork' : 'clone'), versions: req.versions ?? (req.mode === 'development' ? 'latest' : 'released'), ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null })
   installed[req.name] = ['oxmysql', 'ox_lib', 'kora_core']
   return {
     dir: req.dir,
@@ -420,7 +427,21 @@ const reachMock = installReachMock(route, () => servers)
 installSupportMock(route, Fail)
 const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep)
 const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
-const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
+const resourceMock = installResourceMock(route, Fail, {
+  find: (n) => find(n),
+  installed: (n) => installed[n] ?? [],
+  consoleEnabled: (n) => !!consoleEnabled[n],
+  repos: (n, id) => collabMock.repos(id, find(n)),
+  branchRow: (n, id): T.ResourceBranch => (id.startsWith('kora_') ? branchesMock.row(n, id) : { id, folder: id, state: 'pinned', default_branch: 'dev', label: 'fixed version', changed_count: 0, stashes: 0 }),
+})
+const collabMock = installCollabMock(route, startJob, Fail, {
+  find: (n) => find(n),
+  installed: (n) => installed[n] ?? [],
+  signedIn: () => prefs.github,
+  onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why),
+  onServerChanged: (s) => pushServer(s),
+})
+const branchesMock = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github, onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why) })
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: viewer.identity?.provider === 'tailscale' }) satisfies T.Meta)
 
@@ -464,7 +485,7 @@ route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
     await sleep(1200)
     const have = servers.map((s) => s.dir)
-    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development', kind: 'txadmin', ports: { game: 30130, txadmin: 40130 } }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production', kind: 'plain', ports: { game: 30131, txadmin: 40131 } }].filter((c) => !have.includes(c.dir)) }
+    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development', source: 'fork', versions: 'latest', kind: 'txadmin', ports: { game: 30130, txadmin: 40130 } }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production', source: 'clone', versions: 'released', kind: 'plain', ports: { game: 30131, txadmin: 40131 } }].filter((c) => !have.includes(c.dir)) }
   }),
 )
 route('POST', '/servers/adopt', (_m, b) => {
@@ -473,7 +494,7 @@ route('POST', '/servers/adopt', (_m, b) => {
   if (dir.includes('nothing')) throw new Fail(400, 'bad_request', 'That folder does not look like a FiveM server (no server.cfg or resources folder).')
   if (servers.some((s) => s.dir === dir)) throw new Fail(409, 'conflict', 'That server is already in your list.')
   const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? 'adopted'
-  const s: T.ServerSummary = { name, dir, mode: 'production', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false, connect: null }
+  const s: T.ServerSummary = { name, dir, mode: 'production', source: 'clone', versions: 'released', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false, connect: null }
   servers.push(s)
   installed[name] = ['chat']
   snapshots[name] = []
@@ -494,6 +515,7 @@ route('POST', '/servers/{s}/control', (m, b) => {
       if (clash) throw new Fail(409, 'conflict', `Port ${s.ports.game} is already in use by "${clash.name}". Change the port on the Ports tab first.`)
     }
     s.status = action === 'stop' ? 'stopped' : 'running'
+    if (action !== 'stop') resourceMock.serverRestarted(s.name)
     pushServer(s)
     return { status: s.status }
   })
@@ -567,6 +589,7 @@ route('POST', '/servers/{s}/resources/{name}/control', (m, b) => {
   if (s.status !== 'running') throw new Fail(409, 'conflict', 'The server is not running. Start the server first; its resources start with it.')
   if (!consoleEnabled[s.name]) throw new Fail(409, 'conflict', 'The live console is not switched on for this server yet. Turn it on in the Console tab first (it needs a restart).')
   pushConsole(s.name, `> ${action === 'restart' ? 'ensure' : action} ${name}`)
+  if (action !== 'stop') resourceMock.resourceRestarted(s.name, name)
   return { message: `Asked the server to ${action} ${name}. The Console tab shows what happened.` }
 })
 route('POST', '/servers/{s}/update/preview', (m, b) => {
@@ -586,7 +609,8 @@ route('POST', '/servers/{s}/update/preview', (m, b) => {
     await sleep(1500)
     const p = makePreview(s)
     // A resource switched to another branch or a pull request is left alone by updates.
-    if (s.mode === 'development') p.resources = p.resources.map((r) => { const note = resetBranches.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
+    // (The trouble scenario keeps its own examples of resources that need attention.)
+    if (!beh.trouble) p.resources = p.resources.map((r) => { const note = branchesMock.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
     dirtyPreviewed[s.name] = p
     s.badge = badgeFrom(p)
     pushServer(s)
@@ -618,7 +642,7 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
     await sleep(1000)
     emit({ type: 'health', message: 'Healthy' })
     emit({ type: 'done' })
-    ;(snapshots[s.name] ??= []).unshift({ id: snap, created_unix: Math.floor(Date.now() / 1000), resources: chosen.map((c) => c.id) })
+    ;(snapshots[s.name] ??= []).unshift({ id: snap, created_unix: Math.floor(Date.now() / 1000), resources: chosen.map((c) => c.id), on_other_branch: [] })
     const report: T.UpdateReport = {
       server: s.name,
       updated: chosen.map((c) => ({ id: c.id, from: c.from, to: c.to })),
@@ -636,6 +660,7 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
     const left = preview.resources.map((r) => (chosen.includes(r) ? { ...r, status: 'up_to_date' as const, behind: 0, from: r.to } : r))
     dirtyPreviewed[s.name] = { ...preview, resources: left }
     s.badge = badgeFrom(dirtyPreviewed[s.name])
+    resourceMock.markChanged(s.name, chosen.map((c) => c.id), 'updated')
     pushServer(s)
     return report
   })
@@ -657,6 +682,7 @@ route('POST', '/servers/{s}/snapshots/{id}/rollback', (m) => {
       emit({ type: 'resource', id: r, state: 'rolled back' })
       await sleep(600)
     }
+    resourceMock.markChanged(s.name, snap.resources, 'rolled back')
     return {}
   })
 })
@@ -838,10 +864,10 @@ route('POST', '/servers/{s}/issues', (m, b) => {
 })
 route('POST', '/servers/{s}/pr/plan', (m, b) => {
   const s = find(dec(m[1]))
-  if (s.mode !== 'development') throw new Fail(400, 'bad_request', 'Pull requests are only for development servers.')
+  if (s.source !== 'fork') throw new Fail(422, 'collab.needs_fork', 'A pull request is made from your own copy of the resource on GitHub, and this server uses plain copies of the originals. Choose "Make my own copy (fork)" for this resource first.', undefined, { actions: [{ kind: 'make_fork' }] })
   if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   const r = String(b.resource ?? '')
-  if (r !== 'kora_core' && r !== 'kora_inventory') throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
+  if (!['kora_core', 'kora_inventory', 'kora_jobs'].includes(r)) throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
   return { resource: r, upstream: `KoraFiveM/${r}`, base: 'dev', head_owner: 'sam-rp', head_branch: 'fix-payroll', ahead: 2, dir: `${s.dir}/resources/[kora]/${r}` } satisfies T.PrPlan
 })
 route('POST', '/servers/{s}/pr', (m, b) => {

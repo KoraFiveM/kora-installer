@@ -313,6 +313,8 @@ fn stored_config_is_the_source_of_truth_and_a_missing_job_reads_as_off() {
 #[test]
 fn set_args_rebuild_the_cli_call_for_elevation() {
     let rec = ServerRecord {
+        source: None,
+        versions: None,
         name: "main".into(),
         dir: "/srv/kora/main".into(),
         mode: crate::installer::Mode::Development,
@@ -588,6 +590,8 @@ fn a_forged_binary_in_created_json_never_becomes_the_root_update_job() {
     std::fs::write(dir.join(".kora/created.json"), r#"{"created_dir":false,"resources":[],"artifacts":false,"files":[],"service_unit":null,"firewall":false,"registered":true,"binary":"/tmp/evil"}"#)
         .unwrap();
     let rec = crate::installer::registry::ServerEntry {
+        source: None,
+        versions: None,
         name: "main".into(),
         dir: dir.clone(),
         mode: crate::installer::Mode::Production,

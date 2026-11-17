@@ -812,6 +812,8 @@ mod tests {
     #[test]
     fn reading_the_schedule_does_not_look_for_the_root_program() {
         let rec = ServerEntry {
+            source: None,
+            versions: None,
             name: "My Server".into(),
             dir: "/srv/my".into(),
             mode: crate::installer::Mode::Production,

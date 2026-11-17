@@ -9,6 +9,7 @@ use kora_core::installer::{self, host, registry};
 
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
 use crate::cmd::backup::BackupCmd;
+use crate::cmd::desktop::DesktopCmd;
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::helper::{helper, HelperCmd};
 use crate::cmd::install::{install, InstallArgs};
@@ -23,7 +24,7 @@ use crate::cmd::toolchain::ToolsCmd;
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
 use crate::cmd::webhook::{webhook, WebhookCmd};
-use crate::cmd::{admin_worker, bare, branch, keys_cmd, toolchain};
+use crate::cmd::{admin_worker, bare, branch, keys_cmd, resource, toolchain};
 
 #[derive(Parser)]
 #[command(name = "kora", version, about = "Kora installer and server manager")]
@@ -134,6 +135,11 @@ enum Command {
         #[command(subcommand)]
         cmd: branch::PrCmd,
     },
+    /// One resource: what it is, which version it is on, and whether a restart is needed.
+    Resource {
+        #[command(subcommand)]
+        cmd: resource::ResourceCmd,
+    },
     /// GitHub helpers for development mode.
     Github {
         #[command(subcommand)]
@@ -203,6 +209,12 @@ enum Command {
     /// One administrator step of an install or delete, run by that helper.
     #[command(hide = true)]
     AdminStep(admin_worker::AdminStepArgs),
+    /// What the Kora desktop app (tray icon and window) asks of kora. Run by the app, never by a person.
+    #[command(hide = true)]
+    Desktop {
+        #[command(subcommand)]
+        cmd: DesktopCmd,
+    },
     /// Start (or install) Kora's own MariaDB on Windows, run by that helper.
     #[command(hide = true)]
     AdminDb(admin_worker::AdminDbArgs),
@@ -231,7 +243,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Profile { .. }
             | Command::Branch { .. }
             | Command::Pr { .. }
+            | Command::Resource { .. }
             | Command::Webhook { .. }
+            | Command::Desktop { .. }
             | Command::Reach(_)
             | Command::Backup { .. }
             | Command::Support { .. }
@@ -427,11 +441,13 @@ fn main() {
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
+        Some(Command::Desktop { cmd }) => cmd::desktop::run(cmd),
         Some(Command::Reach(a)) => cmd::reach::run(a),
         Some(Command::Backup { cmd }) => cmd::backup::run(cmd),
         Some(Command::Support { cmd }) => cmd::support::run(cmd),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
+        Some(Command::Resource { cmd }) => resource::resource(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Tools { cmd: ToolsCmd::Status }) => toolchain::run_tools_status(),

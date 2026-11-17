@@ -132,7 +132,7 @@ pub fn to_entry(c: &Candidate, taken: &[String]) -> ServerEntry {
         name = format!("{base}-{n}");
         n += 1;
     }
-    ServerEntry { name, dir: c.dir.clone(), mode: c.mode, ports: c.ports, created_unix: now_unix() }
+    ServerEntry { source: None, versions: None, name, dir: c.dir.clone(), mode: c.mode, ports: c.ports, created_unix: now_unix() }
 }
 
 #[cfg(test)]
@@ -184,6 +184,8 @@ mod tests {
     fn kora_server_file_gives_name_mode_and_ports() {
         let d = tempfile::tempdir().unwrap();
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "Main".into(),
             mode: Mode::Development,
             dir: d.path().to_path_buf(),

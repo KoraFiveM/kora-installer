@@ -118,6 +118,7 @@ pub(crate) fn app_uninstall(yes: bool, dry_run: bool, shortcuts: bool) -> i32 {
             Ok(lines) => {
                 println!("{}", if dry_run { "Dry run: nothing was changed. Removing Kora's shortcuts would:" } else { "Kora's shortcuts were removed:" });
                 print_lines("  - ", &lines);
+                crate::cmd::desktop::remove_autostart(dry_run);
             }
             Err(e) => {
                 eprintln!("error: {e}");

@@ -31,7 +31,7 @@ $reg = Get-RegistryText
 Assert-That (-not $reg -or $reg -notmatch '"smoke"') 'kora delete removed the registry entry'
 
 # --- fresh install with the service + firewall ---------------------------------------------
-$r = Invoke-Native $kora @('install', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '--service', '--firewall', '--txadmin-public', '-y')
+$r = Invoke-Native $kora @('install', '--mode', 'prod', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '--service', '--firewall', '--txadmin-public', '-y')
 Show 'kora install --service --firewall' $r
 Assert-That ($r.Code -eq 0) 'kora install --service --firewall exits 0'
 Assert-That ((Wait-SvcState 'STOPPED' 10) -eq 'STOPPED') "service $svc is registered and stopped"

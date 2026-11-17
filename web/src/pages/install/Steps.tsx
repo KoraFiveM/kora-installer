@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { DbChoice, Problem } from '@/api/types'
+import type { DbChoice, Problem, Source } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
@@ -12,7 +12,7 @@ import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { slug, validatePorts } from '@/lib/utils'
-import { dbLoginProblem, dirBase, folderFor, type WizardForm } from './form'
+import { dbLoginProblem, defaultVersions, dirBase, folderFor, type WizardForm } from './form'
 import type { PortsChecked } from './ports'
 
 export interface StepProps {
@@ -22,12 +22,28 @@ export interface StepProps {
   defaultsDir: string
 }
 
-export function ModeStep({ f, set }: StepProps) {
+/** Choosing the source also moves "Which versions" to its usual answer, until the person has chosen versions themselves. */
+export function sourcePatch(f: WizardForm, source: Source): Partial<WizardForm> {
+  return { source, ...(f.versionsTouched ? {} : { versions: defaultVersions(source) }) }
+}
+
+export function SourceStep({ f, set }: StepProps) {
   return (
     <fieldset className="space-y-3">
-      <legend className="mb-2 text-sm text-muted-foreground">What kind of server is this?</legend>
-      <Radio name="mode" checked={f.mode === 'production'} onChange={() => set({ mode: 'production' })} label="Production" hint="A server for players. Resources are installed from tested releases, and you choose when to update." />
-      <Radio name="mode" checked={f.mode === 'development'} onChange={() => set({ mode: 'development' })} label="Development" hint="For building and changing resources. Kora forks them into your GitHub account, and the server can update itself on a schedule." />
+      <legend className="mb-2 text-sm text-muted-foreground">Where should the resources come from?</legend>
+      <Radio name="source" checked={f.source === 'clone'} onChange={() => set(sourcePatch(f, 'clone'))} label="Use Kora's resources as they are" hint="Plain copies (clones) of the original repositories. You do not need a GitHub account." />
+      <Radio name="source" checked={f.source === 'fork'} onChange={() => set(sourcePatch(f, 'fork'))} label="Make my own copies on GitHub so I can change them" hint="Kora forks each resource into your GitHub account or an organisation you belong to. You can then change them, send pull requests and keep them up to date with the originals." />
+    </fieldset>
+  )
+}
+
+export function VersionsStep({ f, set }: StepProps) {
+  return (
+    <fieldset className="space-y-3">
+      <legend className="mb-2 text-sm text-muted-foreground">Which versions should the server follow?</legend>
+      <Radio name="versions" checked={f.versions === 'released'} onChange={() => set({ versions: 'released', versionsTouched: true })} label="Released versions (recommended, stable)" hint="Every resource is pinned to a tested release. You choose when to move to a newer one." />
+      <Radio name="versions" checked={f.versions === 'latest'} onChange={() => set({ versions: 'latest', versionsTouched: true })} label="Latest changes (the main branch)" hint="Every resource follows the newest changes, including things that are not released yet. Good for building and testing." />
+      <p className="text-xs text-muted-foreground">You can change this later in the server's settings, and put any single resource on another branch or pull request to try it.</p>
     </fieldset>
   )
 }
@@ -37,7 +53,7 @@ export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & {
   const [folderOpen, setFolderOpen] = useState(false)
   const [kindOpen, setKindOpen] = useState(false)
   const showFolder = !quick || advanced || folderOpen || f.dirTouched
-  const showKind = kindOpen || f.mode === 'development'
+  const showKind = kindOpen || f.source === 'fork'
   return (
     <div className="space-y-4">
       <Field label="Server name" hint={`Used for the folder, the service and the database. Saved as "${slug(f.name) || '...'}".`}>
@@ -58,10 +74,15 @@ export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & {
           <Input value={f.hostname} onChange={(e) => set({ hostname: e.target.value })} />
         </Field>
       )}
-      {quick && (showKind ? <ModeStep f={f} set={set} advanced={advanced} defaultsDir={defaultsDir} /> : (
+      {quick && (showKind ? (
+        <div className="space-y-4">
+          <SourceStep f={f} set={set} advanced={advanced} defaultsDir={defaultsDir} />
+          <VersionsStep f={f} set={set} advanced={advanced} defaultsDir={defaultsDir} />
+        </div>
+      ) : (
         <p className="text-sm text-muted-foreground">
-          This will be a server for players.{' '}
-          <Button variant="link" className="h-auto p-0" onClick={() => setKindOpen(true)}>Make a development server instead</Button>
+          The resources are plain copies of the originals, at released versions.{' '}
+          <Button variant="link" className="h-auto p-0" onClick={() => setKindOpen(true)}>Choose where they come from</Button>
         </p>
       ))}
     </div>
@@ -127,7 +148,7 @@ export function BuildStep({ f, set, advanced }: StepProps) {
 export function ResourcesStep({ f, set }: StepProps) {
   const cat = useQuery({ queryKey: ['catalog'], queryFn: api.catalog })
   const [query, setQuery] = useState('')
-  const groups = useMemo(() => groupResources((cat.data?.resources ?? []).filter((r) => r.group !== 'pre' && r.kind !== 'dependency' && (f.mode === 'development' || !r.dev_only)), query), [cat.data, query, f.mode])
+  const groups = useMemo(() => groupResources((cat.data?.resources ?? []).filter((r) => r.group !== 'pre' && r.kind !== 'dependency' && (f.versions === 'latest' || !r.dev_only)), query), [cat.data, query, f.versions])
   const toggle = (id: string) => set({ resourceIds: f.resourceIds.includes(id) ? f.resourceIds.filter((x) => x !== id) : [...f.resourceIds, id] })
   return (
     <div className="space-y-4">
@@ -344,22 +365,50 @@ export function CfxStep({ f, set }: StepProps) {
 
 export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signedIn: boolean; onSignedIn: () => void }) {
   const owners = useQuery({ queryKey: ['github-owners'], queryFn: api.github.owners, enabled: signedIn })
+  const personal = (owners.data ?? []).find((o) => o.kind === 'user')
+  const orgs = (owners.data ?? []).filter((o) => o.kind !== 'user')
+  const usable = orgs.filter((o) => o.can_fork)
+  const chosenOrg = usable.some((o) => o.login === f.githubOwner)
+  // Two plain steps: personal account or organisation; an organisation then asks which one.
+  const [where, setWhere] = useState<'personal' | 'org' | null>(null)
+  const shown = where ?? (chosenOrg ? 'org' : f.githubOwner && personal?.login === f.githubOwner ? 'personal' : null)
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">A development server keeps its own copy (a fork) of each Kora resource on GitHub, so you can change them and share your changes.</p>
+      <p className="text-sm text-muted-foreground">Each resource gets your own copy (a fork) on GitHub, so you can change it and share your changes. Where should the copies go?</p>
       <GithubSignIn onSignedIn={onSignedIn} />
-      {signedIn && (
-        <Field label="Put the forks in" hint={f.githubRemembered && f.githubOwner ? 'Your own account, or an organisation you belong to. Remembered from your last install: pick another to change it.' : 'Your own account, or an organisation you belong to.'}>
-          <Select value={f.githubOwner} onChange={(e) => set({ githubOwner: e.target.value, githubRemembered: false })} disabled={owners.isLoading} aria-busy={owners.isLoading}>
-            <option value="">{owners.isLoading ? 'Loading your accounts...' : 'Choose...'}</option>
-            {(owners.data ?? []).map((o) => <option key={o.login} value={o.login}>{o.login} ({o.kind === 'user' ? 'your account' : 'organisation'})</option>)}
-          </Select>
-        </Field>
-      )}
       {signedIn && owners.isLoading && (
         <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" aria-hidden /> Loading your GitHub accounts and organisations. This can take a few seconds.
         </p>
+      )}
+      {signedIn && !owners.isLoading && !owners.error && (
+        <fieldset className="space-y-3">
+          <legend className="sr-only">Where the copies go</legend>
+          <Radio
+            name="fork-where"
+            checked={shown === 'personal'}
+            disabled={!personal}
+            onChange={() => { setWhere('personal'); if (personal) set({ githubOwner: personal.login, githubRemembered: false }) }}
+            label={personal ? `My personal account (${personal.login})` : 'My personal account'}
+            hint={f.githubRemembered && f.githubOwner && personal?.login === f.githubOwner ? 'Remembered from your last install: pick another to change it.' : undefined}
+          />
+          <Radio
+            name="fork-where"
+            checked={shown === 'org'}
+            disabled={usable.length === 0}
+            onChange={() => { setWhere('org'); if (!chosenOrg) set({ githubOwner: '', githubRemembered: false }) }}
+            label="An organisation I belong to"
+            hint={orgs.length === 0 ? 'You do not belong to an organisation that Kora can put copies in. Ask an owner of the organisation to let you create repositories, then sign in to GitHub again.' : usable.length === 0 ? `You belong to ${orgs.map((o) => o.login).join(', ')}, but you may not create repositories there: ${orgs[0].reason ?? 'not allowed'}. Ask an owner to allow it, then sign in to GitHub again.` : undefined}
+          />
+          {shown === 'org' && usable.length > 0 && (
+            <Field label="Which organisation?" hint={f.githubRemembered && chosenOrg ? 'Remembered from your last install: pick another to change it.' : 'Your own copies are created there, so you need the right to create repositories in it.'}>
+              <Select value={chosenOrg ? f.githubOwner : ''} onChange={(e) => set({ githubOwner: e.target.value, githubRemembered: false })}>
+                <option value="">Choose...</option>
+                {orgs.map((o) => <option key={o.login} value={o.login} disabled={!o.can_fork}>{o.can_fork ? o.login : `${o.login} (you may not create repositories here)`}</option>)}
+              </Select>
+            </Field>
+          )}
+        </fieldset>
       )}
       <ErrorNotice error={owners.error} />
     </div>

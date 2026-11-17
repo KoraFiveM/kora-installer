@@ -3,7 +3,7 @@
 //   KORA_UPDATE_TS=1 cargo test -p kora-web --test api_ts
 // CI fails when this file is out of date.
 
-import type { AddOutcome, AddPlan, AdoptRequest, AlertSettings, AlertSettingsUpdate, AlertsList, AppInstallRequest, AppStatus, AppUninstallRequest, ArtifactList, AssetImportEvent, AssetImportReport, AssetImportRequest, AssetInspectRequest, AssetInspectResult, AuditPage, AuditQuery, BackupCreateRequest, BackupCreated, BackupEvent, BackupSettings, BackupsOverview, BackupsRemoved, BackupsView, BranchChoices, BranchChoicesQuery, BranchesList, BulkApplyRequest, BulkEvent, BulkPreview, BulkPreviewRequest, BulkResult, BundleCreateRequest, BundleFileRequest, BundleFileText, BundleListing, BundleSaved, Catalog, CfxCheck, CfxRequest, Consent, ConsoleCommand, ConsoleLine, ControlRequest, ControlResult, CreatedUrl, DbLoginCheck, DbLoginRequest, DbStartResult, DeleteRequest, DirRequest, DiskCheck, EnsureRequest, Fleet, ForwardingRequest, ForwardingView, GithubLoginResult, GithubLoginStart, GithubOwners, GithubStatus, IdsRequest, ImportInspectRequest, ImportPreview, ImportRequest, ImportResult, ImportUploaded, InstallDefaults, InstallEvent, InstallLog, InstallOutcome, InstallPlan, InstallRequest, IssueRequest, JobFailedData, JobRecord, JobStarted, JobsList, JobsQuery, JsonValue, KeyAddRequest, KeyAdded, KeyChange, KeyRemoved, KeyUpdateRequest, LogTail, LogTailQuery, LogsList, Message, Meta, Metrics, MetricsQuery, NewUser, NoEvents, NodeAddRequest, NodeAdded, NodeServers, NodesList, Notes, Nothing, PaidAssets, PanelRestarting, PassphraseRequest, Ports, PortsCheck, PrChoices, PrOpenRequest, PrPlan, PrPlanRequest, Profile, ProfileUpdate, ReachConsentPatch, ReachReport, RecentDownloads, RemoteSettings, RemoteSettingsUpdate, ResourceControlRequest, ResourceEvent, ResourcesList, RestorePreview, RestoreReport, ResumeRequest, RollbackRequest, SavedKeys, ScanResult, ScheduleConfig, ScheduleState, SelfUpdateInfo, SelfUpdateRequest, SelfUpdateResult, ServerCatalog, ServerDetail, ServerKeyChanged, ServerKeyRequest, ServerSummary, ServersList, SessionCreated, SessionLink, SessionRequest, SnapshotsList, StashRestoreRequest, StatusEvent, SupportRequest, SupportSummary, SwitchRequest, SwitchResult, SystemCheck, SystemInfo, ToolInstallEvent, ToolInstallResult, ToolsList, TxAdminTicket, UninstallPlan, UninstallRequest, UninstallResult, UpdateApplyRequest, UpdateEvent, UpdatePreviewRequest, UpdatePreviewResult, UpdateReport, UserAddRequest, UsersList, VerifyResult, WebhookSetRequest, WebhookState } from './types'
+import type { Acted, AddOutcome, AddPlan, AdoptRequest, AlertSettings, AlertSettingsUpdate, AlertsList, AppInstallRequest, AppStatus, AppUninstallRequest, ArtifactList, AssetImportEvent, AssetImportReport, AssetImportRequest, AssetInspectRequest, AssetInspectResult, AuditPage, AuditQuery, BranchChoices, BranchChoicesQuery, BranchesList, BulkApplyRequest, BulkEvent, BulkPreview, BulkPreviewRequest, BulkResult, Catalog, CfxCheck, CfxRequest, CommentRequest, CommitRequest, Committed, Consent, ConsoleCommand, ConsoleLine, ControlRequest, ControlResult, CreatedUrl, DbLoginCheck, DbLoginRequest, DbStartResult, DeleteRequest, DirRequest, DiskCheck, EnsureRequest, Fleet, ForkEvent, ForkOutcome, ForkRequest, ForwardingRequest, ForwardingView, GithubLoginResult, GithubLoginStart, GithubOwners, GithubStatus, IdsRequest, InstallDefaults, InstallEvent, InstallLog, InstallOutcome, InstallPlan, InstallRequest, IssueRequest, Issues, JobFailedData, JobRecord, JobStarted, JobsList, JobsQuery, JsonValue, KeyAddRequest, KeyAdded, KeyChange, KeyRemoved, KeyUpdateRequest, LocalChanges, Log, LogTail, LogTailQuery, LogsList, MergeRequest, Message, Meta, Metrics, MetricsQuery, NewBranchRequest, NewUser, NoEvents, NodeAddRequest, NodeAdded, NodeServers, NodesList, Notes, Nothing, PaidAssets, PanelRestarting, Ports, PortsCheck, PrChoices, PrOpenRequest, PrPlan, PrPlanRequest, PrSideQuery, PrView, Profile, ProfileUpdate, Pushed, ReachConsentPatch, ReachReport, RecentDownloads, Releases, RemoteSettings, RemoteSettingsUpdate, ResourceControlRequest, ResourceEvent, ResourcePage, ResourcesList, ResumeRequest, ReviewRequest, RollbackRequest, SavedKeys, ScanResult, ScheduleConfig, ScheduleState, SelfUpdateInfo, SelfUpdateRequest, SelfUpdateResult, ServerCatalog, ServerDetail, ServerKeyChanged, ServerKeyRequest, ServerSummary, ServersList, SessionCreated, SessionLink, SessionRequest, SnapshotsList, StashRestoreRequest, StatusEvent, SwitchNow, SwitchRequest, SwitchResult, SystemCheck, SystemInfo, ToolInstallEvent, ToolInstallResult, ToolsList, TxAdminTicket, UninstallPlan, UninstallRequest, UninstallResult, UpdateApplyRequest, UpdateEvent, UpdatePreviewRequest, UpdatePreviewResult, UpdateReport, UserAddRequest, UsersList, VersionsRequest, VersionsSet, WebhookSetRequest, WebhookState } from './types'
 
 /** One entry per operation: what goes in and what comes out. `Untyped` = not described by the Rust side yet. */
 export interface OpTypes {
@@ -24,6 +24,7 @@ export interface OpTypes {
   console_send: { method: 'POST'; path: '/servers/{s}/console'; params: { s: string }; query: undefined; body: ConsoleCommand; response: undefined; events: undefined; result: undefined }
   console_enable: { method: 'PUT'; path: '/servers/{s}/console/enabled'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
   resources_list: { method: 'GET'; path: '/servers/{s}/resources'; params: { s: string }; query: undefined; body: undefined; response: ResourcesList; events: undefined; result: undefined }
+  resource_get: { method: 'GET'; path: '/servers/{s}/resources/{name}'; params: { s: string; name: string }; query: undefined; body: undefined; response: ResourcePage; events: undefined; result: undefined }
   resource_ensure: { method: 'POST'; path: '/servers/{s}/ensure'; params: { s: string }; query: undefined; body: EnsureRequest; response: Message; events: undefined; result: undefined }
   resource_control: { method: 'POST'; path: '/servers/{s}/resources/{name}/control'; params: { s: string; name: string }; query: undefined; body: ResourceControlRequest; response: Message; events: undefined; result: undefined }
   update_preview: { method: 'POST'; path: '/servers/{s}/update/preview'; params: { s: string }; query: undefined; body: UpdatePreviewRequest; response: JobStarted; events: UpdateEvent; result: UpdatePreviewResult }
@@ -114,31 +115,26 @@ export interface OpTypes {
   stash_restore: { method: 'POST'; path: '/servers/{s}/resources/{name}/stash/restore'; params: { s: string; name: string }; query: undefined; body: StashRestoreRequest; response: SwitchResult; events: undefined; result: undefined }
   branch_bulk_preview: { method: 'POST'; path: '/servers/{s}/branches/preview'; params: { s: string }; query: undefined; body: BulkPreviewRequest; response: JobStarted; events: BulkEvent; result: BulkPreview }
   branch_bulk_apply: { method: 'POST'; path: '/servers/{s}/branches/apply'; params: { s: string }; query: undefined; body: BulkApplyRequest; response: JobStarted; events: BulkEvent; result: BulkResult }
+  resource_changes: { method: 'GET'; path: '/servers/{s}/resources/{name}/changes'; params: { s: string; name: string }; query: undefined; body: undefined; response: LocalChanges; events: undefined; result: undefined }
+  resource_log: { method: 'GET'; path: '/servers/{s}/resources/{name}/log'; params: { s: string; name: string }; query: undefined; body: undefined; response: Log; events: undefined; result: undefined }
+  resource_commit: { method: 'POST'; path: '/servers/{s}/resources/{name}/commit'; params: { s: string; name: string }; query: undefined; body: CommitRequest; response: Committed; events: undefined; result: undefined }
+  resource_push: { method: 'POST'; path: '/servers/{s}/resources/{name}/push'; params: { s: string; name: string }; query: undefined; body: undefined; response: Pushed; events: undefined; result: undefined }
+  resource_new_branch: { method: 'POST'; path: '/servers/{s}/resources/{name}/new-branch'; params: { s: string; name: string }; query: undefined; body: NewBranchRequest; response: SwitchNow; events: undefined; result: undefined }
+  pr_view: { method: 'GET'; path: '/servers/{s}/resources/{name}/prs/{number}'; params: { s: string; name: string; number: string }; query: PrSideQuery; body: undefined; response: PrView; events: undefined; result: undefined }
+  pr_comment: { method: 'POST'; path: '/servers/{s}/resources/{name}/prs/{number}/comment'; params: { s: string; name: string; number: string }; query: undefined; body: CommentRequest; response: Acted; events: undefined; result: undefined }
+  pr_review: { method: 'POST'; path: '/servers/{s}/resources/{name}/prs/{number}/review'; params: { s: string; name: string; number: string }; query: undefined; body: ReviewRequest; response: Acted; events: undefined; result: undefined }
+  pr_merge: { method: 'POST'; path: '/servers/{s}/resources/{name}/prs/{number}/merge'; params: { s: string; name: string; number: string }; query: undefined; body: MergeRequest; response: Acted; events: undefined; result: undefined }
+  issues_list: { method: 'GET'; path: '/servers/{s}/resources/{name}/issues'; params: { s: string; name: string }; query: undefined; body: undefined; response: Issues; events: undefined; result: undefined }
+  issue_comment: { method: 'POST'; path: '/servers/{s}/resources/{name}/issues/{number}/comment'; params: { s: string; name: string; number: string }; query: undefined; body: CommentRequest; response: Acted; events: undefined; result: undefined }
+  resource_releases: { method: 'GET'; path: '/servers/{s}/resources/{name}/releases'; params: { s: string; name: string }; query: undefined; body: undefined; response: Releases; events: undefined; result: undefined }
+  resources_fork: { method: 'POST'; path: '/servers/{s}/fork'; params: { s: string }; query: undefined; body: ForkRequest; response: JobStarted; events: ForkEvent; result: ForkOutcome }
+  versions_set: { method: 'PUT'; path: '/servers/{s}/versions'; params: { s: string }; query: undefined; body: VersionsRequest; response: VersionsSet; events: undefined; result: undefined }
   reach_check: { method: 'POST'; path: '/servers/{s}/reach'; params: { s: string }; query: undefined; body: ReachConsentPatch; response: ReachReport; events: undefined; result: undefined }
   reach_settings_get: { method: 'GET'; path: '/reach/settings'; params: Record<string, never>; query: undefined; body: undefined; response: Consent; events: undefined; result: undefined }
   reach_settings_set: { method: 'PUT'; path: '/reach/settings'; params: Record<string, never>; query: undefined; body: ReachConsentPatch; response: Consent; events: undefined; result: undefined }
   forwarding_set: { method: 'PUT'; path: '/servers/{s}/forwarding'; params: { s: string }; query: undefined; body: ForwardingRequest; response: ForwardingView; events: undefined; result: undefined }
   reach_firewall_open: { method: 'POST'; path: '/servers/{s}/reach/firewall'; params: { s: string }; query: undefined; body: undefined; response: Notes; events: undefined; result: undefined }
   txadmin_ticket: { method: 'POST'; path: '/servers/{s}/txadmin/ticket'; params: { s: string }; query: undefined; body: undefined; response: TxAdminTicket; events: undefined; result: undefined }
-  backups_list: { method: 'GET'; path: '/servers/{s}/backups'; params: { s: string }; query: undefined; body: undefined; response: BackupsView; events: undefined; result: undefined }
-  backup_create: { method: 'POST'; path: '/servers/{s}/backups'; params: { s: string }; query: undefined; body: BackupCreateRequest; response: JobStarted; events: BackupEvent; result: BackupCreated }
-  backup_settings_set: { method: 'PUT'; path: '/servers/{s}/backups/settings'; params: { s: string }; query: undefined; body: BackupSettings; response: BackupSettings; events: undefined; result: undefined }
-  backup_prune: { method: 'POST'; path: '/servers/{s}/backups/prune'; params: { s: string }; query: undefined; body: undefined; response: BackupsRemoved; events: undefined; result: undefined }
-  backup_undo: { method: 'POST'; path: '/servers/{s}/backups/undo'; params: { s: string }; query: undefined; body: PassphraseRequest; response: JobStarted; events: BackupEvent; result: RestoreReport }
-  backup_verify: { method: 'POST'; path: '/servers/{s}/backups/{id}/verify'; params: { s: string; id: string }; query: undefined; body: PassphraseRequest; response: JobStarted; events: BackupEvent; result: VerifyResult }
-  backup_preview: { method: 'POST'; path: '/servers/{s}/backups/{id}/preview'; params: { s: string; id: string }; query: undefined; body: PassphraseRequest; response: RestorePreview; events: undefined; result: undefined }
-  backup_restore: { method: 'POST'; path: '/servers/{s}/backups/{id}/restore'; params: { s: string; id: string }; query: undefined; body: PassphraseRequest; response: JobStarted; events: BackupEvent; result: RestoreReport }
-  backup_delete: { method: 'DELETE'; path: '/servers/{s}/backups/{id}'; params: { s: string; id: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
-  backup_download: { method: 'GET'; path: '/servers/{s}/backups/{id}/file'; params: { s: string; id: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
-  backups_overview: { method: 'GET'; path: '/backups'; params: Record<string, never>; query: undefined; body: undefined; response: BackupsOverview; events: undefined; result: undefined }
-  support_bundle_preview: { method: 'POST'; path: '/support/bundle/preview'; params: Record<string, never>; query: undefined; body: SupportRequest; response: BundleListing; events: undefined; result: undefined }
-  support_bundle_file: { method: 'POST'; path: '/support/bundle/file'; params: Record<string, never>; query: undefined; body: BundleFileRequest; response: BundleFileText; events: undefined; result: undefined }
-  support_bundle_create: { method: 'POST'; path: '/support/bundle'; params: Record<string, never>; query: undefined; body: BundleCreateRequest; response: BundleSaved; events: undefined; result: undefined }
-  support_bundle_download: { method: 'GET'; path: '/support/bundle/{file}'; params: { file: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
-  support_summary: { method: 'POST'; path: '/support/summary'; params: Record<string, never>; query: undefined; body: SupportRequest; response: SupportSummary; events: undefined; result: undefined }
-  backup_import_upload: { method: 'POST'; path: '/backups/import/upload'; params: Record<string, never>; query: undefined; body: Blob; response: ImportUploaded; events: undefined; result: undefined }
-  backup_import_inspect: { method: 'POST'; path: '/backups/import/inspect'; params: Record<string, never>; query: undefined; body: ImportInspectRequest; response: ImportPreview; events: undefined; result: undefined }
-  backup_import_start: { method: 'POST'; path: '/backups/import'; params: Record<string, never>; query: undefined; body: ImportRequest; response: JobStarted; events: BackupEvent; result: ImportResult }
 }
 
 export type OpName = keyof OpTypes
@@ -174,6 +170,7 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   console_send: { method: 'POST', path: '/servers/{s}/console', job: false, stream: false, raw: null },
   console_enable: { method: 'PUT', path: '/servers/{s}/console/enabled', job: false, stream: false, raw: null },
   resources_list: { method: 'GET', path: '/servers/{s}/resources', job: false, stream: false, raw: null },
+  resource_get: { method: 'GET', path: '/servers/{s}/resources/{name}', job: false, stream: false, raw: null },
   resource_ensure: { method: 'POST', path: '/servers/{s}/ensure', job: false, stream: false, raw: null },
   resource_control: { method: 'POST', path: '/servers/{s}/resources/{name}/control', job: false, stream: false, raw: null },
   update_preview: { method: 'POST', path: '/servers/{s}/update/preview', job: true, stream: false, raw: null },
@@ -264,31 +261,26 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   stash_restore: { method: 'POST', path: '/servers/{s}/resources/{name}/stash/restore', job: false, stream: false, raw: null },
   branch_bulk_preview: { method: 'POST', path: '/servers/{s}/branches/preview', job: true, stream: false, raw: null },
   branch_bulk_apply: { method: 'POST', path: '/servers/{s}/branches/apply', job: true, stream: false, raw: null },
+  resource_changes: { method: 'GET', path: '/servers/{s}/resources/{name}/changes', job: false, stream: false, raw: null },
+  resource_log: { method: 'GET', path: '/servers/{s}/resources/{name}/log', job: false, stream: false, raw: null },
+  resource_commit: { method: 'POST', path: '/servers/{s}/resources/{name}/commit', job: false, stream: false, raw: null },
+  resource_push: { method: 'POST', path: '/servers/{s}/resources/{name}/push', job: false, stream: false, raw: null },
+  resource_new_branch: { method: 'POST', path: '/servers/{s}/resources/{name}/new-branch', job: false, stream: false, raw: null },
+  pr_view: { method: 'GET', path: '/servers/{s}/resources/{name}/prs/{number}', job: false, stream: false, raw: null },
+  pr_comment: { method: 'POST', path: '/servers/{s}/resources/{name}/prs/{number}/comment', job: false, stream: false, raw: null },
+  pr_review: { method: 'POST', path: '/servers/{s}/resources/{name}/prs/{number}/review', job: false, stream: false, raw: null },
+  pr_merge: { method: 'POST', path: '/servers/{s}/resources/{name}/prs/{number}/merge', job: false, stream: false, raw: null },
+  issues_list: { method: 'GET', path: '/servers/{s}/resources/{name}/issues', job: false, stream: false, raw: null },
+  issue_comment: { method: 'POST', path: '/servers/{s}/resources/{name}/issues/{number}/comment', job: false, stream: false, raw: null },
+  resource_releases: { method: 'GET', path: '/servers/{s}/resources/{name}/releases', job: false, stream: false, raw: null },
+  resources_fork: { method: 'POST', path: '/servers/{s}/fork', job: true, stream: false, raw: null },
+  versions_set: { method: 'PUT', path: '/servers/{s}/versions', job: false, stream: false, raw: null },
   reach_check: { method: 'POST', path: '/servers/{s}/reach', job: false, stream: false, raw: null },
   reach_settings_get: { method: 'GET', path: '/reach/settings', job: false, stream: false, raw: null },
   reach_settings_set: { method: 'PUT', path: '/reach/settings', job: false, stream: false, raw: null },
   forwarding_set: { method: 'PUT', path: '/servers/{s}/forwarding', job: false, stream: false, raw: null },
   reach_firewall_open: { method: 'POST', path: '/servers/{s}/reach/firewall', job: false, stream: false, raw: null },
   txadmin_ticket: { method: 'POST', path: '/servers/{s}/txadmin/ticket', job: false, stream: false, raw: null },
-  backups_list: { method: 'GET', path: '/servers/{s}/backups', job: false, stream: false, raw: null },
-  backup_create: { method: 'POST', path: '/servers/{s}/backups', job: true, stream: false, raw: null },
-  backup_settings_set: { method: 'PUT', path: '/servers/{s}/backups/settings', job: false, stream: false, raw: null },
-  backup_prune: { method: 'POST', path: '/servers/{s}/backups/prune', job: false, stream: false, raw: null },
-  backup_undo: { method: 'POST', path: '/servers/{s}/backups/undo', job: true, stream: false, raw: null },
-  backup_verify: { method: 'POST', path: '/servers/{s}/backups/{id}/verify', job: true, stream: false, raw: null },
-  backup_preview: { method: 'POST', path: '/servers/{s}/backups/{id}/preview', job: false, stream: false, raw: null },
-  backup_restore: { method: 'POST', path: '/servers/{s}/backups/{id}/restore', job: true, stream: false, raw: null },
-  backup_delete: { method: 'DELETE', path: '/servers/{s}/backups/{id}', job: false, stream: false, raw: null },
-  backup_download: { method: 'GET', path: '/servers/{s}/backups/{id}/file', job: false, stream: false, raw: null },
-  backups_overview: { method: 'GET', path: '/backups', job: false, stream: false, raw: null },
-  support_bundle_preview: { method: 'POST', path: '/support/bundle/preview', job: false, stream: false, raw: null },
-  support_bundle_file: { method: 'POST', path: '/support/bundle/file', job: false, stream: false, raw: null },
-  support_bundle_create: { method: 'POST', path: '/support/bundle', job: false, stream: false, raw: null },
-  support_bundle_download: { method: 'GET', path: '/support/bundle/{file}', job: false, stream: false, raw: null },
-  support_summary: { method: 'POST', path: '/support/summary', job: false, stream: false, raw: null },
-  backup_import_upload: { method: 'POST', path: '/backups/import/upload', job: false, stream: false, raw: 'application/octet-stream' },
-  backup_import_inspect: { method: 'POST', path: '/backups/import/inspect', job: false, stream: false, raw: null },
-  backup_import_start: { method: 'POST', path: '/backups/import', job: true, stream: false, raw: null },
 }
 
 /** Operations that still have an `Untyped` request, response or job type (a list to shrink). */

@@ -6,6 +6,12 @@
 /** Not described by the Rust side yet: the shape is unknown, so check it before use. */
 export type Untyped = unknown
 
+export type Acted = {
+  message: string,
+  acting_as: string | null,
+  url: string | null,
+};
+
 /**
  * Something the user can do about a [`Problem`]. Plain data: the front end decides what each
  * one does (the panel's handler registry; a terminal prints a hint). Never put secrets in here.
@@ -64,6 +70,10 @@ export type Action =
     "kind": "start_database"
   }
   | {
+    "kind": "make_fork",
+    resource?: string,
+  }
+  | {
     "kind": "unknown"
   };
 
@@ -100,7 +110,7 @@ export type AlertEmail = {
   supported: boolean,
 };
 
-export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention" | "backup_failed";
+export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention";
 
 export type AlertRules = {
   stopped: boolean,
@@ -400,183 +410,6 @@ export type AuditRow = {
 };
 
 /**
- * `POST /servers/{s}/backups`.
- */
-export type BackupCreateRequest = {
-  /**
-   * Protect the file with this password (age encryption). Left out: not protected.
-   */
-  passphrase?: string,
-  /**
-   * Keep every resource in full (a bigger file that needs no internet to restore).
-   */
-  everything: boolean,
-  /**
-   * Stop the server while the backup runs (a strictly consistent copy).
-   */
-  stop_server: boolean,
-  /**
-   * Keep this one somewhere else than the usual folder (administrators only).
-   */
-  folder?: string,
-  /**
-   * A copy made to move the server to another computer: needs a password, is never removed by the retention rules.
-   */
-  for_move: boolean,
-};
-
-/**
- * The result of making a backup.
- */
-export type BackupCreated = {
-  info: BackupInfo,
-  /**
-   * Where the file is, on the computer that runs Kora.
-   */
-  path: string,
-  notes: Array<string>,
-  /**
-   * Older backups the retention rules removed.
-   */
-  pruned: Array<string>,
-};
-
-/**
- * One step of a backup, restore or import, as a job event.
- */
-export type BackupEvent = {
-  /**
-   * A short stable name of the step ("database", "files", ...).
-   */
-  step: string,
-  /**
-   * Plain words for the person.
-   */
-  message: string,
-  /**
-   * 0..=100 for the whole operation.
-   */
-  percent: number,
-};
-
-/**
- * The small file next to an archive: enough to list it without opening it.
- */
-export type BackupInfo = {
-  id: string,
-  /**
-   * The archive's file name.
-   */
-  file: string,
-  bytes: number,
-  sha256: string,
-  encrypted: boolean,
-  created_unix: number,
-  label: Label,
-  kora_version: string,
-  server: string,
-  database: DbKind,
-  by_reference: number,
-  in_full: number,
-  stopped: boolean,
-  /**
-   * Made by a newer Kora than this one: it can be listed but not restored here.
-   */
-  too_new: boolean,
-};
-
-/**
- * The backup schedule of one server.
- */
-export type BackupSchedule = {
-  enabled: boolean,
-  cadence: Cadence,
-  /**
-   * `HH:MM`, 24 hours, local time.
-   */
-  time: string,
-  /**
-   * 0 = Monday .. 6 = Sunday (weekly).
-   */
-  weekday?: number,
-};
-
-/**
- * Per-server backup settings (kept in Kora's own store, never in the server folder, so deleting the
- * server does not delete them).
- */
-export type BackupSettings = {
-  /**
-   * A folder to keep backups in; empty = Kora's own backups folder.
-   */
-  folder: string,
-  retention: Retention,
-  schedule: BackupSchedule,
-  resources: ResourceChoice,
-  /**
-   * Stop the server while a SCHEDULED backup runs (strictly consistent, but players are kicked).
-   */
-  stop_for_scheduled: boolean,
-};
-
-/**
- * The "last backup" line of the Overview and the servers list.
- */
-export type BackupSummary = {
-  last_ok_unix: number | null,
-  /**
-   * "No backup yet" / "Last backup 3 days ago".
-   */
-  text: string,
-  /**
-   * The newest backup is older than the schedule implies, or the last run failed.
-   */
-  warning: string | null,
-  scheduled: boolean,
-};
-
-/**
- * `GET /backups`: the last backup of every server.
- */
-export type BackupsOverview = {
-  servers: Array<ServerBackupLine>,
-};
-
-/**
- * Which backups an operation removed.
- */
-export type BackupsRemoved = {
-  removed: Array<string>,
-};
-
-/**
- * `GET /servers/{s}/backups`.
- */
-export type BackupsView = {
-  /**
-   * Newest first.
-   */
-  backups: Array<BackupInfo>,
-  settings: BackupSettings,
-  summary: BackupSummary,
-  /**
-   * Where backups are kept, as a path on the computer that runs Kora.
-   */
-  folder: string,
-  /**
-   * The folder is Kora's own (the default), not one the person chose.
-   */
-  default_folder: boolean,
-  free_bytes: number | null,
-  undo: UndoInfo | null,
-  database: DatabaseNote,
-  /**
-   * What the schedule needs to run, in words.
-   */
-  schedule_note: string,
-};
-
-/**
  * The small update badge of a server (`None` on the server = not known yet).
  */
 export type Badge = {
@@ -758,75 +591,6 @@ export type BulkRow = {
 export type BulkStatus = "switched" | "already" | "needs_choice" | "skipped" | "failed";
 
 /**
- * `POST /support/bundle`: save what was previewed.
- */
-export type BundleCreateRequest = {
-  id: string,
-};
-
-/**
- * One file of the bundle, for the screen.
- */
-export type BundleFile = {
-  name: string,
-  bytes: number,
-  /**
-   * How many values were hidden in it.
-   */
-  redactions: number,
-  /**
-   * What kinds ("licence key", "address with a login", ...).
-   */
-  hidden: Array<string>,
-};
-
-/**
- * `POST /support/bundle/file`: one file's (cleaned) text.
- */
-export type BundleFileRequest = {
-  id: string,
-  name: string,
-};
-
-export type BundleFileText = {
-  name: string,
-  text: string,
-};
-
-/**
- * What a bundle holds, built and kept for a few minutes so that what is saved is exactly what was shown.
- */
-export type BundleListing = {
-  id: string,
-  files: Array<BundleFile>,
-  /**
-   * Left out altogether, and why.
-   */
-  omitted: Array<Omitted>,
-  total_bytes: number,
-  /**
-   * Where it will be saved, on the computer that runs Kora.
-   */
-  folder: string,
-  /**
-   * "Kora never uploads this…", said by the program, not the page.
-   */
-  never_uploaded: string,
-};
-
-export type BundleSaved = {
-  file_name: string,
-  /**
-   * The full path on the computer that runs Kora.
-   */
-  path: string,
-  bytes: number,
-  folder: string,
-};
-
-export type Cadence = "daily" | "weekly";
-
-/**
  * `GET /catalog`.
  */
 export type Catalog = {
@@ -880,7 +644,21 @@ export type CfxRequest = {
 
 export type ChangeStatus = "up_to_date" | "clean" | "dirty" | "diverged" | "other_branch";
 
+export type ChangedFile = {
+  path: string,
+  /**
+   * `modified`, `added`, `deleted`, `renamed` or `new` (not yet known to git).
+   */
+  status: string,
+};
+
 export type ChangesChoice = "ask" | "stash" | "discard";
+
+export type Check = {
+  name: string,
+  state: ChecksState,
+  url?: string,
+};
 
 /**
  * One line of the System check.
@@ -901,19 +679,27 @@ export type CheckItem = {
 
 export type CheckState = "ok" | "problem" | "info";
 
+export type ChecksState = "passing" | "failing" | "pending" | "none";
+
 /**
- * A thing in the way, and what to do about it.
+ * `POST .../prs/{number}/comment` and `POST .../issues/{number}/comment`.
  */
-export type Clash = {
-  /**
-   * `name`, `game_port`, `txadmin_port`, `folder`.
-   */
-  kind: string,
+export type CommentRequest = {
+  body: string,
+  source?: string,
+};
+
+/**
+ * `POST /servers/{s}/resources/{name}/commit`.
+ */
+export type CommitRequest = {
   message: string,
-  /**
-   * What Kora suggests instead (a name, a port number, a folder), when it has one.
-   */
-  suggestion?: string,
+};
+
+export type Committed = {
+  commit: string,
+  files: number,
+  branch: string | null,
 };
 
 /**
@@ -1017,36 +803,6 @@ export type Creator = {
   description?: string,
 };
 
-export type DatabaseBackup = {
-  kind: DbKind,
-  /**
-   * The database name (never a password).
-   */
-  name?: string,
-  host?: string,
-  port?: number,
-  /**
-   * Size of the dump, uncompressed.
-   */
-  dump_bytes: number,
-  /**
-   * What a person should know (honest wording for "skipped" and "external").
-   */
-  note: string,
-};
-
-/**
- * What the backup of this server's database will do, said before anyone presses anything.
- */
-export type DatabaseNote = {
-  kind: DbKind,
-  note: string,
-  /**
-   * The program that makes the copy (mariadb-dump / mysqldump) was not found.
-   */
-  tool_missing: boolean,
-};
-
 /**
  * The database administrator login, used once for the install. Never stored or returned.
  */
@@ -1058,8 +814,6 @@ export type DbAdmin = {
 };
 
 export type DbChoice = "use_existing" | "install_if_missing" | "skip";
-
-export type DbKind = "dumped" | "none" | "external" | "failed";
 
 export type DbLoginCheck = {
   ok: boolean,
@@ -1200,7 +954,18 @@ export type FleetServer = {
   actions: Array<ControlAction>,
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -1214,6 +979,58 @@ export type FleetServer = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+};
+
+/**
+ * Progress of making copies, one event per resource.
+ */
+export type ForkEvent = {
+  "type": "forked",
+  done: number,
+  total: number,
+  id: string,
+};
+
+export type ForkFailure = {
+  resource: string,
+  problem: Problem,
+};
+
+export type ForkOutcome = {
+  /**
+   * Where the copies are (login or organisation).
+   */
+  owner: string,
+  forked: Array<Forked>,
+  /**
+   * Resources that were not plain clones of a repository (paid assets, copies of someone else's resource).
+   */
+  skipped: Array<string>,
+  failed: Array<ForkFailure>,
+  /**
+   * Every resource of the server is now your own copy, so the server follows "your own copies".
+   */
+  server_is_fork: boolean,
+};
+
+/**
+ * `POST /servers/{s}/fork`: make your own copy of some resources (left out = every plain clone).
+ */
+export type ForkRequest = {
+  /**
+   * A GitHub login or organisation; left out = the signed-in account.
+   */
+  owner?: string,
+  resources?: Array<string>,
+};
+
+export type Forked = {
+  resource: string,
+  /**
+   * `owner/name` of the new copy.
+   */
+  fork: string,
+  message: string,
 };
 
 /**
@@ -1381,115 +1198,6 @@ export type IdsRequest = {
   ids: Array<string>,
 };
 
-export type ImportChoices = {
-  name: string,
-  dir: string,
-  game_port: number,
-  txadmin_port: number,
-};
-
-/**
- * `POST /backups/import/inspect`.
- */
-export type ImportInspectRequest = {
-  source: ImportSource,
-  passphrase?: string,
-};
-
-export type ImportPreview = {
-  file_name: string,
-  encrypted: boolean,
-  /**
-   * A password is needed (and was not given or was wrong): nothing else is known yet.
-   */
-  needs_passphrase: boolean,
-  created_unix: number,
-  server: ServerInfo | null,
-  database: DatabaseBackup | null,
-  by_reference: number,
-  in_full: number,
-  /**
-   * What Kora suggests for this computer.
-   */
-  suggested: ImportChoices | null,
-  clashes: Array<Clash>,
-  /**
-   * What will be created, in words.
-   */
-  will_create: Array<string>,
-  /**
-   * What does not come along, in words.
-   */
-  wont_carry: Array<string>,
-  warnings: Array<string>,
-  /**
-   * The saved licence keys (names only) that could be used instead of the one in the file.
-   */
-  saved_keys: Array<string>,
-  /**
-   * The licence-key warning, always shown.
-   */
-  licence_note: string,
-};
-
-export type ImportRequest = {
-  source: ImportSource,
-  passphrase?: string,
-  choices: ImportChoices,
-  /**
-   * Use a saved licence key instead of the one in the file.
-   */
-  licence_key_name?: string,
-  /**
-   * Start the server when it is imported.
-   */
-  start: boolean,
-  /**
-   * Remove what an earlier, failed import of this server made, and begin again.
-   */
-  start_over: boolean,
-};
-
-export type ImportResult = {
-  name: string,
-  dir: string,
-  resources_fetched: Array<string>,
-  /**
-   * Things that did not work, one sentence each (the import still completed).
-   */
-  problems: Array<string>,
-  notes: Array<string>,
-  started: boolean,
-  /**
-   * Steps to do next on THIS computer, in words (open the firewall, set up the service...).
-   */
-  next_steps: Array<string>,
-  /**
-   * How to remove the server from the OLD computer, as instructions (Kora never reaches into another machine).
-   */
-  old_machine_steps: Array<string>,
-};
-
-/**
- * Where the file is: uploaded through the panel, or a path on this computer (local sessions only).
- */
-export type ImportSource = {
-  upload?: string,
-  path?: string,
-};
-
-/**
- * `POST /backups/import/upload` answers this: the file is on this computer, waiting.
- */
-export type ImportUploaded = {
-  /**
-   * The id to give `inspect` and `import` as `source.upload`.
-   */
-  upload: string,
-  file_name: string,
-  bytes: number,
-};
-
 export type ImportedAsset = {
   name: string,
   version: string | null,
@@ -1621,7 +1329,19 @@ export type InstallPlan = {
  * `POST /installs` and `POST /installs/plan`.
  */
 export type InstallRequest = {
-  mode: Mode,
+  /**
+   * The old spelling (`production` = clone + released, `development` = fork + latest). Optional: `source` and
+   * `versions` win when they are sent.
+   */
+  mode?: Mode,
+  /**
+   * Plain clones of the originals, or your own copies (forks).
+   */
+  source?: Source,
+  /**
+   * Released versions (pinned) or the latest changes (the main branch).
+   */
+  versions?: Versions,
   name: string,
   dir: string,
   hostname: string,
@@ -1655,6 +1375,16 @@ export type InstallRequest = {
   cfx_identifier: string | null,
 };
 
+export type IssueItem = {
+  number: number,
+  title: string,
+  author: string,
+  url: string,
+  comments: number,
+  created: string,
+  labels: Array<string>,
+};
+
 /**
  * `POST /servers/{s}/issues`.
  */
@@ -1662,6 +1392,12 @@ export type IssueRequest = {
   resource: string,
   title: string,
   text: string,
+};
+
+export type Issues = {
+  repo: string,
+  issues: Array<IssueItem>,
+  new_issue_url: string,
 };
 
 /**
@@ -1808,11 +1544,6 @@ export type KeyUpdateRequest = {
 
 export type Kind = "kora" | "dependency" | "optional" | "internal";
 
-/**
- * Why a backup was made. Decides what pruning may remove.
- */
-export type Label = "manual" | "scheduled" | "before_restore" | "move";
-
 export type Layer = {
   id: LayerId,
   state: ReachState,
@@ -1826,6 +1557,41 @@ export type Layer = {
 };
 
 export type LayerId = "running" | "firewall" | "router" | "internet";
+
+export type LocalChanges = {
+  branch: string | null,
+  files: Array<ChangedFile>,
+  /**
+   * The real number of changed files (`files` stops at 200).
+   */
+  count: number,
+  /**
+   * A readable diff (read-only), cut at about 60 000 characters.
+   */
+  diff: string,
+  diff_truncated: boolean,
+  /**
+   * Commits on this branch that are not on its remote yet, and the other way round. `None` = no remote branch.
+   */
+  ahead: number | null,
+  behind: number | null,
+  repos: Repos,
+};
+
+export type Log = {
+  branch: string | null,
+  commits: Array<LogEntry>,
+};
+
+export type LogEntry = {
+  sha: string,
+  subject: string,
+  author: string,
+  /**
+   * Unix time of the commit.
+   */
+  when: number,
+};
 
 export type LogFile = {
   name: string,
@@ -1850,6 +1616,14 @@ export type LogTailQuery = {
  */
 export type LogsList = {
   files: Array<LogFile>,
+};
+
+/**
+ * `POST .../prs/{number}/merge`: `merge`, `squash` or `rebase`; left out = the first the repository allows.
+ */
+export type MergeRequest = {
+  method?: string,
+  source?: string,
 };
 
 /**
@@ -1936,6 +1710,13 @@ export type MetricsQuery = {
 export type Mode = "production" | "development";
 
 /**
+ * `POST /servers/{s}/resources/{name}/new-branch`.
+ */
+export type NewBranchRequest = {
+  name: string,
+};
+
+/**
  * `POST /users` answer: the token is shown this once.
  */
 export type NewUser = {
@@ -1990,14 +1771,6 @@ export type Notes = {
  * An empty job result (`{}`).
  */
 export type Nothing = Record<symbol, never>;
-
-/**
- * Something deliberately left out, and why.
- */
-export type Omitted = {
-  name: string,
-  why: string,
-};
 
 export type OwnerKind = "user" | "org";
 
@@ -2064,13 +1837,6 @@ export type PanelUser = {
    * Unix seconds.
    */
   created: number,
-};
-
-/**
- * A request that may carry the password of a protected backup.
- */
-export type PassphraseRequest = {
-  passphrase?: string,
 };
 
 export type PlanItem =
@@ -2143,6 +1909,22 @@ export type PrChoices = {
   notes: Array<string>,
 };
 
+export type PrComment = {
+  author: string,
+  body: string,
+  created: string,
+  /**
+   * `comment`, or a review: `approved`, `changes_requested`, `commented`.
+   */
+  kind: string,
+};
+
+export type PrFile = {
+  path: string,
+  additions: number,
+  deletions: number,
+};
+
 /**
  * `POST /servers/{s}/pr`: the plan is worked out again on the server and must be exactly what was sent.
  */
@@ -2180,7 +1962,60 @@ export type PrPlanRequest = {
  */
 export type PrRef = number | string;
 
+/**
+ * Which side a pull request or issue is on: the original (default) or the person's own copy.
+ */
+export type PrSideQuery = {
+  source?: string,
+};
+
 export type PrSource = "upstream" | "fork";
+
+export type PrView = {
+  number: number,
+  title: string,
+  body: string,
+  author: string,
+  /**
+   * `OPEN`, `MERGED` or `CLOSED`.
+   */
+  state: string,
+  draft: boolean,
+  url: string,
+  /**
+   * `owner/name` it is on.
+   */
+  repo: string,
+  base: string,
+  head: string,
+  created: string,
+  updated: string,
+  /**
+   * `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED` or empty (no reviews needed).
+   */
+  review: string,
+  checks: ChecksState,
+  check_list: Array<Check>,
+  /**
+   * `MERGEABLE`, `CONFLICTING` or `UNKNOWN`.
+   */
+  mergeable: string,
+  files: Array<PrFile>,
+  comments: Array<PrComment>,
+  /**
+   * Which ways of merging the repository allows: `merge`, `squash`, `rebase`.
+   */
+  merge_methods: Array<string>,
+  /**
+   * Whether the signed-in account may merge here (`ADMIN`, `MAINTAIN` or `WRITE` on the repository).
+   */
+  can_merge: boolean,
+  acting_as: string | null,
+  /**
+   * Set when this pull request is the one checked out in the resource.
+   */
+  trying?: Trying,
+};
 
 export type Preset = "daily" | "weekly" | "custom";
 
@@ -2273,6 +2108,31 @@ export type PullRequest = {
   draft: boolean,
   url: string,
   updated: string,
+  /**
+   * When it was opened.
+   */
+  created: string,
+  /**
+   * `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or empty when GitHub did not say.
+   */
+  review: string,
+  /**
+   * Whether its checks pass, fail, are still running, or there are none.
+   */
+  checks: ChecksState,
+};
+
+export type Pushed = {
+  branch: string,
+  /**
+   * `owner/name` it went to.
+   */
+  to: string,
+  /**
+   * The branch did not exist on GitHub before.
+   */
+  new_branch: boolean,
+  acting_as: string | null,
 };
 
 /**
@@ -2324,6 +2184,32 @@ export type RecentDownloads = {
   zips: Array<DownloadZip>,
 };
 
+export type ReleaseItem = {
+  tag: string,
+  name: string,
+  published: string,
+  prerelease: boolean,
+  url: string,
+  notes: string,
+  /**
+   * This is the release the server is pinned to.
+   */
+  pinned: boolean,
+  /**
+   * This is newer than the release the server is pinned to.
+   */
+  newer: boolean,
+};
+
+export type Releases = {
+  repo: string,
+  /**
+   * The pinned release of this resource (a commit), when the server follows released versions.
+   */
+  pinned_commit: string | null,
+  releases: Array<ReleaseItem>,
+};
+
 export type Remote = "origin" | "upstream";
 
 /**
@@ -2364,27 +2250,18 @@ export type RemoteSettingsUpdate = {
   allow_remote_destructive?: boolean,
 };
 
-export type ResourceBackup = {
-  id: string,
+/**
+ * The repositories of a resource: the original, and the person's own copy when there is one.
+ */
+export type Repos = {
   /**
-   * Relative to `<server>/resources/`.
+   * `owner/name` of the original repository.
    */
-  path: string,
-  stored: StoredAs,
-  repository: string,
-  branch: string,
+  original: string | null,
   /**
-   * The commit the folder was on.
+   * `owner/name` of the person's own copy (fork), when there is one.
    */
-  commit?: string,
-  /**
-   * Why the files had to be kept in full ("changed here", "kept-aside changes", "paid asset", ...).
-   */
-  why_full?: string,
-  /**
-   * Bytes in the archive for this resource (0 by reference).
-   */
-  bytes: number,
+  fork: string | null,
 };
 
 export type ResourceBranch = {
@@ -2399,6 +2276,10 @@ export type ResourceBranch = {
    */
   branch?: string,
   pr?: number,
+  /**
+   * The title of that pull request, when Kora has it (kept when the pull request is tried, refreshed by "Get the latest commits").
+   */
+  pr_title?: string,
   /**
    * The normal branch (`dev`).
    */
@@ -2437,11 +2318,6 @@ export type ResourceChange = {
 };
 
 /**
- * How the resources are kept in the archive.
- */
-export type ResourceChoice = "auto" | "everything";
-
-/**
  * `POST /servers/{s}/resources/{name}/control`: the same actions as a server.
  */
 export type ResourceControlRequest = {
@@ -2458,6 +2334,39 @@ export type ResourceEvent = {
 };
 
 /**
+ * `GET /servers/{s}/resources/{name}`.
+ */
+export type ResourcePage = {
+  id: string,
+  /**
+   * Relative to `resources/`.
+   */
+  folder: string,
+  repository: string,
+  /**
+   * The branch it normally follows.
+   */
+  default_branch: string,
+  /**
+   * The release it is pinned to, when the server uses released versions.
+   */
+  pinned_commit?: string,
+  third_party: boolean,
+  source?: string,
+  version?: string,
+  /**
+   * Where its files are: the normal version, a branch, a pull request.
+   */
+  branch: ResourceBranch,
+  /**
+   * The original repository and your own copy; `null` when it is not a git clone.
+   */
+  repos: Repos | null,
+  restart: RestartInfo,
+  server: ResourceServerState,
+};
+
+/**
  * `"all"` or `{"only": [ids]}`.
  */
 export type ResourceSelection = "all"
@@ -2466,59 +2375,45 @@ export type ResourceSelection = "all"
   };
 
 /**
+ * The server the resource is on, as far as the page needs it.
+ */
+export type ResourceServerState = {
+  name: string,
+  mode: Mode,
+  source: Source,
+  versions: Versions,
+  running: boolean,
+  console_enabled: boolean,
+  console_waiting_for_restart: boolean,
+};
+
+/**
  * `GET /servers/{s}/resources`.
  */
 export type ResourcesList = {
   resources: Array<string>,
 };
 
-export type RestartPolicy = "none" | "ensure" | "full_restart" | "when_quiet";
-
 /**
- * What a restore would do, in words.
+ * What the panel shows for one resource.
  */
-export type RestorePreview = {
-  id: string,
-  created_unix: number,
-  encrypted: boolean,
+export type RestartInfo = {
   /**
-   * The archive is password protected and no (right) password was given: nothing else is known yet.
+   * The running server still has the old version of this resource.
    */
-  needs_passphrase: boolean,
-  server: ServerInfo | null,
-  database: DatabaseBackup | null,
-  resources: Array<ResourceBackup>,
-  stopped: boolean,
-  server_running: boolean,
+  needed: boolean,
   /**
-   * What will be replaced.
+   * What changed, when it is `needed`.
    */
-  will_change: Array<string>,
+  why?: string,
+  changed_unix?: number,
   /**
-   * What stays as it is.
+   * The words to show.
    */
-  will_keep: Array<string>,
-  warnings: Array<string>,
+  notice?: string,
 };
 
-export type RestoreReport = {
-  /**
-   * The safety backup taken first (what "Undo" goes back to).
-   */
-  safety_backup: string | null,
-  database_restored: boolean,
-  files_restored: number,
-  /**
-   * One sentence per resource that was brought back.
-   */
-  resources_restored: Array<string>,
-  /**
-   * Things that did not work, one sentence each, with what was done instead.
-   */
-  problems: Array<string>,
-  notes: Array<string>,
-  restarted: boolean,
-};
+export type RestartPolicy = "none" | "ensure" | "full_restart" | "when_quiet";
 
 /**
  * A stopped install that can carry on (also after the panel was restarted).
@@ -2544,17 +2439,12 @@ export type ResumeRequest = {
 };
 
 /**
- * A line of the answer about where backups go.
+ * `POST .../prs/{number}/review`: `approve`, `request_changes` (with a reason) or `comment`.
  */
-export type Retention = {
-  /**
-   * Keep this many of the newest backups (0 = no limit).
-   */
-  keep_last: number,
-  /**
-   * Also keep the newest backup of each day for this many days (0 = off).
-   */
-  keep_daily_days: number,
+export type ReviewRequest = {
+  action: string,
+  body?: string,
+  source?: string,
 };
 
 /**
@@ -2588,7 +2478,12 @@ export type SampleBadge = "up_to_date"
  * The answers of an install that stopped part-way, as saved: never a licence key or a database login.
  */
 export type SavedInstall = {
+  /**
+   * The old spelling, always sent.
+   */
   mode: Mode,
+  source?: Source,
+  versions?: Versions,
   name: string,
   dir: string,
   hostname: string,
@@ -2737,14 +2632,6 @@ export type SelfUpdateResult = {
 };
 
 /**
- * One line of the servers list: the last backup of one server.
- */
-export type ServerBackupLine = {
-  server: string,
-  summary: BackupSummary,
-};
-
-/**
  * `GET /servers/{s}/catalog`.
  */
 export type ServerCatalog = {
@@ -2767,7 +2654,18 @@ export type ServerDetail = {
   console_enabled: boolean,
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -2781,33 +2679,6 @@ export type ServerDetail = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
-};
-
-export type ServerInfo = {
-  name: string,
-  /**
-   * "production" or "development" (older wording kept for the file format).
-   */
-  mode: string,
-  game_port: number,
-  txadmin_port: number,
-  game_build: number,
-  /**
-   * The FXServer build the server ran. Not in the archive: it is downloaded again.
-   */
-  artifact_build: number,
-  /**
-   * "linux" or "windows": where the backup was made.
-   */
-  os: string,
-  /**
-   * The folder it lived in (shown, and used to rewrite paths when it moves).
-   */
-  dir: string,
-  /**
-   * Where it was listed, e.g. the licence key's saved name (never the key).
-   */
-  github_owner?: string,
 };
 
 export type ServerKeyChanged = {
@@ -2840,7 +2711,18 @@ export type ServerKeyRequest =
 export type ServerSummary = {
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -2897,10 +2779,22 @@ export type SessionRequest = {
   code?: string,
 };
 
+export type SnapshotBranch = {
+  id: string,
+  /**
+   * The branch it was on when the snapshot was taken (not its normal one).
+   */
+  branch: string,
+};
+
 export type SnapshotInfo = {
   id: string,
   created_unix: number,
   resources: Array<string>,
+  /**
+   * Resources that were not on their normal branch when the snapshot was taken: a rollback puts them back on it.
+   */
+  on_other_branch: Array<SnapshotBranch>,
 };
 
 /**
@@ -2909,6 +2803,12 @@ export type SnapshotInfo = {
 export type SnapshotsList = {
   snapshots: Array<SnapshotInfo>,
 };
+
+/**
+ * Where a server's resources come from. This is the whole difference between the old "Production" and "Development"
+ * as far as GitHub goes: nothing else about a server depends on it.
+ */
+export type Source = "clone" | "fork";
 
 /**
  * `POST /servers/{s}/resources/{name}/stash/restore`.
@@ -2940,25 +2840,6 @@ export type StatusEvent = {
 };
 
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
-
-export type StoredAs = "reference" | "full";
-
-/**
- * `POST /support/bundle/preview` and `POST /support/summary`.
- */
-export type SupportRequest = {
-  /**
-   * Only this server's files (left out: every server).
-   */
-  server?: string,
-};
-
-/**
- * `POST /support/summary`: the short cleaned text an issue report may attach (never the file).
- */
-export type SupportSummary = {
-  text: string,
-};
 
 /**
  * What is checked out.
@@ -3140,6 +3021,21 @@ export type ToolsList = {
 };
 
 /**
+ * A pull request that is checked out here: how it stands against its newest commit on GitHub.
+ */
+export type Trying = {
+  branch: string,
+  /**
+   * Commits GitHub has that this folder does not (`None` = the folder has not downloaded its newest commit: get the latest).
+   */
+  behind: number | null,
+  /**
+   * Commits made here on top of it.
+   */
+  ahead: number,
+};
+
+/**
  * `POST /servers/{s}/txadmin/ticket`: where to open txAdmin through the panel. The address works once, for a minute.
  * txAdmin has its own sign-in; `username` is the account Kora made at install (never its password).
  */
@@ -3151,15 +3047,6 @@ export type TxAdminTicket = {
   port: number,
   expires_in: number,
   username: string | null,
-};
-
-/**
- * The newest safety copy, taken by the last restore: what "Undo this restore" goes back to.
- */
-export type UndoInfo = {
-  id: string,
-  created_unix: number,
-  encrypted: boolean,
 };
 
 export type UninstallAnswer = {
@@ -3334,16 +3221,24 @@ export type UsersList = {
 };
 
 /**
- * The answer to "check this backup".
+ * Which versions of the resources a server follows. A separate setting from [`Source`].
  */
-export type VerifyResult = {
+export type Versions = "released" | "latest";
+
+/**
+ * `PUT /servers/{s}/versions`.
+ */
+export type VersionsRequest = {
+  versions: Versions,
+};
+
+export type VersionsSet = {
+  source: Source,
+  versions: Versions,
   /**
-   * Every file in the backup matches its checksum.
+   * What to do next, in words.
    */
-  ok: boolean,
-  files: number,
-  bytes: number,
-  summary: string,
+  message: string,
 };
 
 /**

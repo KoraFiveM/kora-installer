@@ -62,10 +62,90 @@ impl std::fmt::Debug for DbAdmin {
     }
 }
 
+/// Where a server's resources come from. This is the whole difference between the old "Production" and "Development"
+/// as far as GitHub goes: nothing else about a server depends on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    /// Plain clones of the original repositories. No GitHub account is needed.
+    Clone,
+    /// The person's own copies (forks) on GitHub, in their account or an organisation.
+    Fork,
+}
+
+/// Which versions of the resources a server follows. A separate setting from [`Source`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Versions {
+    /// Each resource is pinned to a released version from the catalogue; updates move between releases.
+    Released,
+    /// Each resource follows the latest changes of its main branch.
+    Latest,
+}
+
+impl Mode {
+    /// The old spelling, as a source: Production cloned, Development forked.
+    pub fn source(self) -> Source {
+        match self {
+            Mode::Production => Source::Clone,
+            Mode::Development => Source::Fork,
+        }
+    }
+
+    /// The old spelling, as versions: Production was pinned to releases, Development followed the main branch.
+    pub fn versions(self) -> Versions {
+        match self {
+            Mode::Production => Versions::Released,
+            Mode::Development => Versions::Latest,
+        }
+    }
+}
+
+/// THE mapping between the old `mode` and the two settings, in one place.
+///
+/// - Reading: a record with the new fields uses them; a record without them (every server made before 0.8) maps
+///   `prod` to clone + released and `dev` to fork + latest. Nothing is rewritten until the record is saved for another
+///   reason, and then both spellings are written.
+/// - Writing: the `mode` kept for older Kora versions is `production` when the versions are released and `development`
+///   otherwise (that is the behaviour that matters most to an older reader: pinned or following).
+pub fn style(mode: Mode, source: Option<Source>, versions: Option<Versions>) -> (Source, Versions) {
+    (source.unwrap_or_else(|| mode.source()), versions.unwrap_or_else(|| mode.versions()))
+}
+
+/// What an install asks for, from whichever spelling it used (the old `mode`, the new `source` / `versions`, or both).
+/// A new field wins over `mode`. With nothing at all: plain clones of released versions. With only a `source`, the
+/// versions default from it: released for clones, the latest changes for your own copies (the old behaviour).
+pub fn resolve(mode: Option<Mode>, source: Option<Source>, versions: Option<Versions>) -> (Source, Versions) {
+    match mode {
+        Some(m) => style(m, source, versions),
+        None => {
+            let s = source.unwrap_or(Source::Clone);
+            (s, versions.unwrap_or(if s == Source::Fork { Versions::Latest } else { Versions::Released }))
+        }
+    }
+}
+
+/// The `mode` to keep writing for older versions of Kora (see [`style`]).
+pub fn compat_mode(versions: Versions) -> Mode {
+    match versions {
+        Versions::Released => Mode::Production,
+        Versions::Latest => Mode::Development,
+    }
+}
+
 /// Everything the wizard / website / flags decide. Secrets (license key) live here only in memory.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InstallRequest {
+    /// The old spelling (`prod` = clone + released, `dev` = fork + latest). When `source` / `versions` are set they win.
     pub mode: Mode,
+    /// Clone or fork. `None` = from `mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    /// Released versions or the latest changes. `None` = from `mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub versions: Option<Versions>,
     /// Display + registry name; also used for service and db names after sanitising.
     pub name: String,
     /// Server root directory (resources/, artifacts/, secrets.cfg...).
@@ -93,7 +173,7 @@ pub struct InstallRequest {
     pub service: bool,
     /// Open firewall ports (needs admin).
     pub firewall: bool,
-    /// Dev mode only: GitHub org (or user) to fork into.
+    /// When forking: the GitHub organisation (or user) to fork into; `None` = the signed-in account.
     pub github_owner: Option<String>,
     /// Catalog URL or local path override (tests / offline). `None` = default + embedded fallback.
     pub catalog: Option<String>,
@@ -109,6 +189,15 @@ pub struct InstallRequest {
     /// scripts make per-user shortcuts instead). Kept so saved requests and old clients still load.
     #[serde(default, skip_serializing)]
     pub app: Option<crate::app_install::AppChoice>,
+}
+
+impl InstallRequest {
+    pub fn source(&self) -> Source {
+        style(self.mode, self.source, self.versions).0
+    }
+    pub fn versions(&self) -> Versions {
+        style(self.mode, self.source, self.versions).1
+    }
 }
 
 impl std::fmt::Debug for InstallRequest {

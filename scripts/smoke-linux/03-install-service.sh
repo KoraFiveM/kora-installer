@@ -12,7 +12,7 @@ UNIT=/etc/systemd/system/$SVC.service
 ACCOUNT=kora-$NAME
 export CFX_LICENSE_KEY="$FAKE_KEY"
 state() { systemctl is-active "$SVC" 2>/dev/null || true; }
-install_it() { kora install --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --service -y; }
+install_it() { kora install --mode prod --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --service -y; }
 txadmin_up() { curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$TX_PORT/"; }
 assert_gone() {
   assert "unit file $UNIT is gone" test ! -e "$UNIT"
@@ -47,7 +47,7 @@ KORA_COPY="$(sed -n 's/^ExecStart=\([^ ]*\) service-host.*/\1/p' "$UNIT" | tr -d
 note "service runs: $KORA_COPY"
 assert_eq "the service program is a root-owned copy" root "$(stat -c %U "$KORA_COPY")"
 kora status
-assert_matches "status shows stopped" "$OUT" "$NAME[[:space:]]+prod[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
+assert_matches "status shows stopped" "$OUT" "$NAME[[:space:]]+clone, released[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
 
 step "3. uninstall --dry-run leaves everything"
 kora uninstall --dry-run
@@ -69,7 +69,7 @@ wait_for "licence rejection logged" 120 logfound || { jr | tail -n 80; fail "no 
 assert "log shows FXServer rejected the fake licence key (expected)" logfound
 assert "an FXServer process of the service user runs" pgrep -u $ACCOUNT -f 'FXServer|run.sh'
 kora status
-assert_matches "status shows running" "$OUT" "$NAME[[:space:]]+prod[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+running"
+assert_matches "status shows running" "$OUT" "$NAME[[:space:]]+clone, released[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+running"
 sleep 15
 assert_eq "still active 15 s after start" active "$(state)"
 PID1="$(systemctl show -p MainPID --value $SVC)"

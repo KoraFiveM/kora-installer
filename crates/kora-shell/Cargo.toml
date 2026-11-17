@@ -1,0 +1,15 @@
+[package]
+name = "kora-shell"
+description = "The decisions of the Kora desktop app (tray, notifications, navigation, bridge, autostart, single instance): pure logic, no GUI dependency"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,59 @@
+# cargo-deny configuration for the desktop app only (it has its own Cargo.lock; see docs/desktop-app.md).
+# Run: cargo deny --manifest-path crates/kora-desktop/Cargo.toml check --config crates/kora-desktop/deny.toml
+# The main program's rules are in the repository's deny.toml and are not weakened by anything here.
+[graph]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+# Only the app's own direct dependencies are checked for "unmaintained": the toolkit's insides (the GTK 3 bindings that
+# wry and tray-icon use on Linux are unmaintained upstream; their authors are moving to GTK 4) are theirs to replace.
+unmaintained = "workspace"
+ignore = [
+  # glib 0.18.5 (via gtk 0.18, Linux build only): `VariantStrIter` unsoundness. Kora never iterates a GVariant string
+  # array; fixed only in glib 0.20, which the gtk 0.18 family used by wry/tray-icon cannot take. Windows build: absent.
+  { id = "RUSTSEC-2024-0429", reason = "glib 0.18 via wry/tray-icon (Linux only); the affected API is not used" },
+]
+
+[licenses]
+version = 2
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "MIT-0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "CC0-1.0",
+  "0BSD",
+  "Unlicense",
+]
+confidence-threshold = 0.9
+# MPL-2.0 is file-level copyleft: fine to link and ship unmodified (its source is public on crates.io), and these are
+# the only four crates under it (CSS parsing inside wry's HTML handling, and a directories helper). Named one by one so a
+# new MPL crate has to be looked at on purpose. OWNER DECISION recorded in docs/desktop-app.md.
+exceptions = [
+  { allow = ["MPL-2.0"], crate = "cssparser" },
+  { allow = ["MPL-2.0"], crate = "cssparser-macros" },
+  { allow = ["MPL-2.0"], crate = "dtoa-short" },
+  { allow = ["MPL-2.0"], crate = "selectors" },
+  { allow = ["MPL-2.0"], crate = "option-ext" },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

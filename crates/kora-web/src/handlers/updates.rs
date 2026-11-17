@@ -138,7 +138,7 @@ pub async fn update_auto(State(st): State<AppState>, Path(s): Path<String>) -> R
 }
 
 fn snapshot_json(s: &SnapshotInfo) -> Value {
-    json!({"id": s.id, "created_unix": s.created_unix, "resources": s.resources})
+    json!({"id": s.id, "created_unix": s.created_unix, "resources": s.resources, "on_other_branch": s.on_other_branch})
 }
 
 pub async fn snapshots_list(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {

@@ -3,6 +3,7 @@
 pub mod assets;
 pub mod backups;
 pub mod branches;
+pub mod collab;
 pub mod console;
 pub mod github;
 pub mod hub;
@@ -12,6 +13,7 @@ pub mod maintenance;
 pub mod monitor;
 pub mod reach;
 pub mod remote;
+pub mod resource_page;
 pub mod resources;
 pub mod servers;
 pub mod settings;

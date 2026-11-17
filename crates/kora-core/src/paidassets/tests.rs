@@ -51,6 +51,8 @@ fn server() -> (tempfile::TempDir, PathBuf) {
     fs::create_dir_all(dir.join("resources/[kora]/kora_core")).unwrap();
     fs::write(dir.join("server.cfg"), "endpoint_add_tcp \"0.0.0.0:30120\"\nensure [kora]\n").unwrap();
     ServerFile {
+        source: None,
+        versions: None,
         name: "srv".into(),
         mode: Mode::Production,
         dir: dir.clone(),

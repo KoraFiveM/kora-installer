@@ -15,7 +15,6 @@ use kora_core::api::{valid_resource_name, Op};
 use kora_core::branches::{self as br, Changes, PrSource, Reply, Request, Target};
 use kora_core::git::branches::codes;
 use kora_core::installer::registry::ServerEntry;
-use kora_core::installer::Mode;
 use kora_core::problem::Problem;
 use serde_json::{json, Value};
 
@@ -38,14 +37,10 @@ fn fail(m: String) -> ApiError {
     ApiError::core(m)
 }
 
-/// The server, which must be a Development one (production servers stay on their releases).
+/// The server. Every server can switch a resource to a branch or a pull request now (a server on released versions is
+/// told, in the panel, that it will run unreleased code until the resource is put back).
 fn dev(st: &AppState, name: &str) -> Result<ServerEntry, ApiError> {
-    let e = st.entry(name)?;
-    if e.mode != Mode::Development {
-        let p = Problem::new(codes::NOT_DEV, "Changing branches is only for Development servers. A Production server stays on its tested releases.");
-        return Err(ApiError::problem(StatusCode::CONFLICT, p));
-    }
-    Ok(e)
+    st.entry(name)
 }
 
 fn resource(name: &str) -> Result<(), ApiError> {

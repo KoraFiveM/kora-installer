@@ -56,7 +56,8 @@ struct Rig {
 
 fn rig() -> Rig {
     let dir = tempfile::tempdir().unwrap();
-    let entry = ServerEntry { name: "prod".into(), dir: dir.path().to_path_buf(), mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 };
+    let entry =
+        ServerEntry { source: None, versions: None, name: "prod".into(), dir: dir.path().to_path_buf(), mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 };
     let fake = FakeBackend::new();
     fake.state().servers.push(entry.clone());
     fake.state().status.insert("prod".into(), Status::Running);

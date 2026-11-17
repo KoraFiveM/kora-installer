@@ -32,6 +32,11 @@ pub struct JobStarted {
     pub server: Option<String>,
 }
 
+/// Put in the response of a request that acted on GitHub, so the log row says as whom (the one GitHub account `gh` is signed
+/// in as, shared by every panel user). A login is a short plain name, never a secret.
+#[derive(Debug, Clone)]
+pub struct GithubActor(pub String);
+
 /// Does a request for `op` with `method` belong in the log?
 pub fn audited(op: Op, method: &Method) -> bool {
     // Downloading a backup hands out the secrets inside it: that is always written down.
@@ -187,6 +192,7 @@ impl Ctx {
             write(&self.home, self.op, job.server.as_deref().or(self.server.as_deref()), &self.actor, result::STARTED, Some(format!("job {}", job.id)));
             return;
         }
+        let github = resp.extensions().get::<GithubActor>().map(|g| format!("as GitHub account {}", g.0));
         let res = if status.is_success() {
             result::OK
         } else if status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED {
@@ -194,7 +200,7 @@ impl Ctx {
         } else {
             result::FAILED
         };
-        write(&self.home, self.op, self.server.as_deref(), &self.actor, res, (!status.is_success()).then(|| format!("HTTP {}", status.as_u16())));
+        write(&self.home, self.op, self.server.as_deref(), &self.actor, res, (!status.is_success()).then(|| format!("HTTP {}", status.as_u16())).or(github));
     }
 
     /// Wait for the job to end (on its own thread) and write how it ended.
@@ -206,7 +212,13 @@ impl Ctx {
             loop {
                 match rx.recv() {
                     Ok(JobMessage::Event(_)) => {}
-                    Ok(JobMessage::Done(_)) => return write(&home, op, server.as_deref(), &actor, result::OK, Some(format!("job {id}"))),
+                    Ok(JobMessage::Done(v)) => {
+                        // Making copies is done on GitHub too: say into which account.
+                        let who = (op == Op::ResourcesFork)
+                            .then(|| v.get("owner").and_then(Value::as_str).filter(|o| !o.is_empty() && o.len() <= 64).map(|o| format!(", copies in GitHub account {o}")))
+                            .flatten();
+                        return write(&home, op, server.as_deref(), &actor, result::OK, Some(format!("job {id}{}", who.unwrap_or_default())));
+                    }
                     Ok(JobMessage::Failed(e)) => {
                         // Only the error CODE: the text can name paths.
                         let code = crate::jobs::job_error(&e).get("code").and_then(Value::as_str).unwrap_or("failed").to_string();

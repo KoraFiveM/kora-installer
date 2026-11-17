@@ -10,8 +10,8 @@ NAME=smoke
 sql() { docker exec -e MYSQL_PWD=root kora-smoke-db mariadb -h127.0.0.1 -uroot -N -B -e "$1"; }
 jget() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }
 
-step "1. kora install (production, --db existing)"
-kora install --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
+step "1. kora install (plain clones of released versions, NEW flags, --db existing)"
+kora install --source clone --versions released --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
 assert_eq "install exits 0" 0 "$CODE"
 assert_not_contains "licence key never printed" "$OUT" "$FAKE_KEY"
 assert_contains "finished" "$OUT" "Install finished."
@@ -62,10 +62,10 @@ step "5. registry and status"
 assert "registry lists the server" registry_has $NAME
 kora status
 assert_eq "status exits 0" 0 "$CODE"
-assert_matches "status shows the server as stopped" "$OUT" "$NAME[[:space:]]+prod[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
+assert_matches "status shows the server as stopped" "$OUT" "$NAME[[:space:]]+clone, released[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
 
 step "6. running the same install again resumes cleanly"
-kora install --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
+kora install --mode prod --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
 assert_eq "second install exits 0" 0 "$CODE"
 assert_eq "still the same database" "$DB" "$(jget "$D/database.json" database)"
 

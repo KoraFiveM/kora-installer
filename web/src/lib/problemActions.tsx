@@ -40,13 +40,15 @@ export const BUILT_IN: readonly ProblemActionKind[] = ['show_command', 'open_lin
 
 const KNOWN: readonly ProblemActionKind[] = [
   'retry', 'retry_step', 'skip_step', 'change_answers', 'sign_in_github', 'install_tool', 'request_admin',
-  'continue_without_admin', 'show_command', 'open_link', 'open_log', 'copy_details', 'start_database',
+  'continue_without_admin', 'show_command', 'open_link', 'open_log', 'copy_details', 'start_database', 'make_fork',
 ]
 
 /** Wizard pages that `change_answers` can open, as the user sees them. */
 const SECTION_LABEL: Record<string, string> = {
   licence: 'the licence key',
-  mode: 'the kind of server',
+  source: 'where the resources come from',
+  versions: 'which versions to follow',
+  mode: 'where the resources come from',
   name: 'the name or folder',
   ports: 'the ports',
   build: 'the server build',
@@ -95,6 +97,8 @@ export function actionLabel(a: ProblemAction, p?: { code: string }): string {
       return 'Copy details'
     case 'start_database':
       return 'Start it for me'
+    case 'make_fork':
+      return 'Make my own copy (fork)'
     case 'unknown':
     default:
       // A kind from a newer Kora (or the Rust `Action::Unknown`): never shown, see `hasHandler`.

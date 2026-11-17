@@ -172,7 +172,7 @@ fn present(landing: Landing, port: u16, link: &str, no_open: bool) {
 }
 
 /// The real-world facts.
-fn facts(home: &std::path::Path, ports: &dyn PortCheck, platform: kora_core::service::Platform) -> (Facts, Option<Running>) {
+pub(crate) fn facts(home: &std::path::Path, ports: &dyn PortCheck, platform: kora_core::service::Platform) -> (Facts, Option<Running>) {
     let windows = platform == kora_core::service::Platform::Windows;
     let running = running_panel(home, ports, platform);
     let elevated = elevate::is_elevated() && std::env::var_os("KORA_ALLOW_ROOT_PANEL").is_none_or(|v| v != "1");
@@ -237,7 +237,7 @@ fn foreground_args(no_open: bool) -> crate::cmd::panel::PanelArgs {
 }
 
 /// Set up and start the background panel, wait for it, return its port and sign-in link.
-fn start_and_wait(home: &std::path::Path, ports: &dyn PortCheck) -> Result<(u16, String), String> {
+pub(crate) fn start_and_wait(home: &std::path::Path, ports: &dyn PortCheck) -> Result<(u16, String), String> {
     let port = background_port_for(None, home, ports)?;
     println!("Starting Kora Panel in the background (it also starts by itself when you sign in) ...");
     let link = start_background_service(home, port, svc_tailscale(home))?;

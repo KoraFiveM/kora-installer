@@ -1,21 +1,27 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { api } from '@/api/client'
-import type { BranchChoices, ChangesChoice, PullRequest, ResourceBranch, ServerDetail, SwitchRequest, SwitchResult } from '@/api/types'
+import type { BranchChoices, ChangesChoice, ResourceBranch, ServerDetail, SwitchRequest, SwitchResult, Versions } from '@/api/types'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input, Select } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { branchBadge, useRefreshBranches } from './useBranches'
+import { useRefreshBranches } from './useBranches'
+import { VersionBadge } from './VersionBadge'
 import { ChangesDialog } from './ChangesDialog'
 
 /** After files changed: say that the running server still has the old version, and offer the existing restart. */
-export function RestartHint({ server: s, resource, note }: { server: ServerDetail; resource: string; note?: string }) {
+/** What the branch tools need to know about the server. */
+export type BranchServer = Pick<ServerDetail, 'name' | 'running' | 'console_enabled'> & { versions: Versions }
+
+export function RestartHint({ server: s, resource, note }: { server: Pick<ServerDetail, 'name' | 'running' | 'console_enabled'>; resource: string; note?: string }) {
   const m = useMutation({ mutationFn: () => api.resources.control(s.name, resource, 'restart') })
   const canRestart = s.running && s.console_enabled
   return (
@@ -32,9 +38,19 @@ export function RestartHint({ server: s, resource, note }: { server: ServerDetai
   )
 }
 
-const prWhere = (p: PullRequest) => (p.source === 'upstream' ? 'Original repository' : 'Your fork')
+/** The Branches dialog: the same controls as on the resource page, in a box. */
+export function ResourceDialog({ server: s, resource, onClose }: { server: BranchServer; resource: ResourceBranch; onClose: () => void }) {
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-2xl" title={`Branch of ${resource.id}`} description="You can try another version of this resource's code, or go back to the normal one.">
+        <BranchControls server={s} resource={resource} />
+      </DialogContent>
+    </Dialog>
+  )
+}
 
-export function ResourceDialog({ server: s, resource, onClose }: { server: ServerDetail; resource: ResourceBranch; onClose: () => void }) {
+/** Where the resource is and how to change it: back to normal, another branch, a pull request, kept-aside changes. */
+export function BranchControls({ server: s, resource }: { server: BranchServer; resource: ResourceBranch }) {
   const qc = useQueryClient()
   const refreshLists = useRefreshBranches(s.name)
   const role = useRole()
@@ -42,11 +58,9 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
   const id = resource.id
   const choices = useQuery({ queryKey: ['branch-choices', s.name, id], queryFn: () => api.branches.choices(s.name, id) })
   const [pick, setPick] = useState('')
-  const [showPrs, setShowPrs] = useState(false)
   const [prText, setPrText] = useState('')
   const [result, setResult] = useState<SwitchResult | null>(null)
   const [ask, setAsk] = useState<{ req: SwitchRequest; files: string[] } | null>(null)
-  const prs = useQuery({ queryKey: ['branch-prs', s.name, id], queryFn: () => api.branches.prs(s.name, id), enabled: showPrs, retry: false })
 
   const reload = useMutation({
     mutationFn: () => api.branches.choices(s.name, id, true),
@@ -81,16 +95,24 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
     const branch = rest.join(':')
     send({ action: 'branch', branch, ...(where === 'origin' || where === 'upstream' ? { remote: where } : {}) })
   }
-  const badge = branchBadge(c?.resource ?? resource)
   const working = go.isPending || restore.isPending
 
+  const released = s.versions === 'released'
+  // A server on released versions runs tested code; leaving the release is a deliberate choice.
+  const [understood, setUnderstood] = useState(false)
+  const leaving = !!blocked || (released && !understood)
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-2xl" title={`Branch of ${id}`} description="Each resource here is your own copy of it. You can try another version of its code, or go back to the normal one.">
+    <>
         <div className="space-y-5">
+          {released && (
+            <Alert tone="warning" title="This server follows released versions">
+              <p>This resource will run unreleased code until you put it back on its released version. Only do it for a test, and put it back when you are done.</p>
+              <div className="mt-2"><Checkbox label="I understand: this resource will run unreleased code" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /></div>
+            </Alert>
+          )}
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span>Right now it is on</span>
-            <Badge tone={badge.tone}>{badge.text}</Badge>
+            <VersionBadge branch={c?.resource ?? resource} />
             {(c?.resource ?? resource).changed_count > 0 && <Badge tone="amber">{(c?.resource ?? resource).changed_count} changed file{(c?.resource ?? resource).changed_count === 1 ? '' : 's'} of yours</Badge>}
           </div>
           {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
@@ -108,9 +130,9 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
 
           {resource.state !== 'default' && (
             <section className="space-y-2">
-              <h3 className="text-sm font-semibold">Back to the normal version</h3>
-              <p className="text-xs text-muted-foreground">Goes back to <code className="font-mono">{resource.default_branch}</code>, the branch Kora keeps updated. Updates start working again for this resource.</p>
-              <Button disabled={working || !!blocked} onClick={() => send({ action: 'default' })}>Back to the normal version</Button>
+              <h3 className="text-sm font-semibold">{released ? 'Back to the released version' : 'Back to the normal version'}</h3>
+              <p className="text-xs text-muted-foreground">{released ? 'Goes back to exactly the release this server is pinned to. Updates start working again for this resource.' : <>Goes back to <code className="font-mono">{resource.default_branch}</code>, the branch Kora keeps updated. Updates start working again for this resource.</>}</p>
+              <Button disabled={working || !!blocked} onClick={() => send({ action: 'default' })}>{released ? 'Back to the released version' : 'Back to the normal version'}</Button>
             </section>
           )}
 
@@ -126,7 +148,7 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
                   {options.upstream.length > 0 && <optgroup label="On the original repository">{options.upstream.map((b) => <option key={`u${b}`} value={`upstream:${b}`}>{b}</option>)}</optgroup>}
                 </Select>
               </Field></div>
-              <Button variant="default" disabled={!pick || working || !!blocked} onClick={switchToPick}>Switch</Button>
+              <Button variant="default" disabled={!pick || working || leaving} onClick={switchToPick}>Switch</Button>
               <Button variant="ghost" onClick={() => reload.mutate()} disabled={reload.isPending} title="Ask GitHub for the newest list of branches" aria-label="Refresh list of branches from GitHub">
                 {reload.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}Refresh list
               </Button>
@@ -139,36 +161,11 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
             <h3 className="text-sm font-semibold">Try a pull request</h3>
             <p className="text-xs text-muted-foreground">A pull request is a change someone has proposed. Kora downloads it so you can try it on your server before it is accepted. Paste its number or address, or pick one.</p>
             <p className="text-xs text-amber" role="note">A pull request is someone else&apos;s code. Once you try it, it runs on your server like any of its resources, before anyone has accepted it. Only try pull requests from people you trust, and look at what they change on GitHub first.</p>
-            <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (prText.trim() && !blocked) send({ action: 'pr', pr: prText.trim() }) }}>
+            <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (prText.trim() && !leaving) send({ action: 'pr', pr: prText.trim() }) }}>
               <div className="min-w-56 flex-1"><Field label="Pull request number or address"><Input value={prText} onChange={(e) => setPrText(e.target.value)} placeholder="12 or https://github.com/owner/name/pull/12" autoComplete="off" /></Field></div>
-              <Button type="submit" variant="default" disabled={!prText.trim() || working || !!blocked}>Try it</Button>
+              <Button type="submit" variant="default" disabled={!prText.trim() || working || leaving}>Try it</Button>
             </form>
-            {!showPrs ? (
-              <Button size="sm" onClick={() => setShowPrs(true)}>Show open pull requests</Button>
-            ) : (
-              <div className="space-y-2">
-                {prs.isLoading && <p className="text-sm text-muted-foreground" role="status">Asking GitHub...</p>}
-                <ErrorNotice error={prs.error} onRetry={() => void prs.refetch()} />
-                {(prs.data?.notes ?? []).map((n) => <p key={n} className="text-xs text-amber">{n}</p>)}
-                {prs.data && prs.data.prs.length === 0 && <p className="text-sm text-muted-foreground">There are no open pull requests.</p>}
-                <ul className="divide-y divide-border rounded-md border border-border" aria-label="Open pull requests">
-                  {(prs.data?.prs ?? []).map((p) => (
-                    <li key={`${p.source}${p.number}`} className="flex flex-wrap items-center gap-2 p-3 text-sm">
-                      <div className="min-w-0 flex-1">
-                        <div><span className="font-mono text-xs text-muted-foreground">#{p.number}</span> {p.title}{p.draft && <> <Badge tone="plain">Draft</Badge></>}</div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge tone={p.source === 'upstream' ? 'info' : 'amber'}>{prWhere(p)}</Badge>
-                          <span>by {p.author}</span>
-                          <span className="font-mono">{p.repo}</span>
-                          {p.from === null && <span className="text-orange">its fork was deleted</span>}
-                        </div>
-                      </div>
-                      <Button size="sm" disabled={working || !!blocked} aria-label={`Try it: pull request #${p.number}`} onClick={() => send({ action: 'pr', pr: p.number, source: p.source })}>Try it</Button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <p className="text-xs text-muted-foreground">To pick one from the open pull requests, with their checks and reviews, use the <Link className="text-info underline" to={`/servers/${encodeURIComponent(s.name)}/resources/${encodeURIComponent(id)}`}>page of {id}</Link>.</p>
           </section>
 
           {(c?.stashes.length ?? 0) > 0 && (
@@ -199,7 +196,6 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
             if (req) go.mutate({ ...req, changes: choice })
           }}
         />
-      </DialogContent>
-    </Dialog>
+    </>
   )
 }

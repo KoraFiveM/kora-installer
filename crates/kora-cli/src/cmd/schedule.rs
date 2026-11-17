@@ -51,7 +51,15 @@ pub(crate) fn schedule(cmd: ScheduleCmd) -> i32 {
         reg.find(server).cloned().or_else(|| {
             let dir = PathBuf::from(server);
             let sf = registry::ServerFile::load(&dir).ok()?;
-            Some(registry::ServerEntry { name: sf.name, dir, mode: sf.mode, ports: registry::PortsRecord { game: sf.ports.game, txadmin: sf.ports.txadmin }, created_unix: 0 })
+            Some(registry::ServerEntry {
+                source: None,
+                versions: None,
+                name: sf.name,
+                dir,
+                mode: sf.mode,
+                ports: registry::PortsRecord { game: sf.ports.game, txadmin: sf.ports.txadmin },
+                created_unix: 0,
+            })
         })
     };
     let missing = |server: &str| {

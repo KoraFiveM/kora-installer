@@ -203,7 +203,12 @@ impl Backend for SystemBackend {
             // So the monitor does not report this stop as a crash.
             crate::monitor::mark_stop_intent(&e.dir);
         }
-        control_with(&SystemControl, &e.name, a)
+        control_with(&SystemControl, &e.name, a)?;
+        if a != ControlAction::Stop {
+            // Everything is loaded fresh: no resource still needs a restart.
+            crate::resourcestate::mark_server_restarted(&e.dir);
+        }
+        Ok(())
     }
 
     fn resources(&mut self, e: &ServerEntry) -> Vec<String> {
@@ -423,6 +428,11 @@ impl Backend for SystemBackend {
         paidassets::remove(&e.dir, name)
     }
 
+    fn collab(&mut self, e: &ServerEntry, req: &crate::collab::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
+        crate::installer::gitops::with_runner(&e.dir, |r| crate::collab::run_on(r, &sf, req, say)).map_err(String::from)
+    }
+
     fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
         let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
         crate::installer::gitops::with_runner(&e.dir, |r| crate::branches::run(r, &sf, req, say)).map_err(String::from)
@@ -454,6 +464,8 @@ mod tests {
         use crate::installer::registry::{PortsRecord, ResourceRecord};
         let rec = |id: &str, path: &str| ResourceRecord { id: id.into(), path: path.into(), ..Default::default() };
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "a".into(),
             mode: installer::Mode::Production,
             dir: PathBuf::from("/srv/a"),

@@ -7,7 +7,7 @@ import type { ServerDetail } from '@/api/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/Skeleton'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { ModeChip, StatusChip } from '@/components/Status'
+import { StatusChip, StyleChip } from '@/components/Status'
 import { useServerControl } from '@/hooks/useServerControl'
 import NotFound from '@/pages/NotFound'
 import { OverviewTab } from './server/OverviewTab'
@@ -46,7 +46,6 @@ export default function ServerDetailPage() {
   if (q.error instanceof ApiError && q.error.status === 404) return <NotFound />
   if (q.isError || !q.data) return <ErrorNotice error={q.error} />
   const s = q.data
-  const dev = s.mode === 'development'
   // The Updates tab now lives in Resources; old links to ?tab=updates land there.
   const requested = params.get('tab') ?? 'overview'
   const current = requested === 'updates' ? 'resources' : requested
@@ -55,7 +54,7 @@ export default function ServerDetailPage() {
       <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> All servers</Link>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-heading text-2xl font-bold">{s.name}</h1>
-        <ModeChip mode={s.mode} />
+        <StyleChip source={s.source} versions={s.versions} />
         <StatusChip status={s.status} pending={ctl.pending} />
       </div>
       <Tabs value={current} onValueChange={(t) => setParams({ tab: t }, { replace: true })}>
@@ -67,10 +66,10 @@ export default function ServerDetailPage() {
           <TabsTrigger value="resources">Resources</TabsTrigger>
           <TabsTrigger value="assets">Paid assets</TabsTrigger>
           <TabsTrigger value="backups">Backups</TabsTrigger>
-          {dev && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
+          <TabsTrigger value="schedule">Schedule</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="ports">Ports</TabsTrigger>
-          {dev && <TabsTrigger value="github">GitHub</TabsTrigger>}
+          <TabsTrigger value="github">GitHub</TabsTrigger>
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
         <TabsContent value="overview"><OverviewTab server={s} ctl={ctl} /></TabsContent>
@@ -80,10 +79,10 @@ export default function ServerDetailPage() {
         <TabsContent value="resources"><Lazy id="resources"><ResourcesTab server={s} /></Lazy></TabsContent>
         <TabsContent value="assets"><Lazy id="assets"><PaidAssetsTab server={s} /></Lazy></TabsContent>
         <TabsContent value="backups"><Lazy id="backups"><BackupsTab server={s} /></Lazy></TabsContent>
-        {dev && <TabsContent value="schedule"><Lazy id="schedule"><ScheduleTab server={s} /></Lazy></TabsContent>}
+        <TabsContent value="schedule"><Lazy id="schedule"><ScheduleTab server={s} /></Lazy></TabsContent>
         <TabsContent value="notifications"><Lazy id="notifications"><NotificationsTab server={s} /></Lazy></TabsContent>
         <TabsContent value="ports"><Lazy id="ports"><PortsTab server={s} /></Lazy></TabsContent>
-        {dev && <TabsContent value="github"><Lazy id="github"><GithubTab server={s} /></Lazy></TabsContent>}
+        <TabsContent value="github"><Lazy id="github"><GithubTab server={s} /></Lazy></TabsContent>
         <TabsContent value="danger"><Lazy id="danger"><DangerTab server={s} /></Lazy></TabsContent>
       </Tabs>
     </div>

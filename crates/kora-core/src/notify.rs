@@ -356,7 +356,7 @@ mod tests {
     const GOOD: &str = "https://discord.com/api/webhooks/123456789/abc_DEF-ghi";
 
     fn server(dir: &Path) -> ServerRecord {
-        ServerEntry { name: "Alpha".into(), dir: dir.to_path_buf(), mode: Mode::Development, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 }
+        ServerEntry { source: None, versions: None, name: "Alpha".into(), dir: dir.to_path_buf(), mode: Mode::Development, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 }
     }
 
     fn report() -> UpdateReport {

@@ -56,6 +56,8 @@ pub fn min_role(op: Op) -> Role {
         | Op::ServersList
         | Op::ServerGet
         | Op::ResourcesList
+        | Op::ResourceGet
+        | Op::ResourceLog
         | Op::BranchesList
         | Op::SnapshotsList
         | Op::CatalogForServer
@@ -91,6 +93,10 @@ pub fn min_role(op: Op) -> Role {
         // Branch lists, pull request lists and the "who has this branch" check only read (they may ask GitHub).
         | Op::BranchChoices
         | Op::PrList
+        | Op::ResourceChanges
+        | Op::PrView
+        | Op::IssuesList
+        | Op::ResourceReleases
         | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
@@ -186,6 +192,16 @@ pub fn min_role(op: Op) -> Role {
         | Op::BranchSwitch
         | Op::StashRestore
         | Op::BranchBulkApply
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssueComment
+        | Op::ResourcesFork
+        | Op::VersionsSet
+
         // Forwarding a port on the router and opening the firewall change the network around the machine; a
         // txAdmin ticket opens full control of the game server (it can run code through resources).
         | Op::ForwardingSet
@@ -225,6 +241,9 @@ pub fn destructive(op: Op) -> bool {
         | Op::SelfUpdateApply
         | Op::ScheduleSet
         | Op::ScheduleRemove
+        | Op::ResourcePush
+        | Op::PrMerge
+
         // txAdmin is full control of the game server, including running code through resources: as serious as
         // console input.
         | Op::BackupSettingsSet
@@ -248,6 +267,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::ConsoleStream
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::BranchesList
@@ -256,6 +276,18 @@ pub fn destructive(op: Op) -> bool {
         | Op::StashRestore
         | Op::BranchSwitch
         | Op::BranchBulkApply
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
@@ -380,6 +412,7 @@ pub fn installs(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::UpdatePreview
@@ -467,6 +500,20 @@ pub fn installs(op: Op) -> bool {
         | Op::BranchSwitch
         | Op::StashRestore
         | Op::BranchBulkPreview
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::BranchBulkApply
         | Op::ReachCheck
         | Op::ReachSettingsGet
@@ -559,6 +606,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::BranchesList
@@ -568,6 +616,20 @@ pub fn local_only(op: Op) -> bool {
         | Op::BranchBulkPreview
         | Op::BranchSwitch
         | Op::BranchBulkApply
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto
@@ -830,6 +892,8 @@ mod tests {
             Op::BackupDownload,
             Op::BackupSettingsSet,
             Op::BackupPrune,
+            Op::ResourcePush,
+            Op::PrMerge,
         ];
         for op in Op::ALL {
             assert_eq!(destructive(*op), want.contains(op), "{op:?}");

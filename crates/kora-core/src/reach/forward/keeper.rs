@@ -471,6 +471,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         settings::save_server(d.path(), &settings::ServerReach { forward: true, ..Default::default() }).unwrap();
         let sf = crate::installer::registry::ServerFile {
+            source: None,
+            versions: None,
             name: "main".into(),
             mode: crate::installer::Mode::Production,
             dir: d.path().to_path_buf(),

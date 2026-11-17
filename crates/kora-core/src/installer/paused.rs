@@ -252,6 +252,8 @@ mod tests {
 
     fn req(dir: &str, key_name: Option<&str>) -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: "Dev Den".into(),
             dir: dir.into(),

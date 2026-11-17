@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::keys::Profile;
-use crate::installer::{InstallOutcome, Mode, Ports};
+use crate::installer::{InstallOutcome, Mode, Ports, Source, Versions};
 use crate::problem::Problem;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,7 +45,19 @@ pub struct DbAdmin {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct InstallRequest {
-    pub mode: Mode,
+    /// The old spelling (`production` = clone + released, `development` = fork + latest). Optional: `source` and
+    /// `versions` win when they are sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub mode: Option<Mode>,
+    /// Plain clones of the originals, or your own copies (forks).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub source: Option<Source>,
+    /// Released versions (pinned) or the latest changes (the main branch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub versions: Option<Versions>,
     pub name: String,
     pub dir: String,
     pub hostname: String,
@@ -79,7 +91,14 @@ pub struct InstallRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SavedInstall {
+    /// The old spelling, always sent.
     pub mode: Mode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub source: Option<Source>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub versions: Option<Versions>,
     pub name: String,
     pub dir: String,
     pub hostname: String,
