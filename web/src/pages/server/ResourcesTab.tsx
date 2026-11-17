@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Play, RefreshCw, RotateCw, Square } from 'lucide-react'
 import { api } from '@/api/client'
@@ -131,8 +132,9 @@ const CONTROL: Record<ControlAction, { label: string; Icon: typeof Play }> = {
 const CONSOLE_RESOURCE = 'kora_console'
 
 /** One installed resource: its name, what the last check found, and the buttons to check, start, stop and restart it. */
-function InstalledResource({ id, updates: u, branch, noCheck, noControl, pending, said, onControl }: {
+function InstalledResource({ id, serverName, updates: u, branch, noCheck, noControl, pending, said, onControl }: {
   id: string
+  serverName: string
   /** Development: the branch it is on. */
   branch?: ResourceBranch
   updates: Updates
@@ -152,7 +154,7 @@ function InstalledResource({ id, updates: u, branch, noCheck, noControl, pending
   return (
     <li className="py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="min-w-0 flex-1 break-all font-mono text-sm">{id}</span>
+        <Link className="min-w-0 flex-1 break-all font-mono text-sm underline-offset-2 hover:underline" to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} aria-label={`Open the page of ${id}`}>{id}</Link>
         {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <Badge tone={branchBadge(branch).tone} title="Change it in the GitHub tab">{branchBadge(branch).text}</Badge>}
         {checking ? <span className="text-xs text-muted-foreground" role="status">Checking...</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
         <div className="flex items-center gap-1">
@@ -206,6 +208,7 @@ function InstalledList({ server: s, installed, updates: u }: { server: ServerDet
           <InstalledResource
             key={r}
             id={r}
+            serverName={s.name}
             updates={u}
             branch={branches.byId.get(r)}
             noCheck={noOperator}

@@ -10,6 +10,7 @@ import { ToolchainActions } from '@/components/ToolchainActions'
 import { SignedOut } from '@/components/SignedOut'
 import ServersPage from '@/pages/ServersPage'
 import ServerDetailPage from '@/pages/ServerDetailPage'
+import ResourcePage from '@/pages/ResourcePage'
 import InstallWizard from '@/pages/InstallWizard'
 import FleetPage from '@/pages/FleetPage'
 import SettingsPage from '@/pages/SettingsPage'
@@ -74,6 +75,7 @@ export function App({ boot }: { boot: BootResult }) {
             <Route element={<AppShell />}>
               <Route index element={<ServersPage />} />
               <Route path="servers/:name" element={<ServerDetailPage />} />
+              <Route path="servers/:name/resources/:resource" element={<ResourcePage />} />
               <Route path="install" element={<InstallWizard />} />
               <Route path="fleet" element={<FleetPage />} />
               <Route path="settings" element={<SettingsPage />} />

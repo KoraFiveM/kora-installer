@@ -6,6 +6,7 @@ import { installHubMock } from './hub'
 import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
 import { installKeysMock } from './keys'
 import { installBranchesMock } from './branches'
+import { installResourceMock } from './resource'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
@@ -54,7 +55,8 @@ function init(name: ScenarioName) {
   paidAssets = {}
   uploads = new Map()
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
-  resetBranches?.()
+  branchesMock?.()
+  resourceMock?.reset()
   jobs.clear()
   busy.clear()
   paused.clear()
@@ -389,7 +391,13 @@ let lastHeaders = new Headers()
 const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers)
-const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
+const resourceMock = installResourceMock(route, Fail, {
+  find: (n) => find(n),
+  installed: (n) => installed[n] ?? [],
+  consoleEnabled: (n) => !!consoleEnabled[n],
+  branchRow: (n, id): T.ResourceBranch => (id.startsWith('kora_') && find(n).mode === 'development' ? branchesMock.row(n, id) : { id, folder: id, state: 'pinned', default_branch: 'dev', label: 'fixed version', changed_count: 0, stashes: 0 }),
+})
+const branchesMock = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github, onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why) })
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
 
@@ -463,6 +471,7 @@ route('POST', '/servers/{s}/control', (m, b) => {
       if (clash) throw new Fail(409, 'conflict', `Port ${s.ports.game} is already in use by "${clash.name}". Change the port on the Ports tab first.`)
     }
     s.status = action === 'stop' ? 'stopped' : 'running'
+    if (action !== 'stop') resourceMock.serverRestarted(s.name)
     pushServer(s)
     return { status: s.status }
   })
@@ -536,6 +545,7 @@ route('POST', '/servers/{s}/resources/{name}/control', (m, b) => {
   if (s.status !== 'running') throw new Fail(409, 'conflict', 'The server is not running. Start the server first; its resources start with it.')
   if (!consoleEnabled[s.name]) throw new Fail(409, 'conflict', 'The live console is not switched on for this server yet. Turn it on in the Console tab first (it needs a restart).')
   pushConsole(s.name, `> ${action === 'restart' ? 'ensure' : action} ${name}`)
+  if (action !== 'stop') resourceMock.resourceRestarted(s.name, name)
   return { message: `Asked the server to ${action} ${name}. The Console tab shows what happened.` }
 })
 route('POST', '/servers/{s}/update/preview', (m, b) => {
@@ -603,6 +613,7 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
     const left = preview.resources.map((r) => (chosen.includes(r) ? { ...r, status: 'up_to_date' as const, behind: 0, from: r.to } : r))
     dirtyPreviewed[s.name] = { ...preview, resources: left }
     s.badge = badgeFrom(dirtyPreviewed[s.name])
+    resourceMock.markChanged(s.name, chosen.map((c) => c.id), 'updated')
     pushServer(s)
     return report
   })
@@ -624,6 +635,7 @@ route('POST', '/servers/{s}/snapshots/{id}/rollback', (m) => {
       emit({ type: 'resource', id: r, state: 'rolled back' })
       await sleep(600)
     }
+    resourceMock.markChanged(s.name, snap.resources, 'rolled back')
     return {}
   })
 })

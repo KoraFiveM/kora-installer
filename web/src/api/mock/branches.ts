@@ -11,6 +11,8 @@ export interface BranchesDeps {
   find: (name: string) => T.ServerSummary
   installed: (server: string) => string[]
   signedIn: () => boolean
+  /** Files of a resource changed (the page's "restart needed" notice). */
+  onChanged?: (server: string, id: string, why: string) => void
 }
 
 interface Res {
@@ -35,7 +37,7 @@ const RESTART = 'The files changed, but a running server still has the old versi
 const validBranch = (b: string) => /^[A-Za-z0-9._/-]{1,200}$/.test(b) && !b.startsWith('-') && !b.includes('..') && !b.endsWith('/') && !b.endsWith('.lock')
 
 /** Adds the routes; the returned function forgets every switch (a scenario starts from a clean world). */
-export function installBranchesMock(route: Route, startJob: StartJob, Fail: FailCtor, d: BranchesDeps): () => void {
+export function installBranchesMock(route: Route, startJob: StartJob, Fail: FailCtor, d: BranchesDeps): (() => void) & { row: (server: string, id: string) => T.ResourceBranch } {
   const state = new Map<string, Res>()
   const key = (s: string, r: string) => `${s}/${r}`
   const trackable = (s: string) => d.installed(s).filter((r) => r.startsWith('kora_'))
@@ -96,6 +98,7 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
     const left = leave(v, going, changes)
     if (left === 'ask') return result(id, v, 'needs_choice', `${v.dirty.length} file${v.dirty.length === 1 ? ' has' : 's have'} changes of your own that haven't been saved anywhere. Choose what to do with them first.`)
     apply(v)
+    d.onChanged?.(server, id, `moved to ${labelOf(v)}`)
     return result(id, v, 'switched', `Now on ${labelOf(v)}.${left.stashed ? ' Your changes were kept aside: you can bring them back later.' : ''}`, { stashed: left.stashed, title })
   }
 
@@ -164,6 +167,7 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
     const st = v.stashes.find((x) => x.index === Number(b.index))
     if (!st) throw new Fail(422, 'branch.stash_gone', 'Those kept-aside changes are not there any more.')
     v.dirty = ['config.lua']
+    d.onChanged?.(s.name, id, 'kept-aside changes brought back')
     return result(id, v, 'switched', 'Your changes are back (1 file). They also stay in the kept-aside list, so nothing can be lost.', { stashed: st })
   })
 
@@ -212,5 +216,5 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
       return { items, switched, needs_choice: count('needs_choice'), failed: 0, skipped: count('skipped'), needs_restart: switched > 0, restart_note: switched > 0 ? RESTART : undefined } satisfies T.BulkResult
     })
   })
-  return () => state.clear()
+  return Object.assign(() => state.clear(), { row })
 }

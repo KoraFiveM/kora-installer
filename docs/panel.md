@@ -178,6 +178,12 @@ Each server in the list (and its Overview) has three buttons:
 | GitHub | Development servers only: sign in to GitHub, **change a resource's branch or try a pull request** (see below), report an issue about a resource, or open a pull request. |
 | Danger zone | Delete the server. You choose whether to keep the files and the database, then type the server's name to confirm. |
 
+### The page of one resource
+
+Every resource name in the Resources tab opens its own page (`/servers/<server>/resources/<resource>`, so it can be bookmarked and the back link returns to the list). It shows where the resource's files are and has **Check for update**, **Update** (only this resource; it does not restart anything), and **Start**, **Stop**, **Restart** on the running server. The last three send the command through the live console, so they need the server running and the console switched on: when they cannot work the page says why and offers the fix (start the server, or open the Console tab). Checking and the three buttons need the operator role, updating needs admin.
+
+**Restart needed.** After anything that changes a resource's files (update, switching branch, trying a pull request, going back to the normal version, bringing kept-aside changes back, rollback) the page says "Restart needed: the running server still has the old version." with a restart button. Kora remembers this on the server in `kora-resource-state.json` in the server folder, as a change number per resource against the number of its last restart and of the last start of the whole server, so reloading the page, another user or `kora resource show` all see the same thing. It goes away when the resource is restarted from the page or the whole server is started or restarted through Kora. A server that is not running has nothing old loaded, so it shows no notice. If a server is restarted outside Kora (for example from txAdmin) the notice stays until Kora sees a restart. Delete the file to clear it.
+
 ### Branches and pull requests (Development servers)
 
 On a Development server every resource is a clone of your own fork. The GitHub tab's **Branches and pull requests** card lets you move a resource onto another version of its code without using git yourself. The same operations are `kora branch ...` and `kora pr ...` in a terminal.
