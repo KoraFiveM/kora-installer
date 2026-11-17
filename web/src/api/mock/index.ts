@@ -52,6 +52,7 @@ function init(name: ScenarioName) {
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
   jobs.clear()
   busy.clear()
+  paused.clear()
   nextId = 1
   consoleTick = 0
 }
@@ -74,7 +75,10 @@ const find = (name: string): T.ServerSummary => {
   return s
 }
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms * speed))
-const elevate = (what: string, cmd: string[]) => new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd])
+const elevate = (what: string, cmd: string[]) =>
+  new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd], {
+    actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
+  })
 
 // ---- buses ----------------------------------------------------------------------------------
 
@@ -238,8 +242,28 @@ const INSTALL_STEPS: [string, string][] = [
   ['launch', 'Starting the server'],
 ]
 
-async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void): Promise<T.InstallOutcome> {
-  const fail = req.name.toLowerCase().startsWith('fail')
+/** Steps that may be skipped after they failed (the real list: `kora_core::installer::SKIPPABLE`). */
+const SKIPPABLE = new Set(['build.firewall', 'launch'])
+
+/**
+ * Stopped installs that can carry on (`POST /installs/{job}/resume`), with their answers. Demo names:
+ * "fail..." stops at the database the first time (Try this step again then works); "skip..." stops at
+ * starting the server, which may be skipped; "github..." stops because GitHub is not signed in.
+ */
+const paused = new Map<string, { req: T.InstallRequest; failed: string; attempt: number; done: string[]; skip: Set<string> }>()
+
+interface InstallRun {
+  /** How many times this install was tried before. */
+  attempt: number
+  /** Steps finished in an earlier attempt (shown as done again first). */
+  done: string[]
+  /** Steps the user chose to skip. */
+  skip: Set<string>
+}
+
+async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, jobId: () => string, run: InstallRun = { attempt: 0, done: [], skip: new Set() }): Promise<T.InstallOutcome> {
+  const lower = req.name.toLowerCase()
+  const failAt = lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
   if (!req.service) skipped.add('build.service')
@@ -248,18 +272,47 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void): Pr
   for (let i = 0; i < INSTALL_STEPS.length; i++) {
     const [step, title] = INSTALL_STEPS[i]
     const pct = Math.round(((i + 1) / INSTALL_STEPS.length) * 100)
-    if (skipped.has(step)) {
-      emit({ step, title, status: 'skipped', detail: 'Not needed for your choices', percent: pct } satisfies T.ProgressEvent)
+    if (skipped.has(step) || run.skip.has(step)) {
+      emit({ step, title, status: 'skipped', detail: run.skip.has(step) ? 'Skipped: you chose to go on without it' : 'Not needed for your choices', percent: pct } satisfies T.ProgressEvent)
+      continue
+    }
+    if (run.done.includes(step)) {
+      emit({ step, title, status: 'done', detail: 'Already done', percent: pct } satisfies T.ProgressEvent)
       continue
     }
     emit({ step, title, status: 'running', detail: 'Working on it', percent: Math.max(0, pct - 10) } satisfies T.ProgressEvent)
     await sleep(step === 'build.fxserver' ? 1800 : 900)
-    if (fail && step === 'build.db') {
-      emit({ step, title, status: 'failed', detail: 'Could not log in to the database', percent: pct } satisfies T.ProgressEvent)
+    if (step === failAt) {
+      emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
       prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier }
-      throw new Fail(500, 'internal', 'The database refused the administrator login, so the install stopped before creating the server database.', undefined, {
-        kept: [`The FiveM server files in ${req.dir}`, 'Your answers (use "Try again" to continue)'],
+      const id = jobId()
+      paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
+      const common: Partial<T.JobError> = {
+        kept: [`What was already created in ${req.dir}`, 'Your answers (not the licence key or database password)'],
         log_path: `${req.dir}/.kora/install.log`,
+        failed_step: step,
+        resume: true,
+      }
+      const tail: T.ProblemAction[] = [
+        { kind: 'retry_step', step },
+        ...(SKIPPABLE.has(step) ? [{ kind: 'skip_step', step } as T.ProblemAction] : []),
+        { kind: 'change_answers' },
+        { kind: 'open_log', job: id, path: `${req.dir}/.kora/install.log` },
+      ]
+      if (step === 'build.db') {
+        throw new Fail(500, 'install.db_login_failed', "Could not log in to the database server as 'root'. Kora needs an administrator account to create a NEW database and user. Check the admin user, password, address and port you gave.", undefined, {
+          ...common,
+          details: "ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: YES)",
+          actions: [{ kind: 'change_answers', section: 'database' }, ...tail],
+        })
+      }
+      if (step === 'prepare.git') {
+        throw new Fail(500, 'github.signed_out', 'You are not signed in to GitHub.', undefined, { ...common, actions: [{ kind: 'sign_in_github' }, ...tail] })
+      }
+      throw new Fail(500, 'install.step_failed', 'The server was installed, but it did not start: txAdmin did not answer within 60 seconds.', undefined, {
+        ...common,
+        details: '[txAdmin] Error: listen EADDRINUSE: address already in use 0.0.0.0:40120',
+        actions: tail,
       })
     }
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
@@ -702,13 +755,13 @@ route('DELETE', '/servers/{s}/assets/{a}', (m) => {
 route('POST', '/servers/{s}/issues', (m, b) => {
   find(dec(m[1]))
   if (!String(b.title ?? '').trim()) throw new Fail(400, 'bad_request', 'Give the issue a short title.')
-  if (!prefs.github) throw new Fail(403, 'forbidden', 'Sign in to GitHub first.')
+  if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   return { url: `https://github.com/KoraFiveM/${String(b.resource)}/issues/42` }
 })
 route('POST', '/servers/{s}/pr/plan', (m, b) => {
   const s = find(dec(m[1]))
   if (s.mode !== 'development') throw new Fail(400, 'bad_request', 'Pull requests are only for development servers.')
-  if (!prefs.github) throw new Fail(403, 'forbidden', 'Sign in to GitHub first.')
+  if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   const r = String(b.resource ?? '')
   if (r !== 'kora_core' && r !== 'kora_inventory') throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
   return { resource: r, upstream: `KoraFiveM/${r}`, base: 'dev', head_owner: 'sam-rp', head_branch: 'fix-payroll', ahead: 2, dir: `${s.dir}/resources/[kora]/${r}` } satisfies T.PrPlan
@@ -718,7 +771,18 @@ route('POST', '/servers/{s}/pr', (m, b) => {
   if (!String(b.title ?? '').trim()) throw new Fail(400, 'bad_request', 'Give the pull request a title.')
   return { url: 'https://github.com/KoraFiveM/kora_core/pull/87' }
 })
-route('GET', '/github/status', () => ({ signed_in: prefs.github, user: prefs.github ? 'sam-rp' : null }) satisfies T.GithubStatus)
+route('GET', '/github/status', () => {
+  // `trouble`: the GitHub CLI is not installed (told apart from "signed out").
+  if (beh.trouble) {
+    return {
+      signed_in: false, user: null, state: 'gh_missing', missing_scopes: [],
+      problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
+    } satisfies T.GithubStatus
+  }
+  return prefs.github
+    ? ({ signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null } satisfies T.GithubStatus)
+    : ({ signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } } satisfies T.GithubStatus)
+})
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
     await sleep(beh.trouble ? 3000 : 6000)
@@ -729,7 +793,7 @@ route('POST', '/github/login', () => {
   return { ...started, code: 'WDJB-MJHT', url: 'https://github.com/login/device' } satisfies T.GithubLoginStart
 })
 route('GET', '/github/owners', () => {
-  if (!prefs.github) throw new Fail(403, 'forbidden', 'Sign in to GitHub first.')
+  if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   return { owners: [{ login: 'sam-rp', kind: 'user', can_fork: true, reason: null }, { login: 'sunset-roleplay', kind: 'org', can_fork: false, reason: 'You cannot create repositories in this organisation.' }] satisfies T.GithubOwner[] }
 })
 route('GET', '/catalog', () => catalog)
@@ -784,7 +848,27 @@ route('POST', '/installs', (_m, b) => {
   if (servers.some((s) => s.name === r.name)) throw new Fail(409, 'conflict', `A server called "${r.name}" already exists.`)
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)
-  return startJob('install', null, (emit) => runInstall(r, emit))
+  let id = ''
+  const started = startJob('install', null, (emit) => runInstall(r, emit, () => id))
+  id = started.job
+  return started
+})
+route('POST', '/installs/{j}/resume', (m, b) => {
+  const from = dec(m[1])
+  const p = paused.get(from)
+  if (!p) {
+    throw new Fail(404, 'install.cannot_resume', 'This install can no longer be continued from here (Kora Panel was restarted, or it was continued already). Check your answers and start it again: it carries on where it stopped.', undefined, { actions: [{ kind: 'change_answers' }] })
+  }
+  const skip = typeof b.skip === 'string' ? b.skip : null
+  if (skip && (skip !== p.failed || !SKIPPABLE.has(skip))) {
+    throw new Fail(409, 'install.cannot_resume', 'This step cannot be skipped: your server needs it. Try it again, or change your answers.', undefined, { actions: [{ kind: 'retry_step', step: p.failed }, { kind: 'change_answers' }] })
+  }
+  paused.delete(from)
+  const run: InstallRun = { attempt: p.attempt, done: p.done, skip: new Set([...p.skip, ...(skip ? [skip] : [])]) }
+  let id = ''
+  const started = startJob('install', null, (emit) => runInstall(p.req, emit, () => id, run))
+  id = started.job
+  return started
 })
 route('GET', '/installs/{j}/log', () => ({ lines: ['[install] started', '[install] see the steps above for details'] }))
 route('GET', '/self-update', () => ({ current: prefs.version, latest: '0.4.1', available: prefs.version !== '0.4.1', update_available: prefs.version !== '0.4.1', versions: ['0.4.1', '0.4.0', '0.3.4'] }) satisfies T.SelfUpdateInfo)
@@ -860,7 +944,8 @@ installMonitorMock({ route, servers, fail: (status, code, message) => new Fail(s
 // ---- fetch shim -----------------------------------------------------------------------------
 
 const json = (status: number, body: unknown) => new Response(body === undefined ? null : JSON.stringify(body), { status: body === undefined && status === 200 ? 204 : status, headers: { 'Content-Type': 'application/json' } })
-const errRes = (e: Fail) => json(e.status, { error: { code: e.code, message: e.message, ...(e.command ? { command: e.command } : {}) } })
+const errRes = (e: Fail) =>
+  json(e.status, { error: { code: e.code, message: e.message, ...(e.command ? { command: e.command } : {}), ...(e.extra.details ? { details: e.extra.details } : {}), ...(e.extra.actions ? { actions: e.extra.actions } : {}) } })
 
 async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.origin)

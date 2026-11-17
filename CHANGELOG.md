@@ -12,9 +12,13 @@ versions follow [SemVer](https://semver.org/).
 - The headless install's default folder on Windows is `C:\Kora\<name>`, the same as in the panel (it used to be `%USERPROFILE%\kora\<name>`).
 - The install scripts make per-user shortcuts that open the panel: Start Menu and Desktop on Windows (no administrator rights, not "Run as administrator"), a launcher in the applications menu on Linux desktops (no terminal window). `KORA_NO_SHORTCUTS=1` / `-NoShortcuts` skips them. `kora app install` makes the same shortcuts.
 - The server install no longer adds the machine-wide "Kora app" in `%ProgramFiles%` / `/opt/kora`, and the install options for it are gone from the wizard (`--no-app` and `--no-desktop-shortcut` are still accepted and ignored).
+- The install no longer asks you to close the window or run the installer again when git was just installed, the GitHub sign-in did not finish or permissions are missing: it says what happened and what to do. `kora install` in a terminal prints the same plain message.
 
 ### Added
 - **Tidy up old shortcuts.** When an earlier Kora left its machine-wide app and administrator shortcuts behind, Settings (and a notice on the servers screen) offers one click to make the new shortcuts first and then remove the old copy. Removing it needs administrator rights, so the panel shows the command to run (`kora app uninstall --yes`) or uses the helper. `kora app status` shows what is found.
+- **Errors that say what to do, with buttons to do it.** When an install, a GitHub action or something that needs administrator rights fails, the panel says in plain words what happened, keeps the technical part under "Show details", and offers buttons for the fixes (try the step again, change an answer, sign in to GitHub, the command to run as administrator, ...). Other errors get "Try again" and "Copy details".
+- **A failed install step can be tried again, or skipped when that is safe, without starting over.** The install stops at the failed step and waits: "Try this step again" carries on from there with the same answers (the licence key is kept in Kora's memory only, never written to disk), "Change my answers" goes back to the summary. Only optional steps can be skipped: opening the firewall, the daily update schedule, and starting the server.
+- The GitHub status tells "the GitHub CLI is not installed", "not signed in" and "signed in without the permissions Kora needs" apart.
 
 ### Removed
 - The terminal screens (the `kora-tui` crate: install wizard and server manager). Everything they did is in the panel or the command line.

@@ -138,3 +138,26 @@ describe('api client', () => {
     await expect(api.webhook.remove('a')).resolves.toBeUndefined()
   })
 })
+
+describe('problems', () => {
+  it('keeps the details and actions of an error answer', async () => {
+    const actions = [{ kind: 'sign_in_github' }, { kind: 'install_tool', tool: 'gh' }]
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: { code: 'github.gh_missing', message: 'No gh.', details: 'which gh: not found', actions } }))
+    const e = (await api.github.owners().catch((x: unknown) => x)) as ApiError
+    expect(e).toBeInstanceOf(ApiError)
+    expect([e.code, e.details, e.actions]).toEqual(['github.gh_missing', 'which gh: not found', actions])
+    // An older answer without them still reads.
+    fetchMock.mockResolvedValueOnce(jsonResponse(409, { error: { code: 'conflict', message: 'Busy.' } }))
+    const old = (await api.github.owners().catch((x: unknown) => x)) as ApiError
+    expect([old.details, old.actions]).toEqual([undefined, undefined])
+  })
+
+  it('carries on with a stopped install, skipping a step only when asked', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(202, { job: 'j2' }))
+    expect(await api.installs.resume('j 1')).toEqual({ job: 'j2' })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/installs/j%201/resume')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({})
+    await api.installs.resume('j1', 'launch')
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ skip: 'launch' })
+  })
+})

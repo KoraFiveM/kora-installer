@@ -18,6 +18,10 @@ use crate::service::ScheduleConfig;
 use crate::update::manual::{ApplyOpts, ChangeStatus, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
 use crate::update::UpdateReport;
 
+/// The error is text for a person, or a packed [`crate::problem::Problem`] (`Err(problem.into())`)
+/// when the front end should offer specific actions. The panel unpacks it (`ApiError::core`); a
+/// terminal front end shows it with [`crate::problem::plain_text`]. Plain strings stay valid and
+/// become a generic problem.
 pub type Res<T> = Result<T, String>;
 
 /// Live state of a server.

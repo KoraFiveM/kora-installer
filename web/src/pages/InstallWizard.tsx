@@ -12,11 +12,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { CopyButton, CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { GithubSignIn } from '@/components/GithubSignIn'
+import type { ActionHandlers } from '@/lib/problemActions'
 import { StepProgress } from '@/components/JobProgress'
 import { Skeleton } from '@/components/Skeleton'
 import { formatBytes, validatePorts } from '@/lib/utils'
 import { REMOTE_ACTIONS_COMMAND, useInstallBlock } from './install/access'
-import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, STEP_LABEL, stepProblem, stepsFor, type StepId, type WizardForm } from './install/form'
+import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
 import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
 import { cn } from '@/lib/utils'
@@ -202,6 +204,10 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const [resumeOffered, setResumeOffered] = useState(true)
   const [starting, setStarting] = useState(false)
   const [diskOk, setDiskOk] = useState(true)
+  /** Carrying on with a stopped install did not work (for example: the panel was restarted). */
+  const [resumeErr, setResumeErr] = useState<unknown>(null)
+  /** A failure offered "Sign in to GitHub": the sign-in is shown under it. */
+  const [githubAsked, setGithubAsked] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
   const ports = usePortsCheck(f.game, f.tx)
   const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
@@ -229,6 +235,46 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     }
   }
 
+  /** Carry on with the stopped install `job` (same answers, licence key kept by Kora): retry the failed step, or skip it. */
+  const resume = async (skip?: string) => {
+    if (!job) return
+    setResumeErr(null)
+    try {
+      const next = (await api.installs.resume(job, skip)).job
+      setGithubAsked(false)
+      setJob(next)
+    } catch (e) {
+      setResumeErr(e)
+    }
+  }
+  /** Back to the answers; `section` opens that page (it returns to the summary). */
+  const changeAnswers = (section?: string) => {
+    setJob(null)
+    setResumeErr(null)
+    setGithubAsked(false)
+    setStep(steps.length - 1)
+    setEditing(sectionStep(section, f.mode))
+  }
+  /** What the buttons under an install error do (see lib/problemActions.tsx). */
+  const installActions: ActionHandlers = {
+    retry_step: () => resume(),
+    skip_step: (a) => resume(a.step),
+    retry: () => {
+      if (run.error?.resume) return resume()
+      setJob(null)
+      return start()
+    },
+    change_answers: (a) => changeAnswers(a.section),
+    sign_in_github: () => setGithubAsked(true),
+    continue_without_admin: () => changeAnswers(),
+  }
+  /** Errors from starting (on the summary): change an answer, or drop the parts that need administrator rights. */
+  const startActions: ActionHandlers = {
+    change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.mode)) },
+    continue_without_admin: () => { setStartErr(null); setF(withoutAdmin(f)); setEditing(null) },
+    sign_in_github: () => { setStartErr(null); setEditing(f.mode === 'development' ? 'github' : null) },
+  }
+
   // ---- running / finished ----
   if (job) {
     return (
@@ -247,15 +293,24 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
             {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
             {run.phase === 'failed' && (
               <div className="space-y-4">
-                <ErrorNotice error={run.error} title="The install could not finish" />
+                <ErrorNotice error={run.error} title="The install could not finish" actions={installActions} />
+                {githubAsked && (
+                  <Alert tone="info" title="Sign in to GitHub">
+                    <p className="mb-2">When you are signed in, use &quot;Try this step again&quot; above. Your answers are kept.</p>
+                    <GithubSignIn onSignedIn={onGithubSignedIn} />
+                  </Alert>
+                )}
+                <ErrorNotice error={resumeErr} actions={installActions} />
                 {run.error?.kept && run.error.kept.length > 0 && (
                   <div className="text-sm"><div className="font-semibold">What was kept</div><ul className="list-disc pl-5 text-muted-foreground">{run.error.kept.map((k) => <li key={k}>{k}</li>)}</ul></div>
                 )}
-                {run.error?.log_path && <p className="text-sm">Details are in <code className="font-mono text-xs">{run.error.log_path}</code></p>}
-                <div className="flex gap-2">
-                  <Button variant="default" onClick={() => { setJob(null); void start() }}>Try again</Button>
-                  <Button onClick={() => { setJob(null); setEditing(null); setStep(steps.length - 1) }}>Change my answers</Button>
-                </div>
+                {/* An answer without actions (an older panel, or contact with the job was lost): the plain choices. */}
+                {!run.error?.actions?.length && (
+                  <div className="flex gap-2">
+                    <Button variant="default" onClick={() => { setJob(null); void start() }}>Try again</Button>
+                    <Button onClick={() => changeAnswers()}>Change my answers</Button>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -318,7 +373,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               onDisk={setDiskOk}
             />
           )}
-          <ErrorNotice error={startErr} />
+          <ErrorNotice error={startErr} actions={startActions} />
           {starting && (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your answers (ports, GitHub, permissions) and starting the install. This can take a few seconds.

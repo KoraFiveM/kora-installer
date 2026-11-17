@@ -9,6 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -18,7 +19,8 @@ use kora_core::api::install::{
     self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall,
 };
 use kora_core::api::Op;
-use kora_core::installer::{slug, Mode};
+use kora_core::installer::{slug, InstallRequest, Mode};
+use kora_core::problem::{codes, Action, Problem};
 use serde_json::{json, Value};
 
 use crate::remote::Caller;
@@ -274,10 +276,83 @@ pub async fn install_log(
     .ok_or_else(|| ApiError::not_found("There is no install with that id."))
 }
 
+// ---- stopped installs that can carry on -----------------------------------------------------
+
+/// How long a stopped install can be continued, and how many are kept.
+const KEEP_PAUSED: Duration = Duration::from_secs(6 * 3600);
+const MAX_PAUSED: usize = 10;
+
+/// An install that stopped at a failed step. The request still holds the licence key and the
+/// database password: they live here, in this process's memory only (never written anywhere), so
+/// "Try this step again" works without typing them again. Gone when the panel restarts.
+struct Paused {
+    req: InstallRequest,
+    via_helper: bool,
+    /// The step that failed (`None`: it stopped before the first step). Only this one may be skipped.
+    failed_step: Option<String>,
+    /// The progress events of the steps that had finished, replayed first by the next job.
+    finished: Vec<Value>,
+    at: Instant,
+}
+
+static PAUSED: Mutex<Option<HashMap<String, Paused>>> = Mutex::new(None);
+
+fn with_paused<T>(f: impl FnOnce(&mut HashMap<String, Paused>) -> T) -> T {
+    let mut g = PAUSED.lock().unwrap_or_else(|p| p.into_inner());
+    let m = g.get_or_insert_with(HashMap::new);
+    m.retain(|_, p| p.at.elapsed() < KEEP_PAUSED);
+    f(m)
+}
+
+fn pause(job: &str, p: Paused) {
+    with_paused(|m| {
+        // One stopped install per folder: a newer one replaces it.
+        m.retain(|_, old| old.req.dir != p.req.dir);
+        while m.len() >= MAX_PAUSED {
+            let Some(oldest) = m.iter().min_by_key(|(_, v)| v.at).map(|(k, _)| k.clone()) else { break };
+            m.remove(&oldest);
+        }
+        m.insert(job.to_string(), p);
+    });
+}
+
+/// The last event of every step that finished (done or skipped), in order: what a resumed job shows first.
+fn finished_events(events: &[Value]) -> Vec<Value> {
+    let mut last: Vec<(String, Value)> = Vec::new();
+    for ev in events {
+        let Some(step) = ev.get("step").and_then(Value::as_str) else { continue };
+        last.retain(|(s, _)| s != step);
+        last.push((step.to_string(), ev.clone()));
+    }
+    last.into_iter()
+        .filter(|(_, ev)| matches!(ev.get("status").and_then(Value::as_str), Some("done" | "skipped")))
+        .map(|(_, ev)| ev)
+        .collect()
+}
+
+/// The job error of a stopped install: the Problem (`code`, `message`, `details`, `actions`) plus
+/// `kept`, `log_path`, `failed_step` and `resume: true` (`POST /installs/{job}/resume` works).
+fn stopped_error(job: &str, problem: Problem, kept: &[String], log_path: Option<&std::path::Path>, failed_step: Option<&str>) -> String {
+    let path = log_path.map(|p| p.to_string_lossy().into_owned());
+    let problem = problem.with_action(Action::OpenLog { job: Some(job.to_string()), path: path.clone() });
+    let mut err = problem.to_json();
+    err["kept"] = json!(kept);
+    err["resume"] = json!(true);
+    if let Some(p) = path {
+        err["log_path"] = json!(p);
+    }
+    if let Some(s) = failed_step {
+        err["failed_step"] = json!(s);
+    }
+    err.to_string()
+}
+
 /// The install runs in the privileged helper as `kora install ...` (the same command the user would
 /// have been asked to run). The licence key and the database admin password go in the environment, never
 /// on the command. The helper's output lines become job events and go in the install log.
-fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &kora_core::installer::InstallRequest) -> Result<Value, String> {
+/// A failure can be retried (the helper's install continues where it stopped), not skipped: the
+/// helper's install state belongs to the administrator account.
+fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &InstallRequest) -> Result<Value, String> {
     let env = crate::elevated::secret_env(req.license_key.as_deref(), req.db_admin.as_ref().and_then(|a| a.password.as_deref()));
     let r = crate::elevated::privileged(core::install_command(req), env, &mut |line| {
         h.event(json!({"type": "status", "message": line}));
@@ -291,8 +366,49 @@ fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &kora_core::
             "txadmin_url": format!("http://127.0.0.1:{}", req.ports.txadmin),
             "notes": ["Installed by the Kora helper."],
         })),
-        Err(e) => Err(json!({"message": e.message, "kept": []}).to_string()),
+        Err(e) => {
+            let mut p = e.to_problem();
+            if p.code == "bad_request" || p.code == "internal" {
+                p.code = kora_core::problem::codes::FAILED.to_string();
+            }
+            let p = p.with_action(Action::Retry).with_action(Action::ChangeAnswers { section: None });
+            pause(id, Paused { req: req.clone(), via_helper: true, failed_step: None, finished: vec![], at: Instant::now() });
+            Err(stopped_error(id, p, &[], None, None))
+        }
     }
+}
+
+/// Start the install job (a first run, or a resumed one that replays `finished` first).
+fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, via_helper: bool, finished: Vec<Value>) -> Result<Response, ApiError> {
+    let name = req.name.clone();
+    st.spawn_job(Op::InstallStart, Some(name), move |h| {
+        let id = h.id().0.clone();
+        log_begin(&id);
+        for ev in &finished {
+            h.event(ev.clone());
+        }
+        if via_helper {
+            return install_via_helper(h, &id, &req);
+        }
+        let mut events: Vec<Value> = finished.clone();
+        let fin = core::run_install(&*e, &req, |ev| {
+            let v = core::progress_json(ev);
+            events.push(v.clone());
+            h.event(v);
+            log_push(&id, core::log_line(ev));
+        });
+        log_finish(&id, fin.log_path.clone());
+        match fin.outcome {
+            Ok(out) => Ok(core::outcome_json(&out)),
+            Err(msg) => {
+                let problem = fin.problem.unwrap_or_else(|| Problem::decode(&msg));
+                if !req.dry_run {
+                    pause(&id, Paused { req: req.clone(), via_helper: false, failed_step: fin.failed_step.clone(), finished: finished_events(&events), at: Instant::now() });
+                }
+                Err(stopped_error(&id, problem, &fin.kept, fin.log_path.as_deref(), fin.failed_step.as_deref()))
+            }
+        }
+    })
 }
 
 // ---- starting an install --------------------------------------------------------------------
@@ -300,9 +416,10 @@ fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &kora_core::
 /// `POST /installs`: body = the UI's install request. Validates like the CLI, then runs the
 /// installer as a job: every `ProgressEvent` is a job event (`{step, title, status, detail,
 /// percent}`), the result is the outcome (`connect`, `txadmin_url`, `admin_user`,
-/// `admin_password_file`, `notes`, ...; never the password). A failure is a JSON error string with
-/// `message`, `kept` and `log_path`. Without administrator rights for what the install needs:
-/// `needs_elevation` with the `kora install ...` command (no secrets on it).
+/// `admin_password_file`, `notes`, ...; never the password). A failure is a job error with the
+/// Problem's fields (`code`, `message`, `details`, `actions`) plus `kept`, `log_path`,
+/// `failed_step` and `resume` (see [`install_resume`]). Without administrator rights for what the
+/// install needs: `needs_elevation` with the `kora install ...` command (no secrets on it).
 pub async fn install_start(
     State(st): State<AppState>,
     Json(body): Json<Value>,
@@ -317,25 +434,39 @@ pub async fn install_start(
             return Ok((req, false));
         }
         if req.license_key.is_none() {
-            return Err(ApiError::bad_request("A licence key is needed. Get one from the Cfx.re portal: https://portal.cfx.re/servers/registration-keys"));
+            return Err(ApiError::problem(
+                StatusCode::BAD_REQUEST,
+                Problem::new(codes::INSTALL_LICENCE_MISSING, "A licence key is needed. Get one from the Cfx.re portal: https://portal.cfx.re/servers/registration-keys")
+                    .with_action(Action::change_answers("licence"))
+                    .with_action(Action::open_link(kora_core::installer::LICENCE_URL)),
+            ));
         }
         let servers = st2.backend().list().map_err(ApiError::internal)?;
         if servers.iter().any(|s| slug(&s.name) == slug(&req.name) || s.dir == req.dir) {
-            return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name)));
+            return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name))
+                .with_action(Action::change_answers("name")));
         }
         if req.mode == Mode::Development {
-            let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(ApiError::bad_request)?;
+            let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|m| {
+                if Problem::is_encoded(&m) {
+                    ApiError::core(m)
+                } else {
+                    ApiError::bad_request(m).with_action(Action::change_answers("github"))
+                }
+            })?;
             req.github_owner = Some(owner);
         }
         if !core::already_installed(&req) {
             let avoid = core::avoid_ports(&servers, &req.name, Some(&req.dir));
-            core::settle_ports(&mut req, false, e2.prober(), &avoid).map_err(|m| ApiError::conflict(format!("{m} Go back and pick other ports.")))?;
+            core::settle_ports(&mut req, false, e2.prober(), &avoid)
+                .map_err(|m| ApiError::conflict(format!("{m} Go back and pick other ports.")).with_action(Action::change_answers("ports")))?;
         }
         let reasons = e2.admin_reasons(&req);
         if !reasons.is_empty() && !e2.is_elevated() {
             // With the helper installed the install runs there; otherwise the user gets the command.
             if !crate::elevated::helper_installed() {
-                return Err(ApiError::needs_elevation(core::elevation_message(&req, &reasons), core::install_command(&req)));
+                return Err(ApiError::needs_elevation(core::elevation_message(&req, &reasons), core::install_command(&req))
+                    .with_action(Action::ContinueWithoutAdmin));
             }
             return Ok((req, true));
         }
@@ -343,27 +474,65 @@ pub async fn install_start(
     })
     .await?;
     let (req, via_helper) = req;
-    let name = req.name.clone();
-    st.spawn_job(Op::InstallStart, Some(name), move |h| {
-        let id = h.id().0.clone();
-        log_begin(&id);
-        if via_helper {
-            return install_via_helper(h, &id, &req);
-        }
-        let fin = core::run_install(&*e, &req, |ev| {
-            h.event(core::progress_json(ev));
-            log_push(&id, core::log_line(ev));
-        });
-        log_finish(&id, fin.log_path.clone());
-        match fin.outcome {
-            Ok(out) => Ok(core::outcome_json(&out)),
-            Err(msg) => {
-                let mut err = json!({"message": if fin.next.is_empty() { msg } else { format!("{msg}\n\n{}", fin.next) }, "kept": fin.kept});
-                if let Some(p) = &fin.log_path {
-                    err["log_path"] = json!(p.to_string_lossy());
-                }
-                Err(err.to_string())
+    // A new start for this folder replaces any stopped install of it.
+    with_paused(|m| m.retain(|_, p| p.req.dir != req.dir));
+    spawn_install(&st, e, req, via_helper, vec![])
+}
+
+/// `POST /installs/{job}/resume` `{skip?: step}`: carry on with an install that stopped (its job
+/// error has `resume: true`), with the same answers, licence key included (kept in memory, see
+/// [`Paused`]). Without `skip` the failed step runs again; with it, that step is skipped first
+/// (only steps that are safe to skip, see `kora_core::installer::SKIPPABLE`). Answers `202 {job}`:
+/// a new job, which first replays the steps that had finished.
+pub async fn install_resume(
+    State(st): State<AppState>,
+    Path(job): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Response, ApiError> {
+    let skip = match body.get("skip") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        Some(_) => return Err(ApiError::bad_request("That request was not understood. Reload the page and try again.")),
+    };
+    let Some(paused) = with_paused(|m| m.remove(&job)) else {
+        return Err(ApiError::problem(
+            StatusCode::NOT_FOUND,
+            Problem::new(
+                codes::INSTALL_CANNOT_RESUME,
+                "This install can no longer be continued from here (Kora Panel was restarted, or it was continued already). Check your answers and start it again: it carries on where it stopped.",
+            )
+            .with_action(Action::ChangeAnswers { section: None }),
+        ));
+    };
+    let e = env();
+    let id = job.clone();
+    let (paused, e) = blocking(move || {
+        if let Some(step) = &skip {
+            let refused = if paused.via_helper {
+                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "This install ran with administrator rights, so its steps cannot be skipped from here. Try it again, or change your answers.")
+                    .with_action(Action::Retry)
+                    .with_action(Action::ChangeAnswers { section: None }))
+            } else if paused.failed_step.as_deref() != Some(step.as_str()) {
+                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "Only the step that failed can be skipped. Try it again, or change your answers.")
+                    .with_action(Action::ChangeAnswers { section: None }))
+            } else {
+                e.skip_step(&paused.req, step).err()
+            };
+            if let Some(p) = refused {
+                // Nothing changed: the install can still be retried.
+                with_paused(|m| m.insert(id, paused));
+                return Err(ApiError::problem(StatusCode::CONFLICT, p));
             }
         }
+        Ok((paused, e))
     })
+    .await?;
+    let Paused { req, via_helper, failed_step, finished, .. } = paused;
+    let again = Paused { req: req.clone(), via_helper, failed_step, finished: finished.clone(), at: Instant::now() };
+    let r = spawn_install(&st, e, req, via_helper, finished);
+    if r.is_err() {
+        // Not started (another job runs for this server): it can still be continued later.
+        pause(&job, again);
+    }
+    r
 }

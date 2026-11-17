@@ -196,7 +196,7 @@ mod offline {
     }
     impl GithubEnv for Env {
         fn auth(&self) -> GithubUser {
-            GithubUser { signed_in: false, user: None }
+            GithubUser::signed_out()
         }
         fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
             Ok(vec![])

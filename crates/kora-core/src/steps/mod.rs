@@ -15,7 +15,8 @@ use std::path::Path;
 /// Error type for the step engine.
 #[derive(Debug, thiserror::Error)]
 pub enum StepError {
-    #[error("step failed: {0}")]
+    /// The text may be a packed [`crate::problem::Problem`]; `Display` shows it readably.
+    #[error("step failed: {}", crate::problem::plain_text(.0))]
     Failed(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -40,8 +41,11 @@ pub trait Step {
 }
 
 /// Run `steps` in order, persisting status to `state_path` after every transition.
-/// Steps already `Done` (and still verifying) are skipped, which gives resume.
-/// On failure the step is marked `Failed` and the error is returned.
+/// Steps already `Done` (and still verifying) are skipped, which gives resume; so are steps the
+/// user chose to skip ([`mark_skipped`]). Running the plan again after a failure is "retry the
+/// failed step": it starts at the first step that is not done.
+/// On failure the step is marked `Failed` (with the error text, which may be a packed
+/// [`crate::problem::Problem`]) and the error is returned.
 pub fn run_plan(steps: &mut [Box<dyn Step>], state_path: &Path) -> StepResult<PlanState> {
     let mut state = PlanState::load_or_default(state_path)?;
     for s in steps.iter() {
@@ -50,6 +54,9 @@ pub fn run_plan(steps: &mut [Box<dyn Step>], state_path: &Path) -> StepResult<Pl
     state.save(state_path)?;
     for s in steps.iter_mut() {
         let id = s.id().to_string();
+        if state.status(&id) == Some(StepStatus::Skipped) {
+            continue;
+        }
         if state.status(&id) == Some(StepStatus::Done) && s.verify()? {
             continue;
         }
@@ -69,6 +76,21 @@ pub fn run_plan(steps: &mut [Box<dyn Step>], state_path: &Path) -> StepResult<Pl
             }
         }
         state.save(state_path)?;
+    }
+    Ok(state)
+}
+
+/// Record that the user chose to go on without step `id`: the next [`run_plan`] passes over it.
+/// Only a step that has failed (or never ran) can be skipped; a done step stays done. The caller
+/// decides which steps are safe to skip.
+pub fn mark_skipped(state_path: &Path, id: &str) -> StepResult<PlanState> {
+    let mut state = PlanState::load_or_default(state_path)?;
+    match state.status(id) {
+        Some(StepStatus::Done) => {}
+        _ => {
+            state.set(id, StepStatus::Skipped, None);
+            state.save(state_path)?;
+        }
     }
     Ok(state)
 }

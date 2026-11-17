@@ -120,6 +120,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::CheckCfx
         | Op::InstallPlan
         | Op::InstallStart
+        | Op::InstallResume
         | Op::SelfUpdateApply
         | Op::AppInstall
         | Op::AppUninstall
@@ -161,6 +162,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::AppUninstall
         | Op::ConsoleSend
         | Op::InstallStart
+        | Op::InstallResume
         | Op::SelfUpdateApply
         | Op::ScheduleSet
         | Op::ScheduleRemove => true,
@@ -320,6 +322,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::CheckCfx
         | Op::InstallPlan
         | Op::InstallStart
+        | Op::InstallResume
         | Op::InstallLog
         | Op::SelfUpdateCheck
         | Op::SelfUpdateApply
@@ -459,6 +462,7 @@ mod tests {
             Op::AppUninstall,
             Op::ConsoleSend,
             Op::InstallStart,
+            Op::InstallResume,
             Op::SelfUpdateApply,
             Op::ScheduleSet,
             Op::ScheduleRemove,
