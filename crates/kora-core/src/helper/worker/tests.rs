@@ -269,9 +269,38 @@ mod stream {
     }
 
     #[test]
+    fn a_child_that_runs_too_long_or_for_nobody_is_stopped() {
+        let mut ex = ChildExecutor::new("/bin/sh".into());
+        ex.limit = Duration::from_millis(300);
+        let t = std::time::Instant::now();
+        let e = ex.run(&["-c".into(), "echo started; sleep 30".into()], &[], &mut |_, _| {}).unwrap_err();
+        assert!(e.to_string().contains("longer than") && t.elapsed() < Duration::from_secs(10), "{e}");
+        let ex = Arc::new(ChildExecutor::new("/bin/sh".into()));
+        let e2 = ex.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            e2.cancel();
+        });
+        let t = std::time::Instant::now();
+        let e = ex.run(&["-c".into(), "sleep 30".into()], &[], &mut |_, _| {}).unwrap_err();
+        canceller.join().unwrap();
+        assert!(e.to_string().contains("went away") && t.elapsed() < Duration::from_secs(10), "{e}");
+        assert!(ex.run(&["-c".into(), "true".into()], &[], &mut |_, _| {}).is_err(), "a cancelled executor starts nothing more");
+    }
+
+    #[test]
+    fn a_grandchild_holding_the_output_open_does_not_keep_the_step_waiting() {
+        let ex = ChildExecutor::new("/bin/sh".into());
+        let t = std::time::Instant::now();
+        let code = ex.run(&["-c".into(), "(sleep 20 &) ; echo done; exit 0".into()], &[], &mut |_, _| {}).unwrap();
+        assert_eq!(code, 0);
+        assert!(t.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
     fn the_child_gets_only_the_environment_it_is_given() {
         std::env::set_var("KORA_MARIADB_HOME_TEST_LEAK", "/tmp/evil");
-        let ex = ChildExecutor { exe: "/bin/sh".into() };
+        let ex = ChildExecutor::new("/bin/sh".into());
         let mut out = Vec::new();
         let code = ex.run(&["-c".into(), "echo \"leak=$KORA_MARIADB_HOME_TEST_LEAK home=$HOME given=$GIVEN\"".into()], &[("GIVEN".into(), "yes".into())], &mut |_, l| out.push(l.to_string())).unwrap();
         assert_eq!(code, 0);
@@ -280,7 +309,7 @@ mod stream {
 
     #[test]
     fn the_child_executor_runs_without_a_shell_and_keeps_result_lines_whole() {
-        let ex = ChildExecutor { exe: "/bin/sh".into() };
+        let ex = ChildExecutor::new("/bin/sh".into());
         let mut out = Vec::new();
         let long = "x".repeat(10_000);
         let script = format!("echo \"$KORA_T\"; echo 'KORA-ADMIN-RESULT {{\"v\":\"{long}\"}}'; echo err >&2; exit 3");

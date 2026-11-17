@@ -230,6 +230,7 @@ mod imp {
     const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     const TOKEN_QUERY: u32 = 8;
+    const SYNCHRONIZE: u32 = 0x0010_0000;
     const TOKEN_USER: u32 = 1;
     const SE_FILE_OBJECT: u32 = 1;
     const OWNER_SECURITY_INFORMATION: u32 = 1;
@@ -651,10 +652,25 @@ mod imp {
         };
         let mut reader = BufReader::new(file.try_clone().map_err(|e| e.to_string())?);
         let mut writer = file;
-        let exec = worker::ChildExecutor { exe: own };
+        let exec = Arc::new(worker::ChildExecutor::new(own));
+        // The panel's process ends (crash, closed): stop a running child at once instead of
+        // letting it finish for nobody.
+        {
+            let exec = exec.clone();
+            // SAFETY: plain call; the handle is closed by `Owned` in the thread.
+            let h = Owned(unsafe { OpenProcess(SYNCHRONIZE, 0, parent) });
+            if !h.0.is_null() {
+                std::thread::spawn(move || {
+                    let h = h;
+                    // SAFETY: a process handle we own.
+                    unsafe { WaitForSingleObject(h.0, u32::MAX) };
+                    worker::Executor::cancel(exec.as_ref());
+                });
+            }
+        }
         // The children's whole environment, built from nothing (never this process's inherited one).
         let base = worker::elevated_child_env(&system_dirs(), &user, profile_dir(&user.sid).as_deref(), None);
-        worker::serve(&mut reader, &mut writer, validator.as_ref(), &exec, &base, &touch).map_err(|e| e.to_string())
+        worker::serve(&mut reader, &mut writer, validator.as_ref(), exec.as_ref(), &base, &touch).map_err(|e| e.to_string())
     }
 }
 

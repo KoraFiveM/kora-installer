@@ -73,7 +73,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use super::client::HelperError;
-use super::server::{Executor, Validator};
+pub use super::server::Executor;
+use super::server::Validator;
 use super::{check_request_in, mask_secrets, Message, Request, MAX_ARG_BYTES, MAX_REQUEST_BYTES, PING};
 use crate::problem::{codes, Action, Problem};
 
@@ -286,6 +287,10 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
             }
             if alive {
                 alive = send(writer, &Message::Progress { stream: stream.to_string(), line: mask_secrets(text, &secrets) });
+                if !alive {
+                    // Nobody is listening any more: do not leave an elevated child running for nobody.
+                    executor.cancel();
+                }
             }
         });
         let sent = match res {
@@ -381,15 +386,40 @@ pub fn scrub_overrides() {
     }
 }
 
+/// How long one elevated child may run (an install of Kora's MariaDB downloads for a while).
+pub const STEP_LIMIT: Duration = Duration::from_secs(45 * 60);
+
+/// One elevated child at a time in this process (the worker's sessions, the helper's connections).
+static CHILD_RUNS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Runs `exe argv` as a child with ONLY `env` (the environment is cleared first), no shell, no
-/// window, and streams its output lines. Works on every platform (tests run it on Linux).
+/// window, and streams its output lines. One child at a time per process; a child is killed when
+/// it runs longer than `limit` or when [`Executor::cancel`] was called (the panel went away).
+/// Works on every platform (tests run it on Linux).
 pub struct ChildExecutor {
     pub exe: std::path::PathBuf,
+    pub limit: Duration,
+    pub cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ChildExecutor {
+    pub fn new(exe: std::path::PathBuf) -> Self {
+        ChildExecutor { exe, limit: STEP_LIMIT, cancelled: Default::default() }
+    }
 }
 
 impl Executor for ChildExecutor {
+    fn cancel(&self) {
+        self.cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn run(&self, argv: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str, &str)) -> io::Result<i32> {
         use std::process::{Command, Stdio};
+        use std::sync::atomic::Ordering;
+        let _one_at_a_time = CHILD_RUNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "Kora Panel went away"));
+        }
         let mut cmd = Command::new(&self.exe);
         cmd.args(argv).env_clear().envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)]
@@ -399,13 +429,13 @@ impl Executor for ChildExecutor {
         }
         let mut child = cmd.spawn()?;
         let (tx, rx) = std::sync::mpsc::channel::<(&'static str, String)>();
-        let mut readers = Vec::new();
         let pipes: [(&'static str, Option<Box<dyn Read + Send>>); 2] =
             [("stdout", child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>)), ("stderr", child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>))];
         for (name, pipe) in pipes {
             if let Some(p) = pipe {
                 let tx = tx.clone();
-                readers.push(std::thread::spawn(move || {
+                // Not joined: a grandchild that keeps the pipe open must not keep us waiting.
+                std::thread::spawn(move || {
                     for chunk in io::BufReader::new(p).split(b'\n').map_while(Result::ok) {
                         // A result line is JSON that may be long: never cut or split it.
                         if chunk.starts_with(RESULT_PREFIX.as_bytes()) {
@@ -420,15 +450,38 @@ impl Executor for ChildExecutor {
                             }
                         }
                     }
-                }));
+                });
             }
         }
         drop(tx);
-        for (name, line) in rx {
-            on_line(name, &line);
-        }
-        for r in readers {
-            let _ = r.join();
+        let deadline = std::time::Instant::now() + self.limit;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok((name, line)) => on_line(name, &line),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    let why = if self.cancelled.load(Ordering::SeqCst) {
+                        Some("Kora Panel went away, so the step was stopped".to_string())
+                    } else if std::time::Instant::now() > deadline {
+                        Some(format!("the step took longer than {} minutes and was stopped", self.limit.as_secs() / 60))
+                    } else {
+                        None
+                    };
+                    if let Some(why) = why {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, why));
+                    }
+                    if let Ok(Some(st)) = child.try_wait() {
+                        // Exited; give the readers a moment for the last lines, then stop waiting.
+                        let grace = std::time::Instant::now() + Duration::from_secs(2);
+                        while let Ok((name, line)) = rx.recv_timeout(grace.saturating_duration_since(std::time::Instant::now())) {
+                            on_line(name, &line);
+                        }
+                        return Ok(st.code().unwrap_or(-1));
+                    }
+                }
+            }
         }
         Ok(child.wait()?.code().unwrap_or(-1))
     }
@@ -446,6 +499,8 @@ pub struct StepOutcome {
     /// The `admin-step` result ([`RESULT_PREFIX`]); may hold a secret (a new database login): never log it.
     pub data: Option<serde_json::Value>,
 }
+
+static PANEL_RUNS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The panel's end of a session (any byte stream: the real pipe, or a socket pair in tests).
 pub struct Session {
@@ -493,8 +548,10 @@ impl Session {
         super::client::parse_message(&line)
     }
 
-    /// Run one allow-listed command; `on_line` gets every output line.
+    /// Run one allow-listed command; `on_line` gets every output line. One elevated run at a time
+    /// in the panel, however many sessions are open (an install's and a separate action's).
     pub fn run(&mut self, verb: &str, args: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, HelperError> {
+        let _one_at_a_time = PANEL_RUNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         self.send(&Request { verb: verb.into(), args: args.to_vec(), env: env.iter().cloned().collect() })?;
         loop {
             match self.next()? {
