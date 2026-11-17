@@ -417,3 +417,17 @@ async fn tidy_up_and_uninstall_use_the_worker() {
     assert_eq!(calls[0], ("uninstall".to_string(), vec!["--app".to_string(), "--yes".into()]));
     assert_eq!(calls[1], ("uninstall".to_string(), vec!["--yes".to_string(), "prod".into()]));
 }
+
+#[tokio::test]
+async fn an_uninstall_never_deletes_folders_elevated_the_panel_deletes_them_as_the_person() {
+    let b = FakeBroker::new(&[Answer::Yes]);
+    let r = rig(b.clone()).await;
+    let a = r.call("POST", "/uninstall", Some(json!({"answers": [], "delete_files": true, "delete_databases": true, "only": ["prod"]}))).await;
+    let (_, j) = r.job(a).await;
+    assert_eq!(j["state"], "done", "{j}");
+    let calls = b.log().calls.clone();
+    assert_eq!(calls[0], ("uninstall".to_string(), vec!["--yes".to_string(), "--delete-databases".into(), "prod".into()]), "no --delete-files for the elevated side");
+    let m = r.maint.calls.lock().unwrap().clone();
+    assert!(m.iter().any(|c| c == "delete_server_files /srv/prod"), "{m:?}");
+    assert!(!m.iter().any(|c| c.contains("/srv/dev")), "only the chosen server");
+}

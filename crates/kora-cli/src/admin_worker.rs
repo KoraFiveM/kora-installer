@@ -162,6 +162,10 @@ pub fn worker_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&Path
         // record could name another server's update task); the child checks the folder again.
         Some(Command::Schedule { cmd: ScheduleCmd::Set { server, .. } | ScheduleCmd::Off { server } }) if verb == "schedule" => name_only(&server),
         Some(Command::App { cmd: AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
+        // Never deletes files elevated: Kora Panel deletes the folders itself, as the person.
+        Some(Command::Uninstall { delete_files: true, .. }) if verb == "uninstall" => {
+            Err("Kora's administrator helper does not delete server folders; Kora Panel deletes them itself.".into())
+        }
         Some(Command::Uninstall { server, .. }) if verb == "uninstall" => server.as_deref().map_or(Ok(()), name_only),
         _ => deny(),
     }
@@ -225,6 +229,7 @@ mod tests {
             ("schedule", vec!["set", "/srv/x", "--daily", "04:00"]),
             ("schedule", vec!["off", ".."]),
             ("uninstall", vec!["--yes", r"C:\Users\other\srv"]),
+            ("uninstall", vec!["--yes", "--delete-files"]),
         ] {
             assert!(v(verb, &args).is_err(), "{verb} {args:?}");
         }

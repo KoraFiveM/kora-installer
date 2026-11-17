@@ -5,7 +5,7 @@
 //! reshapes it into values an HTTP handler can return.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::app_install::{self as app, AppOptions};
@@ -97,6 +97,26 @@ pub trait Maintenance: Send + Sync {
         req: &UninstallRequest,
         status: &mut dyn FnMut(&str),
     ) -> Result<UninstallOutcome, String>;
+    /// The server folders an uninstall `req` would delete: `(name, folder)`.
+    fn uninstall_folders(&self, req: &UninstallRequest) -> Vec<(String, PathBuf)> {
+        folders_to_delete(&Registry::load().unwrap_or_default(), req)
+    }
+    /// Delete what Kora put in a server folder, as the person (never elevated: the folder is
+    /// theirs, and an elevated delete in a folder others can change is a risk). Notes.
+    fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, String> {
+        installer::rollback(dir, &RollbackOptions { keep_files: false, keep_db: true }, &mut NullSink).map_err(|e| e.0)
+    }
+}
+
+/// Which registered servers' folders `req` deletes (everything, `only`, `--delete-files` or the
+/// `<name>/folder` answers).
+pub fn folders_to_delete(reg: &Registry, req: &UninstallRequest) -> Vec<(String, PathBuf)> {
+    reg.servers
+        .iter()
+        .filter(|s| req.only.is_empty() || req.only.iter().any(|o| matches_only(s, o)))
+        .filter(|s| req.delete_files || req.answers.iter().any(|(i, r)| *r && *i == format!("{}/folder", s.name)))
+        .map(|s| (s.name.clone(), s.dir.clone()))
+        .collect()
 }
 
 static OVERRIDE: RwLock<Option<Arc<dyn Maintenance>>> = RwLock::new(None);
@@ -648,6 +668,18 @@ pub mod fake {
             ));
             status("Removing");
             self.outcome.lock().unwrap().clone()
+        }
+        fn uninstall_folders(&self, req: &UninstallRequest) -> Vec<(String, PathBuf)> {
+            let all = ["prod", "dev"];
+            all.iter()
+                .filter(|n| req.only.is_empty() || req.only.iter().any(|o| o == *n))
+                .filter(|n| req.delete_files || req.answers.iter().any(|(i, r)| *r && *i == format!("{n}/folder")))
+                .map(|n| (n.to_string(), PathBuf::from(format!("/srv/{n}"))))
+                .collect()
+        }
+        fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, String> {
+            self.log(format!("delete_server_files {}", dir.display()));
+            Ok(vec![])
         }
     }
 }
