@@ -127,11 +127,11 @@ Options:
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping

@@ -6,11 +6,12 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
+use kora_core::api::wire as w;
 use kora_core::api::{valid_resource_name, Status};
 use kora_core::branches::{Reply, Request};
 use kora_core::console;
 use kora_core::resourcestate;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::{blocking, ApiError, AppState};
 
@@ -32,20 +33,26 @@ pub async fn resource_page(State(st): State<AppState>, Path((s, name)): Path<(St
         };
         let running = st.backend().status(&e) == Status::Running;
         let restart = resourcestate::info(&e.dir, &id, running);
-        let mut out = serde_json::to_value(&*page).map_err(|x| ApiError::internal(x.to_string()))?;
-        if let Some(o) = out.as_object_mut() {
-            o.insert("restart".into(), serde_json::to_value(restart).unwrap_or_default());
-            o.insert(
-                "server".into(),
-                json!({
-                    "name": e.name,
-                    "mode": e.mode,
-                    "running": running,
-                    "console_enabled": console::is_installed(&e.dir),
-                    "console_waiting_for_restart": console::waiting_for_restart(&e.dir),
-                }),
-            );
-        }
+        let out = w::ResourcePage {
+            id: page.id.clone(),
+            folder: page.folder.clone(),
+            repository: page.repository.clone(),
+            default_branch: page.default_branch.clone(),
+            pinned_commit: page.pinned_commit.clone(),
+            third_party: page.third_party,
+            source: page.source.clone(),
+            version: page.version.clone(),
+            branch: page.branch.clone(),
+            restart,
+            server: w::ResourceServerState {
+                name: e.name.clone(),
+                mode: e.mode,
+                running,
+                console_enabled: console::is_installed(&e.dir),
+                console_waiting_for_restart: console::waiting_for_restart(&e.dir),
+            },
+        };
+        let out = serde_json::to_value(out).map_err(|x| ApiError::internal(x.to_string()))?;
         Ok(Json(out))
     })
     .await

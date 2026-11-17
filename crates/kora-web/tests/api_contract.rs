@@ -332,6 +332,20 @@ fn branch_state(id: &str) -> kora_core::branches::ResourceBranch {
     }
 }
 
+fn resource_page(f: &FakeBackend) {
+    f.state().branches = Some(Ok(kora_core::branches::Reply::Page(Box::new(kora_core::branches::Page {
+        id: "kora_hud".into(),
+        folder: "[kora]/kora_hud".into(),
+        repository: "https://github.com/KoraFiveM/kora_hud.git".into(),
+        default_branch: "dev".into(),
+        pinned_commit: Some("aaaaaaaa".into()),
+        third_party: false,
+        source: None,
+        version: None,
+        branch: branch_state("kora_hud"),
+    }))));
+}
+
 fn branches_overview(f: &FakeBackend) {
     f.state().branches = Some(Ok(kora_core::branches::Reply::Overview(vec![branch_state("kora_hud")])));
 }
@@ -467,6 +481,7 @@ fn cases() -> Vec<Case> {
         case(Op::ServerControl, s, Some(json!({"action": "restart"}))),
         case(Op::ServersScan, &[], None),
         case(Op::ResourcesList, s, None),
+        with(case(Op::ResourceGet, &[("s", "prod"), ("name", "kora_hud")], None), resource_page),
         case(Op::ResourceEnsure, s, Some(json!({"name": "kora_hud", "restart": false}))),
         with(case(Op::UpdatePreview, s, Some(json!({"scope": "all"}))), preview),
         with(case(Op::UpdateApply, s, Some(json!({"scope": {"resources": ["kora_hud"]}, "restart": "when_quiet", "skip": [], "targets": {"kora_hud": "2222222"}}))), apply),

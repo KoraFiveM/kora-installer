@@ -2,7 +2,6 @@ import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
-import { resourceApi } from '@/api/resource'
 import type { ControlAction } from '@/api/types'
 import { useServerControl } from '@/hooks/useServerControl'
 import { useKept } from '@/lib/kept'
@@ -24,7 +23,7 @@ export default function ResourcePage() {
   const qc = useQueryClient()
   // Under ['server', name] so every action that refreshes the server refreshes this page too.
   const key = ['server', name, 'resource', resource]
-  const q = useQuery({ queryKey: key, queryFn: () => resourceApi.get(name, resource) })
+  const q = useQuery({ queryKey: key, queryFn: () => api.resources.get(name, resource) })
   const updates = useUpdates(name)
   const ctl = useServerControl(name)
   const noOperator = whyNot(useRole(), 'operator')

@@ -1740,6 +1740,35 @@ export type ResourceEvent = {
 };
 
 /**
+ * `GET /servers/{s}/resources/{name}`.
+ */
+export type ResourcePage = {
+  id: string,
+  /**
+   * Relative to `resources/`.
+   */
+  folder: string,
+  repository: string,
+  /**
+   * The branch it normally follows.
+   */
+  default_branch: string,
+  /**
+   * The release it is pinned to, when the server uses released versions.
+   */
+  pinned_commit?: string,
+  third_party: boolean,
+  source?: string,
+  version?: string,
+  /**
+   * Where its files are: the normal version, a branch, a pull request.
+   */
+  branch: ResourceBranch,
+  restart: RestartInfo,
+  server: ResourceServerState,
+};
+
+/**
  * `"all"` or `{"only": [ids]}`.
  */
 export type ResourceSelection = "all"
@@ -1748,10 +1777,40 @@ export type ResourceSelection = "all"
   };
 
 /**
+ * The server the resource is on, as far as the page needs it.
+ */
+export type ResourceServerState = {
+  name: string,
+  mode: Mode,
+  running: boolean,
+  console_enabled: boolean,
+  console_waiting_for_restart: boolean,
+};
+
+/**
  * `GET /servers/{s}/resources`.
  */
 export type ResourcesList = {
   resources: Array<string>,
+};
+
+/**
+ * What the panel shows for one resource.
+ */
+export type RestartInfo = {
+  /**
+   * The running server still has the old version of this resource.
+   */
+  needed: boolean,
+  /**
+   * What changed, when it is `needed`.
+   */
+  why?: string,
+  changed_unix?: number,
+  /**
+   * The words to show.
+   */
+  notice?: string,
 };
 
 export type RestartPolicy = "none" | "ensure" | "full_restart" | "when_quiet";

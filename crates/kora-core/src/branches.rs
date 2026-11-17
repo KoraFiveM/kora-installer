@@ -345,7 +345,7 @@ pub fn switch(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, target: &T
     let outcome = go(r, &dir, &rec.branch, target, changes)?;
     let moved = outcome.status == Status::Switched;
     if moved {
-        crate::resourcestate::mark_changed(&sf.dir, &[rec.id.clone()], &format!("moved to {}", outcome.now.label(&rec.branch)));
+        crate::resourcestate::mark_changed(&sf.dir, std::slice::from_ref(&rec.id), &format!("moved to {}", outcome.now.label(&rec.branch)));
     }
     Ok(SwitchResult { resource: rec.id.clone(), needs_restart: moved, restart_note: moved.then(|| RESTART_NOTE.to_string()), outcome })
 }
@@ -357,7 +357,7 @@ pub fn restore_stash(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, ind
     let dir = folder(sf, rec)?;
     let _lock = lock_for(sf)?;
     let outcome = gb::restore_stash(r, &dir, &rec.branch, index)?;
-    crate::resourcestate::mark_changed(&sf.dir, &[rec.id.clone()], "kept-aside changes brought back");
+    crate::resourcestate::mark_changed(&sf.dir, std::slice::from_ref(&rec.id), "kept-aside changes brought back");
     Ok(SwitchResult { resource: rec.id.clone(), needs_restart: true, restart_note: Some(RESTART_NOTE.to_string()), outcome })
 }
 

@@ -1,6 +1,5 @@
 // Mock data and routes for the resource page and its "restart needed" notice (kept apart from the main mock).
 import type * as T from '../types'
-import type { ResourcePage } from '../resource'
 
 type Body = Record<string, unknown>
 type Route = (method: string, pattern: string, h: (m: RegExpMatchArray, body: Body, query: URLSearchParams) => unknown | Promise<unknown>) => void
@@ -27,7 +26,7 @@ export function installResourceMock(route: Route, Fail: FailCtor, d: ResourceDep
     if (!d.installed(s.name).includes(id)) throw new Fail(404, 'not_found', `'${id}' is not installed on this server.`)
     const running = s.status === 'running'
     const why = pending.get(key(s.name, id))
-    const page: ResourcePage = {
+    const page: T.ResourcePage = {
       id,
       folder: id,
       repository: `https://github.com/KoraFiveM/${id}.git`,

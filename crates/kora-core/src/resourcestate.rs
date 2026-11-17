@@ -142,16 +142,20 @@ pub fn mark_server_restarted_with(store: &dyn StateStore, dir: &Path, now: u64) 
 
 /// What the panel shows for one resource.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RestartInfo {
     /// The running server still has the old version of this resource.
     pub needed: bool,
     /// What changed, when it is `needed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub why: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub changed_unix: Option<u64>,
     /// The words to show.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub notice: Option<String>,
 }
 

@@ -208,6 +208,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::ConsoleSend => OpSpec::send::<w::ConsoleCommand>(),
         Op::ConsoleEnable => OpSpec::nothing(),
         Op::ResourcesList => OpSpec::get::<w::ResourcesList>(),
+        Op::ResourceGet => OpSpec::get::<w::ResourcePage>(),
         Op::ResourceEnsure => OpSpec::call::<w::EnsureRequest, w::Message>(),
         Op::ResourceControl => OpSpec::call::<w::ResourceControlRequest, w::Message>(),
         Op::UpdatePreview => OpSpec::start_job_with::<w::UpdatePreviewRequest>().events::<w::UpdateEvent>().result::<w::UpdatePreviewResult>(),

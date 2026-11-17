@@ -1,8 +1,9 @@
 import { Loader2, RotateCw } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import type { RestartInfo } from '@/api/resource'
-import { RESTART_NOTICE } from '@/api/resource'
+import type { RestartInfo } from '@/api/types'
+
+const RESTART_NOTICE = 'Restart needed: the running server still has the old version.'
 
 /**
  * Said whenever the files of a resource changed and the running server has not loaded them yet. The fact comes from the

@@ -273,6 +273,8 @@ export const api = {
   },
   resources: {
     list: (name: string) => call('resources_list', { params: { s: name } }).then((r) => r.resources),
+    /** The page of one resource: where its files are, the server's state, the restart notice. */
+    get: (name: string, resource: string) => call('resource_get', { params: { s: name, name: resource } }),
     ensure: (name: string, body: { name: string; restart: boolean }) => call('resource_ensure', { params: { s: name }, body }),
     /** Start, stop or restart one resource on a running server. */
     control: (name: string, resource: string, action: T.ControlAction) => call('resource_control', { params: { s: name, name: resource }, body: { action } }),
