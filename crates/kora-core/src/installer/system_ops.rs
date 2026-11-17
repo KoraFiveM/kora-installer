@@ -134,11 +134,15 @@ pub fn db_needs_helper(windows: bool, admin: bool, has_helper: bool, login_given
     windows && !admin && has_helper && !login_given
 }
 
+/// The Administrators group (owner of what an elevated administrator creates on Windows Server).
+pub const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
+
 /// A folder the helper may work on for the person whose SID is `user_sid`: a full path, holding a
-/// Kora install record, owned by that person (or, for a folder of an earlier attempt that an
-/// elevated install made, by the Administrators group when the person approved as themselves).
-/// `owner` = the folder's owner SID.
-pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record: bool) -> std::result::Result<(), String> {
+/// Kora install record, owned by that person, or by the Administrators group when the person is an
+/// administrator themselves (`admin_member`: an elevated Kora made it for them, for example
+/// `kora install` from an administrator terminal). `owner` = the folder's owner SID. A standard
+/// account never gets a folder of the administrators', even when an administrator typed the password.
+pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record: bool, admin_member: bool) -> std::result::Result<(), String> {
     let no = |why: &str| Err(format!("Kora's administrator helper will not work on {}: {why}.", dir.display()));
     if !dir.is_absolute() || dir.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return no("it is not a full folder path");
@@ -148,6 +152,7 @@ pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record
     }
     match owner {
         Some(o) if !user_sid.is_empty() && o.eq_ignore_ascii_case(user_sid) => Ok(()),
+        Some(o) if !user_sid.is_empty() && admin_member && o.eq_ignore_ascii_case(ADMINISTRATORS_SID) => Ok(()),
         Some(_) => no("the folder does not belong to you"),
         None => no("cannot see who owns the folder"),
     }
@@ -244,14 +249,15 @@ mod tests {
     fn only_the_persons_own_folders_with_a_record_are_worked_on() {
         let dir = if cfg!(windows) { std::path::PathBuf::from(r"C:\Users\jo\kora\a") } else { "/home/jo/kora/a".into() };
         let me = "S-1-5-21-1-2-3-1001";
-        assert!(check_dir_for(&dir, me, Some(me), true).is_ok());
-        assert!(check_dir_for(&dir, me, Some("s-1-5-21-1-2-3-1001"), true).is_ok(), "SIDs compare without case");
-        assert!(check_dir_for(&dir, me, Some("S-1-5-18"), true).unwrap_err().contains("does not belong to you"));
-        assert!(check_dir_for(&dir, me, Some("S-1-5-32-544"), true).is_err(), "a folder administrators own is not the person's");
-        assert!(check_dir_for(&dir, me, None, true).is_err());
-        assert!(check_dir_for(&dir, me, Some(me), false).unwrap_err().contains("no Kora install record"));
-        assert!(check_dir_for(Path::new("relative"), me, Some(me), true).is_err());
-        assert!(check_dir_for(&dir, "", Some(""), true).is_err(), "no known user: refused");
+        assert!(check_dir_for(&dir, me, Some(me), true, false).is_ok());
+        assert!(check_dir_for(&dir, me, Some("s-1-5-21-1-2-3-1001"), true, false).is_ok(), "SIDs compare without case");
+        assert!(check_dir_for(&dir, me, Some("S-1-5-18"), true, true).unwrap_err().contains("does not belong to you"));
+        assert!(check_dir_for(&dir, me, Some(ADMINISTRATORS_SID), true, false).is_err(), "a standard account never gets the administrators' folders");
+        assert!(check_dir_for(&dir, me, Some(ADMINISTRATORS_SID), true, true).is_ok(), "an administrator's own folder made by an elevated Kora");
+        assert!(check_dir_for(&dir, me, None, true, true).is_err());
+        assert!(check_dir_for(&dir, me, Some(me), false, false).unwrap_err().contains("no Kora install record"));
+        assert!(check_dir_for(Path::new("relative"), me, Some(me), true, false).is_err());
+        assert!(check_dir_for(&dir, "", Some(""), true, true).is_err(), "no known user: refused");
     }
 
     #[test]

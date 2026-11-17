@@ -16,6 +16,10 @@ pub struct PanelUser {
     pub sid: String,
     pub domain: String,
     pub name: String,
+    /// The account is in the Administrators group (even when the panel's token does not use it):
+    /// a person who could have elevated themselves, so folders an elevated Kora made for them
+    /// (owned by Administrators) are theirs too.
+    pub admin_member: bool,
 }
 
 static PANEL_USER: std::sync::OnceLock<PanelUser> = std::sync::OnceLock::new();
@@ -38,7 +42,7 @@ pub fn child_env(u: &PanelUser) -> Vec<(String, String)> {
 }
 
 #[cfg(windows)]
-pub use imp::{open_session, path_owner_sid, run_worker};
+pub use imp::{open_session, path_owner_sid, run_worker, selftest};
 
 #[cfg(not(windows))]
 pub fn open_session(_kora_home: Option<&str>, _limit: Duration) -> Result<Session, OpenError> {
@@ -54,6 +58,12 @@ pub fn run_worker(_args: &[String], _validator: Arc<dyn Validator>) -> Result<()
 #[cfg(not(windows))]
 pub fn path_owner_sid(_p: &std::path::Path) -> Option<String> {
     None
+}
+
+/// CI only (see [`imp::selftest`] on Windows).
+#[cfg(not(windows))]
+pub fn selftest(_say: &mut dyn FnMut(&str)) -> Result<(), String> {
+    Err("the administrator helper only exists on Windows".into())
 }
 
 #[cfg(windows)]
@@ -175,6 +185,8 @@ mod imp {
     }
 
     struct Owned(Handle);
+    // SAFETY: a kernel handle may be used and closed from any thread.
+    unsafe impl Send for Owned {}
     impl Drop for Owned {
         fn drop(&mut self) {
             if !self.0.is_null() && self.0 != INVALID {
@@ -253,12 +265,56 @@ mod imp {
         Ok(Owned(info.h_process))
     }
 
+    /// How the worker was started: through the prompt, or (the CI self-test, already elevated) directly.
+    enum Launched {
+        Shell(Owned),
+        Child(std::process::Child),
+    }
+
+    impl Launched {
+        fn pid(&self) -> u32 {
+            match self {
+                // SAFETY: a process handle we own.
+                Launched::Shell(h) => unsafe { GetProcessId(h.0) },
+                Launched::Child(c) => c.id(),
+            }
+        }
+        fn exited(&mut self) -> bool {
+            match self {
+                // SAFETY: a process handle we own.
+                Launched::Shell(h) => (unsafe { WaitForSingleObject(h.0, 0) }) == 0,
+                Launched::Child(c) => c.try_wait().map(|s| s.is_some()).unwrap_or(true),
+            }
+        }
+    }
+
+    type Launch = fn(&Path, &str, &[String]) -> Result<Launched, u32>;
+
+    fn launch_runas(exe: &Path, params: &str, _args: &[String]) -> Result<Launched, u32> {
+        shell_runas(exe, params).map(Launched::Shell)
+    }
+
+    fn launch_direct(exe: &Path, _params: &str, args: &[String]) -> Result<Launched, u32> {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new(exe)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .map(Launched::Child)
+            .map_err(|e| e.raw_os_error().unwrap_or(1) as u32)
+    }
+
     /// Panel side: ask Windows (the prompt), wait for the worker to connect, check it, and return
     /// the session. `limit`: how long the person has to answer.
     pub fn open_session(kora_home: Option<&str>, limit: Duration) -> Result<Session, OpenError> {
         if crate::elevate::is_elevated() {
             return Err(OpenError::Unsupported);
         }
+        open_with(kora_home, limit, launch_runas).map(|(s, _)| s)
+    }
+
+    fn open_with(kora_home: Option<&str>, limit: Duration, launch: Launch) -> Result<(Session, Launched), OpenError> {
         if PROMPT_OPEN.swap(true, Ordering::SeqCst) {
             return Err(OpenError::Busy);
         }
@@ -278,27 +334,21 @@ mod imp {
                 return Err(OpenError::Failed(format!("cannot create the connection for the administrator helper: {e}")));
             }
         };
-        let params = worker_args(&name, me).iter().map(|a| crate::elevate::quote_windows_arg(a)).collect::<Vec<_>>().join(" ");
+        let args = worker_args(&name, me);
+        let params = args.iter().map(|a| crate::elevate::quote_windows_arg(a)).collect::<Vec<_>>().join(" ");
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let r = shell_runas(&exe, &params).map(|h| {
-                let raw = h.0 as usize;
-                std::mem::forget(h);
-                raw
-            });
+            let r = launch(&exe, &params, &args);
             PROMPT_OPEN.store(false, Ordering::SeqCst);
-            if let Err(std::sync::mpsc::SendError(Ok(raw))) = tx.send(r) {
-                // Nobody waits any more (timed out): the worker finds no pipe and exits by itself.
-                drop(Owned(raw as Handle));
-            }
+            // Nobody waits any more (timed out): dropping it is fine, the worker finds no pipe and exits by itself.
+            let _ = tx.send(r);
         });
-        let process = match rx.recv_timeout(limit) {
-            Ok(Ok(raw)) => Owned(raw as Handle),
+        let mut process = match rx.recv_timeout(limit) {
+            Ok(Ok(p)) => p,
             Ok(Err(code)) => return Err(shell_execute_error(code)),
             Err(_) => return Err(OpenError::TimedOut),
         };
-        // SAFETY: a process handle we own.
-        let worker_pid = unsafe { GetProcessId(process.0) };
+        let worker_pid = process.pid();
         let deadline = Instant::now() + CONNECT_LIMIT;
         loop {
             // SAFETY: our pipe handle (non-blocking mode: answers at once).
@@ -308,8 +358,7 @@ mod imp {
             if ok || err == ERROR_PIPE_CONNECTED || err == ERROR_NO_DATA {
                 break;
             }
-            // SAFETY: a process handle we own.
-            if unsafe { WaitForSingleObject(process.0, 0) } == 0 {
+            if process.exited() {
                 return Err(OpenError::Failed("Kora's administrator helper stopped before it connected.".into()));
             }
             if Instant::now() > deadline {
@@ -332,7 +381,79 @@ mod imp {
         let file = unsafe { File::from_raw_handle(pipe.0 as RawHandle) };
         std::mem::forget(pipe);
         let reader = file.try_clone().map_err(|e| OpenError::Failed(e.to_string()))?;
-        Session::begin(Box::new(BufReader::new(reader)), Box::new(file), kora_home).map_err(|e| OpenError::Failed(e.to_string()))
+        let s = Session::begin(Box::new(BufReader::new(reader)), Box::new(file), kora_home).map_err(|e| OpenError::Failed(e.to_string()))?;
+        Ok((s, process))
+    }
+
+    /// `kora admin-worker --selftest`, for CI (whose account is already elevated, so there is no
+    /// prompt to answer): everything the panel and the worker do except the prompt itself. The
+    /// worker is started directly instead of through `runas`; the pipe, its security, both peer
+    /// checks, the protocol, the allow-list and an `admin-step` child are the real ones.
+    pub fn selftest(say: &mut dyn FnMut(&str)) -> Result<(), String> {
+        use crate::helper::client::HelperError;
+        if !crate::elevate::is_elevated() {
+            return Err("the self-test is for an account that is already elevated (CI); people use Kora Panel".into());
+        }
+        let home = crate::installer::registry::kora_home().to_string_lossy().into_owned();
+        let (mut s, mut child) = open_with(Some(&home), Duration::from_secs(30), launch_direct).map_err(|e| format!("the worker did not start or connect: {e:?}"))?;
+        say(&format!("ok: the worker started, connected through the pipe and passed both peer checks (pid {})", s.worker_pid));
+        let ping = s.run(crate::helper::PING, &[], &[], &mut |_| {}).map_err(|e| format!("ping: {e}"))?;
+        if !ping.ok {
+            return Err("ping was not answered".into());
+        }
+        say("ok: ping answered");
+        for (verb, args) in [("install", vec!["--name", "x"]), ("delete", vec!["x", "--yes"]), ("cmd.exe", vec!["/c", "whoami"]), ("admin-step", vec!["run", "--step", "system.firewall", "--dir", r"C:\Windows"])] {
+            let a: Vec<String> = args.iter().map(|x| x.to_string()).collect();
+            match s.run(verb, &a, &[], &mut |_| {}) {
+                Err(HelperError::Rejected(m)) => say(&format!("ok: refused {verb} {}: {m}", args.join(" "))),
+                other => return Err(format!("{verb} {args:?} was not refused: {other:?}")),
+            }
+        }
+        // A real step child: undoing nothing in a folder with an install record.
+        let dir = std::env::temp_dir().join(format!("kora-worker-selftest-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".kora")).map_err(|e| e.to_string())?;
+        let req = crate::installer::InstallRequest {
+            mode: crate::installer::Mode::Production,
+            name: "selftest".into(),
+            dir: dir.clone(),
+            hostname: String::new(),
+            license_key: None,
+            cfx_identifier: None,
+            ports: crate::installer::Ports::default(),
+            txadmin_public: false,
+            artifact_url: None,
+            game_build: None,
+            resources: crate::installer::ResourceSelection::All,
+            db: crate::installer::DbChoice::Skip,
+            service: false,
+            firewall: false,
+            github_owner: None,
+            catalog: None,
+            dry_run: false,
+            db_admin: None,
+            start: false,
+            app: None,
+        };
+        std::fs::write(dir.join(".kora").join("request.json"), serde_json::to_vec(&req).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let args = crate::installer::system_ops::step_args(true, "system.schedule", &dir, true, true, &None);
+        let mut lines = Vec::new();
+        let out = s.run("admin-step", &args, &[], &mut |l| lines.push(l.to_string())).map_err(|e| format!("admin-step: {e}"))?;
+        let _ = std::fs::remove_dir_all(&dir);
+        let r: crate::installer::system_ops::StepResult = out.data.and_then(|v| serde_json::from_value(v).ok()).ok_or("the step child sent no result line")?;
+        if !out.ok || r.error.is_some() {
+            return Err(format!("the step child failed: {:?} {lines:?}", r.error));
+        }
+        say(&format!("ok: an admin-step child ran and reported back ({})", r.detail));
+        s.finish();
+        let t = std::time::Instant::now();
+        while !child.exited() {
+            if t.elapsed() > Duration::from_secs(15) {
+                return Err("the worker did not exit after bye".into());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        say("ok: the worker exited after bye");
+        Ok(())
     }
 
     fn process_image(pid: u32) -> Option<PathBuf> {
@@ -382,12 +503,26 @@ mod imp {
             }
             let sa = &*(buf.as_ptr() as *const SidAndAttributes);
             let sid = sid_string(sa.sid)?;
+            // TOKEN_GROUPS: any Administrators entry, enabled or deny-only (a filtered admin token).
+            let mut glen = 0u32;
+            GetTokenInformation(t.0, 2, std::ptr::null_mut(), 0, &mut glen);
+            let mut gbuf = vec![0u64; (glen as usize).div_ceil(8).max(1)];
+            let mut admin_member = false;
+            if GetTokenInformation(t.0, 2, gbuf.as_mut_ptr().cast(), glen, &mut glen) != 0 {
+                let count = *(gbuf.as_ptr() as *const u32) as usize;
+                let first = (gbuf.as_ptr() as *const u8).add(std::mem::size_of::<usize>()) as *const SidAndAttributes;
+                for i in 0..count {
+                    if sid_string((*first.add(i)).sid).as_deref() == Some("S-1-5-32-544") {
+                        admin_member = true;
+                    }
+                }
+            }
             let (mut nl, mut dl, mut usage) = (256u32, 256u32, 0u32);
             let (mut name, mut dom) = (vec![0u16; 256], vec![0u16; 256]);
             if LookupAccountSidW(std::ptr::null(), sa.sid, name.as_mut_ptr(), &mut nl, dom.as_mut_ptr(), &mut dl, &mut usage) == 0 {
                 return None;
             }
-            Some(PanelUser { sid, name: from_wide(name.as_ptr()), domain: from_wide(dom.as_ptr()) })
+            Some(PanelUser { sid, name: from_wide(name.as_ptr()), domain: from_wide(dom.as_ptr()), admin_member })
         }
     }
 
@@ -462,7 +597,7 @@ mod tests {
 
     #[test]
     fn children_act_for_the_panel_user_not_the_administrator_who_answered() {
-        let u = PanelUser { sid: "S-1-5-21-1-2-3-1001".into(), domain: "PC".into(), name: "jo".into() };
+        let u = PanelUser { sid: "S-1-5-21-1-2-3-1001".into(), domain: "PC".into(), name: "jo".into(), admin_member: false };
         let e = child_env(&u);
         assert!(e.contains(&("USERNAME".into(), "jo".into())) && e.contains(&("USERDOMAIN".into(), "PC".into())));
         assert!(e.contains(&("KORA_WORKER_USER_SID".into(), u.sid.clone())));

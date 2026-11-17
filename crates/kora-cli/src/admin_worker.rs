@@ -42,11 +42,14 @@ pub struct AdminStepArgs {
 #[derive(Args, Debug, Clone)]
 pub struct AdminWorkerArgs {
     /// The panel's pipe.
-    #[arg(long)]
-    pub pipe: String,
+    #[arg(long, required_unless_present = "selftest")]
+    pub pipe: Option<String>,
     /// The panel's process id.
-    #[arg(long)]
-    pub parent: u32,
+    #[arg(long, required_unless_present = "selftest")]
+    pub parent: Option<u32>,
+    /// CI only, on an account that is already elevated: run the panel's side and a worker without the prompt.
+    #[arg(long, conflicts_with_all = ["pipe", "parent"])]
+    pub selftest: bool,
 }
 
 /// `kora admin-step`: exit code 0 when the step worked; the result line is printed either way.
@@ -76,7 +79,19 @@ pub fn admin_step(a: &AdminStepArgs) -> i32 {
 
 /// `kora admin-worker`: serve the panel, then exit (never waits for a key: it has no visible window).
 pub fn admin_worker(a: &AdminWorkerArgs) -> i32 {
-    let args = vec!["--pipe".to_string(), a.pipe.clone(), "--parent".to_string(), a.parent.to_string()];
+    if a.selftest {
+        return match kora_core::helper::winpipe::selftest(&mut |l| println!("{l}")) {
+            Ok(()) => {
+                println!("administrator helper self-test passed");
+                0
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                1
+            }
+        };
+    }
+    let args = vec!["--pipe".to_string(), a.pipe.clone().unwrap_or_default(), "--parent".to_string(), a.parent.unwrap_or(0).to_string()];
     match kora_core::helper::winpipe::run_worker(&args, std::sync::Arc::new(worker_validate)) {
         Ok(()) => 0,
         Err(e) => {
@@ -90,11 +105,11 @@ pub fn admin_worker(a: &AdminWorkerArgs) -> i32 {
 /// helper's): the arguments must parse as one of the privileged commands the panel uses, and an
 /// `admin-step` folder must belong to the person the panel runs as.
 pub fn worker_validate(verb: &str, args: &[String]) -> Result<(), String> {
-    let sid = kora_core::helper::winpipe::panel_user().map(|u| u.sid.clone()).unwrap_or_default();
+    let user = kora_core::helper::winpipe::panel_user().cloned().unwrap_or_default();
     worker_validate_for(verb, args, &|dir| {
         let owner = kora_core::helper::winpipe::path_owner_sid(dir);
         let record = dir.join(".kora").join("request.json").is_file();
-        system_ops::check_dir_for(dir, &sid, owner.as_deref(), record)
+        system_ops::check_dir_for(dir, &user.sid, owner.as_deref(), record, user.admin_member)
     })
 }
 

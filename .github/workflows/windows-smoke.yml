@@ -57,6 +57,14 @@ jobs:
         run: ./scripts/smoke/06-dev-dry-run.ps1
       - name: "10. kora self-update (local fake release: replace while running, checksum mismatch, no asset, offline, .old cleanup)"
         run: ./scripts/smoke/10-selfupdate.ps1
+      - name: "11. Panel's administrator worker without the prompt (pipe security, peer checks, protocol, allow-list, a step child)"
+        timeout-minutes: 10
+        run: ./scripts/smoke/11-admin-worker.ps1
+      - name: "11b. Worker unit tests on Windows (pipe names, peer checks, protocol helpers)"
+        timeout-minutes: 15
+        run: |
+          cargo test --locked -p kora-core -- helper:: system_ops
+          if ($LASTEXITCODE -ne 0) { throw 'worker unit tests failed' }
       - name: Collect logs
         if: always()
         run: |

@@ -999,7 +999,7 @@ Options:
 ===== kora admin-worker =====
 Windows: Kora Panel's short-lived administrator helper (started through the permission prompt)
 
-Usage: kora admin-worker [OPTIONS] --pipe <PIPE> --parent <PARENT>
+Usage: kora admin-worker [OPTIONS]
 
 Options:
       --pipe <PIPE>
@@ -1007,6 +1007,9 @@ Options:
 
       --parent <PARENT>
           The panel's process id
+
+      --selftest
+          CI only, on an account that is already elevated: run the panel's side and a worker without the prompt
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
