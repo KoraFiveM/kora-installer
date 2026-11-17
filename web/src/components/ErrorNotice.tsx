@@ -55,7 +55,12 @@ export function systemCheckHelps(code: string): boolean {
 function SystemCheckLink() {
   const inRouter = useInRouterContext()
   const cls = 'text-info underline'
-  return <p className="mt-2 text-xs">{inRouter ? <Link className={cls} to="/system">Open the System check</Link> : <a className={cls} href="/system">Open the System check</a>} to see what Kora needs on this computer.</p>
+  // In the install wizard the answers live on that page: the check opens beside it, so nothing typed is lost.
+  const beside = window.location.pathname.startsWith('/install')
+  const link = inRouter && !beside
+    ? <Link className={cls} to="/system">Open the System check</Link>
+    : <a className={cls} href="/system" {...(beside ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>Open the System check{beside ? ' in a new tab' : ''}</a>
+  return <p className="mt-2 text-xs">{link} to see what Kora needs on this computer.</p>
 }
 
 /** Errors where "Copy details" helps when nothing better is offered: real failures, not answers to a bad request. */

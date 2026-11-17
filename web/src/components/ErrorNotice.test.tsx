@@ -21,6 +21,14 @@ describe('ErrorNotice', () => {
     expect(screen.getByText("Wait for it to finish, then try again. Its progress is on the server's Resources tab.")).toBeInTheDocument()
   })
 
+  it('opens the System check in a new tab from the install wizard, so the typed answers are not lost', () => {
+    window.history.pushState({}, '', '/install')
+    render(<ErrorNotice error={new ApiError(500, { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed.' })} />)
+    const link = screen.getByRole('link', { name: 'Open the System check in a new tab' })
+    expect(link).toHaveAttribute('target', '_blank')
+    window.history.pushState({}, '', '/')
+  })
+
   it('offers the command of a remote sign-in refusal to copy', () => {
     const message = 'This action is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora: `kora panel remote-actions on`'
     render(<ErrorNotice error={new ApiError(403, { code: 'forbidden', message })} />)
