@@ -585,7 +585,97 @@ the shared secret (`X-Kora-Proxy-Secret`). The visitor's address (the right-most
 the sign-in lockout counts; `X-Forwarded-Proto: https` makes the request count as secure; a proxied visitor is always a
 remote one, never the person at the computer, and never gets a Tailscale identity. Without the secret, or from another
 address, forwarded headers are refused as before. Add the public name to the allowed names (Settings > Remote access)
-and turn remote access on. The "Open txAdmin" gateway ports are not proxied this way. `kora panel proxy forget` removes the trust.
+and turn remote access on. `kora panel proxy forget` removes the trust. To open txAdmin through the proxy, see [below](#opening-txadmin-through-the-proxy).
+
+### Opening txAdmin through the proxy
+
+txAdmin cannot run under a path prefix (`/txadmin/main/`): its page talks to absolute paths such as `/auth/` and `/socket.io`. So
+the panel gives each server's txAdmin an address of its own, a **gateway port** (txAdmin's port + 10000: `50120` for the usual
+`40120`), and the proxy has to give people a **host name** or a **port** that leads to it. Pick one way and set it up once per server:
+
+1. **One host name per server** (recommended, nothing to open in the firewall). Tell Kora the pattern, then give each server that name
+   in the proxy, forwarding to its gateway port on the panel's own address. Add the names to the allowed hosts (Settings, Remote access).
+
+   ```sh
+   kora panel proxy txadmin-host 'tx-{server}.example.com'    # {server} is the server's short name (underscores become dashes)
+   ```
+
+2. **One port per server on the panel's public name.** Nothing to tell Kora (`kora panel proxy txadmin-host --clear`): "Open txAdmin"
+   opens `https://panel.example.com:<gateway port>`, so the proxy must listen on that same public port and forward to the same
+   port on the panel's address. `Host` must reach Kora as the visitor typed it (nginx: `$http_host`, not `$host`).
+
+Replace `<secret>` with the proxy's secret (`kora panel proxy trust`); it is the same one as for the panel. The proxy must pass
+WebSockets on (txAdmin's live console is one) and forward `Host` unchanged. Kora applies the same rules as for the panel: the
+address and the secret together, a visitor is always remote, and txAdmin still needs an administrator, and
+`kora panel remote-actions on` for a token sign-in. A name made for one server does not open another server's txAdmin. The secret and
+the forwarded headers never reach txAdmin.
+
+**Caddy, one host name per server**
+
+```
+tx-main.example.com {
+    reverse_proxy 127.0.0.1:50120 {
+        header_up X-Kora-Proxy-Secret <secret>
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+(Caddy passes WebSockets on and adds X-Forwarded-For and Host itself.)
+```
+
+**Caddy, one port per server**
+
+```
+example.com:50120 {
+    reverse_proxy 127.0.0.1:50120 {
+        header_up X-Kora-Proxy-Secret <secret>
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+```
+
+**nginx, one host name per server**
+
+```
+server {
+    listen 443 ssl;
+    server_name tx-main.example.com;
+    # ssl_certificate and ssl_certificate_key as for the panel
+    location / {
+        proxy_pass http://127.0.0.1:50120;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Kora-Proxy-Secret <secret>;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
+**nginx, one port per server**
+
+```
+server {
+    listen 50120 ssl;
+    server_name example.com;
+    # ssl_certificate and ssl_certificate_key as for the panel
+    location / {
+        proxy_pass http://127.0.0.1:50120;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Kora-Proxy-Secret <secret>;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
 
 ### Other options
 

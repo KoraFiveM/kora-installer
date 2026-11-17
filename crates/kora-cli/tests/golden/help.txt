@@ -624,9 +624,10 @@ Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name wi
 Usage: kora panel proxy [OPTIONS] <COMMAND>
 
 Commands:
-  trust   Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
-  forget  Stop trusting any proxy: forwarded headers are refused again
-  status  Show the trusted proxy setting
+  trust         Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
+  txadmin-host  How each server's txAdmin is reached through the proxy: a host name template with {server}, like `tx-{server}.example.com` (give every server's txAdmin a name in the proxy), or `--clear` to use the panel's own name with the server's gateway port (the proxy listens on that port). txAdmin cannot run under a path prefix, so it gets a name or a port of its own. See docs/panel.md
+  forget        Stop trusting any proxy: forwarded headers are refused again
+  status        Show the trusted proxy setting
 
 Options:
       --no-elevate
@@ -649,6 +650,25 @@ Options:
           The panel address the proxy forwards to, for the configuration examples
           
           [default: 127.0.0.1:47120]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy txadmin-host =====
+How each server's txAdmin is reached through the proxy: a host name template with {server}, like `tx-{server}.example.com` (give every server's txAdmin a name in the proxy), or `--clear` to use the panel's own name with the server's gateway port (the proxy listens on that port). txAdmin cannot run under a path prefix, so it gets a name or a port of its own. See docs/panel.md
+
+Usage: kora panel proxy txadmin-host [OPTIONS] [TEMPLATE]
+
+Arguments:
+  [TEMPLATE]
+          The template (lower-case letters, digits, `-` and `.`, with `{server}`; `{port}` is the gateway port)
+
+Options:
+      --clear
+          Go back to the panel's own name with the gateway port
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
