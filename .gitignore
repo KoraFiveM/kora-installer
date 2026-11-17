@@ -15,3 +15,7 @@ database.json
 web/node_modules
 web/dist
 .pw-browsers/
+web/dist-mock
+web/e2e-results
+web/e2e-report
+web/playwright-report

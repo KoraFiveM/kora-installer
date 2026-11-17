@@ -15,6 +15,6 @@ export default defineConfig(({ command, mode }) => {
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     build: { outDir: 'dist', assetsDir: 'assets', sourcemap: false },
     server: { proxy: mock ? undefined : { '/api': 'http://127.0.0.1:47120' } },
-    test: { environment: 'jsdom', globals: true, setupFiles: ['./src/test/setup.ts'], css: false },
+    test: { environment: 'jsdom', globals: true, setupFiles: ['./src/test/setup.ts'], css: false, exclude: ['e2e/**', 'node_modules/**', 'dist*/**'] },
   }
 })
