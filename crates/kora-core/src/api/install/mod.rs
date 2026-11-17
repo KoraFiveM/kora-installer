@@ -750,7 +750,7 @@ pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Optio
             done(Ok(out), log_path)
         }
         Err(msg) => {
-            let log_path = write_install_log(req, &log, Some(&msg.to_string()));
+            let log_path = write_install_log(req, &log, Some(&msg.one_line()));
             let saved = env.saved_save(req);
             let mut kept = Vec::new();
             if req.dir.join(".kora").is_dir() {

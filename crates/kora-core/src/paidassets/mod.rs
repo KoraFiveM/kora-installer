@@ -845,7 +845,7 @@ pub fn import(dir: &Path, zip: &Path, opts: &ImportOpts, say: &mut dyn FnMut(&st
     })();
     if let Err(e) = result {
         undo(&swaps);
-        return Err(format!("{e}. Nothing was changed: any replaced asset was put back.").into());
+        return Err(e.and_say("Nothing was changed: any replaced asset was put back."));
     }
 
     for ((r, _), s) in staged.iter().zip(&swaps) {

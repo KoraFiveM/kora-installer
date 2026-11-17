@@ -264,12 +264,12 @@ pub fn execute(cloner: &dyn Cloner, server: &mut ServerFile, plan: &AddPlan, say
             Err(e) => out.failed.push((item.id.clone(), e.one_line())),
         }
     }
-    server.save().map_err(|e| Problem::generic(format!("cannot write kora-server.json: {e}")))?;
+    server.save().map_err(|e| e.lead("cannot write kora-server.json"))?;
     // Only folders that now really hold something new.
     let folders = layout::folders_for(done_rels.iter().map(String::as_str));
     match append_ensures_to_cfg(&server.dir.join("server.cfg"), &folders) {
         Ok(added) => out.ensured = added,
-        Err(e) => out.notes.push(e.to_string()),
+        Err(e) => out.notes.push(e.one_line()),
     }
     Ok(out)
 }

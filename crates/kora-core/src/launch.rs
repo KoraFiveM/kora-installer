@@ -241,7 +241,7 @@ pub fn start_with(env: &dyn LaunchEnv, spec: &Spec, progress: &mut dyn FnMut(&st
     let (method, pid) = if has_service {
         if svc != ServiceState::Running {
             if let Err(e) = env.service_start(spec) {
-                return done(Method::Service, None, false, false, Some(Problem::StartFailed), format!("Could not start the background service: {e}"), vec![]);
+                return done(Method::Service, None, false, false, Some(Problem::StartFailed), format!("Could not start the background service: {}", e.one_line()), vec![]);
             }
         }
         (Method::Service, None)
@@ -251,7 +251,7 @@ pub fn start_with(env: &dyn LaunchEnv, spec: &Spec, progress: &mut dyn FnMut(&st
                 env.write_pid_file(spec, pid);
                 (Method::Detached, Some(pid))
             }
-            Err(e) => return done(Method::Detached, None, false, false, Some(Problem::StartFailed), format!("Could not start FXServer: {e}"), vec![]),
+            Err(e) => return done(Method::Detached, None, false, false, Some(Problem::StartFailed), format!("Could not start FXServer: {}", e.one_line()), vec![]),
         }
     };
     wait_ready(env, spec, progress, method, pid, log_start, tx_timeout, grace)
@@ -628,7 +628,7 @@ impl LaunchEnv for SystemEnv {
 /// Resolve a registered name or folder to a [`Spec`].
 pub fn spec_for(name_or_dir: &str) -> Result<Spec, crate::problem::Problem> {
     let dir = crate::installer::host::resolve_dir(name_or_dir)?;
-    let sf = crate::installer::ServerFile::load(&dir).map_err(|e| format!("cannot read kora-server.json: {e}"))?;
+    let sf = crate::installer::ServerFile::load(&dir).map_err(|e| e.lead("cannot read kora-server.json"))?;
     Ok(Spec { name: sf.name.clone(), dir, game_port: sf.ports.game, txadmin_port: sf.ports.txadmin })
 }
 

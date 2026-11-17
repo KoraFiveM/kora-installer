@@ -1003,7 +1003,7 @@ pub fn set_versions(sf: &ServerFile, versions: Versions) -> PResult<VersionsSet>
     let mut next = sf.clone();
     next.source = Some(sf.source());
     next.versions = Some(versions);
-    next.save().map_err(|e| Problem::generic(format!("Could not save the server's settings: {e}")))?;
+    next.save().map_err(|e| e.lead("Could not save the server's settings"))?;
     sync_entry(&next);
     let message = match versions {
         Versions::Released => "This server now follows released versions. Check for updates to see which resources move to a release; nothing has changed yet.",
@@ -1159,7 +1159,7 @@ pub fn run_on(r: &dyn CommandRunner, sf: &ServerFile, req: &Request, progress: &
 
 /// [`run_on`] on a registered server (name or folder) with the right git for who owns its folder. For the command line.
 pub fn run_for(server: &str, req: &Request, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<Reply> {
-    let sf = crate::update::manual::load_server(server).map_err(|e| Problem::generic(e.to_string()))?;
+    let sf = crate::update::manual::load_server(server)?;
     crate::installer::gitops::with_runner(&sf.dir, |r| run_on(r, &sf, req, progress))
 }
 

@@ -680,7 +680,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                                     rb.repository = url;
                                     repointed.push(rb.id.clone());
                                 }
-                                Err(why) => result.problems.push(format!("{}: your own copy could not be made ({why}); it follows the old owner's copy instead.", rb.id)),
+                                Err(why) => result.problems.push(format!("{}: your own copy could not be made ({}); it follows the old owner's copy instead.", rb.id, why.one_line())),
                             }
                         }
                         new_owner = Some(owner);
@@ -749,7 +749,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             let got = env
                 .fetcher
                 .artifact(m.server.artifact_build, &dir, &mut said)
-                .map_err(|e| Problem::new(codes::NOT_FOUND, format!("The server program could not be downloaded: {e}")).with_action(Action::Retry))?;
+                .map_err(|e| Problem::new(codes::NOT_FOUND, "The server program could not be downloaded.").with_details(e.one_line()).with_action(Action::Retry))?;
             if got != m.server.artifact_build && m.server.artifact_build != 0 {
                 result.notes.push(format!("FXServer build {} is no longer available; build {got} was used instead.", m.server.artifact_build));
             }
@@ -771,7 +771,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 ev("database", "Creating a new database and login", 50);
                 let made = prov.provision(&ppath).map_err(|e| {
                     Problem::new(codes::DB_STOPPED, "Kora could not create the new database. Is the database server running? Kora uses the same database administrator login as an install: on Linux the root account's own login (run Kora as root for the import) or the KORA_DB_ADMIN_USER and KORA_DB_ADMIN_PASSWORD settings; on Windows the login of the MariaDB Kora set up.")
-                        .with_details(e.to_string())
+                        .with_details(e.one_line())
                         .with_action(Action::StartDatabase)
                         .with_action(Action::Retry)
                 })?;
@@ -828,7 +828,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 ev("resources", &format!("Fetching {} ({}/{})", rb.id, i + 1, refs.len()), (72 + i * 18 / refs.len().max(1)) as u8);
                 match super::resources::ensure_at_commit(env.tools.git, &res_dir, rb) {
                     Ok(msg) => result.resources_fetched.push(msg),
-                    Err(msg) => result.problems.push(format!("{msg}. Fetch it later from the Resources tab; the server is otherwise complete.")),
+                    Err(msg) => result.problems.push(format!("{}. Fetch it later from the Resources tab; the server is otherwise complete.", msg.one_line())),
                 }
             }
             // every resource counts as changed ("Restart needed"), and a pull request being tried keeps its title

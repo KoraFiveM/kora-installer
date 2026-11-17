@@ -646,7 +646,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
     let (cat, cnote) = match load_catalog(req, hooks) {
         Ok(x) => x,
         Err(e) => {
-            notes.push(format!("Catalog could not be loaded ({e}); resource list unavailable."));
+            notes.push(format!("Catalog could not be loaded ({}); resource list unavailable.", e.one_line()));
             (Catalog { schema_version: 3, resources: vec![], creators: vec![] }, None)
         }
     };
@@ -654,7 +654,7 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
     let selected = select_resources(&cat, &req.resources, req.versions() == Versions::Latest).unwrap_or_default();
     match preflight(req, hooks, admin) {
         Ok(()) => notes.push("Free disk space and service-account access look fine.".into()),
-        Err(e) => notes.push(format!("WARNING, a real install would stop here: {e}")),
+        Err(e) => notes.push(format!("WARNING, a real install would stop here: {}", e.one_line())),
     }
     if req.service && admin && hooks.fix_permissions {
         let blocked = service_blocking_dirs(&req.dir);

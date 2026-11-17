@@ -28,7 +28,7 @@ pub(crate) fn resolve_dir(name_or_dir: &str) -> Result<PathBuf> {
     if p.is_absolute() && p.join("kora-server.json").is_file() {
         return Ok(p.to_path_buf());
     }
-    let reg = Registry::load().map_err(|e| Problem::generic(format!("cannot read the server registry: {e}")))?;
+    let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
     let entry = reg.find(name_or_dir).ok_or_else(|| Problem::generic(format!("no registered server named '{name_or_dir}'")))?;
     Ok(entry.dir.clone())
 }
@@ -36,7 +36,7 @@ pub(crate) fn resolve_dir(name_or_dir: &str) -> Result<PathBuf> {
 /// The command that starts a server (exposed for tests and `kora status`).
 pub fn build_command(name_or_dir: &str) -> Result<Command> {
     let dir = resolve_dir(name_or_dir)?;
-    let sf = ServerFile::load(&dir).map_err(|e| Problem::generic(format!("cannot read kora-server.json: {e}")))?;
+    let sf = ServerFile::load(&dir).map_err(|e| e.lead("cannot read kora-server.json"))?;
     let store = ArtifactStore::new(dir.join("artifacts"));
     let build_dir: PathBuf = store.current_dir().map_err(|e| Problem::generic(e.to_string()))?.ok_or_else(|| Problem::generic("this server has no FXServer build installed"))?;
     let exe = build_dir.join(Platform::current().executable());
@@ -322,13 +322,13 @@ mod scm {
 
 /// Name of the OS service Kora registered for a registered server (`kora-<slug>`).
 pub fn service_name_of(name: &str) -> Result<String> {
-    let reg = Registry::load().map_err(|e| Problem::generic(format!("cannot read the server registry: {e}")))?;
+    let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
     let entry = reg.find(name).ok_or_else(|| Problem::generic(format!("no registered server named '{name}'")))?;
     Ok(format!("kora-{}", super::slug(&entry.name)))
 }
 
 fn service_for(name: &str) -> Result<crate::service::ManagedServer> {
-    let reg = Registry::load().map_err(|e| Problem::generic(format!("cannot read the server registry: {e}")))?;
+    let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
     let entry = reg.find(name).ok_or_else(|| Problem::generic(format!("no registered server named '{name}'")))?;
     // Control verbs only use the service name; the other fields satisfy validation.
     Ok(crate::service::ManagedServer {

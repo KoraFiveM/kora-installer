@@ -189,10 +189,10 @@ pub fn load_server(server: &str) -> Result<ServerRecord> {
     let dir = if as_dir.is_absolute() && as_dir.join("kora-server.json").is_file() {
         as_dir.to_path_buf()
     } else {
-        let reg = Registry::load().map_err(|e| Problem::generic(format!("cannot read the server registry: {e}")))?;
+        let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
         reg.find(server).ok_or_else(|| Problem::generic(format!("no registered server named '{server}' (see `kora status`)")))?.dir.clone()
     };
-    ServerFile::load(&dir).map_err(|e| Problem::generic(format!("cannot read {}: {e}", dir.join("kora-server.json").display())))
+    ServerFile::load(&dir)
 }
 
 fn snapshot_dir(server: &ServerRecord) -> std::path::PathBuf {
@@ -829,7 +829,7 @@ fn defer_text(d: &DeferReason) -> String {
 /// Production: keep each resource's pinned commit in `kora-server.json` current. The file is read
 /// again here (the caller holds the update lock), so nothing another tool wrote meanwhile is lost.
 fn record_commits(server: &ServerRecord, moved: &[(String, String)]) -> std::result::Result<(), Problem> {
-    let mut sf = ServerFile::load(&server.dir).map_err(|e| format!("updated, but could not read kora-server.json to record the new versions: {e}"))?;
+    let mut sf = ServerFile::load(&server.dir).map_err(|e| e.lead("updated, but could not read kora-server.json to record the new versions"))?;
     sf.dir = server.dir.clone();
     for r in &mut sf.resources {
         if let Some((_, c)) = moved.iter().find(|(id, _)| *id == r.id) {

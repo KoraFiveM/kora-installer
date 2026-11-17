@@ -469,6 +469,14 @@ impl Problem {
         self
     }
 
+    /// Add a sentence after the message (`"Nothing was changed."`): the replacement for
+    /// `format!("{e}. Nothing was changed.")` that keeps the code, details and actions.
+    pub fn and_say(mut self, more: &str) -> Self {
+        let m = self.message.trim_end_matches(['.', ' ']).to_string();
+        self.message = format!("{m}. {more}");
+        self
+    }
+
     /// The whole problem on one line, for the few places that must keep a plain string (a field of a
     /// wire type, a log line): the message, then the details in brackets. Not for showing a Problem
     /// to a person: pass the Problem on instead.

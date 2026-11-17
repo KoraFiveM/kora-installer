@@ -364,10 +364,10 @@ impl HealthCheck for ServiceHealth {
 pub fn auto_update(server: &str) -> Result<UpdateReport> {
     let as_dir = Path::new(server);
     let (name, dir) = if as_dir.is_absolute() && as_dir.join("kora-server.json").is_file() {
-        let sf = ServerFile::load(as_dir).map_err(|e| Problem::generic(format!("cannot read {}: {e}", as_dir.join("kora-server.json").display())))?;
+        let sf = ServerFile::load(as_dir)?;
         (sf.name, as_dir.to_path_buf())
     } else {
-        let reg = Registry::load().map_err(|e| Problem::generic(format!("cannot read the server registry: {e}")))?;
+        let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
         let entry = reg.find(server).ok_or_else(|| Problem::generic(format!("no registered server named '{server}' (see `kora status`)")))?;
         (entry.name.clone(), entry.dir.clone())
     };
@@ -403,7 +403,7 @@ pub fn auto_update(server: &str) -> Result<UpdateReport> {
 /// put on a branch or a pull request is left alone by the engine and reported, never a failure.
 pub(crate) fn auto_update_released(sf: &ServerFile, run: &dyn Fn(&ServerFile) -> Result<UpdateReport>) -> Result<UpdateReport> {
     let res = run(sf);
-    append_log(&sf.dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {e}")));
+    append_log(&sf.dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {}", e.one_line())));
     res
 }
 
@@ -424,7 +424,7 @@ pub fn auto_update_in<H: HealthCheck>(
             return Err(Problem::generic(e.to_string()));
         }
     };
-    let res = ServerFile::load(dir).map_err(|e| Problem::generic(format!("cannot read {}: {e}", dir.join("kora-server.json").display()))).and_then(|sf| {
+    let res = ServerFile::load(dir).and_then(|sf| {
         let h = health(&sf);
         // Running server: ask it for its player count (restart-needing updates wait for 0 players);
         // a server that is not running has none. Asked after the fork sync, which can take minutes.
@@ -432,7 +432,7 @@ pub fn auto_update_in<H: HealthCheck>(
     });
     let line = match &res {
         Ok((r, _)) => r.summary(),
-        Err(e) => format!("update failed: {e}"),
+        Err(e) => format!("update failed: {}", e.one_line()),
     };
     append_log(dir, &line);
     if let Ok((report, _)) = &res {

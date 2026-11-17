@@ -75,7 +75,7 @@ pub fn rewrite_env_txadmin_port(env: &str, new: u16) -> Option<String> {
 
 /// Check and apply a port change. `name` is the registry name of the server.
 pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber) -> Result<PortChange, Problem> {
-    let mut sf = ServerFile::load(dir).map_err(|e| format!("cannot read kora-server.json: {e}"))?;
+    let mut sf = ServerFile::load(dir).map_err(|e| e.lead("cannot read kora-server.json"))?;
     let old = Ports { game: sf.ports.game, txadmin: sf.ports.txadmin };
     if new == old {
         return Err("those are already the ports this server uses".into());
@@ -130,7 +130,7 @@ pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber)
     };
 
     sf.ports = PortsRecord { game: new.game, txadmin: new.txadmin };
-    sf.save().map_err(|e| format!("cannot write kora-server.json: {e}"))?;
+    sf.save().map_err(|e| e.lead("cannot write kora-server.json"))?;
 
     let path = super::registry::registry_path();
     Registry::update_at(&path, |reg| {
@@ -139,7 +139,7 @@ pub fn change_ports(dir: &Path, name: &str, new: Ports, prober: &dyn PortProber)
         }
         Ok(())
     })
-    .map_err(|e| format!("cannot write the server registry: {e}"))?;
+    .map_err(|e| e.lead("cannot write the server registry"))?;
 
     notes.push("Firewall rules were not changed. Open the new ports and close the old ones if you opened them.".into());
     notes.push("Start the server again to use the new ports.".into());

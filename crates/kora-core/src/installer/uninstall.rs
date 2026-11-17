@@ -98,7 +98,7 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
                 reg.remove(&name);
                 match save(reg) {
                     Ok(()) => sum.removed.push(format!("{name}: removed from the server list")),
-                    Err(e) => sum.failed.push(format!("{name}: cannot write the server list: {e}")),
+                    Err(e) => sum.failed.push(format!("{name}: cannot write the server list: {}", e.one_line())),
                 }
             } else {
                 sum.kept.push(format!("{name}: left in the server list (no records)"));
@@ -128,7 +128,7 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
         let items = match system::items_for(&target, &created, env.platform, env.runner, !del_files, used) {
             Ok(i) => i,
             Err(e) => {
-                sum.failed.push(format!("{name}: {e}"));
+                sum.failed.push(format!("{name}: {}", e.one_line()));
                 continue;
             }
         };
@@ -157,7 +157,7 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
                     if system::clears_record(item) {
                         system::clear_record(&mut created, item.kind);
                         if let Err(e) = save_created_to(&dir, &created) {
-                            say(&format!("  note: removed, but could not update Kora's record: {e}"));
+                            say(&format!("  note: removed, but could not update Kora's record: {}", e.one_line()));
                         }
                     }
                     if !item.plan.steps.is_empty() {
@@ -202,8 +202,8 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
                     ));
                 }
                 Err(e) => {
-                    sum.failed.push(format!("{name}: {e}"));
-                    say(&format!("  FAILED: {e}"));
+                    sum.failed.push(format!("{name}: {}", e.one_line()));
+                    say(&format!("  FAILED: {}", e.one_line()));
                 }
             }
         } else if ask.ask(&format!("Forget '{name}' in the Kora server list? (its folder and database stay)"), true) {
@@ -267,8 +267,8 @@ pub fn mariadb_cleanup(
             say("  done: removed the MariaDB server Kora installed");
         }
         Err(e) => {
-            sum.failed.push(format!("MariaDB: {e}"));
-            say(&format!("  FAILED: {e}"));
+            sum.failed.push(format!("MariaDB: {}", e.one_line()));
+            say(&format!("  FAILED: {}", e.one_line()));
         }
     }
 }

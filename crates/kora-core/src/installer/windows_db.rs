@@ -398,14 +398,14 @@ pub fn install(http: &super::HttpClient, say: &mut dyn FnMut(&str)) -> Result<Re
                 say(&format!("Downloaded MariaDB {MARIADB_VERSION} from {} (SHA-256 verified)", used.split_once("://").map_or(used.as_str(), |(_, r)| r).split('/').next().unwrap_or("")));
             }
             StepAction::ExtractZip { archive, dest } => {
-                extract_zip_stripped(archive, dest).map_err(|e| Problem::generic(format!("{e}. {AV_HINT}")))?;
+                extract_zip_stripped(archive, dest).map_err(|e| e.and_say(AV_HINT))?;
                 let _ = std::fs::remove_file(archive);
                 if !dest.join("bin").join("mariadb-install-db.exe").is_file() {
                     return err(format!("the MariaDB zip does not contain bin\\mariadb-install-db.exe. {AV_HINT}"));
                 }
             }
             StepAction::Run(spec) if spec.program.ends_with("mariadb-install-db.exe") => {
-                run_checked(spec, "creating the MariaDB data folder and service").map_err(|e| Problem::generic(format!("{e}. {AV_HINT}")))?;
+                run_checked(spec, "creating the MariaDB data folder and service").map_err(|e| e.and_say(AV_HINT))?;
                 // Loopback only, whatever install-db wrote.
                 let p = datadir.join("my.ini");
                 let text = std::fs::read_to_string(&p).unwrap_or_default();

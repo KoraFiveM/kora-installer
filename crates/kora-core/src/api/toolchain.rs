@@ -85,7 +85,7 @@ impl ToolchainEnv for SystemToolchain {
     }
 
     fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, Problem> {
-        let found = db::detect(&db::SystemRunner, db::Os::current()).map_err(|e| Problem::generic(format!("Kora could not look for the database server: {e}")).to_string())?;
+        let found = db::detect(&db::SystemRunner, db::Os::current()).map_err(|e| Problem::from(e).lead("Kora could not look for the database server"))?;
         start_database_with(&db::SystemRunner, &found, crate::elevate::is_elevated(), cfg!(windows), Duration::from_secs(45), say)
     }
 

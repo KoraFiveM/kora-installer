@@ -650,7 +650,7 @@ pub fn run(r: &dyn CommandRunner, sf: &ServerFile, req: &Request, progress: &mut
 
 /// [`run`] on a registered server (name or folder) with the right git for who owns its folder. For the command line.
 pub fn run_on(server: &str, req: &Request, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<Reply> {
-    let sf = crate::update::manual::load_server(server).map_err(|e| Problem::generic(e.to_string()))?;
+    let sf = crate::update::manual::load_server(server)?;
     crate::installer::gitops::with_runner(&sf.dir, |r| run(r, &sf, req, progress))
 }
 

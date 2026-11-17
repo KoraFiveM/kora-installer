@@ -160,7 +160,7 @@ fn server_system_items(reg: &Registry, name: &str, dir: &Path, keep_files: bool)
     };
     let target = Target::from_request(&req);
     let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(reg, b, &[dir]));
-    let items = system::items_for(&target, &created, Platform::current(), &SystemRunner, keep_files, used).map_err(|e| format!("{name}: {e}"))?;
+    let items = system::items_for(&target, &created, Platform::current(), &SystemRunner, keep_files, used).map_err(|e| e.lead(&name.to_string()))?;
     Ok(items
         .into_iter()
         .map(|i| {
@@ -275,7 +275,7 @@ impl Maintenance for SystemMaintenance {
     }
 
     fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, Problem> {
-        let reg = Registry::load().map_err(|e| format!("cannot read the server list: {e}"))?;
+        let reg = Registry::load().map_err(|e| e.lead("cannot read the server list"))?;
         let mut out = Vec::new();
         for s in reg.servers.iter().filter(|s| only.is_none_or(|o| matches_only(s, o))) {
             let recorded = load_request_from(&s.dir).is_some() && load_created_from(&s.dir).is_some();
@@ -314,7 +314,7 @@ impl Maintenance for SystemMaintenance {
     }
 
     fn uninstall_run(&self, req: &UninstallRequest, status: &mut dyn FnMut(&str)) -> Result<UninstallOutcome, Problem> {
-        let mut reg = Registry::load().map_err(|e| format!("cannot read the server list: {e}"))?;
+        let mut reg = Registry::load().map_err(|e| e.lead("cannot read the server list"))?;
         let answers: HashMap<String, bool> = req.answers.iter().cloned().collect();
         let admin = installer::is_admin();
         let runner = SystemRunner;

@@ -107,7 +107,7 @@ impl Step for InstallStep {
                 Ok(())
             }
             Err(e) => {
-                self.ctx.emit(self.id, StepStatus::Failed, e.to_string(), 0.0);
+                self.ctx.emit(self.id, StepStatus::Failed, e.message.clone(), 0.0);
                 Err(fail(e))
             }
         }
@@ -1009,7 +1009,7 @@ impl InstallStep {
                             }
                             Err(e) => {
                                 abort.store(true, Ordering::SeqCst);
-                                errors.lock().unwrap().push(format!("{}: {e}", it.id));
+                                errors.lock().unwrap().push(format!("{}: {}", it.id, e.one_line()));
                             }
                         }
                     });
