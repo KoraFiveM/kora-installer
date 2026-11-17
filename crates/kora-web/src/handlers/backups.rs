@@ -292,8 +292,16 @@ pub async fn backup_import_upload(Extension(caller): Extension<Caller>, headers:
     .await?;
     let name = import_name(&headers);
     let path = dir.join(&name);
-    let bytes = match super::assets::save_body(body, path, IMPORT_UPLOAD_LIMIT).await {
-        Ok(n) => n,
+    let bytes = match super::assets::save_body(body, path.clone(), IMPORT_UPLOAD_LIMIT).await {
+        Ok(n) => {
+            // The file holds secrets: owner-only, whatever the umask made it (its folder is private too).
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+            n
+        }
         Err(e) => {
             let _ = std::fs::remove_dir_all(&dir);
             return Err(e);
