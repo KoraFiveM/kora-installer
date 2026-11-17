@@ -1,0 +1,372 @@
+//! Start, stop, restart, state and removal of a server's containers.
+//!
+//! [`Manager`] works on one server folder with an engine behind an [`EngineRunner`], so every command it
+//! issues is asserted in tests with a fake runner. The real thing is [`system`]. Nothing here ever matches
+//! containers by pattern: Kora acts on the exact names in the folder's `kora-container.json` and finds
+//! leftovers only by the `kora.server=<slug>` label, so it can never touch somebody else's containers.
+//!
+//! "Start" means "make sure the container matches what it should be, then start it": a missing container is
+//! created, one whose `kora.spec` label differs from the one the current settings give (a new FXServer build
+//! after an update, other ports, new limits, a newer pinned image) is removed and created again. That is safe
+//! because a container holds no state of its own.
+
+use std::path::Path;
+
+use super::engine::{self, ContainerState, Engine, EngineError, EngineRunner};
+use super::record::ContainerRecord;
+use super::spec::{self, GameSpec, STOP_TIMEOUT_SECS};
+use crate::problem::Problem;
+
+pub struct Manager<'a> {
+    pub dir: &'a Path,
+    pub rec: &'a ContainerRecord,
+    pub runner: &'a dyn EngineRunner,
+}
+
+/// What the real machine uses.
+pub fn system() -> crate::service::SystemRunner {
+    crate::service::SystemRunner
+}
+
+/// The folder's slug (the name the containers carry in their label).
+pub fn slug_for_dir(dir: &Path) -> String {
+    crate::installer::registry::ServerFile::load(dir).map(|f| crate::installer::slug(&f.name)).unwrap_or_else(|_| {
+        // A record always names its container `kora-<slug>`.
+        ContainerRecord::load(dir).map(|r| r.container.trim_start_matches("kora-").to_string()).unwrap_or_else(|| "server".into())
+    })
+}
+
+impl<'a> Manager<'a> {
+    pub fn new(dir: &'a Path, rec: &'a ContainerRecord, runner: &'a dyn EngineRunner) -> Self {
+        Manager { dir, rec, runner }
+    }
+
+    pub fn engine(&self) -> Engine {
+        self.rec.engine()
+    }
+
+    pub fn slug(&self) -> String {
+        self.rec.container.trim_start_matches("kora-").to_string()
+    }
+
+    fn fail(&self, what: &str, e: EngineError) -> Problem {
+        super::detect::problem_for_failure(&self.engine(), what, &e)
+    }
+
+    fn state_of(&self, name: &str) -> ContainerState {
+        match self.engine().run(self.runner, &engine::inspect_state_args(name)) {
+            Ok(o) => engine::parse_state(&o),
+            Err(e) => ContainerState::Other(e.to_string()),
+        }
+    }
+
+    /// The game container's state.
+    pub fn state(&self) -> ContainerState {
+        self.state_of(&self.rec.container)
+    }
+
+    /// The database container's state (`None`: this server has none).
+    pub fn db_state(&self) -> Option<ContainerState> {
+        self.rec.db.as_ref().map(|d| self.state_of(&d.container))
+    }
+
+    fn label_of(&self, name: &str, label: &str) -> Option<String> {
+        let args = vec!["inspect".to_string(), "--type".into(), "container".into(), "--format".into(), format!("{{{{index .Config.Labels \"{label}\"}}}}"), name.to_string()];
+        let o = self.engine().run(self.runner, &args).ok().filter(|o| o.success())?;
+        let v = o.stdout.trim().to_string();
+        (!v.is_empty() && v != "<no value>").then_some(v)
+    }
+
+    /// The arguments the game container should be created with right now.
+    pub fn desired_game_args(&self) -> Result<Vec<String>, Problem> {
+        let sf = crate::installer::registry::ServerFile::load(self.dir).map_err(|e| Problem::generic(format!("cannot read kora-server.json: {e}")))?;
+        let store = crate::artifacts::ArtifactStore::new(self.dir.join("artifacts"));
+        let st = store.state().map_err(|e| Problem::generic(e.to_string()))?;
+        let build = st.current.ok_or_else(|| Problem::generic("this server has no FXServer build installed"))?;
+        let build_dir = store.build_dir(build);
+        let g = GameSpec {
+            slug: &self.slug(),
+            dir: self.dir,
+            rec: self.rec,
+            game_port: sf.ports.game,
+            txadmin_port: sf.ports.txadmin,
+            build,
+            build_dir: &build_dir,
+            env: crate::txadmin::txadmin_env(&self.dir.join("txData"), sf.ports.txadmin),
+        };
+        spec::game_create_args(&g).map_err(Problem::generic)
+    }
+
+    fn image_present(&self, image: &str) -> bool {
+        self.engine().run(self.runner, &engine::image_inspect_args(image)).is_ok_and(|o| o.success())
+    }
+
+    /// Pull `image` when the engine does not have it, passing progress lines on.
+    pub fn ensure_image(&self, image: &str, progress: &mut dyn FnMut(&str)) -> Result<(), Problem> {
+        if self.image_present(image) {
+            return Ok(());
+        }
+        progress(&format!("Downloading {image}"));
+        let e = self.engine();
+        let args = engine::pull_args(image);
+        let o = self.runner.run_lines(e.program(), &args, &mut |l| progress(l.trim())).map_err(|x| self.fail("download the container image", EngineError::Spawn(e.program().into(), x.to_string())))?;
+        if o.success() {
+            Ok(())
+        } else {
+            Err(super::detect::pull_problem(&e, image, &engine::tidy(&o.stderr)))
+        }
+    }
+
+    pub fn ensure_network(&self) -> Result<(), Problem> {
+        let Some(db) = &self.rec.db else { return Ok(()) };
+        let e = self.engine();
+        if e.run(self.runner, &engine::network_inspect_args(&db.network)).is_ok_and(|o| o.success()) {
+            return Ok(());
+        }
+        e.run_ok(self.runner, &engine::network_create_args(&db.network, &self.slug())).map(|_| ()).map_err(|x| self.fail("create the server's private network", x))
+    }
+
+    pub fn ensure_volume(&self) -> Result<(), Problem> {
+        let Some(db) = &self.rec.db else { return Ok(()) };
+        let e = self.engine();
+        if e.run(self.runner, &engine::volume_inspect_args(&db.volume)).is_ok_and(|o| o.success()) {
+            return Ok(());
+        }
+        e.run_ok(self.runner, &engine::volume_create_args(&db.volume, &self.slug())).map(|_| ()).map_err(|x| self.fail("create the database's data volume", x))
+    }
+
+    /// Make the game container exist and match the current settings; does not start it.
+    pub fn ensure_game_container(&self, progress: &mut dyn FnMut(&str)) -> Result<(), Problem> {
+        let want = self.desired_game_args()?;
+        let want_label = spec::spec_label_of(&want);
+        let name = &self.rec.container;
+        let e = self.engine();
+        match self.state() {
+            ContainerState::Missing => {}
+            ContainerState::Other(w) if !w.is_empty() && !w.contains("paused") => {
+                return Err(Problem::new(super::codes::START_FAILED, format!("Kora could not tell what state the container '{name}' is in.")).with_details(w))
+            }
+            _ => {
+                if self.label_of(name, "kora.spec") == want_label && want_label.is_some() {
+                    return Ok(());
+                }
+                progress("Updating the container to the current settings");
+                e.run_ok(self.runner, &engine::rm_args(name)).map_err(|x| self.fail("replace the server's container", x))?;
+            }
+        }
+        self.ensure_image(&self.rec.image, progress)?;
+        self.ensure_network()?;
+        e.run_ok(self.runner, &want).map(|_| ()).map_err(|x| self.fail("create the server's container", x))
+    }
+
+    /// Start the database container (creating nothing: it is made by the install).
+    pub fn start_db(&self) -> Result<(), Problem> {
+        let Some(db) = &self.rec.db else { return Ok(()) };
+        if self.state_of(&db.container) == ContainerState::Running {
+            return Ok(());
+        }
+        self.engine().run_ok(self.runner, &engine::start_args(&db.container)).map(|_| ()).map_err(|x| self.fail("start the database container", x))
+    }
+
+    /// Start the server: database container first, then the game container (created or replaced if needed).
+    pub fn start(&self, progress: &mut dyn FnMut(&str)) -> Result<(), Problem> {
+        self.start_db()?;
+        self.ensure_game_container(progress)?;
+        if self.state() != ContainerState::Running {
+            self.engine().run_ok(self.runner, &engine::start_args(&self.rec.container)).map_err(|x| self.fail("start the server's container", x))?;
+        }
+        Ok(())
+    }
+
+    /// Stop the game container, waiting up to [`STOP_TIMEOUT_SECS`] for a clean shutdown. The database keeps running.
+    pub fn stop(&self) -> Result<(), Problem> {
+        match self.state() {
+            ContainerState::Missing | ContainerState::Stopped => Ok(()),
+            _ => self.engine().run_ok(self.runner, &engine::stop_args(&self.rec.container, STOP_TIMEOUT_SECS)).map(|_| ()).map_err(|x| self.fail("stop the server's container", x)),
+        }
+    }
+
+    pub fn restart(&self, progress: &mut dyn FnMut(&str)) -> Result<(), Problem> {
+        self.stop()?;
+        self.start(progress)
+    }
+
+    /// Stop and remove the database container too (a delete, a conversion back).
+    pub fn stop_db(&self) -> Result<(), Problem> {
+        let Some(db) = &self.rec.db else { return Ok(()) };
+        match self.state_of(&db.container) {
+            ContainerState::Missing | ContainerState::Stopped => Ok(()),
+            _ => self.engine().run_ok(self.runner, &engine::stop_args(&db.container, STOP_TIMEOUT_SECS)).map(|_| ()).map_err(|x| self.fail("stop the database container", x)),
+        }
+    }
+
+    /// Remove what Kora made for this server: the containers, the network, and (only when `remove_volume`)
+    /// the database's data volume. Missing objects are fine. Returns what was removed, in words.
+    pub fn remove_all(&self, remove_volume: bool) -> Result<Vec<String>, Problem> {
+        let e = self.engine();
+        let mut done = Vec::new();
+        let mut gone = |what: &str, args: Vec<String>, exists: bool| -> Result<(), Problem> {
+            if !exists {
+                return Ok(());
+            }
+            e.run_ok(self.runner, &args).map(|_| ()).map_err(|x| self.fail(&format!("remove {what}"), x))?;
+            done.push(format!("Removed {what}"));
+            Ok(())
+        };
+        gone(&format!("the container {}", self.rec.container), engine::rm_args(&self.rec.container), self.state() != ContainerState::Missing)?;
+        if let Some(db) = &self.rec.db {
+            gone(&format!("the database container {}", db.container), engine::rm_args(&db.container), self.state_of(&db.container) != ContainerState::Missing)?;
+            let net = e.run(self.runner, &engine::network_inspect_args(&db.network)).is_ok_and(|o| o.success());
+            gone(&format!("the private network {}", db.network), engine::network_rm_args(&db.network), net)?;
+            if remove_volume {
+                let vol = e.run(self.runner, &engine::volume_inspect_args(&db.volume)).is_ok_and(|o| o.success());
+                gone(&format!("the database's data volume {}", db.volume), engine::volume_rm_args(&db.volume), vol)?;
+            }
+        }
+        Ok(done)
+    }
+
+    /// Everything on the engine that carries this server's label (for the "nothing left" check).
+    pub fn leftovers(&self) -> Vec<String> {
+        let e = self.engine();
+        let slug = self.slug();
+        let mut out = Vec::new();
+        for kind in ["container", "network", "volume"] {
+            if let Ok(o) = e.run(self.runner, &engine::list_server_objects_args(kind, &slug)) {
+                if o.success() {
+                    out.extend(o.stdout.lines().map(str::trim).filter(|l| !l.is_empty()).map(|l| format!("{kind} {l}")));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// The record of a registered server's folder, when it is a container-mode server.
+pub fn record_of(dir: &Path) -> Option<ContainerRecord> {
+    ContainerRecord::load(dir)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::container::record::tests::sample;
+    use crate::service::testing::FakeRunner;
+
+    impl EngineRunner for FakeRunner {}
+
+    /// A server folder with a registered FXServer build, ready for `desired_game_args`.
+    pub fn server_dir() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path();
+        let sf = crate::installer::registry::ServerFile {
+            name: "Main".into(),
+            mode: crate::installer::Mode::Production,
+            source: None,
+            versions: None,
+            dir: dir.to_path_buf(),
+            ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
+            game_build: 0,
+            artifact_build: 38435,
+            database: None,
+            github_owner: None,
+            created_unix: 1,
+            kora_version: "t".into(),
+            resources: vec![],
+        };
+        std::fs::write(dir.join("kora-server.json"), serde_json::to_vec(&sf).unwrap()).unwrap();
+        std::fs::create_dir_all(dir.join("artifacts")).unwrap();
+        std::fs::write(dir.join("artifacts/state.json"), r#"{"current":38435,"previous":null}"#).unwrap();
+        d
+    }
+
+    #[test]
+    fn start_creates_a_missing_container_then_starts_it_after_the_database() {
+        let d = server_dir();
+        let rec = sample();
+        let r = FakeRunner::default();
+        // inspect of the containers: missing; images: present
+        r.respond("inspect --type container", 125, "");
+        r.responses.borrow_mut().last_mut().unwrap().1.stderr = "Error: no such container".into();
+        r.respond("network inspect", 0, "kora-main-net\n");
+        Manager::new(d.path(), &rec, &r).start(&mut |_| {}).unwrap();
+        let calls = r.calls();
+        let pos = |needle: &str| calls.iter().position(|c| c.contains(needle)).unwrap_or_else(|| panic!("{needle} not in {calls:#?}"));
+        assert!(pos("podman start kora-main-db") < pos("podman create --name kora-main"), "{calls:#?}");
+        assert!(pos("podman create --name kora-main ") < calls.len() - 1, "{calls:#?}");
+        assert_eq!(calls.last().unwrap(), "podman start kora-main");
+        assert!(calls.iter().all(|c| !c.contains("sh -c") && !c.starts_with("sudo")), "{calls:#?}");
+    }
+
+    #[test]
+    fn a_container_with_the_current_spec_is_only_started_and_one_with_an_old_spec_is_replaced() {
+        let d = server_dir();
+        let rec = sample();
+        let want = Manager::new(d.path(), &rec, &FakeRunner::default()).desired_game_args().unwrap();
+        let label = spec::spec_label_of(&want).unwrap();
+
+        let same = FakeRunner::default();
+        same.respond("--format {{.State.Status}} kora-main", 0, "exited\n");
+        same.respond("index .Config.Labels", 0, &format!("{label}\n"));
+        Manager::new(d.path(), &rec, &same).start(&mut |_| {}).unwrap();
+        let calls = same.calls();
+        assert!(calls.iter().any(|c| c == "podman start kora-main"), "{calls:#?}");
+        assert!(!calls.iter().any(|c| c.starts_with("podman rm") || c.starts_with("podman create")), "{calls:#?}");
+
+        let old = FakeRunner::default();
+        old.respond("--format {{.State.Status}} kora-main", 0, "exited\n");
+        old.respond("index .Config.Labels", 0, "0123456789abcdef\n");
+        old.respond("network inspect", 0, "kora-main-net\n");
+        Manager::new(d.path(), &rec, &old).start(&mut |_| {}).unwrap();
+        let calls = old.calls();
+        let rm = calls.iter().position(|c| c == "podman rm -f -v kora-main").expect("old container removed");
+        let create = calls.iter().position(|c| c.starts_with("podman create --name kora-main ")).expect("new one created");
+        assert!(rm < create);
+    }
+
+    #[test]
+    fn stop_waits_the_same_thirty_seconds_the_service_does_and_leaves_the_database_running() {
+        let d = server_dir();
+        let rec = sample();
+        let r = FakeRunner::default();
+        r.respond("State.Status", 0, "running\n");
+        Manager::new(d.path(), &rec, &r).stop().unwrap();
+        assert!(r.calls().iter().any(|c| c == "podman stop -t 30 kora-main"));
+        assert!(!r.calls().iter().any(|c| c.contains("kora-main-db")));
+        // stopping a stopped or missing container is fine and runs nothing
+        let r = FakeRunner::default();
+        r.respond("State.Status", 0, "exited\n");
+        Manager::new(d.path(), &rec, &r).stop().unwrap();
+        assert!(!r.calls().iter().any(|c| c.contains(" stop ")));
+    }
+
+    #[test]
+    fn remove_all_removes_exactly_the_servers_objects_and_keeps_the_volume_unless_asked() {
+        let d = server_dir();
+        let rec = sample();
+        let r = FakeRunner::default();
+        r.respond("State.Status", 0, "exited\n");
+        let done = Manager::new(d.path(), &rec, &r).remove_all(false).unwrap();
+        let calls = r.calls();
+        for want in ["podman rm -f -v kora-main", "podman rm -f -v kora-main-db", "podman network rm kora-main-net"] {
+            assert!(calls.iter().any(|c| c == want), "{want} in {calls:#?}");
+        }
+        assert!(!calls.iter().any(|c| c.contains("volume rm")), "the data is kept unless asked");
+        assert_eq!(done.len(), 3);
+        let r = FakeRunner::default();
+        r.respond("State.Status", 0, "exited\n");
+        Manager::new(d.path(), &rec, &r).remove_all(true).unwrap();
+        assert!(r.calls().iter().any(|c| c == "podman volume rm kora-main-dbdata"));
+    }
+
+    #[test]
+    fn leftovers_are_found_by_label_only() {
+        let d = server_dir();
+        let rec = sample();
+        let r = FakeRunner::default();
+        r.respond("ps -a", 0, "kora-main\n");
+        let left = Manager::new(d.path(), &rec, &r).leftovers();
+        assert_eq!(left, vec!["container kora-main".to_string()]);
+        assert!(r.calls().iter().all(|c| c.contains("label=kora.server=main")), "{:?}", r.calls());
+    }
+}
