@@ -209,6 +209,7 @@ MOVED="$SMOKE_ROOT/moved"
 kora backup import "$MOVEFILE" --name ${NAME}2 --dir "$MOVED" --game-port 32120 --txadmin-port 42120 --run-mode container --yes
 assert_eq "import exits 0" 0 "$CODE"
 assert "the imported server has its own record" test -f "$MOVED/kora-container.json"
+echo "----- on the engine after the import -----"; "$ENGINE" ps -a --format '{{.Names}} {{.Status}}' || true; "$ENGINE" inspect --format '{{.State.Status}}' kora-${NAME}2 2>&1 | head -n 3 || true
 assert_eq "its game container exists (not started)" "created" "$("$ENGINE" inspect --format '{{.State.Status}}' kora-${NAME}2 2>/dev/null || echo missing)"
 assert_eq "its database holds the rows" 2 "$(MYSQL_PWD="$(jget "$MOVED/database.json" password)" "$ENGINE" exec -e MYSQL_PWD kora-${NAME}2-db mariadb --protocol=tcp -h127.0.0.1 -u"$(jget "$MOVED/database.json" user)" -N -B -e 'SELECT COUNT(*) FROM players' "$(jget "$MOVED/database.json" database)")"
 kora delete ${NAME}2 -y
