@@ -1528,6 +1528,9 @@ Options:
       --json
           Print JSON, one row per line
 
+      --service
+          Show what Kora's administrator service did with administrator rights instead (its own log: your account's lines, or everyone's when you administer this computer)
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

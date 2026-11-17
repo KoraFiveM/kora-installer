@@ -95,6 +95,8 @@ pub enum Op {
     JobsList,
     /// The audit log: who did what (admins only).
     AuditList,
+    /// What the administrator service did with administrator rights (its own audit file), for the Activity log (admins only).
+    AuditServiceList,
     Events,
     MetricsGet,
     AlertsList,
@@ -337,6 +339,7 @@ impl Op {
         Op::JobEvents,
         Op::JobsList,
         Op::AuditList,
+        Op::AuditServiceList,
         Op::Events,
         Op::MetricsGet,
         Op::AlertsList,
@@ -506,6 +509,7 @@ impl Op {
             Op::JobEvents => "job_events",
             Op::JobsList => "jobs_list",
             Op::AuditList => "audit_list",
+            Op::AuditServiceList => "audit_service_list",
             Op::Events => "events",
             Op::MetricsGet => "metrics_get",
             Op::AlertsList => "alerts_list",
@@ -676,6 +680,7 @@ impl Op {
             Op::JobEvents => (Method::Get, "/jobs/{id}/events"),
             Op::JobsList => (Method::Get, "/jobs"),
             Op::AuditList => (Method::Get, "/audit"),
+            Op::AuditServiceList => (Method::Get, "/audit/service"),
             Op::Events => (Method::Get, "/events"),
             Op::MetricsGet => (Method::Get, "/servers/{s}/metrics"),
             Op::AlertsList => (Method::Get, "/alerts"),
@@ -965,6 +970,7 @@ mod tests {
             | Op::JobEvents
             | Op::JobsList
             | Op::AuditList
+            | Op::AuditServiceList
             | Op::Events
             | Op::MetricsGet
             | Op::AlertsList

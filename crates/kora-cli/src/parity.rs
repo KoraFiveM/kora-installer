@@ -310,6 +310,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("audit --result", Route(Op::AuditList)),
     ("audit --days", Route(Op::AuditList)),
     ("audit --limit", Route(Op::AuditList)),
+    ("audit --service", Route(Op::AuditServiceList)),
     ("audit --json", CliOnly("the panel always gets JSON")),
     ("store", CliOnly("Kora's own data file on this computer; the panel never opens or copies it")),
     ("store status", CliOnly("Kora's own data file on this computer; the panel never opens or copies it")),

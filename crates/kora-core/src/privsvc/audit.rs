@@ -62,6 +62,63 @@ pub fn rfc3339(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
+/// A line of the log, taken apart (what the panel's Activity log shows).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parsed {
+    pub at: u64,
+    pub account: String,
+    pub what: String,
+    /// `done`, `failed`, `refused` or `stopped`.
+    pub result: &'static str,
+    pub detail: Option<String>,
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ` to unix seconds (the inverse of [`rfc3339`]).
+pub fn parse_rfc3339(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[19] != b'Z' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, m, d, h, mi, sec) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+        return None;
+    }
+    // days-from-civil (Howard Hinnant)
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(days * 86_400 + h * 3600 + mi * 60 + sec).ok()
+}
+
+/// Take a line apart. `None` for anything that is not a line [`line`] wrote.
+pub fn parse_line(l: &str) -> Option<Parsed> {
+    if !is_audit_line(l) {
+        return None;
+    }
+    let mut it = l.splitn(4, " | ");
+    let (when, who, what, result) = (it.next()?, it.next()?, it.next()?, it.next()?);
+    let account = match who.split_once(" (") {
+        Some((_, name)) => name.trim_end_matches(')').to_string(),
+        None => who.to_string(),
+    };
+    let (result, detail) = if result == "done" {
+        ("done", None)
+    } else if let Some(rest) = result.strip_prefix("failed") {
+        ("failed", Some(rest.trim().trim_matches(['(', ')']).to_string()).filter(|d| !d.is_empty()))
+    } else if let Some(why) = result.strip_prefix("refused:") {
+        ("refused", Some(why.trim().to_string()).filter(|d| !d.is_empty()))
+    } else if result.starts_with("stopped") {
+        ("stopped", Some("it took longer than its time limit".to_string()))
+    } else {
+        return None;
+    };
+    Some(Parsed { at: parse_rfc3339(when)?, account, what: what.to_string(), result, detail })
+}
+
 /// At most this many lines are handed out in one read, and at most this many bytes of the file are looked at.
 pub const READ_MAX_LINES: usize = 500;
 pub const READ_MAX_BYTES: u64 = 512 * 1024;
@@ -190,6 +247,25 @@ mod tests {
         let t = read_tail(&p, 120).unwrap();
         assert!(t.starts_with("2026-11-17T09:03") || t.starts_with("2026-11-17T09:02") || t.is_empty() || t.starts_with("not a log"), "{t:?}");
         assert!(t.len() <= 120 && !t.starts_with("26-"), "no partial first line: {t:?}");
+    }
+
+    #[test]
+    fn a_line_is_taken_apart_again_and_the_time_round_trips() {
+        for t in [0u64, 951_782_400, 1_794_909_000, 4_102_444_799] {
+            assert_eq!(parse_rfc3339(&rfc3339(t)), Some(t), "{t}");
+        }
+        assert_eq!(parse_rfc3339("2026-13-01T00:00:00Z"), None);
+        assert_eq!(parse_rfc3339("yesterday"), None);
+        let id = AccountId::uid(1000);
+        let p = parse_line(&line(1_794_909_000, Some(&id), "jo", "run system.firewall [my-server]", &Outcome::Done)).unwrap();
+        assert_eq!((p.at, p.account.as_str(), p.what.as_str(), p.result, p.detail), (1_794_909_000, "jo", "run system.firewall [my-server]", "done", None));
+        let p = parse_line(&line(5, Some(&id), "", "x", &Outcome::Failed(3))).unwrap();
+        assert_eq!((p.account.as_str(), p.result, p.detail.as_deref()), ("uid:1000", "failed", Some("code 3")));
+        let p = parse_line(&line(5, None, "", "x", &Outcome::Refused("account not allowed"))).unwrap();
+        assert_eq!((p.account.as_str(), p.result, p.detail.as_deref()), ("unknown", "refused", Some("account not allowed")));
+        assert_eq!(parse_line(&line(5, Some(&id), "jo", "x", &Outcome::TimedOut)).unwrap().result, "stopped");
+        assert_eq!(parse_line("not a log line"), None);
+        assert_eq!(parse_line("2026-11-17T09:00:00Z | uid:1000 (jo) | x | exploded"), None);
     }
 
     #[test]

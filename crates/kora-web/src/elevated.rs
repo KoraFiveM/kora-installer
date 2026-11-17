@@ -227,6 +227,45 @@ pub fn reach_open_firewall(name: &str, dir: &std::path::Path, on_line: &mut dyn 
     )
 }
 
+/// What the administrator service did with administrator rights, for the Activity log: its own audit lines, read through the
+/// service (`audit-read`: read-only, only the lines about this account unless the account administers the machine, bounded,
+/// scrubbed). Never an error: what cannot be shown is explained in the page's `note`.
+pub fn service_audit(lines: u16) -> kora_core::api::wire::ServiceAuditPage {
+    use kora_core::api::wire::{ServiceAuditPage as P, ServiceAuditRow as R};
+    let none = |note: String| P { available: false, entries: vec![], all_accounts: false, note: Some(note) };
+    match broker().availability() {
+        Availability::Ready => {}
+        Availability::Missing => return none("Kora's administrator service is not installed on this computer, so nothing has been done with administrator rights.".into()),
+        Availability::NotAllowed(why) => return none(format!("Kora's administrator service does not serve this account ({why}), so what it did cannot be shown here.")),
+    }
+    let args = vec!["--lines".to_string(), lines.to_string()];
+    match broker().call("audit-read", &args, &[], &mut |_| {}) {
+        Ok(o) if o.ok => {
+            let all = o.data.as_ref().and_then(|d| d.get("admin")).and_then(Value::as_bool).unwrap_or(false);
+            let mut entries: Vec<R> = o
+                .data
+                .as_ref()
+                .and_then(|d| d.get("lines"))
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .filter_map(kora_core::privsvc::audit::parse_line)
+                        .map(|p| R { at: p.at, account: p.account, what: p.what, result: p.result.to_string(), detail: p.detail })
+                        .collect()
+                })
+                .unwrap_or_default();
+            entries.reverse();
+            P { available: true, entries, all_accounts: all, note: None }
+        }
+        Ok(_) => P { available: true, entries: vec![], all_accounts: false, note: Some("Kora's administrator service could not read its log just now. Try again in a moment.".into()) },
+        Err(e) => {
+            let (ClientError::Unavailable(m) | ClientError::Broken(m) | ClientError::Refused(m)) = e;
+            P { available: true, entries: vec![], all_accounts: false, note: Some(format!("Kora's administrator service could not read its log ({m}).")) }
+        }
+    }
+}
+
 /// [`privileged_as`] for the toolchain actions, whose sentence names no particular thing.
 pub fn privileged_msg(message: &str, command: Vec<String>, env: Vec<(String, String)>, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
     privileged_as("do this", message, command, env, on_line)

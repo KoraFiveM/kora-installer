@@ -287,6 +287,16 @@ pub async fn audit_list(State(st): State<AppState>, Extension(caller): Extension
     .await
 }
 
+/// `GET /audit/service?limit=`: what Kora's administrator service did with administrator rights, newest first (admins only). The
+/// panel's own log ([`audit_list`]) and the service's are separate files; the Settings page shows both, merged by time.
+pub async fn service_audit_list(Extension(caller): Extension<Caller>, Query(q): Query<HashMap<String, String>>) -> Result<Json<kora_core::api::wire::ServiceAuditPage>, ApiError> {
+    if caller.remote && !caller.identity.as_ref().is_some_and(|i| i.role >= Role::Admin) {
+        return Err(ApiError::forbidden("Only an administrator can see the audit log."));
+    }
+    let lines = q.get("limit").and_then(|v| v.parse::<u32>().ok()).unwrap_or(200).clamp(1, 500) as u16;
+    crate::blocking(move || Ok(Json(crate::elevated::service_audit(lines)))).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

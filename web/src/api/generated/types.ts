@@ -3821,6 +3821,59 @@ export type ServersList = {
 };
 
 /**
+ * The answer: the service's lines, newest first. `available` is false when the service is not there for this account.
+ */
+export type ServiceAuditPage = {
+  available: boolean,
+  entries: Array<ServiceAuditRow>,
+  /**
+   * The lines of every account on this computer (the signed-in account administers the machine); otherwise only the lines about this account.
+   */
+  all_accounts: boolean,
+  /**
+   * Why there is nothing to show, or what to know, in plain words.
+   */
+  note: string | null,
+};
+
+/**
+ * `GET /audit/service?limit=`.
+ */
+export type ServiceAuditQuery = {
+  /**
+   * At most this many (default 200, at most 500).
+   */
+  limit?: number,
+};
+
+/**
+ * One line of the administrator service's own audit file: what it did with administrator rights, for whom, and how it went.
+ * Never a secret, a path or a typed value: the service writes only the operation's short label.
+ */
+export type ServiceAuditRow = {
+  /**
+   * Unix seconds.
+   */
+  at: number,
+  /**
+   * The account it was done for: its name when the service knew it, else its id.
+   */
+  account: string,
+  /**
+   * The operation, in short (`run system.firewall [my-server]`, `backup job set [my-server]`).
+   */
+  what: string,
+  /**
+   * `done`, `failed`, `refused` or `stopped`.
+   */
+  result: string,
+  /**
+   * The service's own words after the result (`code 1`, why it was refused).
+   */
+  detail: string | null,
+};
+
+/**
  * `POST /session`: the cookie is set; `secret` must come back with every request (`X-Kora-Session`).
  */
 export type SessionCreated = {
