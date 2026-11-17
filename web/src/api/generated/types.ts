@@ -235,6 +235,10 @@ export type AlertRules = {
   disk: boolean,
   ram: boolean,
   updates: boolean,
+  /**
+   * Problems with Kora itself (the panel's certificate, the administrator service): sent to this server's addresses too.
+   */
+  machine: boolean,
 };
 
 /**
@@ -246,6 +250,7 @@ export type AlertRulesUpdate = {
   disk?: boolean,
   ram?: boolean,
   updates?: boolean,
+  machine?: boolean,
 };
 
 /**

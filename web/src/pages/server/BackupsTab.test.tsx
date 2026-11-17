@@ -34,6 +34,7 @@ const view = (o: Partial<BackupsView> = {}): BackupsView => ({
   undo: null,
   database: { kind: 'dumped', note: "The server's own database is copied as one consistent snapshot.", tool_missing: false },
   schedule_note: "Scheduled backups run while Kora's background service is running.",
+  schedule_by_os: false,
   ...o,
 })
 
