@@ -1315,7 +1315,16 @@ impl InstallStep {
 
     fn service(&self) -> Result<String> {
         if self.helper().is_some() {
-            return self.via_helper(false, "system.service").map(|r| r.detail);
+            let r = self.via_helper(false, "system.service")?;
+            if r.grants_left {
+                // The opt-in helper registers the service but never changes permissions inside a
+                // folder the person controls: the folder's owner (this process) grants them.
+                let ctx = &*self.ctx;
+                let server = managed_server(ctx, &format!("kora-{}", slug(&ctx.req.name)), "kora.exe")?;
+                ctx.emit(self.id, StepStatus::Running, "Letting the service into the server folder", 0.9);
+                service::apply_plan(&service::windows_grant_plan(&server), &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
+            }
+            return Ok(r.detail);
         }
         let ctx = &*self.ctx;
         let platform = svc_platform();
@@ -1371,7 +1380,17 @@ impl InstallStep {
             tail.push(service::SystemStep::write("Save the server's non-secret environment (txAdmin data folder and port)", &server.env_file_path(), txadmin_env_text(ctx), 0o600));
             tail.push(service::SystemStep::run(format!("Give '{account}' ownership of the server folder (and only that folder)"), "chown", &["-R", &format!("{account}:{account}"), &server.dir]));
         }
-        tail.extend(service::install_plan(&server, platform).map_err(|e| InstallError(e.to_string()))?.steps);
+        if platform == SvcPlatform::Windows {
+            server.validate().map_err(|e| InstallError(e.to_string()))?;
+            let sid = service::windows_installing_sid(&rn);
+            tail.extend(service::windows_register_plan_for(&server, sid.as_deref()).steps);
+            // In the opt-in helper the person's own process grants the folder rights (see above).
+            if !crate::helper::winhelper::in_service() {
+                tail.extend(service::windows_grant_plan(&server).steps);
+            }
+        } else {
+            tail.extend(service::install_plan(&server, platform).map_err(|e| InstallError(e.to_string()))?.steps);
+        }
 
         if !ctx.admin {
             let all: Vec<String> = head.iter().chain(tail.iter()).map(|s| s.description.clone()).collect();

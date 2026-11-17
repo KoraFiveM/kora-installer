@@ -75,6 +75,10 @@ pub struct StepResult {
     /// The step failed: why (what was recorded before that is in `created`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<Problem>,
+    /// `system.service` in the opt-in helper: the service exists, and the person's own process
+    /// still has to let it into the server folder (`service::windows_grant_plan`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grants_left: bool,
 }
 
 /// The database part of a [`StepResult`].
@@ -232,6 +236,7 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     if let Some(c) = Arc::get_mut(&mut ctx) {
         c.shadow = Some(Mutex::new(super::load_created_from(dir).unwrap_or_default()));
     }
+    let grants_left = !undo && step == "system.service" && crate::helper::winhelper::in_service();
     let step = step.to_string();
     std::thread::scope(|s| {
         let h = s.spawn(move || {
@@ -247,8 +252,10 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
         }
         let (r, created, notes) = h.join().map_err(|_| InstallError("the administrator step stopped unexpectedly".into()))?;
         Ok(match r {
-            Ok((detail, db)) => StepResult { detail, notes, created, db, error: None },
-            Err(e) => StepResult { detail: String::new(), notes, created, db: None, error: Some(Problem::decode(&e.0)) },
+            Ok((detail, db)) => {
+                StepResult { detail, notes, created, db, error: None, grants_left }
+            }
+            Err(e) => StepResult { detail: String::new(), notes, created, db: None, error: Some(Problem::decode(&e.0)), grants_left: false },
         })
     })
 }

@@ -488,7 +488,20 @@ pub fn install_plan(server: &ManagedServer, platform: Platform) -> ServiceResult
 }
 
 /// Windows: the steps of [`install_plan`] that need administrator rights (register the service,
-/// its restart rule, and the narrow privilege list).
+/// its restart rule, and the narrow privilege list). With `user_sid`, that person may also start
+/// and stop this one service ([`windows_user_control_sddl`]).
+pub fn windows_register_plan_for(server: &ManagedServer, user_sid: Option<&str>) -> Plan {
+    let mut p = windows_register_plan(server);
+    if let Some(sddl) = user_sid.and_then(windows_user_control_sddl) {
+        p.steps.push(
+            SystemStep::run_owned("Let the person who installed start and stop this server's service (and nothing more)", "sc.exe", vec!["sdset".into(), server.service_name(), sddl])
+                .tolerant(),
+        );
+    }
+    p
+}
+
+/// [`windows_register_plan_for`] without the person's right.
 pub fn windows_register_plan(server: &ManagedServer) -> Plan {
     let svc = server.service_name();
     let bin = format!("\"{}\" service-host \"{}\"", server.kora_exe, server.dir);
@@ -528,6 +541,31 @@ pub fn windows_register_plan(server: &ManagedServer) -> Plan {
             vec!["privs".into(), svc, SERVICE_PRIVILEGES.into()],
         ),
     ])
+}
+
+/// The service's security descriptor with one extra entry: the person who installed may query,
+/// start and stop THIS service (nothing else: no reconfiguring, no deleting). The rest is
+/// Windows' default for a new service. The update task runs as that person without elevation and
+/// restarts the server with it.
+pub fn windows_user_control_sddl(user_sid: &str) -> Option<String> {
+    let ok = (user_sid.starts_with("S-1-5-21-") || user_sid.starts_with("S-1-12-1-")) && user_sid.len() < 100 && user_sid.bytes().all(|b| b == b'S' || b == b'-' || b.is_ascii_digit());
+    ok.then(|| format!("D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;{user_sid})"))
+}
+
+/// The SID of the person Kora works for: the panel's account in the worker or helper
+/// (`KORA_WORKER_USER_SID`), otherwise this process's own account (`whoami /user`).
+pub fn windows_installing_sid(runner: &dyn CommandRunner) -> Option<String> {
+    if let Ok(s) = std::env::var("KORA_WORKER_USER_SID") {
+        return Some(s).filter(|s| !s.is_empty());
+    }
+    let out = runner.run("whoami.exe", &["/user".into(), "/fo".into(), "csv".into(), "/nh".into()]).ok()?;
+    parse_whoami_sid(&out.stdout)
+}
+
+/// `"pc\\jo","S-1-5-21-..."` → the SID.
+pub fn parse_whoami_sid(csv: &str) -> Option<String> {
+    let last = csv.lines().next()?.rsplit(',').next()?.trim().trim_matches('"');
+    last.starts_with("S-1-").then(|| last.to_string())
 }
 
 /// The only privileges a Kora server's Windows service keeps (`sc privs`): what every signed-in

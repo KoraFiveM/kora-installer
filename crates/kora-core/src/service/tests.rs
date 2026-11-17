@@ -586,3 +586,21 @@ fn a_forged_binary_in_created_json_never_becomes_the_root_update_job() {
     let unit = systemd_update_unit(&s).unwrap();
     assert!(!unit.contains("/tmp/evil"), "{unit}");
 }
+
+#[test]
+fn the_installing_users_update_task_runs_without_elevation_and_may_restart_only_its_service() {
+    let mut s = server();
+    s.dir = "C:\\Kora\\main".into();
+    let xml = task_xml(&s, &Schedule::Daily(TimeOfDay::new(4, 0).unwrap()), RunAs::InstallingUser, "PC\\jo").unwrap();
+    assert!(xml.contains("<RunLevel>LeastPrivilege</RunLevel>") && !xml.contains("HighestAvailable"), "{xml}");
+    let me = "S-1-5-21-1-2-3-1001";
+    let d = windows_user_control_sddl(me).unwrap();
+    assert!(d.ends_with(&format!("(A;;CCLCSWRPWPDTLOCRRC;;;{me})")), "query, start, stop: {d}");
+    assert!(!d.contains(&format!("WDWO;;;{me}")) && !d.contains(&format!("SD;;;{me}")), "never reconfigure or delete");
+    assert!(windows_user_control_sddl("S-1-5-32-544").is_none() && windows_user_control_sddl("S-1-5-21-1)(A;;GA;;;WD").is_none());
+    let lines: Vec<_> = windows_register_plan_for(&s, Some(me)).steps.iter().filter_map(|s| s.command_line()).collect();
+    assert!(lines.last().unwrap().starts_with("sc.exe sdset kora-main D:"), "{lines:?}");
+    assert_eq!(windows_register_plan_for(&s, None).steps.len(), windows_register_plan(&s).steps.len());
+    assert_eq!(parse_whoami_sid("\"pc\\jo\",\"S-1-5-21-1-2-3-1001\"\r\n").as_deref(), Some(me));
+    assert_eq!(parse_whoami_sid("garbage"), None);
+}
