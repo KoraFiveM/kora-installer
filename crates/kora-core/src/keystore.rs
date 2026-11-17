@@ -241,28 +241,45 @@ impl KeyStore {
 
     /// Give a saved key another name.
     pub fn rename(&self, old: &str, new: &str) -> Result<KeyInfo, Problem> {
-        let new = check_name(new)?;
-        self.change(|keys| {
-            let Some(i) = keys.iter().position(|e| same(&e.name, old)) else { return Err(not_found(old)) };
-            if keys.iter().enumerate().any(|(j, e)| j != i && same(&e.name, &new)) {
-                return Err(name_taken(&new));
-            }
-            keys[i].name = new;
-            Ok((info(&keys[i]), true))
-        })
+        self.update(old, Some(new), None)
     }
 
     /// Put a different key under an existing name (servers already installed keep the key they have).
     pub fn replace(&self, name: &str, key: &str) -> Result<KeyInfo, Problem> {
-        let key = check_key(key)?;
+        self.update(name, None, Some(key))
+    }
+
+    /// Rename and/or replace in one step: either both happen or neither.
+    pub fn update(&self, name: &str, new_name: Option<&str>, new_key: Option<&str>) -> Result<KeyInfo, Problem> {
+        let new_name = new_name.map(check_name).transpose()?;
+        let new_key = new_key.map(check_key).transpose()?;
         self.change(|keys| {
             let Some(i) = keys.iter().position(|e| same(&e.name, name)) else { return Err(not_found(name)) };
-            if let Some(e) = keys.iter().enumerate().find(|(j, e)| *j != i && e.key == key).map(|(_, e)| e) {
-                return Err(duplicate(&e.name));
+            if let Some(n) = &new_name {
+                if keys.iter().enumerate().any(|(j, e)| j != i && same(&e.name, n)) {
+                    return Err(name_taken(n));
+                }
             }
-            keys[i].key = key;
-            Ok((info(&keys[i]), true))
+            if let Some(k) = &new_key {
+                if let Some((_, e)) = keys.iter().enumerate().find(|(j, e)| *j != i && e.key == *k) {
+                    return Err(duplicate(&e.name));
+                }
+            }
+            let changed = new_name.as_deref().is_some_and(|n| n != keys[i].name) || new_key.as_deref().is_some_and(|k| k != keys[i].key);
+            if let Some(n) = new_name {
+                keys[i].name = n;
+            }
+            if let Some(k) = new_key {
+                keys[i].key = k;
+            }
+            Ok((info(&keys[i]), changed))
         })
+    }
+
+    /// Every saved key (safe to show) with the servers whose configuration holds exactly that key.
+    pub fn list_with_servers(&self, servers: &[ServerEntry]) -> Result<Vec<(KeyInfo, Vec<String>)>, Problem> {
+        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        Ok(self.read()?.keys.iter().map(|e| (info(e), servers_using(&e.key, servers))).collect())
     }
 
     /// Forget a saved key. Servers installed with it are not touched.

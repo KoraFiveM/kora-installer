@@ -114,6 +114,13 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::AssetImport => on_op(op, handlers::assets::asset_import),
         Op::AssetRemove => on_op(op, handlers::assets::asset_remove),
         Op::AssetDownloads => on_op(op, handlers::assets::asset_downloads),
+        Op::KeysList => on_op(op, handlers::keys::keys_list),
+        Op::KeyAdd => on_op(op, handlers::keys::key_add),
+        Op::KeyUpdate => on_op(op, handlers::keys::key_update),
+        Op::KeyRemove => on_op(op, handlers::keys::key_remove),
+        Op::ServerKeySet => on_op(op, handlers::keys::server_key_set),
+        Op::ProfileGet => on_op(op, handlers::keys::profile_get),
+        Op::ProfileSet => on_op(op, handlers::keys::profile_set),
     }
 }
 

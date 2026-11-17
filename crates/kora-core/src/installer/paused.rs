@@ -103,6 +103,11 @@ impl PausedStore {
         }
     }
 
+    /// Every stopped install that is written down and still fresh.
+    pub fn list(&self) -> Vec<Stored> {
+        self.all()
+    }
+
     fn all(&self) -> Vec<Stored> {
         let Ok(rd) = std::fs::read_dir(&self.dir) else { return vec![] };
         rd.flatten()

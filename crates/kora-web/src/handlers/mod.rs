@@ -13,3 +13,4 @@ pub mod monitor;
 pub mod hub;
 pub mod remote;
 pub mod assets;
+pub mod keys;
