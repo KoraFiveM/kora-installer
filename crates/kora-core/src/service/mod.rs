@@ -568,6 +568,43 @@ pub fn parse_whoami_sid(csv: &str) -> Option<String> {
     last.starts_with("S-1-").then(|| last.to_string())
 }
 
+/// `BINARY_PATH_NAME` from `sc qc <service>` output.
+pub fn parse_qc_binpath(out: &str) -> Option<String> {
+    out.lines().find_map(|l| l.trim().strip_prefix("BINARY_PATH_NAME").map(|r| r.trim_start().trim_start_matches(':').trim().to_string()))
+}
+
+/// Is this service command line the one Kora registers for the server folder `dir`?
+/// (`"<kora.exe>" service-host "<dir>"`; case and a trailing backslash do not matter.)
+pub fn binpath_is_for(bin: &str, dir: &str) -> bool {
+    let norm = |s: &str| s.trim().trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    match bin.rsplit_once(" service-host ") {
+        Some((exe, d)) => exe.trim().starts_with('"') && exe.to_ascii_lowercase().ends_with("kora.exe\"") && norm(d.trim().trim_matches('"')) == norm(dir),
+        None => false,
+    }
+}
+
+/// What a (retried) service step finds under the server's service name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Existing {
+    Missing,
+    /// Kora's service for this very folder (an earlier attempt made it and then stopped before
+    /// recording it): use it.
+    Ours,
+    /// Something else has the name.
+    Other(String),
+}
+
+pub fn windows_existing_service(runner: &dyn CommandRunner, server: &ManagedServer) -> Existing {
+    match runner.run("sc.exe", &["qc".into(), server.service_name()]) {
+        Ok(o) if o.code == 0 => match parse_qc_binpath(&o.stdout) {
+            Some(b) if binpath_is_for(&b, &server.dir) => Existing::Ours,
+            Some(b) => Existing::Other(b),
+            None => Existing::Other(String::new()),
+        },
+        _ => Existing::Missing,
+    }
+}
+
 /// The only privileges a Kora server's Windows service keeps (`sc privs`): what every signed-in
 /// user has. Notably NOT `SeImpersonatePrivilege`.
 pub const SERVICE_PRIVILEGES: &str = "SeChangeNotifyPrivilege/SeIncreaseWorkingSetPrivilege";

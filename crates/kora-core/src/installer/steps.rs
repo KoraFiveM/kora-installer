@@ -1394,7 +1394,19 @@ impl InstallStep {
         if platform == SvcPlatform::Windows {
             server.validate().map_err(|e| InstallError(e.to_string()))?;
             let sid = service::windows_installing_sid(&rn);
-            tail.extend(service::windows_register_plan_for(&server, sid.as_deref()).steps);
+            let mut reg = service::windows_register_plan_for(&server, sid.as_deref());
+            match service::windows_existing_service(&rn, &server) {
+                service::Existing::Missing => {}
+                // An earlier attempt registered it and stopped before recording it: use it.
+                service::Existing::Ours => reg.steps.retain(|s| !s.command_line().is_some_and(|l| l.starts_with("sc.exe create "))),
+                service::Existing::Other(bin) => {
+                    return err(format!(
+                        "A Windows service called '{}' already exists and runs something else ({bin}). Kora will not change it. Choose another server name, or remove that service yourself.",
+                        server.service_name()
+                    ))
+                }
+            }
+            tail.extend(reg.steps);
             // In the opt-in helper the person's own process grants the folder rights (see above).
             if !crate::helper::winhelper::in_service() {
                 tail.extend(service::windows_grant_plan(&server).steps);

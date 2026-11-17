@@ -604,3 +604,15 @@ fn the_installing_users_update_task_runs_without_elevation_and_may_restart_only_
     assert_eq!(parse_whoami_sid("\"pc\\jo\",\"S-1-5-21-1-2-3-1001\"\r\n").as_deref(), Some(me));
     assert_eq!(parse_whoami_sid("garbage"), None);
 }
+
+#[test]
+fn a_retried_service_step_adopts_only_kora_s_own_service_for_the_same_folder() {
+    let qc = "[SC] QueryServiceConfig SUCCESS\r\n\r\nSERVICE_NAME: kora-main\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        BINARY_PATH_NAME   : \"C:\\Program Files\\Kora\\bin\\0.7.0-abc\\kora.exe\" service-host \"C:\\Users\\jo\\kora\\main\"\r\n";
+    let b = parse_qc_binpath(qc).unwrap();
+    assert!(binpath_is_for(&b, "C:\\Users\\jo\\kora\\main"));
+    assert!(binpath_is_for(&b, "c:\\users\\jo\\kora\\main\\"), "case and trailing slash");
+    assert!(!binpath_is_for(&b, "C:\\Users\\other\\kora\\main"));
+    assert!(!binpath_is_for("\"C:\\evil\\x.exe\" service-host \"C:\\Users\\jo\\kora\\main\"", "C:\\Users\\jo\\kora\\main"));
+    assert!(!binpath_is_for("C:\\Windows\\system32\\svchost.exe -k netsvcs", "C:\\Users\\jo\\kora\\main"));
+    assert_eq!(parse_qc_binpath("nothing"), None);
+}
