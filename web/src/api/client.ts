@@ -324,7 +324,7 @@ export const api = {
     prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => call('pr_open', { params: { s: name }, body }),
   },
   branches: {
-    /** Where each resource is (nothing is downloaded). Development servers only. */
+    /** Where each resource is (nothing is downloaded). */
     list: (name: string) => call('branches_list', { params: { s: name } }).then((r) => r.resources),
     /** Branches and kept-aside changes of one resource; `refresh` downloads the newest lists from GitHub first. */
     choices: (name: string, resource: string, refresh = false) => call('branch_choices', { params: { s: name, name: resource }, query: refresh ? { refresh: '1' } : undefined }),

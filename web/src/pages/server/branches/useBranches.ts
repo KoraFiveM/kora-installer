@@ -3,7 +3,7 @@ import { api } from '@/api/client'
 import type { ResourceBranch } from '@/api/types'
 import { offNormalText } from '@/components/NotNormalBadge'
 
-/** Where each resource of a Development server is. Local only, so it is cheap to keep fresh. */
+/** Where each resource of a server is. Local only, so it is cheap to keep fresh. */
 export function useBranches(server: string, enabled = true) {
   const q = useQuery({ queryKey: ['branches', server], queryFn: () => api.branches.list(server), enabled })
   const byId = new Map<string, ResourceBranch>((q.data ?? []).map((r) => [r.id, r]))
@@ -17,6 +17,8 @@ export function useRefreshBranches(server: string) {
     void qc.invalidateQueries({ queryKey: ['branches', server] })
     void qc.invalidateQueries({ queryKey: ['branch-choices', server] })
     void qc.invalidateQueries({ queryKey: ['snapshots', server] })
+    // The resource pages (and the restart-needed notice) live under ['server', name].
+    void qc.invalidateQueries({ queryKey: ['server', server] })
   }
 }
 

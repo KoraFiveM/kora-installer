@@ -35,7 +35,7 @@ export function installResourceMock(route: Route, Fail: FailCtor, d: ResourceDep
       third_party: false,
       branch: d.branchRow(s.name, id),
       restart: why !== undefined && running ? { needed: true, why, changed_unix: Math.floor(Date.now() / 1000), notice: NOTICE } : { needed: false },
-      server: { name: s.name, mode: s.mode, running, console_enabled: d.consoleEnabled(s.name), console_waiting_for_restart: false },
+      server: { name: s.name, mode: s.mode, source: s.source, versions: s.versions, running, console_enabled: d.consoleEnabled(s.name), console_waiting_for_restart: false },
     }
     return page
   })

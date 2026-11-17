@@ -1,10 +1,27 @@
-import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall, SavedKey } from '@/api/types'
+import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
 
 export type ArtifactChoice = 'recommended' | 'pick' | 'custom'
 
+/**
+ * The old `mode` as the two settings (production = clones of released versions, development = your own copies of the
+ * latest changes). The one place the web reads that old spelling, for answers saved by an older Kora.
+ */
+export function styleOfMode(m: Mode): { source: Source; versions: Versions } {
+  return m === 'development' ? { source: 'fork', versions: 'latest' } : { source: 'clone', versions: 'released' }
+}
+
+/** What "Which versions" starts as for a source: released for plain clones, the latest changes for your own copies. */
+export function defaultVersions(source: Source): Versions {
+  return source === 'fork' ? 'latest' : 'released'
+}
+
 export interface WizardForm {
-  mode: Mode
+  /** Where the resources come from: plain clones, or the person's own copies (forks) on GitHub. */
+  source: Source
+  /** Which versions to follow. Follows `source` until the person picks one themselves. */
+  versions: Versions
+  versionsTouched: boolean
   name: string
   dir: string
   dirTouched: boolean
@@ -47,10 +64,11 @@ export interface WizardForm {
   cfxFound: { username: string | null; identifier: string } | null
 }
 
-export type StepId = 'mode' | 'name' | 'ports' | 'build' | 'resources' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
+export type StepId = 'source' | 'versions' | 'name' | 'ports' | 'build' | 'resources' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
 
 export const STEP_LABEL: Record<StepId, string> = {
-  mode: 'Kind of server',
+  source: 'Where the resources come from',
+  versions: 'Which versions',
   name: 'Name your server',
   ports: 'Ports',
   build: 'FiveM server build',
@@ -64,20 +82,20 @@ export const STEP_LABEL: Record<StepId, string> = {
 }
 
 /** Every step, one after the other ("Choose everything myself"). */
-export function stepsFor(mode: Mode): StepId[] {
-  const s: StepId[] = ['mode', 'name', 'ports', 'build', 'resources', 'database', 'options', 'licence', 'cfx']
-  if (mode === 'development') s.push('github')
+export function stepsFor(source: Source): StepId[] {
+  const s: StepId[] = ['source', 'versions', 'name', 'ports', 'build', 'resources', 'database', 'options', 'licence', 'cfx']
+  if (source === 'fork') s.push('github')
   s.push('review')
   return s
 }
 
 /**
  * The short path: only what a person must answer. Everything else keeps its default and is listed on
- * the last screen, where each line can be changed. A development server cannot work without GitHub,
+ * the last screen, where each line can be changed. Your own copies cannot be made without GitHub,
  * so that step joins in.
  */
-export function quickStepsFor(mode: Mode): StepId[] {
-  return mode === 'development' ? ['licence', 'name', 'github', 'review'] : ['licence', 'name', 'review']
+export function quickStepsFor(source: Source): StepId[] {
+  return source === 'fork' ? ['licence', 'name', 'github', 'review'] : ['licence', 'name', 'review']
 }
 
 export function dirBase(dir: string): string {
@@ -97,7 +115,7 @@ export function suggestKeyName(keys: SavedKey[]): string {
 export function initialForm(d: InstallDefaults, keys: SavedKey[] = []): WizardForm {
   const cfxId = d.profile?.cfx_identifier ?? null
   return {
-    mode: 'production', name: d.name, dir: d.dir, dirTouched: false, hostname: d.hostname,
+    source: 'clone', versions: 'released', versionsTouched: false, name: d.name, dir: d.dir, dirTouched: false, hostname: d.hostname,
     game: String(d.ports.game), tx: String(d.ports.txadmin),
     artifact: 'recommended', artifactBuild: null, artifactUrl: '', gameBuild: '',
     resourcesAll: true, resourceIds: [],
@@ -111,11 +129,18 @@ export function initialForm(d: InstallDefaults, keys: SavedKey[] = []): WizardFo
   }
 }
 
+/** The saved answers' two settings: the new fields when there are some, else mapped from the old `mode`. */
+function resolveSaved(s: SavedInstall, f: WizardForm): Pick<WizardForm, 'source' | 'versions' | 'versionsTouched'> {
+  const old = s.mode ? styleOfMode(s.mode) : null
+  const source = s.source ?? old?.source ?? f.source
+  return { source, versions: s.versions ?? old?.versions ?? defaultVersions(source), versionsTouched: true }
+}
+
 /** Fill the form from answers saved by an install that stopped part-way (never contains secrets). */
 export function applySaved(f: WizardForm, s: SavedInstall): WizardForm {
   return {
     ...f,
-    mode: s.mode ?? f.mode,
+    ...(s.source || s.versions || s.mode ? resolveSaved(s, f) : {}),
     name: s.name ?? f.name,
     dir: s.dir ?? f.dir,
     dirTouched: s.dir ? true : f.dirTouched,
@@ -145,8 +170,8 @@ export function withoutAdmin(f: WizardForm): WizardForm {
 }
 
 /** The wizard page a `change_answers` action names, when this kind of server has it. */
-export function sectionStep(section: string | undefined, mode: Mode): StepId | null {
-  const all = stepsFor(mode)
+export function sectionStep(section: string | undefined, source: Source): StepId | null {
+  const all = stepsFor(source)
   return section && (all as string[]).includes(section) && section !== 'review' ? (section as StepId) : null
 }
 
@@ -157,7 +182,8 @@ export function folderFor(base: string, name: string): string {
 export function buildRequest(f: WizardForm, opts: { artifactUrl?: string | null } = {}): InstallRequest {
   const gb = f.gameBuild.trim()
   return {
-    mode: f.mode,
+    source: f.source,
+    versions: f.versions,
     name: slug(f.name),
     dir: f.dir.trim(),
     hostname: f.hostname.trim(),
@@ -172,7 +198,7 @@ export function buildRequest(f: WizardForm, opts: { artifactUrl?: string | null 
     db: f.db,
     service: f.service,
     firewall: f.firewall,
-    github_owner: f.mode === 'development' ? f.githubOwner || null : null,
+    github_owner: f.source === 'fork' ? f.githubOwner || null : null,
     dry_run: false,
     db_admin: f.db !== 'skip' && f.dbCustom ? { host: f.dbHost.trim(), port: Number(f.dbPort), user: f.dbUser.trim(), password: f.dbPass } : null,
     start: true,
@@ -232,7 +258,7 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): s
       return f.cfxFound || !f.cfxUsername.trim() ? null : 'Check the Cfx.re username, or clear the box to skip this step.'
     case 'github':
       if (!ctx.githubSignedIn) return 'Sign in to GitHub to continue.'
-      return f.githubOwner ? null : 'Choose where your forks go.'
+      return f.githubOwner ? null : 'Choose where your own copies go.'
     default:
       return null
   }
@@ -241,7 +267,7 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): s
 /** Every step that still has a problem, whether or not the person opened it. Used by the last screen. */
 export function allProblems(f: WizardForm, ctx: ProblemContext): Partial<Record<StepId, string>> {
   const out: Partial<Record<StepId, string>> = {}
-  for (const id of stepsFor(f.mode)) {
+  for (const id of stepsFor(f.source)) {
     const p = stepProblem(id, f, ctx)
     if (p) out[id] = p
   }

@@ -109,7 +109,7 @@ function AddResources({ server: s }: { server: ServerDetail }) {
         {plan && plan.items.length > 0 && <Button variant="default" disabled={run.phase === 'running' || no !== null} title={no ?? undefined} onClick={async () => { setErr(null); try { setJob((await api.resources.add(s.name, [...picked])).job) } catch (e) { setErr(e) } }}>Install {plan.items.length} resource{plan.items.length === 1 ? '' : 's'}</Button>}
       </div>
       {no && <p className="text-xs text-muted-foreground">{no}</p>}
-      {plan && <PlanView plan={plan} dev={s.mode === 'development'} />}
+      {plan && <PlanView plan={plan} dev={s.source === 'fork'} />}
       <ErrorNotice error={err ?? (run.phase === 'failed' ? run.error : null)} />
       {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
       {run.phase === 'done' && run.result && (
@@ -136,7 +136,7 @@ const CONSOLE_RESOURCE = 'kora_console'
 function InstalledResource({ id, serverName, updates: u, branch, noCheck, noControl, pending, said, onControl }: {
   id: string
   serverName: string
-  /** Development: the branch it is on. */
+  /** Where its files are (branch, pull request, released version). */
   branch?: ResourceBranch
   updates: Updates
   /** Why checking is off (null = allowed). */
@@ -179,7 +179,7 @@ function InstalledResource({ id, serverName, updates: u, branch, noCheck, noCont
 }
 
 function InstalledList({ server: s, installed, updates: u }: { server: ServerDetail; installed: string[]; updates: Updates }) {
-  const branches = useBranches(s.name, s.mode === 'development')
+  const branches = useBranches(s.name)
   const role = useRole()
   const noOperator = whyNot(role, 'operator')
   const noControl = noOperator

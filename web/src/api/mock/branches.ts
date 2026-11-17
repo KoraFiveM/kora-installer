@@ -53,9 +53,8 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
     return v
   }
   const dev = (name: string): T.ServerSummary => {
-    const s = d.find(name)
-    if (s.mode !== 'development') throw new Fail(409, 'branch.not_development', 'Changing branches is only for Development servers. A Production server stays on its tested releases.')
-    return s
+    // Every server can switch a resource to a branch or a pull request now.
+    return d.find(name)
   }
   const checkName = (s: T.ServerSummary, r: string) => {
     if (!trackable(s.name).includes(r)) throw new Fail(422, 'branch.unsupported', `${r} is not a resource Kora can switch (it is not a fork of yours).`)

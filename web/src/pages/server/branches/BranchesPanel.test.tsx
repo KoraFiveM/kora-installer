@@ -183,10 +183,9 @@ describe('BranchesPanel', () => {
     await waitFor(() => expect(within(row('kora_phone')).getByText('Normal version (dev)')).toBeInTheDocument())
   })
 
-  it('production servers are refused by the API with a plain reason', async () => {
+  it('a server on released versions answers too (every server can switch a resource)', async () => {
     const r = await fetch('/api/v1/servers/kora-live/branches')
-    expect(r.status).toBe(409)
-    expect(((await r.json()) as { error: { code: string } }).error.code).toBe('branch.not_development')
+    expect(r.status).toBe(200)
   })
 })
 

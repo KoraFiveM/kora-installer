@@ -14,6 +14,9 @@ import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, wit
 
 const BASE = '/api/v1'
 
+/** The old `mode` word for an install request (what older Kora versions read). */
+const compatMode = (req: T.InstallRequest): T.Mode => (req.versions ? (req.versions === 'latest' ? 'development' : 'production') : req.mode ?? 'production')
+
 // ---- state (rebuilt by `init`, so a scenario starts from a clean world) ------------------------
 
 let scenario: ScenarioName = 'default'
@@ -317,7 +320,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     await sleep(step === 'build.fxserver' ? 1800 : 900)
     if (step === failAt) {
       emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null, txadmin_public: req.txadmin_public, artifact_url: req.artifact_url, game_build: req.game_build, github_owner: req.github_owner, start: req.start }
+      prefs.savedInstall = { mode: compatMode(req), source: req.source, versions: req.versions, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null, txadmin_public: req.txadmin_public, artifact_url: req.artifact_url, game_build: req.game_build, github_owner: req.github_owner, start: req.start }
       const id = jobId()
       paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
       const common: Partial<T.JobError> = {
@@ -359,7 +362,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
   }
   prefs.savedInstall = null
-  servers.push({ name: req.name, dir: req.dir, mode: req.mode, ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null })
+  servers.push({ name: req.name, dir: req.dir, mode: compatMode(req), source: req.source ?? (req.mode === 'development' ? 'fork' : 'clone'), versions: req.versions ?? (req.mode === 'development' ? 'latest' : 'released'), ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null })
   installed[req.name] = ['oxmysql', 'ox_lib', 'kora_core']
   return {
     dir: req.dir,
@@ -401,7 +404,7 @@ const resourceMock = installResourceMock(route, Fail, {
   find: (n) => find(n),
   installed: (n) => installed[n] ?? [],
   consoleEnabled: (n) => !!consoleEnabled[n],
-  branchRow: (n, id): T.ResourceBranch => (id.startsWith('kora_') && find(n).mode === 'development' ? branchesMock.row(n, id) : { id, folder: id, state: 'pinned', default_branch: 'dev', label: 'fixed version', changed_count: 0, stashes: 0 }),
+  branchRow: (n, id): T.ResourceBranch => (id.startsWith('kora_') ? branchesMock.row(n, id) : { id, folder: id, state: 'pinned', default_branch: 'dev', label: 'fixed version', changed_count: 0, stashes: 0 }),
 })
 const branchesMock = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github, onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why) })
 
@@ -447,7 +450,7 @@ route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
     await sleep(1200)
     const have = servers.map((s) => s.dir)
-    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development', kind: 'txadmin', ports: { game: 30130, txadmin: 40130 } }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production', kind: 'plain', ports: { game: 30131, txadmin: 40131 } }].filter((c) => !have.includes(c.dir)) }
+    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development', source: 'fork', versions: 'latest', kind: 'txadmin', ports: { game: 30130, txadmin: 40130 } }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production', source: 'clone', versions: 'released', kind: 'plain', ports: { game: 30131, txadmin: 40131 } }].filter((c) => !have.includes(c.dir)) }
   }),
 )
 route('POST', '/servers/adopt', (_m, b) => {
@@ -456,7 +459,7 @@ route('POST', '/servers/adopt', (_m, b) => {
   if (dir.includes('nothing')) throw new Fail(400, 'bad_request', 'That folder does not look like a FiveM server (no server.cfg or resources folder).')
   if (servers.some((s) => s.dir === dir)) throw new Fail(409, 'conflict', 'That server is already in your list.')
   const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? 'adopted'
-  const s: T.ServerSummary = { name, dir, mode: 'production', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false, connect: null }
+  const s: T.ServerSummary = { name, dir, mode: 'production', source: 'clone', versions: 'released', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false, connect: null }
   servers.push(s)
   installed[name] = ['chat']
   snapshots[name] = []

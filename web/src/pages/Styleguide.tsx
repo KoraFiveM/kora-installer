@@ -142,7 +142,7 @@ function Chips() {
         <UpdateChip badge={{ kind: 'new_release' }} />
         <UpdateChip badge={null} />
       </Row>
-      <Row label="Mode"><ModeChip mode="production" /><ModeChip mode="development" /></Row>
+      <Row label="Style"><ModeChip mode="production" /><ModeChip mode="development" /></Row>
     </div>
   )
 }

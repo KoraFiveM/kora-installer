@@ -21,7 +21,7 @@ import { formatBytes, validatePorts } from '@/lib/utils'
 import { useInstallBlock } from './install/access'
 import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
-import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
+import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, OptionsStep, PortsStep, ResourcesStep, SourceStep, VersionsStep } from './install/Steps'
 import { cn } from '@/lib/utils'
 
 interface ReviewRow {
@@ -37,7 +37,8 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
   const rows: ReviewRow[] = [
     { label: 'Licence key', value: f.licenceChoice === 'saved' ? (f.licenceName ? `Your saved licence key "${f.licenceName}"` : 'Not picked yet') : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? `Provided (hidden). It will be saved as "${f.saveKeyName.trim()}".` : 'Provided (hidden). It will not be saved.') : 'Not given yet', step: 'licence' },
-    { label: 'Kind of server', value: f.mode === 'production' ? 'Production (a server for players)' : 'Development (for building and changing resources)', step: 'mode' },
+    { label: 'Resources come from', value: f.source === 'clone' ? "Kora's resources as they are (plain copies)" : 'Your own copies on GitHub', step: 'source' },
+    { label: 'Versions', value: f.versions === 'released' ? 'Released versions (stable)' : 'Latest changes (the main branch)', step: 'versions' },
     { label: 'Name', value: req.name || 'Not given yet', step: 'name' },
     { label: 'Folder', value: req.dir || 'Not given yet', step: 'name' },
     { label: 'Server name for players', value: req.hostname || '(default)', step: 'name', advanced: true },
@@ -54,7 +55,7 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
     value: f.cfxFound ? `${f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier}${f.cfxRemembered ? '. Remembered from your last install.' : ''}` : 'Not set. Kora makes a local admin with a generated password.',
     step: 'cfx',
   })
-  if (f.mode === 'development') rows.push({ label: 'GitHub forks go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
+  if (f.source === 'fork') rows.push({ label: 'Your copies go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
   return rows
 }
 
@@ -84,7 +85,7 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
   /** Drop the parts that need administrator rights (Windows notice). */
   onWithoutAdmin?: () => void
 }) {
-  const safeKey = JSON.stringify([req.dir, req.mode, req.firewall, req.service, req.db, req.txadmin_public])
+  const safeKey = JSON.stringify([req.dir, req.source, req.versions, req.firewall, req.service, req.db, req.txadmin_public])
   const disk = useQuery({ queryKey: ['disk', req.dir], queryFn: () => api.installs.checkDisk(req.dir) })
   useEffect(() => onDisk(disk.data ? disk.data.ok : true), [disk.data, onDisk])
   const plan = useQuery({ queryKey: ['plan', safeKey], queryFn: () => api.installs.plan({ ...req, dry_run: true }) })
@@ -243,8 +244,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
 
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
   const req = buildRequest(f, { artifactUrl: artUrl })
-  const stepsOf = (mode: WizardForm['mode']) => (everyStep ? stepsFor(mode) : quickStepsFor(mode))
-  const steps = stepsOf(f.mode)
+  const stepsOf = (source: WizardForm['source']) => (everyStep ? stepsFor(source) : quickStepsFor(source))
+  const steps = stepsOf(f.source)
   const at = Math.min(step, steps.length - 1)
   const id: StepId = steps[at]
   const ctx = { ports: ports.state, githubSignedIn }
@@ -283,7 +284,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     setResumeErr(null)
     setGithubAsked(false)
     setStep(steps.length - 1)
-    setEditing(sectionStep(section, f.mode))
+    setEditing(sectionStep(section, f.source))
   }
   /** A fix launched from the failed step worked: say so and retry that step (only when the install can carry on). */
   const retryAfterFix = run.error?.resume ? async () => { await resume(); setAutoRetried(true) } : undefined
@@ -308,11 +309,11 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   }
   /** Errors from starting (on the summary): change an answer, or drop the parts that need administrator rights. */
   const startActions: ActionHandlers = {
-    change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.mode)) },
+    change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.source)) },
     continue_without_admin: () => { setStartErr(null); setF(withoutAdmin(f)); setEditing(null) },
     // A remote session: Windows only asks when the person says so.
     ...(canAsk ? { request_admin: () => start({ askAdmin: true }) } : {}),
-    sign_in_github: () => { setStartErr(null); setEditing(f.mode === 'development' ? 'github' : null) },
+    sign_in_github: () => { setStartErr(null); setEditing(f.source === 'fork' ? 'github' : null) },
   }
 
   // ---- running / finished ----
@@ -385,7 +386,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved licence key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
           {defaults.saved_key_missing && <p className="mt-1">The saved licence key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
           <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
+            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>Continue where I left off</Button>
             <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>
           </div>
         </Alert>
@@ -397,7 +398,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               <span>&quot;{r.name}&quot; stopped{r.failed_step ? ` at the step ${r.failed_step}` : ''}. Its answers and licence key are kept.</span>
               <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>Carry on</Button>
               {saved && saved.name === r.name && (
-                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Change my answers first</Button>
+                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>Change my answers first</Button>
               )}
             </div>
           ))}
@@ -412,7 +413,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       <Card>
         <CardHeader><CardTitle className="text-lg">{STEP_LABEL[showing]}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {showing === 'mode' && <ModeStep {...common} />}
+          {showing === 'source' && <SourceStep {...common} />}
+          {showing === 'versions' && <VersionsStep {...common} />}
           {showing === 'name' && <NameStep {...common} quick={!everyStep && !editing} />}
           {showing === 'ports' && <PortsStep {...common} ports={ports} />}
           {showing === 'build' && <BuildStep {...common} />}

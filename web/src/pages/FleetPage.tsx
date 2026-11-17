@@ -16,7 +16,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice, toNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { Skeleton } from '@/components/Skeleton'
-import { ModeChip, StatusChip, UpdateChip } from '@/components/Status'
+import { StatusChip, StyleChip, UpdateChip } from '@/components/Status'
 import { useJob } from '@/hooks/useJob'
 
 const ING: Record<ControlAction, string> = { start: 'Starting', stop: 'Stopping', restart: 'Restarting' }
@@ -94,7 +94,7 @@ function ServerRow({ s }: { s: FleetServer }) {
         {s.node_id === null ? <Link to={`/servers/${encodeURIComponent(s.name)}`} className="hover:underline">{s.name}</Link> : s.name}
       </td>
       <td className="px-4 py-3 text-muted-foreground">{s.node_name}</td>
-      <td className="px-4 py-3"><ModeChip mode={s.mode} /></td>
+      <td className="px-4 py-3"><StyleChip source={s.source} versions={s.versions} /></td>
       <td className="px-4 py-3"><StatusChip status={s.status} pending={ctl.pending} /></td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.game}</td>
       <td className="px-4 py-3"><UpdateChip badge={s.badge} /></td>

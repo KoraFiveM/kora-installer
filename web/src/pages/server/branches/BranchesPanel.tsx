@@ -11,7 +11,7 @@ import { useBranches } from './useBranches'
 import { VersionBadge } from './VersionBadge'
 
 /**
- * Branches and pull requests of a Development server's resources (the GitHub tab). Plain words first:
+ * Branches and pull requests of a server's resources (the GitHub tab). Plain words first:
  * "the normal version", "try a pull request"; the git names are there but secondary.
  */
 export function BranchesPanel({ server: s }: { server: ServerDetail }) {

@@ -9,7 +9,7 @@ const fetchMock = vi.fn()
 beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock) })
 afterEach(() => vi.unstubAllGlobals())
 
-const srv = (name: string, badge: ServerSummary['badge']): ServerSummary => ({ name, dir: `/srv/${name}`, mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: 0, status: 'stopped', badge, managed: true, connect: null })
+const srv = (name: string, badge: ServerSummary['badge']): ServerSummary => ({ name, dir: `/srv/${name}`, mode: 'production', source: 'clone', versions: 'released', ports: { game: 30120, txadmin: 40120 }, created_unix: 0, status: 'stopped', badge, managed: true, connect: null })
 
 describe('ServersPage', () => {
   it('links the update chip to the Resources tab of that server, when there is something to look at', async () => {

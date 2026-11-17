@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
-import type { Badge as BadgeT, Mode, ServerStatus } from '@/api/types'
+import type { Badge as BadgeT, Mode, ServerStatus, Source, Versions } from '@/api/types'
+import { styleOfMode } from '@/pages/install/form'
 import { Badge } from '@/components/ui/badge'
 
 export function StatusChip({ status, pending }: { status: ServerStatus; pending?: string }) {
@@ -29,6 +30,17 @@ export function UpdateChip({ badge, to }: { badge: BadgeT | null; to?: string })
   return to && badge && badge.kind !== 'up_to_date' ? <Link to={to} className="hover:underline">{chip}</Link> : chip
 }
 
+/** Where a server's resources come from and which versions it follows, in plain words ("Plain copies, released versions"). */
+export function StyleChip({ source, versions }: { source: Source; versions: Versions }) {
+  return (
+    <Badge tone="plain" title={`${source === 'clone' ? "Plain copies of the original repositories" : 'Your own copies (forks) on GitHub'}; ${versions === 'released' ? 'pinned to released versions' : 'following the latest changes'}.`}>
+      {source === 'clone' ? 'Plain copies' : 'Own copies'}, {versions === 'released' ? 'released versions' : 'latest changes'}
+    </Badge>
+  )
+}
+
+/** The same chip from the old `mode` word (answers from the folder scan, which only knows that). */
 export function ModeChip({ mode }: { mode: Mode }) {
-  return <Badge tone="plain">{mode === 'production' ? 'Production' : 'Development'}</Badge>
+  const { source, versions } = styleOfMode(mode)
+  return <StyleChip source={source} versions={versions} />
 }

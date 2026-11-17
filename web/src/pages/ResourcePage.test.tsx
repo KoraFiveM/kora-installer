@@ -14,7 +14,7 @@ const base = (over: Partial<Page> = {}): Page => ({
   third_party: false,
   branch: { id: 'kora_hud', folder: 'kora_hud', state: 'default', default_branch: 'dev', label: 'the normal version (dev)', changed_count: 0, stashes: 0 },
   restart: { needed: false },
-  server: { name: 'live', mode: 'development', running: true, console_enabled: true, console_waiting_for_restart: false },
+  server: { name: 'live', mode: 'development', source: 'fork', versions: 'latest', running: true, console_enabled: true, console_waiting_for_restart: false },
   ...over,
 })
 const preview = (status: 'clean' | 'up_to_date'): UpdatePreview => ({ new_release: null, resources: [{ id: 'kora_hud', from: 'aaaaaaa', to: 'bbbbbbb', behind: status === 'clean' ? 2 : 0, changelog: ['A small fix'], needs_restart: false, status }] })
@@ -27,6 +27,7 @@ function install() {
     const method = init?.method ?? 'GET'
     calls.push(`${method} ${url.replace(/^.*\/api\/v1/, '')}`)
     if (url.endsWith('/servers/live/resources/kora_hud') && method === 'GET') return jsonResponse(200, page)
+    if (url.endsWith('/resources/kora_hud/branches')) return jsonResponse(200, { resource: page.branch, branches: { current: 'dev', default_branch: 'dev', local: ['dev'], fork: [], upstream: [] }, stashes: [], notes: [] })
     if (url.endsWith('/resources/kora_hud/control')) {
       // A restart of the resource loads the new files: the notice goes.
       page = { ...page, restart: { needed: false } }
@@ -70,11 +71,28 @@ describe('resource page', () => {
   it('highlights a resource that is not on its normal version', async () => {
     page = base({ branch: { id: 'kora_hud', folder: 'kora_hud', state: 'pr', pr: 12, default_branch: 'dev', label: 'pull request #12', changed_count: 0, stashes: 0 } })
     show()
-    expect(await screen.findByText('Trying pull request #12')).toBeInTheDocument()
+    // In the header and again where the version is changed.
+    expect((await screen.findAllByText('Trying pull request #12')).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('on released versions, leaving the release needs an explicit yes, and going back says "released"', async () => {
+    page = base({
+      branch: { id: 'kora_hud', folder: 'kora_hud', state: 'pr', pr: 12, default_branch: 'dev', label: 'pull request #12', changed_count: 0, stashes: 0 },
+      server: { name: 'live', mode: 'production', source: 'clone', versions: 'released', running: true, console_enabled: true, console_waiting_for_restart: false },
+    })
+    const user = userEvent.setup()
+    show()
+    expect(await screen.findByText('This server follows released versions')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to the released version' })).toBeEnabled()
+    const tryIt = await screen.findByRole('button', { name: 'Try it' })
+    await user.type(screen.getByLabelText('Pull request number or address'), '12')
+    expect(tryIt).toBeDisabled()
+    await user.click(screen.getByLabelText(/I understand: this resource will run unreleased code/))
+    expect(tryIt).toBeEnabled()
   })
 
   it('explains why start/stop/restart are off and offers the fix when the server is stopped', async () => {
-    page = base({ server: { name: 'live', mode: 'development', running: false, console_enabled: true, console_waiting_for_restart: false } })
+    page = base({ server: { name: 'live', mode: 'development', source: 'fork', versions: 'latest', running: false, console_enabled: true, console_waiting_for_restart: false } })
     show()
     expect(await screen.findByText(/The server is not running/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled()
@@ -82,7 +100,7 @@ describe('resource page', () => {
   })
 
   it('points to the Console tab when the live console is off', async () => {
-    page = base({ server: { name: 'live', mode: 'development', running: true, console_enabled: false, console_waiting_for_restart: false } })
+    page = base({ server: { name: 'live', mode: 'development', source: 'fork', versions: 'latest', running: true, console_enabled: false, console_waiting_for_restart: false } })
     show()
     expect(await screen.findByRole('link', { name: 'Open the Console tab' })).toHaveAttribute('href', '/servers/live?tab=console')
     expect(screen.getByRole('button', { name: /Restart$/ })).toBeDisabled()

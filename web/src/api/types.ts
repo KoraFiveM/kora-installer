@@ -193,6 +193,8 @@ export type {
   ResourceServerState,
   RestartInfo,
   SnapshotBranch,
+  Source,
+  Versions,
   ResourceSelection,
   ResourcesList,
   RestartPolicy,

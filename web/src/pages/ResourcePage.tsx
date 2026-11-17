@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/Skeleton'
 import { StatusChip } from '@/components/Status'
 import NotFound from '@/pages/NotFound'
 import { VersionBadge } from './server/branches/VersionBadge'
+import { BranchControls } from './server/branches/ResourceDialog'
 import { useUpdates } from './server/useUpdates'
 import { RestartNotice } from './server/resource/RestartNotice'
 import { controlBlock, ResourceActions } from './server/resource/ResourceActions'
@@ -78,6 +79,12 @@ export default function ResourcePage() {
           />
         </CardContent>
       </Card>
+      {page.branch.state !== 'pinned' && page.branch.state !== 'unavailable' && (
+        <Card>
+          <CardHeader><CardTitle>Which version of the code</CardTitle></CardHeader>
+          <CardContent><BranchControls server={page.server} resource={page.branch} /></CardContent>
+        </Card>
+      )}
       <ConfirmDialog
         open={ask !== null}
         onOpenChange={(o) => { if (!o) setAsk(null) }}
