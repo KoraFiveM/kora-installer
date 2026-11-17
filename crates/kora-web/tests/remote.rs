@@ -498,7 +498,7 @@ async fn destructive_actions_are_refused_for_token_admins_while_remote_actions_a
     for (m, uri) in DESTRUCTIVE {
         let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
         assert!(is_switch_refusal(&r), "{m} {uri}: {} {:?}", r.status, r.json);
-        assert!(r.msg().contains("turned off for sign-ins made with a token"), "{m} {uri}: {}", r.msg());
+        assert!(r.msg().contains("turned off for sign-ins that do not come through Tailscale"), "{m} {uri}: {}", r.msg());
         // The problem says exactly how to turn it on, and the other ways to do it.
         let e = &r.json["error"];
         assert!(e["details"].as_str().unwrap().contains("kora panel remote-actions on"), "{e}");
@@ -624,14 +624,21 @@ async fn local_cookie(w: &World) -> String {
 }
 
 #[tokio::test]
-async fn users_api_shows_the_token_once_and_never_the_hash() {
-    let w = world_with(Remote::new(None, enabled_cfg()));
+async fn users_api_shows_the_enrolment_link_once_and_makes_no_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let w = world_with(Remote::from_file(dir.path().join("panel.json")).unwrap().forced(true));
     let c = local_cookie(&w).await;
     let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "pat", "role": "operator"})).send(&w.app).await;
     assert_eq!(r.status, 201);
-    let token = r.json["token"].as_str().unwrap().to_string();
-    assert!(token.len() >= 32);
-    assert_eq!((r.json["name"].as_str(), r.json["role"].as_str()), (Some("pat"), Some("operator")));
+    let link = r.json["link"].as_str().unwrap().to_string();
+    assert!(link.len() >= 32);
+    assert!(r.json.get("token").is_none(), "a new user has no token: {:?}", r.json);
+    assert_eq!(r.json["expires_in"], 1800);
+    // The link is the only credential, and only its hash is kept; the list shows no secret.
+    let r = req("GET", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).send(&w.app).await;
+    assert!(!r.json.to_string().contains(&link));
+    assert_eq!(r.json["users"][0]["legacy_token"], false);
+    assert_eq!((r.json["users"][0]["name"].as_str(), r.json["users"][0]["role"].as_str()), (Some("pat"), Some("operator")));
     // Duplicate and bad names.
     let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "PAT", "role": "viewer"})).send(&w.app).await;
     assert_eq!(r.status, 409);
@@ -644,14 +651,13 @@ async fn users_api_shows_the_token_once_and_never_the_hash() {
     assert_eq!(list.json["users"][0]["name"], "pat");
     let get = req("GET", "/api/v1/remote").peer(LOOPBACK_PEER).cookie(&c).send(&w.app).await;
     for text in [list.json.to_string(), get.json.to_string()] {
-        assert!(!text.contains(&token) && !text.contains("hash") && !text.contains("salt"), "{text}");
+        assert!(!text.contains(&link) && !text.contains("hash") && !text.contains("salt"), "{text}");
     }
-    // The new token signs in from another computer, then removal ends the session.
-    let cookie = sign_in(&w.app, &token).await;
-    assert_eq!(req("GET", "/api/v1/servers").cookie(&cookie).send(&w.app).await.status, 200);
+    // The enrolment link is not a token: it signs nobody in.
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": link})).send(&w.app).await;
+    assert_eq!(r.status, 401);
     let r = req("DELETE", "/api/v1/users/pat").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 204);
-    assert_eq!(req("GET", "/api/v1/servers").cookie(&cookie).send(&w.app).await.status, 401);
     let r = req("DELETE", "/api/v1/users/pat").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 404);
 }
@@ -736,7 +742,7 @@ async fn settings_are_saved_to_the_private_store() {
     let w = world_with(Remote::from_file(path.clone()).unwrap().forced(true));
     let c = local_cookie(&w).await;
     let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "pat", "role": "admin"})).send(&w.app).await;
-    let token = r.json["token"].as_str().unwrap().to_string();
+    let link = r.json["link"].as_str().unwrap().to_string();
     let db = kora_core::store::db_path(dir.path());
     assert_eq!(std::fs::metadata(&db).unwrap().permissions().mode() & 0o777, 0o600);
     assert_eq!(std::fs::metadata(dir.path().join("store")).unwrap().permissions().mode() & 0o777, 0o700);
@@ -744,11 +750,13 @@ async fn settings_are_saved_to_the_private_store() {
     for e in std::fs::read_dir(dir.path().join("store")).unwrap().flatten().filter(|e| e.path().is_file()) {
         text.push_str(&String::from_utf8_lossy(&std::fs::read(e.path()).unwrap()));
     }
-    assert!(!text.contains(&token), "the token must not be on disk");
-    assert!(RemoteConfig::load(&path).unwrap().users.iter().any(|u| u.name == "pat" && !u.hash.is_empty()));
-    // A fresh panel reading the file knows the user.
+    assert!(!text.contains(&link), "the enrolment link must not be on disk");
+    // The new user exists with no token at all.
+    assert!(RemoteConfig::load(&path).unwrap().users.iter().any(|u| u.name == "pat" && u.hash.is_empty()));
+    // A fresh panel reading the file knows the user, and nobody can sign in as them with the link as a token.
     let again = Remote::from_file(path).unwrap();
-    assert_eq!(again.identity_for_token(&token).unwrap().role, Role::Admin);
+    assert!(again.config().user("pat").is_some());
+    assert!(again.identity_for_token(&link).is_none() && again.identity_for_bearer(&link).is_none());
 }
 
 // ---------- /meta for the UI ----------
@@ -806,8 +814,8 @@ async fn sessions_expire_after_twelve_idle_hours_and_use_keeps_them_alive() {
         let app = w.app.clone();
         async move { req("GET", "/api/v1/servers").peer(peer).cookie(&cookie).send(&app).await.status }
     };
-    // Activity every 11 hours keeps both alive well past 12 hours in total.
-    for _ in 0..3 {
+    // Activity every 11 hours keeps both alive well past 12 hours in total (a remote token session is capped at one day).
+    for _ in 0..2 {
         *clock.lock().unwrap() += hours(11);
         assert_eq!(get(remote.clone(), REMOTE_PEER).await, 200);
         assert_eq!(get(local.clone(), LOOPBACK_PEER).await, 200);
@@ -830,17 +838,40 @@ async fn sessions_end_after_seven_days_however_busy() {
         let app = w.app.clone();
         async move { req("GET", "/api/v1/servers").peer(peer).cookie(&cookie).send(&app).await.status }
     };
-    // Busy every 6 hours for just under 7 days: still fine.
+    // Busy every 6 hours for just under 7 days: the computer's own session is fine; a remote token session is capped at one day.
     let mut t = 0;
     while t + 6 < 7 * 24 {
         t += 6;
         *clock.lock().unwrap() = hours(t);
-        assert_eq!(get(remote.clone(), REMOTE_PEER).await, 200, "at {t} h");
+        assert_eq!(get(remote.clone(), REMOTE_PEER).await, if t < 24 { 200 } else { 401 }, "remote token session at {t} h");
         assert_eq!(get(local.clone(), LOOPBACK_PEER).await, 200, "at {t} h");
     }
     *clock.lock().unwrap() = hours(7 * 24);
     assert_eq!(get(remote, REMOTE_PEER).await, 401);
     assert_eq!(get(local, LOOPBACK_PEER).await, 401);
+}
+
+#[tokio::test]
+async fn strong_remote_sessions_end_after_eight_idle_hours_and_three_days() {
+    use kora_web::remote::Provider;
+    let (st_clock, offset) = stepping_clock();
+    let sessions = kora_web::security::Sessions::with_clock(st_clock);
+    let n = sessions.create_for(Provider::Passkey, "adam", true, Role::Admin);
+    *offset.lock().unwrap() += hours(7);
+    assert!(sessions.get(&n.id).is_some(), "busy within 8 hours");
+    *offset.lock().unwrap() += hours(8);
+    assert!(sessions.get(&n.id).is_none(), "idle for 8 hours");
+    let n = sessions.create_for(Provider::Code, "adam", true, Role::Admin);
+    for _ in 0..11 {
+        *offset.lock().unwrap() += hours(6);
+        assert!(sessions.get(&n.id).is_some());
+    }
+    *offset.lock().unwrap() += hours(6);
+    assert!(sessions.get(&n.id).is_none(), "three days, however busy");
+    // The computer's own session keeps the long limits.
+    let n = sessions.create_for(Provider::Local, "local", false, Role::Admin);
+    *offset.lock().unwrap() += hours(11);
+    assert!(sessions.get(&n.id).is_some());
 }
 
 #[tokio::test]
