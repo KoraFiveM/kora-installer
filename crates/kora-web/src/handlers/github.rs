@@ -130,10 +130,19 @@ fn check_resource(r: &str) -> Result<(), ApiError> {
     }
 }
 
+/// The answer, marked with the GitHub account that acted so the audit log says as whom (the answer's own shape is unchanged).
+fn acted(v: Value, login: Option<String>) -> Response {
+    let mut r = Json(v).into_response();
+    if let Some(l) = login.filter(|l| !l.is_empty() && l.len() <= 64) {
+        r.extensions_mut().insert(crate::audit::GithubActor(l));
+    }
+    r
+}
+
 /// `POST /servers/{s}/issues` `{resource, title, text}` → `{url}`.
-pub async fn issue_report(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+pub async fn issue_report(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let b: IssueBody = parse(body)?;
-    let url = blocking(move || {
+    let (url, login) = blocking(move || {
         let e = st.entry(&s)?;
         check_resource(&b.resource)?;
         let title = b.title.trim();
@@ -147,10 +156,11 @@ pub async fn issue_report(State(st): State<AppState>, Path(s): Path<String>, Jso
         if !be.github_signed_in() {
             return Err(sign_in_first());
         }
-        be.report_issue(&e, &b.resource, title, &b.text).map_err(ApiError::core)
+        let url = be.report_issue(&e, &b.resource, title, &b.text).map_err(ApiError::core)?;
+        Ok((url, be.github_acting_as()))
     })
     .await?;
-    Ok(Json(json!({"url": url})))
+    Ok(acted(json!({"url": url}), login))
 }
 
 #[derive(Deserialize)]
@@ -187,10 +197,10 @@ struct OpenBody {
 /// `POST /servers/{s}/pr` `{plan, title, text}` → `{url}`. The plan is worked out again here from
 /// the resource and must be exactly what the client sent: a plan the client changed (another
 /// folder, branch or repository) is refused, so the browser cannot make Kora push somewhere else.
-pub async fn pr_open(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+pub async fn pr_open(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let b: OpenBody = parse(body)?;
     let client: PrPlan = parse(b.plan)?;
-    let url = blocking(move || {
+    let (url, login) = blocking(move || {
         let e = st.entry(&s)?;
         check_resource(&client.resource)?;
         let title = b.title.trim();
@@ -208,8 +218,9 @@ pub async fn pr_open(State(st): State<AppState>, Path(s): Path<String>, Json(bod
         if fresh != client {
             return Err(ApiError::bad_request("The details of this pull request have changed since you looked at them. Check them again before sending."));
         }
-        be.pr_open(&fresh, title, &b.text).map_err(ApiError::core)
+        let url = be.pr_open(&fresh, title, &b.text).map_err(ApiError::core)?;
+        Ok((url, be.github_acting_as()))
     })
     .await?;
-    Ok(Json(json!({"url": url})))
+    Ok(acted(json!({"url": url}), login))
 }

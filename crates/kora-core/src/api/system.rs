@@ -342,6 +342,10 @@ impl Backend for SystemBackend {
         add::execute(&add::GitCloner(&SystemRunner), &mut sf, &plan, &mut |_| {}).map_err(err)
     }
 
+    fn github_acting_as(&mut self) -> Option<String> {
+        crate::collab::acting_as(&SystemRunner)
+    }
+
     fn github_signed_in(&mut self) -> bool {
         git::is_signed_in(&SystemRunner)
     }

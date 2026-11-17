@@ -258,6 +258,10 @@ impl Backend for FakeBackend {
         s.calls.push(format!("add_install {} {}", e.name, ids.join(",")));
         s.add_result.clone().unwrap_or_else(|| Ok(AddOutcome::default()))
     }
+    fn github_acting_as(&mut self) -> Option<String> {
+        Some("fake-login".into())
+    }
+
     fn github_signed_in(&mut self) -> bool {
         self.state().signed_in
     }

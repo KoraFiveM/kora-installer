@@ -376,7 +376,14 @@ mod tests {
         let mut del = vec![];
         let (sum, rig) = go(&mut reg, &Options { dry_run: true, ..Default::default() }, true, &r, &mut Defaults, &mut del);
         let text = rig.out.join("\n");
-        for want in ["Stop and remove the background service kora-alpha", "systemctl disable kora-alpha", "userdel kora-alpha", "Delete the root-owned copy", "Remove the scheduled-backup job", "KEEP the server folder and database"] {
+        for want in [
+            "Stop and remove the background service kora-alpha",
+            "systemctl disable kora-alpha",
+            "userdel kora-alpha",
+            "Delete the root-owned copy",
+            "Remove the scheduled-backup job",
+            "KEEP the server folder and database",
+        ] {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
         // the only commands run were the read-only `id -u` and the look for the backup job's timer file
