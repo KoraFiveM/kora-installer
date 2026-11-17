@@ -114,6 +114,10 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::AssetImport => on_op(op, handlers::assets::asset_import),
         Op::AssetRemove => on_op(op, handlers::assets::asset_remove),
         Op::AssetDownloads => on_op(op, handlers::assets::asset_downloads),
+        Op::ToolsStatus => on_op(op, handlers::toolchain::tools_status),
+        Op::ToolInstall => on_op(op, handlers::toolchain::tool_install),
+        Op::SystemCheck => on_op(op, handlers::toolchain::system_check_get),
+        Op::DbStart => on_op(op, handlers::toolchain::db_start),
     }
 }
 

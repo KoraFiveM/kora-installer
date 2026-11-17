@@ -95,7 +95,10 @@ pub fn min_role(op: Op) -> Role {
         | Op::InstallLog
         | Op::AlertsAck
         // Lists imported paid assets with hints taken from the console output.
-        | Op::AssetsList => Operator,
+        | Op::AssetsList
+        // Read-only machine checks: which tools and database are here, and where.
+        | Op::ToolsStatus
+        | Op::SystemCheck => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
         | Op::ServerUnregister
@@ -148,7 +151,9 @@ pub fn min_role(op: Op) -> Role {
         | Op::AssetInspect
         | Op::AssetImport
         | Op::AssetRemove
-        | Op::AssetDownloads => Admin,
+        | Op::AssetDownloads
+        | Op::ToolInstall
+        | Op::DbStart => Admin,
     }
 }
 
@@ -165,7 +170,9 @@ pub fn destructive(op: Op) -> bool {
         | Op::InstallResume
         | Op::SelfUpdateApply
         | Op::ScheduleSet
-        | Op::ScheduleRemove => true,
+        | Op::ScheduleRemove
+        | Op::ToolInstall
+        | Op::DbStart => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -243,7 +250,9 @@ pub fn destructive(op: Op) -> bool {
         | Op::AssetInspect
         | Op::AssetImport
         | Op::AssetRemove
-        | Op::AssetDownloads => false,
+        | Op::AssetDownloads
+        | Op::ToolsStatus
+        | Op::SystemCheck => false,
     }
 }
 
@@ -343,7 +352,11 @@ pub fn local_only(op: Op) -> bool {
         | Op::AssetsList
         | Op::AssetInspect
         | Op::AssetImport
-        | Op::AssetRemove => false,
+        | Op::AssetRemove
+        | Op::ToolsStatus
+        | Op::ToolInstall
+        | Op::SystemCheck
+        | Op::DbStart => false,
     }
 }
 
