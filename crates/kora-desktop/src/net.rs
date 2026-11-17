@@ -168,7 +168,7 @@ fn spawn_poller(c: Creds, proxy: Arc<Mutex<EventLoopProxy<UserEvent>>>, stop: Ar
     std::thread::spawn(move || {
         let mut tick = 0u64;
         while !stop.load(Ordering::Relaxed) {
-            if tick % 8 == 0 {
+            if tick.is_multiple_of(8) {
                 if let Ok(body) = get(&c, "/alerts") {
                     if let Ok(l) = serde_json::from_str::<AlertsList>(&body) {
                         send(&proxy, UserEvent::Alerts(l.alerts));
