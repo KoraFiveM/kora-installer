@@ -83,10 +83,12 @@ describe('Install wizard form: run mode', () => {
     let f = initialForm(defaults)
     f = { ...f, ...runModePatch(f, 'container') }
     expect(f.db).toBe('container')
+    expect(f.firewall).toBe(false)
     const r = buildRequest(f)
     expect(r).toMatchObject({ run_mode: 'container', container: {}, service: false, db: 'container', db_admin: null })
     f = { ...f, ...runModePatch(f, 'service') }
     expect(f.db).toBe('install_if_missing')
+    expect(f.firewall).toBe(true)
     expect(runModePatch({ ...f, db: 'skip' }, 'container').db).toBe('skip')
   })
 

@@ -109,6 +109,12 @@ pub(crate) struct InstallArgs {
     /// With --run-mode container: publish the game port on this address only (default: every address).
     #[arg(long, value_name = "IP")]
     pub(crate) bind: Option<String>,
+    /// With --run-mode container: limit the server's memory, in MiB (default: no limit).
+    #[arg(long, value_name = "MIB")]
+    pub(crate) memory_mb: Option<u32>,
+    /// With --run-mode container: limit the server's processors, in cores (for example 2 or 1.5; default: no limit).
+    #[arg(long, value_name = "CORES")]
+    pub(crate) cpus: Option<f32>,
     /// Install and enable the OS service (needs admin).
     #[arg(long)]
     pub(crate) service: bool,
@@ -227,8 +233,14 @@ impl InstallArgs {
         if in_container && self.service {
             return Err("--service and --run-mode container cannot be combined: a container server has no system service.".into());
         }
-        if !in_container && (self.engine.is_some() || self.bind.is_some()) {
-            return Err("--engine and --bind only apply with --run-mode container.".into());
+        if !in_container && (self.engine.is_some() || self.bind.is_some() || self.memory_mb.is_some() || self.cpus.is_some()) {
+            return Err("--engine, --bind, --memory-mb and --cpus only apply with --run-mode container.".into());
+        }
+        if self.memory_mb.is_some_and(|m| m < 512) {
+            return Err("--memory-mb must be at least 512: FXServer needs that much.".into());
+        }
+        if self.cpus.is_some_and(|c| !(0.1..=256.0).contains(&c)) {
+            return Err("--cpus must be between 0.1 and 256.".into());
         }
         if let Some(b) = &self.bind {
             if b.parse::<std::net::IpAddr>().is_err() {
@@ -285,7 +297,8 @@ impl InstallArgs {
                     EngineArg::Docker => kora_core::container::EngineKind::Docker,
                 }),
                 bind: self.bind.clone(),
-                ..Default::default()
+                memory_mb: self.memory_mb,
+                cpu_tenths: self.cpus.map(|c| (c * 10.0).round() as u32),
             }),
             // Retired in 0.7.0: the install no longer adds a machine-wide app.
             app: None,

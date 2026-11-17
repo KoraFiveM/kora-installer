@@ -44,6 +44,8 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --run-mode", Route(Op::InstallStart)),
     ("install --engine", Route(Op::InstallStart)),
     ("install --bind", Route(Op::InstallStart)),
+    ("install --memory-mb", Route(Op::InstallStart)),
+    ("install --cpus", Route(Op::InstallStart)),
     ("install --firewall", Route(Op::InstallStart)),
     ("install --fork-owner", Route(Op::InstallStart)),
     ("install --source", Route(Op::InstallStart)),

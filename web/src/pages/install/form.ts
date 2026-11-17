@@ -175,8 +175,9 @@ export function withoutAdmin(f: WizardForm): WizardForm {
 
 /** Choosing how the server runs also moves the database to that mode's usual answer (a container next to the server, or what a service installs). */
 export function runModePatch(f: WizardForm, runMode: RunMode): Partial<WizardForm> {
-  if (runMode === 'container') return { runMode, db: f.db === 'skip' ? 'skip' : 'container', dbCustom: false }
-  return { runMode, db: f.db === 'container' ? 'install_if_missing' : f.db }
+  // A container server needs no administrator rights: the firewall step (which does) is off until the person asks for it.
+  if (runMode === 'container') return { runMode, db: f.db === 'skip' ? 'skip' : 'container', dbCustom: false, firewall: false }
+  return { runMode, db: f.db === 'container' ? 'install_if_missing' : f.db, firewall: true }
 }
 
 /** The wizard page a `change_answers` action names, when this kind of server has it. */

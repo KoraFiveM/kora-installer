@@ -128,6 +128,12 @@ Options:
       --bind <IP>
           With --run-mode container: publish the game port on this address only (default: every address)
 
+      --memory-mb <MIB>
+          With --run-mode container: limit the server's memory, in MiB (default: no limit)
+
+      --cpus <CORES>
+          With --run-mode container: limit the server's processors, in cores (for example 2 or 1.5; default: no limit)
+
       --service
           Install and enable the OS service (needs admin)
 
@@ -161,14 +167,14 @@ Options:
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
-
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
   -y, --yes
           Do not ask anything (implied by any other option)

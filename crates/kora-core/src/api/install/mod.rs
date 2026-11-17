@@ -659,6 +659,15 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
         if let Some(e) = c.engine {
             v.extend(["--engine".to_string(), e.program().to_string()]);
         }
+        if let Some(b) = &c.bind {
+            v.extend(["--bind".to_string(), b.clone()]);
+        }
+        if let Some(m) = c.memory_mb {
+            v.extend(["--memory-mb".to_string(), m.to_string()]);
+        }
+        if let Some(t) = c.cpu_tenths {
+            v.extend(["--cpus".to_string(), format!("{}.{}", t / 10, t % 10)]);
+        }
     }
     if let Some(a) = &req.db_admin {
         v.extend(["--db-admin-user".to_string(), a.user.clone(), "--db-admin-host".to_string(), a.host.clone(), "--db-admin-port".to_string(), a.port.to_string()]);
