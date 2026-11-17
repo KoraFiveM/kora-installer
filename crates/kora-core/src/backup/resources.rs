@@ -336,7 +336,7 @@ mod tests {
         g.say("fetch origin", "");
         // after the fetch the commit is still not there: a clear message, nothing checked out
         let e = ensure_at_commit(&g, d.path(), &reference()).unwrap_err();
-        assert!(e.contains("no longer on"), "{e}");
+        assert!(e.to_string().contains("no longer on"), "{e}");
         assert!(!g.log.borrow().iter().any(|l| l.starts_with("checkout")));
     }
 

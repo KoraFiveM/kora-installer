@@ -1958,7 +1958,7 @@ mod problem_tests {
     }
 
     fn problem_of<T: std::fmt::Debug>(r: Result<T>) -> Problem {
-        r.unwrap_err().problem()
+        r.unwrap_err()
     }
 
     #[test]
@@ -2010,9 +2010,9 @@ mod problem_tests {
         let t = e.to_string();
         assert!(t.starts_with("Your GitHub sign-in does not give Kora") && t.contains("gh auth refresh -h github.com -s read:org"), "{t}");
         assert!(!t.contains("kora-problem"));
-        assert_eq!(e.problem().code, codes::GH_MISSING_SCOPES);
+        assert_eq!(e.code, codes::GH_MISSING_SCOPES);
         // Through the step engine too.
-        let se = StepError::Failed(e.0.clone());
-        assert_eq!(Problem::from(se).problem().code, codes::GH_MISSING_SCOPES);
+        let se = StepError::Failed(e.clone());
+        assert_eq!(Problem::from(se).code, codes::GH_MISSING_SCOPES);
     }
 }

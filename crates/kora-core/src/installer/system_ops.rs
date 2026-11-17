@@ -395,7 +395,7 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e}"));
         assert!(check_step_request(&req, "system.firewall", false, true).is_ok());
         req.ports.game = 3389;
-        assert!(check_step_request(&req, "system.firewall", false, true).unwrap_err().0.contains("3389"), "remote desktop stays closed when the panel asks");
+        assert!(check_step_request(&req, "system.firewall", false, true).unwrap_err().to_string().contains("3389"), "remote desktop stays closed when the panel asks");
         assert!(check_step_request(&req, "system.firewall", false, false).is_ok(), "an administrator terminal: as before (>= 1024)");
         assert!(check_step_request(&req, "system.firewall", true, true).is_ok(), "closing is always fine");
         req.ports.game = 445;
@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn unknown_steps_are_refused_before_anything_is_read() {
         let e = run_admin_step(false, "build.config", Path::new("/nonexistent"), false, false, None, &mut |_| {}).unwrap_err();
-        assert!(e.0.contains("not a step"), "{e:?}");
+        assert!(e.to_string().contains("not a step"), "{e:?}");
         assert!(run_admin_step(true, "prepare.db", Path::new("/nonexistent"), false, false, None, &mut |_| {}).is_err());
     }
 

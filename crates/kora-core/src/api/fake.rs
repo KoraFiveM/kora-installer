@@ -106,7 +106,7 @@ impl FakeBackend {
 
 fn err_or<T>(e: &Option<String>, ok: impl FnOnce() -> T) -> Res<T> {
     match e {
-        Some(x) => Err(x.clone()),
+        Some(x) => Err(x.clone().into()),
         None => Ok(ok()),
     }
 }
@@ -148,7 +148,7 @@ impl Backend for FakeBackend {
         let mut s = self.state();
         s.calls.push(format!("{a:?} {}", e.name));
         if let Some(x) = &s.control_error {
-            return Err(x.clone());
+            return Err(x.clone().into());
         }
         let st = if a == ControlAction::Stop { Status::Stopped } else { Status::Running };
         s.status.insert(e.name.clone(), st);
@@ -170,7 +170,7 @@ impl Backend for FakeBackend {
         let mut s = self.state();
         s.calls.push(format!("delete {} keep_files={keep_files} keep_db={keep_db}", e.name));
         if let Some(x) = &s.delete_error {
-            return Err(x.clone());
+            return Err(x.clone().into());
         }
         s.servers.retain(|x| x.name != e.name);
         Ok(vec!["Deleted.".into()])
@@ -184,7 +184,7 @@ impl Backend for FakeBackend {
         s.calls.push(format!("delete {} keep_files={keep_files} keep_db={keep_db} db_password=set", e.name));
         if let Some(x) = &s.delete_error {
             if !x.contains("KORA_DB_ADMIN_PASSWORD") || pw == "wrong" {
-                return Err(x.clone());
+                return Err(x.clone().into());
             }
         }
         s.servers.retain(|x| x.name != e.name);
@@ -282,7 +282,7 @@ impl Backend for FakeBackend {
     fn notify_save(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()> {
         let mut s = self.state();
         if let Some(x) = &s.notify_save_error {
-            return Err(x.clone());
+            return Err(x.clone().into());
         }
         s.calls.push(format!("notify_save {} set={}", e.name, c.discord_webhook.is_some()));
         s.notify.insert(e.name.clone(), c.clone());
@@ -315,7 +315,7 @@ impl Backend for FakeBackend {
         let mut s = self.state();
         s.calls.push(format!("ports {} {} {}", e.name, p.game, p.txadmin));
         if let Some(x) = &s.ports_error {
-            return Err(x.clone());
+            return Err(x.clone().into());
         }
         if let Some(x) = s.servers.iter_mut().find(|x| x.name == e.name) {
             x.ports = PortsRecord { game: p.game, txadmin: p.txadmin };
@@ -349,7 +349,7 @@ impl Backend for FakeBackend {
         let mut s = self.state();
         s.calls.push(format!("firewall_open {}", e.name));
         match &s.firewall_open_error {
-            Some(x) => Err(x.clone()),
+            Some(x) => Err(x.clone().into()),
             None => Ok(vec![format!("Opened port {} (TCP and UDP) in the firewall.", e.ports.game)]),
         }
     }
@@ -388,10 +388,10 @@ impl Backend for FakeBackend {
         let mut s = self.state();
         s.calls.push(format!("asset_remove {} {name}", e.name));
         if let Some(x) = &s.asset_remove_error {
-            return Err(x.clone());
+            return Err(x.clone().into());
         }
         let Some(v) = s.assets.get_mut(&e.name).filter(|v| v.assets.iter().any(|a| a.name == name)) else {
-            return Err(format!("There is no paid asset called {name} on this server (not found)."));
+            return Err(format!("There is no paid asset called {name} on this server (not found).").into());
         };
         v.assets.retain(|a| a.name != name);
         Ok(vec![format!("{name} was removed.")])

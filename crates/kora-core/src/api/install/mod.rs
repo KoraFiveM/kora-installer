@@ -936,22 +936,22 @@ mod tests {
         w.firewall = true;
         let req = build_request(&w).unwrap();
         // A plain error in a step that must not be skipped: retry it, or change the answers.
-        let p = failure_problem(&req, "download failed", Some("build.artifact"));
+        let p = failure_problem(&req, "download failed".into(), Some("build.artifact"));
         assert_eq!((p.code.as_str(), p.message.as_str()), (codes::INSTALL_STEP_FAILED, "download failed"));
         assert_eq!(p.actions, vec![Action::RetryStep { step: "build.artifact".into() }, Action::ChangeAnswers { section: None }]);
         // A step that is safe to skip also offers that.
-        let p = failure_problem(&req, "no firewall", Some("system.firewall"));
+        let p = failure_problem(&req, "no firewall".into(), Some("system.firewall"));
         assert!(p.actions.contains(&Action::SkipStep { step: "system.firewall".into() }));
         // The step's own problem keeps its code and actions first; its own "change answers" is kept.
         let own = Problem::new(codes::INSTALL_DB_LOGIN, "login refused").with_action(Action::change_answers("database"));
-        let p = failure_problem(&req, &own.encode(), Some("prepare.tools"));
+        let p = failure_problem(&req, own.clone(), Some("prepare.tools"));
         assert_eq!(p.code, codes::INSTALL_DB_LOGIN);
         assert_eq!(p.actions, vec![Action::change_answers("database"), Action::RetryStep { step: "prepare.tools".into() }]);
         // Stopped before the first step: try the whole install again.
-        let p = failure_problem(&req, "ports taken", None);
+        let p = failure_problem(&req, "ports taken".into(), None);
         assert_eq!((p.code.as_str(), p.actions[0].clone()), (codes::FAILED, Action::Retry));
         // A full disk points at the folder first: retrying cannot help.
-        let p = failure_problem(&req, "Not enough free disk space on the disk holding /srv/a: Kora needs about 4.6 GiB.", None);
+        let p = failure_problem(&req, "Not enough free disk space on the disk holding /srv/a: Kora needs about 4.6 GiB.".into(), None);
         assert_eq!(p.actions[0], Action::change_answers("name"), "{:?}", p.actions);
     }
 

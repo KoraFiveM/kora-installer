@@ -624,12 +624,12 @@ mod tests {
             "http://hooks.example.com@127.0.0.1/",
         ] {
             let e = public_webhook(bad, &dns).unwrap_err();
-            assert!(e.contains("public internet address"), "{bad}: {e}");
+            assert!(e.to_string().contains("public internet address"), "{bad}: {e}");
         }
         // `\` counts as `/` for the sender, so this would go to 127.0.0.1.
         let e = public_webhook("http://127.0.0.1:8080\\@hooks.example.com/", &dns).unwrap_err();
-        assert!(e.contains("backslash"), "{e}");
-        assert!(public_webhook("https://nowhere.invalid/", &dns).unwrap_err().contains("Could not look up"));
+        assert!(e.to_string().contains("backslash"), "{e}");
+        assert!(public_webhook("https://nowhere.invalid/", &dns).unwrap_err().to_string().contains("Could not look up"));
         assert!(public_webhook("https://hooks.example.com:x/", &dns).is_err());
         assert!(public_webhook("ftp://hooks.example.com/", &dns).is_err());
     }
@@ -655,7 +655,7 @@ mod tests {
         l.set_nonblocking(true).unwrap();
         let port = l.local_addr().unwrap().port();
         let e = post_json(&format!("http://127.0.0.1:{port}/x"), &json!({}), true).unwrap_err();
-        assert!(e.contains("Could not reach"), "{e}");
+        assert!(e.to_string().contains("Could not reach"), "{e}");
         assert!(l.accept().is_err(), "nothing connected");
         // Set on this computer: the same address is used as before.
         let t = std::thread::spawn(move || {

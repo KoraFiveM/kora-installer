@@ -223,8 +223,8 @@ mod tests {
     #[test]
     fn choosing_a_fork_owner_says_when_gh_is_missing_or_signed_out() {
         let e = resolve_owner_with(&Gh(|_| Err(std::io::Error::new(std::io::ErrorKind::NotFound, "gh"))), None).unwrap_err();
-        assert_eq!(Problem::decode(&e).code, codes::GH_MISSING);
+        assert_eq!(e.code, codes::GH_MISSING);
         let e = resolve_owner_with(&Gh(|_| out(1, "")), None).unwrap_err();
-        assert_eq!(Problem::decode(&e).code, codes::GH_SIGNED_OUT);
+        assert_eq!(e.code, codes::GH_SIGNED_OUT);
     }
 }

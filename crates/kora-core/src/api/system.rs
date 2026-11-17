@@ -590,6 +590,6 @@ mod tests {
     fn a_server_that_did_not_come_up_is_an_error_with_the_log_tail() {
         let (r, _) = run(false, false, ControlAction::Start);
         let m = r.unwrap_err();
-        assert!(m.contains("did not start properly: it crashed") && m.contains("| boom 2"), "{m}");
+        assert!(m.to_string().contains("did not start properly: it crashed") && m.to_string().contains("| boom 2"), "{m}");
     }
 }
