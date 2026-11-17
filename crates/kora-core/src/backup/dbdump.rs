@@ -152,6 +152,13 @@ fn env_for(c: &Credentials) -> Vec<(String, String)> {
 
 /// The dump command: one database, one snapshot, with routines, triggers and events.
 pub fn dump_spec(program: &str, c: &Credentials, no_tablespaces: bool) -> CommandSpec {
+    dump_spec_with(program, c, no_tablespaces, false)
+}
+
+/// [`dump_spec`], and `no_statistics` adds `--column-statistics=0`: a MySQL 8 `mysqldump` asks the server for
+/// `information_schema.COLUMN_STATISTICS`, which MariaDB and MySQL 5.7 do not have ("Unknown table
+/// 'column_statistics'"). Only added on that error: the other tools do not know the option.
+pub fn dump_spec_with(program: &str, c: &Credentials, no_tablespaces: bool, no_statistics: bool) -> CommandSpec {
     let mut args = connection_args(c);
     args.extend(
         ["--single-transaction", "--quick", "--routines", "--triggers", "--events", "--hex-blob", "--default-character-set=utf8mb4", "--skip-comments", "--no-tablespaces"]
@@ -161,6 +168,9 @@ pub fn dump_spec(program: &str, c: &Credentials, no_tablespaces: bool) -> Comman
     if !no_tablespaces {
         args.retain(|a| a != "--no-tablespaces");
     }
+    if no_statistics {
+        args.insert(0, "--column-statistics=0".to_string());
+    }
     args.push(c.database.clone());
     CommandSpec { program: program.to_string(), args, env: env_for(c), stdin: None }
 }
@@ -168,18 +178,31 @@ pub fn dump_spec(program: &str, c: &Credentials, no_tablespaces: bool) -> Comman
 /// Dump the server's database into `out`. Returns the size. A MySQL server that wants the PROCESS
 /// privilege for tablespaces is retried without them (the dump does not need them).
 pub fn dump(r: &dyn StreamRunner, program: &str, c: &Credentials, out: &Path) -> Result<u64, DbFailure> {
-    let attempt = |no_ts: bool| -> Result<CommandOutput, DbFailure> {
+    let attempt = |no_ts: bool, no_stats: bool| -> Result<CommandOutput, DbFailure> {
         let _ = std::fs::remove_file(out);
-        r.run_to_file(&dump_spec(program, c, no_ts), out).map_err(|e| match e {
+        r.run_to_file(&dump_spec_with(program, c, no_ts, no_stats), out).map_err(|e| match e {
             DbError::Io(io) if io.kind() == std::io::ErrorKind::StorageFull => DbFailure::DiskFull,
             DbError::Io(io) => DbFailure::Other(io.to_string()),
             DbError::Command(m) if m.contains("No such file") || m.contains("cannot find") || m.contains("not found") => DbFailure::ToolMissing,
             other => DbFailure::Other(other.to_string()),
         })
     };
-    let mut o = attempt(false)?;
-    if !o.ok() && o.stderr.to_ascii_lowercase().contains("process") && o.stderr.to_ascii_lowercase().contains("privilege") {
-        o = attempt(true)?;
+    let (mut no_ts, mut no_stats) = (false, false);
+    let mut o = attempt(no_ts, no_stats)?;
+    // Each known complaint is answered once, in whatever order the server raises them.
+    for _ in 0..2 {
+        let e = o.stderr.to_ascii_lowercase();
+        if o.ok() {
+            break;
+        }
+        if !no_ts && e.contains("process") && e.contains("privilege") {
+            no_ts = true;
+        } else if !no_stats && e.contains("column_statistics") {
+            no_stats = true;
+        } else {
+            break;
+        }
+        o = attempt(no_ts, no_stats)?;
     }
     if !o.ok() {
         let _ = std::fs::remove_file(out);
@@ -398,6 +421,8 @@ mod tests {
         assert!(!line.contains("connect-timeout"), "the dump tools reject it: {line}");
         assert!(dump_spec("x", &creds(), true).args.contains(&"--no-tablespaces".to_string()));
         assert!(!format!("{s:?}").contains("s3cr3t"));
+        assert!(!line.contains("column-statistics"), "only added after the server says it has no column statistics");
+        assert!(dump_spec_with("x", &creds(), false, true).args.contains(&"--column-statistics=0".to_string()));
     }
 
     #[test]
