@@ -24,6 +24,24 @@ use serde_json::{json, Value};
 use crate::remote::{Caller, Role};
 use crate::{blocking, ApiError, AppState};
 
+/// Failed scheduled backups go to the panel's alert list and, through it, to Discord and the generic webhook.
+struct MonitorAnnounce(kora_core::monitor::Monitor);
+
+impl kora_core::backup::scheduler::Announce for MonitorAnnounce {
+    fn failed(&self, e: &kora_core::installer::registry::ServerEntry, message: &str) {
+        self.0.raise_external(e, kora_core::monitor::AlertKind::BackupFailed, format!("The scheduled backup did not work: {message}"), kora_core::monitor::now_unix());
+    }
+    fn recovered(&self, e: &kora_core::installer::registry::ServerEntry) {
+        self.0.resolve_external(&e.name, kora_core::monitor::AlertKind::BackupFailed, kora_core::monitor::now_unix());
+    }
+}
+
+/// Start looking for due scheduled backups (they only run while the panel runs, see
+/// `kora_core::backup::scheduler`).
+pub fn start_scheduler(make: crate::BackendFactory, monitor: kora_core::monitor::Monitor) -> kora_core::backup::scheduler::Handle {
+    kora_core::backup::scheduler::spawn(make, std::sync::Arc::new(MonitorAnnounce(monitor)))
+}
+
 fn to_json<T: serde::Serialize>(v: &T) -> Result<Value, ApiError> {
     serde_json::to_value(v).map_err(|x| ApiError::internal(x.to_string()))
 }

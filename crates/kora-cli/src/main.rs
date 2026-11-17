@@ -8,6 +8,7 @@ use kora_core::elevate;
 use kora_core::installer::{self, host, registry};
 
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
+use crate::cmd::backup::BackupCmd;
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::helper::{helper, HelperCmd};
 use crate::cmd::install::{install, InstallArgs};
@@ -66,6 +67,11 @@ enum Command {
     },
     /// Can players reach a server? A checklist (running, firewall, router, internet) and the fixes.
     Reach(ReachArgs),
+    /// Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule.
+    Backup {
+        #[command(subcommand)]
+        cmd: BackupCmd,
+    },
     /// Discord notifications for update reports.
     Webhook {
         #[command(subcommand)]
@@ -221,6 +227,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Pr { .. }
             | Command::Webhook { .. }
             | Command::Reach(_)
+            | Command::Backup { .. }
             | Command::SelfUpdate { .. }
             | Command::Panel(_),
         ) => K::Other,
@@ -414,6 +421,7 @@ fn main() {
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
         Some(Command::Reach(a)) => cmd::reach::run(a),
+        Some(Command::Backup { cmd }) => cmd::backup::run(cmd),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),

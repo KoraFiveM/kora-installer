@@ -13,6 +13,7 @@ Commands:
   status         Show registered servers
   self-update    Update the kora program itself to the newest stable release (checksum-verified)
   reach          Can players reach a server? A checklist (running, firewall, router, internet) and the fixes
+  backup         Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
@@ -135,11 +136,11 @@ Options:
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
   -y, --yes
           Do not ask anything (implied by any other option)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
   -h, --help
           Print help
@@ -589,6 +590,227 @@ Options:
 
       --json
           Print the result as JSON
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup =====
+Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule
+
+Usage: kora backup [OPTIONS] <COMMAND>
+
+Commands:
+  create    Make a backup of a server (database, settings, txAdmin data, resources)
+  list      List the backups of a server
+  verify    Check every file of a backup against its checksums
+  restore   Put a backup back on the server (a safety copy of the server as it is now is made first)
+  undo      Undo the last restore (puts the safety copy back)
+  delete    Delete one backup
+  prune     Remove old backups under the retention rules
+  schedule  Show or change where backups go, how many are kept, and the schedule
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup create =====
+Make a backup of a server (database, settings, txAdmin data, resources)
+
+Usage: kora backup create [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --encrypt
+          Protect the file with a password (see --password-stdin; KORA_BACKUP_PASSWORD also works)
+
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --everything
+          Keep every resource in full (a bigger file that needs no internet to restore)
+
+      --stop-server
+          Stop the server while the backup runs (a strictly consistent copy), and start it again
+
+      --folder <DIR>
+          Keep this backup in another folder
+
+      --for-move
+          A copy to move the server to another computer: needs a password and is never removed by the retention rules
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup list =====
+List the backups of a server
+
+Usage: kora backup list [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup verify =====
+Check every file of a backup against its checksums
+
+Usage: kora backup verify [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          The backup's number (see `kora backup list`), or `latest`
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup restore =====
+Put a backup back on the server (a safety copy of the server as it is now is made first)
+
+Usage: kora backup restore [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          The backup's number, or `latest`
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup undo =====
+Undo the last restore (puts the safety copy back)
+
+Usage: kora backup undo [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup delete =====
+Delete one backup
+
+Usage: kora backup delete [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          
+
+Options:
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup prune =====
+Remove old backups under the retention rules
+
+Usage: kora backup prune [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup schedule =====
+Show or change where backups go, how many are kept, and the schedule
+
+Usage: kora backup schedule [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --daily <HH:MM>
+          Every day at HH:MM (24 hours, this computer's time)
+
+      --weekly <DAY> <HH:MM>
+          Every week on DAY (mon..sun) at HH:MM
+
+      --off
+          Turn scheduled backups off
+
+      --keep-last <N>
+          Keep this many of the newest backups (0 = no limit)
+
+      --keep-days <DAYS>
+          Also keep the newest backup of each day for this many days (0 = off)
+
+      --folder <DIR>
+          Keep backups in this folder (outside the server folder)
+
+      --default-folder
+          Go back to Kora's own backups folder
+
+      --stop <STOP>
+          Stop the server during scheduled backups
+          
+          [possible values: on, off]
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

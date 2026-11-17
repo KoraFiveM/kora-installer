@@ -728,6 +728,25 @@ mod tests {
         assert!(!remote_allowed(Op::TxAdminTicket, Role::Operator, Via::Tailscale, true));
     }
 
+    /// Backups: reading and making one is operator work; anything that replaces data, removes a backup,
+    /// changes where they go, or hands out the secrets inside one is an administrator's, and held back from a
+    /// user-token session until the remote-destructive switch is on.
+    #[test]
+    fn backup_roles() {
+        for op in [Op::BackupsList, Op::BackupCreate, Op::BackupVerify, Op::BackupPreview] {
+            assert_eq!(min_role(op), Role::Operator, "{op:?}");
+            assert!(!destructive(op), "{op:?}");
+        }
+        for op in [Op::BackupRestore, Op::BackupUndo, Op::BackupDelete, Op::BackupDownload, Op::BackupSettingsSet, Op::BackupPrune] {
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(destructive(op) && !local_only(op), "{op:?}");
+            assert!(!remote_allowed(op, Role::Operator, Via::Tailscale, true), "{op:?}: an operator may not");
+            assert!(!remote_allowed(op, Role::Admin, Via::Token, false), "{op:?}: a token admin needs the switch");
+            assert!(remote_allowed(op, Role::Admin, Via::Tailscale, false), "{op:?}: a Tailscale admin may");
+        }
+        assert!(Op::BackupVerify.is_read_only_job() && Op::BackupRestore.is_job() && Op::BackupCreate.is_job());
+    }
+
     #[test]
     fn viewer_ops_are_reads() {
         for op in Op::ALL {
@@ -740,7 +759,23 @@ mod tests {
 
     #[test]
     fn the_listed_destructive_ops() {
-        let want = [Op::ServerDelete, Op::ServerUnregister, Op::UninstallRun, Op::AppUninstall, Op::ConsoleSend, Op::SelfUpdateApply, Op::ScheduleSet, Op::ScheduleRemove, Op::TxAdminTicket];
+        let want = [
+            Op::ServerDelete,
+            Op::ServerUnregister,
+            Op::UninstallRun,
+            Op::AppUninstall,
+            Op::ConsoleSend,
+            Op::SelfUpdateApply,
+            Op::ScheduleSet,
+            Op::ScheduleRemove,
+            Op::TxAdminTicket,
+            Op::BackupRestore,
+            Op::BackupUndo,
+            Op::BackupDelete,
+            Op::BackupDownload,
+            Op::BackupSettingsSet,
+            Op::BackupPrune,
+        ];
         for op in Op::ALL {
             assert_eq!(destructive(*op), want.contains(op), "{op:?}");
         }
