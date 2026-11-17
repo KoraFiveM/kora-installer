@@ -75,6 +75,14 @@ pub trait GitOps {
     fn is_ancestor(&self, _repo: &Path, _ancestor: &str, _descendant: &str) -> GitResult<bool> {
         Err(UpdateError::Git("cannot compare commits here".into()))
     }
+    /// The branch checked out now: `Some("HEAD")` when detached, `None` when unknown (default: unknown, so nothing is assumed).
+    fn current_branch(&self, _repo: &Path) -> GitResult<Option<String>> {
+        Ok(None)
+    }
+    /// Check out `branch` (`"HEAD"` = detach). Used to put a resource back on the branch a snapshot was taken on.
+    fn switch_branch(&self, _repo: &Path, _branch: &str) -> GitResult<()> {
+        Err(UpdateError::Git("switching branches is not supported here".into()))
+    }
     /// Fetch what each target needs, possibly in parallel; one result per target, in order. Default: one by one.
     fn fetch_many(&self, targets: &[&UpdateTarget], _mode: FetchMode) -> Vec<GitResult<()>> {
         targets.iter().map(|t| self.fetch(&t.path)).collect()
@@ -206,11 +214,14 @@ pub enum SkipReason {
     Dirty,
     Diverged,
     Error(String),
+    /// The person put this resource on another branch or a pull request on purpose (Development): updates leave it
+    /// alone. Carries the branch it is on (`"HEAD"` = a single commit). Informational, never "needs attention".
+    OtherBranch(String),
 }
 
 impl SkipReason {
     fn needs_attention(&self) -> bool {
-        !matches!(self, SkipReason::LocalCommits)
+        !matches!(self, SkipReason::LocalCommits | SkipReason::OtherBranch(_))
     }
     fn text(&self) -> String {
         match self {
@@ -218,6 +229,7 @@ impl SkipReason {
             SkipReason::Dirty => "uncommitted changes".into(),
             SkipReason::Diverged => "diverged from upstream (it has commits of its own and upstream has new ones); skipped, nothing was changed".into(),
             SkipReason::Error(e) => format!("error: {e}"),
+            SkipReason::OtherBranch(b) => format!("{}; not updated (go back to the normal version in the Branches tab to update it again)", crate::git::branches::describe_other(b)),
         }
     }
 }
@@ -254,8 +266,21 @@ impl UpdatePlan {
     }
 }
 
+/// Development: the branch a resource is on when it is not the one updates follow (`upstream/<branch>`); `None` = fine.
+pub(crate) fn off_branch(git: &dyn GitOps, path: &Path, followed: &str) -> Option<String> {
+    let want = followed.strip_prefix("upstream/")?;
+    match git.current_branch(path) {
+        Ok(Some(cur)) if cur != want => Some(cur),
+        _ => None,
+    }
+}
+
 fn classify_fetched(git: &dyn GitOps, t: &UpdateTarget) -> GitResult<PlanItem> {
     let current = git.head_commit(&t.path, "HEAD")?;
+    // Deliberately on another branch or a pull request: never pulled, never "up to date", never clobbered.
+    if let Some(cur) = off_branch(git, &t.path, &t.upstream_ref) {
+        return Ok(PlanItem { target: t.clone(), upstream: current.clone(), current, behind: 0, action: Action::Skipped(SkipReason::OtherBranch(cur)) });
+    }
     let upstream = git.head_commit(&t.path, &t.upstream_ref)?;
     let behind = git.behind_count(&t.path, &t.upstream_ref)?;
     let ahead = git.is_diverged(&t.path, &t.upstream_ref)?;
@@ -331,6 +356,10 @@ pub struct SnapshotEntry {
     pub id: String,
     pub path: PathBuf,
     pub commit: String,
+    /// The branch the resource was on when the snapshot was taken (`"HEAD"` = none). A rollback goes back to it first, so
+    /// it never resets a branch the person has switched to since. Older snapshots do not have it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// Previous commits, saved before applying (stored under `snapshots/`).
@@ -495,7 +524,19 @@ pub fn record_holds(server_dir: &Path, plan: &UpdatePlan, report: &UpdateReport)
 pub fn rollback_snapshot(git: &dyn GitOps, snap: &Snapshot) -> Vec<(String, Result<(), String>)> {
     snap.entries
         .iter()
-        .map(|e| (e.id.clone(), git.reset_to(&e.path, &e.commit).map_err(|x| x.to_string())))
+        .map(|e| {
+            // Back on the branch the snapshot was taken on first: a reset must never rewrite some other branch.
+            if let Some(b) = &e.branch {
+                if let Ok(Some(now)) = git.current_branch(&e.path) {
+                    if &now != b {
+                        if let Err(x) = git.switch_branch(&e.path, b) {
+                            return (e.id.clone(), Err(format!("could not go back to {} first: {x}", crate::git::branches::describe_other(b).replace("on branch ", "branch "))));
+                        }
+                    }
+                }
+            }
+            (e.id.clone(), git.reset_to(&e.path, &e.commit).map_err(|x| x.to_string()))
+        })
         .collect()
 }
 
@@ -764,7 +805,7 @@ pub fn run_update_with(
         created_unix: opts.now_unix,
         entries: apply
             .iter()
-            .map(|i| SnapshotEntry { id: i.target.id.clone(), path: i.target.path.clone(), commit: i.current.clone() })
+            .map(|i| SnapshotEntry { id: i.target.id.clone(), path: i.target.path.clone(), commit: i.current.clone(), branch: git.current_branch(&i.target.path).ok().flatten() })
             .collect(),
     }
     .save(opts.snapshot_file)?;
@@ -1135,7 +1176,7 @@ mod tests {
     #[test]
     fn manual_snapshot_rollback() {
         let git = FakeGit::new(vec![("/a", repo("new", "new", 0))]);
-        let s = Snapshot { created_unix: 1, entries: vec![SnapshotEntry { id: "a".into(), path: "/a".into(), commit: "old".into() }] };
+        let s = Snapshot { created_unix: 1, entries: vec![SnapshotEntry { id: "a".into(), path: "/a".into(), commit: "old".into(), branch: None }] };
         assert!(rollback_snapshot(&git, &s)[0].1.is_ok());
         assert_eq!(git.head("/a"), "old");
     }
@@ -1248,6 +1289,7 @@ mod tests {
                     id: format!("r{i}"),
                     path: "/x".into(),
                     commit: "c".into(),
+                    branch: None,
                 }],
             }
             .save(&d.join(format!("{id}.json")))

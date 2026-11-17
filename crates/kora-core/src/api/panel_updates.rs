@@ -45,6 +45,10 @@ fn skip_text(r: &SkipReason) -> String {
             "It has changes of your own and upstream has new ones, so it was not touched.".into()
         }
         SkipReason::Error(e) => e.clone(),
+        SkipReason::OtherBranch(b) => format!(
+            "It is {}, so it was not updated. Go back to the normal version to update it again.",
+            crate::git::branches::describe_other(b)
+        ),
     }
 }
 
