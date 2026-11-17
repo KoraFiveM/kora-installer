@@ -167,83 +167,6 @@ fn windows_install_creates_everything_and_is_idempotent() {
 }
 
 #[test]
-fn desktop_shortcut_is_optional() {
-    let l = win_layout();
-    let (r, c) = running("0.2.0", b"p", r"C:\x\kora.exe");
-    let mut f = machine_with(&r, c);
-    install_app_with(&mut f, &l, &r, &AppOptions { desktop_shortcut: false, ..OPTS }).unwrap();
-    assert!(f.shortcuts.contains_key(l.start_menu.as_ref().unwrap()));
-    assert!(!f.shortcuts.contains_key(l.desktop.as_ref().unwrap()));
-}
-
-#[test]
-fn dry_run_lists_every_change_and_changes_nothing() {
-    let l = win_layout();
-    let (r, c) = running("0.2.0", b"p", r"C:\x\kora.exe");
-    let mut f = machine_with(&r, c);
-    let before_path = f.path.clone();
-    let out = install_app_with(&mut f, &l, &r, &AppOptions { dry_run: true, ..OPTS }).unwrap();
-    assert!(out.dry_run);
-    let text = out.changes.join("\n");
-    for want in ["Copy C:\\x\\kora.exe", "installed version 0.2.0", "machine PATH", "Start Menu", "Desktop", "Apps & features", "always run as administrator"] {
-        assert!(text.contains(want), "missing {want:?} in:\n{text}");
-    }
-    assert_eq!(out.changes.len(), 7, "copy, state, PATH, broadcast, 2 shortcuts, uninstall key: {text}");
-    assert!(f.log.borrow().is_empty() && f.shortcuts.is_empty() && f.key.is_none() && f.path == before_path && f.broadcasts == 0);
-}
-
-#[test]
-fn upgrade_replaces_downgrade_is_refused_unless_forced() {
-    let l = win_layout();
-    let (old, oc) = running("0.2.0", b"old", r"C:\x\kora.exe");
-    let mut f = machine_with(&old, oc);
-    install_app_with(&mut f, &l, &old, &OPTS).unwrap();
-
-    let (new, nc) = running("0.3.0", b"newer", r"C:\y\kora.exe");
-    f.files.insert(new.exe.clone(), nc.clone());
-    let up = install_app_with(&mut f, &l, &new, &OPTS).unwrap();
-    assert!(up.changes.iter().any(|c| c.starts_with("Replace")), "{:?}", up.changes);
-    assert_eq!(f.files[&l.exe], nc);
-    assert_eq!(f.key.as_ref().unwrap().display_version, "0.3.0");
-
-    let (older, oc2) = running("0.2.5", b"middle", r"C:\z\kora.exe");
-    f.files.insert(older.exe.clone(), oc2.clone());
-    let down = install_app_with(&mut f, &l, &older, &OPTS).unwrap();
-    assert!(!down.changed(), "{:?}", down.changes);
-    assert!(down.notes.iter().any(|n| n.contains("newer") && n.contains("--force")));
-    assert_eq!(f.files[&l.exe], nc, "never downgraded");
-    assert_eq!(f.key.as_ref().unwrap().display_version, "0.3.0");
-
-    let forced = install_app_with(&mut f, &l, &older, &AppOptions { force: true, ..OPTS }).unwrap();
-    assert!(forced.changed());
-    assert_eq!(f.files[&l.exe], oc2);
-    assert_eq!(f.key.as_ref().unwrap().display_version, "0.2.5");
-}
-
-#[test]
-fn same_version_with_different_content_is_refreshed_identical_is_left() {
-    let l = win_layout();
-    let (a, ac) = running("0.2.0", b"build-a", r"C:\x\kora.exe");
-    let mut f = machine_with(&a, ac);
-    install_app_with(&mut f, &l, &a, &OPTS).unwrap();
-    let (b, bc) = running("0.2.0", b"build-b", r"C:\y\kora.exe");
-    f.files.insert(b.exe.clone(), bc.clone());
-    assert!(install_app_with(&mut f, &l, &b, &OPTS).unwrap().changed());
-    assert_eq!(f.files[&l.exe], bc);
-}
-
-#[test]
-fn running_from_the_installed_copy_does_not_copy_onto_itself() {
-    let l = win_layout();
-    let r = Running { exe: l.exe.clone(), version: "0.2.0".into(), sha256: hash(b"x") };
-    let mut f = Fake { path: Some(String::new()), ..Fake::default() };
-    f.files.insert(l.exe.clone(), b"x".to_vec());
-    install_app_with(&mut f, &l, &r, &OPTS).unwrap();
-    assert!(!f.log.borrow().iter().any(|l| l.starts_with("copy")));
-    assert!(f.key.is_some());
-}
-
-#[test]
 fn uninstall_removes_only_what_the_app_made() {
     let l = win_layout();
     let (r, c) = running("0.2.0", b"p", r"C:\x\kora.exe");
@@ -611,6 +534,79 @@ mod per_user {
         let mut f = Fake::default();
         let out = install_user_with(&mut f, &ul, Path::new("/home/sam/.local/bin/kora"), None, &UserOptions::default()).unwrap();
         assert!(out.changes.is_empty() && out.notes.iter().any(|n| n.contains("no desktop")), "{out:?}");
+    }
+
+    #[test]
+    fn removing_the_windows_shortcuts_takes_only_ours_and_leaves_the_program() {
+        let ul = win_user();
+        let mut f = fake_with(EXE);
+        install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        assert!(user_status_with(&f, &ul).any());
+        // a dry run lists both and changes nothing
+        let dry = uninstall_user_with(&mut f, &ul, true).unwrap();
+        assert_eq!(dry.len(), 2, "{dry:?}");
+        assert!(dry.iter().all(|l| l.contains("shortcut") || l.contains(".lnk")), "{dry:?}");
+        assert_eq!(f.shortcuts.len(), 2);
+        let out = uninstall_user_with(&mut f, &ul, false).unwrap();
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(f.shortcuts.is_empty());
+        assert!(f.files.contains_key(&PathBuf::from(EXE)), "the program is not removed");
+        assert!(!user_status_with(&f, &ul).any());
+        assert!(uninstall_user_with(&mut f, &ul, false).unwrap().is_empty(), "again: nothing to do");
+    }
+
+    #[test]
+    fn a_shortcut_with_our_name_that_is_not_ours_is_left_alone() {
+        let ul = win_user();
+        let mut f = fake_with(EXE);
+        let (start, desk) = (ul.start_menu.clone().unwrap(), ul.desktop.clone().unwrap());
+        // the old machine-wide app's shortcut ran `kora manager` as administrator
+        let old = ShortcutSpec { path: start.clone(), target: r"C:\Program Files\Kora\kora.exe".into(), args: "manager".into(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: true, minimized: false };
+        // someone else's program
+        let other = ShortcutSpec { path: desk.clone(), target: r"C:\games\other.exe".into(), args: String::new(), ..old.clone() };
+        f.shortcuts.insert(start.clone(), old);
+        f.shortcuts.insert(desk.clone(), other);
+        let out = uninstall_user_with(&mut f, &ul, false).unwrap();
+        assert_eq!(f.shortcuts.len(), 2, "both stay");
+        assert_eq!(out.iter().filter(|l| l.contains("left alone")).count(), 2, "{out:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removing_the_linux_launcher_takes_the_launcher_and_its_picture_only() {
+        let ul = linux_user(true);
+        let exe = "/home/sam/.local/bin/kora";
+        let mut f = Fake::default();
+        f.files.insert(PathBuf::from(exe), b"program".to_vec());
+        install_user_with(&mut f, &ul, Path::new(exe), None, &UserOptions::default()).unwrap();
+        assert!(user_status_with(&f, &ul).any());
+        let dry = uninstall_user_with(&mut f, &ul, true).unwrap();
+        assert_eq!(dry.len(), 2, "{dry:?}");
+        assert!(f.files.contains_key(ul.desktop_entry.as_ref().unwrap()), "a dry run changes nothing");
+        let out = uninstall_user_with(&mut f, &ul, false).unwrap();
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(!f.files.contains_key(ul.desktop_entry.as_ref().unwrap()) && !f.files.contains_key(ul.icon_png.as_ref().unwrap()));
+        assert!(f.files.contains_key(&PathBuf::from(exe)), "the program stays");
+        assert!(uninstall_user_with(&mut f, &ul, false).unwrap().is_empty());
+        // someone else's launcher and picture are never removed
+        let mut g = Fake::default();
+        g.files.insert(ul.desktop_entry.clone().unwrap(), b"[Desktop Entry]\nName=Mine\n".to_vec());
+        g.files.insert(ul.icon_png.clone().unwrap(), b"not our picture".to_vec());
+        let out = uninstall_user_with(&mut g, &ul, false).unwrap();
+        assert_eq!(g.files.len(), 2, "{out:?}");
+        assert!(out.iter().any(|l| l.contains("not made by Kora")), "{out:?}");
+    }
+
+    #[test]
+    fn the_old_app_removal_does_not_touch_the_new_shortcuts() {
+        // "Tidy up" makes the new shortcuts, then removes the old app: that must keep the new ones.
+        let (ul, old) = (win_user(), win_layout());
+        let (r, c) = running("0.6.5", b"old-program", r"C:\x\kora.exe");
+        let mut f = machine_with(&r, c);
+        install_app_with(&mut f, &old, &r, &OPTS).unwrap();
+        install_user_with(&mut f, &ul, Path::new(EXE), Some(&old.dir), &UserOptions { desktop_shortcut: true, dry_run: false }).unwrap();
+        uninstall_app_with(&mut f, &old, false).unwrap();
+        assert!(user_status_with(&f, &ul).in_place(), "the new way in survives the old app's removal");
     }
 
     #[test]

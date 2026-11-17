@@ -192,10 +192,11 @@ Off by default: nothing above changes for `kora panel` as it is today.
   - *admin*: everything else, subject to the next two rules.
   - *local-only* (refused remotely for every role): `remote_get/set`, `users_list/add/remove`,
     `server_open_folder`.
-  - *remote-destructive* (refused remotely, even for admins, unless `allow_remote_destructive` is on):
-    `server_delete`, `server_unregister`, `uninstall_run`, `app_uninstall`, `console_send`,
-    `install_start`, `self_update_apply`, `schedule_set`, `schedule_remove`. Turning it on does not
-    skip the typed-name confirmation the handlers enforce.
+  - *remote-destructive* (refused for **token** sessions, even admins, unless `allow_remote_destructive` is on;
+    Tailscale admins are not held back): `server_delete`, `server_unregister`, `uninstall_run`,
+    `app_uninstall`, `console_send`, `self_update_apply`, `schedule_set`, `schedule_remove`. Turning it on
+    does not skip the typed-name confirmation. *Install* (`install_start`, `install_resume`) is admin-only
+    and allowed for every remote admin (v0.7.0; it used to be remote-destructive).
 - **Sessions.** Same cookie flow for local and remote. A session records provider, name and (remote) the
   role it was made with; every request looks the user up again, so a removed user, a changed role, or
   Tailscale being switched off ends the session (401, the UI shows its sign-in screen). A cookie made for a
@@ -204,7 +205,7 @@ Off by default: nothing above changes for `kora panel` as it is today.
   cannot lock the owner out of the local one.
 - **Who am I?** `GET /meta` carries `identity` (`null` when not signed in, else `{name, provider:
   local|tailscale|token, role}`), `remote` (this request came from another computer) and
-  `allow_remote_destructive`. The UI's `useRole()` reads them to hide or disable what the role cannot do.
+  `allow_remote_destructive` (true for a Tailscale identity, else the setting). The UI's `useRole()` reads them to hide or disable what the role cannot do.
 - **Settings file.** `<kora home>/panel.json`, mode 0600 on Unix, written atomically. The panel notices
   changes made by `kora panel user ...` while it runs.
 - **Threat model.** See the remote access section of the wave-3 report: a viewer sees status only;

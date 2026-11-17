@@ -83,7 +83,7 @@ describe('scenarios', () => {
     renderApp(<SettingsPage />)
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Tidy up old shortcuts' }))
     const cmd = await screen.findByLabelText('Command to run')
-    await waitFor(() => expect(cmd).toHaveTextContent('sudo kora app uninstall --yes'))
+    await waitFor(() => expect(cmd).toHaveTextContent('sudo kora uninstall --app --yes'))
     expect(screen.getAllByText(/needs administrator rights/i).length).toBeGreaterThan(0)
   })
 

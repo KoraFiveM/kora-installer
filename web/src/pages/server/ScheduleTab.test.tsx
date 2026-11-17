@@ -27,7 +27,7 @@ describe('ScheduleTab', () => {
     const button = screen.getByRole('button', { name: 'Turn schedule off' })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('title', expect.stringContaining('kora panel remote-actions on'))
-    expect(screen.getByText(/turned off for remote sign-ins.*kora panel remote-actions on/)).toBeInTheDocument()
+    expect(screen.getByText(/turned off for sign-ins made with a token.*kora panel remote-actions on/)).toBeInTheDocument()
   })
 
   it('says what was saved', async () => {

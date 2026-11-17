@@ -251,7 +251,11 @@ pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st)
         "node": hostname(),
         "identity": caller.identity,
         "remote": caller.remote,
-        "allow_remote_destructive": caller.remote && caller.identity.is_some() && st.remote.config().allow_remote_destructive,
+        // May this remote session use the destructive actions? A Tailscale identity always may; a token
+        // session only once `kora panel remote-actions on` has been run. (Installing needs neither.)
+        "allow_remote_destructive": caller.remote && caller.identity.as_ref().is_some_and(|i| {
+            i.provider == remote::Provider::Tailscale || st.remote.config().allow_remote_destructive
+        }),
     }))
 }
 

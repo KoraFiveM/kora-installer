@@ -8,7 +8,6 @@ import { installMock } from '@/api/mock'
 import { api } from '@/api/client'
 import type { InstallRequest, Meta } from '@/api/types'
 import { AlertsProvider } from '@/lib/app'
-import { REMOTE_ACTIONS_COMMAND } from './install/access'
 import { renderApp } from '@/test/utils'
 
 beforeAll(() => {
@@ -302,32 +301,32 @@ describe('Install wizard: every step', () => {
 })
 
 describe('Install wizard: who may install', () => {
-  it('tells a remote admin up front that installing is off, with the command, and asks for nothing', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    renderWithMeta({ remote: true, allow_remote_destructive: false, identity: { name: 'sam', provider: 'local', role: 'admin' } })
-    const notice = await screen.findByRole('alert')
-    expect(notice).toHaveTextContent('Installing a server is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora (over SSH is fine):')
-    expect(notice).toHaveTextContent('Then reload this page.')
-    const cmd = notice.querySelector('code')
-    expect(cmd).toHaveTextContent(REMOTE_ACTIONS_COMMAND)
-    expect(REMOTE_ACTIONS_COMMAND).toBe('kora panel remote-actions on')
-    expect(screen.getByRole('link', { name: 'Back to your servers' })).toHaveAttribute('href', '/')
-    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument()
+  it('lets a remote token admin install while the destructive actions are off', async () => {
+    renderWithMeta({ remote: true, allow_remote_destructive: false, identity: { name: 'sam', provider: 'token', role: 'admin' } })
+    expect(await screen.findByLabelText('Licence key')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('offers "Add an existing server" on the first step, so the wizard is never a dead end', async () => {
+    renderWithMeta({ remote: false, identity: { name: 'sam', provider: 'local', role: 'admin' } })
+    expect(await screen.findByRole('link', { name: 'Add an existing server' })).toHaveAttribute('href', '/?add=1')
+  })
+
+  it('lets a Tailscale admin install', async () => {
+    renderWithMeta({ remote: true, allow_remote_destructive: true, identity: { name: 'sam', provider: 'tailscale', role: 'admin' } })
+    expect(await screen.findByLabelText('Licence key')).toBeInTheDocument()
+  })
+
+  it('still stops a remote operator from installing, with the reason', async () => {
+    renderWithMeta({ remote: true, identity: { name: 'kim', provider: 'tailscale', role: 'operator' } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your account (operator) cannot do this. Ask an administrator for admin access.')
     expect(screen.queryByLabelText('Licence key')).not.toBeInTheDocument()
-    await new Promise((r) => setTimeout(r, 50))
-    expect(fetchSpy).not.toHaveBeenCalled()
-    fetchSpy.mockRestore()
   })
 
   it('tells someone who is not an administrator why, instead of showing the steps', async () => {
     renderWithMeta({ remote: false, identity: { name: 'kim', provider: 'local', role: 'operator' } })
     expect(await screen.findByRole('alert')).toHaveTextContent('Your account (operator) cannot do this. Ask an administrator for admin access.')
     expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument()
-  })
-
-  it('shows the steps to a remote admin once remote actions are switched on', async () => {
-    renderWithMeta({ remote: true, allow_remote_destructive: true, identity: { name: 'sam', provider: 'local', role: 'admin' } })
-    expect(await screen.findByLabelText('Licence key')).toBeInTheDocument()
   })
 })
 

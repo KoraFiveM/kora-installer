@@ -31,6 +31,17 @@ pub enum Provider {
     Token,
 }
 
+impl Provider {
+    /// How the remote-actions rules see this session. Anything that is not a verified Tailscale identity
+    /// is treated like a token (the conservative choice).
+    pub fn via(self) -> roles::Via {
+        match self {
+            Provider::Tailscale => roles::Via::Tailscale,
+            Provider::Local | Provider::Token => roles::Via::Token,
+        }
+    }
+}
+
 /// The signed-in user as the UI sees it.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Identity {

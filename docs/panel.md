@@ -37,7 +37,7 @@ kora
 
 Kora makes sure the panel runs in the background (so monitoring and alerts keep working), then opens your browser at it.
 It never asks for administrator rights. With no servers yet the panel opens straight into the install wizard.
-`kora manager` does the same, and `kora install` (with no options) opens the install page.
+`kora install` (with no options) opens the install page. (The old name `kora manager` still works and does the same as `kora`.)
 
 What `kora` does when things are not simple:
 
@@ -144,11 +144,24 @@ waiting, and buttons to start, stop and restart. From here you can:
 
 If a server's folder has gone missing, the list says so rather than hiding it.
 
+Each server in the list (and its Overview) has three buttons:
+
+- **Open txAdmin:** opens txAdmin in a new tab. From the computer that runs Kora it uses `localhost`; from another
+  computer it uses the name you reached the panel by plus txAdmin's port. txAdmin's port is closed to other computers by
+  default, so if the page does not load, forward it like the panel's own (`ssh -L 40120:localhost:40120 ...`). Through an
+  SSH tunnel to the panel, `localhost` is your own computer, so add that port to the tunnel too.
+- **Open folder** / **Copy path:** at the computer that runs Kora, with a desktop in front of it, it opens the server's
+  folder in the file manager. From anywhere else (Tailscale, a token sign-in, an SSH tunnel, a computer with no desktop)
+  it is **Copy path** instead, because opening a window nobody is looking at would do nothing useful.
+- **Copy connect address:** this computer's address on your network with the server's game port, for players on the same
+  network. Players on the internet need your public address (or domain name) with the same port, and the port forwarded
+  on your router or opened with your hosting provider. Kora cannot see your public address.
+
 ## 4. A server's tabs
 
 | Tab | What it is for |
 |---|---|
-| Overview | State, ports, the update badge, start / stop / restart, open the server folder (only when you are on that computer). |
+| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin and the connect address. |
 | Console | Live server output and a box to send commands. The first time, Kora offers to add a small resource called `kora_console`; it loads on the next server start. |
 | Logs | Pick a log file and read its latest lines. |
 | Resources | **Updates** at the top: check for newer versions, pick what to update, choose what happens about restarts, and roll back to an earlier snapshot (same as `kora update`). Below it the installed resources, each with buttons to check it for updates and to start, stop or restart it on a running server (needs the live console from the Console tab), and the catalogue of resources you can add (same as `kora add-resources`). What the tab shows stays when you open another tab and come back. |
@@ -189,7 +202,7 @@ where you left off" the next time. The wizard also checks free disk space before
   Files or /opt/kora, and shortcuts that ask for administrator rights) it offers **Tidy up old shortcuts**, also as a
   notice on the servers screen. That makes the new shortcuts first, so the old ones keep working until the end, then removes
   the old copy. Removing the old copy needs administrator rights: the panel shows the command to run
-  (`kora app uninstall --yes`) or, with the helper installed, does it itself.
+  (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
   and databases are kept unless you tick them.
@@ -329,17 +342,35 @@ Managing remote access and users from the panel is only possible from a local se
 hours idle or 7 days in total, and at once when the account is removed or its role changes. The sign-in link from
 `kora panel` only works on the computer itself (or through an SSH tunnel), never remotely.
 
-**Destructive actions are off for remote sessions by default.** These only work from a local session, even for a
-remote admin: deleting a server, unregistering it (removing it from Kora's list), uninstalling Kora, removing the Kora
-app, sending console commands, installing a server, updating Kora, and setting or removing restart schedules. To allow
-them for remote admins, run this on the computer that runs Kora:
+**What a remote administrator can do depends on how they signed in.**
+
+| | Tailscale admin | Token admin |
+|---|---|---|
+| Install a new server (start an install, resume a paused one) | yes | yes |
+| Manage servers: start/stop, settings, resources, snapshots, ports, GitHub | yes | yes |
+| Delete a server, unregister a server, uninstall Kora, remove the Kora app | yes | **off** until `remote actions` is on |
+| Send console commands, update Kora, set or remove restart schedules | yes | **off** until `remote actions` is on |
+| Open a server's folder, manage users and remote access, restart the panel | never (this computer only) | never (this computer only) |
+
+An SSH tunnel is a local session: everything works. Viewer and operator roles are unchanged (no installs, no
+destructive actions, whatever the setting).
+
+Why the difference: a Tailscale sign-in is checked by the Tailscale service on this computer, so it names a real
+person on a device they have signed in. A token is a secret in a link: it can be pasted into a chat or left in a
+backup, and whoever holds it *is* that user. A leaked token that can only install can be undone by removing the
+server it made. A leaked token that can delete cannot be undone, so deleting stays off for tokens until someone on
+the computer that runs Kora turns it on. The typed-name confirmation for deleting always applies.
+
+When a token session asks for one of those, the panel says why and shows the command. To allow them for token
+administrators, run this on the computer that runs Kora (over SSH is fine):
 
 ```sh
 kora panel remote-actions on       # off turns them off again; status shows the setting
 ```
 
 or use the switch in Settings > Remote access from a local session. A running panel uses the new setting right away;
-no restart is needed. Even when it is on you must type the server's name to delete it.
+no restart is needed. Installing on Windows from afar still needs someone at the computer to accept the Windows
+administrator prompt.
 
 **A panel admin can do a lot on that computer**: install and delete servers, send console commands, update Kora. The panel itself does not run as root (since 0.6.1), but only make people you fully trust
 admin; give others the operator or viewer role.

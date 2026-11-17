@@ -101,11 +101,11 @@ try {
     $r = Invoke-Native $pf @('app', 'status') $envs; Show 'app status after self-update' $r
     Assert-That ($r.Output -match 'version: 99\.0\.0') 'app status reports the new recorded version'
     Assert-That (-not (Test-Path "$pf.old")) '.old of the app copy is deleted at the next start'
-    $r = Invoke-Native $kora @('app', 'uninstall', '--yes') $envs; Show 'app uninstall' $r
+    $r = Invoke-Native $kora @('uninstall', '--app', '--yes') $envs; Show 'uninstall --app' $r
     Assert-That (-not (Test-Path $pfDir)) 'cleanup: Program Files\Kora is gone'
 }
 finally {
     $d = Join-Path $env:ProgramFiles 'Kora'
-    if (Test-Path $d) { & $kora app uninstall --yes 2>&1 | Out-Null }
+    if (Test-Path $d) { & $kora uninstall --app --yes 2>&1 | Out-Null }
     if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
 }

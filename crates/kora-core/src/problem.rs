@@ -65,6 +65,9 @@ pub mod codes {
     /// The step to retry or skip is not known, not failed, or not safe to skip.
     pub const INSTALL_CANNOT_RESUME: &str = "install.cannot_resume";
 
+    /// A remote sign-in made with a token asked for something that stays off until `remote actions` is on.
+    pub const REMOTE_ACTIONS_OFF: &str = "remote.actions_off";
+
     /// The GitHub CLI (`gh`) is not installed.
     pub const GH_MISSING: &str = "github.gh_missing";
     /// `gh` is installed but not signed in.

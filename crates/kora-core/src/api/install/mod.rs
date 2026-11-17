@@ -2,10 +2,9 @@
 //! disk, database login, FiveM builds), turning the UI's request into an [`InstallRequest`] with
 //! the same rules as the CLI, and running the installer with progress.
 //!
-//! The logic is the same as the TUI wizard (`kora-tui`) and the headless `kora install`
-//! (`kora-cli`); the non-drawing parts are duplicated here because those crates are front ends
-//! (see the list in the wave-2 report). Everything that touches the machine or the network goes
-//! through [`InstallEnv`], so tests use a fake.
+//! The logic is the same as the headless `kora install` (`kora-cli`); the parts that do not
+//! depend on the command line are kept here because that crate is a front end. Everything that
+//! touches the machine or the network goes through [`InstallEnv`], so tests use a fake.
 
 pub mod github;
 

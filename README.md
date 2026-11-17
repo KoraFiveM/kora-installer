@@ -24,7 +24,7 @@ On a server without a screen (over SSH), `kora` prints the sign-in link and an `
 computer first. `kora panel --tailscale` instead opens it to your own devices over [Tailscale](https://tailscale.com)
 (you sign in with your Tailscale account: no link or tunnel).
 
-`kora manager` and `kora install` (with no options) are the same as `kora`; `kora install` opens the install page.
+`kora install` (with no options) opens the install page. (The old name `kora manager` still works and is the same as `kora`.)
 `kora install` with options stays the scriptable, non-interactive installer. The terminal screens (TUI) of earlier
 versions are gone: everything they did is in the panel.
 

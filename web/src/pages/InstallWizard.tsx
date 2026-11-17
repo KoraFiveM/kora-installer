@@ -17,7 +17,7 @@ import type { ActionHandlers } from '@/lib/problemActions'
 import { StepProgress } from '@/components/JobProgress'
 import { Skeleton } from '@/components/Skeleton'
 import { formatBytes, validatePorts } from '@/lib/utils'
-import { REMOTE_ACTIONS_COMMAND, useInstallBlock } from './install/access'
+import { useInstallBlock } from './install/access'
 import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
 import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, ModeStep, NameStep, OptionsStep, PortsStep, ResourcesStep } from './install/Steps'
@@ -139,7 +139,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
 }
 
 /**
- * Installing is admin-only and, for remote sign-ins, off unless switched on. Say so before step 1
+ * Installing is admin-only (remote administrators included). Say so before step 1
  * instead of after the last one. The steps (and their admin-only page-load requests) only mount
  * once the sign-in is known and allowed.
  */
@@ -153,13 +153,7 @@ export default function InstallWizard() {
       <div className="mx-auto max-w-2xl space-y-5">
         <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
         <Alert tone="warning" title="You cannot install a server from here">
-          {block.kind === 'remote' ? (
-            <>
-              <p>Installing a server is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora (over SSH is fine):</p>
-              <p className="my-2"><code className="rounded bg-ink px-2 py-1 font-mono text-xs">{REMOTE_ACTIONS_COMMAND}</code></p>
-              <p>Then reload this page.</p>
-            </>
-          ) : block.reason}
+          {block.reason}
         </Alert>
         <Button asChild><Link to="/">Back to your servers</Link></Button>
       </div>
@@ -336,6 +330,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
         <Checkbox label="Show advanced options" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
       </div>
+      {at === 0 && !editing && (
+        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline-offset-4 hover:underline">Add an existing server</Link> instead.</p>
+      )}
       {saved && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
           <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers (not your licence key).</p>

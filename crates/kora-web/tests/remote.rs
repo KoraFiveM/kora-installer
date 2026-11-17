@@ -785,23 +785,102 @@ const DESTRUCTIVE: &[(&str, &str)] = &[
     ("POST", "/api/v1/uninstall"),
     ("DELETE", "/api/v1/app"),
     ("POST", "/api/v1/servers/prod/console"),
-    ("POST", "/api/v1/installs"),
     ("POST", "/api/v1/self-update"),
     ("PUT", "/api/v1/servers/prod/schedule"),
     ("DELETE", "/api/v1/servers/prod/schedule"),
 ];
 
+/// Installing a new server (start, and resume a paused install).
+const INSTALL: &[(&str, &str)] = &[
+    ("POST", "/api/v1/installs"),
+    ("POST", "/api/v1/installs/j1/resume"),
+];
+
+/// What the remote guard says when it refuses an action: a guided problem about the switch.
+fn is_switch_refusal(r: &Resp) -> bool {
+    r.status == 403 && r.json["error"]["code"] == "remote.actions_off"
+}
+
 #[tokio::test]
-async fn destructive_actions_are_refused_remotely_even_for_admins() {
+async fn destructive_actions_are_refused_for_token_admins_while_remote_actions_are_off() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
     for (m, uri) in DESTRUCTIVE {
         let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
+        assert!(is_switch_refusal(&r), "{m} {uri}: {} {:?}", r.status, r.json);
+        assert!(r.msg().contains("turned off for sign-ins made with a token"), "{m} {uri}: {}", r.msg());
+        // The problem says exactly how to turn it on, and the other ways to do it.
+        let e = &r.json["error"];
+        assert!(e["details"].as_str().unwrap().contains("kora panel remote-actions on"), "{e}");
+        assert!(e["details"].as_str().unwrap().contains("Tailscale"), "{e}");
+        assert_eq!(e["actions"][0]["kind"], "show_command", "{e}");
+        assert_eq!(e["actions"][0]["command"], json!(["kora", "panel", "remote-actions", "on"]));
+    }
+}
+
+#[tokio::test]
+async fn token_admins_can_install_by_default_but_other_token_roles_cannot() {
+    let (w, [vera, olly, adam]) = with_users(enabled_cfg());
+    for (m, uri) in INSTALL {
+        let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
+        // The handler may refuse the empty request itself; the remote guard must not.
+        assert!(!is_switch_refusal(&r), "{m} {uri}: {:?}", r.json);
+        assert_ne!(r.status, 401, "{m} {uri}");
+        assert!(!r.msg().contains("not available over remote"), "{m} {uri}: {}", r.msg());
+        for tok in [&vera, &olly] {
+            let r = req(m, uri).bearer(tok).json(json!({})).send(&w.app).await;
+            assert_eq!(r.status, 403, "{m} {uri}");
+            assert!(r.msg().contains("access, so it cannot do this"), "{m} {uri}: {}", r.msg());
+        }
+    }
+}
+
+#[tokio::test]
+async fn tailscale_admins_get_install_and_destructive_actions_with_no_switch() {
+    let (w, _) = tailscale_world("boss@example.com", &[("boss@example.com", Role::Admin)]);
+    assert!(!w.remote.config().allow_remote_destructive, "the switch is off");
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({})).send(&w.app).await;
+    assert_eq!(r.status, 200, "{:?}", r.json);
+    let cookie = r.cookie.unwrap();
+    // The typed-name confirmation still applies.
+    let r = req("DELETE", "/api/v1/servers/dev")
+        .cookie(&cookie)
+        .h("x-kora", "1")
+        .json(json!({"confirm_name": "wrong"}))
+        .send(&w.app)
+        .await;
+    assert_eq!(r.status, 400);
+    assert!(r.msg().contains("does not match"), "{}", r.msg());
+    for (m, uri) in DESTRUCTIVE.iter().chain(INSTALL) {
+        let r = req(m, uri).cookie(&cookie).h("x-kora", "1").json(json!({})).send(&w.app).await;
+        assert!(!is_switch_refusal(&r), "{m} {uri}: {:?}", r.json);
+        assert_ne!(r.status, 401, "{m} {uri}");
+    }
+    // The meta flag the UI reads says the destructive actions are available.
+    let r = req("GET", "/api/v1/meta").cookie(&cookie).send(&w.app).await;
+    assert_eq!(r.json["allow_remote_destructive"], true);
+}
+
+#[tokio::test]
+async fn tailscale_roles_below_admin_are_unchanged() {
+    let (w, _) = tailscale_world("op@example.com", &[("op@example.com", Role::Operator)]);
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({})).send(&w.app).await;
+    let cookie = r.cookie.unwrap();
+    for (m, uri) in DESTRUCTIVE.iter().chain(INSTALL) {
+        let r = req(m, uri).cookie(&cookie).h("x-kora", "1").json(json!({})).send(&w.app).await;
         assert_eq!(r.status, 403, "{m} {uri}");
-        assert!(
-            r.msg().contains("turned off for remote sign-ins"),
-            "{m} {uri}: {}",
-            r.msg()
-        );
+        assert!(r.msg().contains("access, so it cannot do this"), "{m} {uri}: {}", r.msg());
+    }
+}
+
+#[tokio::test]
+async fn tailscale_admins_still_cannot_use_local_only_operations() {
+    let (w, _) = tailscale_world("boss@example.com", &[("boss@example.com", Role::Admin)]);
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({})).send(&w.app).await;
+    let cookie = r.cookie.unwrap();
+    for (m, uri) in [("GET", "/api/v1/remote"), ("GET", "/api/v1/users"), ("POST", "/api/v1/servers/prod/open-folder"), ("POST", "/api/v1/session/link")] {
+        let r = req(m, uri).cookie(&cookie).h("x-kora", "1").json(json!({})).send(&w.app).await;
+        assert_eq!(r.status, 403, "{m} {uri}");
+        assert!(r.msg().contains("only be done on the computer"), "{m} {uri}: {}", r.msg());
     }
 }
 
@@ -818,12 +897,12 @@ async fn destructive_actions_pass_the_guard_when_enabled_and_keep_their_own_conf
         .await;
     assert_eq!(r.status, 400);
     assert!(r.msg().contains("does not match"), "{}", r.msg());
-    for (m, uri) in DESTRUCTIVE {
+    for (m, uri) in DESTRUCTIVE.iter().chain(INSTALL) {
         let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
         // A handler may still answer 403 itself (needs_elevation when this process is not root,
         // as on a CI runner): what matters is that the remote guard did not refuse it.
         assert!(
-            !r.msg().contains("turned off for remote sign-ins"),
+            !is_switch_refusal(&r),
             "{m} {uri} should reach the handler: {}",
             r.msg()
         );
@@ -1158,6 +1237,10 @@ async fn meta_tells_a_remote_user_whether_destructive_actions_are_on() {
     let (w, [_, _, adam]) = with_users(cfg);
     let r = req("GET", "/api/v1/meta").bearer(&adam).send(&w.app).await;
     assert_eq!(r.json["allow_remote_destructive"], true);
+    // With the switch off a token session sees false (a Tailscale admin sees true: see its own test).
+    let (w2, [_, _, adam2]) = with_users(enabled_cfg());
+    let r = req("GET", "/api/v1/meta").bearer(&adam2).send(&w2.app).await;
+    assert_eq!(r.json["allow_remote_destructive"], false);
     let r = req("GET", "/api/v1/meta").send(&w.app).await;
     assert_eq!(
         r.json["allow_remote_destructive"], false,

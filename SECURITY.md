@@ -25,8 +25,11 @@ reasonable time to release a fix before you disclose publicly.
 - The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, or a
   helper (`kora helper`, Linux) that accepts only Kora's fixed list of privileged actions and checks the calling user.
 - Remote access (`--bind <ip> --remote`) is off by default and uses plain HTTP: use Tailscale, WireGuard or an SSH tunnel, never
-  the open internet. Roles are viewer / operator / admin. Delete, uninstall and console input are disabled for remote sessions unless
-  enabled, and need the server name typed. Tailscale identity is checked with the local Tailscale service, never from request headers.
+  the open internet. Roles are viewer / operator / admin. Remote administrators can install and manage servers.
+  Tailscale administrators can also delete, uninstall and send console input; for token sessions those stay off until `kora panel remote-actions on`
+  is run on the machine, and deleting always needs the server name typed. Reasoning: a Tailscale identity is checked by the local Tailscale
+  service (a person on a device they signed in), never from request headers; a token is a bearer secret that can leak, and a leaked token that
+  can only install can be undone by removing the new server, while one that can delete cannot be undone.
 - Hub nodes authenticate with bearer tokens; treat them like passwords.
 
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way

@@ -10,7 +10,9 @@ const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 }
  *
  * - No identity in `/meta` (an older server, or the answer has not arrived yet) counts as a local admin.
  * - `can('operator')`: role is at least operator.
- * - `canDestroy`: admin, and (for another computer) the destructive actions are switched on.
+ * - `canDestroy`: admin, and (for another computer) the destructive actions are available: always for a
+ *   Tailscale sign-in, and for a token sign-in once `kora panel remote-actions on` has been run. Installing a
+ *   server needs only the admin role.
  */
 export function useRole() {
   // Reads the `meta` answer the app shell already keeps fresh; it never fetches by itself.
@@ -35,6 +37,6 @@ export const ALLOW_REMOTE_COMMAND = 'kora panel remote-actions on'
 /** Plain-words reason a button is off, for a tooltip or a note. */
 export function whyNot(r: ReturnType<typeof useRole>, min: Role, destructive = false): string | null {
   if (!r.can(min)) return `Your account (${r.role}) cannot do this. Ask an administrator for ${min} access.`
-  if (destructive && !r.destructiveAllowed) return `This is turned off for remote sign-ins. To turn it on, run this on the computer that runs Kora: ${ALLOW_REMOTE_COMMAND}`
+  if (destructive && !r.destructiveAllowed) return `This is turned off for sign-ins made with a token, because a token is a secret that could leak. To turn it on, run this on the computer that runs Kora (over SSH is fine): ${ALLOW_REMOTE_COMMAND}. Or sign in through Tailscale as an administrator, or use the panel on that computer.`
   return null
 }

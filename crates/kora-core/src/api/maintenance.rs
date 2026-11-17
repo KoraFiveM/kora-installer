@@ -372,11 +372,11 @@ impl Maintenance for SystemMaintenance {
                 });
             }
         }
-        if only.is_none() && self.app_status().installed {
+        if only.is_none() && (self.app_status().installed || app::user::user_status().any()) {
             out.push(PlanItem {
                 item: "app".into(),
                 description:
-                    "The Kora app (the `kora` command, shortcuts and the installed program)".into(),
+                    "Kora's shortcuts (and the old machine-wide Kora app, if it is still installed). Your servers are not touched".into(),
                 kind: "app",
                 remove: false,
             });
@@ -485,10 +485,18 @@ impl Maintenance for SystemMaintenance {
             }
         }
         if answers.get("app").copied().unwrap_or(false) {
-            status("Removing the Kora app");
-            match app::uninstall_app_opts(false) {
-                Ok(_) => sum.removed.push("the Kora app".into()),
-                Err(e) => sum.failed.push(format!("the Kora app: {e}")),
+            status("Removing the Kora shortcuts");
+            match app::user::uninstall_user(false) {
+                Ok(lines) if !lines.is_empty() => sum.removed.push("Kora's shortcuts".into()),
+                Ok(_) => {}
+                Err(e) => sum.failed.push(format!("Kora's shortcuts: {e}")),
+            }
+            if app::user::legacy_present().present() {
+                status("Removing the old Kora app");
+                match app::uninstall_app_opts(false) {
+                    Ok(_) => sum.removed.push("the old Kora app".into()),
+                    Err(e) => sum.failed.push(format!("the old Kora app: {e}")),
+                }
             }
         }
         Ok(UninstallOutcome {

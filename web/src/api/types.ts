@@ -101,6 +101,11 @@ export interface ServerSummary {
   badge: Badge | null
   /** false = adopted (an existing server Kora did not install). */
   managed: boolean
+  /**
+   * `<this computer's network address>:<game port>`: what players on the same network type to join. Null when
+   * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
+   */
+  connect?: string | null
 }
 
 export interface ServerDetail extends ServerSummary {
@@ -108,8 +113,6 @@ export interface ServerDetail extends ServerSummary {
   game_listening: boolean
   txadmin_up: boolean
   console_enabled: boolean
-  /** Full address to connect with, when the server knows it. */
-  connect?: string
 }
 
 export type ControlAction = 'start' | 'stop' | 'restart'
