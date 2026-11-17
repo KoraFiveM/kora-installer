@@ -107,6 +107,9 @@ async fn self_update_apply_runs_a_job() {
     assert_eq!(s, 202);
 }
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn self_update_apply_validates_and_elevates() {
     let (app, _m, _g) = setup(false);
@@ -144,6 +147,7 @@ async fn self_update_apply_validates_and_elevates() {
     );
 }
 
+#[cfg(not(windows))]
 fn clone_fake(m: &FakeMaintenance) -> FakeMaintenance {
     FakeMaintenance {
         admin: m.admin,
@@ -205,6 +209,9 @@ async fn tidy_up_as_admin_makes_the_shortcuts_first_then_removes_the_old_copy() 
     assert_eq!(m.calls().last().unwrap(), "app_install shortcut=true force=false dry=true");
 }
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn tidy_up_without_administrator_rights_makes_the_shortcuts_and_asks_for_the_command() {
     let (app, m, _g) = setup(false);
@@ -292,6 +299,9 @@ async fn uninstall_run_job_and_errors() {
     assert_eq!(done["state"], "failed");
 }
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn uninstall_run_needs_elevation_without_admin() {
     let (app, m, _g) = setup(false);

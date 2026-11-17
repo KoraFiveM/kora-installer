@@ -559,6 +559,9 @@ async fn artifacts_are_listed_without_broken_builds() {
 
 // ---- plan -----------------------------------------------------------------------------------
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn plan_validates_like_the_cli_and_returns_no_secrets() {
     let r = rig().await;
@@ -822,6 +825,9 @@ async fn install_refuses_bad_requests_before_starting() {
     assert!(r.env.st().runs.is_empty(), "nothing may have started");
 }
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn install_needing_administrator_rights_answers_needs_elevation_without_secrets() {
     let r = rig().await;
