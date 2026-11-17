@@ -25,6 +25,7 @@ pub mod launch;
 pub mod monitor;
 pub mod notify;
 pub mod paidassets;
+pub mod privsvc;
 pub mod problem;
 pub mod profile;
 pub mod self_update;
