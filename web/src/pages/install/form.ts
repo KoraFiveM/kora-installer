@@ -1,15 +1,13 @@
-import type { DbChoice, InstallDefaults, InstallRequest, Mode, RunMode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
+import type { DbChoice, InstallDefaults, InstallRequest, RunMode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
+import { styleOfMode } from '@/lib/style'
+import { t, msg, type Msg } from '@/i18n'
+import '@/i18n/en/install/form'
+
+export { styleOfMode }
 
 export type ArtifactChoice = 'recommended' | 'pick' | 'custom'
 
-/**
- * The old `mode` as the two settings (production = clones of released versions, development = your own copies of the
- * latest changes). The one place the web reads that old spelling, for answers saved by an older Kora.
- */
-export function styleOfMode(m: Mode): { source: Source; versions: Versions } {
-  return m === 'development' ? { source: 'fork', versions: 'latest' } : { source: 'clone', versions: 'released' }
-}
 
 /** What "Which versions" starts as for a source: released for plain clones, the latest changes for your own copies. */
 export function defaultVersions(source: Source): Versions {
@@ -68,20 +66,20 @@ export interface WizardForm {
 
 export type StepId = 'source' | 'versions' | 'name' | 'ports' | 'build' | 'resources' | 'runmode' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
 
-export const STEP_LABEL: Record<StepId, string> = {
-  source: 'Where the resources come from',
-  versions: 'Which versions',
-  name: 'Name your server',
-  ports: 'Ports',
-  build: 'FiveM server build',
-  resources: 'Resources',
-  runmode: 'How the server runs',
-  database: 'Database',
-  options: 'Options',
-  licence: 'Your licence key',
-  cfx: 'Your Cfx.re account',
-  github: 'GitHub',
-  review: 'Check and install',
+export const STEP_LABEL: Record<StepId, Msg> = {
+  source: msg('install.form.whereResourcesComeFrom'),
+  versions: msg('install.form.whichVersions'),
+  name: msg('install.form.nameServer'),
+  ports: msg('install.form.ports'),
+  build: msg('install.form.fivemServerBuild'),
+  resources: msg('install.form.resources'),
+  runmode: msg('install.form.howServerRuns'),
+  database: msg('install.form.database'),
+  options: msg('install.form.options'),
+  licence: msg('install.form.licenceKey'),
+  cfx: msg('install.form.cfxReAccount'),
+  github: msg('install.form.github'),
+  review: msg('install.form.checkInstall'),
 }
 
 /** Every step, one after the other ("Choose everything myself"). `containers`: a container engine works here, so "How the server runs" is asked. */
@@ -108,9 +106,9 @@ export function dirBase(dir: string): string {
 
 /** The name offered for a key about to be saved: "Main" first, then "Key 2", "Key 3"... */
 export function suggestKeyName(keys: SavedKey[]): string {
-  if (keys.length === 0) return 'Main'
+  if (keys.length === 0) return t('install.form.main')
   for (let n = keys.length + 1; ; n++) {
-    const name = `Key ${n}`
+    const name = t('install.form.keyN', { n })
     if (!keys.some((k) => k.name.toLowerCase() === name.toLowerCase())) return name
   }
 }
@@ -224,12 +222,12 @@ export function buildRequest(f: WizardForm, opts: { artifactUrl?: string | null 
 
 export function dbLoginProblem(f: WizardForm): string | null {
   if (f.db === 'skip' || f.db === 'container' || !f.dbCustom) return null
-  if (!f.dbUser.trim()) return 'Type the database administrator user name.'
-  if (!f.dbPass) return 'Type the database administrator password.'
-  if (f.dbPass !== f.dbPass2) return 'The two passwords are not the same.'
+  if (!f.dbUser.trim()) return t('install.form.typeDatabaseAdministratorUser')
+  if (!f.dbPass) return t('install.form.typeDatabaseAdministratorPassw')
+  if (f.dbPass !== f.dbPass2) return t('install.form.twoPasswordsSame')
   const p = Number(f.dbPort)
-  if (!Number.isInteger(p) || p < 1 || p > 65535) return 'The database port must be a number from 1 to 65535.'
-  if (!f.dbHost.trim()) return 'Type the database host.'
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return t('install.form.databasePortMustNumber')
+  if (!f.dbHost.trim()) return t('install.form.typeDatabaseHost')
   return null
 }
 
@@ -243,42 +241,42 @@ export interface ProblemContext {
   containers?: boolean
 }
 
-const PORTS_MESSAGE: Record<PortsState, string | null> = {
+const PORTS_MESSAGE: Record<PortsState, Msg | null> = {
   ok: null,
-  checking: 'Checking that the ports are free...',
-  taken: 'One of the ports is already in use. Pick a free one.',
-  unknown: 'Kora could not check that the ports are free.',
+  checking: msg('install.form.checkingPortsFree'),
+  taken: msg('install.form.onePortsAlreadyUse'),
+  unknown: msg('install.form.koraCouldCheckPorts'),
 }
 
 /** Why a step is not finished (null = fine). Messages are shown to the user. */
 export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): string | null {
   switch (step) {
     case 'name':
-      if (!slug(f.name)) return 'Give the server a name.'
-      if (!f.dir.trim()) return 'Choose a folder for the server.'
+      if (!slug(f.name)) return t('install.form.giveServerName')
+      if (!f.dir.trim()) return t('install.form.chooseFolderServer')
       return null
     case 'ports':
-      return validatePorts(f.game, f.tx) ?? PORTS_MESSAGE[ctx.ports]
+      return validatePorts(f.game, f.tx) ?? (PORTS_MESSAGE[ctx.ports] ? t(PORTS_MESSAGE[ctx.ports]!) : null)
     case 'build':
-      if (f.artifact === 'custom' && !/^https:\/\/\S+$/.test(f.artifactUrl.trim())) return 'Type a download address that starts with https://.'
-      if (f.artifact === 'pick' && f.artifactBuild === null) return 'Pick a build from the list.'
-      if (f.gameBuild.trim() && !/^\d+$/.test(f.gameBuild.trim())) return 'The game build must be a number.'
+      if (f.artifact === 'custom' && !/^https:\/\/\S+$/.test(f.artifactUrl.trim())) return t('install.form.typeDownloadAddressStarts')
+      if (f.artifact === 'pick' && f.artifactBuild === null) return t('install.form.pickBuildFromList')
+      if (f.gameBuild.trim() && !/^\d+$/.test(f.gameBuild.trim())) return t('install.form.gameBuildMustNumber')
       return null
     case 'resources':
-      return !f.resourcesAll && f.resourceIds.length === 0 ? 'Pick at least one resource, or choose to install everything.' : null
+      return !f.resourcesAll && f.resourceIds.length === 0 ? t('install.form.pickLeastOneResource') : null
     case 'runmode':
-      return f.runMode === 'container' && !ctx.containers ? 'Running in a container needs Podman or Docker, and none that works was found. Choose a system service, or fix the container engine on the System check page.' : null
+      return f.runMode === 'container' && !ctx.containers ? t('install.form.runningContainerNeedsPodman') : null
     case 'database':
       return dbLoginProblem(f)
     case 'licence':
-      if (f.licenceChoice === 'saved') return f.licenceName ? null : 'Pick one of your saved keys, or add a new one.'
-      if (f.license.trim().length < 8) return 'Paste your licence key. It is a long string of letters and numbers.'
-      return f.saveKey && !f.saveKeyName.trim() ? 'Give the key a name so you can find it next time, or turn off "Save this key".' : null
+      if (f.licenceChoice === 'saved') return f.licenceName ? null : t('install.form.pickOneSavedKeys')
+      if (f.license.trim().length < 8) return t('install.form.pasteLicenceKeyLong')
+      return f.saveKey && !f.saveKeyName.trim() ? t('install.form.giveKeyNameFind') : null
     case 'cfx':
-      return f.cfxFound || !f.cfxUsername.trim() ? null : 'Check the Cfx.re username, or clear the box to skip this step.'
+      return f.cfxFound || !f.cfxUsername.trim() ? null : t('install.form.checkCfxReUsername')
     case 'github':
-      if (!ctx.githubSignedIn) return 'Sign in to GitHub to continue.'
-      return f.githubOwner ? null : 'Choose where your own copies go.'
+      if (!ctx.githubSignedIn) return t('install.form.signGithubContinue')
+      return f.githubOwner ? null : t('install.form.chooseWhereOwnCopies')
     default:
       return null
   }

@@ -53,7 +53,7 @@ describe('BackupsTab', () => {
   it('says plainly what a backup holds and starts with no backup', async () => {
     answers(view())
     renderAs(<BackupsTab server={server} />)
-    expect(await screen.findByText('No backup yet', { selector: 'h3, div, p, span' })).toBeInTheDocument()
+    expect(await screen.findByText('No backup yet', { selector: 'h2, div, p, span' })).toBeInTheDocument()
     expect(screen.getByText(/A backup holds your secrets/)).toBeInTheDocument()
     expect(screen.getByText(/Press "Back up now"/)).toBeInTheDocument()
   })

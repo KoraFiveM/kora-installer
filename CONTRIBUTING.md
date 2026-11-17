@@ -124,7 +124,7 @@ The panel UI is also tested in a real browser: `web/e2e/`, run by the **Browser 
   the System check, every server tab, branches and pull requests, updates, Settings, what a remote operator or token admin
   sees, two keyboard-only journeys, and the "page file is gone after an update" reload screen. Every test also **fails on a
   browser console error, an unhandled rejection or a failed request**, and runs an **axe accessibility scan** on the pages it
-  reaches (serious and critical violations fail the test).
+  reaches (moderate, serious and critical violations fail the test; see `docs/accessibility.md`). New UI text goes in the English catalogue (`web/src/i18n/en/`, see `docs/translations.md`): a test fails when text is written into a component.
 - **`web/e2e/real/`**: a small smoke layer against the real `kora panel` binary (Linux in CI): a throw-away `HOME` and
   `KORA_HOME`, a spare port, a one-time sign-in link, the main pages, adding a fake server folder and opening its tabs. No
   installs.

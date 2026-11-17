@@ -12,25 +12,21 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { timeAgo } from '@/lib/ago'
+import { t, msg, type Msg, fmt, unix } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/resources/paidAssetsTab'
 
 export const PORTAL_URL = 'https://portal.cfx.re/assets/granted-assets'
 
-/** `1.5 MB`-style size. */
+/** `1.5 MB`-style size, in the current language. */
 export function fileSize(n: number): string {
-  const units = ['bytes', 'KB', 'MB', 'GB']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return i === 0 ? `${n} bytes` : `${v.toFixed(1)} ${units[i]}`
+  return fmt.bytes(n)
 }
 
-const HINT_TITLE: Record<AssetHint['kind'], string> = {
-  entitlement: 'Licence key and asset owner do not match',
-  verify_failed: 'A protected resource could not be verified',
-  download_failed: 'A protected resource could not be fetched',
+const HINT_TITLE: Record<AssetHint['kind'], Msg> = {
+  entitlement: msg('resources.paidAssetsTab.licenceKeyAssetOwner'),
+  verify_failed: msg('resources.paidAssetsTab.protectedResourceCouldVerified'),
+  download_failed: msg('resources.paidAssetsTab.protectedResourceCouldFetched'),
 }
 
 function Hints({ hints }: { hints: AssetHint[] }) {
@@ -38,9 +34,9 @@ function Hints({ hints }: { hints: AssetHint[] }) {
   return (
     <div className="space-y-3">
       {hints.map((h, i) => (
-        <Alert key={`${h.kind}-${h.resource ?? i}`} tone="warning" title={`${HINT_TITLE[h.kind]}${h.resource ? `: ${h.resource}` : ''}`}>
+        <Alert key={`${h.kind}-${h.resource ?? i}`} tone="warning" title={`${t(HINT_TITLE[h.kind])}${h.resource ? `: ${h.resource}` : ''}`}>
           <p>{h.fix}</p>
-          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">Seen in the console: {h.line}</p>
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{t('resources.paidAssetsTab.seenConsoleLine', { line: h.line })}</p>
         </Alert>
       ))}
     </div>
@@ -51,20 +47,20 @@ export function PlanView({ plan }: { plan: AssetPlan }) {
   const blocking = plan.problems.filter((p) => p.blocking)
   const warnings = plan.problems.filter((p) => !p.blocking)
   return (
-    <div className="space-y-3" aria-label="What will be imported">
+    <div className="space-y-3" aria-label={t('resources.paidAssetsTab.whatImported')}>
       <div className="flex items-center gap-2 text-sm font-semibold"><FileArchive className="size-4" /> {plan.zip_name}</div>
       {plan.resources.length > 0 && (
         <ul className="divide-y divide-border rounded-md border border-border">
           {plan.resources.map((r) => (
             <li key={r.zip_path || r.name} className="flex flex-wrap items-center gap-2 p-3 text-sm">
               <span className="font-mono text-xs">{r.name}</span>
-              {!r.has_fxmanifest ? <Badge tone="plain">Not a resource, skipped</Badge> : (
+              {!r.has_fxmanifest ? <Badge tone="plain">{t('resources.paidAssetsTab.resourceSkipped')}</Badge> : (
                 <>
-                  {r.version && <Badge tone="plain">Version {r.version}</Badge>}
-                  {r.escrowed ? <Badge tone="info">Protected (escrowed)</Badge> : <Badge tone="plain">Not protected</Badge>}
-                  {r.escrowed && (r.has_fxap ? <Badge tone="success">.fxap file present</Badge> : <Badge tone="danger">.fxap file missing</Badge>)}
-                  {r.replaces && <Badge tone="amber">Replaces the imported copy (kept as a backup)</Badge>}
-                  <span className="ml-auto font-mono text-xs text-muted-foreground">resources/[paid]/{r.name} · {fileSize(r.size)}</span>
+                  {r.version && <Badge tone="plain">{t('resources.paidAssetsTab.versionVersion', { version: r.version })}</Badge>}
+                  {r.escrowed ? <Badge tone="info">{t('resources.paidAssetsTab.protectedEscrowed')}</Badge> : <Badge tone="plain">{t('resources.paidAssetsTab.notProtected')}</Badge>}
+                  {r.escrowed && (r.has_fxap ? <Badge tone="success">{t('resources.paidAssetsTab.fxapFilePresent')}</Badge> : <Badge tone="danger">{t('resources.paidAssetsTab.fxapFileMissing')}</Badge>)}
+                  {r.replaces && <Badge tone="amber">{t('resources.paidAssetsTab.replacesImportedCopyKept')}</Badge>}
+                  <span className="ml-auto font-mono text-xs text-muted-foreground">{t('resources.paidAssetsTab.resourcesPaidNameFilesize', { name: r.name, fileSize: fileSize(r.size) })}</span>
                 </>
               )}
             </li>
@@ -72,12 +68,12 @@ export function PlanView({ plan }: { plan: AssetPlan }) {
         </ul>
       )}
       {blocking.length > 0 && (
-        <Alert tone="danger" title="This zip can't be imported">
+        <Alert tone="danger" title={t('resources.paidAssetsTab.zipCantImported')}>
           <ul className="list-disc pl-5">{blocking.map((p, i) => <li key={i}>{p.message}</li>)}</ul>
         </Alert>
       )}
       {warnings.length > 0 && (
-        <Alert tone="warning" title="Check before importing">
+        <Alert tone="warning" title={t('resources.paidAssetsTab.checkBeforeImporting')}>
           <ul className="list-disc pl-5">{warnings.map((p, i) => <li key={i}>{p.message}</li>)}</ul>
         </Alert>
       )}
@@ -107,7 +103,7 @@ function ImportPanel({ server: s, canImport, local, onDone, fileInput }: { serve
     const f = files?.[0]
     if (!f) return
     if (!f.name.toLowerCase().endsWith('.zip')) {
-      setErr(new Error('Choose the .zip file you downloaded from the Cfx.re Portal.'))
+      setErr(new Error(t('resources.paidAssetsTab.chooseZipFileDownloaded')))
       return
     }
     inspect.mutate({ file: f })
@@ -128,51 +124,51 @@ function ImportPanel({ server: s, canImport, local, onDone, fileInput }: { serve
     <div className="space-y-4">
       <div
         role="group"
-        aria-label="Drop a zip file here"
+        aria-label={t('resources.paidAssetsTab.dropZipFileHere')}
         className={`flex flex-col items-center gap-3 rounded-md border-2 border-dashed p-6 text-center text-sm ${dragging ? 'border-primary bg-primary/5' : 'border-border'}`}
         onDragOver={(e) => { e.preventDefault(); if (canImport) setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => { e.preventDefault(); setDragging(false); if (canImport) pick(e.dataTransfer.files) }}
       >
         <Upload className="size-6 text-muted-foreground" />
-        <p>Drop the asset's .zip file here, exactly as you downloaded it (don't unpack it).</p>
+        <p>{t('resources.paidAssetsTab.dropAssetsZipFile')}</p>
         <input ref={fileInput} id="asset-zip" type="file" accept=".zip,application/zip" className="sr-only" disabled={!canImport} onChange={(e) => { pick(e.target.files); e.target.value = '' }} />
-        <Button asChild variant="secondary" size="sm"><label htmlFor="asset-zip" aria-disabled={!canImport} className={canImport ? 'cursor-pointer' : 'pointer-events-none opacity-50'}>Choose a zip file</label></Button>
+        <Button asChild variant="secondary" size="sm"><label htmlFor="asset-zip" aria-disabled={!canImport} className={canImport ? 'cursor-pointer' : 'pointer-events-none opacity-50'}>{t('resources.paidAssetsTab.chooseZipFile')}</label></Button>
       </div>
       {local && canImport && downloads.data && (
         <div className="space-y-2">
-          <div className="text-sm font-semibold">Recent zips in your Downloads folder</div>
+          <div className="text-sm font-semibold">{t('resources.paidAssetsTab.recentZipsDownloadsFolder')}</div>
           {downloads.data.zips.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{downloads.data.found ? 'No zip files were downloaded in the last 24 hours.' : 'No Downloads folder was found on this computer.'}</p>
+            <p className="text-sm text-muted-foreground">{downloads.data.found ? t('resources.paidAssetsTab.noZipFilesWere') : t('resources.paidAssetsTab.noDownloadsFolderFound')}</p>
           ) : (
             <ul className="divide-y divide-border rounded-md border border-border">
               {downloads.data.zips.map((z) => (
                 <li key={z.name} className="flex flex-wrap items-center gap-2 p-2 text-sm">
                   <span className="font-mono text-xs">{z.name}</span>
                   <span className="text-xs text-muted-foreground">{fileSize(z.size)} · {timeAgo(z.modified_unix * 1000, Date.now())}</span>
-                  <Button size="sm" className="ml-auto" disabled={inspect.isPending} onClick={() => inspect.mutate({ download: z.name })}>Check this zip</Button>
+                  <Button size="sm" className="ml-auto" disabled={inspect.isPending} onClick={() => inspect.mutate({ download: z.name })}>{t('resources.paidAssetsTab.checkZip')}</Button>
                 </li>
               ))}
             </ul>
           )}
         </div>
       )}
-      {inspect.isPending && <p className="text-sm text-muted-foreground">Reading the zip…</p>}
+      {inspect.isPending && <p className="text-sm text-muted-foreground">{t('resources.paidAssetsTab.readingZip')}</p>}
       <ErrorNotice error={err ?? inspect.error ?? (run.phase === 'failed' ? run.error : null)} />
       {inspected && <PlanView plan={inspected.plan} />}
       {inspected?.plan.can_import && source && run.phase !== 'done' && (
         <div className="flex flex-wrap gap-2">
-          <Button variant="default" disabled={run.phase === 'running'} onClick={() => void startImport()}>Import {count} asset{count === 1 ? '' : 's'}</Button>
-          <Button disabled={run.phase === 'running'} onClick={() => setInspected(null)}>Cancel</Button>
+          <Button variant="default" disabled={run.phase === 'running'} onClick={() => void startImport()}>{t('resources.paidAssetsTab.importCountAssetValue', { count })}</Button>
+          <Button disabled={run.phase === 'running'} onClick={() => setInspected(null)}>{t('resources.paidAssetsTab.cancel')}</Button>
         </div>
       )}
-      {run.phase === 'running' && <p className="text-sm text-muted-foreground">{status.at(-1) ?? 'Importing…'}</p>}
+      {run.phase === 'running' && <p className="text-sm text-muted-foreground">{status.at(-1) ?? t('resources.paidAssetsTab.importing')}</p>}
       {run.phase === 'done' && run.result && (
-        <Alert tone="success" title="Imported">
+        <Alert tone="success" title={t('resources.paidAssetsTab.imported')}>
           <ul className="list-disc pl-5">
-            {run.result.imported.map((a) => <li key={a.name}><span className="font-mono">{a.name}</span>{a.version ? ` ${a.version}` : ''}{a.replaced ? ' (replaced; the old copy is kept as a backup)' : ''}</li>)}
+            {run.result.imported.map((a) => <li key={a.name}><span className="font-mono">{a.name}</span>{a.version ? ` ${a.version}` : ''}{a.replaced ? t('resources.paidAssetsTab.replacedOldCopyKept') : ''}</li>)}
           </ul>
-          {run.result.ensured.length > 0 && <p>Added to server.cfg: {run.result.ensured.map((e) => `ensure ${e}`).join(', ')}</p>}
+          {run.result.ensured.length > 0 && <p>{t('resources.paidAssetsTab.addedServerCfgJoin', { join: run.result.ensured.map((e) => `ensure ${e}`).join(', ') })}</p>}
           {run.result.notes.map((n, i) => <p key={i}>{n}</p>)}
         </Alert>
       )}
@@ -187,14 +183,14 @@ function AssetRow({ server, asset: a, canChange, onReplace, onRemoved }: { serve
     <li className="space-y-2 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs">{a.name}</span>
-        {a.version && <Badge tone="plain">Version {a.version}</Badge>}
-        {a.imported_unix && <span className="text-xs text-muted-foreground">Imported {new Date(a.imported_unix * 1000).toLocaleDateString()}</span>}
-        {!a.present && <Badge tone="danger">Folder missing</Badge>}
-        {a.present && !a.has_fxap && <Badge tone="amber">No .fxap file</Badge>}
+        {a.version && <Badge tone="plain">{t('resources.paidAssetsTab.versionVersion', { version: a.version })}</Badge>}
+        {a.imported_unix && <span className="text-xs text-muted-foreground">{t('resources.paidAssetsTab.importedTolocaledatestring', { when: unix(a.imported_unix) })}</span>}
+        {!a.present && <Badge tone="danger">{t('resources.paidAssetsTab.folderMissing')}</Badge>}
+        {a.present && !a.has_fxap && <Badge tone="amber">{t('resources.paidAssetsTab.noFxapFile')}</Badge>}
         {canChange && (
           <span className="ml-auto flex gap-2">
-            <Button size="sm" onClick={onReplace}>Replace with newer zip</Button>
-            <Button size="sm" variant="outline" onClick={() => setConfirm(true)}>Remove</Button>
+            <Button size="sm" onClick={onReplace}>{t('resources.paidAssetsTab.replaceNewerZip')}</Button>
+            <Button size="sm" variant="outline" onClick={() => setConfirm(true)}>{t('resources.paidAssetsTab.remove')}</Button>
           </span>
         )}
       </div>
@@ -202,9 +198,9 @@ function AssetRow({ server, asset: a, canChange, onReplace, onRemoved }: { serve
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
-        title={`Remove ${a.name}?`}
-        description="Its folder is moved to the backups in the server's .kora folder and its ensure line is taken out of server.cfg. Restart the server afterwards."
-        confirmLabel="Remove"
+        title={t('resources.paidAssetsTab.removeName', { name: a.name })}
+        description={t('resources.paidAssetsTab.itsFolderMovedBackups')}
+        confirmLabel={t('resources.paidAssetsTab.remove')}
         destructive
         busy={m.isPending}
         onConfirm={() => m.mutate()}
@@ -232,22 +228,22 @@ export function PaidAssetsTab({ server: s }: { server: ServerDetail }) {
     <div className="grid gap-5 lg:grid-cols-2">
       <div className="space-y-5">
         <Card>
-          <CardHeader><CardTitle>Paid assets</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t('resources.paidAssetsTab.paidAssets')}</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <p>Assets you buy on the Cfx.re Portal are protected (escrowed). Download each one as a .zip file and give it to Kora: it keeps the folder name and the hidden .fxap file exactly as they must be, puts the asset in resources/[paid] and adds it to server.cfg.</p>
-            <Alert tone="info">Buy and download with the same Cfx.re account that owns this server's licence key.</Alert>
+            <p>{t('resources.paidAssetsTab.assetsBuyCfxRe')}</p>
+            <Alert tone="info">{t('resources.paidAssetsTab.buyDownloadSameCfx')}</Alert>
             <Button asChild variant="default">
-              <a href={portal} target="_blank" rel="noopener noreferrer">Open Cfx.re Portal <ExternalLink /></a>
+              <a href={portal} target="_blank" rel="noopener noreferrer">{rich('resources.paidAssetsTab.openCfxRePortal', { externalLink: <ExternalLink /> })}</a>
             </Button>
           </CardContent>
         </Card>
         <Hints hints={list.data?.hints ?? []} />
         <Card>
-          <CardHeader><CardTitle>Imported paid assets{noList ? '' : ` (${assets.length})`}</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t('resources.paidAssetsTab.importedPaidAssetsValue', { value: noList ? '' : ` (${assets.length})` })}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <ErrorNotice error={list.error} />
-            {removed && <Alert tone="success" title="Removed">{removed.map((n, i) => <p key={i}>{n}</p>)}</Alert>}
-            {noList ? <Alert tone="info">{noList}</Alert> : assets.length === 0 && !list.isLoading ? <p className="text-sm text-muted-foreground">No paid assets have been imported yet.</p> : (
+            {removed && <Alert tone="success" title={t('resources.paidAssetsTab.removed')}>{removed.map((n, i) => <p key={i}>{n}</p>)}</Alert>}
+            {noList ? <Alert tone="info">{noList}</Alert> : assets.length === 0 && !list.isLoading ? <p className="text-sm text-muted-foreground">{t('resources.paidAssetsTab.noPaidAssetsBeen')}</p> : (
               <ul className="divide-y divide-border rounded-md border border-border">
                 {assets.map((a) => <AssetRow key={a.name} server={s.name} asset={a} canChange={canImport} onReplace={() => fileInput.current?.click()} onRemoved={(n) => { setRemoved(n); refresh() }} />)}
               </ul>
@@ -256,7 +252,7 @@ export function PaidAssetsTab({ server: s }: { server: ServerDetail }) {
         </Card>
       </div>
       <Card>
-        <CardHeader><CardTitle>Import a paid asset</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t('resources.paidAssetsTab.importPaidAsset')}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           {!canImport && <Alert tone="info">{whyNot(role, 'admin')}</Alert>}
           <ImportPanel server={s} canImport={canImport} local={local} onDone={refresh} fileInput={fileInput} />

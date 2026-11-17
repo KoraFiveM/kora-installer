@@ -1,0 +1,41 @@
+import { register } from '../../index'
+
+const messages = {
+  'servers.reachCard.fromInternetNeedsRouter': 'From the internet (needs the router and firewall steps above to be right)',
+  'servers.reachCard.internetAddress': 'Internet address',
+  'servers.reachCard.cfxReJoinLink': 'Cfx.re join link',
+  'servers.reachCard.contactWhat': 'This will contact {what}',
+  'servers.reachCard.choiceRememberedTurnOff': 'Your choice is remembered; you can turn it off again at the bottom of this card.',
+  'servers.reachCard.notNow': 'Not now',
+  'servers.reachCard.justOnce': 'Just this once',
+  'servers.reachCard.letKoraChangeRouter': 'Let Kora change your router?',
+  'servers.reachCard.turnPortForwarding': 'Turn on port forwarding',
+  'servers.reachCard.playersReachServer': 'Can players reach this server?',
+  'servers.reachCard.koraChecksFourThings': "Kora checks four things in turn: is the server listening, does this computer's firewall let players in, does your router send them here, and can the internet reach it. It only looks at this computer and your router. Nothing outside is contacted unless you allow it. ",
+  'servers.reachCard.checkAgain': 'Check again',
+  'servers.reachCard.checkNow': 'Check now',
+  'servers.reachCard.lookingServerFirewallRouter': 'Looking at the server, the firewall and your router (a few seconds)…',
+  'servers.reachCard.automaticPortForwarding': 'Automatic port forwarding is on.',
+  'servers.reachCard.turnOff': 'Turn it off',
+  'servers.reachCard.addressesGivePeople': 'Addresses to give people',
+  'servers.reachCard.addressOwnNetwork': 'Address on your own network',
+  'servers.reachCard.addressInternet': 'Address on the internet',
+  'servers.reachCard.outsideLookupsKoraMay': 'Outside lookups Kora may do for this check (off unless you allow them)',
+  'servers.reachCard.cfxResPublicServer': "Cfx.re's public server list",
+  'servers.reachCard.asksFrontendCfxservicesNet': "Asks frontend.cfx-services.net about this server's own join code.",
+  'servers.reachCard.publicaddressWebsiteApiIpify': 'A public-address website (api.ipify.org)',
+  'servers.reachCard.onlyUsedWhenRouter': "Only used when the router cannot tell Kora the public address. It sees this computer's public address.",
+  'servers.reachCard.checkAskedWhatLearned': 'This check asked {what}; it learned {learned}.',
+  'servers.reachCard.probablyOk': 'Probably OK',
+  'servers.reachCard.problem': 'Problem',
+  'servers.reachCard.notKnown': 'Not known',
+  'servers.reachCard.routerProgramsReconfigureSmall': "A router that programs can reconfigure is a small risk: any program on your network can do the same. Turning this on lets Kora do it for this server's game port only (TCP and UDP): it keeps the rule while the server runs and removes it when the server stops.",
+  'servers.reachCard.cfxResPublicServer2': "Cfx.re's public server list (frontend.cfx-services.net)",
+  'servers.reachCard.koraSendsServersJoin': "Kora sends your server's join code (the one from its own log). Cfx.re already knows it; Kora learns whether you are listed and which address Cfx.re has.",
+  'servers.reachCard.allowCheckAgain': 'Allow and check again',
+  'servers.reachCard.websiteSeesComputersPublic': "That website sees this computer's public address and that a request was made. Kora learns your public address.",
+  'servers.reachCard.ok': 'OK',
+} as const
+
+register('en', messages)
+export default messages

@@ -1,6 +1,7 @@
 // Mock data and routes for the tools, the System check and "start the database". Hooked up from
 // mock/index.ts with one `installToolchainMock(...)` call (kept apart so edits do not collide).
 import type * as T from '../types'
+import '@/i18n/en/errors/problems'
 
 type Body = Record<string, unknown>
 type Route = (method: string, pattern: string, h: (m: RegExpMatchArray, body: Body, query: URLSearchParams) => unknown | Promise<unknown>) => void
@@ -85,7 +86,7 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
 
   route('GET', '/system/check', () => {
     const g = github()
-    const gitFix: T.Problem = { code: 'install.tool_missing', message: 'Git is not installed. Kora needs it to download and update resources.', actions: [{ kind: 'install_tool', tool: 'git' }, { kind: 'open_link', url: 'https://git-scm.com/downloads' }] }
+    const gitFix: T.Problem = { code: 'install.tool_missing', message: 'Git is not installed. Kora needs it to download and update resources.', i18n: { id: 'errors.problems.gitMissing' }, actions: [{ kind: 'install_tool', tool: 'git' }, { kind: 'open_link', url: 'https://git-scm.com/downloads' }] }
     const toolItem = (id: 'git' | 'gh', label: string, fix: T.Problem): T.CheckItem => {
       const t = tool(id)
       return t.installed
@@ -99,7 +100,7 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
       : { id: 'github', label: 'GitHub sign-in', state: 'ok', summary: `Signed in${g.user ? ` as ${g.user}` : ''}.`, problem: null }
     const db: T.CheckItem = state.dbRunning
       ? { id: 'database', label: 'Database', state: 'ok', summary: 'mariadb 11.4.2 is running.', problem: null }
-      : { id: 'database', label: 'Database', state: 'problem', summary: 'mariadb 11.4.2 is installed but not running.', problem: { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', actions: [{ kind: 'start_database' }] } }
+      : { id: 'database', label: 'Database', state: 'problem', summary: 'mariadb 11.4.2 is installed but not running.', problem: { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', i18n: { id: 'errors.problems.dbStopped', params: { name: 'mariadb' } }, actions: [{ kind: 'start_database' }] } }
     const items: T.CheckItem[] = [
       toolItem('git', 'Git', gitFix),
       toolItem('gh', 'GitHub CLI', ghMissing),
@@ -133,7 +134,7 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
 
 /** For the wizard's database check: a failed login on a stopped database carries the fix. */
 export function mockDbStoppedProblem(): T.Problem | null {
-  return state.dbRunning ? null : { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', actions: [{ kind: 'start_database' }] }
+  return state.dbRunning ? null : { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', i18n: { id: 'errors.problems.dbStopped', params: { name: 'mariadb' } }, actions: [{ kind: 'start_database' }] }
 }
 
 /** Tests: the database server is installed but stopped (and starting it needs no administrator rights outside `trouble`). */

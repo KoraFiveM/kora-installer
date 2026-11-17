@@ -4,6 +4,8 @@ import { api } from '@/api/client'
 import { elevateInstallService } from '@/lib/shell'
 import { useAlerts } from '@/lib/app'
 import { ProblemActions, toProblem, type ActionContext, type ActionHandlers } from '@/lib/problemActions'
+import { t } from '@/i18n'
+import '@/i18n/en/errors/adminActions'
 
 /** How long the installer may take before the panel stops waiting (the person answers Windows' prompt meanwhile). */
 const INSTALL_WAIT_MS = 15 * 60_000
@@ -28,31 +30,31 @@ export function AdminActions({ children }: { children: ReactNode }) {
           // front of its window (a background panel's prompt only flashes in the taskbar). The installer then runs on its
           // own, so wait until the service answers for this account. Outside the app (false): the panel starts it as a job.
           if (await elevateInstallService()) {
-            alerts.push('info', 'The Kora installer is running. Windows asks for administrator permission in front of this window: choose Yes.')
+            alerts.push('info', t('errors.adminActions.koraInstallerRunningWindows'))
             const until = Date.now() + INSTALL_WAIT_MS
             for (;;) {
               if ((await api.system()).admin_service?.state === 'ready') break
-              if (Date.now() > until) throw new Error('The installer did not finish in time, or the permission was not given.')
+              if (Date.now() > until) throw new Error(t('errors.adminActions.installerDidFinishTime'))
               await new Promise((r) => setTimeout(r, 2000))
             }
           } else {
             const { job } = await api.adminService.install()
-            alerts.push('info', 'The Kora installer is running. Windows asks for administrator permission on the computer that runs Kora: choose Yes.')
+            alerts.push('info', t('errors.adminActions.koraInstallerRunningWindows2'))
             const until = Date.now() + INSTALL_WAIT_MS
             for (;;) {
               const j = await api.jobs.get(job)
               if (j.state === 'done') break
-              if (j.state === 'failed') throw new Error(j.error?.message ?? 'The installer stopped.')
-              if (Date.now() > until) throw new Error('The installer did not finish in time. Check the computer that runs Kora.')
+              if (j.state === 'failed') throw new Error(j.error?.message ?? t('errors.adminActions.installerStopped'))
+              if (Date.now() > until) throw new Error(t('errors.adminActions.installerDidFinishTime2'))
               await new Promise((r) => setTimeout(r, 1000))
             }
           }
-          alerts.push('success', "Kora's administrator service is installed. Kora can now do this without asking.")
+          alerts.push('success', t('errors.adminActions.korasAdministratorServiceInsta'))
           void qc.invalidateQueries()
           if (ctx?.afterFix) await ctx.afterFix()
           else if (ctx?.retry) await ctx.retry()
         } catch (e) {
-          alerts.push('warning', toProblem(e)?.message ?? "Kora's administrator service was not installed.")
+          alerts.push('warning', toProblem(e)?.message ?? t('errors.adminActions.korasAdministratorServiceInsta2'))
         }
       },
     }

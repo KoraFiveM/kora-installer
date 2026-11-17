@@ -201,6 +201,7 @@ pub mod known {
     /// `gh` is not installed.
     pub fn gh_missing() -> Problem {
         Problem::new(codes::GH_MISSING, "The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.")
+            .with_message_id("errors.problems.ghMissing", &[])
             .with_action(Action::InstallTool { tool: Tool::Gh })
             .with_action(Action::open_link(GH_URL))
     }
@@ -208,23 +209,27 @@ pub mod known {
     /// Git is not installed (and Kora has no copy of its own yet).
     pub fn git_missing() -> Problem {
         Problem::new(codes::INSTALL_TOOL_MISSING, "Git is not installed. Kora needs it to download and update resources.")
+            .with_message_id("errors.problems.gitMissing", &[])
             .with_action(Action::InstallTool { tool: Tool::Git })
             .with_action(Action::open_link(GIT_URL))
     }
 
     /// A database server is installed but not running.
     pub fn db_stopped(name: &str) -> Problem {
-        Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running.")).with_action(Action::StartDatabase)
+        Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running."))
+            .with_message_id("errors.problems.dbStopped", &[("name", name)])
+            .with_action(Action::StartDatabase)
     }
 
     /// `gh` is installed but not signed in.
     pub fn github_signed_out() -> Problem {
-        Problem::new(codes::GH_SIGNED_OUT, "You are not signed in to GitHub.").with_action(Action::SignInGithub { scopes: vec![] })
+        Problem::new(codes::GH_SIGNED_OUT, "You are not signed in to GitHub.").with_message_id("errors.problems.githubSignedOut", &[]).with_action(Action::SignInGithub { scopes: vec![] })
     }
 
     /// Signed in without the permissions Kora needs.
     pub fn github_missing_scopes(missing: &[String]) -> Problem {
         Problem::new(codes::GH_MISSING_SCOPES, "Your GitHub sign-in does not give Kora all the permissions it needs. Sign in again to give them.")
+            .with_message_id("errors.problems.githubMissingScopes", &[])
             .with_details(format!("Missing permissions (scopes): {}", missing.join(", ")))
             .with_action(Action::SignInGithub { scopes: missing.to_vec() })
     }
@@ -370,16 +375,37 @@ pub struct Problem {
     /// What the user can do, best first. Empty: the front end offers its generic choices.
     #[serde(default)]
     pub actions: Vec<Action>,
+    /// The same message as a catalogue id plus named parameters, so a front end can show it in its own language
+    /// (`docs/translations.md`). Optional and backwards compatible: without it, `message` (English) is shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub i18n: Option<Box<MessageRef>>,
+}
+
+/// A message for a front end's catalogue: the id (`errors.problems.<name>`) and its parameters, all as text (a front end
+/// reads a count as a number where its message says so). The English `message` of the problem is what this id says in English.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct MessageRef {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub params: std::collections::BTreeMap<String, String>,
 }
 
 impl Problem {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
-        Self { code: code.to_string(), message: message.into(), details: None, actions: Vec::new() }
+        Self { code: code.to_string(), message: message.into(), details: None, actions: Vec::new(), i18n: None }
     }
 
     /// A problem with no specific code and no actions (what every plain string error becomes).
     pub fn generic(message: impl Into<String>) -> Self {
         Self::new(codes::FAILED, message)
+    }
+
+    /// Say which catalogue message this is (`id`) and its parameters, for front ends that translate.
+    pub fn with_message_id(mut self, id: &str, params: &[(&str, &str)]) -> Self {
+        self.i18n = Some(Box::new(MessageRef { id: id.to_string(), params: params.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }));
+        self
     }
 
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
@@ -424,7 +450,8 @@ impl Problem {
         let code = v.get("code").and_then(|c| c.as_str()).unwrap_or(codes::FAILED).to_string();
         let details = v.get("details").and_then(|d| d.as_str()).map(String::from);
         let actions = v.get("actions").and_then(|a| serde_json::from_value(a.clone()).ok()).unwrap_or_default();
-        Some(Self { code, message, details, actions })
+        let i18n = v.get("i18n").and_then(|m| serde_json::from_value::<MessageRef>(m.clone()).ok()).map(Box::new);
+        Some(Self { code, message, details, actions, i18n })
     }
 }
 
@@ -670,5 +697,23 @@ mod tests {
     fn actions_are_added_once_and_empty_details_are_dropped() {
         let p = Problem::generic("m").with_action(Action::Retry).with_action(Action::Retry).with_details("  ");
         assert_eq!((p.actions.len(), p.details), (1, None));
+    }
+
+    #[test]
+    fn a_message_id_travels_with_the_problem_and_is_optional() {
+        // Known problems say which catalogue message they are, with parameters.
+        let p = known::db_stopped("MariaDB");
+        let m = p.i18n.clone().expect("a known problem has a message id");
+        assert_eq!(m.id, "errors.problems.dbStopped");
+        assert_eq!(m.params.get("name").map(String::as_str), Some("MariaDB"));
+        // It survives the JSON the panel reads.
+        assert_eq!(Problem::from_json(&p.to_json()).unwrap(), p);
+        // Without one nothing is sent (older panels see exactly what they saw before).
+        let plain = Problem::new(codes::FAILED, "x");
+        assert!(plain.to_json().get("i18n").is_none());
+        // A problem from an older Kora, with no field, still reads.
+        let old = serde_json::json!({ "code": "failed", "message": "old", "actions": [] });
+        assert_eq!(Problem::from_json(&old).unwrap().i18n, None);
+        assert_eq!(serde_json::from_value::<Problem>(old).unwrap().i18n, None);
     }
 }

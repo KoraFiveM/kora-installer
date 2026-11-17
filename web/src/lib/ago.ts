@@ -1,11 +1,8 @@
-/** "just now", "2 minutes ago", "3 hours ago", for a moment `then` (ms) seen at `now` (ms). */
+import { fmt, t } from '@/i18n'
+import '@/i18n/en/core/ago'
+
+/** "just now", "2 minutes ago", "3 hours ago", for a moment `then` (ms) seen at `now` (ms): the wording is Intl's, in the current language. */
 export function timeAgo(then: number, now: number): string {
-  const s = Math.max(0, Math.round((now - then) / 1000))
-  if (s < 45) return 'just now'
-  const m = Math.round(s / 60)
-  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`
-  const d = Math.round(h / 24)
-  return `${d} day${d === 1 ? '' : 's'} ago`
+  if (Math.abs(now - then) < 45_000) return t('core.ago.justNow')
+  return fmt.relative(then, now)
 }

@@ -10,6 +10,9 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/servers/notificationsTab'
 
 export function NotificationsTab({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()
@@ -25,33 +28,33 @@ export function NotificationsTab({ server: s }: { server: ServerDetail }) {
   const remove = useMutation({ mutationFn: () => api.webhook.remove(s.name), onSuccess: () => { setConfirm(false); return refresh() } })
   return (
     <Card className="max-w-2xl">
-      <CardHeader><CardTitle>Discord notifications</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('servers.notificationsTab.discordNotifications')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">Kora can post to a Discord channel when updates finish or something needs your attention. In Discord, open the channel settings, choose Integrations, then Webhooks, and copy the webhook address.</p>
+        <p className="text-sm text-muted-foreground">{t('servers.notificationsTab.koraPostDiscordChannel')}</p>
         {q.data?.configured ? (
           <div className="space-y-3">
-            <div className="text-sm">Current webhook: <code className="break-all rounded bg-ink px-2 py-1 font-mono text-xs">{q.data.redacted}</code></div>
+            <div className="text-sm">{rich('servers.notificationsTab.currentWebhookCodeNode', { code: <code className="break-all rounded bg-ink px-2 py-1 font-mono text-xs">{q.data.redacted}</code> })}</div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => test.mutate()} disabled={test.isPending || !!noTest} title={noTest ?? undefined}>Send a test message</Button>
-              <Button variant="destructive" onClick={() => setConfirm(true)} disabled={remove.isPending || !!noChange} title={noChange ?? undefined}>Remove webhook</Button>
+              <Button onClick={() => test.mutate()} disabled={test.isPending || !!noTest} title={noTest ?? undefined}>{t('servers.notificationsTab.sendTestMessage')}</Button>
+              <Button variant="destructive" onClick={() => setConfirm(true)} disabled={remove.isPending || !!noChange} title={noChange ?? undefined}>{t('servers.notificationsTab.removeWebhook')}</Button>
             </div>
           </div>
-        ) : <p className="text-sm">No webhook is set.</p>}
+        ) : <p className="text-sm">{t('servers.notificationsTab.noWebhookSet')}</p>}
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (url.trim()) set.mutate() }}>
-          <Field label={q.data?.configured ? 'Replace the webhook address' : 'Webhook address'} hint="The address is kept secret: it is never shown in full again.">
-            <Input type="password" autoComplete="off" disabled={!!noChange} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://discord.com/api/webhooks/..." />
+          <Field label={q.data?.configured ? t('servers.notificationsTab.replaceWebhookAddress') : t('servers.notificationsTab.webhookAddress')} hint={t('servers.notificationsTab.addressKeptSecretNever')}>
+            <Input type="password" autoComplete="off" disabled={!!noChange} value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('servers.notificationsTab.httpsDiscordComApi')} />
           </Field>
-          <Button type="submit" variant="default" disabled={!url.trim() || set.isPending || !!noChange} title={noChange ?? undefined}>{q.data?.configured ? 'Replace webhook' : 'Save webhook'}</Button>
+          <Button type="submit" variant="default" disabled={!url.trim() || set.isPending || !!noChange} title={noChange ?? undefined}>{q.data?.configured ? t('servers.notificationsTab.replaceWebhook') : t('servers.notificationsTab.saveWebhook')}</Button>
         </form>
         {noChange && <p className="text-xs text-muted-foreground">{noChange}</p>}
-        {test.isSuccess && <Alert tone="success">Test message sent. Check your Discord channel.</Alert>}
+        {test.isSuccess && <Alert tone="success">{t('servers.notificationsTab.testMessageSentCheck')}</Alert>}
         <ErrorNotice error={set.error ?? test.error ?? remove.error ?? q.error} />
         <ConfirmDialog
           open={confirm}
           onOpenChange={setConfirm}
-          title="Remove the webhook?"
-          description="Alerts stop being sent. You will need the address again to turn them back on."
-          confirmLabel="Remove webhook"
+          title={t('servers.notificationsTab.removeWebhook2')}
+          description={t('servers.notificationsTab.alertsStopBeingSent')}
+          confirmLabel={t('servers.notificationsTab.removeWebhook')}
           destructive
           busy={remove.isPending}
           onConfirm={() => remove.mutate()}

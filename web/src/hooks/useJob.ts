@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '@/api/client'
 import type { Job, JobError } from '@/api/types'
+import { t } from '@/i18n'
+import '@/i18n/en/core/useJob'
 
 export const JOB_POLL_MS = 1000
 /** How many times in a row asking about a job may fail before it is given up on. One lost request must not turn a running job into a failed one. */
@@ -95,7 +97,7 @@ export function useJob<R = unknown, E = unknown>(jobId: string | null, onFinish?
         return
       }
       closed = true
-      setView({ phase: 'failed', events: seen, result: null, error: { code: 'failed', message: gone(e) && e instanceof Error ? e.message : 'Kora lost contact with this job. It may still be running: reload the page to look again.' } })
+      setView({ phase: 'failed', events: seen, result: null, error: { code: 'failed', message: gone(e) && e instanceof Error ? e.message : t('core.useJob.koraLostContactJob') } })
     }
 
     const fetchFinal = async () => {

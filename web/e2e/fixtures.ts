@@ -1,7 +1,7 @@
 // Shared fixtures for the mock-layer journeys.
 //  - `problems`: every browser console error, page error and unhandled rejection is collected; the test fails at
 //    the end if there was one (a journey that expects one removes it with `problems.expect(/text/)`).
-//  - `scan(label)`: runs axe on the page as it is now and fails on serious or critical violations.
+//  - `scan(label)`: runs axe on the page as it is now and fails on moderate, serious or critical violations (minor ones are only reported).
 //  - `open(path, opts)`: goes to a page in a chosen mock scenario / viewer.
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
@@ -10,6 +10,11 @@ export const KEY = 'cfxk_abcdefghij_12345'
 
 export type Scenario = 'default' | 'empty' | 'fleet' | 'trouble' | 'slow' | 'offline' | 'down' | 'windows' | 'service' | 'noservice' | 'notallowed' | 'restarted' | 'keylost' | 'containers'
 export type Viewer = 'local' | 'operator' | 'remote-operator' | 'remote-admin' | 'remote-tailscale-admin' | 'remote-passkey-admin' | 'remote-code-operator'
+
+/** Impacts that fail a test. Only "minor" findings are tolerated. */
+const FAILING = new Set(['moderate', 'serious', 'critical'])
+/** Rules that are switched off, each with the reason. Keep this list empty if at all possible (docs/accessibility.md). */
+const AXE_EXCLUDED: string[] = []
 
 class Problems {
   readonly list: string[] = []
@@ -25,7 +30,8 @@ class Problems {
 
 interface Fixtures {
   problems: Problems
-  open: (path: string, opts?: { scenario?: Scenario; as?: Viewer }) => Promise<void>
+  /** `lang`: the panel's language for this visit (the mock build reads `?lang=`): `de`, or `en-XA` for the pseudo-language. */
+  open: (path: string, opts?: { scenario?: Scenario; as?: Viewer; lang?: string }) => Promise<void>
   scan: (label: string) => Promise<void>
 }
 
@@ -47,17 +53,21 @@ export const test = base.extend<Fixtures>({
       const u = new URL(path, 'http://x')
       u.searchParams.set('scenario', opts.scenario ?? 'default')
       u.searchParams.set('as', opts.as ?? 'local')
+      if (opts.lang) u.searchParams.set('lang', opts.lang)
       await page.goto(u.pathname + u.search + u.hash)
     })
   },
   scan: async ({ page }, use) => {
     await use(async (label) => {
-      const r = await new AxeBuilder({ page }).exclude('#kora-mock-switcher').analyze()
-      // E2E_AXE_REPORT=1 also prints the moderate and minor findings (they do not fail the test): for the accessibility backlog.
+      // A page that is still loading shows a skeleton and no heading yet: scan the page, not the placeholder.
+      await page.locator('h1').first().waitFor({ timeout: 5000 }).catch(() => undefined)
+      const r = await new AxeBuilder({ page }).exclude('#kora-mock-switcher').disableRules(AXE_EXCLUDED).analyze()
+      // Everything the scanner can see fails the test except "minor" (cosmetic best practice). See docs/accessibility.md.
+      // E2E_AXE_REPORT=1 also prints the minor findings.
       if (process.env.E2E_AXE_REPORT) {
-        for (const v of r.violations.filter((x) => x.impact !== 'serious' && x.impact !== 'critical')) console.log(`AXE[${v.impact}] ${v.id} @ ${label}: ${v.nodes.slice(0, 2).map((n) => n.target.join(' ')).join(' ; ')}`)
+        for (const v of r.violations.filter((x) => !FAILING.has(x.impact ?? ''))) console.log(`AXE[${v.impact}] ${v.id} @ ${label}: ${v.nodes.slice(0, 2).map((n) => n.target.join(' ')).join(' ; ')}`)
       }
-      const bad = r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+      const bad = r.violations.filter((v) => FAILING.has(v.impact ?? ''))
       const text = bad.map((v) => `[${v.impact}] ${v.id}: ${v.help}\n    ${v.nodes.slice(0, 4).map((n) => n.target.join(' ') + ' :: ' + (n.failureSummary ?? '').split('\n').slice(0, 3).join(' | ')).join('\n    ')}`).join('\n')
       expect(text, `accessibility violations on "${label}" (${page.url()})`).toBe('')
     })

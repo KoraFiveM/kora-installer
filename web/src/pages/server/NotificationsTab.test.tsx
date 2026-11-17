@@ -28,7 +28,7 @@ describe('NotificationsTab', () => {
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => (init?.method === 'DELETE' ? new Response(null, { status: 204 }) : jsonResponse(200, hook)))
     renderAs(<NotificationsTab server={server} />)
     await user.click(await screen.findByRole('button', { name: 'Remove webhook' }))
-    expect(screen.getByText('Remove the webhook?')).toBeInTheDocument()
+    expect(await screen.findByText('Remove the webhook?')).toBeInTheDocument()
     expect(screen.getByText(/Alerts stop being sent/)).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'DELETE')).toBe(false)
     const buttons = screen.getAllByRole('button', { name: 'Remove webhook' })

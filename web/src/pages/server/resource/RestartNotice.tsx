@@ -2,8 +2,11 @@ import { Loader2, RotateCw } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import type { RestartInfo } from '@/api/types'
+import { t, msg } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/resources/restartNotice'
 
-const RESTART_NOTICE = 'Restart needed: the running server still has the old version.'
+const RESTART_NOTICE = msg('resources.restartNotice.restartNeededRunningServer')
 
 /**
  * Said whenever the files of a resource changed and the running server has not loaded them yet. The fact comes from the
@@ -19,13 +22,11 @@ export function RestartNotice({ info, onRestartResource, onRestartServer, pendin
 }) {
   if (!info.needed) return null
   return (
-    <Alert tone="warning" title={info.notice ?? RESTART_NOTICE}>
-      {info.why && <p>What changed: {info.why}.</p>}
+    <Alert tone="warning" title={info.notice ?? t(RESTART_NOTICE)}>
+      {info.why && <p>{t('resources.restartNotice.whatChangedWhy', { why: info.why })}</p>}
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="default" disabled={pending || disabledReason !== null} title={disabledReason ?? undefined} onClick={onRestartResource}>
-          {pending ? <Loader2 className="animate-spin" aria-hidden /> : <RotateCw aria-hidden />} Restart this resource
-        </Button>
-        <Button size="sm" variant="ghost" disabled={pending} onClick={onRestartServer}>Restart the whole server</Button>
+        <Button size="sm" variant="default" disabled={pending || disabledReason !== null} title={disabledReason ?? undefined} onClick={onRestartResource}>{rich('resources.restartNotice.nodeNodeRestartResource', { node: pending ? <Loader2 className="animate-spin" aria-hidden /> : <RotateCw aria-hidden /> })}</Button>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={onRestartServer}>{t('resources.restartNotice.restartWholeServer')}</Button>
       </div>
       {disabledReason && <p className="mt-1 text-xs text-muted-foreground">{disabledReason}</p>}
     </Alert>

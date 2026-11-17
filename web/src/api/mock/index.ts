@@ -17,6 +17,7 @@ import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedSer
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { installAuthMock } from './auth'
 import { adminNeeds, adminWhat, installCommand, withoutAdminReq } from './adminParts'
+import '@/i18n/en/errors/problems'
 
 const BASE = '/api/v1'
 
@@ -908,12 +909,12 @@ const githubStatus = (): T.GithubStatus => {
   if (!mockGhInstalled()) {
     return {
       signed_in: false, user: null, state: 'gh_missing', missing_scopes: [],
-      problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
+      problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', i18n: { id: 'errors.problems.ghMissing' }, actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
     }
   }
   return prefs.github
     ? { signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null }
-    : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } }
+    : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', i18n: { id: 'errors.problems.githubSignedOut' }, actions: [{ kind: 'sign_in_github' }] } }
 }
 route('GET', '/github/status', () => githubStatus())
 installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble })

@@ -32,7 +32,7 @@ describe('RemoteAccessCard', () => {
     renderAs(<RemoteAccessCard />)
 
     await user.click(await screen.findByRole('button', { name: 'Remove sam@example.com' }))
-    expect(screen.getByText('Remove sam@example.com?')).toBeInTheDocument()
+    expect(await screen.findByText('Remove sam@example.com?')).toBeInTheDocument()
     expect(screen.getByText(/cannot sign in again until you add them back/)).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(false)
     await user.click(screen.getByRole('button', { name: 'Remove' }))

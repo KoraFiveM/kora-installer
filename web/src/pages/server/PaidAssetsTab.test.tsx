@@ -112,8 +112,9 @@ describe('PaidAssetsTab', () => {
   })
 
   it('formats sizes', () => {
-    expect(fileSize(500)).toBe('500 bytes')
-    expect(fileSize(2048)).toBe('2.0 KB')
-    expect(fileSize(3 * 1024 * 1024 * 1024)).toBe('3.0 GB')
+    // Intl's own units: decimal (1 kB = 1000 bytes), the unit and decimal mark of the language.
+    expect(fileSize(500)).toBe('500 byte')
+    expect(fileSize(2048)).toBe('2 kB')
+    expect(fileSize(3 * 1000 * 1000 * 1000)).toBe('3 GB')
   })
 })

@@ -18,8 +18,11 @@ import { Field } from '@/components/Field'
 import { Skeleton } from '@/components/Skeleton'
 import { StatusChip, StyleChip, UpdateChip } from '@/components/Status'
 import { useJob } from '@/hooks/useJob'
+import { t, msg, type Msg } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/servers/fleetPage'
 
-const ING: Record<ControlAction, string> = { start: 'Starting', stop: 'Stopping', restart: 'Restarting' }
+const ING: Record<ControlAction, Msg> = { start: msg('servers.fleetPage.starting'), stop: msg('servers.fleetPage.stopping'), restart: msg('servers.fleetPage.restarting') }
 const DONE: Record<ControlAction, string> = { start: 'started', stop: 'stopped', restart: 'restarted' }
 
 /** Start / stop / restart one server of this panel or of a node, and follow the job. */
@@ -35,7 +38,7 @@ function useFleetControl(s: FleetServer) {
     setJob(null)
     setAction(null)
     void qc.invalidateQueries({ queryKey: ['fleet'] })
-    if (j.state === 'failed') push('danger', `${label}: ${j.error?.message ?? 'The action did not finish.'}`)
+    if (j.state === 'failed') push('danger', `${label}: ${j.error?.message ?? t('servers.fleetPage.actionDidFinish')}`)
     else if (a) push('success', `${label} ${DONE[a]}.`)
   })
   const run = async (a: ControlAction) => {
@@ -46,37 +49,37 @@ function useFleetControl(s: FleetServer) {
       setJob(r.job)
     } catch (e) {
       setAction(null)
-      push('danger', `${label}: ${toNotice(e)?.message ?? 'The action did not start.'}`)
+      push('danger', `${label}: ${toNotice(e)?.message ?? t('servers.fleetPage.actionDidStart')}`)
     } finally {
       setStarting(false)
     }
   }
   const busy = starting || view.phase === 'running'
-  return { run, busy, pending: busy && action ? ING[action] : undefined }
+  return { run, busy, pending: busy && action ? t(ING[action]) : undefined }
 }
 
 function Actions({ s, busy, run }: { s: FleetServer; busy: boolean; run: (a: ControlAction) => void }) {
   const [confirm, setConfirm] = useState(false)
-  if (s.status === 'missing') return <span className="text-xs text-muted-foreground">Folder missing</span>
-  if (s.actions.length === 0) return <span className="text-xs text-muted-foreground">Update that node to control it from here</span>
+  if (s.status === 'missing') return <span className="text-xs text-muted-foreground">{t('servers.fleetPage.folderMissing')}</span>
+  if (s.actions.length === 0) return <span className="text-xs text-muted-foreground">{t('servers.fleetPage.updateNodeControlFrom')}</span>
   const can = (a: ControlAction) => s.actions.includes(a)
   return (
     <div className="flex gap-2">
       {s.status === 'stopped' && can('start') && (
-        <Button size="sm" disabled={busy} onClick={() => run('start')} aria-label={`Start ${s.name} on ${s.node_name}`}><Play /> Start</Button>
+        <Button size="sm" disabled={busy} onClick={() => run('start')} aria-label={t('servers.fleetPage.startNameNodeName', { name: s.name, node_name: s.node_name })}>{rich('servers.fleetPage.playNodeStart', { play: <Play /> })}</Button>
       )}
       {s.status === 'running' && can('stop') && (
-        <Button size="sm" disabled={busy} onClick={() => run('stop')} aria-label={`Stop ${s.name} on ${s.node_name}`}><Square /> Stop</Button>
+        <Button size="sm" disabled={busy} onClick={() => run('stop')} aria-label={t('servers.fleetPage.stopNameNodeName', { name: s.name, node_name: s.node_name })}>{rich('servers.fleetPage.squareNodeStop', { square: <Square /> })}</Button>
       )}
       {s.status === 'running' && can('restart') && (
-        <Button size="sm" disabled={busy} onClick={() => setConfirm(true)} aria-label={`Restart ${s.name} on ${s.node_name}`}><RotateCw /> Restart</Button>
+        <Button size="sm" disabled={busy} onClick={() => setConfirm(true)} aria-label={t('servers.fleetPage.restartNameNodeName', { name: s.name, node_name: s.node_name })}>{rich('servers.fleetPage.rotatecwNodeRestart', { rotateCw: <RotateCw /> })}</Button>
       )}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
-        title={`Restart ${s.name}?`}
-        description={`Everyone playing on ${s.name} (${s.node_name}) will be disconnected for a minute or so while it restarts.`}
-        confirmLabel="Restart server"
+        title={t('servers.fleetPage.restartName', { name: s.name })}
+        description={t('servers.fleetPage.everyonePlayingNameNode', { name: s.name, node_name: s.node_name })}
+        confirmLabel={t('servers.fleetPage.restartServer')}
         onConfirm={() => {
           setConfirm(false)
           run('restart')
@@ -113,7 +116,7 @@ function AddNodeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
     mutationFn: () => api.hub.addNode({ name, url, token }),
     onSuccess: (n) => {
       void qc.invalidateQueries({ queryKey: ['fleet'] })
-      push(n.insecure ? 'warning' : 'success', n.insecure ? `${n.name} was added, but ${n.warning ?? 'its address is not private.'}` : `${n.name} was added.`)
+      push(n.insecure ? 'warning' : 'success', n.insecure ? t('servers.fleetPage.addedButInsecure', { name: n.name, warning: n.warning ?? t('servers.fleetPage.addressNotPrivate') }) : t('servers.fleetPage.nodeAdded', { name: n.name }))
       setName('')
       setUrl('')
       setToken('')
@@ -122,15 +125,15 @@ function AddNodeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
   })
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) add.reset(); onOpenChange(o) }}>
-      <DialogContent title="Add a node" description="A node is another computer running Kora Panel. Create a token there with 'kora panel user add', then enter it here. Kora checks the connection before saving.">
+      <DialogContent title={t('servers.fleetPage.addNode')} description={t('servers.fleetPage.nodeAnotherComputerRunning')}>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); add.mutate() }}>
-          <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Garage box" autoComplete="off" /></Field>
-          <Field label="Address" hint="For example http://192.168.1.20:47120. Use https:// or Tailscale for anything outside your own network."><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://192.168.1.20:47120" autoComplete="off" /></Field>
-          <Field label="Token" hint="Saved on this computer only, and never shown again."><Input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" /></Field>
+          <Field label={t('servers.fleetPage.name')}><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('servers.fleetPage.garageBox')} autoComplete="off" /></Field>
+          <Field label={t('servers.fleetPage.address')} hint={t('servers.fleetPage.exampleHttpUseHttps')}><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('servers.fleetPage.http')} autoComplete="off" /></Field>
+          <Field label={t('servers.fleetPage.token')} hint={t('servers.fleetPage.savedComputerOnlyNever')}><Input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" /></Field>
           {add.isError && <ErrorNotice error={add.error} />}
           <div className="flex justify-end gap-2">
-            <Button type="button" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" variant="default" disabled={add.isPending || !name.trim() || !url.trim() || !token.trim()}>{add.isPending ? 'Checking...' : 'Add node'}</Button>
+            <Button type="button" onClick={() => onOpenChange(false)}>{t('servers.fleetPage.cancel')}</Button>
+            <Button type="submit" variant="default" disabled={add.isPending || !name.trim() || !url.trim() || !token.trim()}>{add.isPending ? t('servers.fleetPage.checking') : t('servers.fleetPage.addNode2')}</Button>
           </div>
         </form>
       </DialogContent>
@@ -144,16 +147,16 @@ function NodeCard({ n, onRemove }: { n: HubNode; onRemove: () => void }) {
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2 font-medium">
           {n.name}
-          {n.reachable ? <Badge tone="success" dot>Online</Badge> : <Badge tone="danger" dot>Not reachable</Badge>}
+          {n.reachable ? <Badge tone="success" dot>{t('servers.fleetPage.online')}</Badge> : <Badge tone="danger" dot>{t('servers.fleetPage.notReachable')}</Badge>}
           {n.version && <Badge tone="plain">Kora {n.version}</Badge>}
-          {n.reachable && !n.can_control && <Badge tone="orange">View only: update it to control it</Badge>}
+          {n.reachable && !n.can_control && <Badge tone="orange">{t('servers.fleetPage.viewOnlyUpdateControl')}</Badge>}
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground">{n.url}</div>
-        {n.server_count !== null && <div className="text-xs text-muted-foreground">{n.server_count === 1 ? '1 server' : `${n.server_count} servers`}</div>}
+        {n.server_count !== null && <div className="text-xs text-muted-foreground">{t('servers.fleetPage.serversCount', { count: n.server_count })}</div>}
         {n.last_error && <div className="text-xs text-danger-text">{n.last_error}</div>}
         {n.warning && <div className="text-xs text-orange">{n.warning}</div>}
       </div>
-      <Button size="sm" onClick={onRemove} aria-label={`Remove ${n.name}`}><Trash2 /> Remove</Button>
+      <Button size="sm" onClick={onRemove} aria-label={t('servers.fleetPage.removeName', { name: n.name })}>{rich('servers.fleetPage.trashNodeRemove', { trash2: <Trash2 /> })}</Button>
     </li>
   )
 }
@@ -163,8 +166,8 @@ export default function FleetPage() {
   if (remote) {
     return (
       <div className="space-y-6">
-        <h1 className="font-heading text-2xl font-bold">Fleet</h1>
-        <Alert tone="info">The fleet can only be opened on the computer that runs Kora, because it uses the sign-in tokens of the other panels.</Alert>
+        <h1 className="font-heading text-2xl font-bold">{t('servers.fleetPage.fleet')}</h1>
+        <Alert tone="info">{t('servers.fleetPage.fleetOnlyOpenedComputer')}</Alert>
       </div>
     )
   }
@@ -180,7 +183,7 @@ function Fleet() {
   const remove = useMutation({
     mutationFn: (id: string) => api.hub.removeNode(id),
     onSuccess: () => {
-      push('success', `${removing?.name ?? 'The node'} was removed from this list.`)
+      push('success', t('servers.fleetPage.nodeRemoved', { name: removing?.name ?? t('servers.fleetPage.theNode') }))
       setRemoving(null)
       void qc.invalidateQueries({ queryKey: ['fleet'] })
     },
@@ -190,21 +193,21 @@ function Fleet() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-heading text-2xl font-bold">Fleet</h1>
+        <h1 className="font-heading text-2xl font-bold">{t('servers.fleetPage.fleet')}</h1>
         <div className="flex gap-2">
-          <Button onClick={() => void q.refetch()} disabled={q.isFetching}><RefreshCw className={q.isFetching ? 'animate-spin' : ''} /> Refresh</Button>
-          <Button onClick={() => setAdding(true)}><Plus /> Add a node</Button>
+          <Button onClick={() => void q.refetch()} disabled={q.isFetching}>{rich('servers.fleetPage.refreshcwNodeRefresh', { refreshCw: <RefreshCw className={q.isFetching ? 'animate-spin' : ''} /> })}</Button>
+          <Button onClick={() => setAdding(true)}>{rich('servers.fleetPage.plusNodeAddNode', { plus: <Plus /> })}</Button>
         </div>
       </div>
       {q.isError && <ErrorNotice error={q.error} />}
-      {q.data?.partial && <Alert tone="warning" title="Some nodes are not answering">The list below shows what could be reached. Check the nodes marked "Not reachable".</Alert>}
+      {q.data?.partial && <Alert tone="warning" title={t('servers.fleetPage.someNodesAnswering')}>{t('servers.fleetPage.listBelowShowsWhat')}</Alert>}
       {q.isLoading && <Skeleton className="h-40" />}
       {q.isSuccess && (
         <Card>
-          <CardHeader><CardTitle>Nodes</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t('servers.fleetPage.nodes')}</CardTitle></CardHeader>
           <CardContent>
             {nodes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No other panels yet. Add a node to see and control its servers from here.</p>
+              <p className="text-sm text-muted-foreground">{t('servers.fleetPage.noOtherPanelsYet')}</p>
             ) : (
               <ul className="space-y-3">{nodes.map((n) => <NodeCard key={n.id} n={n} onRemove={() => setRemoving(n)} />)}</ul>
             )}
@@ -214,11 +217,11 @@ function Fleet() {
       {servers.length > 0 && (
         <Card className="overflow-x-auto">
           <table className="w-full min-w-[48rem] text-left text-sm">
-            <caption className="sr-only">Servers on all nodes</caption>
+            <caption className="sr-only">{t('servers.fleetPage.serversAllNodes')}</caption>
             <thead className="text-xs text-muted-foreground">
               <tr>
-                {['Server', 'Node', 'Mode', 'Status', 'Game port', 'Updates', 'Actions'].map((h) => (
-                  <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>
+                {[msg('servers.fleetPage.colServer'), msg('servers.fleetPage.colNode'), msg('servers.fleetPage.colMode'), msg('servers.fleetPage.colStatus'), msg('servers.fleetPage.gamePort'), msg('servers.fleetPage.colUpdates'), msg('servers.fleetPage.colActions')].map((h) => (
+                  <th key={h.msgId} scope="col" className="px-4 py-3 font-medium">{t(h)}</th>
                 ))}
               </tr>
             </thead>
@@ -230,9 +233,9 @@ function Fleet() {
       <ConfirmDialog
         open={removing !== null}
         onOpenChange={(o) => !o && setRemoving(null)}
-        title={`Remove ${removing?.name ?? 'this node'}?`}
-        description="It only disappears from this list. Nothing changes on that computer, and its servers keep running."
-        confirmLabel="Remove node"
+        title={t('servers.fleetPage.removeValue', { name: removing?.name ?? 'this node' })}
+        description={t('servers.fleetPage.onlyDisappearsFromList')}
+        confirmLabel={t('servers.fleetPage.removeNode')}
         destructive
         busy={remove.isPending}
         onConfirm={() => removing && remove.mutate(removing.id)}

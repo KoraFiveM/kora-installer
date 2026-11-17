@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { t } from '@/i18n'
+import '@/i18n/en/servers/shortcuts'
 
 /** Status of the Kora shortcuts, and the one-click "Tidy up old shortcuts" (see `PUT /app`). */
 function useShortcuts() {
@@ -31,8 +33,8 @@ export function TidyUpBanner() {
   return (
     <Alert tone="info">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <span>Kora now opens from your own shortcuts, with no administrator prompt. Tidy up the old ones?</span>
-        <Button onClick={() => tidy.mutate()} disabled={tidy.isPending}>Tidy up old shortcuts</Button>
+        <span>{t('servers.shortcuts.koraNowOpensFrom')}</span>
+        <Button onClick={() => tidy.mutate()} disabled={tidy.isPending}>{t('servers.shortcuts.tidyUpOldShortcuts')}</Button>
       </div>
       <ErrorNotice error={tidy.error} />
     </Alert>
@@ -47,20 +49,20 @@ export function ShortcutsCard() {
   const legacy = q.data?.legacy ?? false
   return (
     <Card>
-      <CardHeader><CardTitle>Kora shortcuts</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('servers.shortcuts.koraShortcuts')}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">Kora is this panel in your browser. The shortcut in your Start Menu (or applications menu) opens it; no administrator prompt.</p>
-        <div className="text-sm">{q.data?.shortcuts ? <Badge tone="success" dot>Shortcut in place</Badge> : <Badge tone="neutral" dot>No shortcut yet</Badge>}</div>
+        <p className="text-sm text-muted-foreground">{t('servers.shortcuts.koraPanelBrowserShortcut')}</p>
+        <div className="text-sm">{q.data?.shortcuts ? <Badge tone="success" dot>{t('servers.shortcuts.shortcutPlace')}</Badge> : <Badge tone="neutral" dot>{t('servers.shortcuts.noShortcutYet')}</Badge>}</div>
         {legacy && (
           <Alert tone="info">
-            <p className="font-medium">An older Kora is still installed on this computer.</p>
+            <p className="font-medium">{t('servers.shortcuts.olderKoraStillInstalled')}</p>
             <ul className="mt-1 list-disc pl-5 text-sm">{q.data?.legacy_items.map((i) => <li key={i}>{i}</li>)}</ul>
-            <p className="mt-1 text-sm">Tidying up makes the new shortcuts first, so the old ones keep working until the end. Removing the old copy needs administrator rights; if you are not an administrator here, Kora shows the command to run.</p>
+            <p className="mt-1 text-sm">{t('servers.shortcuts.tidyingUpMakesNew')}</p>
           </Alert>
         )}
         {tidy.isSuccess && <Alert tone="success">{tidy.data.message}</Alert>}
-        <Checkbox label="Also put a shortcut on the desktop (Windows)" checked={desktop} onChange={(e) => setDesktop(e.target.checked)} />
-        <Button onClick={() => tidy.mutate()} disabled={tidy.isPending}>{legacy ? 'Tidy up old shortcuts' : q.data?.shortcuts ? 'Refresh the shortcuts' : 'Add the shortcuts'}</Button>
+        <Checkbox label={t('servers.shortcuts.alsoPutShortcutDesktop')} checked={desktop} onChange={(e) => setDesktop(e.target.checked)} />
+        <Button onClick={() => tidy.mutate()} disabled={tidy.isPending}>{legacy ? t('servers.shortcuts.tidyUpOldShortcuts') : q.data?.shortcuts ? t('servers.shortcuts.refreshShortcuts') : t('servers.shortcuts.addShortcuts')}</Button>
         <ErrorNotice error={tidy.error ?? q.error} />
       </CardContent>
     </Card>

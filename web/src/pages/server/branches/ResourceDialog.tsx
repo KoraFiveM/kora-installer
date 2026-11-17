@@ -16,6 +16,9 @@ import { Field } from '@/components/Field'
 import { useRefreshBranches } from './useBranches'
 import { VersionBadge } from './VersionBadge'
 import { ChangesDialog } from './ChangesDialog'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/resources/resourceDialog'
 
 /** After files changed: say that the running server still has the old version, and offer the existing restart. */
 /** What the branch tools need to know about the server. */
@@ -26,12 +29,12 @@ export function RestartHint({ server: s, resource, note }: { server: Pick<Server
   const canRestart = s.running && s.console_enabled
   return (
     <div className="mt-2 space-y-2 text-sm">
-      <p>{note ?? 'The files changed. Restart the resource (or the server) to load them.'}</p>
+      <p>{note ?? t('resources.resourceDialog.filesChangedRestartResource')}</p>
       {s.running ? (
         canRestart ? (
-          <Button size="sm" onClick={() => m.mutate()} disabled={m.isPending}>{m.isPending && <Loader2 className="animate-spin" aria-hidden />}Restart {resource} now</Button>
-        ) : <p className="text-xs text-muted-foreground">To restart just this resource, turn on the live console in the Console tab. Or restart the whole server from the Overview tab.</p>
-      ) : <p className="text-xs text-muted-foreground">The server is not running, so it will use the new version when it starts.</p>}
+          <Button size="sm" onClick={() => m.mutate()} disabled={m.isPending}>{rich('resources.resourceDialog.nodeNodeRestartResource', { node: m.isPending && <Loader2 className="animate-spin" aria-hidden />, resource })}</Button>
+        ) : <p className="text-xs text-muted-foreground">{t('resources.resourceDialog.restartJustResourceTurn')}</p>
+      ) : <p className="text-xs text-muted-foreground">{t('resources.resourceDialog.serverRunningUseNew')}</p>}
       {m.data && <p className="text-xs text-muted-foreground" role="status">{m.data.message}</p>}
       <ErrorNotice error={m.error} />
     </div>
@@ -42,7 +45,7 @@ export function RestartHint({ server: s, resource, note }: { server: Pick<Server
 export function ResourceDialog({ server: s, resource, onClose }: { server: BranchServer; resource: ResourceBranch; onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-2xl" title={`Branch of ${resource.id}`} description="You can try another version of this resource's code, or go back to the normal one.">
+      <DialogContent className="max-w-2xl" title={t('resources.resourceDialog.branchId', { id: resource.id })} description={t('resources.resourceDialog.tryAnotherVersionResources')}>
         <BranchControls server={s} resource={resource} />
       </DialogContent>
     </Dialog>
@@ -105,24 +108,24 @@ export function BranchControls({ server: s, resource }: { server: BranchServer; 
     <>
         <div className="space-y-5">
           {released && (
-            <Alert tone="warning" title="This server follows released versions">
-              <p>This resource will run unreleased code until you put it back on its released version. Only do it for a test, and put it back when you are done.</p>
-              <div className="mt-2"><Checkbox label="I understand: this resource will run unreleased code" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /></div>
+            <Alert tone="warning" title={t('resources.resourceDialog.serverFollowsReleasedVersions')}>
+              <p>{t('resources.resourceDialog.resourceRunUnreleasedCode')}</p>
+              <div className="mt-2"><Checkbox label={t('resources.resourceDialog.iUnderstandResourceRun')} checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /></div>
             </Alert>
           )}
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span>Right now it is on</span>
+            <span>{t('resources.resourceDialog.rightNow')}</span>
             <VersionBadge branch={c?.resource ?? resource} />
-            {(c?.resource ?? resource).changed_count > 0 && <Badge tone="amber">{(c?.resource ?? resource).changed_count} changed file{(c?.resource ?? resource).changed_count === 1 ? '' : 's'} of yours</Badge>}
+            {(c?.resource ?? resource).changed_count > 0 && <Badge tone="amber">{t('resources.resourceDialog.changedCountChangedFile', { changed_count: (c?.resource ?? resource).changed_count })}</Badge>}
           </div>
           {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
           <ErrorNotice error={choices.error} onRetry={() => void choices.refetch()} />
 
           {result && (
-            <Alert tone={result.status === 'already' ? 'info' : 'success'} title={result.status === 'already' ? 'Nothing to do' : 'Done'}>
+            <Alert tone={result.status === 'already' ? 'info' : 'success'} title={result.status === 'already' ? t('resources.resourceDialog.nothingDo') : t('resources.resourceDialog.done')}>
               <p>{result.message}</p>
-              {result.stashed && <p className="mt-1">Your changes are kept aside ({result.stashed.message}). You can bring them back below.</p>}
-              {result.saved_branch && <p className="mt-1">The commit you were on had no branch, so it was saved as <code className="font-mono">{result.saved_branch}</code>.</p>}
+              {result.stashed && <p className="mt-1">{t('resources.resourceDialog.changesKeptAsideMessage', { message: result.stashed.message })}</p>}
+              {result.saved_branch && <p className="mt-1">{rich('resources.resourceDialog.commitWereHadNo', { code: <code className="font-mono">{result.saved_branch}</code> })}</p>}
               {result.needs_restart && <RestartHint server={s} resource={id} note={result.restart_note} />}
             </Alert>
           )}
@@ -130,57 +133,55 @@ export function BranchControls({ server: s, resource }: { server: BranchServer; 
 
           {resource.state !== 'default' && (
             <section className="space-y-2">
-              <h3 className="text-sm font-semibold">{released ? 'Back to the released version' : 'Back to the normal version'}</h3>
-              <p className="text-xs text-muted-foreground">{released ? 'Goes back to exactly the release this server is pinned to. Updates start working again for this resource.' : <>Goes back to <code className="font-mono">{resource.default_branch}</code>, the branch Kora keeps updated. Updates start working again for this resource.</>}</p>
-              <Button disabled={working || !!blocked} onClick={() => send({ action: 'default' })}>{released ? 'Back to the released version' : 'Back to the normal version'}</Button>
+              <h3 className="text-sm font-semibold">{released ? t('resources.resourceDialog.backReleasedVersion') : t('resources.resourceDialog.backNormalVersion')}</h3>
+              <p className="text-xs text-muted-foreground">{released ? t('resources.resourceDialog.goesBackExactlyRelease') : <>{rich('resources.resourceDialog.goesBackCodeNode', { code: <code className="font-mono">{resource.default_branch}</code> })}</>}</p>
+              <Button disabled={working || !!blocked} onClick={() => send({ action: 'default' })}>{released ? t('resources.resourceDialog.backReleasedVersion') : t('resources.resourceDialog.backNormalVersion')}</Button>
             </section>
           )}
 
           <section className="space-y-2">
-            <h3 className="text-sm font-semibold">Switch to a branch</h3>
-            <p className="text-xs text-muted-foreground">A branch is a separate line of changes to the code. Pick one from your fork or from the original repository.</p>
+            <h3 className="text-sm font-semibold">{t('resources.resourceDialog.switchBranch')}</h3>
+            <p className="text-xs text-muted-foreground">{t('resources.resourceDialog.branchSeparateLineChanges')}</p>
             <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-56 flex-1"><Field label="Branch">
+              <div className="min-w-56 flex-1"><Field label={t('resources.resourceDialog.branch')}>
                 <Select value={pick} onChange={(e) => setPick(e.target.value)} disabled={!c}>
-                  <option value="">Choose a branch</option>
-                  {options.local.length > 0 && <optgroup label="Already in this folder">{options.local.map((b) => <option key={`l${b}`} value={`local:${b}`}>{b}</option>)}</optgroup>}
-                  {options.fork.length > 0 && <optgroup label="On your fork">{options.fork.map((b) => <option key={`f${b}`} value={`origin:${b}`}>{b}</option>)}</optgroup>}
-                  {options.upstream.length > 0 && <optgroup label="On the original repository">{options.upstream.map((b) => <option key={`u${b}`} value={`upstream:${b}`}>{b}</option>)}</optgroup>}
+                  <option value="">{t('resources.resourceDialog.chooseBranch')}</option>
+                  {options.local.length > 0 && <optgroup label={t('resources.resourceDialog.alreadyFolder')}>{options.local.map((b) => <option key={`l${b}`} value={`local:${b}`}>{b}</option>)}</optgroup>}
+                  {options.fork.length > 0 && <optgroup label={t('resources.resourceDialog.onYourFork')}>{options.fork.map((b) => <option key={`f${b}`} value={`origin:${b}`}>{b}</option>)}</optgroup>}
+                  {options.upstream.length > 0 && <optgroup label={t('resources.resourceDialog.originalRepository')}>{options.upstream.map((b) => <option key={`u${b}`} value={`upstream:${b}`}>{b}</option>)}</optgroup>}
                 </Select>
               </Field></div>
-              <Button variant="default" disabled={!pick || working || leaving} onClick={switchToPick}>Switch</Button>
-              <Button variant="ghost" onClick={() => reload.mutate()} disabled={reload.isPending} title="Ask GitHub for the newest list of branches" aria-label="Refresh list of branches from GitHub">
-                {reload.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}Refresh list
-              </Button>
+              <Button variant="default" disabled={!pick || working || leaving} onClick={switchToPick}>{t('resources.resourceDialog.switch')}</Button>
+              <Button variant="ghost" onClick={() => reload.mutate()} disabled={reload.isPending} title={t('resources.resourceDialog.askGithubNewestList')} aria-label={t('resources.resourceDialog.refreshListBranchesFrom')}>{rich('resources.resourceDialog.nodeNodeRefreshList', { node: reload.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden /> })}</Button>
             </div>
             {(c?.notes ?? []).map((n) => <p key={n} className="text-xs text-amber">{n}</p>)}
             <ErrorNotice error={reload.error} />
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-sm font-semibold">Try a pull request</h3>
-            <p className="text-xs text-muted-foreground">A pull request is a change someone has proposed. Kora downloads it so you can try it on your server before it is accepted. Paste its number or address, or pick one.</p>
-            <p className="text-xs text-amber" role="note">A pull request is someone else&apos;s code. Once you try it, it runs on your server like any of its resources, before anyone has accepted it. Only try pull requests from people you trust, and look at what they change on GitHub first.</p>
+            <h3 className="text-sm font-semibold">{t('resources.resourceDialog.tryPullRequest')}</h3>
+            <p className="text-xs text-muted-foreground">{t('resources.resourceDialog.pullRequestChangeSomeone')}</p>
+            <p className="text-xs text-amber" role="note">{t('resources.resourceDialog.pullRequestSomeoneElses')}</p>
             <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (prText.trim() && !leaving) send({ action: 'pr', pr: prText.trim() }) }}>
-              <div className="min-w-56 flex-1"><Field label="Pull request number or address"><Input value={prText} onChange={(e) => setPrText(e.target.value)} placeholder="12 or https://github.com/owner/name/pull/12" autoComplete="off" /></Field></div>
-              <Button type="submit" variant="default" disabled={!prText.trim() || working || leaving}>Try it</Button>
+              <div className="min-w-56 flex-1"><Field label={t('resources.resourceDialog.pullRequestNumberAddress')}><Input value={prText} onChange={(e) => setPrText(e.target.value)} placeholder={t('resources.resourceDialog.httpsGithubComOwner')} autoComplete="off" /></Field></div>
+              <Button type="submit" variant="default" disabled={!prText.trim() || working || leaving}>{t('resources.resourceDialog.tryIt')}</Button>
             </form>
-            <p className="text-xs text-muted-foreground">To pick one from the open pull requests, with their checks and reviews, use the <Link className="text-info underline" to={`/servers/${encodeURIComponent(s.name)}/resources/${encodeURIComponent(id)}`}>page of {id}</Link>.</p>
+            <p className="text-xs text-muted-foreground">{rich('resources.resourceDialog.pickOneFromOpen', { id, link: (c) => <Link className="text-info underline" to={`/servers/${encodeURIComponent(s.name)}/resources/${encodeURIComponent(id)}`}>{c}</Link> })}</p>
           </section>
 
           {(c?.stashes.length ?? 0) > 0 && (
             <section className="space-y-2">
-              <h3 className="text-sm font-semibold">Changes you kept aside</h3>
-              <p className="text-xs text-muted-foreground">Kora set these aside when you switched. They stay here until you bring them back, and bringing them back does not delete them. They are also kept in this folder in git, as a "stash".</p>
+              <h3 className="text-sm font-semibold">{t('resources.resourceDialog.changesKeptAside')}</h3>
+              <p className="text-xs text-muted-foreground">{t('resources.resourceDialog.koraSetTheseAside')}</p>
               <ul className="divide-y divide-border rounded-md border border-border">
                 {c!.stashes.map((st) => (
                   <li key={st.index} className="flex flex-wrap items-center gap-2 p-3 text-sm">
-                    <span className="min-w-0 flex-1">{st.message} <span className="text-xs text-muted-foreground">(made on {st.branch})</span></span>
-                    <Button size="sm" disabled={working || !!blocked} aria-label={`Bring my changes back: kept-aside set ${st.index + 1}`} onClick={() => restore.mutate(st.index)}>Bring my changes back</Button>
+                    <span className="min-w-0 flex-1">{st.message} <span className="text-xs text-muted-foreground">{t('resources.resourceDialog.madeBranch', { branch: st.branch })}</span></span>
+                    <Button size="sm" disabled={working || !!blocked} aria-label={t('resources.resourceDialog.bringMyChangesBack', { set: st.index + 1 })} onClick={() => restore.mutate(st.index)}>{t('resources.resourceDialog.bringMyChangesBack2')}</Button>
                   </li>
                 ))}
               </ul>
-              {resource.changed_count > 0 && <p className="text-xs text-muted-foreground">Bringing changes back needs a clean folder: keep or save your current changes first.</p>}
+              {resource.changed_count > 0 && <p className="text-xs text-muted-foreground">{t('resources.resourceDialog.bringingChangesBackNeeds')}</p>}
             </section>
           )}
         </div>

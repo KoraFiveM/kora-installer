@@ -7,7 +7,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use kora_core::problem::{codes, Action, Problem};
+use kora_core::problem::{codes, Action, MessageRef, Problem};
 use serde_json::json;
 
 #[derive(Debug, Clone)]
@@ -26,6 +26,7 @@ pub struct ApiError {
 struct Extra {
     details: Option<String>,
     actions: Vec<Action>,
+    i18n: Option<MessageRef>,
 }
 
 impl ApiError {
@@ -43,8 +44,8 @@ impl ApiError {
     /// A [`Problem`] with this HTTP status.
     pub fn problem(status: StatusCode, p: Problem) -> Self {
         let mut e = Self::new(status, &p.code, p.message);
-        if p.details.is_some() || !p.actions.is_empty() {
-            e.extra = Some(Box::new(Extra { details: p.details, actions: p.actions }));
+        if p.details.is_some() || !p.actions.is_empty() || p.i18n.is_some() {
+            e.extra = Some(Box::new(Extra { details: p.details, actions: p.actions, i18n: p.i18n.map(|b| *b) }));
         }
         if e.code == codes::NEEDS_ELEVATION {
             e.command = e.actions().iter().find_map(|a| match a {
@@ -56,7 +57,13 @@ impl ApiError {
     }
     /// The error as a [`Problem`] (for job errors and tests).
     pub fn to_problem(&self) -> Problem {
-        Problem { code: self.code.clone(), message: self.message.clone(), details: self.details().map(String::from), actions: self.actions().to_vec() }
+        Problem {
+            code: self.code.clone(),
+            message: self.message.clone(),
+            details: self.details().map(String::from),
+            actions: self.actions().to_vec(),
+            i18n: self.extra.as_ref().and_then(|x| x.i18n.clone()).map(Box::new),
+        }
     }
     pub fn with_action(mut self, a: Action) -> Self {
         let x = self.extra.get_or_insert_with(Box::default);
@@ -158,6 +165,9 @@ impl IntoResponse for ApiError {
         if !self.actions().is_empty() {
             err["actions"] = json!(self.actions());
         }
+        if let Some(m) = self.extra.as_ref().and_then(|x| x.i18n.as_ref()) {
+            err["i18n"] = json!(m);
+        }
         (self.status, Json(json!({ "error": err }))).into_response()
     }
 }
@@ -220,5 +230,15 @@ mod tests {
         let e = ApiError::core(elevation_problem("Needs admin.", vec!["kora".into(), "x".into()]));
         assert_eq!((e.status, e.command.clone()), (StatusCode::FORBIDDEN, Some(vec!["kora".to_string(), "x".to_string()])));
         assert_eq!(e.to_problem().code, "needs_elevation");
+    }
+
+    #[tokio::test]
+    async fn a_message_id_reaches_the_browser_and_is_left_out_when_there_is_none() {
+        let with = Problem::new(codes::INSTALL_DB_STOPPED, "The database server MariaDB is installed but not running.").with_message_id("errors.problems.dbStopped", &[("name", "MariaDB")]);
+        let (_, v) = body(ApiError::from(with.clone())).await;
+        assert_eq!(v["error"]["i18n"], json!({"id": "errors.problems.dbStopped", "params": {"name": "MariaDB"}}));
+        assert_eq!(ApiError::from(with.clone()).to_problem(), with);
+        let (_, v) = body(ApiError::from(Problem::new(codes::GH_MISSING, "x"))).await;
+        assert!(v["error"].get("i18n").is_none());
     }
 }

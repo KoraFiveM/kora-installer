@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { parseAnsi } from '@/lib/ansi'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/servers/consoleTab'
 
 const MAX_LINES = 1000
 
@@ -68,13 +71,13 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
     setPaused(false)
   }
 
-  if (!readOk) return <Alert tone="info" title="The console is not available to you">{whyNot(role, 'operator')}</Alert>
+  if (!readOk) return <Alert tone="info" title={t('servers.consoleTab.consoleAvailable')}>{whyNot(role, 'operator')}</Alert>
 
   if (!s.console_enabled) {
     return (
       <div className="max-w-xl space-y-4">
-        <Alert tone="info" title="The console is not switched on">To show live server output and send commands, Kora adds a small helper resource called kora_console to this server. It loads the next time the server starts.</Alert>
-        <Button variant="default" disabled={enabling || !role.can('admin')} title={whyNot(role, 'admin') ?? undefined} onClick={async () => { setEnabling(true); setErr(null); try { await api.console.enable(s.name); await qc.invalidateQueries({ queryKey: ['server', s.name] }) } catch (e) { setErr(e) } finally { setEnabling(false) } }}>Enable console</Button>
+        <Alert tone="info" title={t('servers.consoleTab.consoleSwitched')}>{t('servers.consoleTab.showLiveServerOutput')}</Alert>
+        <Button variant="default" disabled={enabling || !role.can('admin')} title={whyNot(role, 'admin') ?? undefined} onClick={async () => { setEnabling(true); setErr(null); try { await api.console.enable(s.name); await qc.invalidateQueries({ queryKey: ['server', s.name] }) } catch (e) { setErr(e) } finally { setEnabling(false) } }}>{t('servers.consoleTab.enableConsole')}</Button>
         <ErrorNotice error={err} />
       </div>
     )
@@ -98,27 +101,27 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
     <div className="space-y-3">
       {s.status !== 'running' && (
         <Alert tone="warning">
-          <p>The server is not running, so there is no live output.</p>
+          <p>{t('servers.consoleTab.serverRunningThereNo')}</p>
           {s.status === 'stopped' && (
             <Button size="sm" className="mt-2" disabled={ctl.busy || startOff !== null} title={startOff ?? undefined} onClick={() => void ctl.run('start')}>
-              <Play /> {ctl.pending ?? 'Start server'}
+              <Play /> {ctl.pending ?? t('servers.consoleTab.startServer')}
             </Button>
           )}
         </Alert>
       )}
       <div className="relative">
-        <div ref={box} onScroll={onScroll} role="log" aria-label="Server console output" tabIndex={0} className="h-96 overflow-y-auto rounded-lg border border-border bg-ink p-3 font-mono text-xs leading-relaxed">
-          {lines.length === 0 ? <span className="text-muted-foreground">Waiting for output...</span> : lines.map((l, i) => <div key={i} className="whitespace-pre-wrap break-words">{parseAnsi(l)}</div>)}
+        <div ref={box} onScroll={onScroll} role="log" aria-label={t('servers.consoleTab.serverConsoleOutput')} tabIndex={0} className="h-96 overflow-y-auto rounded-lg border border-border bg-ink p-3 font-mono text-xs leading-relaxed">
+          {lines.length === 0 ? <span className="text-muted-foreground">{t('servers.consoleTab.waitingOutput')}</span> : lines.map((l, i) => <div key={i} className="whitespace-pre-wrap break-words">{parseAnsi(l)}</div>)}
         </div>
-        {paused && <Button size="sm" className="absolute bottom-3 right-5" onClick={jump}><ArrowDown /> Paused. Jump to latest</Button>}
+        {paused && <Button size="sm" className="absolute bottom-3 right-5" onClick={jump}>{rich('servers.consoleTab.arrowdownNodePausedJump', { arrowDown: <ArrowDown /> })}</Button>}
       </div>
       <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void send() }}>
-        <label htmlFor="console-cmd" className="sr-only">Console command</label>
+        <label htmlFor="console-cmd" className="sr-only">{t('servers.consoleTab.consoleCommand')}</label>
         <Input
           id="console-cmd"
           className="font-mono"
           value={cmd}
-          placeholder="Type a command, for example status"
+          placeholder={t('servers.consoleTab.typeCommandExampleStatus')}
           autoComplete="off"
           disabled={!role.canDestroy}
           onChange={(e) => setCmd(e.target.value)}
@@ -135,7 +138,7 @@ export function ConsoleTab({ server: s }: { server: ServerDetail }) {
             }
           }}
         />
-        <Button type="submit" variant="default" disabled={!cmd.trim() || !role.canDestroy}>Send</Button>
+        <Button type="submit" variant="default" disabled={!cmd.trim() || !role.canDestroy}>{t('servers.consoleTab.send')}</Button>
       </form>
       {!role.canDestroy && <p className="text-xs text-muted-foreground">{whyNot(role, 'admin', true)}</p>}
       <ErrorNotice error={err} />
