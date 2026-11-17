@@ -182,6 +182,7 @@ Commands:
   proxy           Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name with a real certificate
   restart         Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
   remote-actions  Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
+  remote          Remote sign-in settings that are not about one person
 
 Options:
       --port <PORT>
@@ -736,6 +737,74 @@ Options:
 Show whether they are on or off
 
 Usage: kora panel remote-actions status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote =====
+Remote sign-in settings that are not about one person
+
+Usage: kora panel remote [OPTIONS] <COMMAND>
+
+Commands:
+  require-strong  Require a passkey or one-time codes for everybody who signs in from another computer: the old token links stop working for sign-in (the same switch as Settings, Remote access). Local to this computer
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong =====
+Require a passkey or one-time codes for everybody who signs in from another computer: the old token links stop working for sign-in (the same switch as Settings, Remote access). Local to this computer
+
+Usage: kora panel remote require-strong [OPTIONS] <COMMAND>
+
+Commands:
+  on      Allow these actions for administrators who sign in with a token
+  off     Refuse these actions for token sign-ins from other computers (the default)
+  status  Show whether they are on or off
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong on =====
+Allow these actions for administrators who sign in with a token
+
+Usage: kora panel remote require-strong on [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong off =====
+Refuse these actions for token sign-ins from other computers (the default)
+
+Usage: kora panel remote require-strong off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong status =====
+Show whether they are on or off
+
+Usage: kora panel remote require-strong status [OPTIONS]
 
 Options:
       --no-elevate

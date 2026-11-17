@@ -255,7 +255,7 @@ pub fn store(cmd: StoreCmd) -> i32 {
 // ---- the audit row of a `kora` command ---------------------------------------------------------------
 
 /// The operation a command path stands for, `None` for what only reads or only runs the panel itself.
-fn op_of(path: &[&str]) -> Option<Op> {
+pub(crate) fn op_of(path: &[&str]) -> Option<Op> {
     Some(match path {
         ["install"] => Op::InstallStart,
         ["update"] => Op::UpdateApply,
@@ -287,7 +287,13 @@ fn op_of(path: &[&str]) -> Option<Op> {
         ["panel", "user", "api-token", "revoke"] => Op::ApiTokenRevoke,
         ["panel", "tls", "renew"] => Op::TlsRenew,
         ["panel", "user", "remove"] => Op::UserRemove,
-        ["panel", "tailscale", "allow"] | ["panel", "tailscale", "remove"] | ["panel", "tailscale", "off"] | ["panel", "remote-actions", "on"] | ["panel", "remote-actions", "off"] => Op::RemoteSet,
+        ["panel", "tailscale", "allow"]
+        | ["panel", "tailscale", "remove"]
+        | ["panel", "tailscale", "off"]
+        | ["panel", "remote-actions", "on"]
+        | ["panel", "remote-actions", "off"]
+        | ["panel", "remote", "require-strong", "on"]
+        | ["panel", "remote", "require-strong", "off"] => Op::RemoteSet,
         ["panel", "restart"] => Op::PanelRestart,
         _ => return None,
     })
