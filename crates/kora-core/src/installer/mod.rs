@@ -268,7 +268,9 @@ pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
 /// [`plan_steps`] with the "needs the `kora` account" decision given (tests).
 pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep> {
     let mut v = Vec::new();
-    if kora_user {
+    let container = req.container.is_some();
+    // A container server's folder stays the person's own: no `kora` account, no service account.
+    if kora_user && !container {
         v.push(PlannedStep { id: "prepare.account", title: "Create the 'kora' user account that owns the server folder", weight: 1, needs_admin: true, skippable: false });
     }
     v.extend([
@@ -276,6 +278,10 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
         PlannedStep { id: "prepare.catalog", title: "Load the resource catalog", weight: 3, needs_admin: false, skippable: false },
         PlannedStep { id: "prepare.tools", title: "Check git, GitHub CLI, database server and ports", weight: 5, needs_admin: false, skippable: false },
     ]);
+    if container {
+        v.push(PlannedStep { id: "container.engine", title: "Check the container engine", weight: 3, needs_admin: false, skippable: false });
+        v.push(PlannedStep { id: "container.images", title: "Download the container images", weight: 12, needs_admin: false, skippable: false });
+    }
     if req.source() == Source::Fork {
         v.push(PlannedStep { id: "build.forks", title: "Fork the resources into your GitHub account", weight: 30, needs_admin: false, skippable: false });
     }
@@ -291,17 +297,21 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
         skippable: false,
     });
     if req.db != DbChoice::Skip {
-        v.push(PlannedStep { id: "build.db", title: "Create a new database and user", weight: 5, needs_admin: false, skippable: false });
+        let title = if req.db == DbChoice::Container { "Create the database container" } else { "Create a new database and user" };
+        v.push(PlannedStep { id: "build.db", title, weight: 5, needs_admin: false, skippable: false });
     }
     v.push(PlannedStep { id: "build.artifact", title: "Download and unpack the FiveM server build", weight: 20, needs_admin: false, skippable: false });
     v.push(PlannedStep { id: "build.config", title: "Write txAdmin profile, server.cfg, permissions.cfg and secrets.cfg", weight: 3, needs_admin: false, skippable: false });
     if req.firewall {
         v.push(PlannedStep { id: "system.firewall", title: "Open the game port in the firewall", weight: 2, needs_admin: true, skippable: true });
     }
-    if req.service {
+    if container {
+        v.push(PlannedStep { id: "container.create", title: "Create the server's container", weight: 3, needs_admin: false, skippable: false });
+    }
+    if req.service && !container {
         v.push(PlannedStep { id: "system.service", title: "Register the background service", weight: 2, needs_admin: true, skippable: false });
     }
-    if req.service && req.versions() == Versions::Latest {
+    if req.service && !container && req.versions() == Versions::Latest {
         v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true, skippable: true });
     }
     v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false, skippable: false });
@@ -733,7 +743,11 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
                     if req.versions() == Versions::Released { selected.len() - pinned } else { selected.len() }
                 )
             }
+            "container.engine" => "Find Podman or Docker, prove it can run a container, and record which".into(),
+            "container.images" => format!("Download the pinned base image{}", if req.db == DbChoice::Container { " and the MariaDB image" } else { "" }),
+            "container.create" => "Create the server's container (published game port, txAdmin on loopback only, the server folder mounted) and set up start at boot".into(),
             "build.db" => match req.db {
+                DbChoice::Container => "Create a MariaDB container on the server's private network, with its data in a named volume and a generated login".into(),
                 DbChoice::InstallIfMissing => "Install MariaDB if missing (admin needed), then create a new database + user with a generated password".into(),
                 _ => "Create a new database + user with a generated password (never touches existing data)".into(),
             },

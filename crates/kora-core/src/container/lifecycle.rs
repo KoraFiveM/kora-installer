@@ -200,29 +200,42 @@ impl<'a> Manager<'a> {
         }
     }
 
+    fn gone(&self, done: &mut Vec<String>, what: &str, args: Vec<String>, exists: bool) -> Result<(), Problem> {
+        if !exists {
+            return Ok(());
+        }
+        self.engine().run_ok(self.runner, &args).map(|_| ()).map_err(|x| self.fail(&format!("remove {what}"), x))?;
+        done.push(format!("Removed {what}"));
+        Ok(())
+    }
+
+    /// Remove the game container only (stopping it first, whatever state it is in).
+    pub fn remove_game(&self) -> Result<Vec<String>, Problem> {
+        let mut done = Vec::new();
+        self.gone(&mut done, &format!("the container {}", self.rec.container), engine::rm_args(&self.rec.container), self.state() != ContainerState::Missing)?;
+        Ok(done)
+    }
+
+    /// Remove the database container and the private network, and (only when `remove_volume`) the data volume.
+    pub fn remove_db_side(&self, remove_volume: bool) -> Result<Vec<String>, Problem> {
+        let mut done = Vec::new();
+        let Some(db) = &self.rec.db else { return Ok(done) };
+        let e = self.engine();
+        self.gone(&mut done, &format!("the database container {}", db.container), engine::rm_args(&db.container), self.state_of(&db.container) != ContainerState::Missing)?;
+        let net = e.run(self.runner, &engine::network_inspect_args(&db.network)).is_ok_and(|o| o.success());
+        self.gone(&mut done, &format!("the private network {}", db.network), engine::network_rm_args(&db.network), net)?;
+        if remove_volume {
+            let vol = e.run(self.runner, &engine::volume_inspect_args(&db.volume)).is_ok_and(|o| o.success());
+            self.gone(&mut done, &format!("the database's data volume {}", db.volume), engine::volume_rm_args(&db.volume), vol)?;
+        }
+        Ok(done)
+    }
+
     /// Remove what Kora made for this server: the containers, the network, and (only when `remove_volume`)
     /// the database's data volume. Missing objects are fine. Returns what was removed, in words.
     pub fn remove_all(&self, remove_volume: bool) -> Result<Vec<String>, Problem> {
-        let e = self.engine();
-        let mut done = Vec::new();
-        let mut gone = |what: &str, args: Vec<String>, exists: bool| -> Result<(), Problem> {
-            if !exists {
-                return Ok(());
-            }
-            e.run_ok(self.runner, &args).map(|_| ()).map_err(|x| self.fail(&format!("remove {what}"), x))?;
-            done.push(format!("Removed {what}"));
-            Ok(())
-        };
-        gone(&format!("the container {}", self.rec.container), engine::rm_args(&self.rec.container), self.state() != ContainerState::Missing)?;
-        if let Some(db) = &self.rec.db {
-            gone(&format!("the database container {}", db.container), engine::rm_args(&db.container), self.state_of(&db.container) != ContainerState::Missing)?;
-            let net = e.run(self.runner, &engine::network_inspect_args(&db.network)).is_ok_and(|o| o.success());
-            gone(&format!("the private network {}", db.network), engine::network_rm_args(&db.network), net)?;
-            if remove_volume {
-                let vol = e.run(self.runner, &engine::volume_inspect_args(&db.volume)).is_ok_and(|o| o.success());
-                gone(&format!("the database's data volume {}", db.volume), engine::volume_rm_args(&db.volume), vol)?;
-            }
-        }
+        let mut done = self.remove_game()?;
+        done.extend(self.remove_db_side(remove_volume)?);
         Ok(done)
     }
 

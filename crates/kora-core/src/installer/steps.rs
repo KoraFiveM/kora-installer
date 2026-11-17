@@ -16,6 +16,8 @@ use crate::service::{self, ManagedServer, Platform as SvcPlatform};
 use crate::steps::StepResult;
 use crate::txadmin::{self, CfxIdentity, DbConnection, ServerConfig};
 
+mod container;
+
 const CLONE_WORKERS: usize = 4;
 
 pub(crate) fn build(ctx: &Arc<Ctx>) -> Vec<Box<dyn Step>> {
@@ -666,6 +668,9 @@ impl InstallStep {
 
     fn is_done(&self) -> bool {
         let ctx = &self.ctx;
+        if let Some(done) = self.container_is_done() {
+            return done;
+        }
         match self.id {
             // Done before the engine starts (see `prepare_account`).
             "prepare.account" => true,
@@ -709,8 +714,12 @@ impl InstallStep {
             }
             "prepare.account" => Ok("Already done".into()),
             "prepare.tools" => self.prepare_tools(),
+            "container.engine" => self.container_engine(),
+            "container.images" => self.container_images(),
+            "container.create" => self.container_create(),
             "build.forks" => self.forks(),
             "build.resources" => self.resources(),
+            "build.db" if ctx.req.db == DbChoice::Container => self.container_database(),
             "build.db" => self.database(),
             "build.artifact" => self.artifact(),
             "build.config" => self.config(),
@@ -824,8 +833,8 @@ impl InstallStep {
                 return Err(super::ports_busy(&conflicts).into());
             }
         }
-        // Database server.
-        if ctx.req.db != DbChoice::Skip {
+        // Database server (a database container needs none on the host).
+        if ctx.req.db != DbChoice::Skip && ctx.req.db != DbChoice::Container {
             if self.db_helper() {
                 self.via_helper(false, "prepare.db")?;
             } else {
@@ -1103,7 +1112,22 @@ impl InstallStep {
         }
         io(std::fs::create_dir_all(ctx.meta_dir()), "cannot create state folder")?;
         ctx.emit(self.id, StepStatus::Running, "Creating database and user", 0.4);
-        let creds = db::provision(&db::SystemRunner, &admin, "127.0.0.1", "127.0.0.1", &state_path).map_err(|e| InstallError(e.to_string()))?;
+        // In a container, 127.0.0.1 is the container itself: an existing database must be reachable by its own
+        // network address, and the new login must be allowed from any address the container connects from.
+        let (account_host, conn_host) = if ctx.req.is_container() {
+            if matches!(admin.host.trim_matches(['[', ']']), "127.0.0.1" | "localhost" | "::1") {
+                return Err(Problem::new(
+                    crate::container::codes::DB_NOT_RUNNING,
+                    "A database on this same computer cannot be reached from inside a container by its loopback address (127.0.0.1 there is the container itself). Choose 'a MariaDB container next to the server', or give the database's network address.",
+                )
+                .with_action(Action::change_answers("database"))
+                .into());
+            }
+            ("%".to_string(), admin.host.clone())
+        } else {
+            ("127.0.0.1".to_string(), "127.0.0.1".to_string())
+        };
+        let creds = db::provision(&db::SystemRunner, &admin, &account_host, &conn_host, &state_path).map_err(|e| InstallError(e.to_string()))?;
         let json = serde_json::to_string_pretty(&creds).map_err(|e| InstallError(e.to_string()))?;
         let path = ctx.req.dir.join("database.json");
         ctx.update_created(|c| c.files.push("database.json".into()))?;
@@ -1567,6 +1591,9 @@ impl InstallStep {
 
     fn undo(&self) -> Result<String> {
         let ctx = &*self.ctx;
+        if let Some(r) = self.undo_container() {
+            return r;
+        }
         let created = ctx.load_created();
         if !ctx.system_trusted {
             let services = " (`systemctl list-units 'kora-*'` lists Kora's services)";
