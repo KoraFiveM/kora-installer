@@ -155,8 +155,24 @@ If a server's folder has gone missing, the list says so rather than hiding it.
 | Schedule | Development servers only: when the server updates itself. Changing it needs administrator rights. Same as `kora schedule`. |
 | Notifications | The Discord webhook for update reports: set, test, remove. The address is never shown back to you. Same as `kora webhook`. |
 | Ports | Change the game and txAdmin ports. The server must be stopped. Kora checks the ports are free. Firewall rules are not changed: open the new ports and close the old ones yourself. |
-| GitHub | Development servers only: sign in to GitHub, report an issue about a resource, or open a pull request. |
+| GitHub | Development servers only: sign in to GitHub, **change a resource's branch or try a pull request** (see below), report an issue about a resource, or open a pull request. |
 | Danger zone | Delete the server. You choose whether to keep the files and the database, then type the server's name to confirm. |
+
+### Branches and pull requests (Development servers)
+
+On a Development server every resource is a clone of your own fork. The GitHub tab's **Branches and pull requests** card lets you move a resource onto another version of its code without using git yourself. The same operations are `kora branch ...` and `kora pr ...` in a terminal.
+
+- **See where each resource is.** Each resource shows "Normal version (dev)", "Branch fix-hud", "Trying PR #12" or "A single commit", plus how many files you changed and how many sets of changes are kept aside. The Resources tab shows the same next to the name.
+- **Switch to a branch.** Pick it from the list (branches already in the folder, on your fork, on the original repository; "Refresh list" asks GitHub for the newest) and press Switch.
+- **Try a pull request.** Paste its number or its GitHub address, or pick one from the list. The list holds the open pull requests of the original repository *and* of your fork, each marked "Original repository" or "Your fork" with its title, number and author. The pull request is downloaded onto a branch called `pr/<number>`; trying it again later fetches its new commits (fast-forward only; if the author rewrote it, it goes on a new branch and your earlier copy stays). A pull request that was merged or closed, a number that does not exist, an address on some other repository and a pull request whose fork was deleted each get a plain explanation.
+- **Back to the normal version** puts the resource back on its normal branch (the one Kora updates). In the bulk section, "Back to the normal version, for all" does it for every resource.
+- **Several resources at once.** Type a branch name, "Check which resources have it" shows who has it and who does not, then "Switch the N that have it" moves those and leaves the others as they are.
+- **Your own changes are never lost.** A resource with changes you have not saved is not touched until you choose: *Keep my changes aside* (recommended), *Throw my changes away* (asked a second time, with a warning that it cannot be undone) or *Cancel*. Kept-aside changes are listed in that resource's window with *Bring my changes back*; if they no longer fit, nothing changes and they stay kept aside. In git they are an ordinary stash starting with "Kora:", so `git stash list` in the resource folder shows them too. Kora never deletes a stash, not even after bringing the changes back.
+- **After a switch** the files on disk have changed but a running server still has the old version loaded. Kora says so and offers "Restart <resource> now" (needs the live console) or tells you to restart the server.
+
+What updates do with a switched resource: **they leave it alone.** The update check shows it as "Not updated: on another branch" with the reason ("on branch fix-hud", "trying pull request #12"), the scheduled daily update skips it with the same words, and neither counts it as a problem or reports it "up to date". Nothing is ever pulled into your branch. Going back to the normal version makes updates work for it again. Snapshots record each resource's branch; a rollback first returns the resource to the branch it was on when the snapshot was taken and only then resets it, so it never rewrites a branch you moved to afterwards. Switching waits while an update is running (and the other way round). Production servers have none of this: they stay on their pinned releases.
+
+Sign-in: listing and trying pull requests uses the GitHub CLI (`gh`); if you are not signed in, or `gh` is missing, the panel offers the usual sign-in and install buttons. Switching between branches that are already downloaded needs no GitHub sign-in. Switching branches needs the **admin** role, and from another computer the remote-actions switch, because it changes the code the server runs.
 
 ## 5. Installing a server (the wizard)
 

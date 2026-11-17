@@ -95,7 +95,7 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 ## Everyday commands
 
 `kora status`, `kora start|stop|restart`, `kora schedule show|set|off <server>`, `kora delete <server>`,
-`kora panel` (web panel), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise).
+`kora panel` (web panel), `kora branch list|show|switch|default|all|restore <server> ...` and `kora pr list|checkout <server> <resource> ...` (Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone), `kora uninstall [--dry-run]` (asks item by item before removing anything Kora created; your folders and databases are kept unless you say otherwise).
 
 ## Status and limits
 

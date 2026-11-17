@@ -118,6 +118,43 @@ assert_eq "status: nothing left" 0 "$(python3 -I -c 'import json,sys; s=json.loa
 assert_contains "retry updated kora-core" "$OUT" "updated kora-core"
 assert_eq "kora-core now equals upstream" "$(up_head kora-core)" "$(head_of kora-core)"
 
+step "4b. a resource put on another branch is left alone by updates, and one command brings it back"
+# a `feature` branch on hud's upstream, then hud is switched to it with `kora branch`
+w="$R/work/kora-hud"; g -C "$w" checkout -q -b feature; echo feature > "$w/feat.txt"; g -C "$w" add -A; g -C "$w" commit -qm "feature work"
+g -C "$w" push -q origin feature; g -C "$w" checkout -q dev
+kora branch show $NAME kora-hud --refresh
+assert_eq "show works" 0 "$CODE"
+assert_contains "the branch is offered from the original repository" "$OUT" "feature"
+kora branch switch $NAME kora-hud feature --from upstream
+assert_eq "switch exit 0" 0 "$CODE"
+assert_eq "hud is on feature" feature "$(git -C "$(fork kora-hud)" rev-parse --abbrev-ref HEAD)"
+assert "the feature file is there" test -s "$(fork kora-hud)/feat.txt"
+kora branch list $NAME
+assert_matches "the list says which branch" "$OUT" "kora-hud +branch feature"
+hud_on_feature="$(head_of kora-hud)"
+upstream_commit kora-hud
+kora update --auto $NAME
+assert_eq "update exit 0 (a switched resource is not a problem)" 0 "$CODE"
+assert_contains "the update says it left hud alone, and why" "$OUT" "on branch feature"
+assert_eq "hud was not touched by the update" "$hud_on_feature" "$(head_of kora-hud)"
+assert_eq "hud is still on feature" feature "$(git -C "$(fork kora-hud)" rev-parse --abbrev-ref HEAD)"
+# changes of your own are never lost silently
+echo "my notes" > "$(fork kora-hud)/notes.txt"
+kora branch default $NAME kora-hud
+assert_eq "needs a choice: exit 3" 3 "$CODE"
+assert_contains "names the way out" "$OUT" "--stash"
+assert_eq "nothing moved" feature "$(git -C "$(fork kora-hud)" rev-parse --abbrev-ref HEAD)"
+assert "the notes are still there" test -s "$(fork kora-hud)/notes.txt"
+kora branch default $NAME kora-hud --stash
+assert_eq "default with --stash exit 0" 0 "$CODE"
+assert_contains "says where the changes are" "$OUT" "kept aside"
+assert_eq "hud is back on dev" dev "$(git -C "$(fork kora-hud)" rev-parse --abbrev-ref HEAD)"
+assert "the notes were put aside, not deleted" sh -c "git -C '$(fork kora-hud)' stash list | grep -q Kora"
+kora update --auto $NAME
+assert_eq "update after going back: exit 0" 0 "$CODE"
+assert_contains "hud updates again" "$OUT" "updated kora-hud"
+assert_eq "hud now equals upstream" "$(up_head kora-hud)" "$(head_of kora-hud)"
+
 step "5. production servers are refused"
 python3 -I - "$D" <<'PY'
 import json, sys

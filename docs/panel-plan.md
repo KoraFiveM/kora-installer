@@ -87,6 +87,13 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | issue_report | POST /servers/{s}/issues | `{resource, title, text}` |
 | pr_plan | POST /servers/{s}/pr/plan | `{resource}` |
 | pr_open | POST /servers/{s}/pr | `{plan, title, text}` |
+| branches_list | GET /servers/{s}/branches | Development only: where each resource is (local, no network) |
+| branch_choices | GET /servers/{s}/resources/{name}/branches | `?refresh=1` downloads the lists; branches and kept-aside changes |
+| pr_list | GET /servers/{s}/resources/{name}/prs | open pull requests of the original and the fork, via `gh` |
+| branch_switch | POST /servers/{s}/resources/{name}/branch | `{action: branch\|pr\|default, branch?, remote?, pr?, source?, changes?: ask\|stash\|discard}` |
+| stash_restore | POST /servers/{s}/resources/{name}/stash/restore | `{index}`: brings kept-aside changes back (the stash is kept) |
+| branch_bulk_preview | POST /servers/{s}/branches/preview | job; `{branch, fetch?}`: which resources have the branch |
+| branch_bulk_apply | POST /servers/{s}/branches/apply | job; `{action: branch\|default, branch?, resources?, changes?}` |
 | github_status | GET /github/status | |
 | github_login | POST /github/login | device flow: `{code, url}`; job completes on approval |
 | github_owners | GET /github/owners | |
