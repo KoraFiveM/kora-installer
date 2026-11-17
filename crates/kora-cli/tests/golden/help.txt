@@ -611,6 +611,7 @@ Commands:
   undo      Undo the last restore (puts the safety copy back)
   delete    Delete one backup
   prune     Remove old backups under the retention rules
+  import    Bring the server in a backup file onto THIS computer as a new server (made with `backup create --for-move`)
   schedule  Show or change where backups go, how many are kept, and the schedule
 
 Options:
@@ -771,6 +772,49 @@ Arguments:
           
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup import =====
+Bring the server in a backup file onto THIS computer as a new server (made with `backup create --for-move`)
+
+Usage: kora backup import [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>
+          The backup file (.tar.gz or .tar.gz.age)
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --name <NAME>
+          A name for the new server (default: the old name, made unique)
+
+      --dir <DIR>
+          The folder for the new server (default: the usual place for its name)
+
+      --game-port <GAME_PORT>
+          The game port (default: the old one, or the next free one)
+
+      --txadmin-port <TXADMIN_PORT>
+          The txAdmin port (default: the old one, or the next free one)
+
+      --licence-key <NAME>
+          Use this saved licence key instead of the one in the file (see `kora keys`)
+
+      --start
+          Start the server when it is imported
+
+      --start-over
+          Remove what an earlier, failed import of this server made, and begin again
+
+      --yes
+          Do not ask for confirmation
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

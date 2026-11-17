@@ -90,6 +90,37 @@ pub(crate) enum BackupCmd {
     },
     /// Remove old backups under the retention rules.
     Prune { server: String },
+    /// Bring the server in a backup file onto THIS computer as a new server (made with `backup create --for-move`).
+    Import {
+        /// The backup file (.tar.gz or .tar.gz.age).
+        file: String,
+        #[command(flatten)]
+        pw: PasswordArgs,
+        /// A name for the new server (default: the old name, made unique).
+        #[arg(long)]
+        name: Option<String>,
+        /// The folder for the new server (default: the usual place for its name).
+        #[arg(long, value_name = "DIR")]
+        dir: Option<String>,
+        /// The game port (default: the old one, or the next free one).
+        #[arg(long)]
+        game_port: Option<u16>,
+        /// The txAdmin port (default: the old one, or the next free one).
+        #[arg(long)]
+        txadmin_port: Option<u16>,
+        /// Use this saved licence key instead of the one in the file (see `kora keys`).
+        #[arg(long, value_name = "NAME")]
+        licence_key: Option<String>,
+        /// Start the server when it is imported.
+        #[arg(long)]
+        start: bool,
+        /// Remove what an earlier, failed import of this server made, and begin again.
+        #[arg(long)]
+        start_over: bool,
+        /// Do not ask for confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show or change where backups go, how many are kept, and the schedule.
     Schedule {
         server: String,
@@ -356,6 +387,49 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 Ok(gone) => {
                     println!("Removed {} old backup{}: {}", gone.len(), if gone.len() == 1 { "" } else { "s" }, gone.join(", "));
                     0
+                }
+                Err(m) => fail(plain_text(&m)),
+            }
+        }
+        BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, start, start_over, yes } => {
+            use kora_core::backup::import::{ImportChoices, ImportRequest, ImportSource};
+            let passphrase = match password(&pw, false) {
+                Ok(p) => p,
+                Err(m) => return fail(m),
+            };
+            let source = ImportSource { path: Some(file.clone()), upload: None };
+            let mut preview = match b.import_inspect(&source, passphrase.as_deref(), true) {
+                Ok(p) => p,
+                Err(m) => return fail(plain_text(&m)),
+            };
+            if preview.needs_passphrase {
+                return fail("this backup is password protected: give the password with --password-stdin (or KORA_BACKUP_PASSWORD)".into());
+            }
+            let (Some(info), Some(sug)) = (preview.server.take(), preview.suggested.take()) else { return fail("this file is not a server backup".into()) };
+            println!("This is the server \"{}\", made on {} ({} resources by reference, {} in full).", info.name, if info.os == "windows" { "Windows" } else { "Linux" }, preview.by_reference, preview.in_full);
+            preview.will_create.iter().for_each(|l| println!("  will create: {l}"));
+            preview.wont_carry.iter().for_each(|l| println!("  does not come along: {l}"));
+            preview.warnings.iter().for_each(|l| println!("  note: {l}"));
+            preview.clashes.iter().for_each(|c| println!("  in the way: {} (suggestion: {})", c.message, c.suggestion.as_deref().unwrap_or("choose another")));
+            println!("{}", preview.licence_note);
+            let choices = ImportChoices { name: name.unwrap_or(sug.name), dir: dir.unwrap_or(sug.dir), game_port: game_port.unwrap_or(sug.game_port), txadmin_port: txadmin_port.unwrap_or(sug.txadmin_port) };
+            println!("The new server: \"{}\" in {} (ports {} and {}).", choices.name, choices.dir, choices.game_port, choices.txadmin_port);
+            if !yes && !crate::ui::confirm("Bring this server in now?") {
+                println!("Nothing was changed.");
+                return 0;
+            }
+            let req = ImportRequest { source, passphrase, choices, licence_key_name: licence_key, start, start_over };
+            match b.import_run(&req, true, &mut |ev| show(&ev)) {
+                Ok(r) => {
+                    println!("Done: \"{}\" is in {}.", r.name, r.dir);
+                    r.resources_fetched.iter().for_each(|l| println!("  {l}"));
+                    r.notes.iter().for_each(|l| println!("  Note: {l}"));
+                    r.problems.iter().for_each(|l| println!("  Problem: {l}"));
+                    println!("Next:");
+                    r.next_steps.iter().for_each(|l| println!("  - {l}"));
+                    println!("On the old computer, when you are sure:");
+                    r.old_machine_steps.iter().for_each(|l| println!("  - {l}"));
+                    i32::from(!r.problems.is_empty())
                 }
                 Err(m) => fail(plain_text(&m)),
             }
