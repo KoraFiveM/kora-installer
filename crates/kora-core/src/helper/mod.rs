@@ -59,15 +59,20 @@
 //!
 //! # Windows
 //!
-//! Not built in this slice. The planned shape is a named pipe `\\.\pipe\kora-helper` with a DACL
-//! for the installing user's SID, run by a service through the existing `kora service-host`
-//! machinery, with the same protocol and allow-list. Until then `kora helper install` says it is
-//! not available on Windows and the panel keeps answering `needs_elevation` there.
+//! The panel does not need this service on Windows: it starts its own `kora.exe` elevated through
+//! the normal Windows permission prompt, for one install or one action, and talks to it with this
+//! same protocol and these same request checks over a private named pipe ([`worker`], the design
+//! and threat model; [`winpipe`], the Windows calls). `kora helper install` still says it is not
+//! available on Windows. A later opt-in Windows service (for installs with nobody at the desktop)
+//! would serve [`worker::serve`] on a pipe with a DACL for the installing user's SID, with the same
+//! validator and [`worker::ChildExecutor`]; see the end of [`worker`]'s documentation.
 
 pub mod client;
 pub mod dirs;
 pub mod install;
 pub mod server;
+pub mod winpipe;
+pub mod worker;
 
 use std::collections::BTreeMap;
 
@@ -86,7 +91,7 @@ pub const UNIT_PATH: &str = "/etc/systemd/system/kora-helper.service";
 /// A request line longer than this is refused.
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_ARGS: usize = 64;
-const MAX_ARG_BYTES: usize = 4096;
+pub(crate) const MAX_ARG_BYTES: usize = 4096;
 const MAX_ENV_BYTES: usize = 2048;
 
 /// The only environment variables a request may set for the child.
@@ -142,8 +147,13 @@ pub enum Message {
         message: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         version: Option<String>,
+        /// What the step reported back (Windows worker, `admin-step` only; see [`worker`]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data: Option<serde_json::Value>,
     },
     Error { message: String },
+    /// First line of a Windows worker session (see [`worker`]); the Linux helper never sends it.
+    Hello { version: String, pid: u32 },
 }
 
 /// Why a request was refused (plain language; shown to the user).
@@ -168,8 +178,13 @@ pub fn peer_allowed(peer_uid: u32, allowed_uid: u32) -> bool {
 pub type ValidateFn<'a> = &'a dyn Fn(&str, &[String]) -> Result<(), String>;
 
 pub fn check_request(req: &Request, validate: ValidateFn<'_>) -> Result<Vec<String>, Rejected> {
+    check_request_in(req, ALLOWED_VERBS, validate)
+}
+
+/// [`check_request`] against another verb list (the Windows worker's [`worker::WORKER_VERBS`]).
+pub fn check_request_in(req: &Request, verbs: &[&str], validate: ValidateFn<'_>) -> Result<Vec<String>, Rejected> {
     let no = |m: &str| Err(Rejected(m.to_string()));
-    if !ALLOWED_VERBS.contains(&req.verb.as_str()) {
+    if !verbs.contains(&req.verb.as_str()) {
         return no("The helper does not run that command.");
     }
     if req.args.len() > MAX_ARGS || req.args.iter().any(|a| a.len() > MAX_ARG_BYTES || a.contains('\0')) {
@@ -270,7 +285,7 @@ mod tests {
 
     #[test]
     fn messages_round_trip() {
-        let m = Message::Result { ok: true, code: 0, message: None, version: Some("1".into()) };
+        let m = Message::Result { ok: true, code: 0, message: None, version: Some("1".into()), data: None };
         let s = serde_json::to_string(&m).unwrap();
         assert!(s.contains(r#""type":"result""#));
         assert_eq!(serde_json::from_str::<Message>(&s).unwrap(), m);

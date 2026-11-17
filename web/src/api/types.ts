@@ -78,6 +78,8 @@ export interface SystemInfo {
   kora_home?: string
   /** True when the panel can restart itself ("Restart now" after a self-update). */
   can_restart?: boolean
+  /** Windows: the panel asks Windows for administrator permission itself (one prompt per install or action). */
+  admin_prompt?: boolean
 }
 
 export interface Ports {
@@ -297,6 +299,8 @@ export interface InstallPlan {
   /** Plain-language list of what needs administrator rights. */
   needs_admin: string[]
   notes: string[]
+  /** Windows: these parts are done after ONE permission prompt when the install starts. */
+  admin_prompt?: boolean
 }
 
 export interface Artifact {

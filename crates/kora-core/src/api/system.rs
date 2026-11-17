@@ -248,6 +248,10 @@ impl Backend for SystemBackend {
         installer::rollback_with_db_password(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, &mut Quiet).map_err(err)
     }
 
+    fn delete_with_admin(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>, admin: Option<installer::system_ops::SharedAdmin>) -> Res<Vec<String>> {
+        installer::rollback_with_admin(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, admin, &mut Quiet).map_err(err)
+    }
+
     fn unregister(&mut self, e: &ServerEntry) -> Res<()> {
         let mut r = Registry::load().map_err(err)?;
         r.remove(&e.name);

@@ -125,7 +125,7 @@ describe('BranchesPanel', () => {
     expect(within(prs).getByText('by jo-dev')).toBeInTheDocument()
     await user.click(within(prs).getByRole('button', { name: 'Try pull request #41' }))
     expect(await within(dialog).findByText(/Now on pull request #41/)).toBeInTheDocument()
-    await waitFor(() => expect(within(row('kora_core')).getByText('Trying PR #41')).toBeInTheDocument())
+    await waitFor(() => expect(within(row('kora_core')).getByText('Trying pull request #41')).toBeInTheDocument())
     expect(within(dialog).getByRole('button', { name: 'Back to the normal version' })).toBeInTheDocument()
   })
 

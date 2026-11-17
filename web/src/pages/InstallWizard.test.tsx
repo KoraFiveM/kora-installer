@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
@@ -9,6 +9,7 @@ import { api } from '@/api/client'
 import type { InstallRequest, Meta } from '@/api/types'
 import { AlertsProvider } from '@/lib/app'
 import { renderApp } from '@/test/utils'
+import { ToolchainActions } from '@/components/ToolchainActions'
 
 beforeAll(() => {
   history.replaceState(null, '', '/')
@@ -29,7 +30,7 @@ function renderWithMeta(meta: Partial<Meta>) {
 }
 
 const KEY = 'cfxk_abcdefghij_12345'
-const heading = (name: string) => screen.findByRole('heading', { name })
+const heading = (name: string, opts?: { timeout: number }) => screen.findByRole('heading', { name }, opts)
 const next = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole('button', { name: 'Next' }))
 const installButton = () => screen.getByRole('button', { name: 'Install the server' })
 
@@ -334,9 +335,9 @@ describe('Install wizard: who may install', () => {
 
 describe('Install wizard: when a step fails', () => {
   /** Short path to the summary with this server name, then install. */
-  async function installNamed(user: ReturnType<typeof userEvent.setup>, name: string) {
+  async function installNamed(user: ReturnType<typeof userEvent.setup>, name: string, fixes = false) {
     installMock({ scenario: 'default', speed: 0 })
-    renderApp(<InstallWizard />, '/install')
+    renderApp(fixes ? <ToolchainActions><InstallWizard /></ToolchainActions> : <InstallWizard />, '/install')
     await user.type(await screen.findByLabelText('Licence key'), KEY)
     await next(user)
     const box = await screen.findByLabelText('Server name')
@@ -364,6 +365,10 @@ describe('Install wizard: when a step fails', () => {
     expect(await heading('All done')).toBeInTheDocument()
     expect(resume).toHaveBeenCalledTimes(1)
     expect(resume.mock.calls[0][1]).toBeUndefined() // no step skipped
+    // The finished page says the same things as the server's Overview page (note about the address, folder button), and has no "Stop server".
+    expect(screen.getByText(/address on your own network/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Copy path|Open folder/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop server' })).not.toBeInTheDocument()
   })
 
   it('offers to skip a step that is safe to skip, and finishes without it', async () => {
@@ -390,7 +395,62 @@ describe('Install wizard: when a step fails', () => {
     const user = userEvent.setup()
     await installNamed(user, 'github-town')
     await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Sign in to GitHub' }))
-    expect(await screen.findByText(/use "Try this step again" above/)).toBeInTheDocument()
+    expect(await screen.findByText(/Kora tries the step again by itself/)).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Sign in to GitHub' }).length).toBeGreaterThan(0)
+  })
+
+  it('retries the failed step by itself once the GitHub sign-in worked, and says so', async () => {
+    const user = userEvent.setup()
+    const resume = vi.spyOn(api.installs, 'resume')
+    await installNamed(user, 'github-town')
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Sign in to GitHub' }))
+    const panel = (await screen.findByText(/Kora tries the step again by itself/)).closest('[role="alert"], [role="status"], div')!.parentElement as HTMLElement
+    await user.click(within(panel).getByRole('button', { name: 'Sign in to GitHub' }))
+    expect(await heading('All done', { timeout: 8000 })).toBeInTheDocument()
+    expect(resume).toHaveBeenCalledTimes(1)
+  })
+
+  it('"Install it for me" on a failed step installs the tool, then retries that step without another click', async () => {
+    const user = userEvent.setup()
+    const resume = vi.spyOn(api.installs, 'resume')
+    await installNamed(user, 'nogh-town', true)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('GitHub CLI')
+    await user.click(within(alert).getByRole('button', { name: 'Install the GitHub CLI for me' }))
+    expect(await heading('All done', { timeout: 8000 })).toBeInTheDocument()
+    expect(resume).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('"Start it for me" on a stopped database starts it, then retries that step without another click', async () => {
+    const user = userEvent.setup()
+    const resume = vi.spyOn(api.installs, 'resume')
+    await installNamed(user, 'nodb-town', true)
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Start it for me' }))
+    expect(await heading('All done', { timeout: 8000 })).toBeInTheDocument()
+    expect(resume).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Install wizard: an install that stopped', () => {
+  it('shows ONE banner for it (not "continue" and "carry on" for the same install), with both ways forward', async () => {
+    const user = userEvent.setup()
+    installMock({ scenario: 'default', speed: 0 })
+    renderApp(<InstallWizard />, '/install')
+    await user.type(await screen.findByLabelText('Licence key'), KEY)
+    await next(user)
+    const box = await screen.findByLabelText('Server name')
+    await user.clear(box)
+    await user.type(box, 'fail-twice')
+    await next(user)
+    await waitFor(() => expect(installButton()).toBeEnabled(), { timeout: 3000 })
+    await user.click(installButton())
+    await screen.findByRole('heading', { name: 'The install stopped' })
+    cleanup()
+    renderApp(<InstallWizard />, '/install')
+    expect(await screen.findByText(/An install stopped and can carry on/)).toBeInTheDocument()
+    expect(screen.queryByText('Continue where you left off?')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Carry on' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change my answers first' })).toBeInTheDocument()
   })
 })

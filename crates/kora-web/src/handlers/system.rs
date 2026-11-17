@@ -157,6 +157,8 @@ pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiE
             // The UI reads `admin`; `elevated` is the same answer under the plan's name.
             "admin": elevated,
             "helper_installed": crate::elevated::helper_installed(),
+            // Windows: the panel asks Windows for permission itself (one prompt per install or action).
+            "admin_prompt": crate::elevated::worker_supported() && !elevated,
             "headless": headless,
             "local": loopback && !headless,
             "kora_home": kora_core::installer::registry::kora_home(),

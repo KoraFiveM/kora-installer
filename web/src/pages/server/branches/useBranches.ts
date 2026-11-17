@@ -23,7 +23,7 @@ export function useRefreshBranches(server: string) {
 export function branchBadge(r: ResourceBranch): { text: string; tone: 'plain' | 'info' | 'amber' | 'orange' } {
   switch (r.state) {
     case 'default': return { text: `Normal version (${r.default_branch})`, tone: 'plain' }
-    case 'pr': return { text: `Trying PR #${r.pr}`, tone: 'info' }
+    case 'pr': return { text: `Trying pull request #${r.pr}`, tone: 'info' }
     case 'branch': return { text: `Branch ${r.branch}`, tone: 'info' }
     case 'detached': return { text: 'A single commit', tone: 'amber' }
     case 'pinned': return { text: 'Fixed version', tone: 'plain' }

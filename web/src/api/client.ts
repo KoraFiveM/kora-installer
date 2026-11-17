@@ -17,6 +17,8 @@ export class ApiError extends Error {
   readonly command?: string[]
   readonly details?: string
   readonly actions?: T.ProblemAction[]
+  /** Send the request that failed again (`request_admin`: once more, now asking Windows for permission). */
+  replay?: () => Promise<unknown>
   constructor(status: number, body: ApiErrorBody) {
     super(body.message)
     this.name = 'ApiError'
@@ -101,6 +103,20 @@ export interface RequestOptions {
   quiet401?: boolean
   /** Send this file as the body instead of JSON (streamed by the browser). */
   raw?: { body: Blob; type: string; headers?: Record<string, string> }
+  /** The person chose "Ask for administrator permission": Windows may show its prompt even for a remote session. */
+  askAdmin?: boolean
+}
+
+/** Header of [`RequestOptions.askAdmin`] (`kora_web::elevated::ASK_HEADER`). */
+export const ADMIN_HEADER = 'X-Kora-Admin'
+
+let askAdminAt = 0
+/**
+ * The next change sent within a minute asks Windows for administrator permission (the app-wide
+ * `request_admin` button arms this, then repeats what failed). Used once.
+ */
+export function askForAdminNext(): void {
+  askAdminAt = Date.now()
 }
 
 export async function request<R>(path: string, opts: RequestOptions = {}): Promise<R> {
@@ -109,6 +125,10 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   if (method !== 'GET') headers['X-Kora'] = '1'
   const secret = sessionSecret()
   if (secret) headers['X-Kora-Session'] = secret
+  if (method !== 'GET' && (opts.askAdmin || (askAdminAt && Date.now() - askAdminAt < 60_000))) {
+    headers[ADMIN_HEADER] = 'ask'
+    askAdminAt = 0
+  }
   let body: BodyInit | undefined
   if (opts.raw) {
     headers['Content-Type'] = opts.raw.type
@@ -134,6 +154,7 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   }
   if (!res.ok) {
     const err = await readError(res)
+    err.replay = () => request<R>(path, opts)
     // The session ended: forget its secret (in every tab, it is shared). Not for a failed sign-in (a stale
     // link opened in a new tab must not sign the other tabs out), nor when another tab has signed in
     // since this request left.
@@ -310,9 +331,14 @@ export const api = {
     checkDisk: (dir: string) => post<T.DiskCheck>('/checks/disk', { dir }),
     checkDbLogin: (admin: T.DbAdmin | null) => post<T.DbLoginCheck>('/checks/db-login', { admin }),
     plan: (req: T.InstallRequest) => post<T.InstallPlan>('/installs/plan', req),
-    start: (req: T.InstallRequest) => post<T.JobStarted>('/installs', req),
-    /** Carry on with a stopped install (its job error has `resume: true`): retry the failed step, or skip it. */
-    resume: (job: string, skip?: string) => post<T.JobStarted>(`/installs/${enc(job)}/resume`, skip ? { skip } : {}),
+    /** `askAdmin`: the person chose "Ask for administrator permission" (Windows may show its prompt). */
+    start: (req: T.InstallRequest, opts: { askAdmin?: boolean } = {}) => request<T.JobStarted>('/installs', { method: 'POST', body: req, askAdmin: opts.askAdmin }),
+    /**
+     * Carry on with a stopped install (its job error has `resume: true`): retry the failed step, or skip it.
+     * `withoutAdmin`: "Continue without the administrator parts"; `askAdmin`: ask Windows for permission again.
+     */
+    resume: (job: string, skip?: string, opts: { askAdmin?: boolean; withoutAdmin?: boolean } = {}) =>
+      request<T.JobStarted>(`/installs/${enc(job)}/resume`, { method: 'POST', body: { ...(skip ? { skip } : {}), ...(opts.withoutAdmin ? { without_admin: true } : {}) }, askAdmin: opts.askAdmin }),
     log: (job: string) => get<{ lines: string[] }>(`/installs/${enc(job)}/log`).then((r) => r.lines),
   },
   selfUpdate: {

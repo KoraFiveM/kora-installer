@@ -20,7 +20,20 @@ import { ApiError } from '@/api/client'
 import type { JobError, Problem, ProblemAction, ProblemActionKind } from '@/api/types'
 
 export type ActionOf<K extends ProblemActionKind> = Extract<ProblemAction, { kind: K }>
-export type ActionHandlers = { [K in ProblemActionKind]?: (a: ActionOf<K>) => void | Promise<void> }
+/**
+ * Given to every handler: where the button was pressed and how to carry on.
+ * `afterFix` is what to do once a fix action (install a tool, sign in, start the database) has worked: the
+ * page that showed the error says how to carry on (retry the failed step, reload). Absent when the error
+ * sits on something that cannot simply be retried.
+ */
+export interface ActionContext {
+  /** The problem the button belongs to. */
+  problem?: NoticeProblem
+  /** Repeat what failed: the page's own "Try again", else the same request sent again. */
+  retry?: () => unknown
+  afterFix?: () => void | Promise<void>
+}
+export type ActionHandlers = { [K in ProblemActionKind]?: (a: ActionOf<K>, ctx: ActionContext) => void | Promise<void> }
 
 /** Kinds ErrorNotice draws by itself (a copy field, a link, the log, a copy button). */
 export const BUILT_IN: readonly ProblemActionKind[] = ['show_command', 'open_link', 'open_log', 'copy_details']
@@ -46,7 +59,15 @@ const SECTION_LABEL: Record<string, string> = {
 
 const TOOL_LABEL: Record<string, string> = { git: 'Git', gh: 'the GitHub CLI', mariadb: 'MariaDB' }
 
-export function actionLabel(a: ProblemAction): string {
+/** Codes of "this needs administrator rights" problems (Windows asks with its permission prompt). */
+export function isAdminCode(code: string): boolean {
+  return code === 'needs_elevation' || code.startsWith('admin.')
+}
+
+/** Windows was asked already (and said no, nobody answered, ...): the button asks again. */
+const ASKED_ALREADY = ['admin.declined', 'admin.timed_out', 'admin.busy', 'admin.lost']
+
+export function actionLabel(a: ProblemAction, p?: { code: string }): string {
   switch (a.kind) {
     case 'retry':
       return 'Try again'
@@ -61,7 +82,7 @@ export function actionLabel(a: ProblemAction): string {
     case 'install_tool':
       return `Install ${TOOL_LABEL[a.tool] ?? 'it'} for me`
     case 'request_admin':
-      return 'Ask for administrator permission'
+      return p && ASKED_ALREADY.includes(p.code) ? 'Ask again' : 'Ask for administrator permission'
     case 'continue_without_admin':
       return 'Continue without the administrator parts'
     case 'show_command':
@@ -92,13 +113,15 @@ export interface NoticeProblem extends Problem {
   command?: string[]
   /** HTTP status of an API error; 0 when Kora did not answer at all. */
   status?: number
+  /** An API error: send the same request again (see `ApiError.replay`). */
+  replay?: () => Promise<unknown>
 }
 
 const isAction = (a: unknown): a is ProblemAction => typeof a === 'object' && a !== null && KNOWN.includes((a as { kind: ProblemActionKind }).kind)
 
 export function toProblem(e: unknown): NoticeProblem | null {
   if (!e) return null
-  if (e instanceof ApiError) return { code: e.code, message: e.message, details: e.details, actions: (e.actions ?? []).filter(isAction), command: e.command, status: e.status }
+  if (e instanceof ApiError) return { code: e.code, message: e.message, details: e.details, actions: (e.actions ?? []).filter(isAction), command: e.command, status: e.status, replay: e.replay }
   if (typeof e === 'string') return { code: 'failed', message: e, actions: [] }
   if (typeof e === 'object' && 'message' in e) {
     const j = e as JobError
@@ -127,9 +150,9 @@ export function useProblemHandlers(own?: ActionHandlers): ActionHandlers {
 }
 
 /** Run the handler of `a` (the caller checked that there is one). */
-export function runAction(handlers: ActionHandlers, a: ProblemAction): void | Promise<void> {
-  const h = handlers[a.kind] as ((x: ProblemAction) => void | Promise<void>) | undefined
-  return h?.(a)
+export function runAction(handlers: ActionHandlers, a: ProblemAction, ctx: ActionContext = {}): void | Promise<void> {
+  const h = handlers[a.kind] as ((x: ProblemAction, c: ActionContext) => void | Promise<void>) | undefined
+  return h?.(a, ctx)
 }
 
 /** The actions that become buttons: those with a handler, built-in ones excluded. */

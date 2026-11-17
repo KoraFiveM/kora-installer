@@ -54,14 +54,32 @@ pub fn admin_reasons(req: &InstallRequest) -> Vec<String> {
             Ok(found) => found.is_empty(),
             Err(_) => true,
         };
-    admin_reasons_for(req, windows, db_missing)
+    // Windows: a database server is there but no login was given, and Kora's own MariaDB login is
+    // kept where only administrators can read it: creating the new database needs them too.
+    let kora_login_hidden = windows
+        && !db_missing
+        && req.db != DbChoice::Skip
+        && !req.dry_run
+        && !crate::installer::db_override(req)
+        && crate::installer::windows_db::base_dir().is_some_and(|b| b.exists())
+        && crate::installer::windows_db::saved_admin().is_none();
+    admin_reasons_with(req, windows, db_missing, kora_login_hidden)
 }
 
 /// Pure part of [`admin_reasons`]: `db_missing` = `--db install` and no database server was found.
 pub fn admin_reasons_for(req: &InstallRequest, windows: bool, db_missing: bool) -> Vec<String> {
+    admin_reasons_with(req, windows, db_missing, false)
+}
+
+/// [`admin_reasons_for`]; `kora_login_hidden` = Windows, Kora's own MariaDB is installed and its
+/// administrator login (needed to create the new database) is readable by administrators only.
+pub fn admin_reasons_with(req: &InstallRequest, windows: bool, db_missing: bool, kora_login_hidden: bool) -> Vec<String> {
     let mut v = Vec::new();
     if req.dry_run {
         return v;
+    }
+    if kora_login_hidden {
+        v.push("create the new database in Kora's own database server (its administrator login is kept for administrators only)".to_string());
     }
     if db_missing {
         v.push(if windows {
@@ -586,6 +604,15 @@ mod tests {
         assert!(v[0].contains("systemd") && v[1].contains("txAdmin") && v[2].contains("update"));
         r.dry_run = true;
         assert!(admin_reasons_for(&r, true, true).is_empty(), "a dry run changes nothing");
+    }
+
+    #[test]
+    fn kora_s_own_database_login_is_a_reason_on_windows() {
+        let r = InstallRequest { db: DbChoice::UseExisting, ..req() };
+        let v = admin_reasons_with(&r, true, false, true);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].contains("Kora's own database server"), "{v:?}");
+        assert!(admin_reasons_with(&InstallRequest { dry_run: true, ..r }, true, false, true).is_empty());
     }
 
     #[test]

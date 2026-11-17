@@ -55,6 +55,17 @@ pub trait InstallEnv: Send + Sync {
         req: &InstallRequest,
         sink: &mut dyn ProgressSink,
     ) -> Result<InstallOutcome, String>;
+    /// [`InstallEnv::run`] with an administrator helper for the steps that need one (the Windows
+    /// panel's worker, see `installer::system_ops`). Fakes may ignore it.
+    fn run_with_admin(
+        &self,
+        req: &InstallRequest,
+        sink: &mut dyn ProgressSink,
+        admin: Option<installer::system_ops::SharedAdmin>,
+    ) -> Result<InstallOutcome, String> {
+        let _ = admin;
+        self.run(req, sink)
+    }
 }
 
 /// The real machine.
@@ -96,6 +107,15 @@ impl InstallEnv for SystemInstallEnv {
     ) -> Result<InstallOutcome, String> {
         // The raw text: it may be a packed Problem (see `installer::InstallError`).
         installer::run(req, sink).map_err(|e| e.0)
+    }
+    fn run_with_admin(
+        &self,
+        req: &InstallRequest,
+        sink: &mut dyn ProgressSink,
+        admin: Option<installer::system_ops::SharedAdmin>,
+    ) -> Result<InstallOutcome, String> {
+        let hooks = installer::Hooks { admin, ..installer::Hooks::from_env() };
+        installer::run_with(req, sink, &hooks).map_err(|e| e.0)
     }
 }
 
@@ -742,6 +762,20 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
     v
 }
 
+/// The answers without anything that needs administrator rights ("Continue without the
+/// administrator parts"): no firewall change, no background service (so no update task), and the
+/// database only used when it is already there. The same rule as the wizard's `withoutAdmin`.
+pub fn without_admin(req: &InstallRequest) -> InstallRequest {
+    let mut r = req.clone();
+    r.firewall = false;
+    r.txadmin_public = false;
+    r.service = false;
+    if r.db == DbChoice::InstallIfMissing {
+        r.db = DbChoice::UseExisting;
+    }
+    r
+}
+
 /// What to tell the user to do before running [`install_command`] (names the variables, never values).
 pub fn elevation_message(req: &InstallRequest, reasons: &[String]) -> String {
     let mut m = format!(
@@ -822,6 +856,16 @@ pub struct Finished {
 pub fn run_install(
     env: &dyn InstallEnv,
     req: &InstallRequest,
+    on_event: impl FnMut(&ProgressEvent) + Send,
+) -> Finished {
+    run_install_with(env, req, None, on_event)
+}
+
+/// [`run_install`] with an administrator helper for the steps that need one.
+pub fn run_install_with(
+    env: &dyn InstallEnv,
+    req: &InstallRequest,
+    admin: Option<installer::system_ops::SharedAdmin>,
     mut on_event: impl FnMut(&ProgressEvent) + Send,
 ) -> Finished {
     let mut log: Vec<String> = Vec::new();
@@ -838,7 +882,7 @@ pub fn run_install(
                 on_event(ev);
             },
         };
-        env.run(req, &mut sink)
+        env.run_with_admin(req, &mut sink, admin)
     };
     let done = |outcome, log_path| Finished {
         outcome,
@@ -898,6 +942,10 @@ pub fn failure_problem(req: &InstallRequest, error: &str, failed_step: Option<&s
             }
         }
         None => p.push_action(Action::Retry),
+    }
+    // Not enough room: trying again cannot help; the way on is another folder (the name-and-folder page).
+    if p.message.starts_with("Not enough free disk space") && !p.actions.iter().any(|a| matches!(a, Action::ChangeAnswers { .. })) {
+        p.actions.insert(0, Action::change_answers("name"));
     }
     if !p.actions.iter().any(|a| matches!(a, Action::ChangeAnswers { .. })) {
         p.push_action(Action::ChangeAnswers { section: None });
@@ -1052,6 +1100,9 @@ mod tests {
         // Stopped before the first step: try the whole install again.
         let p = failure_problem(&req, "ports taken", None);
         assert_eq!((p.code.as_str(), p.actions[0].clone()), (codes::FAILED, Action::Retry));
+        // A full disk points at the folder first: retrying cannot help.
+        let p = failure_problem(&req, "Not enough free disk space on the disk holding /srv/a: Kora needs about 4.6 GiB.", None);
+        assert_eq!(p.actions[0], Action::change_answers("name"), "{:?}", p.actions);
     }
 
     #[test]

@@ -25,6 +25,18 @@ pub fn writable_by_others(owner_uid: u32, mode: u32) -> bool {
     owner_uid != 0 || mode & 0o022 != 0
 }
 
+const LINE_CAP: usize = 8 * 1024;
+
+/// Split a chunk of child output into display lines (handles `\r` progress redraws).
+pub fn split_lines(chunk: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(chunk)
+        .split(['\n', '\r'])
+        .map(|l| l.trim_end())
+        .filter(|l| !l.is_empty())
+        .map(|l| l.chars().take(LINE_CAP).collect())
+        .collect()
+}
+
 /// Read the installing user's record.
 pub fn load_config(path: &std::path::Path) -> Result<crate::helper::HelperConfig, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -47,7 +59,6 @@ mod unix {
     use std::time::Duration;
 
     const MAX_CONNECTIONS: usize = 16;
-    const LINE_CAP: usize = 8 * 1024;
 
     /// The uid of the process at the other end of `s` (`SO_PEERCRED`).
     pub fn peer_uid_of(s: &UnixStream) -> io::Result<u32> {
@@ -157,7 +168,7 @@ mod unix {
                 return;
             };
             if req.verb == PING {
-                send(&mut out, &Message::Result { ok: true, code: 0, message: None, version: Some(env!("CARGO_PKG_VERSION").into()) });
+                send(&mut out, &Message::Result { ok: true, code: 0, message: None, version: Some(env!("CARGO_PKG_VERSION").into()), data: None });
                 return;
             }
             let validator = Arc::clone(&self.validator);
@@ -179,7 +190,7 @@ mod unix {
                 }
             });
             match res {
-                Ok(code) => send(&mut out, &Message::Result { ok: code == 0, code, message: None, version: None }),
+                Ok(code) => send(&mut out, &Message::Result { ok: code == 0, code, message: None, version: None, data: None }),
                 Err(e) => send(&mut out, &Message::Error { message: format!("The helper could not start Kora: {e}") }),
             };
         }
@@ -209,16 +220,6 @@ mod unix {
             v.push(("KORA_HOME".to_string(), k.clone()));
         }
         v
-    }
-
-    /// Split a chunk of child output into display lines (handles `\r` progress redraws).
-    pub fn split_lines(chunk: &[u8]) -> Vec<String> {
-        String::from_utf8_lossy(chunk)
-            .split(['\n', '\r'])
-            .map(|l| l.trim_end())
-            .filter(|l| !l.is_empty())
-            .map(|l| l.chars().take(LINE_CAP).collect())
-            .collect()
     }
 
     impl Executor for ProcessExecutor {

@@ -49,7 +49,7 @@ What `kora` does when things are not simple:
 | No background service is possible (for example a container with no user session) | The panel runs in that window instead; closing the window stops it. |
 | A server with no screen (SSH) | Nothing opens. Kora prints the sign-in link, a ready-to-paste `ssh -L` command to run on your own computer first, and the Tailscale option (`kora panel --tailscale`). |
 | Typed with `sudo` (Linux) | Kora runs again as the person who typed `sudo` (the panel never runs as root). |
-| Typed as root with no `sudo` user (Linux), or in an "administrator" window (Windows) | A running panel is opened. Otherwise Kora explains what to do (log in as a normal user / open Kora from the Start menu or a normal PowerShell window). Nothing is changed. |
+| Typed as root with no `sudo` user (Linux), or in an "administrator" window (Windows) | A running panel is opened (on Windows, if the background panel was set up before, Kora starts it as your normal user). Otherwise Kora explains what to do (log in as a normal user / open Kora from the Start menu or a normal PowerShell window). Nothing is changed. |
 
 For a window that stays open and runs the panel in front, use `kora panel` (below). Kora starts a small web server, prints a line like `Kora Panel: http://127.0.0.1:47120/#code=...` and opens your
 browser at that address. The panel keeps running in that terminal; press Ctrl+C to stop it. Closing the terminal also
@@ -63,6 +63,12 @@ Options:
 | `--setup` | Makes sure the background panel is set up and running, opens it in your browser (where there is a screen) and prints the sign-in link. The install scripts run this. It never reads what is piped in; on a server with no screen and Tailscale running it asks once, on the terminal, whether to use Tailscale (`KORA_TAILSCALE=1` or `0` answers in advance, for example in automation). |
 | `--no-open` | Do not open a browser; print the address and sign-in link instead. This is automatic over SSH or when the computer has no desktop. |
 | `--tailscale` | Open the panel to your own devices over Tailscale (see below). Run once; it keeps running in the background. |
+| `--admin <LOGIN>` | With `--tailscale`: the Tailscale account (`name@example.com`) that becomes the panel's admin. Without it Kora uses the account you are connected from, else the one that added the computer to Tailscale. |
+| `--bind <ADDRESS>`, `--remote` | Listen on another address than `127.0.0.1` (plain HTTP: only on a private network such as Tailscale or WireGuard); needs remote access (`--remote` for this run, or the saved setting). |
+| `--allow-public` | Let `--bind` be a public address or every interface. Not recommended: use `--tailscale` or an SSH tunnel. |
+| `--foreground` | Run in this window only; do not offer or use the background panel. |
+| `--install-service`, `--remove-service` | Keep the panel running in the background (starts at sign-in, no administrator rights), or stop and remove it. |
+| `--print-link` | Print the sign-in link of the background panel. |
 | `--new-token` | Make a new sign-in token: links shown before stop working. |
 | `--no-elevate` | Do not ask Windows or `sudo` for administrator permission (for developers and CI). |
 
@@ -225,8 +231,8 @@ saving it is only remembered while the panel runs. The wizard also checks free d
   as `kora app install`). If the panel finds the old machine-wide Kora app from earlier versions (a copy in Program
   Files or /opt/kora, and shortcuts that ask for administrator rights) it offers **Tidy up old shortcuts**, also as a
   notice on the servers screen. That makes the new shortcuts first, so the old ones keep working until the end, then removes
-  the old copy. Removing the old copy needs administrator rights: the panel shows the command to run
-  (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
+  the old copy. Removing the old copy needs administrator rights: on Windows the panel asks Windows for permission
+  (one prompt); on Linux it shows the command to run (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
 - **Licence keys:** the keys saved on this computer (`secrets.json` in the Kora folder: plain text, readable only by you,
   not encrypted, like each server's `secrets.cfg`). Add, rename, replace and delete (admins and this computer only); each
@@ -264,7 +270,30 @@ The same buttons appear wherever an error offers them (the install wizard, the G
 The panel runs as you, not as an administrator. A few things need more rights: creating or changing services, firewall
 rules, update timers and scheduled tasks, installing MariaDB, and removing the old machine-wide Kora app.
 
-When you ask for one of these, the panel does one of two things:
+**Windows: Windows asks for permission, once.** The panel asks Windows itself, with the normal permission prompt
+(choose Yes). An install asks **once, when it starts**, for all of its administrator parts (the wizard says so on its
+last screen), then you watch it carry on in the browser. Other actions (the update schedule, Kora's self-update,
+"Tidy up old shortcuts", uninstalling, deleting a server that has a background service) ask once each. Behind the
+prompt is a short-lived copy of Kora running as administrator that does only those parts and then exits; your server
+folders, settings and the install's progress stay yours. If you do not see the prompt, look for a flashing shield icon
+in the taskbar. On an account that is not an administrator, Windows asks for an administrator's password instead; the
+server is still installed for you.
+
+If Windows does not get permission (you chose No, nobody answered within five minutes, or you are signed in from
+another device so nobody may be at the computer to answer), nothing that needs administrator rights is changed and the
+panel offers three choices:
+
+- **Ask again** (from another device: **Ask for administrator permission**): Windows asks on the computer that runs
+  Kora; someone there chooses Yes. From another device the panel never asks unless you press this.
+- **Continue without the administrator parts:** the install carries on as you, without the firewall change, the
+  background service and the daily update task (and with an existing database only). Everything already done is kept.
+- **Show me the command:** the command to run yourself from a terminal opened with "Run as administrator".
+
+A step that failed halfway (for example the administrator copy was closed) can be tried again (Windows asks again) or,
+when it is safe, skipped, like any other install step.
+
+**Linux** (and Windows when the panel itself runs as administrator, which it normally does not): the panel does one
+of two things:
 
 - **Shows the exact command to run.** A message appears with a command such as `sudo kora ...` (Linux) or an elevated
   `kora ...` (Windows). Copy it into a terminal; the command asks for administrator permission itself. When it
@@ -276,7 +305,8 @@ When you ask for one of these, the panel does one of two things:
   helper, servers are installed only into a new or empty folder in your home folder or in `/home/kora`, never from
   another catalogue, and Kora is only updated to a newer version; for anything else run the command yourself with `sudo`.
 
-The Settings page says when the helper is installed. On Windows the panel always shows the command to run.
+The Settings page says when the helper is installed. The Linux helper is not used on Windows, where the panel asks
+Windows instead (above).
 
 ## 8. Troubleshooting
 
@@ -465,8 +495,9 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
 - **Strict page policy.** The page can only load its own files: no inline scripts, no other sites, no framing.
 - **Secrets are write-only.** Licence keys, database passwords and webhook addresses are accepted but never sent back to
   the browser. Saved licence keys show only their name and last 4 characters.
-- **No elevated panel.** The panel runs as you (as root only when you are signed in as root, see [section 10](#10-optional-remote-access)). Privileged actions are a command you run, or a helper that accepts only
-  Kora's fixed actions.
+- **No elevated panel.** The panel runs as you (as root only when you are signed in as root, see [section 10](#10-optional-remote-access)). Privileged actions are a command you run, a helper that accepts only
+  Kora's fixed actions (Linux), or on Windows a short-lived administrator copy of Kora started through the Windows
+  permission prompt that runs only Kora's fixed administrator steps and exits (see SECURITY.md for how it is protected).
 - **No telemetry.** The page makes no requests to other websites. Fonts and icons are built in.
 
 Report a vulnerability privately; see [SECURITY.md](../SECURITY.md).
