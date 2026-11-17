@@ -189,7 +189,7 @@ impl ArchiveWriter {
     /// Everything under `root`, named `<prefix>/<relative path>`. Links and special files are left out.
     /// `skip` is given the path relative to `root` (with `/`) and says whether to leave it out.
     pub fn add_tree(&mut self, prefix: &str, root: &Path, skip: &dyn Fn(&str, bool) -> bool) -> io::Result<()> {
-        fn walk(w: &mut ArchiveWriter, prefix: &str, root: &Path, dir: &Path, rel: &str, skip: &dyn Fn(&str, bool) -> bool) -> io::Result<()> {
+        fn walk(w: &mut ArchiveWriter, prefix: &str, dir: &Path, rel: &str, skip: &dyn Fn(&str, bool) -> bool) -> io::Result<()> {
             let mut entries: Vec<_> = match std::fs::read_dir(dir) {
                 Ok(rd) => rd.flatten().collect(),
                 Err(e) => {
@@ -209,7 +209,7 @@ impl ArchiveWriter {
                     w.notes.push(format!("{prefix}/{child_rel} is a link and was left out."));
                 } else if ft.is_dir() {
                     if !skip(&child_rel, true) {
-                        walk(w, prefix, root, &e.path(), &child_rel, skip)?;
+                        walk(w, prefix, &e.path(), &child_rel, skip)?;
                     }
                 } else if ft.is_file() && !skip(&child_rel, false) {
                     if let Err(err) = w.add_file(&format!("{prefix}/{child_rel}"), &e.path()) {
@@ -226,7 +226,7 @@ impl ArchiveWriter {
             }
             Ok(())
         }
-        walk(self, prefix, root, root, "", skip)
+        walk(self, prefix, root, "", skip)
     }
 
     /// Write the closing manifest (with checksums) and finish. Returns the archive's SHA-256 and size.
@@ -285,8 +285,8 @@ fn check_version(m: &Manifest) -> Result<(), ArchiveError> {
 /// The first entry (`header.json`): what the backup is, without reading the rest.
 pub fn read_head(path: &Path, passphrase: Option<&Passphrase>) -> Result<Manifest, ArchiveError> {
     let mut ar = tar_of(path, passphrase)?;
-    let mut entries = ar.entries().map_err(|e| head_error(e))?;
-    let mut first = entries.next().ok_or_else(|| ArchiveError::Open(OpenError::NotAnArchive))?.map_err(|e| head_error(e))?;
+    let mut entries = ar.entries().map_err(head_error)?;
+    let mut first = entries.next().ok_or(ArchiveError::Open(OpenError::NotAnArchive))?.map_err(head_error)?;
     if first.path().ok().and_then(|p| p.to_str().map(str::to_string)).as_deref() != Some(HEADER) {
         return Err(ArchiveError::Open(OpenError::NotAnArchive));
     }

@@ -165,8 +165,7 @@ mod tests {
     #[test]
     fn settings_and_status_live_in_the_store() {
         let _ = crate::installer::registry::use_test_home();
-        let mut s = BackupSettings::default();
-        s.folder = "/mnt/backups".into();
+        let mut s = BackupSettings { folder: "/mnt/backups".into(), ..Default::default() };
         s.schedule.enabled = true;
         save_settings("alpha", &s).unwrap();
         save_settings("beta", &BackupSettings::default()).unwrap();

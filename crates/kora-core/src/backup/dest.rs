@@ -374,7 +374,7 @@ mod tests {
             info("m2", 98 * DAY, Label::Manual),
             info("safe-new", 99 * DAY, Label::BeforeRestore),
             info("safe-old", 10 * DAY, Label::BeforeRestore),
-            info("move", 1 * DAY, Label::Move),
+            info("move", DAY, Label::Move),
         ];
         let gone = plan_prune(&list, &Retention { keep_last: 1, keep_daily_days: 0 }, now, &[]);
         assert_eq!(gone, vec!["m2".to_string(), "safe-old".to_string()]);

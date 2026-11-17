@@ -663,8 +663,7 @@ pub(crate) mod tests {
         let g = BusyGuard::take(&rig.entry.name).unwrap();
         assert_eq!(create(&rig.entry, &CreateOptions::default(), &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap_err().code, codes::BUSY);
         drop(g);
-        let mut s = BackupSettings::default();
-        s.retention = Retention { keep_last: 2, keep_daily_days: 0 };
+        let s = BackupSettings { retention: Retention { keep_last: 2, keep_daily_days: 0 }, ..Default::default() };
         crate::backup::settings::save_settings(&rig.entry.name, &s).unwrap();
         for i in 0..4u64 {
             let mut t = rig.tools(&git);

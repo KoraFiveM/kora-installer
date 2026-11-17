@@ -218,17 +218,6 @@ pub(crate) async fn stream_file(path: std::path::PathBuf, len: u64) -> Result<Re
     Ok(resp)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ids_are_only_digits_and_dashes() {
-        assert!(valid_id("20260317-041507") && valid_id("20260317-041507-2"));
-        assert!(!valid_id("../etc") && !valid_id("") && !valid_id("a b"));
-    }
-}
-
 // ---- bringing a server from a backup (Part "move a server")
 
 /// The largest backup file accepted as an upload.
@@ -328,4 +317,15 @@ pub async fn backup_import_start(State(st): State<AppState>, Extension(caller): 
         let r = make().import_run(&body, local, &mut |ev| h.event(json!(ev)))?;
         serde_json::to_value(&r).map_err(|x| x.to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_are_only_digits_and_dashes() {
+        assert!(valid_id("20260317-041507") && valid_id("20260317-041507-2"));
+        assert!(!valid_id("../etc") && !valid_id("") && !valid_id("a b"));
+    }
 }

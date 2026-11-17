@@ -534,10 +534,8 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 if is_converted_file(&rel) {
                     let text = std::fs::read_to_string(&src).map_err(|e| io_problem("reading a settings file", e))?;
                     let mut converted = convert_text(&text, &m.server.dir, &c.dir, to_windows);
-                    if rel == "server.cfg" {
-                        if c.game_port != m.server.game_port {
-                            converted = crate::installer::change_ports::rewrite_cfg_game_port(&converted, c.game_port).unwrap_or(converted);
-                        }
+                    if rel == "server.cfg" && c.game_port != m.server.game_port {
+                        converted = crate::installer::change_ports::rewrite_cfg_game_port(&converted, c.game_port).unwrap_or(converted);
                     }
                     if let Some(parent) = dest.parent() {
                         std::fs::create_dir_all(parent).map_err(|e| io_problem("placing a settings file", e))?;

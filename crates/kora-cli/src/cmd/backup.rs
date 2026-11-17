@@ -406,13 +406,20 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 return fail("this backup is password protected: give the password with --password-stdin (or KORA_BACKUP_PASSWORD)".into());
             }
             let (Some(info), Some(sug)) = (preview.server.take(), preview.suggested.take()) else { return fail("this file is not a server backup".into()) };
-            println!("This is the server \"{}\", made on {} ({} resources by reference, {} in full).", info.name, if info.os == "windows" { "Windows" } else { "Linux" }, preview.by_reference, preview.in_full);
+            println!(
+                "This is the server \"{}\", made on {} ({} resources by reference, {} in full).",
+                info.name,
+                if info.os == "windows" { "Windows" } else { "Linux" },
+                preview.by_reference,
+                preview.in_full
+            );
             preview.will_create.iter().for_each(|l| println!("  will create: {l}"));
             preview.wont_carry.iter().for_each(|l| println!("  does not come along: {l}"));
             preview.warnings.iter().for_each(|l| println!("  note: {l}"));
             preview.clashes.iter().for_each(|c| println!("  in the way: {} (suggestion: {})", c.message, c.suggestion.as_deref().unwrap_or("choose another")));
             println!("{}", preview.licence_note);
-            let choices = ImportChoices { name: name.unwrap_or(sug.name), dir: dir.unwrap_or(sug.dir), game_port: game_port.unwrap_or(sug.game_port), txadmin_port: txadmin_port.unwrap_or(sug.txadmin_port) };
+            let choices =
+                ImportChoices { name: name.unwrap_or(sug.name), dir: dir.unwrap_or(sug.dir), game_port: game_port.unwrap_or(sug.game_port), txadmin_port: txadmin_port.unwrap_or(sug.txadmin_port) };
             println!("The new server: \"{}\" in {} (ports {} and {}).", choices.name, choices.dir, choices.game_port, choices.txadmin_port);
             if !yes && !crate::ui::confirm("Bring this server in now?") {
                 println!("Nothing was changed.");
