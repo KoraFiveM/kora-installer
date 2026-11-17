@@ -139,7 +139,11 @@ impl FinishPlan {
 /// (never the same file) and whether this is Windows.
 pub fn finish_plan(own_copy: Option<&std::path::Path>, installed: &std::path::Path, windows: bool) -> FinishPlan {
     let Some(own) = own_copy.filter(|o| *o != installed && super::op::dir_shape_ok(&o.to_string_lossy())) else { return FinishPlan::default() };
-    FinishPlan { set_aside: Some(own.to_path_buf()), repoint_from: Some(own.to_path_buf()), drop_path: windows.then(|| own.parent().map(std::path::Path::to_path_buf)).flatten() }
+    FinishPlan {
+        set_aside: Some(own.to_path_buf()),
+        repoint_from: Some(own.to_path_buf()),
+        drop_path: windows.then(|| own.to_string_lossy().rsplit_once(['\\', '/']).map(|(dir, _)| std::path::PathBuf::from(dir))).flatten(),
+    }
 }
 
 #[cfg(test)]
