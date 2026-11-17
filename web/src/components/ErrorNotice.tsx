@@ -6,7 +6,7 @@ import type { ProblemAction } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { CopyButton, CopyField } from '@/components/CopyButton'
-import { actionLabel, buttonActions, detailsText, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
+import { actionLabel, buttonActions, detailsText, isAdminCode, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
 
 /** Turn a command array into one line that can be pasted into a terminal. */
 export function commandLine(cmd: string[]): string {
@@ -45,6 +45,24 @@ function WithCode({ text }: { text: string }) {
   return <>{text.split('`').map((part, i) => (i % 2 ? <code key={i} className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">{part}</code> : part))}</>
 }
 
+/** The heading of an administrator-rights problem. */
+function adminTitle(code: string): string {
+  switch (code) {
+    case 'admin.declined':
+      return 'Windows did not get permission'
+    case 'admin.timed_out':
+      return 'Nobody answered the permission prompt'
+    case 'admin.remote':
+      return 'Windows has to ask on the computer that runs Kora'
+    case 'admin.busy':
+      return 'Windows is still asking'
+    case 'admin.lost':
+      return 'The administrator part stopped'
+    default:
+      return 'This needs administrator rights'
+  }
+}
+
 /** Errors where "Copy details" helps when nothing better is offered: real failures, not answers to a bad request. */
 function isFailure(p: NoticeProblem): boolean {
   return ['failed', 'internal', 'network'].includes(p.code) || p.code.includes('.') || (p.status ?? 0) >= 500
@@ -68,7 +86,7 @@ export function ErrorNotice({ error, title, actions, onRetry }: {
   const [busy, setBusy] = useState<ProblemAction | null>(null)
   const p = toProblem(error)
   if (!p) return null
-  const elevation = p.code === 'needs_elevation'
+  const elevation = isAdminCode(p.code)
   // The request never arrived (see `request` in api/client.ts).
   const message = p.code === 'network' ? NO_ANSWER : p.message
   const step = nextStep(p)
@@ -79,24 +97,32 @@ export function ErrorNotice({ error, title, actions, onRetry }: {
   const links = p.actions.filter((a): a is Extract<ProblemAction, { kind: 'open_link' }> => a.kind === 'open_link' && a.url.startsWith('https://'))
   const log = p.actions.find((a): a is Extract<ProblemAction, { kind: 'open_log' }> => a.kind === 'open_log')
   const buttons = buttonActions(p, handlers)
+  // Windows can be asked (a "request_admin" button): the command is the last resort, folded away.
+  const canAsk = buttons.some((a) => a.kind === 'request_admin')
   const fallback = buttons.length === 0 && (!!onRetry || isFailure(p))
   const copy = p.actions.some((a) => a.kind === 'copy_details') || fallback
   const run = async (a: ProblemAction) => {
     setBusy(a)
     try {
-      await runAction(handlers, a)
+      await runAction(handlers, a, { problem: p, retry: onRetry ?? p.replay })
     } finally {
       setBusy(null)
     }
   }
   return (
-    <Alert tone={elevation ? 'warning' : 'danger'} title={title ?? (elevation ? 'This needs administrator rights' : undefined)}>
+    <Alert tone={elevation ? 'warning' : 'danger'} title={title ?? (elevation ? adminTitle(p.code) : undefined)}>
       <p><WithCode text={message} /></p>
       {step && <p className="mt-2">{step}</p>}
-      {elevation && commands.length > 0 && (
+      {elevation && commands.length > 0 && !canAsk && (
         <p className="mt-2">Kora is running without administrator rights, so it cannot do this itself. Run the command below as administrator (on Windows, open a terminal with &quot;Run as administrator&quot;; on Linux, run it as root, for example with sudo), then come back here.</p>
       )}
-      {commands.map((c, i) => <CommandField key={i} command={c.command} elevated={!!c.elevated} />)}
+      {canAsk && commands.length > 0 ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-sm">Show me the command</summary>
+          <p className="mt-1 text-sm">Or do it yourself: open a terminal with &quot;Run as administrator&quot; on the computer that runs Kora, run this command, then come back here.</p>
+          {commands.map((c, i) => <CommandField key={i} command={c.command} elevated={!!c.elevated} />)}
+        </details>
+      ) : commands.map((c, i) => <CommandField key={i} command={c.command} elevated={!!c.elevated} />)}
       {refusal && commands.length === 0 && (
         <div className="mt-2">
           <CopyField value={refusal} label="Command to run" />
@@ -121,7 +147,7 @@ export function ErrorNotice({ error, title, actions, onRetry }: {
           {buttons.map((a, i) => (
             <Button key={`${a.kind}-${i}`} size="sm" variant={i === 0 ? 'default' : 'secondary'} disabled={busy !== null} aria-busy={busy === a} onClick={() => void run(a)}>
               {busy === a && <Loader2 className="animate-spin" aria-hidden />}
-              {actionLabel(a)}
+              {actionLabel(a, p)}
             </Button>
           ))}
           {fallback && onRetry && <Button size="sm" variant="default" onClick={onRetry}>Try again</Button>}

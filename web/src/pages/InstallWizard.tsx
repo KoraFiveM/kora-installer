@@ -57,7 +57,21 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   return rows
 }
 
-function ReviewStep({ rows, req, problems, waiting, onChange, onDisk }: {
+/** Windows: said before anything starts, so the prompt is expected (and how to avoid it). */
+export function AdminPromptNotice({ needs, onWithout }: { needs: string[]; onWithout?: () => void }) {
+  return (
+    <Alert tone="info" title="Windows will ask for permission once">
+      <p>These parts need administrator rights:</p>
+      <ul className="mt-1 list-disc pl-5">{needs.map((n) => <li key={n}>{n}</li>)}</ul>
+      <p className="mt-2">When you press Install, Windows asks once for permission on the computer that runs Kora: choose Yes, then watch the install carry on here. If you do not see the prompt, look for a flashing shield icon in the taskbar.</p>
+      {onWithout && (
+        <p className="mt-2">Rather not? <Button variant="link" className="h-auto p-0" onClick={onWithout}>Install without these parts</Button> (no firewall change, no background service, and an existing database only).</p>
+      )}
+    </Alert>
+  )
+}
+
+function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutAdmin }: {
   rows: ReviewRow[]
   req: InstallRequest
   /** What still has to be fixed, by step. Shown beside the first line of that step. */
@@ -66,6 +80,8 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk }: {
   waiting: StepId[]
   onChange: (row: ReviewRow) => void
   onDisk: (ok: boolean) => void
+  /** Drop the parts that need administrator rights (Windows notice). */
+  onWithoutAdmin?: () => void
 }) {
   const safeKey = JSON.stringify([req.dir, req.mode, req.firewall, req.service, req.db, req.txadmin_public])
   const disk = useQuery({ queryKey: ['disk', req.dir], queryFn: () => api.installs.checkDisk(req.dir) })
@@ -95,7 +111,8 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk }: {
       </dl>
       {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!disk.data.message.includes('GB') && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
       <ErrorNotice error={disk.error ?? plan.error} />
-      {plan.data && (
+      {plan.data?.admin_prompt && <AdminPromptNotice needs={plan.data.needs_admin} onWithout={onWithoutAdmin} />}
+      {plan.data && !plan.data.admin_prompt && (
         <Alert tone={plan.data.needs_admin.length ? 'warning' : 'info'} title="Administrator rights">
           {plan.data.needs_admin.length === 0 ? 'Nothing in this install needs administrator rights.' : (
             <>
@@ -223,11 +240,11 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const saved = defaults.saved
   const common = { f, set, advanced, defaultsDir: defaults.dir }
 
-  const start = async () => {
+  const start = async (opts: { askAdmin?: boolean } = {}) => {
     setStartErr(null)
     setStarting(true)
     try {
-      setJob((await api.installs.start(req)).job)
+      setJob((await api.installs.start(req, opts)).job)
     } catch (e) {
       setStartErr(e)
     } finally {
@@ -236,11 +253,11 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   }
 
   /** Carry on with the stopped install `job` (same answers, licence key kept by Kora): retry the failed step, or skip it. */
-  const resume = async (skip?: string) => {
+  const resume = async (skip?: string, opts: { askAdmin?: boolean; withoutAdmin?: boolean } = {}) => {
     if (!job) return
     setResumeErr(null)
     try {
-      const next = (await api.installs.resume(job, skip)).job
+      const next = (await api.installs.resume(job, skip, opts)).job
       setGithubAsked(false)
       setJob(next)
     } catch (e) {
@@ -266,12 +283,20 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     },
     change_answers: (a) => changeAnswers(a.section),
     sign_in_github: () => setGithubAsked(true),
-    continue_without_admin: () => changeAnswers(),
+    // Windows said no (or nobody answered): ask again, or carry on as you, keeping what was done.
+    request_admin: () => resume(undefined, { askAdmin: true }),
+    continue_without_admin: async () => {
+      setF(withoutAdmin(f))
+      if (run.error?.resume) return resume(undefined, { withoutAdmin: true })
+      changeAnswers()
+    },
   }
   /** Errors from starting (on the summary): change an answer, or drop the parts that need administrator rights. */
   const startActions: ActionHandlers = {
     change_answers: (a) => { setStartErr(null); setEditing(sectionStep(a.section, f.mode)) },
     continue_without_admin: () => { setStartErr(null); setF(withoutAdmin(f)); setEditing(null) },
+    // A remote session: Windows only asks when the person says so.
+    request_admin: () => start({ askAdmin: true }),
     sign_in_github: () => { setStartErr(null); setEditing(f.mode === 'development' ? 'github' : null) },
   }
 
@@ -371,6 +396,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               waiting={waiting}
               onChange={(r) => { if (r.advanced) setAdvanced(true); setEditing(r.step) }}
               onDisk={setDiskOk}
+              onWithoutAdmin={() => setF(withoutAdmin(f))}
             />
           )}
           <ErrorNotice error={startErr} actions={startActions} />
@@ -395,7 +421,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               <div className="flex justify-between pt-2">
                 <Button disabled={at === 0} onClick={() => setStep(at - 1)}>Back</Button>
                 {last ? (
-                  <Button variant="default" disabled={starting || !!installBlocked || waiting.length > 0} aria-busy={starting} onClick={start}>
+                  <Button variant="default" disabled={starting || !!installBlocked || waiting.length > 0} aria-busy={starting} onClick={() => void start()}>
                     {starting ? <><Loader2 className="animate-spin" aria-hidden /> Starting...</> : 'Install the server'}
                   </Button>
                 ) : (

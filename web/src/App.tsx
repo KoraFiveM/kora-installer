@@ -5,6 +5,7 @@ import { ApiError, setUnauthorizedHandler } from '@/api/client'
 import { AlertsProvider } from '@/lib/app'
 import { signIn, signInByIdentity, type BootResult } from '@/lib/session'
 import { AppShell } from '@/components/AppShell'
+import { AdminActions } from '@/components/AdminActions'
 import { SignedOut } from '@/components/SignedOut'
 import ServersPage from '@/pages/ServersPage'
 import ServerDetailPage from '@/pages/ServerDetailPage'
@@ -63,6 +64,7 @@ export function App({ boot }: { boot: BootResult }) {
   return (
     <QueryClientProvider client={client}>
       <AlertsProvider>
+        <AdminActions>
         <BrowserRouter>
           <Routes>
             {Styleguide && <Route path="styleguide" element={<Suspense fallback={null}><Styleguide /></Suspense>} />}
@@ -76,6 +78,7 @@ export function App({ boot }: { boot: BootResult }) {
             </Route>
           </Routes>
         </BrowserRouter>
+        </AdminActions>
       </AlertsProvider>
     </QueryClientProvider>
   )
