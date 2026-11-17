@@ -56,6 +56,11 @@ export function looksLikeText(s: string, strict: boolean): boolean {
   return w.length >= 2 && /\s/.test(t)
 }
 
+/** A value in a table of words for people: "Running", "Not allowed", "Needs a restart". */
+export function tableValue(text: string): boolean {
+  return /^[A-Z][a-z]+( [A-Za-z']+)*[.!?]?$/.test(text.trim()) && !PROPER.test(text.trim())
+}
+
 export function scanSource(file: string, source: string): Finding[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
   const lines = source.split('\n')
@@ -118,6 +123,8 @@ export function scanSource(file: string, source: string): Finding[] {
         (ts.isJsxExpression(p) && !inJsxChild(n))
       const text = literalText(n)
       if (!skip && text !== null && !inJsx(n) && looksLikeText(text, true)) add(n, text, 'string')
+      // A label in a table of labels: one capitalised word is enough ({ running: 'Running' }).
+      else if (!skip && text !== null && ts.isPropertyAssignment(p) && p.initializer === n && tableValue(text)) add(n, text, 'string')
     }
     ts.forEachChild(n, visit)
   }
@@ -139,9 +146,9 @@ export function sourceFiles(root: string): string[] {
     for (const e of readdirSync(dir)) {
       const p = join(dir, e)
       if (statSync(p).isDirectory()) {
-        if (['mock', 'generated', 'test', 'i18n'].includes(e) || (e === 'Styleguide.tsx')) continue
+        if (['mock', 'generated', 'test', 'i18n'].includes(e)) continue
         walk(p)
-      } else if (/\.(ts|tsx)$/.test(e) && !/\.(test|spec)\.|\.d\.ts$/.test(e)) out.push(p)
+      } else if (/\.(ts|tsx)$/.test(e) && !/\.(test|spec)\.|\.d\.ts$/.test(e) && e !== 'Styleguide.tsx') out.push(p) // the styleguide is a developer page in the mock build only
     }
   }
   walk(root)

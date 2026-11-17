@@ -87,6 +87,14 @@ export function t<K extends PlainId>(id: K, ...args: ArgsFor<K>): string {
   return format(lookup(id).nodes, context(params, id)).join('')
 }
 
+/**
+ * Mark a message id inside a module-level table (`{ running: msg('jobs.state.running') }`): it checks the id exists, and
+ * returns it. Show it with `t(row.label)` where it is drawn: calling `t` while the module loads would fix the language.
+ */
+export function msg<K extends PlainId>(id: K): K {
+  return id
+}
+
 /** The pieces of a message with tags (strings and what the tag functions returned). `rich()` wraps this. */
 export function pieces<K extends RichId>(id: K, params: Record<string, Value>): unknown[] {
   return format(lookup(id).nodes, context(params, id))

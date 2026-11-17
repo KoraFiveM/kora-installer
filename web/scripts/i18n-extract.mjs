@@ -12,6 +12,7 @@ if (!area || files.length === 0) {
   console.error('usage: node scripts/i18n-extract.mjs <area> <file>...')
   process.exit(2)
 }
+const MODULE = !!process.env.MODULE // module-level strings (tables of labels): `msg('id')` instead of `t('id')`
 const catFile = `src/i18n/en/${area}.ts`
 
 // ---- the catalogue file ------------------------------------------------------------------------------------------
@@ -56,6 +57,7 @@ const hasText = (s) => {
   const w = words(s)
   return w.length > 0 && !w.every((x) => PROPER.test(x))
 }
+const tableValue = (t) => /^[A-Z][a-z]+( [A-Za-z']+)*[.!?]?$/.test(t.trim()) && !PROPER.test(t.trim())
 const proseString = (t) => {
   const s = t.trim()
   if (!hasText(s)) return false
@@ -82,6 +84,7 @@ for (const file of files) {
   let edits = [] // { s, e, text }
   let usesT = false
   let usesRich = false
+  let usesMsg = false
   const usesTName = (() => {
     let found = false
     const v = (n) => {
@@ -246,7 +249,11 @@ for (const file of files) {
         params.push([nm, take(sp.expression.getStart(sf), sp.expression.end)])
       }
     }
-    const id = idFor(msg.replace(/\\([{}<\\])/g, '$1') === msg ? msg : msg, params)
+    const id = idFor(msg, params)
+    if (MODULE) {
+      usesMsg = true
+      return `msg('${id}')`
+    }
     usesT = true
     return `${T}('${id}'${params.length ? `, { ${params.map(([n, c]) => (c === n ? n : `${n}: ${c}`)).join(', ')} }` : ''})`
   }
@@ -295,7 +302,7 @@ for (const file of files) {
       return
     }
     // a plain string / template leaf outside JSX
-    if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) && inFunction(n)) {
+    if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) && inFunction(n) === !MODULE) {
       const p = n.parent
       const inJsxPos = ts.isJsxAttribute(p) || ts.isJsxExpression(p)
       const text = litOf(n)
@@ -307,7 +314,7 @@ for (const file of files) {
         (ts.isBinaryExpression(p) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(p.operatorToken.kind)) ||
         (ts.isElementAccessExpression(p) && p.argumentExpression === n) ||
         (ts.isCallExpression(p) && /^(console\.|(\w+\.)?(getItem|setItem|removeItem|querySelector|querySelectorAll|getElementById|addEventListener|removeEventListener|matchMedia|postMessage|fetch|import|require|include|includes|startsWith|endsWith|test|match|split|replace|replaceAll|join)$|cn$|clsx$|cva$|t$|rich$)/.test(p.expression.getText(sf)))
-      if (!skip && text !== null && proseString(text)) replaceLiteral(n)
+      if (!skip && text !== null && (proseString(text) || (ts.isPropertyAssignment(p) && p.initializer === n && tableValue(text))) && !(MODULE && ts.isTemplateExpression(n))) replaceLiteral(n)
       return
     }
     // a JSX expression child with string leaves, when it is not part of a bigger unit: handled by the unit below, or here alone
@@ -371,9 +378,10 @@ for (const file of files) {
   out += src.slice(pos)
   // imports
   const imports = []
-  if (usesT && !/from '@\/i18n'/.test(out)) imports.push(`import { t${usesTName ? ' as tt' : ''} } from '@/i18n'`)
+  if ((usesT || usesMsg) && !/from '@\/i18n'/.test(out)) imports.push(`import { ${[usesT ? `t${usesTName ? ' as tt' : ''}` : '', usesMsg ? 'msg' : ''].filter(Boolean).join(', ')} } from '@/i18n'`)
+  else if (usesMsg && /import \{([^}]*)\} from '@\/i18n'/.test(out) && !/import \{[^}]*\bmsg\b[^}]*\} from '@\/i18n'/.test(out)) out = out.replace(/import \{([^}]*)\} from '@\/i18n'/, (m0, g) => `import {${g.replace(/\s+$/, '')}, msg } from '@/i18n'`)
   if (usesRich && !/from '@\/i18n\/react'/.test(out)) imports.push(`import { rich } from '@/i18n/react'`)
-  if (!out.includes(`'@/i18n/en/${area}'`) && (usesT || usesRich)) imports.push(`import '@/i18n/en/${area}'`)
+  if (!out.includes(`'@/i18n/en/${area}'`) && (usesT || usesRich || usesMsg)) imports.push(`import '@/i18n/en/${area}'`)
   if (imports.length) {
     const m = [...out.matchAll(/^import [^\n]*\n/gm)]
     const lastImport = m.length ? m[m.length - 1] : null

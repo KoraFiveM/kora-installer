@@ -8,5 +8,5 @@ it('report', () => {
   for (const x of f) by.set(x.file, (by.get(x.file) ?? 0) + 1)
   console.log('TOTAL', f.length, 'in', by.size, 'files')
   console.log([...by].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v}\t${k}`).join('\n'))
-  if (process.env.SHOW) console.log(f.filter((x) => x.file.includes(process.env.SHOW!)).map((x) => `${x.file}:${x.line} [${x.kind}] ${x.text}`).join('\n'))
+  if (process.env.SHOW !== undefined) console.log(f.filter((x) => x.file.includes(process.env.SHOW!)).map((x) => `${x.file}:${x.line} [${x.kind}] ${x.text}`).join('\n'))
 })
