@@ -279,7 +279,7 @@ pub async fn asset_import(State(st): State<AppState>, Extension(caller): Extensi
         if let Some(d) = upload_dir {
             let _ = std::fs::remove_dir_all(d);
         }
-        serde_json::to_value(&out).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&out)?)
     })
 }
 

@@ -26,15 +26,15 @@ pub struct FakeState {
     pub reach_report: Option<crate::reach::ReachReport>,
     pub reach_consent: crate::reach::settings::Consent,
     pub forwarding: HashMap<String, bool>,
-    pub firewall_open_error: Option<String>,
+    pub firewall_open_error: Option<crate::problem::Problem>,
     pub servers: Vec<ServerEntry>,
     pub status: HashMap<String, Status>,
     pub badges: HashMap<String, UpdateBadge>,
     pub calls: Vec<String>,
-    pub list_error: Option<String>,
-    pub control_error: Option<String>,
-    pub ensure_error: Option<String>,
-    pub delete_error: Option<String>,
+    pub list_error: Option<crate::problem::Problem>,
+    pub control_error: Option<crate::problem::Problem>,
+    pub ensure_error: Option<crate::problem::Problem>,
+    pub delete_error: Option<crate::problem::Problem>,
     pub resources: Vec<String>,
     /// Resource id -> folder name, for ids whose folder is named differently.
     pub resource_folders: HashMap<String, String>,
@@ -42,7 +42,7 @@ pub struct FakeState {
     pub preview: Option<Res<UpdatePreview>>,
     pub apply: Option<Res<UpdateReport>>,
     pub apply_events: Vec<UpdateEvent>,
-    pub rollback_error: Option<String>,
+    pub rollback_error: Option<crate::problem::Problem>,
     pub snapshots: Vec<SnapshotInfo>,
     pub catalog: Option<(Catalog, Vec<String>)>,
     pub add_plan: Option<Res<AddPlan>>,
@@ -52,19 +52,19 @@ pub struct FakeState {
     pub pr_plan: Option<Res<PrPlan>>,
     pub pr_result: Option<Res<String>>,
     pub notify: HashMap<String, NotifyConfig>,
-    pub notify_save_error: Option<String>,
-    pub notify_test_error: Option<String>,
+    pub notify_save_error: Option<crate::problem::Problem>,
+    pub notify_test_error: Option<crate::problem::Problem>,
     pub schedule: HashMap<String, ScheduleConfig>,
     /// `Some(args)`: changing the schedule needs elevation and these are the `kora` arguments.
     pub elevation: Option<Vec<String>>,
-    pub ports_error: Option<String>,
+    pub ports_error: Option<crate::problem::Problem>,
     /// Paid assets per server name.
     pub assets: HashMap<String, AssetsView>,
     /// What `asset_inspect` answers (`None`: an importable plan named after the zip).
     pub asset_plan: Option<Res<ImportPlan>>,
     /// What `asset_import` answers (`None`: one asset named after the zip).
     pub asset_import: Option<Res<ImportReport>>,
-    pub asset_remove_error: Option<String>,
+    pub asset_remove_error: Option<crate::problem::Problem>,
     /// What `branches` answers (`None`: an error that says nothing is set up). Every request is in `calls` as `branches {request:?}`.
     pub branches: Option<Res<crate::branches::Reply>>,
     /// The answer to the next `collab` request.
@@ -104,7 +104,7 @@ impl FakeBackend {
     }
 }
 
-fn err_or<T>(e: &Option<String>, ok: impl FnOnce() -> T) -> Res<T> {
+fn err_or<T>(e: &Option<crate::problem::Problem>, ok: impl FnOnce() -> T) -> Res<T> {
     match e {
         Some(x) => Err(x.clone()),
         None => Ok(ok()),
@@ -183,7 +183,7 @@ impl Backend for FakeBackend {
         // Records that a password was given, never the password itself.
         s.calls.push(format!("delete {} keep_files={keep_files} keep_db={keep_db} db_password=set", e.name));
         if let Some(x) = &s.delete_error {
-            if !x.contains("KORA_DB_ADMIN_PASSWORD") || pw == "wrong" {
+            if x.code != crate::problem::codes::DB_NEEDS_PASSWORD || pw == "wrong" {
                 return Err(x.clone());
             }
         }
@@ -391,7 +391,7 @@ impl Backend for FakeBackend {
             return Err(x.clone());
         }
         let Some(v) = s.assets.get_mut(&e.name).filter(|v| v.assets.iter().any(|a| a.name == name)) else {
-            return Err(format!("There is no paid asset called {name} on this server (not found)."));
+            return Err(format!("There is no paid asset called {name} on this server (not found).").into());
         };
         v.assets.retain(|a| a.name != name);
         Ok(vec![format!("{name} was removed.")])
@@ -509,6 +509,7 @@ impl Backend for FakeBackend {
                 os: "windows".into(),
                 dir: "C:\\Servers\\old".into(),
                 github_owner: Some("old-owner".into()),
+                run_mode: None,
             }),
             database: Some(crate::backup::DatabaseBackup {
                 kind: crate::backup::DbKind::Dumped,
@@ -527,6 +528,8 @@ impl Backend for FakeBackend {
             warnings: vec!["This server was made on a different operating system.".into()],
             saved_keys: vec!["Main".into()],
             licence_note: crate::backup::import::LICENCE_NOTE.into(),
+            run_mode: None,
+            container_engine: None,
             db_login: Some(crate::backup::import::DbLoginNote { ok: false, message: "Kora could not log in to the database as root.".into() }),
             fork: Some(crate::backup::import::ForkNote {
                 owner: "old-owner".into(),

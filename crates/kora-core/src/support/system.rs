@@ -120,7 +120,7 @@ impl<B: Backend + ?Sized> Machine for SystemMachine<'_, B> {
     fn service_status(&self, e: &ServerEntry) -> String {
         let svc = match crate::installer::host::service_state(&e.name) {
             Ok(s) => format!("{s:?}"),
-            Err(x) => format!("unknown ({x})"),
+            Err(x) => format!("unknown ({})", x.one_line()),
         };
         let timer = match crate::service::get(e) {
             Some(c) => crate::service::describe(&c),

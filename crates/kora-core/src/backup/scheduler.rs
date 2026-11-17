@@ -99,7 +99,6 @@ fn look(make: &(dyn Fn() -> Box<dyn crate::api::Backend + Send> + Send + Sync), 
     }
     let mut backend = make();
     let Ok(servers) = backend.list() else { return };
-    let (db, git) = (crate::db::SystemRunner, crate::git::SystemRunner);
     for e in servers {
         let Some(cfg) = all.get(&e.name) else { continue };
         if !cfg.schedule.enabled || !e.dir.is_dir() {
@@ -109,7 +108,8 @@ fn look(make: &(dyn Fn() -> Box<dyn crate::api::Backend + Send> + Send + Sync), 
         if !settings::is_due(&cfg.schedule, &status, now) {
             continue;
         }
-        let mut tools = Tools::system(&db, &git);
+        let set = crate::container::backup::ToolSet::for_server(&e.name, &e.dir);
+        let mut tools = set.tools();
         tools.now = now;
         let mut host = super::host::BackendHost::new(&mut *backend, &e);
         match run_if_due(&e, &mut host, &tools) {

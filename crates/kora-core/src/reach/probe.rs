@@ -15,6 +15,7 @@
 //! Neither can say "port 30120 is open" for sure. When no sound answer exists the checklist says
 //! "unknown" and explains the manual test, instead of guessing.
 
+use crate::problem::Problem;
 use std::io::Read;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -106,7 +107,7 @@ fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new().redirects(0).timeout(TIMEOUT).timeout_connect(TIMEOUT).user_agent("kora").build()
 }
 
-fn read_body(r: ureq::Response) -> Result<String, String> {
+fn read_body(r: ureq::Response) -> Result<String, Problem> {
     let mut s = String::new();
     r.into_reader().take(MAX_BODY).read_to_string(&mut s).map_err(|e| e.to_string())?;
     Ok(s)
@@ -122,7 +123,7 @@ impl CfxList for SystemCfxList {
         match agent().get(&format!("{CFX_API}{code}")).call() {
             Ok(r) => match read_body(r) {
                 Ok(b) => parse_listing(code, &b).map_or_else(|| Lookup::Unavailable("Cfx.re answered something unexpected".into()), Lookup::Found),
-                Err(e) => Lookup::Unavailable(e),
+                Err(e) => Lookup::Unavailable(e.one_line()),
             },
             Err(ureq::Error::Status(404, _)) => Lookup::Absent,
             Err(ureq::Error::Status(c, _)) => Lookup::Unavailable(format!("Cfx.re answered with error {c}")),
@@ -138,7 +139,7 @@ impl IpEcho for SystemIpEcho {
         match agent().get(IP_ECHO_URL).call() {
             Ok(r) => match read_body(r) {
                 Ok(b) => parse_ip_text(&b).map_or_else(|| Lookup::Unavailable("the website did not answer with an address".into()), Lookup::Found),
-                Err(e) => Lookup::Unavailable(e),
+                Err(e) => Lookup::Unavailable(e.one_line()),
             },
             Err(ureq::Error::Status(c, _)) => Lookup::Unavailable(format!("the website answered with error {c}")),
             Err(ureq::Error::Transport(t)) => Lookup::Unavailable(t.to_string()),

@@ -23,7 +23,7 @@ use crate::git::branches::{self as gb, codes, Branches, Kind, Outcome, PullReque
 use crate::git::CommandRunner;
 use crate::installer::registry::{ResourceRecord, ServerFile};
 use crate::installer::types::Versions;
-use crate::problem::{Action, Problem};
+use crate::problem::Problem;
 use crate::update::{lock, par_map, FETCH_PARALLEL};
 
 pub use crate::git::branches::{parse_pr_input, valid_branch, Changes, PrSource};
@@ -81,10 +81,7 @@ pub(crate) fn find<'a>(sf: &'a ServerFile, name: &str) -> PResult<&'a ResourceRe
 }
 
 pub(crate) fn lock_for(sf: &ServerFile) -> PResult<lock::UpdateLock> {
-    lock::acquire(&sf.dir).map_err(|e| match e {
-        lock::LockError::Busy => Problem::new(codes::BUSY, "An update is running for this server right now. Try again when it has finished.").with_action(Action::Retry),
-        other => Problem::generic(other.to_string()),
-    })
+    lock::acquire(&sf.dir).map_err(Problem::from)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -650,7 +647,7 @@ pub fn run(r: &dyn CommandRunner, sf: &ServerFile, req: &Request, progress: &mut
 
 /// [`run`] on a registered server (name or folder) with the right git for who owns its folder. For the command line.
 pub fn run_on(server: &str, req: &Request, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<Reply> {
-    let sf = crate::update::manual::load_server(server).map_err(|e| Problem::generic(e.to_string()))?;
+    let sf = crate::update::manual::load_server(server)?;
     crate::installer::gitops::with_runner(&sf.dir, |r| run(r, &sf, req, progress))
 }
 

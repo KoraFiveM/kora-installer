@@ -105,6 +105,10 @@ pub fn database_of(dir: &Path) -> Result<DbSource, Problem> {
             if !credentials_are_sane(&c) {
                 return Err(Problem::new(codes::CORRUPT, "The database login file of this server (database.json) has values Kora will not use, so its database cannot be backed up. Check the file."));
             }
+            // A container server's database is the container named in the login: the tools run inside it.
+            if crate::container::record::ContainerRecord::load(dir).and_then(|r| r.db).is_some_and(|d| d.container == c.host) {
+                return Ok(DbSource::Local(crate::container::dbc::tool_credentials(&c)));
+            }
             Ok(if is_local_host(&c.host) { DbSource::Local(c) } else { DbSource::External(c) })
         }
         Err(_) => {
@@ -281,7 +285,7 @@ pub fn create_unguarded(e: &ServerEntry, o: &CreateOptions, host: &mut dyn Host,
     let mut stopped_by_us = false;
     if stop {
         ev("stop", "Stopping the server for a strictly consistent copy", 8);
-        host.stop().map_err(|m| Problem::generic(format!("The server could not be stopped for the backup: {m}")))?;
+        host.stop().map_err(|m| m.lead("The server could not be stopped for the backup"))?;
         stopped_by_us = true;
     }
     let outcome = build(e, o, tools, &destination, &mut ev, server_file.as_ref(), dbsrc, resources, &skip_resources, resource_bytes + server_bytes + db_bytes, stop || !was_running);
@@ -291,7 +295,7 @@ pub fn create_unguarded(e: &ServerEntry, o: &CreateOptions, host: &mut dyn Host,
             // The backup itself may have worked; the person must know the server is down.
             return match outcome {
                 Ok(mut r) => {
-                    r.notes.push(format!("The server was stopped for the backup and could not be started again ({m}). Start it from the server page."));
+                    r.notes.push(format!("The server was stopped for the backup and could not be started again ({}). Start it from the server page.", m.one_line()));
                     Ok(r)
                 }
                 Err(p) => Err(p),
@@ -380,6 +384,7 @@ fn build(
         os: if cfg!(windows) { "windows".into() } else { "linux".into() },
         dir: e.dir.display().to_string(),
         github_owner: sf.and_then(|s| s.github_owner.clone()),
+        run_mode: crate::container::record::is_container(&e.dir).then_some(crate::container::RunMode::Container),
     };
     if !strictly {
         notes.push("The server was running while the files were copied. The database is one consistent snapshot; the other files were copied one by one, so two of them can be from slightly different moments.".into());
@@ -532,6 +537,27 @@ pub(crate) mod tests {
         assert!(m.notes.iter().any(|n| n.contains("running while")));
         // the status line knows
         assert!(crate::backup::settings::load_status(&rig.entry.name).last_ok_unix.is_some());
+    }
+
+    #[test]
+    fn a_container_servers_backup_records_the_run_mode_and_its_record_and_a_service_servers_does_not() {
+        let rig = Rig::new();
+        let git = rig.clean_git();
+        let tools = rig.tools(&git);
+        let plain = create(&rig.entry, &CreateOptions::default(), &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap();
+        let m = archive::scan(&plain.path, None, None, 1 << 30, None).unwrap();
+        assert_eq!(m.server.run_mode, None);
+        assert!(!m.files.iter().any(|f| f.path == "server/kora-container.json"));
+        // make it a container server
+        let mut rec = crate::container::record::tests::sample();
+        rec.container = "kora-main".into();
+        rec.save(&rig.entry.dir).unwrap();
+        let boxed = create(&rig.entry, &CreateOptions::default(), &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap();
+        let m = archive::scan(&boxed.path, None, None, 1 << 30, None).unwrap();
+        assert_eq!(m.server.run_mode, Some(crate::container::RunMode::Container));
+        assert!(m.files.iter().any(|f| f.path == "server/kora-container.json"), "the record travels with the backup");
+        let text = std::fs::read_to_string(rig.entry.dir.join("kora-container.json")).unwrap().to_ascii_lowercase();
+        assert!(!text.contains("password"));
     }
 
     #[test]

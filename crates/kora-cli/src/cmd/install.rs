@@ -30,6 +30,22 @@ pub(crate) enum DbArg {
     Existing,
     Install,
     Skip,
+    /// Container mode: a MariaDB container next to the server.
+    Container,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub(crate) enum RunModeArg {
+    /// A system service (the default).
+    Service,
+    /// A container run by Podman or Docker (Linux).
+    Container,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum EngineArg {
+    Podman,
+    Docker,
 }
 
 #[derive(Args, Default, Clone)]
@@ -81,9 +97,24 @@ pub(crate) struct InstallArgs {
     /// `all` or a comma separated list of resource ids (dependencies and core are always included).
     #[arg(long)]
     pub(crate) resources: Option<String>,
-    /// existing = use the local MariaDB, install = install it if missing, skip = no database.
+    /// existing = use the local MariaDB, install = install it if missing, skip = no database, container = a MariaDB container next to the server (the default with --run-mode container).
     #[arg(long, value_enum)]
     pub(crate) db: Option<DbArg>,
+    /// How the server runs: service = a system service (the default; --service sets it up), container = in a container run by Podman or Docker (Linux; needs no administrator rights with rootless Podman).
+    #[arg(long, value_enum)]
+    pub(crate) run_mode: Option<RunModeArg>,
+    /// With --run-mode container: which engine (default: the best one found, rootless Podman first).
+    #[arg(long, value_enum)]
+    pub(crate) engine: Option<EngineArg>,
+    /// With --run-mode container: publish the game port on this address only (default: every address).
+    #[arg(long, value_name = "IP")]
+    pub(crate) bind: Option<String>,
+    /// With --run-mode container: limit the server's memory, in MiB (default: no limit).
+    #[arg(long, value_name = "MIB")]
+    pub(crate) memory_mb: Option<u32>,
+    /// With --run-mode container: limit the server's processors, in cores (for example 2 or 1.5; default: no limit).
+    #[arg(long, value_name = "CORES")]
+    pub(crate) cpus: Option<f32>,
     /// Install and enable the OS service (needs admin).
     #[arg(long)]
     pub(crate) service: bool,
@@ -195,6 +226,27 @@ impl InstallArgs {
             Some(list) => ResourceSelection::Only(list.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
         };
         let defaults = Ports::default();
+        let in_container = self.run_mode == Some(RunModeArg::Container);
+        if in_container && !cfg!(target_os = "linux") {
+            return Err("--run-mode container is only available on Linux.".into());
+        }
+        if in_container && self.service {
+            return Err("--service and --run-mode container cannot be combined: a container server has no system service.".into());
+        }
+        if !in_container && (self.engine.is_some() || self.bind.is_some() || self.memory_mb.is_some() || self.cpus.is_some()) {
+            return Err("--engine, --bind, --memory-mb and --cpus only apply with --run-mode container.".into());
+        }
+        if self.memory_mb.is_some_and(|m| m < 512) {
+            return Err("--memory-mb must be at least 512: FXServer needs that much.".into());
+        }
+        if self.cpus.is_some_and(|c| !(0.1..=256.0).contains(&c)) {
+            return Err("--cpus must be between 0.1 and 256.".into());
+        }
+        if let Some(b) = &self.bind {
+            if b.parse::<std::net::IpAddr>().is_err() {
+                return Err(format!("--bind must be an IP address, not '{b}'."));
+            }
+        }
         let (source, versions) = installer::resolve(
             self.mode.map(|m| match m {
                 ModeArg::Prod => Mode::Production,
@@ -224,12 +276,14 @@ impl InstallArgs {
             artifact_url: self.artifact_url,
             game_build: self.game_build,
             resources,
-            db: match self.db.unwrap_or(DbArg::Existing) {
+            db: match self.db.unwrap_or(if in_container { DbArg::Container } else { DbArg::Existing }) {
                 DbArg::Existing => DbChoice::UseExisting,
                 DbArg::Install => DbChoice::InstallIfMissing,
                 DbArg::Skip => DbChoice::Skip,
+                DbArg::Container if in_container => DbChoice::Container,
+                DbArg::Container => return Err("--db container needs --run-mode container".into()),
             },
-            service: self.service,
+            service: self.service && !in_container,
             firewall: self.firewall,
             github_owner: self.github_owner,
             catalog,
@@ -237,6 +291,15 @@ impl InstallArgs {
             db_admin,
             // Headless installs start nothing unless asked (CI and scripts keep their behaviour).
             start: self.start && !self.no_start,
+            container: in_container.then(|| kora_core::container::ContainerRequest {
+                engine: self.engine.map(|e| match e {
+                    EngineArg::Podman => kora_core::container::EngineKind::Podman,
+                    EngineArg::Docker => kora_core::container::EngineKind::Docker,
+                }),
+                bind: self.bind.clone(),
+                memory_mb: self.memory_mb,
+                cpu_tenths: self.cpus.map(|c| (c * 10.0).round() as u32),
+            }),
             // Retired in 0.7.0: the install no longer adds a machine-wide app.
             app: None,
         })

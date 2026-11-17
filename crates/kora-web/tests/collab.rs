@@ -72,7 +72,7 @@ async fn what_the_browser_sends_is_checked_before_anything_runs() {
 async fn a_plain_clone_pushing_gets_the_guided_problem_with_the_fix() {
     let fake = FakeBackend::sample();
     let p = Problem::new(kora_core::collab::NEEDS_FORK, "Pushing needs your own copy.").with_action(Action::MakeFork { resource: None });
-    fake.state().collab = Some(Err(p.encode()));
+    fake.state().collab = Some(Err(p));
     let app = app(&fake);
     let (s, v) = call(&app, "POST", "/servers/prod/resources/kora_hud/push", None).await;
     assert_eq!(s, 422, "{v}");

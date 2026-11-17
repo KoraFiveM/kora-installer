@@ -662,11 +662,11 @@ fn preview_apply_and_rollback_refuse_while_another_update_runs() {
     let before: Vec<String> = (0..3).map(|i| head(&env.path(i))).collect();
     let held = crate::update::lock::acquire(&env.sf.dir).unwrap();
     let e = preview_with(&env.sf, Scope::All, &GitCli::default(), None).unwrap_err();
-    assert!(lock::is_busy_message(&e.to_string()), "{e}");
+    assert_eq!(e.code, crate::git::branches::codes::BUSY, "{e}");
     let e = apply_with(&env.sf, Scope::All, opts(RestartPolicy::None, &[]), &GitCli::default(), &Health::ok(), None, Some(0), 80, &mut |_| {}).unwrap_err();
-    assert!(lock::is_busy_message(&e.to_string()), "{e}");
+    assert_eq!(e.code, crate::git::branches::codes::BUSY, "{e}");
     let e = rollback_with(&env.sf, "1", &GitCli::default(), false).unwrap_err();
-    assert!(lock::is_busy_message(&e.to_string()), "{e}");
+    assert_eq!(e.code, crate::git::branches::codes::BUSY, "{e}");
     assert_eq!((0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(), before, "nothing moved");
     assert!(snapshots(&env.sf).is_empty());
     drop(held);
@@ -681,7 +681,7 @@ fn a_preview_cannot_start_while_an_apply_holds_the_lock() {
         fn check(&self, _: &HealthRequest) -> HealthOutcome {
             *self.1.borrow_mut() = Some(match preview_with(self.0, Scope::All, &GitCli::default(), None) {
                 Ok(_) => "ran".into(),
-                Err(e) => e.to_string(),
+                Err(e) => e.code.clone(),
             });
             HealthOutcome::Healthy
         }
@@ -691,7 +691,7 @@ fn a_preview_cannot_start_while_an_apply_holds_the_lock() {
     let probe = Probe(&env.sf, RefCell::new(None));
     apply_with(&env.sf, Scope::All, opts(RestartPolicy::FullRestart, &[]), &GitCli::default(), &probe, None, Some(0), 81, &mut |_| {}).unwrap();
     let got = probe.1.borrow().clone().unwrap();
-    assert!(lock::is_busy_message(&got), "{got}");
+    assert_eq!(got, crate::git::branches::codes::BUSY);
 }
 
 #[test]

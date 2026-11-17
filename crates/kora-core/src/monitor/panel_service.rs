@@ -10,6 +10,7 @@
 //! (owner-only). `kora panel --print-link` reads it back. All steps are a data [`Plan`], so the unit and
 //! script text is tested on every OS without touching the machine.
 
+use crate::problem::Problem;
 use std::path::{Path, PathBuf};
 
 use crate::installer::registry::kora_home;
@@ -50,7 +51,7 @@ impl RunningPanel {
 }
 
 /// Remember a running panel (owner-only: the record holds its sign-in token).
-pub fn record_running(home: &Path, p: &RunningPanel) -> Result<(), String> {
+pub fn record_running(home: &Path, p: &RunningPanel) -> Result<(), Problem> {
     let text = serde_json::json!({"port": p.port, "pid": p.pid, "token": p.token}).to_string();
     super::write_private(&running_path(home), &text)
 }
@@ -162,14 +163,14 @@ pub fn load_token(home: &Path) -> Option<String> {
 }
 
 /// Keep the saved token, or make one (random, 256 bits) and save it owner-only.
-pub fn ensure_token(home: &Path) -> Result<String, String> {
+pub fn ensure_token(home: &Path) -> Result<String, Problem> {
     if let Some(t) = load_token(home) {
         return Ok(t);
     }
     let mut b = [0u8; 32];
     getrandom::fill(&mut b).map_err(|e| format!("Could not make a sign-in token: {e}"))?;
     let t = hex::encode(b);
-    super::write_private(&token_path(home), &t).map_err(|e| format!("Could not save the sign-in token: {e}"))?;
+    super::write_private(&token_path(home), &t).map_err(|e| e.lead("Could not save the sign-in token"))?;
     Ok(t)
 }
 
@@ -188,13 +189,13 @@ pub fn saved_tailscale(home: &Path) -> bool {
 }
 
 /// Make a new sign-in token (the old link stops working once the panel restarts with it).
-pub fn rotate_token(home: &Path) -> Result<String, String> {
+pub fn rotate_token(home: &Path) -> Result<String, Problem> {
     let _ = std::fs::remove_file(token_path(home));
     ensure_token(home)
 }
 
 /// The sign-in link of the installed service (needs no running process: the token is on disk).
-pub fn link(home: &Path) -> Result<String, String> {
+pub fn link(home: &Path) -> Result<String, Problem> {
     let (Some(token), Some(port)) = (load_token(home), saved_port(home)) else {
         return Err("The Kora Panel background service is not installed. Install it with `kora panel --install-service`.".into());
     };
@@ -314,12 +315,12 @@ pub fn remove_plan(platform: Platform, running_pid: Option<u32>) -> Plan {
 
 /// Install: keep or make the token, remember the port, then run the plan. Returns the sign-in link.
 pub fn install(home: &Path, spec: &InstallSpec<'_>, runner: &dyn CommandRunner, platform: Platform) -> ServiceResult<String> {
-    ensure_token(home).map_err(ServiceError::Other)?;
+    ensure_token(home).map_err(|e| ServiceError::Other(e.one_line()))?;
     let info = serde_json::json!({"port": spec.port, "tailscale": spec.tailscale}).to_string();
     std::fs::create_dir_all(home)?;
     std::fs::write(info_path(home), info)?;
     apply_plan(&install_plan(spec, platform), runner)?;
-    link(home).map_err(ServiceError::Other)
+    link(home).map_err(|e| ServiceError::Other(e.one_line()))
 }
 
 /// Remove the service and the saved token and port.

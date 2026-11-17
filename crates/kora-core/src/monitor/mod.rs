@@ -13,6 +13,7 @@ pub mod history;
 pub mod panel_service;
 pub mod probe;
 
+use crate::problem::Problem;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -177,14 +178,14 @@ pub fn now_unix() -> u64 {
 }
 
 /// Write a file only its owner can read (settings with secrets, the panel token).
-pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
-    std::fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), Problem> {
+    std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
     let tmp = path.with_extension("tmp");
     let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty());
-    crate::db::write_secret_file(&crate::db::SystemRunner, crate::db::Os::current(), &tmp, text, user.as_deref()).map_err(|e| e.to_string())?;
+    crate::db::write_secret_file(&crate::db::SystemRunner, crate::db::Os::current(), &tmp, text, user.as_deref())?;
     crate::fsutil::rename_retrying(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
-        e.to_string()
+        Problem::from(e)
     })
 }
 
@@ -271,6 +272,11 @@ impl Monitor {
             return;
         }
         let detail = backend.status_detail(e);
+        // A container server restarted by its engine (a crash, a reboot) has lost the process that copies its output to
+        // the console log: start it again. Does nothing for any other server, or when one runs.
+        if detail.running {
+            crate::container::logs::ensure_follower(&e.dir);
+        }
         let game = if detail.running { probe.game_info(e.ports.game) } else { None };
         let proc_ = if detail.running { probe.process(e) } else { None };
         let mem = probe.memory();

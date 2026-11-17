@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Skeleton } from '@/components/Skeleton'
-import { StatusChip } from '@/components/Status'
+import { RunChip, StatusChip } from '@/components/Status'
 import NotFound from '@/pages/NotFound'
 import { VersionBadge } from './server/branches/VersionBadge'
 import { BranchControls } from './server/branches/ResourceDialog'
@@ -32,6 +32,8 @@ export default function ResourcePage() {
   // Under ['server', name] so every action that refreshes the server refreshes this page too.
   const key = ['server', name, 'resource', resource]
   const q = useQuery({ queryKey: key, queryFn: () => api.resources.get(name, resource) })
+  // Shared with the server's own page: how the server runs (a chip only for a container).
+  const srv = useQuery({ queryKey: ['server', name], queryFn: () => api.servers.get(name), retry: false })
   const updates = useUpdates(name)
   const ctl = useServerControl(name)
   const noOperator = whyNot(useRole(), 'operator')
@@ -60,6 +62,7 @@ export default function ResourcePage() {
         <h1 className="break-all font-heading text-2xl font-bold">{page.id}</h1>
         {page.branch.state !== 'pinned' && <VersionBadge branch={page.branch} />}
         <StatusChip status={page.server.running ? 'running' : 'stopped'} pending={ctl.pending} />
+        <RunChip mode={srv.data?.run_mode} label={srv.data?.run_label} />
       </div>
       <p className="text-sm text-muted-foreground">
         {page.repository && /^https:\/\/github\.com\//.test(page.repository)

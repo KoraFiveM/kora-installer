@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::registry::kora_home;
 use super::InstallRequest;
-use crate::store::{problem_to_io, Store};
+use crate::store::Store;
 
 /// How long a stopped install can be continued after a restart.
 pub const KEEP_SECS: u64 = 3 * 24 * 3600;
@@ -74,28 +74,28 @@ impl PausedStore {
 
     /// Write a stopped install down. Only installs that use a saved key can be (`Ok(false)` otherwise:
     /// nothing is written). One stopped install per folder: an older one for the same folder goes.
-    pub fn save(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value]) -> std::io::Result<bool> {
+    pub fn save(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value]) -> crate::problem::Res<bool> {
         self.save_as(job, req, via_helper, failed_step, finished, false)
     }
 
     /// An install that is RUNNING now, written down so that a panel that dies leaves something to carry on
     /// from. It is not offered as "carry on" while its job runs ([`list`](Self::list) skips it); the next
     /// panel that finds the job unfinished makes it a stopped install (see `store::jobs::recover`).
-    pub fn save_in_progress(&self, job: &str, req: &InstallRequest, via_helper: bool, finished: &[Value]) -> std::io::Result<bool> {
+    pub fn save_in_progress(&self, job: &str, req: &InstallRequest, via_helper: bool, finished: &[Value]) -> crate::problem::Res<bool> {
         self.save_as(job, req, via_helper, None, finished, true)
     }
 
-    fn save_as(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value], in_progress: bool) -> std::io::Result<bool> {
+    fn save_as(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value], in_progress: bool) -> crate::problem::Res<bool> {
         if !valid_id(job) || req.license_key_name.is_none() {
             return Ok(false);
         }
         let mut r = req.clone();
         r.license_key = None;
         r.catalog = None;
-        let req_json = serde_json::to_string(&r).map_err(std::io::Error::other)?;
-        let finished_json = serde_json::to_string(finished).map_err(std::io::Error::other)?;
+        let req_json = serde_json::to_string(&r)?;
+        let finished_json = serde_json::to_string(finished)?;
         let dir = r.dir.to_string_lossy().into_owned();
-        let s = Store::open(self.home()).map_err(problem_to_io)?;
+        let s = Store::open(self.home())?;
         s.write(|tx| {
             tx.execute("DELETE FROM paused_installs WHERE dir = ?1 AND job <> ?2", rusqlite::params![dir, job])?;
             tx.execute(
@@ -105,7 +105,7 @@ impl PausedStore {
             )?;
             Ok(())
         })
-        .map_err(problem_to_io)?;
+        ?;
         Ok(true)
     }
 
@@ -274,6 +274,7 @@ mod tests {
             dry_run: false,
             db_admin: Some(DbAdmin { host: "127.0.0.1".into(), port: 3306, user: "root".into(), password: Some("hunter2".into()) }),
             start: true,
+            container: None,
             app: None,
         }
     }

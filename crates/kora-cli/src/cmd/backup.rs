@@ -10,7 +10,7 @@ use kora_core::api::wire::BackupCreateRequest;
 use kora_core::api::{Backend, SystemBackend};
 use kora_core::backup::{BackupEvent, BackupInfo, BackupSchedule, Cadence};
 use kora_core::installer::registry::{self, ServerEntry};
-use kora_core::problem::plain_text;
+use kora_core::problem::Problem;
 use kora_core::space::human;
 
 #[derive(Args, Debug, Clone, Default)]
@@ -123,6 +123,9 @@ pub(crate) enum BackupCmd {
         /// Remove what an earlier, failed import of this server made, and begin again.
         #[arg(long)]
         start_over: bool,
+        /// How the new server runs: `service` (the default) or `container` (Linux, Podman or Docker).
+        #[arg(long, value_parser = ["service", "container"])]
+        run_mode: Option<String>,
         /// Do not ask for confirmation.
         #[arg(long)]
         yes: bool,
@@ -157,9 +160,8 @@ pub(crate) enum BackupCmd {
     },
 }
 
-fn fail(m: String) -> i32 {
-    eprintln!("error: {m}");
-    1
+fn fail(m: impl Into<kora_core::problem::Problem>) -> i32 {
+    crate::ui::fail(m)
 }
 
 fn find(server: &str) -> Result<ServerEntry, String> {
@@ -185,12 +187,12 @@ fn password(pw: &PasswordArgs, required: bool) -> Result<Option<String>, String>
 }
 
 /// A backup number or `latest`.
-fn resolve(b: &mut SystemBackend, e: &ServerEntry, id: &str) -> Result<BackupInfo, String> {
-    let view = b.backups_view(e).map_err(|m| plain_text(&m))?;
+fn resolve(b: &mut SystemBackend, e: &ServerEntry, id: &str) -> Result<BackupInfo, Problem> {
+    let view = b.backups_view(e)?;
     if id == "latest" {
         return view.backups.into_iter().next().ok_or_else(|| "this server has no backups yet".into());
     }
-    view.backups.into_iter().find(|x| x.id == id).ok_or_else(|| format!("there is no backup numbered {id} (see `kora backup list {}`)", e.name))
+    view.backups.into_iter().find(|x| x.id == id).ok_or_else(|| Problem::generic(format!("there is no backup numbered {id} (see `kora backup list {}`)", e.name)))
 }
 
 fn show(e: &BackupEvent) {
@@ -221,8 +223,8 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             };
             if scheduled {
                 // What an operating-system task runs: the same as the panel's schedule does.
-                let (db, git) = (kora_core::db::SystemRunner, kora_core::git::SystemRunner);
-                let tools = kora_core::backup::Tools::system(&db, &git);
+                let set = kora_core::container::backup::ToolSet::for_server(&e.name, &e.dir);
+                let tools = set.tools();
                 let mut host = kora_core::backup::host::BackendHost::new(&mut b, &e);
                 return match kora_core::backup::scheduler::run_scheduled(&e, &mut host, &tools) {
                     kora_core::backup::scheduler::Outcome::Made(id) => {
@@ -253,7 +255,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     }
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::List { server } => {
@@ -276,7 +278,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     }
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Archived => match b.backups_archived() {
@@ -292,7 +294,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 println!("Restore one as a new server: kora backup import <file> (the files are in the backups folder).");
                 0
             }
-            Err(m) => fail(plain_text(&m)),
+            Err(m) => fail(m),
         },
         BackupCmd::Verify { server, id, pw } => {
             let e = match find(&server) {
@@ -312,7 +314,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     println!("{}", v.summary);
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Restore { server, id, pw, yes } => {
@@ -335,7 +337,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     p.will_keep.iter().for_each(|l| println!("  keep:   {l}"));
                     p.warnings.iter().for_each(|l| println!("  note:   {l}"));
                 }
-                Err(m) => return fail(plain_text(&m)),
+                Err(m) => return fail(m),
             }
             if !yes && !crate::ui::confirm("Restore this backup now?") {
                 println!("Nothing was changed.");
@@ -352,7 +354,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     }
                     i32::from(!r.problems.is_empty())
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Undo { server, pw, yes } => {
@@ -371,7 +373,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     r.problems.iter().for_each(|l| println!("  Problem: {l}"));
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Delete { server, id, yes } => {
@@ -392,7 +394,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     println!("Deleted backup {}.", info.id);
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Prune { server } => {
@@ -409,10 +411,10 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     println!("Removed {} old backup{}: {}", gone.len(), if gone.len() == 1 { "" } else { "s" }, gone.join(", "));
                     0
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
-        BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, fork_choice, start, start_over, yes } => {
+        BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, fork_choice, start, start_over, run_mode, yes } => {
             use kora_core::backup::import::{ImportChoices, ImportRequest, ImportSource};
             let passphrase = match password(&pw, false) {
                 Ok(p) => p,
@@ -421,12 +423,12 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             let source = ImportSource { path: Some(file.clone()), upload: None, archived: None };
             let mut preview = match b.import_inspect(&source, passphrase.as_deref(), true) {
                 Ok(p) => p,
-                Err(m) => return fail(plain_text(&m)),
+                Err(m) => return fail(m),
             };
             if preview.needs_passphrase {
-                return fail("this backup is password protected: give the password with --password-stdin (or KORA_BACKUP_PASSWORD)".into());
+                return fail("this backup is password protected: give the password with --password-stdin (or KORA_BACKUP_PASSWORD)");
             }
-            let (Some(info), Some(sug)) = (preview.server.take(), preview.suggested.take()) else { return fail("this file is not a server backup".into()) };
+            let (Some(info), Some(sug)) = (preview.server.take(), preview.suggested.take()) else { return fail("this file is not a server backup") };
             println!(
                 "This is the server \"{}\", made on {} ({} resources by reference, {} in full).",
                 info.name,
@@ -437,6 +439,13 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             preview.will_create.iter().for_each(|l| println!("  will create: {l}"));
             preview.wont_carry.iter().for_each(|l| println!("  does not come along: {l}"));
             preview.warnings.iter().for_each(|l| println!("  note: {l}"));
+            if preview.run_mode == Some(kora_core::container::RunMode::Container) || preview.container_engine.is_some() {
+                println!(
+                    "  run mode: the backed-up server ran {}; here {} (choose with --run-mode service|container).",
+                    if preview.run_mode == Some(kora_core::container::RunMode::Container) { "in a container" } else { "as a service" },
+                    preview.container_engine.as_deref().map_or("only a service is possible".to_string(), |e| format!("a container ({e}) is possible"))
+                );
+            }
             if let Some(f) = &preview.fork {
                 println!("  fork: {}", f.message);
             }
@@ -457,7 +466,17 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 "originals" => kora_core::backup::import::ForkChoice::Originals,
                 _ => kora_core::backup::import::ForkChoice::Keep,
             };
-            let req = ImportRequest { source, passphrase, choices, licence_key_name: licence_key, db_admin: None, fork_choice, start, start_over };
+            let req = ImportRequest {
+                source,
+                passphrase,
+                choices,
+                licence_key_name: licence_key,
+                db_admin: None,
+                fork_choice,
+                start,
+                start_over,
+                run_mode: run_mode.as_deref().map(|m| if m == "container" { kora_core::container::RunMode::Container } else { kora_core::container::RunMode::Service }),
+            };
             match b.import_run(&req, true, &mut |ev| show(&ev)) {
                 Ok(r) => {
                     println!("Done: \"{}\" is in {}.", r.name, r.dir);
@@ -470,7 +489,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                     r.old_machine_steps.iter().for_each(|l| println!("  - {l}"));
                     i32::from(!r.problems.is_empty())
                 }
-                Err(m) => fail(plain_text(&m)),
+                Err(m) => fail(m),
             }
         }
         BackupCmd::Schedule { server, daily, weekly, off, keep_last, keep_days, folder, default_folder, stop } => {
@@ -508,7 +527,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             if s != before {
                 match b.backup_settings_set(&e, &s) {
                     Ok(saved) => s = saved,
-                    Err(m) => return fail(plain_text(&m)),
+                    Err(m) => return fail(m),
                 }
                 println!("Saved.");
             }

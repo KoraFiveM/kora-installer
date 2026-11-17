@@ -21,6 +21,8 @@ enum Entry {
 use Entry::{CliOnly, Removed, Route};
 
 const TABLE: &[(&str, Entry)] = &[
+    ("container-logs", CliOnly("started by Kora itself for a container-mode server: it copies the container's output to the console log")),
+    ("container-logs <dir>", CliOnly("started by Kora itself for a container-mode server: it copies the container's output to the console log")),
     ("--no-elevate", CliOnly("the panel runs as the signed-in user and never relaunches itself")),
     ("install", Route(Op::InstallStart)),
     ("install --code", Removed("setup codes no longer exist (0.4.0)")),
@@ -39,6 +41,11 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --resources", Route(Op::InstallStart)),
     ("install --db", Route(Op::InstallStart)),
     ("install --service", Route(Op::InstallStart)),
+    ("install --run-mode", Route(Op::InstallStart)),
+    ("install --engine", Route(Op::InstallStart)),
+    ("install --bind", Route(Op::InstallStart)),
+    ("install --memory-mb", Route(Op::InstallStart)),
+    ("install --cpus", Route(Op::InstallStart)),
     ("install --firewall", Route(Op::InstallStart)),
     ("install --fork-owner", Route(Op::InstallStart)),
     ("install --source", Route(Op::InstallStart)),
@@ -185,6 +192,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("backup import --txadmin-port", Route(Op::BackupImportStart)),
     ("backup import --licence-key", Route(Op::BackupImportStart)),
     ("backup import --start", Route(Op::BackupImportStart)),
+    ("backup import --run-mode", Route(Op::BackupImportStart)),
     ("backup import --fork-choice", Route(Op::BackupImportStart)),
     ("backup archived", Route(Op::BackupsArchived)),
     ("backup import --start-over", Route(Op::BackupImportStart)),

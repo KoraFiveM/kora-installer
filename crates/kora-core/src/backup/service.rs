@@ -16,11 +16,7 @@ use crate::db::SystemRunner;
 use crate::installer::registry::ServerEntry;
 use crate::problem::Problem;
 
-type Res<T> = Result<T, String>;
-
-fn pack(p: Problem) -> String {
-    p.into()
-}
+type Res<T> = Result<T, Problem>;
 
 fn pass(s: Option<&str>) -> Option<Passphrase> {
     s.map(|p| p.trim_end_matches(['\r', '\n'])).filter(|p| !p.is_empty()).map(Passphrase::new)
@@ -70,7 +66,8 @@ pub fn view<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry) -> Res<BackupsView
         Ok(create::DbSource::None(why)) => (DbKind::None, why),
         Err(p) => (DbKind::Failed, p.message),
     };
-    let tool_missing = matches!(kind, DbKind::Dumped | DbKind::External) && dbdump::dump_program(&crate::installer::db_client(), &dbdump::program_runs).is_none();
+    let in_container = crate::container::backup::ToolSet::for_server(&e.name, &e.dir).container_db;
+    let tool_missing = !in_container && matches!(kind, DbKind::Dumped | DbKind::External) && dbdump::dump_program(&crate::installer::db_client(), &dbdump::program_runs).is_none();
     let folder = d.local_dir().map(|p| p.display().to_string()).unwrap_or_default();
     Ok(BackupsView {
         backups: list,
@@ -89,17 +86,17 @@ pub fn create_backup<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, req: &Back
     let folder = match req.folder.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
         Some(f) if !admin => {
             let _ = f;
-            return Err(pack(Problem::generic("Only an administrator can choose another folder for a backup.")));
+            return Err(Problem::generic("Only an administrator can choose another folder for a backup."));
         }
         Some(f) => {
-            check_folder(e, f).map_err(pack)?;
+            check_folder(e, f)?;
             Some(f.to_string())
         }
         None => None,
     };
     let passphrase = pass(req.passphrase.as_deref());
     if req.for_move && passphrase.is_none() {
-        return Err(pack(Problem::new(codes::WEAK_PASSPHRASE, "A backup made to move a server needs a password: the file will travel, and it holds your licence key and database login.")));
+        return Err(Problem::new(codes::WEAK_PASSPHRASE, "A backup made to move a server needs a password: the file will travel, and it holds your licence key and database login."));
     }
     let cfg = settings::load_settings(&e.name);
     let o = CreateOptions {
@@ -109,18 +106,18 @@ pub fn create_backup<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, req: &Back
         label: if req.for_move { Label::Move } else { Label::Manual },
         folder,
     };
-    let (db, git) = (SystemRunner, crate::git::SystemRunner);
-    let tools = tools_for(&db, &git);
+    let set = crate::container::backup::ToolSet::for_server(&e.name, &e.dir);
+    let tools = set.tools();
     let mut host = super::host::BackendHost::new(b, e);
-    let r = create::create(e, &o, &mut host, &tools, say).map_err(pack)?;
+    let r = create::create(e, &o, &mut host, &tools, say)?;
     Ok(BackupCreated { info: r.info, path: r.path.display().to_string(), notes: r.notes, pruned: r.pruned })
 }
 
 pub fn settings_set<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, new: &BackupSettings) -> Res<BackupSettings> {
-    check_folder(e, &new.folder).map_err(pack)?;
-    settings::validate_schedule(&new.schedule).map_err(|m| pack(Problem::generic(m)))?;
+    check_folder(e, &new.folder)?;
+    settings::validate_schedule(&new.schedule).map_err(Problem::generic)?;
     if new.retention.keep_last > 1000 || new.retention.keep_daily_days > 3650 {
-        return Err(pack(Problem::generic("Those retention numbers are too large.")));
+        return Err(Problem::generic("Those retention numbers are too large."));
     }
     let old = settings::load_settings(&e.name);
     let mut new = new.clone();
@@ -128,9 +125,9 @@ pub fn settings_set<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, new: &Back
     if !new.folder.is_empty() {
         dest::LocalFolder::for_server(&new.folder, &e.name)
             .prepare()
-            .map_err(|x| pack(Problem::new(codes::DEST_UNWRITABLE, format!("Kora cannot write to that folder ({x:?}). Check the path, the permissions and that the drive or share is connected."))))?;
+            .map_err(|x| Problem::new(codes::DEST_UNWRITABLE, format!("Kora cannot write to that folder ({x:?}). Check the path, the permissions and that the drive or share is connected.")))?;
     }
-    settings::save_settings(&e.name, &new).map_err(pack)?;
+    settings::save_settings(&e.name, &new)?;
     // A newly switched-on or changed schedule starts from now: it does not make up slots from before it existed.
     if new.schedule.enabled && new.schedule != old.schedule {
         let now = crate::monitor::now_unix();
@@ -149,33 +146,33 @@ fn find(e: &ServerEntry, id: &str) -> Result<(BackupInfo, PathBuf), Problem> {
 }
 
 pub fn verify<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, id: &str, p: Option<&str>, say: &mut dyn FnMut(BackupEvent)) -> Res<VerifyResult> {
-    let (info, path) = find(e, id).map_err(pack)?;
-    let m = restore::verify(&path, Some(&info), pass(p).as_ref(), say).map_err(pack)?;
+    let (info, path) = find(e, id)?;
+    let m = restore::verify(&path, Some(&info), pass(p).as_ref(), say)?;
     Ok(VerifyResult { ok: true, files: m.files.len() as u32, bytes: m.payload_bytes, summary: format!("All {} files match their checksums.", m.files.len()) })
 }
 
 pub fn preview<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, id: &str, p: Option<&str>) -> Res<RestorePreview> {
-    let (info, path) = find(e, id).map_err(pack)?;
+    let (info, path) = find(e, id)?;
     if info.too_new {
-        return Err(pack(Problem::new(codes::TOO_NEW, "This backup was made by a newer version of Kora. Update Kora first.")));
+        return Err(Problem::new(codes::TOO_NEW, "This backup was made by a newer version of Kora. Update Kora first."));
     }
     let running = b.status(e) == crate::api::Status::Running;
-    restore::preview(e, &info, &path, pass(p).as_ref(), running).map_err(pack)
+    restore::preview(e, &info, &path, pass(p).as_ref(), running)
 }
 
 pub fn restore_backup<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, id: &str, p: Option<&str>, say: &mut dyn FnMut(BackupEvent)) -> Res<RestoreReport> {
-    let (_, path) = find(e, id).map_err(pack)?;
-    let (db, git) = (SystemRunner, crate::git::SystemRunner);
-    let tools = tools_for(&db, &git);
+    let (_, path) = find(e, id)?;
+    let set = crate::container::backup::ToolSet::for_server(&e.name, &e.dir);
+    let tools = set.tools();
     let mut host = super::host::BackendHost::new(b, e);
-    restore::restore(e, &path, &RestoreOptions { passphrase: pass(p), no_safety_backup: false }, &mut host, &tools, say).map_err(pack)
+    restore::restore(e, &path, &RestoreOptions { passphrase: pass(p), no_safety_backup: false }, &mut host, &tools, say)
 }
 
 pub fn undo<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, p: Option<&str>, say: &mut dyn FnMut(BackupEvent)) -> Res<RestoreReport> {
-    let (db, git) = (SystemRunner, crate::git::SystemRunner);
-    let tools = tools_for(&db, &git);
+    let set = crate::container::backup::ToolSet::for_server(&e.name, &e.dir);
+    let tools = set.tools();
     let mut host = super::host::BackendHost::new(b, e);
-    restore::undo(e, &destination(e), pass(p).as_ref(), &mut host, &tools, say).map_err(pack)
+    restore::undo(e, &destination(e), pass(p).as_ref(), &mut host, &tools, say)
 }
 
 pub fn delete<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, id: &str) -> Res<()> {
@@ -183,7 +180,7 @@ pub fn delete<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, id: &str) -> Res
     if settings::load_status(&e.name).undo_id.as_deref() == Some(id) {
         settings::update_status(&e.name, |s| s.undo_id = None);
     }
-    d.delete(id).map_err(|x| pack(Problem::new(codes::DEST_UNWRITABLE, "The backup could not be removed.").with_details(format!("{x:?}"))))
+    d.delete(id).map_err(|x| Problem::new(codes::DEST_UNWRITABLE, "The backup could not be removed.").with_details(format!("{x:?}")))
 }
 
 pub fn prune<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry) -> Res<Vec<String>> {
@@ -200,7 +197,7 @@ pub fn prune<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry) -> Res<Vec<String
 }
 
 pub fn file<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry, id: &str) -> Res<PathBuf> {
-    find(e, id).map(|(_, p)| p).map_err(pack)
+    find(e, id).map(|(_, p)| p)
 }
 
 /// The "last backup" line of every server (reads each server's backup folder).
@@ -219,15 +216,14 @@ pub fn overview<B: Backend + ?Sized>(b: &mut B) -> Res<crate::api::wire::Backups
 
 // ---- importing a server from a backup (see `super::import`)
 
-fn open_source(src: &super::import::ImportSource, allow_path: bool) -> Result<PathBuf, String> {
-    super::import::resolve_source(src, allow_path).map_err(pack)
+fn open_source(src: &super::import::ImportSource, allow_path: bool) -> Result<PathBuf, Problem> {
+    super::import::resolve_source(src, allow_path)
 }
 
 pub fn import_inspect(src: &super::import::ImportSource, passphrase: Option<&str>, allow_path: bool, servers: &[ServerEntry]) -> Res<super::import::ImportPreview> {
     let file = open_source(src, allow_path)?;
     let keys: Vec<String> = crate::keystore::KeyStore::default().list().map(|l| l.into_iter().map(|k| k.name).collect()).unwrap_or_default();
     super::import::inspect(&file, passphrase, servers, &keys, &super::import::SystemPorts, &super::import::SystemForks, &|| crate::installer::check_db_admin(None), &crate::api::install::default_dir)
-        .map_err(pack)
 }
 
 pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(BackupEvent)) -> Res<super::import::ImportResult> {
@@ -249,7 +245,7 @@ pub fn import_run<B: Backend + ?Sized>(b: &mut B, req: &super::import::ImportReq
         forks: &super::import::SystemForks,
         servers,
     };
-    let result = super::import::run(req, &file, &env, say).map_err(pack)?;
+    let result = super::import::run(req, &file, &env, say)?;
     // the upload has done its job
     if let Some(id) = req.source.upload.as_deref() {
         let _ = std::fs::remove_dir_all(super::import::imports_dir().join(id));

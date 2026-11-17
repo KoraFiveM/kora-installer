@@ -28,7 +28,7 @@ pub fn load(s: &Store) -> Result<Option<Cached>, String> {
             Err(e) => Err(e.into()),
         }
     })
-    .map_err(kora_core::store::problem_to_string)
+    .map_err(crate::error::store_text)
 }
 
 pub fn save(s: &Store, c: &Cached) -> Result<(), String> {
@@ -40,7 +40,7 @@ pub fn save(s: &Store, c: &Cached) -> Result<(), String> {
         )?;
         Ok(())
     })
-    .map_err(kora_core::store::problem_to_string)
+    .map_err(crate::error::store_text)
 }
 
 /// Is the cached certificate good for `name` for long enough that nothing needs fetching?

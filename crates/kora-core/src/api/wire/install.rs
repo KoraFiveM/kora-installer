@@ -18,6 +18,8 @@ pub enum DbChoice {
     UseExisting,
     InstallIfMissing,
     Skip,
+    /// Container mode: a MariaDB container next to the server (managed by Kora).
+    Container,
 }
 
 /// `"all"` or `{"only": [ids]}`.
@@ -85,6 +87,14 @@ pub struct InstallRequest {
     pub start: bool,
     /// Cfx.re account that becomes the txAdmin admin, e.g. `fivem:4465268`. Null = a generated local admin.
     pub cfx_identifier: Option<String>,
+    /// How the server runs: `service` (the default) or `container` (Linux, Podman or Docker).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub run_mode: Option<crate::container::RunMode>,
+    /// What container mode asks for: which engine, the address to publish on, limits. Only with `run_mode: container`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub container: Option<crate::container::ContainerRequest>,
 }
 
 /// The answers of an install that stopped part-way, as saved: never a licence key or a database login.
@@ -116,6 +126,12 @@ pub struct SavedInstall {
     pub license_key_name: Option<String>,
     /// The Cfx.re account that becomes the txAdmin admin (not a secret).
     pub cfx_identifier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub run_mode: Option<crate::container::RunMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub container: Option<crate::container::ContainerRequest>,
 }
 
 /// A stopped install that can carry on (also after the panel was restarted).
