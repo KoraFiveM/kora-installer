@@ -69,6 +69,21 @@ upgrading), `install` / `wininstall` / `manage` (install, enrol, allow/deny), `p
 10. **MSI shortcuts are all-users** (Start Menu, and an optional public Desktop one), not per-user: a per-machine package
     installs for every account; per-user shortcuts are made by `kora app install` when someone runs Kora.
 
+## The service and the store (`docs/store.md`)
+
+- The privileged side never opens a person's `store/kora.db`: root would create `-wal` / `-shm` there and lock the person out. A child of
+  the service calls `store::forbid_in_this_process()` at start (every way of opening a store then fails and is counted);
+  `crates/kora-core/tests/privileged_never_opens_a_store.rs` runs every administrator step and the migration in service mode and fails if
+  anything tried, or if a file in the store folder changed.
+- What a child needs to know about a server comes from the server FOLDER the service already validated (its install record) or from the
+  request: update schedules take the folder (`kora schedule set|off <folder>`), undo steps carry the name and ports. The shared
+  root-owned program copy is kept when a server is deleted through the service (it cannot ask the person's list whether another server uses it).
+- The migration (`kora service migrate`) reads the person's server list with `store::peek::registered_server_folders`: read-only and
+  immutable, no file created or changed (tested), and the old `servers.json` is accepted on a machine that has not run the new Kora yet.
+  An immutable open ignores a write-ahead log, so a row written moments ago may be missed; the answer only names folders that are then checked
+  from the system.
+- Audit: the service's log is separate from the store's Activity log; see `docs/store.md`, "The audit log".
+
 ## Migration (0.6.x / 0.7.0 to this layout)
 
 `kora service migrate` (run by the `.deb`'s `postinst` and the MSI, safe to repeat; `--dry-run`, `--quiet`):
