@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(c.engines.len(), 2);
         assert!(c.summary.contains("Podman 4.9.3, rootless") && c.summary.contains("ready"), "{}", c.summary);
         let smoke = format!("podman run --rm --init --cap-drop ALL {} true", pins::BASE.reference());
-        assert!(r.calls().iter().any(|l| *l == smoke), "{:#?}", r.calls());
+        assert!(r.calls().contains(&smoke), "{:#?}", r.calls());
         let docker = c.engines.iter().find(|e| e.kind == EngineKind::Docker).unwrap();
         assert!(docker.notes.iter().any(|n| n.contains("root access")), "{:?}", docker.notes);
         assert!(docker.notes.iter().any(|n| n.contains("ufw")), "Docker's firewall bypass is said: {:?}", docker.notes);

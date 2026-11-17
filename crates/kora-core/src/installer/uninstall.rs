@@ -174,7 +174,11 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
         // A container server: its containers and private network are the system-wide part (no unit, no account).
         match crate::container::lifecycle::target_of(&name, &dir) {
             Ok(Some(t)) => {
-                let what = format!("remove this server's containers and private network ({}){}", t.rec.engine().label(), if del_db { " and the database's data volume" } else { "; the database's data volume stays" });
+                let what = format!(
+                    "remove this server's containers and private network ({}){}",
+                    t.rec.engine().label(),
+                    if del_db { " and the database's data volume" } else { "; the database's data volume stays" }
+                );
                 if opts.dry_run {
                     say(&format!("  {verb}: {what}"));
                 } else if ask.ask(&format!("{}?", crate::container::lifecycle::capitalised(&what)), true) {
