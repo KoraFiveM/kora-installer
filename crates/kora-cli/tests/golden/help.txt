@@ -20,6 +20,7 @@ Commands:
   profile        What Kora remembers between installs (your Cfx.re name and GitHub owner)
   branch         Development servers: see and change which branch each resource is on, and go back to the normal version
   pr             Development servers: list and try pull requests on a resource
+  resource       One resource: what it is, which version it is on, and whether a restart is needed
   github         GitHub helpers for development mode
   tools          Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
   check          Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
@@ -1221,6 +1222,40 @@ Options:
   -y, --yes
           Do not ask before discarding
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource =====
+One resource: what it is, which version it is on, and whether a restart is needed
+
+Usage: kora resource [OPTIONS] <COMMAND>
+
+Commands:
+  show  Show one resource: its repository, which version it is on, and whether a restart is needed
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource show =====
+Show one resource: its repository, which version it is on, and whether a restart is needed
+
+Usage: kora resource show [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

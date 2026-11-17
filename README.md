@@ -112,6 +112,7 @@ Most things are in the panel (`kora`); these are the same operations for scripts
 | `kora update <server>` | Preview, apply and roll back updates (`--auto` is for schedulers). `kora schedule show\|set\|off <server>` sets when a Development server updates itself. |
 | `kora add-resources`, `kora add-asset <server> <zip>...` | Add catalogue resources, or paid assets downloaded from the Cfx.re Portal. |
 | `kora branch list\|show\|switch\|default\|all\|restore <server> ...`, `kora pr list\|checkout <server> <resource> ...` | Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone. |
+| `kora resource show <server> <resource>` | One resource: its repository, which version it is on, and whether the running server still needs a restart to load its latest files. |
 | `kora keys list\|add\|replace\|rename\|remove\|use`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line) and the remembered Cfx.re name and GitHub owner. |
 | `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers for Development mode. |
 | `kora webhook ...` | Discord notifications for update reports. |
