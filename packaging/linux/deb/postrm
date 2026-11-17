@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+case "$1" in
+  remove|purge)
+    [ -d /run/systemd/system ] && systemctl daemon-reload || true
+    ;;
+esac
+case "$1" in
+  purge)
+    # Everything the service kept: who may use it, who owns what, the audit log.
+    rm -f /etc/kora/service.json /var/lib/kora/owners.json /var/log/kora/audit.log
+    rmdir /etc/kora /var/lib/kora /var/log/kora 2>/dev/null || true
+    ;;
+esac
+exit 0

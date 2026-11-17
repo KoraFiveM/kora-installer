@@ -303,7 +303,7 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     check_panel_dir(dir)?;
     let mut req = load_request_from(dir).ok_or_else(|| InstallError(format!("{} has no Kora install record", dir.display())))?;
     let in_service = crate::helper::winhelper::in_service();
-    check_step_request(&req, step, undo, in_service || panel_user().is_some())?;
+    check_step_request(&req, step, undo, in_service || crate::privsvc::paths::in_service() || panel_user().is_some())?;
     // Removing system-wide things: the name and ports come from the server list, not from the
     // folder's own (changeable) record, exactly as `kora delete` does.
     let trusted = if undo {
