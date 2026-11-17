@@ -321,3 +321,29 @@ export type UpdatePreview = Omit<UpdatePreviewResult, 'badge' | 'notes'> & Parti
 /** The answers of a stopped install, as saved (every field may be missing from an older panel). */
 export type SavedInstall = Partial<GeneratedSavedInstall>
 export type SchedulePreset = Preset
+
+// ---- remote sign-in, API tokens and HTTPS (generated) ----------------------------------------------------------
+export type {
+  AccountChange,
+  AccountChanged,
+  AccountView,
+  ApiTokenRequest,
+  ApiTokenView,
+  AuthOptions,
+  DeviceView,
+  EnrolRequest,
+  EnrolResponse,
+  KeychainChanged,
+  KeychainView,
+  LoginRequest,
+  LoginResponse,
+  NewApiToken,
+  PasskeyView,
+  ReauthRequest,
+  ReauthResponse,
+  ResetDone,
+  ResetWhat,
+  TlsCa,
+  TlsStatus,
+  UserCredentials,
+} from './generated/types'

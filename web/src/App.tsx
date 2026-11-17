@@ -3,11 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ApiError, setUnauthorizedHandler } from '@/api/client'
 import { AlertsProvider } from '@/lib/app'
-import { signIn, signInByIdentity, type BootResult } from '@/lib/session'
+import { clearHash, enrolFromHash, signIn, signInByIdentity, type BootResult } from '@/lib/session'
 import { AppShell } from '@/components/AppShell'
 import { AdminActions } from '@/components/AdminActions'
 import { ToolchainActions } from '@/components/ToolchainActions'
 import { SignedOut } from '@/components/SignedOut'
+import { Enrol } from '@/components/auth/Enrol'
+import { ReauthProvider } from '@/components/auth/ReauthProvider'
 import ServersPage from '@/pages/ServersPage'
 import NotFound from '@/pages/NotFound'
 
@@ -36,15 +38,38 @@ export function App({ boot }: { boot: BootResult }) {
   )
   // `signed_out`: the quiet Tailscale try did not work; show the sign-in screen without an error.
   const [signedOut, setSignedOut] = useState<ApiError | boolean>(boot.status === 'failed' ? boot.error : boot.status === 'signed_out')
+  const [enrolling, setEnrolling] = useState(boot.status === 'enrol' ? boot.link : null)
 
   useEffect(() => {
     setUnauthorizedHandler(() => setSignedOut((s) => s || true))
     return () => setUnauthorizedHandler(null)
   }, [])
 
+  // An enrolment link opened in a tab that already has the panel open only changes the address's hash (no reload): follow it.
+  useEffect(() => {
+    const onHash = () => {
+      const link = enrolFromHash(window.location.hash)
+      if (link) {
+        clearHash()
+        setEnrolling(link)
+      }
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  if (enrolling) {
+    // The set-up signs the person in at the end; then the panel opens.
+    return <Enrol link={enrolling} onDone={() => { client.clear(); setEnrolling(null); setSignedOut(false) }} />
+  }
+
   if (signedOut) {
     return (
       <SignedOut
+        onSignedIn={() => {
+          client.clear()
+          setSignedOut(false)
+        }}
         error={signedOut instanceof ApiError ? signedOut : null}
         onIdentity={async () => {
           const r = await signInByIdentity()
@@ -71,6 +96,7 @@ export function App({ boot }: { boot: BootResult }) {
   return (
     <QueryClientProvider client={client}>
       <AlertsProvider>
+        <ReauthProvider>
         <AdminActions>
         <BrowserRouter>
           <ToolchainActions>
@@ -90,6 +116,7 @@ export function App({ boot }: { boot: BootResult }) {
           </ToolchainActions>
         </BrowserRouter>
         </AdminActions>
+        </ReauthProvider>
       </AlertsProvider>
     </QueryClientProvider>
   )

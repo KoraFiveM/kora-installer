@@ -46,6 +46,10 @@ pub fn audited(op: Op, method: &Method) -> bool {
         op,
         Op::SessionCreate
             | Op::SessionLogout
+            // The sign-in steps write their own rows (who, how, the outcome), so the guard does not add a nameless one.
+            | Op::AuthLogin
+            | Op::AuthEnrol
+            | Op::AuthReauth
             | Op::ServersScan
             | Op::ServerOpenFolder
             | Op::UpdatePreview
@@ -81,6 +85,9 @@ fn provider_text(p: Provider) -> &'static str {
         Provider::Local => "local",
         Provider::Tailscale => "tailscale",
         Provider::Token => "token",
+        Provider::Passkey => "passkey",
+        Provider::Code => "code",
+        Provider::ApiToken => "api-token",
     }
 }
 

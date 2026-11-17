@@ -27,16 +27,18 @@ use serde::Serialize;
 
 use crate::installer::registry::{kora_home, ServerEntry};
 use crate::problem::{codes, Action, Problem};
-use crate::store::material::{KeyMaterial, SqliteKeyMaterial};
+use crate::store::keychain::{self, Chosen, Place};
+use crate::store::material::KeyMaterial;
 use crate::store::Store;
 
 /// The old file in the Kora home. Its name still says which Kora home a [`KeyStore::at`] path means.
 pub const FILE_NAME: &str = "secrets.json";
 pub const MAX_NAME: usize = 40;
 
-/// Where the key VALUES live. The one line to change when they move to the system keychain.
-fn material() -> &'static dyn KeyMaterial {
-    &SqliteKeyMaterial
+/// Where the key VALUES live: per key, the private table, the system keychain or Windows' protected storage (see
+/// [`crate::store::keychain`]).
+fn material() -> Chosen {
+    Chosen::new()
 }
 
 #[derive(Clone)]
@@ -46,6 +48,11 @@ struct Entry {
     name: String,
     key: String,
     added: u64,
+    /// Where the value is kept.
+    place: Place,
+    /// Why the value cannot be read now (it was in a place this session cannot reach or that lost it), in words naming the key.
+    /// The key is then empty here and is never written back as empty.
+    lost: Option<String>,
 }
 
 impl std::fmt::Debug for Entry {
@@ -61,6 +68,10 @@ pub struct KeyInfo {
     pub last4: String,
     /// Unix seconds when it was saved (0 = unknown).
     pub added: u64,
+    /// Where the value is kept, in words ("Kora's private file", "your system keychain").
+    pub kept: String,
+    /// The value cannot be read from here right now: why, and what to do (the key is never shown as empty or lost silently).
+    pub problem: Option<String>,
 }
 
 /// The last four characters of `key` (all of it when it is shorter, which a valid key never is).
@@ -70,7 +81,7 @@ pub fn last4(key: &str) -> String {
 }
 
 fn info(e: &Entry) -> KeyInfo {
-    KeyInfo { name: e.name.clone(), last4: last4(&e.key), added: e.added }
+    KeyInfo { name: e.name.clone(), last4: last4(&e.key), added: e.added, kept: e.place.label().to_string(), problem: e.lost.clone() }
 }
 
 /// Trim and check a key name.
@@ -130,8 +141,15 @@ fn load_entries(c: &rusqlite::Connection) -> Result<Vec<Entry>, Problem> {
     let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?.collect::<Result<Vec<_>, _>>()?;
     let mut out = Vec::with_capacity(rows.len());
     for (id, name, added) in rows {
-        let key = material().get(c, id)?.unwrap_or_default();
-        out.push(Entry { id, name, key, added: added as u64 });
+        let (place, _) = keychain::location(c, id)?;
+        // A value that cannot be read (kept where this session cannot reach, or gone from there) leaves the key empty and says
+        // why; it is never an error for the whole list, and never written back as empty.
+        let (key, lost) = match material().get(c, id) {
+            Ok(v) => (v.unwrap_or_default(), None),
+            Err(p) if keychain::is_unavailable(&p) => (String::new(), Some(p.message.replace("{key}", &format!("\"{name}\"")))),
+            Err(e) => return Err(e),
+        };
+        out.push(Entry { id, name, key, added: added as u64, place, lost });
     }
     Ok(out)
 }
@@ -162,7 +180,12 @@ fn persist(c: &rusqlite::Connection, before: &[Entry], after: &[Entry]) -> Resul
 
 /// Every saved key as (name, key, added): what the import of the old file verifies against.
 pub(crate) fn export_keys(c: &rusqlite::Connection) -> Result<Vec<(String, String, u64)>, Problem> {
-    Ok(load_entries(c)?.into_iter().map(|e| (e.name, e.key, e.added)).collect())
+    Ok(load_entries(c)?.into_iter().filter(|e| e.lost.is_none()).map(|e| (e.name, e.key, e.added)).collect())
+}
+
+/// Keys whose value cannot be read from here (so an export cannot carry them): name and why.
+pub(crate) fn unreadable_keys(c: &rusqlite::Connection) -> Result<Vec<(String, String)>, Problem> {
+    Ok(load_entries(c)?.into_iter().filter_map(|e| e.lost.map(|why| (e.name, why))).collect())
 }
 
 /// Used by the import of the old `secrets.json`: replace the saved keys, or add the ones that are not there.
@@ -180,7 +203,7 @@ pub(crate) fn import_keys(c: &rusqlite::Connection, keys: &[(String, String, u64
             unique = format!("{name} ({n})");
             n += 1;
         }
-        after.push(Entry { id: 0, name: unique, key: key.clone(), added: *added });
+        after.push(Entry { id: 0, name: unique, key: key.clone(), added: *added, place: Place::Store, lost: None });
     }
     persist(c, &before, &after)
 }
@@ -239,7 +262,7 @@ impl KeyStore {
     fn change<T>(&self, f: impl FnOnce(&mut Vec<Entry>) -> Result<(T, bool), Problem>) -> Result<T, Problem> {
         let s = Store::open_beside(&self.legacy)?;
         self.blocked(&s)?;
-        s.write(|tx| {
+        let out = s.write(|tx| {
             let before = load_entries(tx)?;
             let mut keys = before.clone();
             let (out, changed) = f(&mut keys)?;
@@ -247,7 +270,32 @@ impl KeyStore {
                 persist(tx, &before, &keys)?;
             }
             Ok(out)
-        })
+        })?;
+        // After the commit: keychain items no key points to any more (a removed key, a rolled-back write) are deleted.
+        keychain::sweep(&s);
+        Ok(out)
+    }
+
+    /// Where the keys are kept and what happens to new ones (Settings, `kora keys keychain status`).
+    pub fn keychain_status(&self) -> Result<keychain::Status, Problem> {
+        match self.open_read()? {
+            Some(s) => keychain::status(&s),
+            None => keychain::status(&Store::open_beside(&self.legacy)?),
+        }
+    }
+
+    /// Turn the keychain on (when there is one) and move the saved keys in.
+    pub fn keychain_on(&self) -> Result<keychain::Moved, Problem> {
+        let s = Store::open_beside(&self.legacy)?;
+        self.blocked(&s)?;
+        keychain::migrate_in(&s)
+    }
+
+    /// Turn the keychain off and move every key back into Kora's private file.
+    pub fn keychain_off(&self) -> Result<keychain::Moved, Problem> {
+        let s = Store::open_beside(&self.legacy)?;
+        self.blocked(&s)?;
+        keychain::migrate_out(&s)
     }
 
     /// Like [`change`](Self::change) for something that needs a key to exist already (rename, replace, forget): with no
@@ -272,7 +320,12 @@ impl KeyStore {
     /// The FULL key. Only for writing the server's own configuration or starting an install: never
     /// put the result in an answer, a log, an event or an error.
     pub fn get(&self, name: &str) -> Result<String, Problem> {
-        self.read()?.into_iter().find(|e| same(&e.name, name)).map(|e| e.key).ok_or_else(|| not_found(name))
+        let e = self.read()?.into_iter().find(|e| same(&e.name, name)).ok_or_else(|| not_found(name))?;
+        match e.lost {
+            // Never an empty key handed to an install: a guided problem naming the key.
+            Some(why) => Err(Problem::new(codes::KEYS_VALUE_MISSING, why).with_action(Action::change_answers("licence"))),
+            None => Ok(e.key),
+        }
     }
 
     /// The name a key value is already saved under, if any.
@@ -291,7 +344,7 @@ impl KeyStore {
             if let Some(e) = keys.iter().find(|e| e.key == key) {
                 return Err(duplicate(&e.name));
             }
-            let e = Entry { id: 0, name, key, added: crate::monitor::now_unix() };
+            let e = Entry { id: 0, name, key, added: crate::monitor::now_unix(), place: Place::Store, lost: None };
             let i = info(&e);
             keys.push(e);
             Ok((i, true))
@@ -635,7 +688,7 @@ mod tests {
 
     #[test]
     fn debug_never_prints_a_key() {
-        let e = Entry { id: 1, name: "Main".into(), key: K1.into(), added: 1 };
+        let e = Entry { id: 1, name: "Main".into(), key: K1.into(), added: 1, place: Place::Store, lost: None };
         assert!(!format!("{e:?}").contains("AAAAAAAA"));
     }
 

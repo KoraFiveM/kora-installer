@@ -7,6 +7,8 @@ import { useRole, whyNot } from '@/hooks/useRole'
 import { ShortcutsCard } from '@/components/Shortcuts'
 import { LicenceKeysCard, RememberedCard } from '@/components/LicenceKeys'
 import { RemoteAccessCard, SignedInCard } from '@/components/RemoteAccess'
+import { AccountCard } from '@/components/auth/AccountCard'
+import { TlsCard } from '@/components/TlsCard'
 import { AuditLogCard } from '@/components/AuditLog'
 import { JobHistoryCard } from '@/components/JobHistory'
 import { Alert } from '@/components/ui/alert'
@@ -133,6 +135,8 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-3xl space-y-5">
       <h1 className="font-heading text-2xl font-bold">Settings</h1>
       {role.remote ? <SignedInCard /> : <RemoteAccessCard />}
+      {role.remote && <AccountCard />}
+      {role.can('admin') && <TlsCard />}
       <SelfUpdate />
       <ShortcutsCard />
       <LicenceKeysCard />

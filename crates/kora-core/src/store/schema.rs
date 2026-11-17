@@ -168,6 +168,92 @@ CREATE TABLE documents (
 ) WITHOUT ROWID;
 "#,
     },
+    Migration {
+        version: 5,
+        name: "panel HTTPS (local CA and certificate), remote sign-in (passkeys, one-time codes, API tokens), where each saved key is kept",
+        sql: r#"
+-- The local certificate authority and server certificate of `kora panel tls self-signed`. PRIVATE: the keys here
+-- let someone impersonate the panel to a browser that trusts the CA (see `kora-web::tls::selfsigned`).
+CREATE TABLE tls_local_ca (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    cert_pem TEXT NOT NULL,
+    key_pem  TEXT NOT NULL,
+    created  INTEGER NOT NULL
+);
+CREATE TABLE tls_local_leaf (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    cert_pem TEXT NOT NULL,
+    key_pem  TEXT NOT NULL,
+    names    TEXT NOT NULL,
+    not_after INTEGER NOT NULL
+);
+
+-- The certificate `tailscale cert` issued for this computer's tailnet name (kept so a restart does not ask again).
+CREATE TABLE tls_tailscale (
+    id        INTEGER PRIMARY KEY CHECK (id = 1),
+    name      TEXT NOT NULL,
+    cert_pem  TEXT NOT NULL,
+    key_pem   TEXT NOT NULL,
+    not_after INTEGER NOT NULL
+);
+
+-- Per remote user: the secrets of the sign-in that replaces the token (see `kora-web::remote::auth`). `user` is the
+-- lower-cased name in `remote_users`. PRIVATE: a password hash (argon2id), the TOTP secret, hashed recovery codes.
+CREATE TABLE remote_user_auth (
+    user            TEXT PRIMARY KEY NOT NULL,
+    webauthn_id     BLOB NOT NULL,              -- the WebAuthn user handle (random, never the name)
+    password_hash   TEXT,                       -- argon2id PHC string
+    totp_secret     BLOB,                       -- 20 random bytes
+    totp_confirmed  INTEGER NOT NULL DEFAULT 0,
+    totp_last_step  INTEGER NOT NULL DEFAULT 0, -- replay protection: the last accepted 30-second step
+    recovery_hashes TEXT NOT NULL DEFAULT '[]', -- JSON list of salted SHA-256 hashes, used ones removed
+    failures        INTEGER NOT NULL DEFAULT 0, -- failed password/code attempts in a row (account lockout)
+    locked_until    INTEGER NOT NULL DEFAULT 0
+) WITHOUT ROWID;
+
+CREATE TABLE remote_passkeys (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user          TEXT NOT NULL,
+    label         TEXT NOT NULL,
+    credential_id BLOB NOT NULL UNIQUE,
+    passkey_json  TEXT NOT NULL,                -- the credential's public key and counter (webauthn-rs), PRIVATE
+    rp_id         TEXT NOT NULL,
+    created       INTEGER NOT NULL,
+    last_used     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX remote_passkeys_user ON remote_passkeys(user);
+
+-- One-time enrolment links: only the hash of the link's secret is stored. Single use, short lived.
+CREATE TABLE remote_enrolments (
+    hash       TEXT PRIMARY KEY NOT NULL,
+    user       TEXT NOT NULL,
+    purpose    TEXT NOT NULL,                   -- invite | reset | recover
+    created_by TEXT NOT NULL,
+    expires    INTEGER NOT NULL
+) WITHOUT ROWID;
+
+-- API tokens for scripts: a role, never interactive. Only a salted hash is stored; shown once.
+CREATE TABLE remote_api_tokens (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name      TEXT NOT NULL UNIQUE,
+    role      TEXT NOT NULL,
+    salt      TEXT NOT NULL,
+    hash      TEXT NOT NULL,
+    created   INTEGER NOT NULL,
+    expires   INTEGER NOT NULL DEFAULT 0,       -- 0: never
+    last_used INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL DEFAULT ''
+);
+
+-- Where the VALUE of each saved licence key is kept: the private table (`store`) or the system keychain.
+-- A key with no row here is in `license_key_material` (everything saved before this version).
+CREATE TABLE license_key_location (
+    key_id INTEGER PRIMARY KEY NOT NULL REFERENCES license_keys(id) ON DELETE CASCADE,
+    place  TEXT NOT NULL,                       -- store | dpapi | secret-service
+    note   TEXT NOT NULL DEFAULT ''
+);
+"#,
+    },
 ];
 
 pub fn latest() -> u32 {

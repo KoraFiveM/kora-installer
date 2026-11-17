@@ -39,10 +39,17 @@ pub async fn tools_status() -> Result<Json<Value>, ApiError> {
 
 /// `GET /system/check` → `{items: [{id, label, state, summary, problem}], ok}`. `state` is `ok`, `problem`
 /// (the `problem` has the fix buttons) or `info`.
-pub async fn system_check_get() -> Result<Json<Value>, ApiError> {
+pub async fn system_check_get(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
     let e = env();
     let g = super::github::env();
-    let items = blocking(move || Ok(system_check(e.as_ref(), &g.auth()))).await?;
+    let items = blocking(move || {
+        let mut items = system_check(e.as_ref(), &g.auth());
+        // HTTPS: only a listener other computers can reach (not loopback, not the tailnet) makes plain HTTP a problem.
+        let exposed = crate::tls::rules::plain_is_risky(st.addr.ip());
+        items.push(crate::tls::check_item(st.tls.info().as_ref(), st.tls.last_error().as_deref(), exposed, crate::tls::manager::now_unix()));
+        Ok(items)
+    })
+    .await?;
     Ok(Json(check_json(&items)))
 }
 

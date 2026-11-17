@@ -31,6 +31,43 @@ pub struct SavedKey {
     pub servers: Vec<String>,
     /// Unfinished installs (and saved answers) that use it.
     pub stopped_installs: u32,
+    /// Where the value is kept, in words ("Kora's private file", "your system keychain").
+    pub kept: String,
+    /// The value cannot be read from here right now (the keychain is locked, this session cannot reach it, the entry was deleted):
+    /// why and what to do. The key then needs entering again.
+    pub problem: Option<String>,
+}
+
+/// Where saved keys are kept and what happens to new ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct KeychainView {
+    /// `auto` (use the system keychain when there is one) or `off` (Kora's private file only).
+    pub mode: String,
+    /// A sentence for Settings: where new keys go and why.
+    pub line: String,
+    /// Where new keys go now: `store`, `dpapi` or `secret-service`.
+    pub active: String,
+    /// A system keychain can be used from here right now.
+    pub available: bool,
+}
+
+/// `PUT /keys/keychain`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct KeychainSet {
+    /// `on`: use the keychain and move the saved keys in; `off`: move them back into Kora's private file.
+    pub use_keychain: bool,
+}
+
+/// `PUT /keys/keychain` answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct KeychainChanged {
+    pub keychain: KeychainView,
+    pub moved: u32,
+    /// Keys that could not be moved (they stay where they are): name and why.
+    pub left: Vec<String>,
 }
 
 /// `GET /keys`.
@@ -42,6 +79,7 @@ pub struct SavedKeys {
     pub can_manage: bool,
     /// Where the file is (only told to the computer that runs Kora).
     pub path: Option<String>,
+    pub keychain: KeychainView,
 }
 
 /// `POST /keys`.

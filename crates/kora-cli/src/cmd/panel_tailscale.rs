@@ -208,7 +208,7 @@ pub fn start_background(a: &crate::cmd::panel::PanelArgs, home: &Path, ready: &R
     let listening = ready.status.ips.iter().filter(|i| is_tailnet_ip(**i)).any(|ip| wait_for_port(SocketAddr::new(*ip, port), Duration::from_secs(10)));
     open_firewall(port);
     println!();
-    match ready.status.url(port) {
+    match ready.status.url_with(crate::cmd::panel_tls::tailnet_scheme(home), port) {
         Some(url) if listening => {
             println!("  Kora Panel is open to your Tailscale devices. On any computer or phone signed in");
             println!("  to Tailscale as {}, open:", ready.admin);
@@ -273,7 +273,7 @@ pub fn print_tailnet_address(home: &Path, port: u16) {
     if !tailnet_on(home) {
         return;
     }
-    if let Some(url) = SystemWhois.status().filter(|s| s.running).and_then(|s| s.url(port)) {
+    if let Some(url) = SystemWhois.status().filter(|s| s.running).and_then(|s| s.url_with(crate::cmd::panel_tls::tailnet_scheme(home), port)) {
         println!("From your Tailscale devices (sign in with your Tailscale account): {url}");
     }
 }

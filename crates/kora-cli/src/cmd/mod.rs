@@ -14,6 +14,7 @@ pub(crate) mod panel_background;
 pub(crate) mod panel_remote;
 pub(crate) mod panel_running;
 pub(crate) mod panel_tailscale;
+pub(crate) mod panel_tls;
 pub(crate) mod reach;
 pub(crate) mod resource;
 pub(crate) mod resources;

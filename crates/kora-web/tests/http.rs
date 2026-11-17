@@ -330,7 +330,8 @@ async fn every_route_needs_the_secret_with_the_cookie() {
             tried += 1;
             match op {
                 Op::Meta if *method == "GET" => assert_eq!(st, 200, "{method} {path}"),
-                Op::SessionCreate => assert_ne!(st, 401, "{method} {path}"),
+                Op::SessionCreate | Op::AuthLogin | Op::AuthEnrol => assert_ne!(st, 401, "{method} {path}"),
+                Op::AuthOptions if *method == "GET" => assert_ne!(st, 401, "{method} {path}"),
                 _ => assert_eq!(st, 401, "{method} {path} ({})", op.name()),
             }
         }

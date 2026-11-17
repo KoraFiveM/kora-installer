@@ -18,13 +18,13 @@ function renderAs(ui: ReactElement, meta?: Partial<Meta>) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
-const settings: RemoteSettings = { enabled: true, enabled_by_flag: false, bind: '127.0.0.1', port: 8600, tailnet_url: null, tailscale: true, tailscale_users: { 'sam@example.com': 'admin', 'kim@example.com': 'viewer' }, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: null }
+const settings: RemoteSettings = { enabled: true, enabled_by_flag: false, bind: '127.0.0.1', port: 8600, tailnet_url: null, tailscale: true, tailscale_users: { 'sam@example.com': 'admin', 'kim@example.com': 'viewer' }, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: null, require_strong_auth: false }
 
 describe('RemoteAccessCard', () => {
   it('asks before removing a person or a Tailscale account', async () => {
     const user = userEvent.setup()
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url === '/api/v1/users') return jsonResponse(200, { users: [{ name: 'bob', role: 'operator' }] })
+      if (url === '/api/v1/users') return jsonResponse(200, { users: [{ name: 'bob', role: 'operator', created: 0, passkeys: 0, code: false, legacy_token: true }] })
       if (init?.method === 'DELETE') return new Response(null, { status: 204 })
       if (init?.method === 'PUT') return jsonResponse(200, { ...settings, ...JSON.parse(String(init.body)) })
       return jsonResponse(200, settings)
@@ -43,6 +43,7 @@ describe('RemoteAccessCard', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Remove bob' }))
     expect(screen.getByText('Remove bob?')).toBeInTheDocument()
+    expect(screen.getByText(/passkeys and codes are deleted/)).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'DELETE')).toBe(false)
     await user.click(screen.getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([u, i]) => u === '/api/v1/users/bob' && i?.method === 'DELETE')).toBe(true))

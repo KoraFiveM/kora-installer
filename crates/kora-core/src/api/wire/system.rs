@@ -42,6 +42,10 @@ pub struct PanelUser {
     pub role: Role,
     /// Unix seconds.
     pub created: u64,
+    /// How this person signs in: passkeys, a one-time-code set-up, the old token link, and whether they are waiting to set up.
+    pub passkeys: u32,
+    pub code: bool,
+    pub legacy_token: bool,
 }
 
 /// `GET /users`.
@@ -59,13 +63,15 @@ pub struct UserAddRequest {
     pub role: Role,
 }
 
-/// `POST /users` answer: the token is shown this once.
+/// `POST /users` answer: the new user has no password, passkey or token yet; `link` is the one-time enrolment link
+/// (the page is `<panel address>/#enrol=<link>`), shown this once. It works for 30 minutes and once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct NewUser {
     pub name: String,
     pub role: Role,
-    pub token: String,
+    pub link: String,
+    pub expires_in: u64,
 }
 
 /// `GET /remote` (local sessions only). Token hashes are never sent.
@@ -85,6 +91,8 @@ pub struct RemoteSettings {
     pub allow_remote_destructive: bool,
     pub users: Vec<PanelUser>,
     pub saved_to: Option<String>,
+    /// Interactive remote users must use a passkey or one-time codes (the token link is refused for sign-in).
+    pub require_strong_auth: bool,
 }
 
 /// `PUT /remote`: what is left out stays as it is.
@@ -107,4 +115,7 @@ pub struct RemoteSettingsUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub allow_remote_destructive: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub require_strong_auth: Option<bool>,
 }

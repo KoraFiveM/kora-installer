@@ -77,6 +77,10 @@ pub mod codes {
 
     /// A remote sign-in made with a token asked for something that stays off until `remote actions` is on.
     pub const REMOTE_ACTIONS_OFF: &str = "remote.actions_off";
+    /// A remote session signed in with a passkey or one-time code asked for a sensitive action without a recent check.
+    pub const REMOTE_REAUTH: &str = "remote.reauth_required";
+    /// A saved licence key's value is not in the place Kora wrote it to (the system keychain entry is gone).
+    pub const KEYS_VALUE_MISSING: &str = "keys.value_missing";
     /// The saved licence keys file (`secrets.json`) cannot be read or is damaged: nothing is changed.
     pub const KEYS_UNREADABLE: &str = "keys.unreadable";
     /// No saved licence key has that name (never saved, renamed or deleted).

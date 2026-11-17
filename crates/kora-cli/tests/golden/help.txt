@@ -175,6 +175,8 @@ Usage: kora panel [OPTIONS] [COMMAND]
 Commands:
   user            Manage the people who may sign in to the panel remotely (each has a token and a role)
   tailscale       Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
+  tls             HTTPS for the panel: use your own certificate, Tailscale's, or one made on this computer
+  proxy           Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name with a real certificate
   restart         Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
   remote-actions  Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
 
@@ -183,7 +185,7 @@ Options:
           Port to listen on. Default: 47120, or the next free one (up to 47140) when something else uses it
 
       --bind <BIND>
-          Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard
+          Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and uses HTTPS once there is a certificate (`kora panel tls`); without one it is plain HTTP: use it only on a private network such as Tailscale or WireGuard
           
           [default: 127.0.0.1]
 
@@ -197,7 +199,7 @@ Options:
           With --tailscale: the Tailscale account (name@example.com) that becomes the panel's admin. Without it Kora uses the account you are connected from, else the one that added this computer to Tailscale
 
       --allow-public
-          Let --bind be a public address or every interface (0.0.0.0). The panel is plain HTTP, so on the internet sign-in tokens could be read on the way: use --tailscale or an SSH tunnel instead
+          Let --bind be a public address or every interface (0.0.0.0). Needs HTTPS (`kora panel tls`) or a trusted reverse proxy (`kora panel proxy trust`); --tailscale or an SSH tunnel is safer
 
       --new-token
           Make a new sign-in token, so links shown before stop working (restarts the background panel)
@@ -232,9 +234,12 @@ Manage the people who may sign in to the panel remotely (each has a token and a 
 Usage: kora panel user [OPTIONS] <COMMAND>
 
 Commands:
-  add     Add a user and print their token once (it cannot be shown again)
-  list    List the users and their roles
-  remove  Remove a user; their sessions stop working at once
+  invite       Invite a person: makes the user and prints a one-time link (30 minutes, works once) where they set up a passkey or one-time codes. No token is made
+  list         List the users, their roles and how they sign in
+  credentials  Show what one user can sign in with (counts and dates, never a secret)
+  reset        A lost phone or laptop: take credentials away, end the user's sessions and print a new one-time link to set up again
+  remove       Remove a user; their sessions stop working at once
+  api-token    Tokens for scripts (an `Authorization: Bearer` header; never for signing in, never in an address)
 
 Options:
       --no-elevate
@@ -243,10 +248,10 @@ Options:
   -h, --help
           Print help
 
-===== kora panel user add =====
-Add a user and print their token once (it cannot be shown again)
+===== kora panel user invite =====
+Invite a person: makes the user and prints a one-time link (30 minutes, works once) where they set up a passkey or one-time codes. No token is made
 
-Usage: kora panel user add [OPTIONS] --role <ROLE> <NAME>
+Usage: kora panel user invite [OPTIONS] --role <ROLE> <NAME>
 
 Arguments:
   <NAME>
@@ -265,11 +270,49 @@ Options:
           Print help
 
 ===== kora panel user list =====
-List the users and their roles
+List the users, their roles and how they sign in
 
 Usage: kora panel user list [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user credentials =====
+Show what one user can sign in with (counts and dates, never a secret)
+
+Usage: kora panel user credentials [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user reset =====
+A lost phone or laptop: take credentials away, end the user's sessions and print a new one-time link to set up again
+
+Usage: kora panel user reset [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user
+
+Options:
+      --what <WHAT>
+          What to take away: passkeys, code (password and one-time codes), all (also the old token link) or legacy-token (only the old token link, no new link)
+          
+          [default: all]
+          [possible values: passkeys, code, all, legacy-token]
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -284,6 +327,75 @@ Usage: kora panel user remove [OPTIONS] <NAME>
 Arguments:
   <NAME>
           The user to remove
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token =====
+Tokens for scripts (an `Authorization: Bearer` header; never for signing in, never in an address)
+
+Usage: kora panel user api-token [OPTIONS] <COMMAND>
+
+Commands:
+  create  Make a token and print it once
+  list    List the tokens (never their secrets)
+  revoke  Revoke a token by its name or number
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token create =====
+Make a token and print it once
+
+Usage: kora panel user api-token create [OPTIONS] --role <ROLE> <NAME>
+
+Arguments:
+  <NAME>
+          A name for the script (backup-script)
+
+Options:
+      --role <ROLE>
+          What it may do: viewer, operator or admin. Deleting and uninstalling still need `kora panel remote-actions on`
+          
+          [possible values: viewer, operator, admin]
+
+      --days <DAYS>
+          Valid for this many days. Without it the token never expires
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token list =====
+List the tokens (never their secrets)
+
+Usage: kora panel user api-token list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token revoke =====
+Revoke a token by its name or number
+
+Usage: kora panel user api-token revoke [OPTIONS] <TOKEN>
+
+Arguments:
+  <TOKEN>
+          The token's name or number (see `list`)
 
 Options:
       --no-elevate
@@ -364,6 +476,198 @@ Options:
 Turn Tailscale access off: the panel listens on this computer only again
 
 Usage: kora panel tailscale off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls =====
+HTTPS for the panel: use your own certificate, Tailscale's, or one made on this computer
+
+Usage: kora panel tls [OPTIONS] <COMMAND>
+
+Commands:
+  status       Show whether the panel uses HTTPS, which certificate, when it ends, and its fingerprint
+  set          Use a certificate and key you already have (PEM files). The panel re-reads them when they change, so renewing with certbot or a script needs no restart
+  self-signed  Make a certificate on this computer, from a local certificate authority you trust once in your browser. For a panel on your home network, where no public certificate is possible
+  tailscale    Use the certificate Tailscale issues for this computer's tailnet name (needs MagicDNS and HTTPS certificates enabled in the Tailscale admin console)
+  auto         Use whatever is available: your own certificate if one is set, else Tailscale's when the panel listens on Tailscale, else plain HTTP. The default
+  off          Serve plain HTTP even on addresses other computers can reach (not recommended)
+  renew        Fetch or make the certificate again now (Tailscale and self-signed)
+  export-ca    Save the local certificate authority's certificate (public) to a file, to install in a browser or on a phone
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls status =====
+Show whether the panel uses HTTPS, which certificate, when it ends, and its fingerprint
+
+Usage: kora panel tls status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls set =====
+Use a certificate and key you already have (PEM files). The panel re-reads them when they change, so renewing with certbot or a script needs no restart
+
+Usage: kora panel tls set [OPTIONS] --cert <CERT> --key <KEY>
+
+Options:
+      --cert <CERT>
+          The certificate file (PEM, with any intermediate certificates after it)
+
+      --key <KEY>
+          The private key file (PEM). Other accounts must not be able to read it (chmod 600)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls self-signed =====
+Make a certificate on this computer, from a local certificate authority you trust once in your browser. For a panel on your home network, where no public certificate is possible
+
+Usage: kora panel tls self-signed [OPTIONS]
+
+Options:
+      --name <NAME>
+          A name or address people will open the panel with (repeat for several). This computer's name and addresses are added automatically
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls tailscale =====
+Use the certificate Tailscale issues for this computer's tailnet name (needs MagicDNS and HTTPS certificates enabled in the Tailscale admin console)
+
+Usage: kora panel tls tailscale [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls auto =====
+Use whatever is available: your own certificate if one is set, else Tailscale's when the panel listens on Tailscale, else plain HTTP. The default
+
+Usage: kora panel tls auto [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls off =====
+Serve plain HTTP even on addresses other computers can reach (not recommended)
+
+Usage: kora panel tls off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls renew =====
+Fetch or make the certificate again now (Tailscale and self-signed)
+
+Usage: kora panel tls renew [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls export-ca =====
+Save the local certificate authority's certificate (public) to a file, to install in a browser or on a phone
+
+Usage: kora panel tls export-ca [OPTIONS]
+
+Options:
+      --to <TO>
+          Where to write it. Default: kora-local-ca.crt in the Kora folder
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy =====
+Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name with a real certificate
+
+Usage: kora panel proxy [OPTIONS] <COMMAND>
+
+Commands:
+  trust   Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
+  forget  Stop trusting any proxy: forwarded headers are refused again
+  status  Show the trusted proxy setting
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy trust =====
+Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
+
+Usage: kora panel proxy trust [OPTIONS] <ADDRESSES>...
+
+Arguments:
+  <ADDRESSES>...
+          The proxy's address as the panel sees it (127.0.0.1 when it runs on this computer). Repeat for several
+
+Options:
+      --panel <PANEL>
+          The panel address the proxy forwards to, for the configuration examples
+          
+          [default: 127.0.0.1:47120]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy forget =====
+Stop trusting any proxy: forwarded headers are refused again
+
+Usage: kora panel proxy forget [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy status =====
+Show the trusted proxy setting
+
+Usage: kora panel proxy status [OPTIONS]
 
 Options:
       --no-elevate
@@ -988,12 +1292,13 @@ Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a serv
 Usage: kora keys [OPTIONS] <COMMAND>
 
 Commands:
-  list     List the saved keys (name and the last 4 characters only) and which servers use them
-  add      Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
-  replace  Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
-  rename   Give a saved key another name
-  remove   Forget a saved key. Servers installed with it keep working: they have their own copy
-  use      Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
+  list      List the saved keys (name and the last 4 characters only) and which servers use them
+  add       Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
+  replace   Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
+  rename    Give a saved key another name
+  remove    Forget a saved key. Servers installed with it keep working: they have their own copy
+  keychain  Where the saved keys are kept: Kora's private file, or the system keychain (Windows: protected for your account; Linux: GNOME Keyring, KWallet)
+  use       Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
 
 Options:
       --no-elevate
@@ -1078,6 +1383,59 @@ Options:
   -y, --yes
           Do not ask for confirmation
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain =====
+Where the saved keys are kept: Kora's private file, or the system keychain (Windows: protected for your account; Linux: GNOME Keyring, KWallet)
+
+Usage: kora keys keychain [OPTIONS] <COMMAND>
+
+Commands:
+  status  Show where each saved key is kept, and where new ones go
+  on      Use the system keychain (when this computer has one) and move the saved keys into it
+  off     Keep every key in Kora's private file: moves them back out of the keychain. The way back to Kora 0.7 is `kora store export-json`, which carries every key
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain status =====
+Show where each saved key is kept, and where new ones go
+
+Usage: kora keys keychain status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain on =====
+Use the system keychain (when this computer has one) and move the saved keys into it
+
+Usage: kora keys keychain on [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain off =====
+Keep every key in Kora's private file: moves them back out of the keychain. The way back to Kora 0.7 is `kora store export-json`, which carries every key
+
+Usage: kora keys keychain off [OPTIONS]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

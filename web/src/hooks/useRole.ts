@@ -37,6 +37,6 @@ export const ALLOW_REMOTE_COMMAND = 'kora panel remote-actions on'
 /** Plain-words reason a button is off, for a tooltip or a note. */
 export function whyNot(r: ReturnType<typeof useRole>, min: Role, destructive = false): string | null {
   if (!r.can(min)) return `Your account (${r.role}) cannot do this. Ask an administrator for ${min} access.`
-  if (destructive && !r.destructiveAllowed) return `This is turned off for sign-ins made with a token, because a token is a secret that could leak. To turn it on, run this on the computer that runs Kora (over SSH is fine): ${ALLOW_REMOTE_COMMAND}. Or sign in through Tailscale as an administrator, or use the panel on that computer.`
+  if (destructive && !r.destructiveAllowed) return `This is turned off for sign-ins that do not come through Tailscale, because a sign-in that can be copied (a token, a stolen browser session) could leak. To turn it on, run this on the computer that runs Kora (over SSH is fine): ${ALLOW_REMOTE_COMMAND}. Or sign in through Tailscale as an administrator, or use the panel on that computer.`
   return null
 }

@@ -13,6 +13,7 @@ import { installCollabMock } from './collab'
 import { installReachMock } from './reach'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
+import { installAuthMock } from './auth'
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
 
 const BASE = '/api/v1'
@@ -438,10 +439,19 @@ const collabMock = installCollabMock(route, startJob, Fail, {
 })
 const branchesMock = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github, onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why) })
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: viewer.identity?.provider === 'tailscale' }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: viewer.identity?.provider === 'tailscale', auth_upgrade: viewer.identity?.provider === 'token' && !authMock.hasStrong(viewer.identity.name) }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
-const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
+const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json', require_strong_auth: false }
+const authMock = installAuthMock(route, Fail, {
+  viewer: () => ({ name: viewer.identity?.name ?? 'local', provider: viewer.identity?.provider ?? 'local', remote: viewer.remote }),
+  users: () => remoteState.users,
+  addUser: (name, role) => void remoteState.users.push({ name, role, created: Math.floor(Date.now() / 1000), passkeys: 0, code: false, legacy_token: false }),
+  setSignedIn: (identity) => {
+    prefs.signedIn = true
+    viewer = { identity, remote: true }
+  },
+})
 route('GET', '/remote', () => structuredClone(remoteState))
 route('PUT', '/remote', (_m, b) => {
   const u = b as T.RemoteSettingsUpdate
@@ -455,8 +465,8 @@ route('POST', '/users', (_m, b) => {
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(name)) throw new Fail(400, 'bad_request', 'A user name uses letters, numbers, dots, dashes and underscores, up to 40 characters.')
   if (remoteState.users.some((x) => x.name.toLowerCase() === name.toLowerCase())) throw new Fail(409, 'conflict', `There is already a user named '${name}'.`)
   const role = b.role as T.Role
-  remoteState.users.push({ name, role, created: Math.floor(Date.now() / 1000) })
-  return { name, role, token: 'demo-' + Math.random().toString(16).slice(2).padEnd(56, '0') } satisfies T.NewUser
+  remoteState.users.push({ name, role, created: Math.floor(Date.now() / 1000), passkeys: 0, code: false, legacy_token: false })
+  return { name, role, link: authMock.mintLink(name, role), expires_in: 1800 } satisfies T.NewUser
 })
 route('DELETE', '/users/{name}', (m) => {
   const n = dec(m[1])
@@ -1078,7 +1088,9 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   await new Promise<void>((r) => setTimeout(r, wait * (speed === 0 ? 0 : 1)))
   if (beh.auth === 'down') throw new TypeError('Failed to fetch')
   try {
-    if (beh.auth === 'expired') throw new Fail(401, 'unauthorized', 'You are not signed in.')
+    // The sign-in screen asks these before there is a session.
+    const publicPath = (method === 'GET' && (path === '/meta' || path === '/auth/options')) || (method === 'POST' && (path === '/auth/login' || path === '/auth/enrol'))
+    if (beh.auth === 'expired' && !publicPath) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     if (path === '/session' && method === 'POST') {
       // Like the real panel: a pasted token, or the one-time code from a sign-in link (`/#code=...`).
       const b = JSON.parse(String(init?.body ?? '{}')) as { token?: string; code?: string }
@@ -1090,7 +1102,7 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
       prefs.signedIn = true
       return json(200, { ok: true, identity: { name: 'local', provider: 'local', role: 'admin' }, secret: 'mock-session-secret' } satisfies T.SessionCreated)
     }
-    if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
+    if (!prefs.signedIn && !publicPath) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
     lastHeaders = headers
     if (method !== 'GET' && !headers.has('X-Kora')) throw new Fail(403, 'forbidden', 'Missing the X-Kora header.')
@@ -1209,6 +1221,8 @@ const VIEWERS: Record<string, Viewer> = {
   'remote-operator': { identity: { name: 'kim', provider: 'tailscale', role: 'operator' }, remote: true },
   'remote-admin': { identity: { name: 'sam', provider: 'token', role: 'admin' }, remote: true },
   'remote-tailscale-admin': { identity: { name: 'ada', provider: 'tailscale', role: 'admin' }, remote: true },
+  'remote-passkey-admin': { identity: { name: 'sam', provider: 'passkey', role: 'admin' }, remote: true },
+  'remote-code-operator': { identity: { name: 'amy', provider: 'code', role: 'operator' }, remote: true },
 }
 let viewer: Viewer = { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
 function resolveViewer(search: string, storage: Storage | null): Viewer {

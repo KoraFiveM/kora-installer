@@ -23,7 +23,44 @@ reasonable time to release a fix before you disclose publicly.
   idle or 7 days in all. Wrong codes and tokens are rate-limited, counted per address (IPv6 per /64) so a stranger only locks
   themselves out. `Authorization: Bearer <token>` is also accepted for scripts.
 - Requests that carry proxy headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`...) are refused outright: behind a reverse
-  proxy or `tailscale serve` every visitor would look like this computer. Use `kora panel --tailscale` instead.
+  proxy or `tailscale serve` every visitor would look like this computer. The one exception is a proxy you configured
+  (`kora panel proxy trust <address>`): forwarded headers (`X-Forwarded-For`, `X-Forwarded-Proto`, the ones you honour) count only from
+  that address AND only on a request that carries the shared secret (`X-Kora-Proxy-Secret`, stored as a salted hash, shown once); the
+  client address is the right-most `X-Forwarded-For` entry that is not one of your proxies (a client cannot choose its own); every
+  proxied request is a remote one (never the launch token, never a local-only operation, never a Tailscale identity), and the
+  lockout counts the forwarded address. A wrong secret is refused with the fix; without it nothing changes.
+- **HTTPS.** Loopback is plain HTTP (nothing leaves the computer); every other listener serves HTTPS on the same port once there is
+  a certificate (rustls with the `ring` provider, TLS 1.2/1.3, HTTP/1.1 only), redirects plain HTTP from other computers (307, to a
+  `Host` the panel would accept, never an echoed value), and `--allow-public` refuses to start without HTTPS or a trusted proxy.
+  The certificate is one you provide (re-read when the files change; a key file other accounts can read is refused), the one
+  `tailscale cert` issues for the tailnet name, or a self-signed one from a local CA kept in the private store (its key never
+  leaves it: not in the API, logs, audit log, support data or `export-json`; the CA is never installed or served automatically
+  and its fingerprint is shown to compare; ECDSA P-256; 397-day server certificates, renewed before they end). A certificate
+  that cannot be loaded never turns HTTPS off: the old one keeps serving and the error is shown. Cookies get `Secure` over TLS;
+  `Origin` must use the scheme of the connection (a page served over HTTPS never posts from `http://`); HSTS only for
+  certificates you provided or Tailscale's. Not covered: ACME/Let's Encrypt (use a reverse proxy), client certificates, OCSP.
+- **Remote sign-in (passkeys, one-time codes).** A remote person proves who they are with a passkey (WebAuthn via `webauthn-rs`,
+  pure Rust, no OpenSSL; origin-bound by the browser, fresh challenge each time, state used once and expiring in 5 minutes,
+  signature counter checked and saved), or a password (argon2id, strength-checked, dummy verification for unknown names) plus a
+  one-time code (RFC 6238; HMAC-SHA1 from RustCrypto; current step and one either side; each step accepted once, enforced in one
+  database update) or a recovery code (ten single-use codes, stored as salted hashes). The only bearer link left is the
+  enrolment link: 30 minutes, single use (atomically), stored hashed, replaced on reset. Passkeys are bound to a relying-party
+  ID, a domain name taken from the `Host` the panel accepted: a bare IP address cannot be one and plain HTTP is refused, and the
+  page says to use one-time codes. The same words answer "no such user" and "wrong password"; failures count per source address
+  (as for tokens) and per account (5 failures, 15 minutes; a passkey is not blocked by it, so a stranger cannot lock out the owner
+  of a passkey). Secrets (password hashes, TOTP secrets, passkey public keys, recovery hashes, the local CA key) live only in the
+  private store and are never returned by the API, logged or audited (the audit log records who, how and the outcome, never a
+  value). The TOTP secret has to be reversible, so it protects only as much as the store file's permissions. Phishing: a passkey
+  answers only for its real origin; a one-time code can be phished, which is why a passkey is the default.
+- **API tokens** (for scripts) are not interactive: a role, shown once, stored as a salted hash, optional expiry, accepted only in an
+  `Authorization: Bearer` header (never in an address, never a cookie or session, never a way to sign in to the page), still held
+  back from destructive operations by the remote-actions switch. Old per-user token links keep working for scripts; they are not
+  accepted for signing in once the user has a passkey or one-time codes, nor when an administrator requires them.
+- **Sessions and fresh checks.** Remote sessions made with a passkey or code end after 8 hours idle or 3 days; token sessions after
+  1 day; the computer's own and Tailscale sessions keep 12 hours / 7 days. Deleting, unregistering, uninstalling, updating Kora, console
+  input, schedules and txAdmin from such a session need a passkey or code check from the last 10 minutes; changing how you sign in
+  does too. "Signed-in devices" lists a person's sessions (browser, address, times; a public handle, never the cookie) and signs them
+  out; resets and removed passkeys end sessions at once. Roles and the remote-actions switch are unchanged.
 - Every request must carry the panel's own address in `Host` (DNS rebinding). Changing requests must also have a
   matching `Origin` (when sent) and an `X-Kora` header (CSRF).
 - **txAdmin through the panel (the gateway).** txAdmin is full control of the game server (resources and `exec` run code),
@@ -55,8 +92,10 @@ reasonable time to release a fix before you disclose publicly.
   was: the `store` folder is `0700` and its files `0600` from creation on Linux, including SQLite's `-wal`/`-shm` files, and on
   Windows its inherited permissions are removed so everything created in it inherits that; links are refused, files made by `sudo`
   inside someone else's folder go back to its owner; every change is one transaction, so two programs cannot overwrite each
-  other, and a file that cannot be read is never replaced). The key values have their own table so they can move to the system
-  keychain later. The API shows only a key's name and last four characters.
+  other, and a file that cannot be read is never replaced). The key values go through one seam and live in the system keychain when there is one
+  (Linux Secret Service over the session bus, with the `plain` algorithm; Windows DPAPI, per user): a copy of the Kora folder then holds no
+  key in clear, but malware running as you can still ask for it. Locked or unreachable keychains are never prompted and never lose a key (a
+  guided "enter it again" instead); see [docs/store.md](docs/store.md). The API shows only a key's name and last four characters.
   A stopped install or the saved answers refer to a saved key by name and never contain the key. Only admins and this
   computer can add, rename, replace or delete keys.
 - The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, a

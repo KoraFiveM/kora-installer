@@ -291,8 +291,12 @@ impl Gate {
             .map_err(|e| format!("Kora could not listen on {ip} port {gateway} for txAdmin ({e}). Is something else using that port?"))?;
         let actual = listener.local_addr().map_err(|e| e.to_string())?.port();
         let app = proxy::router(proxy::Ctx { st: st.clone(), port: actual });
+        // The same TLS setup as the panel's own listener on this address: HTTPS where the panel is HTTPS, plain on loopback.
+        let tls = (crate::tls::rules::listener_kind(ip, false) == crate::tls::rules::Listener::Tls).then(|| st.tls.clone());
+        let st_for_hosts = st.clone();
+        let host_ok: crate::tls::serve::HostCheck = Arc::new(move |h: &str| proxy::host_allowed(&st_for_hosts, h, actual));
         let handle = tokio::spawn(async move {
-            let _ = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
+            let _ = crate::tls::serve::serve(listener, app, tls, host_ok, std::future::pending()).await;
         });
         self.lock().listeners.insert((ip, actual), handle.abort_handle());
         Ok(actual)
@@ -320,6 +324,7 @@ fn saved_txadmin_username(dir: &std::path::Path) -> Option<String> {
 pub async fn txadmin_ticket(
     State(st): State<AppState>,
     Extension(caller): Extension<crate::remote::Caller>,
+    Extension(transport): Extension<crate::tls::serve::Transport>,
     headers: HeaderMap,
     Path(s): Path<String>,
 ) -> Result<Json<kora_core::api::wire::TxAdminTicket>, ApiError> {
@@ -367,7 +372,12 @@ pub async fn txadmin_ticket(
     let ticket = st.txgate.mint_ticket(Ticket { server: e.name.clone(), panel_session, remote: caller.remote, gateway: port, expires: st.txgate.now() + TICKET_TTL });
     let dir = e.dir.clone();
     let username = blocking(move || Ok(saved_txadmin_username(&dir))).await.ok().flatten();
-    Ok(Json(kora_core::api::wire::TxAdminTicket { url: format!("http://{}:{port}/__kora/enter?t={ticket}", host_name(host)), port, expires_in: TICKET_TTL.as_secs(), username }))
+    Ok(Json(kora_core::api::wire::TxAdminTicket {
+        url: format!("{}://{}:{port}/__kora/enter?t={ticket}", if transport.secure { "https" } else { "http" }, host_name(host)),
+        port,
+        expires_in: TICKET_TTL.as_secs(),
+        username,
+    }))
 }
 
 /// Static pages of the gateway itself (never txAdmin's).

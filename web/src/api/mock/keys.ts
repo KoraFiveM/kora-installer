@@ -35,7 +35,21 @@ export function installKeysMock(route: Route, Fail: FailCtor, servers: () => T.S
   /** Which saved key each demo server uses (by name), set when a key is applied to it. */
   let usedBy: Record<string, string> = {}
 
+  // The `keylost` scenario seeds a saved key whose keychain entry is gone (the screens for a key that must be entered again). The
+  // scenario is known only once the mock has started, so this runs on the first request.
+  let seeded = false
+  const lostNames = (): string[] => {
+    try {
+      return window.sessionStorage.getItem('kora-mock-scenario') === 'keylost' ? ['Main'] : []
+    } catch {
+      return []
+    }
+  }
   const need = () => {
+    if (!seeded) {
+      seeded = true
+      keys.push(...lostNames().map((name) => ({ name, key: 'cfxk_lostlostlost_0000', added: 1_700_000_000 })))
+    }
     if (trouble) {
       throw new Fail(500, 'keys.unreadable', 'Kora cannot read your saved licence keys (the file is damaged). Nothing was changed and no key was lost: the file is still where it was. Fix or move the file /home/demo/.kora/secrets.json and try again.', undefined, { actions: [{ kind: 'copy_details' }] })
     }
@@ -67,12 +81,24 @@ export function installKeysMock(route: Route, Fail: FailCtor, servers: () => T.S
   }
   const info = (k: Stored): T.SavedKeyInfo => ({ name: k.name, last4: last4(k.key), added: k.added })
 
+  // The system keychain of the demo computer: off until the person turns it on; one key can be shown as lost (`?lostkey=Main`).
+  let keychainOn = false
+  let keychainOff = false
+  const lost = { has: (n: string) => lostNames().includes(n) }
+  const where = (k: Stored) => (keychainOn ? 'your system keychain' : "Kora's private file") + (k ? '' : '')
+  route('PUT', '/keys/keychain', (_m, b) => {
+    need()
+    keychainOn = b.use_keychain === true
+    keychainOff = !keychainOn
+    return { keychain: { mode: keychainOn ? 'auto' : 'off', line: keychainOn ? 'New keys are kept in your system keychain.' : "Kept in Kora's private file (you turned the system keychain off).", active: keychainOn ? 'secret-service' : 'store', available: true }, moved: keys.length, left: [] } satisfies T.KeychainChanged
+  })
   route('GET', '/keys', () => {
     need()
     return {
-      keys: keys.map((k) => ({ ...info(k), servers: Object.entries(usedBy).filter(([s, n]) => same(n, k.name) && servers().some((x) => x.name === s)).map(([s]) => s), stopped_installs: 0 })),
+      keys: keys.map((k) => ({ ...info(k), servers: Object.entries(usedBy).filter(([s, n]) => same(n, k.name) && servers().some((x) => x.name === s)).map(([s]) => s), stopped_installs: 0, kept: where(k), problem: lost.has(k.name) ? `The licence key "${k.name}" is not in your system keychain any more (it was deleted there, or the keychain was reset). Enter it again to keep using it.` : null })),
       can_manage: canManage(),
       path: '/home/demo/.kora/secrets.json',
+      keychain: { mode: keychainOn ? 'auto' : 'off', line: keychainOn ? 'New keys are kept in your system keychain.' : keychainOff ? "Kept in Kora's private file (you turned the system keychain off)." : "Kept in Kora's private file (no system keychain on this computer).", active: keychainOn ? 'secret-service' : 'store', available: true },
     } satisfies T.SavedKeys
   })
   route('POST', '/keys', (_m, b) => {

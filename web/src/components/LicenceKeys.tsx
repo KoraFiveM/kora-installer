@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eye, EyeOff } from 'lucide-react'
 import { api } from '@/api/client'
-import type { Profile, SavedKey } from '@/api/types'
+import type { Profile, SavedKey, SavedKeys } from '@/api/types'
 import { useRole } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +38,37 @@ const when = (unix: number) => (unix > 0 ? new Date(unix * 1000).toLocaleDateStr
 type Dialogue = { kind: 'rename' | 'replace' | 'delete'; key: SavedKey } | null
 
 /** Settings → Licence keys: the keys saved on this computer, by name. Admins manage them; others can only see the names. */
+/** Where the keys are kept, and on this computer the switch for the system keychain. */
+function KeychainLine({ data }: { data: SavedKeys }) {
+  const qc = useQueryClient()
+  const role = useRole()
+  const [result, setResult] = useState<string[] | null>(null)
+  const set = useMutation({
+    mutationFn: (on: boolean) => api.keys.keychain(on),
+    onSuccess: (r) => {
+      setResult([`Moved ${r.moved} ${r.moved === 1 ? 'key' : 'keys'}.`, ...r.left.map((l) => `Could not move: ${l}`)])
+      void qc.invalidateQueries({ queryKey: ['keys'] })
+    },
+  })
+  const kc = data.keychain
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="text-muted-foreground">{kc.line}</p>
+      {!role.remote && role.can('admin') && (
+        <div className="flex flex-wrap gap-3">
+          {kc.mode === 'off' || !kc.available ? (
+            <Button size="sm" variant="secondary" disabled={set.isPending || !kc.available && kc.mode !== 'off'} onClick={() => set.mutate(true)}>Use the system keychain</Button>
+          ) : (
+            <Button size="sm" variant="secondary" disabled={set.isPending} onClick={() => set.mutate(false)}>Keep keys in Kora&apos;s private file instead</Button>
+          )}
+        </div>
+      )}
+      {result && result.map((r) => <Alert key={r} tone={r.startsWith('Could not') ? 'warning' : 'success'}>{r}</Alert>)}
+      <ErrorNotice error={set.error} />
+    </div>
+  )
+}
+
 export function LicenceKeysCard() {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['keys'], queryFn: api.keys.list, retry: false })
@@ -64,8 +95,9 @@ export function LicenceKeysCard() {
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
           Keys you save here can be picked by name when you install a server or change a server&apos;s key, so you never paste them twice.
-          They are kept in a private file on this computer{q.data?.path ? <> (<code className="font-mono text-xs">{q.data.path}</code>)</> : ''} that only you can read, and Kora only ever shows the last 4 characters.
+          They stay on this computer, and Kora only ever shows the last 4 characters.
         </p>
+        {q.data && <KeychainLine data={q.data} />}
         <ErrorNotice error={q.error} title="Kora cannot read your saved licence keys" />
         {q.isSuccess && keys.length === 0 && <p className="text-sm">No keys saved yet.{can ? ' Add one below, or tick "Save this key" when you install a server.' : ' Ask an administrator to add one.'}</p>}
         {keys.length > 0 && (
@@ -78,7 +110,14 @@ export function LicenceKeysCard() {
                     {k.servers.length > 0 ? k.servers.map((s) => <Badge key={s} tone="neutral">Used by {s}</Badge>) : <span>Not used by any server yet</span>}
                     {k.stopped_installs > 0 && <Badge tone="amber">Needed by an unfinished install</Badge>}
                     {when(k.added) && <span>Saved {when(k.added)}</span>}
+                    <span>Kept in {k.kept}</span>
                   </div>
+                  {k.problem && (
+                    <Alert tone="warning" title="This key cannot be read from here">
+                      {k.problem}
+                      {can && <div className="mt-2"><Button size="sm" aria-label={`Enter it again: ${k.name}`} onClick={() => { setDialog({ kind: 'replace', key: k }); setKey('') }}>Enter it again</Button></div>}
+                    </Alert>
+                  )}
                 </div>
                 {can && (
                   <div className="flex gap-2">

@@ -30,6 +30,17 @@ allow = [
   "bzip2-1.0.6",   # libbz2-rs-sys via sevenz-rust2 (BSD-style, permissive)
 ]
 confidence-threshold = 0.9
+# MPL-2.0 is file-level copyleft: using these crates unmodified as dependencies puts no condition on Kora's own
+# source (Apache-2.0); only changes to the crates' own files would have to be shared. Allowed for the WebAuthn
+# (passkey) crates and nothing else.
+exceptions = [
+  { allow = ["MPL-2.0"], crate = "webauthn-rs" },
+  { allow = ["MPL-2.0"], crate = "webauthn-rs-core" },
+  { allow = ["MPL-2.0"], crate = "webauthn-rs-proto" },
+  { allow = ["MPL-2.0"], crate = "webauthn-attestation-ca" },
+  { allow = ["MPL-2.0"], crate = "crypto-glue" },
+  { allow = ["MPL-2.0"], crate = "webauthn-authenticator-rs" }, # dev-dependency: a software passkey for the tests
+]
 
 [bans]
 multiple-versions = "warn"

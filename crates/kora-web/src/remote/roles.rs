@@ -79,7 +79,13 @@ pub fn min_role(op: Op) -> Role {
         | Op::MetricsGet
         | Op::AlertsList
         // Whether outside lookups are allowed is just a yes/no.
-        | Op::ReachSettingsGet => Viewer,
+        | Op::ReachSettingsGet
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange => Viewer,
         // Running servers day to day. Logs and the console can hold player names and addresses,
         // so they are operator and above even though they only read.
         Op::ServerControl
@@ -201,7 +207,16 @@ pub fn min_role(op: Op) -> Role {
         | Op::ForwardingSet
         | Op::ReachFirewallOpen
         | Op::ReachSettingsSet
-        | Op::TxAdminTicket => Admin,
+        | Op::TxAdminTicket
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsStatus
+        | Op::TlsRenew
+        | Op::TlsCa
+        | Op::KeychainSet => Admin,
     }
 }
 
@@ -347,7 +362,22 @@ pub fn destructive(op: Op) -> bool {
         | Op::ReachSettingsGet
         | Op::ReachSettingsSet
         | Op::ForwardingSet
-        | Op::ReachFirewallOpen => false,
+        | Op::ReachFirewallOpen
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsStatus
+        | Op::TlsRenew
+        | Op::TlsCa
+        | Op::KeychainSet => false,
     }
 }
 
@@ -482,7 +512,22 @@ pub fn installs(op: Op) -> bool {
         | Op::ReachSettingsSet
         | Op::ForwardingSet
         | Op::ReachFirewallOpen
-        | Op::TxAdminTicket => false,
+        | Op::TxAdminTicket
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsStatus
+        | Op::TlsRenew
+        | Op::TlsCa
+        | Op::KeychainSet => false,
     }
 }
 
@@ -535,7 +580,14 @@ pub fn local_only(op: Op) -> bool {
         // Restarting stops this computer's panel (and drops every session).
         | Op::PanelRestart
         // Lists files in the Downloads folder of the computer that runs Kora.
-        | Op::AssetDownloads => true,
+        | Op::AssetDownloads
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsRenew
+        | Op::KeychainSet => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -650,7 +702,15 @@ pub fn local_only(op: Op) -> bool {
         | Op::ReachSettingsSet
         | Op::ForwardingSet
         | Op::ReachFirewallOpen
-        | Op::TxAdminTicket => false,
+        | Op::TxAdminTicket
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange
+        | Op::TlsStatus
+        | Op::TlsCa => false,
     }
 }
 
@@ -755,7 +815,10 @@ mod tests {
         for op in Op::ALL {
             if min_role(*op) == Role::Viewer {
                 let m = op.route().0;
-                assert!(m == Method::Get || matches!(op, Op::SessionCreate | Op::SessionLogout), "{op:?} is a viewer op but not a GET");
+                assert!(
+                    m == Method::Get || matches!(op, Op::SessionCreate | Op::SessionLogout | Op::AuthLogin | Op::AuthEnrol | Op::AuthReauth | Op::AuthAccountChange),
+                    "{op:?} is a viewer op but not a GET"
+                );
             }
         }
     }

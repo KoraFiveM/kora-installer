@@ -20,6 +20,9 @@ impl From<Provider> for wire::Provider {
             Provider::Local => wire::Provider::Local,
             Provider::Tailscale => wire::Provider::Tailscale,
             Provider::Token => wire::Provider::Token,
+            Provider::Passkey => wire::Provider::Passkey,
+            Provider::Code => wire::Provider::Code,
+            Provider::ApiToken => wire::Provider::ApiToken,
         }
     }
 }

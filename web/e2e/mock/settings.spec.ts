@@ -10,13 +10,14 @@ test.describe('Settings', () => {
     await scan('settings')
   })
 
-  test('remote access: turning it on and adding a person shows the token once', async ({ page, open, scan }) => {
+  test('remote access: turning it on and inviting a person shows a one-time link', async ({ page, open, scan }) => {
     await open('/settings')
     await page.getByLabel('Allow remote access').click()
     await expect(page.getByLabel('Allow remote access')).toBeChecked()
     await page.getByLabel('Name', { exact: true }).first().fill('kim')
-    await page.getByRole('button', { name: 'Add person' }).click()
+    await page.getByRole('button', { name: 'Invite person' }).click()
     await expect(page.getByText('kim').first()).toBeVisible()
+    await expect(page.getByLabel('Enrolment link for kim')).toContainText('#enrol=')
     await scan('settings: remote access with a person')
     await page.getByRole('button', { name: 'Remove kim' }).click()
     await page.getByRole('dialog').getByRole('button', { name: /^Remove/ }).click()

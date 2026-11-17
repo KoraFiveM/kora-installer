@@ -27,8 +27,8 @@
 //! links are refused, and files made as root inside someone else's folder are handed to its owner.
 //!
 //! # Where the keys' VALUES live
-//! [`material::KeyMaterial`] is the one seam. Today [`material::SqliteKeyMaterial`] keeps them in the
-//! `license_key_material` table; a later workstream can implement the trait over the system keychain.
+//! [`material::KeyMaterial`] is the one seam. [`keychain::Chosen`] keeps each value in the private `license_key_material`
+//! table, in the system keychain (Linux Secret Service) or sealed with Windows DPAPI, and remembers which per key.
 //!
 //! # Versions
 //! `schema_migrations` holds one row per applied migration ([`schema`]). An older Kora that opens a
@@ -42,6 +42,7 @@ pub mod backup;
 pub mod documents;
 pub mod export;
 pub mod jobs;
+pub mod keychain;
 pub mod legacy;
 pub mod material;
 pub mod privacy;

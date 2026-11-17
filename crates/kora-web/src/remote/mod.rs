@@ -3,8 +3,11 @@
 //!
 //! * [`config`]: remote access settings (in the store), hashed per-user tokens.
 //! * [`tailscale`]: the `whois` seam (identity comes from the local tailscaled, never from headers).
+//! * [`proxy`]: the opt-in trusted reverse proxy.
 //! * [`roles`]: viewer / operator / admin, the exhaustive Op classification and request → Op lookup.
+pub mod auth;
 pub mod config;
+pub mod proxy;
 pub mod roles;
 pub mod tailscale;
 
@@ -28,7 +31,15 @@ pub enum Provider {
     /// The launch token, from the computer itself.
     Local,
     Tailscale,
+    /// The old per-user token link (kept working, and for scripts).
     Token,
+    /// A passkey (WebAuthn).
+    Passkey,
+    /// A password and a one-time code.
+    Code,
+    /// A token made for a script (`Authorization: Bearer` only, never a session).
+    #[serde(rename = "api_token")]
+    ApiToken,
 }
 
 impl Provider {
@@ -37,7 +48,7 @@ impl Provider {
     pub fn via(self) -> roles::Via {
         match self {
             Provider::Tailscale => roles::Via::Tailscale,
-            Provider::Local | Provider::Token => roles::Via::Token,
+            Provider::Local | Provider::Token | Provider::Passkey | Provider::Code | Provider::ApiToken => roles::Via::Token,
         }
     }
 }
@@ -168,6 +179,11 @@ impl Remote {
         self.lock().cfg.clone()
     }
 
+    /// The trusted reverse proxy, if one was configured.
+    pub fn trusted_proxy(&self) -> Option<proxy::ProxyConfig> {
+        self.lock().cfg.trusted_proxy.clone()
+    }
+
     pub fn path(&self) -> Option<PathBuf> {
         self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).path.clone()
     }
@@ -248,11 +264,13 @@ impl Remote {
     pub fn resolve(&self, provider: Provider, name: &str) -> Option<Identity> {
         match provider {
             Provider::Local => Some(Identity::local()),
-            Provider::Token => {
+            Provider::Token | Provider::Passkey | Provider::Code => {
                 let g = self.lock();
                 let u = g.cfg.user(name)?;
                 Some(Identity { name: u.name.clone(), provider, role: u.role })
             }
+            // Never a session: an API token is looked up on every request ([`identity_for_bearer`](Self::identity_for_bearer)).
+            Provider::ApiToken => None,
             Provider::Tailscale => {
                 let g = self.lock();
                 if !g.cfg.tailscale {
@@ -262,6 +280,22 @@ impl Remote {
                 Some(Identity { name: name.to_string(), provider, role })
             }
         }
+    }
+
+    /// The settings store of this panel, for the sign-in tables. `Err` when the panel keeps its settings in memory only.
+    pub fn auth_store(&self) -> Result<kora_core::store::Store, String> {
+        let path = self.path().ok_or_else(|| "Remote sign-in needs the panel's saved settings; this panel keeps none.".to_string())?;
+        kora_core::store::Store::open_beside(&path).map_err(kora_core::store::problem_to_string)
+    }
+
+    /// Who an `Authorization: Bearer` token is: an old per-user token link, or an API token. Never a session.
+    pub fn identity_for_bearer(&self, token: &str) -> Option<Identity> {
+        if let Some(i) = self.identity_for_token(token) {
+            return Some(i);
+        }
+        let store = self.auth_store().ok()?;
+        let t = auth::db::api_token_for(&store, token).ok().flatten()?;
+        Some(Identity { name: t.name, provider: Provider::ApiToken, role: t.role })
     }
 
     pub fn identity_for_token(&self, token: &str) -> Option<Identity> {
@@ -342,9 +376,9 @@ Using Tailscale? `kora panel --tailscale` sets everything up for you."
     }
     if !allow_public && (bind.is_unspecified() || !is_private_address(bind)) {
         return Err(format!(
-            "Kora will not listen on {bind}: other people on the internet could reach it, and the panel is plain HTTP, \
-so sign-in tokens could be read on the way. Use `kora panel --tailscale` (recommended), a private address \
-(Tailscale, WireGuard, your home network) or an SSH tunnel. If you really mean it, add --allow-public."
+            "Kora will not listen on {bind}: other people on the internet could reach it. Use `kora panel --tailscale` (recommended), \
+a private address (Tailscale, WireGuard, your home network) or an SSH tunnel. If you really mean it, add --allow-public, \
+which also needs HTTPS (`kora panel tls self-signed`, or your own certificate) or a reverse proxy you tell Kora to trust."
         ));
     }
     let mut warnings = vec![PLAIN_HTTP_WARNING.to_string()];

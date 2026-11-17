@@ -72,7 +72,7 @@ test.describe('a remote administrator with a token', () => {
 
   test('Settings explains what a token sign-in cannot do', async ({ page, open }) => {
     await open('/settings', { as: 'remote-admin' })
-    await expect(page.getByText(/turned off for sign-ins made with a token/).first()).toBeVisible()
+    await expect(page.getByText(/turned off for sign-ins that do not come through Tailscale/).first()).toBeVisible()
     await expect(page.getByText('Uninstall Kora')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Show what would be removed' })).toBeDisabled()
   })

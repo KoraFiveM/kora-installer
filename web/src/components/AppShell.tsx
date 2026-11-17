@@ -77,6 +77,13 @@ export function AppShell() {
           ))}
         </div>
         <div className="px-6 pt-4 empty:hidden"><AlertsBanner /></div>
+        {meta.data?.auth_upgrade && location.pathname !== '/settings' && (
+          <div className="px-6 pt-4">
+            <Alert tone="warning" title="Replace your token link">
+              You signed in with a token: a secret link that works for whoever holds it. <NavLink className="underline" to="/settings">Set up a passkey or one-time codes</NavLink> in Settings; after that the token link stops working for signing in.
+            </Alert>
+          </div>
+        )}
         <main className="p-6">
           <ErrorBoundary resetKey={loc.pathname}>
             <Suspense fallback={<RouteLoading />}>

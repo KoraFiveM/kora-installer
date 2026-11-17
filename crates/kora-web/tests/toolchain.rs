@@ -200,7 +200,7 @@ async fn the_system_check_lists_every_line_with_its_fix() {
     let (s, v) = r.call("GET", "/system/check").await;
     assert_eq!(s, 200, "{v}");
     let ids: Vec<&str> = v["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["git", "gh", "github", "database", "admin", "service"]);
+    assert_eq!(ids, ["git", "gh", "github", "database", "admin", "service", "https"]);
     assert_eq!(v["ok"], false);
     let gh = &v["items"][1];
     assert_eq!((gh["state"].clone(), gh["problem"]["actions"][0].clone()), (json!("problem"), json!({"kind": "install_tool", "tool": "gh"})));
