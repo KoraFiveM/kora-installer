@@ -369,3 +369,18 @@ async fn the_real_socket_client_without_a_service_says_missing() {
     let state = kora_web::elevated::service_state();
     assert!(["ready", "missing", "not_allowed"].contains(&state["state"].as_str().unwrap()));
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn installing_the_service_from_the_panel_is_a_command_on_linux_and_a_conflict_when_it_is_there() {
+    let r = rig(None).await;
+    let (s, j) = r.call("POST", "/system/admin-service/install", Some(json!({}))).await;
+    assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")), "{j}");
+    let shown = j["error"]["actions"].as_array().unwrap().iter().find(|a| a["kind"] == "show_command").unwrap();
+    assert_eq!(shown["command"], json!(["kora", "service", "install"]));
+    set_broker_override(None);
+    let r = rig(Some(FakeHelper::new(0))).await;
+    let (s, _) = r.call("POST", "/system/admin-service/install", Some(json!({}))).await;
+    assert_eq!(s, 409, "already installed");
+    set_broker_override(None);
+}

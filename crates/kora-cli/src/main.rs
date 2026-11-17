@@ -208,7 +208,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         ) => K::Other,
         // Already elevated (the worker) or run by it: never relaunched.
         Some(Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
-        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. } }) => K::Uninstall { dry_run: false },
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Migrate { dry_run: false, .. } }) => {
+            K::Uninstall { dry_run: false }
+        }
         // Linux: relaunched with sudo. Windows: the install has its own single prompt (the installer's).
         Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => {
             if cfg!(windows) {
@@ -358,14 +360,7 @@ fn main() {
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
         command,
-        Some(
-            Command::ServiceHost { .. }
-                | Command::SelfUpdate { .. }
-                | Command::Service { .. }
-                | Command::AdminStep(_)
-                | Command::AdminDb(_)
-                | Command::Update(UpdateArgs { auto: true, .. })
-        )
+        Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Service { .. } | Command::AdminStep(_) | Command::AdminDb(_) | Command::Update(UpdateArgs { auto: true, .. }))
     );
     // The worker has a hidden window and its step children no terminal: never wait for a key.
     match &command {
