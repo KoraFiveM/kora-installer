@@ -991,40 +991,47 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         // What roll-back (`kora delete`) may undo is what `plan-state.json` says is done: the import did these steps itself, so it
         // says so (otherwise a delete would "have nothing to undo" and leave the new database and its login behind).
         let mut plan = crate::steps::PlanState::default();
-        for id in ["prepare.dir", "build.resources", "build.artifact", "build.config", "finalize"].into_iter().chain(creds.is_some().then_some("build.db")) {
+        let steps_done = ["prepare.dir", "build.resources", "build.artifact", "build.config", "finalize"]
+            .into_iter()
+            .chain((creds.is_some() || with_db_container).then_some("build.db"))
+            .chain(crec.is_some().then_some("container.create"));
+        for id in steps_done {
             plan.set(id, crate::steps::StepStatus::Done, None);
         }
         plan.save(&crate::installer::meta_dir(&dir).join("plan-state.json")).map_err(|e| Problem::generic(format!("Kora could not save the server's progress record: {e}")))?;
         // The install record `kora delete` / roll-back reads (`.kora/request.json`, no secrets): without it an imported server
-        // could be started and used but never removed again ("has no Kora install record").
-        let record = crate::installer::InstallRequest {
-            mode: sf.mode,
-            source: Some(new_source),
-            versions: Some(m.server.versions),
-            name: c.name.clone(),
-            dir: dir.clone(),
-            hostname: String::new(),
-            license_key: None,
-            license_key_name: None,
-            cfx_identifier: None,
-            ports: crate::installer::Ports { game: c.game_port, txadmin: c.txadmin_port },
-            txadmin_public: false,
-            artifact_url: None,
-            game_build: Some(m.server.game_build).filter(|b| *b != 0),
-            resources: crate::installer::ResourceSelection::All,
-            db: if creds.is_some() { crate::installer::DbChoice::UseExisting } else { crate::installer::DbChoice::Skip },
-            service: false,
-            firewall: false,
-            github_owner: new_owner.clone(),
-            catalog: None,
-            dry_run: false,
-            db_admin: None,
-            start: false,
-            app: None,
-            container: None,
-        };
-        let record_bytes = serde_json::to_vec_pretty(&record).map_err(|e| Problem::generic(e.to_string()))?;
-        crate::fsutil::write_no_follow(&crate::installer::meta_dir(&dir).join("request.json"), &record_bytes, 0o644).map_err(|e| io_problem("saving the install record", Problem::from(e)))?;
+        // could be started and used but never removed again ("has no Kora install record"). A container import wrote its own
+        // (with the container part) above.
+        if crec.is_none() {
+            let record = crate::installer::InstallRequest {
+                mode: sf.mode,
+                source: Some(new_source),
+                versions: Some(m.server.versions),
+                name: c.name.clone(),
+                dir: dir.clone(),
+                hostname: String::new(),
+                license_key: None,
+                license_key_name: None,
+                cfx_identifier: None,
+                ports: crate::installer::Ports { game: c.game_port, txadmin: c.txadmin_port },
+                txadmin_public: false,
+                artifact_url: None,
+                game_build: Some(m.server.game_build).filter(|b| *b != 0),
+                resources: crate::installer::ResourceSelection::All,
+                db: if creds.is_some() { crate::installer::DbChoice::UseExisting } else { crate::installer::DbChoice::Skip },
+                service: false,
+                firewall: false,
+                github_owner: new_owner.clone(),
+                catalog: None,
+                dry_run: false,
+                db_admin: None,
+                start: false,
+                app: None,
+                container: None,
+            };
+            let record_bytes = serde_json::to_vec_pretty(&record).map_err(|e| Problem::generic(e.to_string()))?;
+            crate::fsutil::write_no_follow(&crate::installer::meta_dir(&dir).join("request.json"), &record_bytes, 0o644).map_err(|e| io_problem("saving the install record", Problem::from(e)))?;
+        }
         let entry = ServerEntry {
             name: c.name.clone(),
             dir: dir.clone(),
