@@ -988,6 +988,13 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             ..Default::default()
         };
         let _ = crate::installer::save_created_to(&dir, &created);
+        // What roll-back (`kora delete`) may undo is what `plan-state.json` says is done: the import did these steps itself, so it
+        // says so (otherwise a delete would "have nothing to undo" and leave the new database and its login behind).
+        let mut plan = crate::steps::PlanState::default();
+        for id in ["prepare.dir", "build.resources", "build.artifact", "build.config", "finalize"].into_iter().chain(creds.is_some().then_some("build.db")) {
+            plan.set(id, crate::steps::StepStatus::Done, None);
+        }
+        plan.save(&crate::installer::meta_dir(&dir).join("plan-state.json")).map_err(|e| Problem::generic(format!("Kora could not save the server's progress record: {e}")))?;
         // The install record `kora delete` / roll-back reads (`.kora/request.json`, no secrets): without it an imported server
         // could be started and used but never removed again ("has no Kora install record").
         let record = crate::installer::InstallRequest {
@@ -1240,6 +1247,7 @@ mod tests {
         // the database came across into the NEW database
         assert_eq!(new_db.0.tables.borrow()[0].1, vec!["alice".to_string(), "bob".to_string()]);
         // the old login is not reused: the new one is in database.json and secrets.cfg, the licence key came from the file
+        assert!(target.join(".kora/plan-state.json").is_file(), "roll-back undoes only what the plan state says is done");
         assert!(target.join(".kora/request.json").is_file(), "an imported server needs its install record, or `kora delete` cannot remove it");
         let dbj = std::fs::read_to_string(target.join("database.json")).unwrap();
         assert!(dbj.contains("kora_new1") && !dbj.contains("s3cr3t-pass"));
