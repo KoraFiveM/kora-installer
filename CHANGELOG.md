@@ -5,6 +5,10 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Windows code signing, ready to switch on** (`docs/release-signing.md`): a reusable `sign-windows.yml` workflow signs the Windows exe (and the future MSI) through SignPath from an unsigned artifact, verifies the signatures, and rewrites the `.sha256` files from the signed bytes so self-update, `install.ps1`, the service's pinned copy and the build provenance attestation all see the signed file. It does nothing (with a notice) until the secret and variables exist, so releases keep working unsigned until the SignPath application is approved. Includes the SignPath artifact configuration and pipeline policy (`.signpath/`), a comparison of SignPath Foundation, Azure Artifact Signing and a paid certificate, the owner's steps, the exact `release.yml` snippet and the Linux trust notes (checksums, attestation, the planned `.deb`).
+- **CI that goes through the panel's real administrator path on Windows** (`.github/workflows/windows-uac.yml`, `docs/windows-uac-ci.md`): an unelevated panel is asked over its API to update itself from a folder only administrators can write to, so the real `runas` / worker / pipe path runs. On GitHub-hosted runners (an elevated account, UAC normally off) it checks that an unelevated administrator token and a standard account never get an administrator worker; on a self-hosted VM with UAC on it also covers approval by policy, the real prompt answered through UI Automation (Yes, No, nobody, a standard account with an administrator's credentials), the pipe being closed to the same user unelevated, and the worker following its panel. Reusable helpers for test accounts, UAC policy, filtered-token launching and token diagnostics are in `scripts/smoke/lib-accounts.ps1`.
+
 ## [0.7.0] - 2026-11-17
 
 This is 0.7.0, "panel first": the web panel is the only interface, nothing needed to get started asks for administrator rights, and failures say what to do and offer the button to do it.
