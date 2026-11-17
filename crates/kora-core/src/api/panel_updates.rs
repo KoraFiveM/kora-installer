@@ -140,6 +140,16 @@ mod tests {
         assert_eq!(v["deferred"][0][1], "2 players are online.");
     }
 
+    /// The pickers show a sentence under each name; the catalog file has it, so the API must send it
+    /// (the panel's TypeScript always declared `description`, the answer used to leave it out).
+    #[test]
+    fn catalog_carries_each_resources_description() {
+        let c = Catalog::embedded().unwrap();
+        let v = catalog_json(&c, None);
+        let with: Vec<&Value> = v["resources"].as_array().unwrap().iter().filter(|r| r["description"].is_string()).collect();
+        assert!(!with.is_empty(), "the bundled catalog has descriptions, none came through");
+    }
+
     #[test]
     fn catalog_uses_snake_case_and_hides_internal() {
         let c = Catalog::embedded().unwrap();

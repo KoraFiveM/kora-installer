@@ -5,6 +5,13 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **The panel's TypeScript API types and its client are generated from the Rust side.** `crates/kora-core/src/api/` now describes every operation once (method, path, parameters, request, response, the events and result of a job, and the error shape with its `Action` union); `web/src/api/generated/` is produced from it (a test and a CI step fail when it is out of date), `client.ts` calls operations by name, and the mock backend is type-checked against the same types. How to add an operation is in `CONTRIBUTING.md`. Nothing on the wire changed except the two fixes below.
+
+### Fixed
+- The resource pickers show the one-line description of each resource again: the catalog file has it, but the panel's answer left it out.
+- A resumed install keeps its txAdmin admin (the Cfx.re identifier is part of the saved answers again; it is not a secret).
+
 ## [0.7.0] - 2026-11-17
 
 This is 0.7.0, "panel first": the web panel is the only interface, nothing needed to get started asks for administrator rights, and failures say what to do and offer the button to do it.

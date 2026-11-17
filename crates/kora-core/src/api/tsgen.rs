@@ -362,3 +362,39 @@ pub fn generate() -> Generated {
     routes_ts.push_str("]\n");
     Generated { types_ts, routes_ts, untyped }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two runs give the same text: CI compares the checked-in files with a fresh run.
+    #[test]
+    fn generation_is_deterministic_and_marked_generated() {
+        let (a, b) = (generate(), generate());
+        assert_eq!((&a.types_ts, &a.routes_ts), (&b.types_ts, &b.routes_ts));
+        assert!(a.types_ts.starts_with("// GENERATED") && a.routes_ts.starts_with("// GENERATED"));
+        assert!(!a.types_ts.contains('\r') && !a.routes_ts.contains('\r'));
+    }
+
+    /// Every operation has a line in the route map, in the order of `Op::ALL`.
+    #[test]
+    fn the_route_map_lists_every_operation() {
+        let g = generate();
+        for op in Op::ALL {
+            assert!(g.routes_ts.contains(&format!("  {}: {{ method: '{}'", op.name(), op.route().0.as_str())), "{} missing from the route map", op.name());
+        }
+    }
+
+    /// The honest gap list: nothing is silently `any`. This is the number to drive down (it is 0 today).
+    #[test]
+    fn nothing_is_left_untyped() {
+        let g = generate();
+        assert!(g.untyped.is_empty(), "operations without a full description: {:?}", g.untyped);
+    }
+
+    #[test]
+    fn path_params_are_read_from_the_route() {
+        assert_eq!(path_params("/servers/{s}/logs/{file}"), ["s", "file"]);
+        assert!(path_params("/meta").is_empty());
+    }
+}

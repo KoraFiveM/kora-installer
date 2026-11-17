@@ -831,6 +831,20 @@ mod tests {
         }
     }
 
+    /// The wizard puts the saved answers back and reads `cfx_identifier` from them (the panel's TypeScript
+    /// always declared it); it is an account name, not a secret, so a resumed install keeps its txAdmin admin.
+    #[test]
+    fn saved_answers_keep_the_cfx_identifier_but_never_a_secret() {
+        let mut w = wire("Alpha");
+        w.cfx_identifier = Some("fivem:4465268".into());
+        w.license_key = Some("cfxk_SECRETKEYSECRETKEY".into());
+        w.db_admin = Some(WireDbAdmin { host: "".into(), port: None, user: "root".into(), password: Some("hunter2".into()) });
+        let v = request_json(&build_request(&w).unwrap());
+        assert_eq!(v["cfx_identifier"], "fivem:4465268");
+        let text = v.to_string();
+        assert!(!text.contains("SECRET") && !text.contains("hunter2"), "{text}");
+    }
+
     #[test]
     fn the_command_never_carries_secrets() {
         let mut w = wire("Alpha");
