@@ -61,3 +61,53 @@ fn show(server: &str, resource: &str) -> i32 {
     }
     0
 }
+
+/// One line for a resource that is not on its normal version (the same words in `kora status`, `kora branch list` and
+/// `kora resource show`): "! kora_hud: pull request #12 (not its normal version)". `None` for a normal one.
+pub(crate) fn off_normal_line(r: &br::ResourceBranch) -> Option<String> {
+    matches!(r.state, State::Branch | State::Pr | State::Detached).then(|| format!("! {}: {} (not on its normal version, {})", r.id, r.label, r.default_branch))
+}
+
+/// What needs a person's eye on one server: resources not on their normal version and resources waiting for a restart.
+pub(crate) fn attention_lines(server: &str, running: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(Reply::Overview(rows)) = br::run_on(server, &Request::Overview, &mut |_, _, _| {}) {
+        out.extend(rows.iter().filter_map(off_normal_line));
+    }
+    if let Ok(sf) = kora_core::update::manual::load_server(server) {
+        for id in kora_core::resourcestate::pending(&sf.dir, running) {
+            out.push(format!("! {id}: {}", kora_core::resourcestate::NOTICE));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(state: State, label: &str) -> br::ResourceBranch {
+        br::ResourceBranch {
+            id: "kora_hud".into(),
+            folder: "kora_hud".into(),
+            state,
+            branch: None,
+            pr: None,
+            default_branch: "dev".into(),
+            label: label.into(),
+            changed_count: 0,
+            stashes: 0,
+            note: None,
+            problem: None,
+        }
+    }
+
+    #[test]
+    fn only_a_resource_off_its_normal_version_is_marked() {
+        assert_eq!(off_normal_line(&row(State::Pr, "pull request #12")).as_deref(), Some("! kora_hud: pull request #12 (not on its normal version, dev)"));
+        assert!(off_normal_line(&row(State::Branch, "branch fix")).is_some());
+        for s in [State::Default, State::Pinned, State::Unavailable] {
+            assert!(off_normal_line(&row(s, "x")).is_none());
+        }
+    }
+}

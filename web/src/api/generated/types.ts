@@ -2143,10 +2143,22 @@ export type SessionRequest = {
   code?: string,
 };
 
+export type SnapshotBranch = {
+  id: string,
+  /**
+   * The branch it was on when the snapshot was taken (not its normal one).
+   */
+  branch: string,
+};
+
 export type SnapshotInfo = {
   id: string,
   created_unix: number,
   resources: Array<string>,
+  /**
+   * Resources that were not on their normal branch when the snapshot was taken: a rollback puts them back on it.
+   */
+  on_other_branch: Array<SnapshotBranch>,
 };
 
 /**

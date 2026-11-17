@@ -32,6 +32,11 @@ pub(crate) fn status() -> i32 {
         let ports = format!("game {}, txAdmin {}", if st.game_listening { "listening" } else { "closed" }, if st.txadmin_up { "up" } else { "down" });
         let mode = if s.mode == Mode::Production { "prod" } else { "dev" };
         println!("{:<20} {:<5} {:<7} {:<7} {:<9} {:<26} {}", s.name, mode, s.ports.game, s.ports.txadmin, state, ports, s.dir.display());
+        if s.dir.is_dir() {
+            for l in crate::cmd::resource::attention_lines(&s.name, st.running) {
+                println!("    {l}");
+            }
+        }
     }
     0
 }

@@ -11,7 +11,8 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Input, Select } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { branchBadge, useRefreshBranches } from './useBranches'
+import { useRefreshBranches } from './useBranches'
+import { VersionBadge } from './VersionBadge'
 import { ChangesDialog } from './ChangesDialog'
 
 /** After files changed: say that the running server still has the old version, and offer the existing restart. */
@@ -81,7 +82,6 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
     const branch = rest.join(':')
     send({ action: 'branch', branch, ...(where === 'origin' || where === 'upstream' ? { remote: where } : {}) })
   }
-  const badge = branchBadge(c?.resource ?? resource)
   const working = go.isPending || restore.isPending
 
   return (
@@ -90,7 +90,7 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
         <div className="space-y-5">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span>Right now it is on</span>
-            <Badge tone={badge.tone}>{badge.text}</Badge>
+            <VersionBadge branch={c?.resource ?? resource} />
             {(c?.resource ?? resource).changed_count > 0 && <Badge tone="amber">{(c?.resource ?? resource).changed_count} changed file{(c?.resource ?? resource).changed_count === 1 ? '' : 's'} of yours</Badge>}
           </div>
           {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}

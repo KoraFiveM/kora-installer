@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { ResourceBranch } from '@/api/types'
+import { offNormalText } from '@/components/NotNormalBadge'
 
 /** Where each resource of a Development server is. Local only, so it is cheap to keep fresh. */
 export function useBranches(server: string, enabled = true) {
@@ -23,9 +24,9 @@ export function useRefreshBranches(server: string) {
 export function branchBadge(r: ResourceBranch): { text: string; tone: 'plain' | 'info' | 'amber' | 'orange' } {
   switch (r.state) {
     case 'default': return { text: `Normal version (${r.default_branch})`, tone: 'plain' }
-    case 'pr': return { text: `Trying pull request #${r.pr}`, tone: 'info' }
-    case 'branch': return { text: `Branch ${r.branch}`, tone: 'info' }
-    case 'detached': return { text: 'A single commit', tone: 'amber' }
+    case 'pr':
+    case 'branch':
+    case 'detached': return { text: offNormalText(r), tone: 'amber' }
     case 'pinned': return { text: 'Fixed version', tone: 'plain' }
     default: return { text: 'Not available', tone: 'orange' }
   }

@@ -19,7 +19,8 @@ import { Field } from '@/components/Field'
 import { ResourceProgress } from '@/components/JobProgress'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { STATUS_INFO, UpdatesPanel } from './UpdatesPanel'
-import { branchBadge, useBranches } from './branches/useBranches'
+import { useBranches } from './branches/useBranches'
+import { VersionBadge } from './branches/VersionBadge'
 import { useUpdates, type Updates } from './useUpdates'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
@@ -155,7 +156,7 @@ function InstalledResource({ id, serverName, updates: u, branch, noCheck, noCont
     <li className="py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Link className="min-w-0 flex-1 break-all font-mono text-sm underline-offset-2 hover:underline" to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} aria-label={`Open the page of ${id}`}>{id}</Link>
-        {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <Badge tone={branchBadge(branch).tone} title="Change it in the GitHub tab">{branchBadge(branch).text}</Badge>}
+        {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <VersionBadge branch={branch} to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} />}
         {checking ? <span className="text-xs text-muted-foreground" role="status">Checking...</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
         <div className="flex items-center gap-1">
           <Button size="icon" variant="ghost" className="size-8" disabled={u.busy || noCheck !== null} aria-busy={checking} aria-label={`Check ${id} for updates`} title={noCheck ?? 'Check for updates'} onClick={() => void u.checkOne(id)}>

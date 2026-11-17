@@ -239,7 +239,7 @@ fn apply(f: &FakeBackend) {
 }
 
 fn snapshots(f: &FakeBackend) {
-    f.state().snapshots = vec![kora_core::update::manual::SnapshotInfo { id: "snap1".into(), created_unix: 1_700_000_000, resources: vec!["kora_hud".into()] }];
+    f.state().snapshots = vec![kora_core::update::manual::SnapshotInfo { id: "snap1".into(), created_unix: 1_700_000_000, resources: vec!["kora_hud".into()], ..Default::default() }];
 }
 
 fn catalog(f: &FakeBackend) {

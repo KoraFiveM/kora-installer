@@ -106,10 +106,10 @@ export const INSTALLED: Record<string, string[]> = {
 
 export function seedSnapshots(): Record<string, SnapshotInfo[]> {
   return {
-    'kora-live': [{ id: 'snap-20260301-0412', created_unix: now - 9 * DAY, resources: ['kora_core', 'kora_jobs'] }],
+    'kora-live': [{ id: 'snap-20260301-0412', created_unix: now - 9 * DAY, resources: ['kora_core', 'kora_jobs'], on_other_branch: [] }],
     'kora-dev': [
-      { id: 'snap-20260310-0400', created_unix: now - 2 * DAY, resources: ['kora_inventory'] },
-      { id: 'snap-20260308-0400', created_unix: now - 4 * DAY, resources: ['kora_core', 'kora_phone'] },
+      { id: 'snap-20260310-0400', created_unix: now - 2 * DAY, resources: ['kora_inventory'], on_other_branch: [] },
+      { id: 'snap-20260308-0400', created_unix: now - 4 * DAY, resources: ['kora_core', 'kora_phone'], on_other_branch: [{ id: 'kora_phone', branch: 'fix-contacts' }] },
     ],
     'kora-old': [],
   }

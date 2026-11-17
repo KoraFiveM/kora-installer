@@ -125,7 +125,9 @@ fn show_row(r: &ResourceBranch) {
         (c, s) => format!("  ({c} changed file(s), {s} set(s) kept aside)"),
     };
     let note = r.note.as_deref().filter(|_| matches!(r.state, State::Pinned | State::Unavailable)).map(|n| format!(": {n}")).unwrap_or_default();
-    println!("{:<28} {}{note}{extra}", r.id, r.label);
+    // Not on the normal version: marked, in the same words as `kora status` and the panel.
+    let mark = if crate::cmd::resource::off_normal_line(r).is_some() { "!" } else { " " };
+    println!("{mark} {:<28} {}{note}{extra}", r.id, r.label);
 }
 
 fn print_switched(r: &br::SwitchResult) -> i32 {

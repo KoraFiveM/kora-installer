@@ -601,7 +601,7 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
     await sleep(1000)
     emit({ type: 'health', message: 'Healthy' })
     emit({ type: 'done' })
-    ;(snapshots[s.name] ??= []).unshift({ id: snap, created_unix: Math.floor(Date.now() / 1000), resources: chosen.map((c) => c.id) })
+    ;(snapshots[s.name] ??= []).unshift({ id: snap, created_unix: Math.floor(Date.now() / 1000), resources: chosen.map((c) => c.id), on_other_branch: [] })
     const report: T.UpdateReport = {
       server: s.name,
       updated: chosen.map((c) => ({ id: c.id, from: c.from, to: c.to })),

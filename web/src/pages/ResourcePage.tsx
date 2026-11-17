@@ -6,14 +6,13 @@ import { api, ApiError } from '@/api/client'
 import type { ControlAction } from '@/api/types'
 import { useServerControl } from '@/hooks/useServerControl'
 import { useKept } from '@/lib/kept'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Skeleton } from '@/components/Skeleton'
 import { StatusChip } from '@/components/Status'
 import NotFound from '@/pages/NotFound'
-import { branchBadge } from './server/branches/useBranches'
+import { VersionBadge } from './server/branches/VersionBadge'
 import { useUpdates } from './server/useUpdates'
 import { RestartNotice } from './server/resource/RestartNotice'
 import { controlBlock, ResourceActions } from './server/resource/ResourceActions'
@@ -42,14 +41,13 @@ export default function ResourcePage() {
   if (q.error instanceof ApiError && q.error.status === 404) return <NotFound />
   if (q.isError || !q.data) return <ErrorNotice error={q.error} onRetry={() => void q.refetch()} />
   const page = q.data
-  const badge = page.branch.state === 'pinned' || page.branch.state === 'unavailable' ? null : branchBadge(page.branch)
   const block = controlBlock(page, noOperator)
   return (
     <div className="space-y-5">
       <Link to={`/servers/${encodeURIComponent(name)}?tab=resources`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> Resources of {name}</Link>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="break-all font-heading text-2xl font-bold">{page.id}</h1>
-        {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
+        {page.branch.state !== 'pinned' && <VersionBadge branch={page.branch} />}
         <StatusChip status={page.server.running ? 'running' : 'stopped'} pending={ctl.pending} />
       </div>
       <p className="text-sm text-muted-foreground">

@@ -15,6 +15,7 @@ import { CopyConnectButton, OpenFolderButton, TxAdminButton } from '@/components
 import { useServerControl } from '@/hooks/useServerControl'
 import { usePanelAlerts } from '@/hooks/usePanelAlerts'
 import { Badge } from '@/components/ui/badge'
+import { OffNormalSummary } from '@/components/OffNormalSummary'
 import { useInstallBlock } from './install/access'
 import { TidyUpBanner } from '@/components/Shortcuts'
 
@@ -28,6 +29,7 @@ function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
       <td className="px-4 py-3">
         <Link to={`/servers/${encodeURIComponent(s.name)}`} className="font-medium hover:underline">{s.name}</Link>
         {alerts > 0 && <Link to={`/servers/${encodeURIComponent(s.name)}?tab=monitoring`} className="ml-2 align-middle"><Badge tone="danger">{alerts === 1 ? '1 alert' : `${alerts} alerts`}</Badge></Link>}
+        <div className="mt-1"><OffNormalSummary server={s} /></div>
         {!s.managed && <div className="text-xs text-muted-foreground">Added from an existing folder</div>}
       </td>
       <td className="px-4 py-3"><ModeChip mode={s.mode} /></td>

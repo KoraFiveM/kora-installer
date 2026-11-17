@@ -150,10 +150,21 @@ pub enum UpdateEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SnapshotBranch {
+    pub id: String,
+    /// The branch it was on when the snapshot was taken (not its normal one).
+    pub branch: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SnapshotInfo {
     pub id: String,
     pub created_unix: u64,
     pub resources: Vec<String>,
+    /// Resources that were not on their normal branch when the snapshot was taken: a rollback puts them back on it.
+    #[serde(default)]
+    pub on_other_branch: Vec<SnapshotBranch>,
 }
 
 fn err<T>(m: impl Into<String>) -> Result<T> {
@@ -817,7 +828,21 @@ fn record_commits(server: &ServerRecord, moved: &[(String, String)]) -> std::res
 
 /// Saved snapshots (manual and automatic updates), newest first.
 pub fn snapshots(server: &ServerRecord) -> Vec<SnapshotInfo> {
-    super::list_snapshots(&server.dir).into_iter().map(|(id, s)| SnapshotInfo { id, created_unix: s.created_unix, resources: s.entries.into_iter().map(|e| e.id).collect() }).collect()
+    super::list_snapshots(&server.dir)
+        .into_iter()
+        .map(|(id, s)| {
+            let normal = |rid: &str| server.resources.iter().find(|r| r.id == rid).map(|r| r.branch.clone());
+            let on_other_branch = s
+                .entries
+                .iter()
+                .filter_map(|e| {
+                    let b = e.branch.as_deref().filter(|b| *b != "HEAD")?;
+                    (normal(&e.id).as_deref() != Some(b)).then(|| SnapshotBranch { id: e.id.clone(), branch: b.to_string() })
+                })
+                .collect();
+            SnapshotInfo { id, created_unix: s.created_unix, resources: s.entries.into_iter().map(|e| e.id).collect(), on_other_branch }
+        })
+        .collect()
 }
 
 /// Put every resource in the snapshot back on its previous commit, and restart if the server runs.

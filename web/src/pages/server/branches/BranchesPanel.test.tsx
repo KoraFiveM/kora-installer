@@ -37,7 +37,7 @@ describe('BranchesPanel', () => {
     await loaded()
     const list = screen.getByRole('list', { name: 'Resources and their branches' })
     expect(within(list).getAllByText('Normal version (dev)').length).toBeGreaterThan(1)
-    expect(within(row('kora_phone')).getByText('Branch fix-contacts')).toBeInTheDocument()
+    expect(within(row('kora_phone')).getByText('On branch fix-contacts')).toBeInTheDocument()
     expect(within(row('kora_jobs')).getByText('2 changed files')).toBeInTheDocument()
     expect(screen.getByText(/1 resource is not on the normal version/)).toBeInTheDocument()
     expect(screen.getByText(/Updates leave it alone/)).toBeInTheDocument()
@@ -55,7 +55,7 @@ describe('BranchesPanel', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Switch' }))
     expect(await within(dialog).findByText(/Now on branch feature\/new-ui/)).toBeInTheDocument()
     expect(within(dialog).getByText(/The server is not running, so it will use the new version when it starts/)).toBeInTheDocument()
-    await waitFor(() => expect(within(row('kora_core')).getByText('Branch feature/new-ui')).toBeInTheDocument())
+    await waitFor(() => expect(within(row('kora_core')).getByText('On branch feature/new-ui')).toBeInTheDocument())
     // Back to the normal version.
     await user.click(within(dialog).getByRole('button', { name: 'Back to the normal version' }))
     expect(await within(dialog).findByText(/Now on the normal version \(dev\)/)).toBeInTheDocument()
@@ -194,7 +194,7 @@ describe('the branch where resources are listed', () => {
   it('shows each resource\'s branch on the Resources tab of a Development server', async () => {
     const { ResourcesTab } = await import('../ResourcesTab')
     renderApp(<ResourcesTab server={dev} />)
-    const badge = await screen.findByText('Branch fix-contacts')
+    const badge = await screen.findByText('On branch fix-contacts')
     // The badge sits on the same row as the resource's name.
     expect(badge.closest('li')).toHaveTextContent('kora_phone')
     expect(screen.getAllByText('Normal version (dev)').length).toBeGreaterThanOrEqual(3)
