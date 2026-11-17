@@ -97,13 +97,13 @@ fn session_allowed(st: &AppState, gs: &GateSession) -> bool {
 }
 
 /// The peer rules the panel's guard applies to remote callers.
-fn peer_allowed(st: &AppState, peer: Option<SocketAddr>) -> Result<bool, Response> {
+fn peer_allowed(st: &AppState, peer: Option<SocketAddr>) -> Result<bool, Box<Response>> {
     let remote = peer.is_some_and(|a| remote::is_remote_peer(a.ip()));
     if remote && !st.remote.enabled() {
-        return Err(deny(StatusCode::FORBIDDEN, "Remote access is off", "Remote access is turned off on the computer that runs Kora."));
+        return Err(Box::new(deny(StatusCode::FORBIDDEN, "Remote access is off", "Remote access is turned off on the computer that runs Kora.")));
     }
     if remote && peer.is_some_and(|p| st.remote.is_self_ip(p.ip())) {
-        return Err(deny(StatusCode::FORBIDDEN, "Not from this computer's own network address", security::SELF_ADDRESS_REFUSED));
+        return Err(Box::new(deny(StatusCode::FORBIDDEN, "Not from this computer's own network address", security::SELF_ADDRESS_REFUSED)));
     }
     Ok(remote)
 }
@@ -125,7 +125,7 @@ async fn handle(State(ctx): State<Ctx>, peer: Option<ConnectInfo<SocketAddr>>, r
     }
     let remote = match peer_allowed(st, peer.map(|p| p.0)) {
         Ok(r) => r,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     if req.uri().path() == "/__kora/enter" {
         return enter(&ctx, req, remote).await;

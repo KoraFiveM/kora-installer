@@ -29,6 +29,11 @@ $pidNow = [int]((Get-Content "$srv\.kora\server.pid" -Raw).Trim())
 $p = Get-Process -Id $pidNow -ErrorAction SilentlyContinue
 Assert-That ($null -ne $p -and $p.ProcessName -match 'FXServer') "FXServer.exe (pid $pidNow) survives the installer exiting"
 Assert-That (Test-TxAdmin) 'txAdmin still answers on 127.0.0.1:41120 after the installer exited'
+# ... and through the panel (the txAdmin gateway), for the server the installer started without a service.
+$gw = Test-TxAdminThroughPanel $kora $name 41120
+Write-Host "txAdmin gateway: $($gw | ConvertTo-Json -Compress)"
+Assert-That ($gw.Enter -eq 303 -and $gw.Via -eq $gw.Direct) "txAdmin answers through the panel like it does directly (HTTP $($gw.Direct))"
+Assert-That ($gw.Anonymous -eq 401) 'the gateway answers nothing without the panel sign-in'
 Assert-That ((Get-Item "$srv\.kora\server.log").Length -gt 0) 'FXServer output went to .kora\server.log'
 
 $st = Invoke-Native $kora @('status'); Show 'kora status' $st
