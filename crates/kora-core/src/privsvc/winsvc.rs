@@ -450,7 +450,34 @@ fn serve_connection(svc: Arc<WinSvc>, pipe: Owned) {
 }
 
 /// Serve until `stop`. Returns an error when the pipe cannot be made first (a squatter).
+///
+/// The instance that is waiting for the next client keeps the access list it was made with, so an account that was allowed
+/// (or denied) after it was made would still meet the old list: the installer enrols the people right after it starts the
+/// service, so the first person to use Kora was refused until someone else had connected. A watcher therefore notices when
+/// the list the pipe should have changes and connects once itself, which uses up the stale instance; the next one is made
+/// from the new list.
 pub fn serve_pipe(svc: Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
+    let done = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let mut made_from = policy::pipe_sddl(&svc.policy());
+            while !stop.load(Ordering::SeqCst) && !done.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(500));
+                let now = policy::pipe_sddl(&svc.policy());
+                if policy::pipe_list_changed(&made_from, &now) {
+                    made_from = now;
+                    wake_listener();
+                }
+            }
+        });
+        let r = accept_loop(&svc, stop);
+        done.store(true, Ordering::SeqCst); // an error ends the watcher too
+        r
+    })
+}
+
+fn accept_loop(svc: &Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
+    let svc = Arc::clone(svc);
     let active = Arc::new(AtomicUsize::new(0));
     let mut inst = make_instance(&svc, true).map_err(|e| format!("cannot create {} (is another program using the name?): {e}", paths::WINDOWS_PIPE))?;
     while !stop.load(Ordering::SeqCst) {

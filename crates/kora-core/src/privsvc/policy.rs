@@ -146,6 +146,12 @@ pub fn pipe_sddl(policy: &Result<Policy, String>) -> String {
     s
 }
 
+/// Does a pipe instance made from the list `made_from` need to be replaced because the list is now `now`?
+/// (Both are [`pipe_sddl`] texts.)
+pub fn pipe_list_changed(made_from: &str, now: &str) -> bool {
+    made_from != now
+}
+
 /// Who is at the other end of a connection, as the OS says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
@@ -254,6 +260,22 @@ mod tests {
         assert!(Policy::parse(&dup).is_err());
         let lower = format!(r#"{{"version":1,"accounts":[{{"id":"{}"}}]}}"#, ME.to_lowercase());
         assert!(Policy::parse(&lower).is_err(), "only the form Kora writes");
+    }
+
+    #[test]
+    fn a_waiting_pipe_instance_is_replaced_when_the_list_changes() {
+        // the service starts before the installer has written the list, then an account is allowed, then denied
+        let at_start = pipe_sddl(&Err("missing".into()));
+        let mut p = Policy::new("0.8.0");
+        let after_file = pipe_sddl(&Ok(p.clone()));
+        assert!(!pipe_list_changed(&at_start, &at_start));
+        assert!(!pipe_list_changed(&after_file, &pipe_sddl(&Ok(p.clone()))), "nothing changed: no needless reconnects");
+        p.allow(AccountId::sid(ME).unwrap(), "jo").unwrap();
+        let allowed = pipe_sddl(&Ok(p.clone()));
+        assert!(pipe_list_changed(&after_file, &allowed), "allowed after the instance was made: the instance must be replaced");
+        assert!(allowed.contains(ME));
+        p.deny(&AccountId::sid(ME).unwrap());
+        assert!(pipe_list_changed(&allowed, &pipe_sddl(&Ok(p))), "denied: replaced too");
     }
 
     #[test]
