@@ -920,6 +920,11 @@ route('POST', '/installs', (_m, b) => {
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)
   // A per-user install without the administrator service: no automatic path, so the choices.
+  if (svc() === 'not_allowed' && adminNeeds(r).length > 0 && !r.name.toLowerCase().startsWith('without')) {
+    throw new Fail(403, 'service.not_allowed', "Kora's administrator service is installed, but it is not turned on for your account, so Kora cannot " + adminWhat(r) + '. An administrator can turn it on for you.', ['kora', 'install'], {
+      actions: [{ kind: 'show_command', command: ['kora', 'service', 'allow', 'sam'], elevated: true }, { kind: 'continue_without_admin' }, { kind: 'show_command', command: installCommand(r), elevated: true }],
+    })
+  }
   if (svc() === 'missing' && adminNeeds(r).length > 0 && !r.name.toLowerCase().startsWith('without')) {
     throw new Fail(403, 'needs_elevation', `Kora needs administrator rights to ${adminWhat(r)}, and its administrator service is not installed on this computer. Install it once (one administrator approval) and Kora can do this, and the next time, without asking again. Or run the command yourself as administrator.`, ['kora', 'install'], {
       actions: [{ kind: 'install_admin_service' }, { kind: 'continue_without_admin' }, { kind: 'show_command', command: installCommand(r), elevated: true }],

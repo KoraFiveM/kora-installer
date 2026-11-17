@@ -35,7 +35,8 @@ export function AdminActions({ children }: { children: ReactNode }) {
           }
           alerts.push('success', "Kora's administrator service is installed. Kora can now do this without asking.")
           void qc.invalidateQueries()
-          if (ctx?.retry) await ctx.retry()
+          if (ctx?.afterFix) await ctx.afterFix()
+          else if (ctx?.retry) await ctx.retry()
         } catch (e) {
           alerts.push('warning', toProblem(e)?.message ?? "Kora's administrator service was not installed.")
         }
