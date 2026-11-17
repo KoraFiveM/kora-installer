@@ -13,41 +13,92 @@ export type Untyped = unknown
  * JSON: `{"kind": "<snake_case variant>", ...fields}`. An unknown `kind` reads as
  * [`Action::Unknown`], which front ends do not show.
  */
-
-export type Action = { "kind": "retry" } | { "kind": "retry_step", step: string, } | { "kind": "skip_step", step: string, } | { "kind": "change_answers", section?: string | null, } | { "kind": "sign_in_github", scopes?: Array<string>, } | { "kind": "install_tool", tool: Tool, } | { "kind": "request_admin" } | { "kind": "continue_without_admin" } | { "kind": "show_command", command: Array<string>, elevated?: boolean, } | { "kind": "open_link", url: string, } | { "kind": "open_log", job?: string | null, path?: string | null, } | { "kind": "copy_details" } | { "kind": "start_database" } | { "kind": "unknown" };
+export type Action =
+  | {
+    "kind": "retry"
+  }
+  | {
+    "kind": "retry_step",
+    step: string,
+  }
+  | {
+    "kind": "skip_step",
+    step: string,
+  }
+  | {
+    "kind": "change_answers",
+    section?: string | null,
+  }
+  | {
+    "kind": "sign_in_github",
+    scopes?: Array<string>,
+  }
+  | {
+    "kind": "install_tool",
+    tool: Tool,
+  }
+  | {
+    "kind": "request_admin"
+  }
+  | {
+    "kind": "continue_without_admin"
+  }
+  | {
+    "kind": "show_command",
+    command: Array<string>,
+    elevated?: boolean,
+  }
+  | {
+    "kind": "open_link",
+    url: string,
+  }
+  | {
+    "kind": "open_log",
+    job?: string | null,
+    path?: string | null,
+  }
+  | {
+    "kind": "copy_details"
+  }
+  | {
+    "kind": "start_database"
+  }
+  | {
+    "kind": "unknown"
+  };
 
 /**
  * `202` answer of every job operation.
  */
-
-export type JobStarted = { job: string, };
+export type JobStarted = {
+  job: string,
+};
 
 /**
  * An error a person can act on. See the module documentation.
  *
  * JSON: `{"code", "message", "details"?, "actions": [..]}` (`details` left out when empty).
  */
-
-export type Problem = { 
-/**
- * Stable machine code ([`codes`]).
- */
-code: string, 
-/**
- * What happened, in plain words, for anyone. One or two sentences; no stack traces.
- */
-message: string, 
-/**
- * Technical details (command output, error text) for the "Show details" box.
- */
-details?: string | null, 
-/**
- * What the user can do, best first. Empty: the front end offers its generic choices.
- */
-actions: Array<Action>, };
+export type Problem = {
+  /**
+   * Stable machine code ([`codes`]).
+   */
+  code: string,
+  /**
+   * What happened, in plain words, for anyone. One or two sentences; no stack traces.
+   */
+  message: string,
+  /**
+   * Technical details (command output, error text) for the "Show details" box.
+   */
+  details?: string | null,
+  /**
+   * What the user can do, best first. Empty: the front end offers its generic choices.
+   */
+  actions: Array<Action>,
+};
 
 /**
  * A tool Kora can install or point to. `#[non_exhaustive]`: new tools may be added.
  */
-
 export type Tool = "git" | "gh" | "mariadb" | "unknown";

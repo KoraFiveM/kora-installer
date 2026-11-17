@@ -44,11 +44,11 @@ impl Collector {
             let name = T::ident(&self.cfg);
             let mut decl = String::new();
             if let Some(d) = T::docs() {
-                decl.push_str(&d);
+                decl.push_str(d.trim_end());
                 decl.push('\n');
             }
             decl.push_str("export ");
-            decl.push_str(&T::decl(&self.cfg));
+            decl.push_str(&pretty(&T::decl(&self.cfg)));
             if let Some((other, _)) = self.decls.get(&name) {
                 assert_eq!(*other, TypeId::of::<T>(), "two different Rust types are both called `{name}` in TypeScript: rename one");
             }
@@ -57,6 +57,155 @@ impl Collector {
         T::visit_dependencies(&mut Visit(self));
         T::visit_generics(&mut Visit(self));
     }
+}
+
+/// Lays out ts-rs's one-line declarations: one field per line, one object variant per line.
+/// Only whitespace changes; strings and comments are copied as they are.
+fn pretty(decl: &str) -> String {
+    let chars: Vec<char> = decl.chars().collect();
+    // A union with an object variant goes one variant per line.
+    let break_union = {
+        let (mut depth, mut parts, mut obj) = (0i32, 1, false);
+        let mut i = 0;
+        let mut in_str: Option<char> = None;
+        while i < chars.len() {
+            let ch = chars[i];
+            match in_str {
+                Some(q) => {
+                    if ch == '\\' {
+                        i += 1;
+                    } else if ch == q {
+                        in_str = None;
+                    }
+                }
+                None => match ch {
+                    '"' | '\'' => in_str = Some(ch),
+                    '{' | '<' | '[' | '(' => {
+                        if depth == 0 && ch == '{' {
+                            obj = true;
+                        }
+                        depth += 1;
+                    }
+                    '}' | '>' | ']' | ')' => depth -= 1,
+                    '|' if depth == 0 => parts += 1,
+                    _ => {}
+                },
+            }
+            i += 1;
+        }
+        parts > 1 && obj
+    };
+    let mut out = String::new();
+    let base = usize::from(break_union);
+    let (mut indent, mut brace, mut other) = (base, 0i32, 0i32);
+    let mut i = 0;
+    let mut in_str: Option<char> = None;
+    let nl = |out: &mut String, indent: usize| {
+        while out.ends_with([' ', '\n']) {
+            out.pop();
+        }
+        out.push('\n');
+        out.push_str(&"  ".repeat(indent));
+    };
+    let mut at_line_start = false;
+    while i < chars.len() {
+        let ch = chars[i];
+        if let Some(q) = in_str {
+            out.push(ch);
+            if ch == '\\' && i + 1 < chars.len() {
+                i += 1;
+                out.push(chars[i]);
+            } else if ch == q {
+                in_str = None;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == '/' && chars.get(i + 1) == Some(&'*') {
+            let end = decl[chars[..i].iter().map(|c| c.len_utf8()).sum::<usize>()..].find("*/").map(|e| e + 2).unwrap_or(0);
+            let start_b: usize = chars[..i].iter().map(|c| c.len_utf8()).sum();
+            let comment = &decl[start_b..start_b + end];
+            let n_chars = comment.chars().count();
+            if !at_line_start {
+                nl(&mut out, indent);
+            }
+            for (k, line) in comment.lines().enumerate() {
+                if k > 0 {
+                    out.push('\n');
+                    out.push_str(&"  ".repeat(indent));
+                    out.push(' ');
+                }
+                out.push_str(line.trim());
+            }
+            nl(&mut out, indent);
+            at_line_start = true;
+            i += n_chars;
+            continue;
+        }
+        match ch {
+            '"' | '\'' => {
+                in_str = Some(ch);
+                out.push(ch);
+                at_line_start = false;
+            }
+            '{' => {
+                let rest = chars[i + 1..].iter().collect::<String>();
+                if rest.trim_start().starts_with('}') {
+                    out.push_str("{}");
+                    i += 1 + rest.find('}').unwrap() + 1;
+                    at_line_start = false;
+                    continue;
+                }
+                out.push('{');
+                brace += 1;
+                indent += 1;
+                nl(&mut out, indent);
+                at_line_start = true;
+            }
+            '}' => {
+                brace -= 1;
+                indent = indent.saturating_sub(1).max(base);
+                nl(&mut out, indent);
+                out.push('}');
+                at_line_start = false;
+            }
+            '<' | '[' | '(' => {
+                other += 1;
+                out.push(ch);
+                at_line_start = false;
+            }
+            '>' | ']' | ')' => {
+                other -= 1;
+                out.push(ch);
+                at_line_start = false;
+            }
+            ',' if other == 0 && brace > 0 => {
+                out.push(',');
+                nl(&mut out, indent);
+                at_line_start = true;
+            }
+            '|' if break_union && brace == 0 && other == 0 => {
+                nl(&mut out, 1);
+                out.push_str("| ");
+                at_line_start = false;
+                i += 1;
+                while chars.get(i) == Some(&' ') {
+                    i += 1;
+                }
+                continue;
+            }
+            ' ' | '\n' | '\t' if at_line_start => {}
+            '\n' | '\t' => out.push(' '),
+            _ => {
+                out.push(ch);
+                at_line_start = false;
+            }
+        }
+        i += 1;
+    }
+    // `= \n  | {`: the first variant gets its bar too.
+    let out = if break_union { out.replacen("= {", "=\n  | {", 1) } else { out };
+    out.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")
 }
 
 struct Visit<'a>(&'a mut Collector);
