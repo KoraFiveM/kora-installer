@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kora for Windows (WiX v5, built in CI by packaging/windows/build-msi.ps1).
+
+  Per-machine: the program goes into %ProgramFiles%\Kora (a folder only administrators can change),
+  Kora's administrator service (KoraService, LocalSystem, starts with Windows) is registered, Kora is
+  added to the machine PATH, and a Start Menu shortcut (and an optional Desktop one) opens Kora Panel.
+  Upgrade and uninstall work from Apps & features. One administrator approval at install time.
+
+  Who may use the service: the account that runs the installer, plus any in the public property
+  ALLOWUSERS (a SID, or names separated by spaces). `kora service allow|deny|list` change it later.
+
+  Properties for unattended installs:  msiexec /i kora.msi /qn ALLOWUSERS="S-1-5-21-..."
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Kora" Manufacturer="Kora" Version="$(Version)" UpgradeCode="6B2F7C5A-3E1D-4B8A-9C4F-2A7D5E8B1C30" Scope="perMachine" InstallerVersion="500" Compressed="yes">
+    <SummaryInformation Description="Kora installs and manages FiveM servers" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Kora is already installed. Remove it first (Apps &amp; features) to go back." Schedule="afterInstallExecute" />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ALLOWUSERS" Secure="yes" />
+    <Property Id="ARPCOMMENTS" Value="Kora and its administrator service" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/KoraFiveM/kora-installer" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Kora">
+        <Component Id="Program" Bitness="always64">
+          <File Id="KoraExe" Source="$(KoraExe)" Name="kora.exe" KeyPath="yes" />
+          <ServiceInstall Id="KoraService" Name="KoraService" DisplayName="Kora administrator service" Description="Does a short list of administrator jobs for Kora Panel (servers' services, firewall rules, databases, updates) for the accounts an administrator allowed. Manage it with: kora service list|allow|deny" Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Arguments="service serve" Vital="yes" />
+          <ServiceControl Id="KoraServiceControl" Name="KoraService" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+          <util:ServiceConfig ServiceName="KoraService" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
+          <!-- everything the service made while running goes with a real uninstall (not with an upgrade: this
+               component is the same one in the next version, so Windows Installer keeps it) -->
+          <RemoveFile Id="RmLedger" Name="owners.json" On="uninstall" />
+          <RemoveFile Id="RmLedgerTmp" Name="owners.json.tmp" On="uninstall" />
+        </Component>
+        <Component Id="PathEntry" Guid="9D0F3B1A-7C52-4E6B-8A14-5F2C0D7E9B63" Bitness="always64">
+          <CreateFolder />
+          <Environment Id="KoraPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="yes" Permanent="no" />
+        </Component>
+        <Directory Id="DATADIR" Name="data">
+          <Component Id="DataFolder" Guid="3A7E5C91-2B64-4D08-9E1F-6C8A4B0D2F75" Bitness="always64">
+            <CreateFolder />
+            <RemoveFile Id="RmData" Name="*" On="uninstall" />
+            <RemoveFolder Id="RmDataFolder" On="uninstall" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="C41B8E2D-5F90-4A37-B6D1-0E9A7C3F8A52" Bitness="always64">
+        <Shortcut Id="KoraStartMenu" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
+        <RegistryValue Root="HKLM" Key="Software\Kora" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+    <StandardDirectory Id="CommonDesktopFolder">
+      <Component Id="DesktopShortcut" Guid="E7D2A049-1B38-4C65-8F90-3D5B6A1C9E04" Bitness="always64">
+        <Shortcut Id="KoraDesktop" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
+        <RegistryValue Root="HKLM" Key="Software\Kora" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Allow the installing account (and ALLOWUSERS). Runs as SYSTEM after the files are in place. -->
+    <CustomAction Id="KoraEnrolUsers" FileRef="KoraExe" ExeCommand="service allow [UserSID] &quot;[ALLOWUSERS]&quot;" Execute="deferred" Impersonate="no" Return="ignore" />
+    <!-- Bring earlier layouts over (per-user program, the old machine-wide app, update tasks that still run with highest privileges). -->
+    <CustomAction Id="KoraMigrate" FileRef="KoraExe" ExeCommand="service migrate --quiet" Execute="deferred" Impersonate="no" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="KoraEnrolUsers" Before="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="KoraMigrate" Before="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+    <Feature Id="Main" Title="Kora" Level="1" AllowAbsent="no">
+      <ComponentRef Id="Program" />
+      <ComponentRef Id="PathEntry" />
+      <ComponentRef Id="DataFolder" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <Feature Id="DesktopShortcutFeature" Title="Desktop shortcut" Level="1">
+        <ComponentRef Id="DesktopShortcut" />
+      </Feature>
+    </Feature>
+  </Package>
+</Wix>

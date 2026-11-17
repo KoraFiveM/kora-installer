@@ -92,8 +92,40 @@ jobs:
           name: kora-linux-x86_64.deb
           path: dist/*
 
+  package-windows:
+    # The MSI: the program in Program Files, Kora's administrator service, PATH, shortcuts, Apps & features.
+    # WiX is fetched here as a pinned .NET tool (not vendored).
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kora-windows-x86_64.exe
+          path: in
+      - name: Install the WiX tool
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'wix install failed' }
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.dotnet\tools"
+      - name: Build the MSI
+        run: |
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          $ver = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object { $_.name -eq 'kora-cli' } | ForEach-Object { $_.version }
+          New-Item -ItemType Directory dist | Out-Null
+          ./packaging/windows/build-msi.ps1 -Exe in/kora-windows-x86_64.exe -Version $ver -Out dist/kora-windows-x86_64.msi
+          $h = (Get-FileHash -Algorithm SHA256 dist/kora-windows-x86_64.msi).Hash.ToLowerInvariant()
+          Set-Content -NoNewline -Encoding ascii -Path dist/kora-windows-x86_64.msi.sha256 -Value ("$h  kora-windows-x86_64.msi" + [char]10)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kora-windows-x86_64.msi
+          path: dist/*
+
   verify:
-    needs: [build, package-linux]
+    needs: [build, package-linux, package-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1  (for the install scripts)
@@ -107,12 +139,13 @@ jobs:
         working-directory: dist
         run: |
           ls -l
-          for f in kora-linux-x86_64 kora-linux-x86_64.sha256 kora-linux-x86_64.deb kora-linux-x86_64.deb.sha256 kora-windows-x86_64.exe kora-windows-x86_64.exe.sha256 install.sh install.ps1; do
+          for f in kora-linux-x86_64 kora-linux-x86_64.sha256 kora-linux-x86_64.deb kora-linux-x86_64.deb.sha256 kora-windows-x86_64.exe kora-windows-x86_64.exe.sha256 kora-windows-x86_64.msi kora-windows-x86_64.msi.sha256 install.sh install.ps1; do
             [ -s "$f" ] || { echo "MISSING or empty: $f"; exit 1; }
           done
           sha256sum -c kora-linux-x86_64.sha256
           sha256sum -c kora-linux-x86_64.deb.sha256
           sha256sum -c kora-windows-x86_64.exe.sha256
+          sha256sum -c kora-windows-x86_64.msi.sha256
       - name: Linux binary runs and reports the Cargo version
         run: |
           chmod +x dist/kora-linux-x86_64
@@ -149,6 +182,7 @@ jobs:
             dist/kora-linux-x86_64
             dist/kora-linux-x86_64.deb
             dist/kora-windows-x86_64.exe
+            dist/kora-windows-x86_64.msi
             dist/install.sh
             dist/install.ps1
 
