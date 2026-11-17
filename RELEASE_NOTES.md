@@ -23,7 +23,7 @@ Already have Kora? Run `kora self-update`, or use the install line again.
 - **Quick buttons on every server:** Open txAdmin, Open folder (Copy path when you are not at that computer) and Copy connect address.
 - **Remote access.** Administrators who sign in over Tailscale can now install and manage servers without a switch. For sign-in tokens, installing works by default; deleting servers and similar actions still need `kora panel remote-actions on`.
 
-<!-- windows-admin: to be filled in -->
+- **Windows asks for permission once, and the install carries on.** An install from the panel no longer stops at "run this command as administrator". Windows shows its normal permission prompt once when the install starts, for the service, the firewall and the database. If you say no, or nobody is at the computer, you can ask again, carry on without those parts, or see the command to run. The prompt can appear as a flashing shield in the taskbar.
 
 ### Upgrading from 0.6.x
 Servers you already have are not changed.

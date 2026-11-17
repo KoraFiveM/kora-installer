@@ -8,6 +8,7 @@ import { installKeysMock } from './keys'
 import { installBranchesMock } from './branches'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
+import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
 
 const BASE = '/api/v1'
 
@@ -257,7 +258,7 @@ const SKIPPABLE = new Set(['build.firewall', 'launch'])
  * "fail..." stops at the database the first time (Try this step again then works); "skip..." stops at
  * starting the server, which may be skipped; "github..." stops because GitHub is not signed in.
  */
-const paused = new Map<string, { req: T.InstallRequest; failed: string; attempt: number; done: string[]; skip: Set<string> }>()
+const paused = new Map<string, { req: T.InstallRequest; failed: string; attempt: number; done: string[]; skip: Set<string>; noAdmin?: boolean }>()
 
 interface InstallRun {
   /** How many times this install was tried before. */
@@ -266,11 +267,28 @@ interface InstallRun {
   done: string[]
   /** Steps the user chose to skip. */
   skip: Set<string>
+  /** Windows: "Continue without the administrator parts" was chosen (no prompt any more). */
+  noAdmin?: boolean
 }
 
 async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, jobId: () => string, run: InstallRun = { attempt: 0, done: [], skip: new Set() }): Promise<T.InstallOutcome> {
   const lower = req.name.toLowerCase()
   const failAt = lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
+  // Windows: one permission prompt before the first step (see ./windowsAdmin).
+  if (beh.windows && !run.noAdmin && adminNeeds(req).length > 0) {
+    const title = 'Administrator permission'
+    emit({ step: ADMIN_STEP, title, status: 'running', detail: 'Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on. If you do not see the prompt, look for a flashing shield icon in the taskbar.', percent: 0 } satisfies T.ProgressEvent)
+    await sleep(700)
+    const answer = promptAnswer(req.name, run.attempt)
+    if (answer !== 'yes') {
+      const p = promptProblem(req, answer)
+      emit({ step: ADMIN_STEP, title, status: 'failed', detail: p.message, percent: 0 } satisfies T.ProgressEvent)
+      const id = jobId()
+      paused.set(id, { req, failed: '', attempt: run.attempt + 1, done: run.done, skip: run.skip })
+      throw new Fail(403, p.code ?? 'admin.declined', p.message, undefined, { details: p.details, resume: true, kept: [], actions: [...(p.actions ?? []), { kind: 'change_answers' }, { kind: 'open_log', job: id }] })
+    }
+    emit({ step: ADMIN_STEP, title, status: 'done', detail: 'Permission given: Kora does the administrator steps when the install reaches them', percent: 0 } satisfies T.ProgressEvent)
+  }
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
   if (!req.service) skipped.add('build.service')
@@ -353,11 +371,15 @@ const route = (method: string, pattern: string, h: Handler) => {
   routes.push([method, new RegExp('^' + pattern.replace(/\{(\w+)\}/g, '([^/]+)') + '$'), h])
 }
 const dec = (s: string) => decodeURIComponent(s)
+/** The headers of the request being answered (the mock routes only get the body). */
+let lastHeaders = new Headers()
+/** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
+const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers)
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
 const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
@@ -391,7 +413,9 @@ route('POST', '/session/link', () => {
   linkCodes.add(code)
   return { code, expires_in: 600 }
 })
-route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
+route('GET', '/system', () => (beh.windows
+  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
+  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -793,7 +817,7 @@ const githubStatus = (): T.GithubStatus => {
     : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } }
 }
 route('GET', '/github/status', () => githubStatus())
-installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble })
+installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble, windows: () => beh.windows })
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
     await sleep(beh.trouble ? 3000 : 6000)
@@ -851,6 +875,10 @@ route('POST', '/installs/plan', (_m, b) => {
   if (r.txadmin_public) needs.push('Open the txAdmin port in the firewall')
   if (r.service) needs.push('Install the background service')
   if (r.db === 'install_if_missing') needs.push('Install the database if it is missing')
+  if (beh.windows) {
+    const w = adminNeeds(r)
+    return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: w, notes: [], admin_prompt: w.length > 0 } satisfies T.InstallPlan
+  }
   return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: needs, notes: [] } satisfies T.InstallPlan
 })
 route('POST', '/installs', (_m, b) => {
@@ -861,6 +889,10 @@ route('POST', '/installs', (_m, b) => {
   if (servers.some((s) => s.name === r.name)) throw new Fail(409, 'conflict', `A server called "${r.name}" already exists.`)
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)
+  if (beh.windows && r.name.toLowerCase().startsWith('remote') && adminNeeds(r).length > 0 && !askedAdmin()) {
+    const p = remoteProblem(r)
+    throw new Fail(403, p.code ?? 'admin.remote', p.message, undefined, { actions: p.actions })
+  }
   let id = ''
   const started = startJob('install', null, (emit) => runInstall(r, emit, () => id))
   id = started.job
@@ -877,9 +909,11 @@ route('POST', '/installs/{j}/resume', (m, b) => {
     throw new Fail(409, 'install.cannot_resume', 'This step cannot be skipped: your server needs it. Try it again, or change your answers.', undefined, { actions: [{ kind: 'retry_step', step: p.failed }, { kind: 'change_answers' }] })
   }
   paused.delete(from)
-  const run: InstallRun = { attempt: p.attempt, done: p.done, skip: new Set([...p.skip, ...(skip ? [skip] : [])]) }
+  const noAdmin = b.without_admin === true || !!p.noAdmin
+  const run: InstallRun = { attempt: p.attempt, done: p.done, skip: new Set([...p.skip, ...(skip ? [skip] : [])]), noAdmin }
+  const req = noAdmin ? withoutAdminReq(p.req) : p.req
   let id = ''
-  const started = startJob('install', null, (emit) => runInstall(p.req, emit, () => id, run))
+  const started = startJob('install', null, (emit) => runInstall(req, emit, () => id, run))
   id = started.job
   return started
 })
@@ -983,6 +1017,7 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
     }
     if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
+    lastHeaders = headers
     if (method !== 'GET' && !headers.has('X-Kora')) throw new Fail(403, 'forbidden', 'Missing the X-Kora header.')
     const raw = init?.body
     const body: Body = raw instanceof Blob ? { file: raw, fileName: decodeURIComponent(headers.get('X-File-Name') ?? 'upload.zip') } : raw ? (JSON.parse(String(raw)) as Body) : {}

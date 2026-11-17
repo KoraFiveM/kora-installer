@@ -25,6 +25,29 @@ pub(crate) fn build(ctx: &Arc<Ctx>) -> Vec<Box<dyn Step>> {
         .collect()
 }
 
+/// The elevated part of one step, in the administrator helper's child (see `system_ops`): `ctx`
+/// is an administrator context whose record is a shadow copy, so nothing is written into the
+/// server folder. Returns the step's detail and, for the database steps, what the person's process
+/// must write.
+pub(crate) fn admin_part(ctx: &Arc<Ctx>, undo: bool, step: &str) -> Result<(String, Option<super::system_ops::DbResult>)> {
+    let id: &'static str = match step {
+        "prepare.db" => "prepare.tools",
+        "build.db" => "build.db",
+        "system.firewall" => "system.firewall",
+        "system.service" => "system.service",
+        "system.schedule" => "system.schedule",
+        other => return err(format!("'{other}' is not a step Kora's administrator helper does")),
+    };
+    let st = InstallStep { ctx: ctx.clone(), id, title: "" };
+    match (undo, step) {
+        (true, "build.db") => st.undo_database(),
+        (true, _) => st.undo().map(|d| (d, None)),
+        (false, "prepare.db") => st.prepare_db().map(|_| ("The database server is ready".to_string(), None)),
+        (false, "build.db") => st.database_elevated(),
+        (false, _) => st.exec().map(|d| (d, None)),
+    }
+}
+
 /// Runs before the step engine (the server folder lives in the `kora` account's home, so the account
 /// comes first). Reported as the `prepare.account` step. Idempotent.
 pub(crate) fn prepare_account(ctx: &Ctx, runner: &dyn service::CommandRunner) -> Result<()> {
@@ -598,6 +621,48 @@ fn txadmin_env_text(ctx: &Ctx) -> String {
 // ---------------------------------------------------------------------------------------------
 
 impl InstallStep {
+    /// Not elevated, but an administrator helper is there (the Windows panel's worker).
+    fn helper(&self) -> Option<&super::system_ops::SharedAdmin> {
+        if self.ctx.admin {
+            None
+        } else {
+            self.ctx.hooks.admin.as_ref()
+        }
+    }
+
+    /// Does this install's database work go to the helper (Kora's own MariaDB login)?
+    fn db_helper(&self) -> bool {
+        super::system_ops::db_needs_helper(db::Os::current() == db::Os::Windows, self.ctx.admin, self.ctx.hooks.admin.is_some(), db_override(&self.ctx.req))
+    }
+
+    /// Have the administrator helper do `step` (see `system_ops`): its lines become this step's
+    /// progress, the record it hands back is written here (by the person's own process), and a
+    /// failure there is this step's failure, with the same problem.
+    fn via_helper(&self, undo: bool, step: &str) -> Result<super::system_ops::StepResult> {
+        let ctx = &*self.ctx;
+        let Some(h) = self.helper() else { return err("no administrator helper is available") };
+        let known = (undo && ctx.system_trusted).then(|| (ctx.req.name.clone(), ctx.req.ports.game, ctx.req.ports.txadmin));
+        let args = super::system_ops::step_args(undo, step, &ctx.req.dir, ctx.keep_files, ctx.keep_db, &known);
+        ctx.emit(self.id, StepStatus::Running, "Working with administrator rights", 0.2);
+        let out = h.0.admin_step(&args, &mut |l| ctx.emit(self.id, StepStatus::Running, l.to_string(), 0.5))?;
+        let Some(r) = out.data.and_then(|v| serde_json::from_value::<super::system_ops::StepResult>(v).ok()) else {
+            return err(if out.ok { "Kora's administrator helper did not report what it did." } else { "Kora's administrator helper could not do this step." });
+        };
+        if let Some(c) = &r.created {
+            ctx.update_created(|x| *x = c.clone())?;
+        }
+        for n in &r.notes {
+            ctx.note(n.clone());
+        }
+        if let Some(p) = r.error.clone() {
+            return Err(p.into());
+        }
+        if !out.ok {
+            return err("Kora's administrator helper could not do this step.");
+        }
+        Ok(r)
+    }
+
     fn is_done(&self) -> bool {
         let ctx = &self.ctx;
         match self.id {
@@ -785,6 +850,20 @@ impl InstallStep {
         }
         // Database server.
         if ctx.req.db != DbChoice::Skip {
+            if self.db_helper() {
+                self.via_helper(false, "prepare.db")?;
+            } else {
+                self.prepare_db()?;
+            }
+        }
+        Ok("git, database and ports are ready".into())
+    }
+
+    /// The database server part of `prepare.tools`: install or start it when Kora may, and check
+    /// that Kora can log in as its administrator.
+    fn prepare_db(&self) -> Result<()> {
+        let ctx = &*self.ctx;
+        {
             if db_override(&ctx.req) {
                 check_admin_login(&admin_conn(&ctx.req))?;
             } else {
@@ -805,7 +884,7 @@ impl InstallStep {
                 check_admin_login(&admin_conn(&ctx.req))?;
             }
         }
-        Ok("git, database and ports are ready".into())
+        Ok(())
     }
 
     /// A detected database service that is not running: start it when Kora owns it (Windows), else say how.
@@ -971,7 +1050,70 @@ impl InstallStep {
         Ok(format!("{total} resources ready"))
     }
 
+    /// `build.db` by the administrator helper: it creates the database and the login with Kora's
+    /// own MariaDB admin login (which never leaves it) and hands back the new login, which is
+    /// written here, by the person's own process.
+    fn database_via_helper(&self) -> Result<String> {
+        let ctx = &*self.ctx;
+        let r = self.via_helper(false, "build.db")?;
+        let db = r.db.ok_or_else(|| InstallError("Kora's administrator helper did not hand back the new database login.".into()))?;
+        let state_path = db_state_path(ctx);
+        if db.clear_old_state {
+            let _ = std::fs::remove_file(&state_path);
+        }
+        let (Some(creds), Some(state)) = (db.credentials, db.state) else {
+            return err("Kora's administrator helper did not hand back the new database login.");
+        };
+        io(std::fs::create_dir_all(ctx.meta_dir()), "cannot create state folder")?;
+        state.save(&state_path).map_err(|e| InstallError(e.to_string()))?;
+        let json = serde_json::to_string_pretty(&creds).map_err(|e| InstallError(e.to_string()))?;
+        let path = ctx.req.dir.join("database.json");
+        ctx.update_created(|c| c.files.push("database.json".into()))?;
+        db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, windows_user().as_deref()).map_err(|e| InstallError(e.to_string()))?;
+        ctx.shared.lock().unwrap().db_name = Some(creds.database.clone());
+        Ok(r.detail)
+    }
+
+    /// `build.db` inside the administrator helper's child: the same work as [`Self::database`],
+    /// but nothing is written into the server folder (the state goes to a private temporary file
+    /// and comes back with the login).
+    fn database_elevated(&self) -> Result<(String, Option<super::system_ops::DbResult>)> {
+        let ctx = &*self.ctx;
+        let admin = admin_conn(&ctx.req);
+        let mut res = super::system_ops::DbResult::default();
+        if let Ok(mut old) = ProvisionState::load(&db_state_path(ctx)) {
+            ctx.emit(self.id, StepStatus::Running, "Cleaning up an unfinished earlier attempt", 0.1);
+            db::rollback(&db::SystemRunner, &admin, &mut old).map_err(|e| InstallError(e.to_string()))?;
+            res.clear_old_state = true;
+        }
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let tmp = std::env::temp_dir().join(format!("kora-db-state-{}-{nanos}.json", std::process::id()));
+        ctx.emit(self.id, StepStatus::Running, "Creating database and user", 0.4);
+        let made = db::provision(&db::SystemRunner, &admin, "127.0.0.1", "127.0.0.1", &tmp);
+        let state = ProvisionState::load(&tmp).ok();
+        let _ = std::fs::remove_file(&tmp);
+        let creds = match made {
+            Ok(c) => c,
+            Err(e) => {
+                // Nothing may stay behind that no record names: drop what this attempt made.
+                if let Some(mut st) = state {
+                    let _ = db::rollback(&db::SystemRunner, &admin, &mut st);
+                }
+                return Err(InstallError(e.to_string()));
+            }
+        };
+        ctx.emit(self.id, StepStatus::Running, "Testing the new login", 0.8);
+        verify_login(&admin.client, &creds)?;
+        let detail = format!("Database {} created for user {}", creds.database, creds.user);
+        res.state = state;
+        res.credentials = Some(creds);
+        Ok((detail, Some(res)))
+    }
+
     fn database(&self) -> Result<String> {
+        if self.db_helper() {
+            return self.database_via_helper();
+        }
         let ctx = &*self.ctx;
         let admin = admin_conn(&ctx.req);
         let state_path = db_state_path(ctx);
@@ -1145,6 +1287,9 @@ impl InstallStep {
     }
 
     fn firewall(&self) -> Result<String> {
+        if self.helper().is_some() {
+            return self.via_helper(false, "system.firewall").map(|r| r.detail);
+        }
         let ctx = &*self.ctx;
         let preq = PortRequest { server: slug(&ctx.req.name), game_port: ctx.req.ports.game, txadmin_port: ctx.req.ports.txadmin, expose_txadmin: ctx.req.txadmin_public };
         ctx.note(firewall::router_note(&preq));
@@ -1169,6 +1314,9 @@ impl InstallStep {
     }
 
     fn service(&self) -> Result<String> {
+        if self.helper().is_some() {
+            return self.via_helper(false, "system.service").map(|r| r.detail);
+        }
         let ctx = &*self.ctx;
         let platform = svc_platform();
         let rn = service::SystemRunner;
@@ -1262,6 +1410,12 @@ impl InstallStep {
     /// sign-in works for private forks); configurable later with `kora schedule`.
     fn schedule(&self) -> Result<String> {
         let ctx = &*self.ctx;
+        if self.helper().is_some() {
+            let r = self.via_helper(false, "system.schedule")?;
+            // The helper made the task; the schedule's record is the person's file.
+            service::save_schedule(&ctx.req.dir, &service::ScheduleConfig::default_for_install(), &service::installing_user()).map_err(|e| InstallError(e.to_string()))?;
+            return Ok(r.detail);
+        }
         let created = ctx.load_created();
         // Only a label in the unit (the update job itself runs as root); never the recorded name.
         let user = service::account::account_name(&slug(&ctx.req.name));
@@ -1285,7 +1439,10 @@ impl InstallStep {
             }
         })?;
         service::apply_plan(&plan, &service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
-        service::save_schedule(&ctx.req.dir, &cfg, &who).map_err(|e| InstallError(e.to_string()))?;
+        // In the administrator helper's child the person's own process writes this file.
+        if ctx.shadow.is_none() {
+            service::save_schedule(&ctx.req.dir, &cfg, &who).map_err(|e| InstallError(e.to_string()))?;
+        }
         Ok(format!("Auto-update scheduled: {} (change it with `kora schedule set {}`)", service::describe_for(&cfg, &who), server.name))
     }
 
@@ -1364,6 +1521,25 @@ impl InstallStep {
 
     // ---- rollback -------------------------------------------------------------------------
 
+    /// Undo `build.db` inside the administrator helper's child: drop the database and its login
+    /// with Kora's own admin login. The state file and the login file are updated by the person's
+    /// own process from what this hands back.
+    fn undo_database(&self) -> Result<(String, Option<super::system_ops::DbResult>)> {
+        let ctx = &*self.ctx;
+        if ctx.keep_db {
+            return Ok(("Database kept".into(), None));
+        }
+        let Ok(mut st) = ProvisionState::load(&db_state_path(ctx)) else { return Ok(("No database to remove".into(), None)) };
+        let (dbn, usr) = (st.database.clone(), st.user.clone());
+        if let Some(other) = db_used_elsewhere(&Registry::load().unwrap_or_default(), &st, &ctx.req.dir) {
+            ctx.note(format!("Database '{dbn}' / user '{usr}' were kept: the server '{other}' uses them too (this folder's records name them)."));
+            return Ok(("Database kept".into(), None));
+        }
+        let admin = admin_conn(&ctx.req);
+        db::rollback(&db::SystemRunner, &admin, &mut st).map_err(|e| InstallError(format!("could not remove database '{dbn}' / user '{usr}': {e}")))?;
+        Ok((format!("Dropped database {dbn} and user {usr}"), Some(super::system_ops::DbResult { state: Some(st), remove_secret_file: true, ..Default::default() })))
+    }
+
     fn undo(&self) -> Result<String> {
         let ctx = &*self.ctx;
         let created = ctx.load_created();
@@ -1383,6 +1559,29 @@ impl InstallStep {
                     ctx.req.dir.display()
                 ));
                 return Ok("Left alone (not in the server list; see notes)".into());
+            }
+        }
+        // Not elevated, with the administrator helper: it removes the system-wide things.
+        if self.helper().is_some() {
+            let any = match self.id {
+                "system.firewall" => created.firewall,
+                "system.service" => created.service_unit.is_some() || created.service_account_created || created.binary.is_some(),
+                "system.schedule" => created.update_timer,
+                "build.db" => !ctx.keep_db && self.db_helper() && db_state_path(ctx).is_file(),
+                _ => false,
+            };
+            if any && self.id == "build.db" {
+                let r = self.via_helper(true, "build.db")?;
+                if let Some(st) = r.db.as_ref().and_then(|d| d.state.as_ref()) {
+                    st.save(&db_state_path(ctx)).map_err(|e| InstallError(e.to_string()))?;
+                }
+                if r.db.as_ref().is_some_and(|d| d.remove_secret_file) {
+                    let _ = std::fs::remove_file(ctx.req.dir.join("database.json"));
+                }
+                return Ok(r.detail);
+            }
+            if any {
+                return self.via_helper(true, self.id).map(|r| r.detail);
             }
         }
         match self.id {

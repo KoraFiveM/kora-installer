@@ -23,6 +23,7 @@ pub mod registry;
 pub mod saved;
 mod steps;
 pub mod system;
+pub mod system_ops;
 pub mod types;
 pub mod uninstall;
 pub mod windows_db;
@@ -98,6 +99,9 @@ pub struct Hooks {
     /// `--fix-permissions`: when the service account cannot get into the server folder because a
     /// parent folder is private, `chmod o+x` exactly those folders instead of stopping.
     pub fix_permissions: bool,
+    /// Not running as administrator, but these steps may be done by an elevated helper (the
+    /// panel's Windows worker, see [`system_ops`]). `None`: they are skipped with a note, as before.
+    pub admin: Option<system_ops::SharedAdmin>,
 }
 
 /// A shareable [`crate::space::DiskInfo`] (printable so `Hooks` stays `Debug`).
@@ -119,6 +123,7 @@ impl Hooks {
             assume_admin: None,
             disk: None,
             fix_permissions: false,
+            admin: None,
         }
     }
 
@@ -376,6 +381,10 @@ pub(crate) struct Ctx {
     pub shared: Mutex<Shared>,
     manifest_lock: Mutex<()>,
     emitted: Mutex<HashSet<String>>,
+    /// In the elevated helper's child (`kora admin-step`): the server folder's record lives here
+    /// instead of on disk, and is handed back to the person's own process, which writes it (so
+    /// every file in the server folder stays theirs). `None`: the normal, on-disk record.
+    pub shadow: Option<Mutex<Created>>,
 }
 
 impl Ctx {
@@ -416,6 +425,9 @@ impl Ctx {
     }
 
     pub fn load_created(&self) -> Created {
+        if let Some(s) = &self.shadow {
+            return s.lock().unwrap().clone();
+        }
         std::fs::read(self.meta_dir().join("created.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
@@ -424,6 +436,10 @@ impl Ctx {
 
     /// Read-modify-write the created manifest (thread safe).
     pub fn update_created(&self, f: impl FnOnce(&mut Created)) -> Result<()> {
+        if let Some(s) = &self.shadow {
+            f(&mut s.lock().unwrap());
+            return Ok(());
+        }
         let _g = self.manifest_lock.lock().unwrap();
         let mut c = self.load_created();
         f(&mut c);
@@ -471,6 +487,7 @@ fn new_ctx_trusted(req: &InstallRequest, hooks: &Hooks, admin: bool, tx: Sender<
         shared: Mutex::new(Shared::default()),
         manifest_lock: Mutex::new(()),
         emitted: Mutex::new(HashSet::new()),
+        shadow: None,
     })
 }
 
@@ -805,6 +822,12 @@ pub fn rollback_with(dir: &Path, opts: &RollbackOptions, sink: &mut dyn Progress
 fn registered(dir: &Path) -> Option<(String, registry::PortsRecord)> {
     let reg = Registry::load().ok()?;
     reg.servers.iter().find(|s| registry::same_path(&s.dir, dir)).map(|s| (s.name.clone(), s.ports))
+}
+
+/// [`rollback_with_db_password`] with an administrator helper for the system-wide parts (the Windows
+/// panel's worker, see [`system_ops`]).
+pub fn rollback_with_admin(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<&str>, admin: Option<system_ops::SharedAdmin>, sink: &mut dyn ProgressSink) -> Result<Vec<String>> {
+    rollback_inner(dir, opts, db_admin_password, sink, &Hooks { admin, ..Hooks::from_env() })
 }
 
 fn rollback_inner(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<&str>, sink: &mut dyn ProgressSink, hooks: &Hooks) -> Result<Vec<String>> {

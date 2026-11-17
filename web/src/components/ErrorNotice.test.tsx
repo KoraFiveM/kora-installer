@@ -59,7 +59,7 @@ describe('ErrorNotice with a Problem', () => {
     // Only actions with a handler are buttons ("install the GitHub CLI" and "change answers" have none here).
     expect(within(alert).getAllByRole('button').map((b) => b.textContent)).toEqual(['Try this step again', 'Skip this step'])
     await user.click(screen.getByRole('button', { name: 'Skip this step' }))
-    expect(skip).toHaveBeenCalledWith({ kind: 'skip_step', step: 'build.artifact' })
+    expect(skip.mock.calls[0][0]).toEqual({ kind: 'skip_step', step: 'build.artifact' })
     expect(retry).not.toHaveBeenCalled()
   })
 
@@ -73,7 +73,7 @@ describe('ErrorNotice with a Problem', () => {
       </ProblemActions>,
     )
     await user.click(screen.getByRole('button', { name: 'Install the GitHub CLI for me' }))
-    expect(appWide).toHaveBeenCalledWith({ kind: 'install_tool', tool: 'gh' })
+    expect(appWide.mock.calls[0][0]).toEqual({ kind: 'install_tool', tool: 'gh' })
     await user.click(screen.getByRole('button', { name: 'Change the ports' }))
     expect(page).toHaveBeenCalledTimes(1)
     expect(appWide).toHaveBeenCalledTimes(1)

@@ -86,7 +86,9 @@ instead of the wizard (`kora install --help`, `kora install --dry-run` to previe
 - Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+ (x86-64).
 - Administrator rights are **not** needed to install Kora, open the panel or get started. Setting up a server's
   service, firewall rules or a database server does need them: on Linux the panel shows the `sudo` command to run (or does
-  it for you once the optional helper is installed); on Windows <!-- windows-admin: to be filled in -->
+  it for you once the optional helper is installed); on Windows an install from the panel asks once, when it starts, with
+  a normal Windows permission prompt for all of its administrator parts. If you say no, you can ask again, carry on
+  without those parts, or see the command to run.
 - Server folder (suggested by default): Windows `C:\Kora\<name>`; Linux `~/kora/<name>` in your own home folder, also
   when Kora runs with `sudo`. Logged in as root (common on rented servers), it is `/home/kora/<name>`: Kora creates a
   normal `kora` user account that owns it. On Linux the background service runs as its own account, which cannot enter

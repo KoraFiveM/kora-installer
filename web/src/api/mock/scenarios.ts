@@ -1,7 +1,7 @@
 // Mock scenarios: which fake world the in-app backend simulates. Chosen with `?scenario=<name>` (kept in
 // sessionStorage so navigating keeps it) or with the floating "Mock" switcher. Only bundled in mock builds.
 
-export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down'] as const
+export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows'] as const
 export type ScenarioName = (typeof SCENARIOS)[number]
 
 export const SCENARIO_INFO: Record<ScenarioName, string> = {
@@ -12,6 +12,7 @@ export const SCENARIO_INFO: Record<ScenarioName, string> = {
   slow: 'Like default, but every request takes 1.5 to 3 s and jobs run slowly (loading states).',
   offline: 'The API answers 401: the "session expired" screen.',
   down: 'Every request fails with a network error (Kora is not answering).',
+  windows: 'Windows: Kora asks Windows for permission itself. Install names starting with "decline" (No at the prompt), "nobody" (no answer) or "remote" (signed in from another device) show the choices.',
 }
 
 export const STORAGE_KEY = 'kora-mock-scenario'
@@ -46,10 +47,12 @@ export interface Behaviour {
   auth: 'ok' | 'expired' | 'down'
   /** Everything fails in realistic ways. */
   trouble: boolean
+  /** Windows: the panel asks Windows for administrator permission itself (`admin_prompt`). */
+  windows: boolean
 }
 
 export function behaviourOf(n: ScenarioName): Behaviour {
-  const base: Behaviour = { latency: [120, 120], jobSlow: 1, auth: 'ok', trouble: false }
+  const base: Behaviour = { latency: [120, 120], jobSlow: 1, auth: 'ok', trouble: false, windows: false }
   switch (n) {
     case 'slow':
       return { ...base, latency: [1500, 3000], jobSlow: 3 }
@@ -59,6 +62,8 @@ export function behaviourOf(n: ScenarioName): Behaviour {
       return { ...base, auth: 'down' }
     case 'trouble':
       return { ...base, trouble: true }
+    case 'windows':
+      return { ...base, windows: true }
     default:
       return base
   }

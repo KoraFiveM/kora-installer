@@ -120,14 +120,14 @@ Options:
       --dry-run
           Show the full plan and change nothing
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --auto-ports
           If a port is in use, silently use the next free one and say what changed
 
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
@@ -1465,6 +1465,86 @@ Options:
 Say whether the helper is installed and running
 
 Usage: kora helper status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora admin-worker =====
+Windows: Kora Panel's short-lived administrator helper (started through the permission prompt)
+
+Usage: kora admin-worker [OPTIONS]
+
+Options:
+      --pipe <PIPE>
+          The panel's pipe
+
+      --parent <PARENT>
+          The panel's process id
+
+      --selftest
+          CI only, on an account that is already elevated: run the panel's side and a worker without the prompt
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora admin-step =====
+One administrator step of an install or delete, run by that helper
+
+Usage: kora admin-step [OPTIONS] --step <STEP> --dir <DIR> <ACTION>
+
+Arguments:
+  <ACTION>
+          `run` (install) or `undo` (delete)
+          
+          [possible values: run, undo]
+
+Options:
+      --step <STEP>
+          The install step (see `kora_core::installer::system_ops`)
+          
+          [possible values: prepare.db, build.db, system.firewall, system.service, system.schedule]
+
+      --dir <DIR>
+          The server folder
+
+      --name <NAME>
+          Undo: the name in the person's server list
+
+      --game-port <GAME_PORT>
+          
+
+      --txadmin-port <TXADMIN_PORT>
+          
+
+      --keep-files
+          
+
+      --keep-db
+          
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora admin-db =====
+Start (or install) Kora's own MariaDB on Windows, run by that helper
+
+Usage: kora admin-db [OPTIONS] <ACTION>
+
+Arguments:
+  <ACTION>
+          `start` Kora's own MariaDB, or `install` it when it is not there yet
+          
+          [possible values: start, install]
 
 Options:
       --no-elevate

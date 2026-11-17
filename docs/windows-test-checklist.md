@@ -196,10 +196,31 @@ Do steps 16 and 18 first (the tools and the GitHub sign-in).
 
 ## Administrator prompt (UAC)
 
-<!-- windows-admin: to be filled in -->
+Do these on a normal administrator account unless a step says otherwise. The prompt can appear as a flashing shield in
+the taskbar instead of on screen: note where it showed.
 
-*(The elevated worker, the single UAC prompt per install, declining the prompt and the remote-user path are described and
-checked here by the windows-admin work. Steps 24 and 31 note where a prompt shows up.)*
+A1. [ ] **One prompt.** Default wizard (service, firewall, "set up the database for me"), press Install: exactly **one**
+    Windows prompt; the install carries on in the browser; the service, the firewall rule and MariaDB exist; the files in
+    the server folder are owned by you.
+    *If not, copy back:* how many prompts, the Show details text, the install log.
+A2. [ ] **Say No.** Same install, press **No**: "Windows did not get permission" with **Ask again**, **Continue without
+    the administrator parts** and **Show me the command**. Ask again, then Yes: it finishes. Repeat and pick Continue
+    without: it finishes with no service and no firewall change.
+A3. [ ] **Leave it unanswered** for 5 minutes: "Nobody answered". Answering the stale prompt afterwards starts nothing,
+    and no `kora.exe admin-worker` is left in Task Manager.
+A4. [ ] **Worker killed.** End `kora.exe admin-worker` in Task Manager during the service step: the step fails with
+    "stopped"; **Try this step again** asks again and finishes. During the firewall step, **Skip** works.
+A5. [ ] **Standard (non-administrator) account.** Windows asks for an administrator's password; the install completes;
+    the scheduled task runs as the standard user; the server folder belongs to the standard user.
+A6. [ ] **Folder with spaces and non-English characters** in the server path.
+A7. [ ] **Remote session** (Tailscale or token): install says you are signed in from another device; **no** prompt
+    appears on the desktop until **Ask for administrator permission** is pressed.
+A8. [ ] **One prompt each** for: a schedule change, "Tidy up old shortcuts", Uninstall, deleting a server that has a
+    service, and System check, "Start it for me".
+A9. [ ] **Windows Server 2022** with a normal administrator account. (The built-in Administrator account runs everything
+    elevated, so the panel refuses to start there, as before.)
+A10. [ ] **Restart the panel mid-install** with a saved key: Carry on asks again only when an administrator step runs.
+A11. [ ] **Task Manager:** the worker never shows a window and exits after each action.
 
 ## 7. Upgrade delta: a machine that has 0.6.x with the old machine-wide app
 

@@ -267,7 +267,7 @@ pub fn build_check(windows: bool, tools: &[ToolStatus], github: &GithubUser, db:
             "admin",
             "Administrator rights",
             CheckState::Info,
-            if windows { "Kora runs with your normal rights. It asks for administrator permission only for the steps that need it." } else { "Kora runs with your normal rights. For the steps that need root it shows you the command to run." },
+            if windows { "Kora runs with your normal rights. When something needs administrator rights, Windows asks you for administrator permission on this computer: once for a whole install, once for other actions." } else { "Kora runs with your normal rights. For the steps that need root it shows you the command to run." },
             None,
         )
     });

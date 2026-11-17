@@ -12,7 +12,8 @@ use kora_core::api::toolchain::{AdminState, DbState, ToolchainEnv};
 use kora_core::helper::client::{Helper, HelperError, Outcome};
 use kora_core::problem::{codes, Action, Problem, Tool};
 use kora_core::tools::{Source, ToolStatus};
-use kora_web::elevated::set_helper_override;
+use kora_core::helper::worker::{OpenError, StepOutcome};
+use kora_web::elevated::{set_broker_override, set_helper_override, Broker, Channel};
 use kora_web::handlers::{github as gh_seam, toolchain as seam};
 use kora_web::{router, AppState};
 use serde_json::{json, Value};
@@ -104,10 +105,12 @@ impl GithubEnv for Gh {
     }
 }
 
+#[cfg(unix)]
 #[derive(Default)]
 struct FakeHelper {
     calls: Mutex<Vec<(String, Vec<String>)>>,
 }
+#[cfg(unix)]
 impl Helper for FakeHelper {
     fn available(&self) -> bool {
         true
@@ -301,18 +304,71 @@ async fn starting_a_database_that_is_not_installed_says_so() {
     assert_eq!((s, v["error"]["code"].as_str()), (422, Some("install.db_missing")), "{v}");
 }
 
+type Calls = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+
+/// A Windows worker stand-in: `supported` = the panel can ask Windows itself; `yes` = the prompt's answer.
+struct FakeBroker {
+    supported: bool,
+    yes: bool,
+    calls: Calls,
+}
+struct FakeChannel(Calls);
+impl Channel for FakeChannel {
+    fn run(&mut self, verb: &str, args: &[String], _: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, HelperError> {
+        self.0.lock().unwrap().push((verb.into(), args.to_vec()));
+        on_line("The database server mariadb is running.");
+        Ok(StepOutcome { ok: true, code: 0, data: None })
+    }
+    fn finish(self: Box<Self>) {}
+}
+impl Broker for FakeBroker {
+    fn supported(&self) -> bool {
+        self.supported
+    }
+    fn open(&self, _: Option<&str>) -> Result<Box<dyn Channel>, OpenError> {
+        if self.yes {
+            Ok(Box::new(FakeChannel(self.calls.clone())))
+        } else {
+            Err(OpenError::Declined)
+        }
+    }
+}
+fn broker(supported: bool, yes: bool) -> Arc<FakeBroker> {
+    Arc::new(FakeBroker { supported, yes, calls: Arc::default() })
+}
+
 #[tokio::test]
 async fn without_administrator_rights_the_start_is_the_elevation_problem() {
     let r = rig(GithubUser::ready("sam")).await;
+    // No way to ask (Linux without the helper, or a panel that cannot ask Windows itself).
+    set_broker_override(Some(broker(false, false)));
     r.fake.admin.lock().unwrap().elevated = false;
     let (s, v) = r.call("POST", "/system/database/start").await;
+    set_broker_override(None);
     assert_eq!((s, v["error"]["code"].as_str()), (403, Some("needs_elevation")), "{v}");
-    // The elevated worker (Windows) hooks `request_admin`; the command is the fallback on both systems.
     assert_eq!(v["error"]["actions"][0], json!({"kind": "request_admin"}));
-    let cmd = if cfg!(windows) { json!(["net", "start", "mariadb"]) } else { json!(["kora", "check", "--start-database"]) };
     let shown = v["error"]["actions"].as_array().unwrap().iter().find(|a| a["kind"] == "show_command").unwrap();
-    assert_eq!(shown["command"], cmd, "{shown}");
+    assert_eq!(shown["command"], json!(["kora", "check", "--start-database"]), "{shown}");
     assert_eq!(*r.fake.db_starts.lock().unwrap(), 0, "nothing was started");
+}
+
+#[tokio::test]
+async fn on_windows_start_it_for_me_goes_through_the_worker_after_one_prompt() {
+    let r = rig(GithubUser::ready("sam")).await;
+    let b = broker(true, true);
+    set_broker_override(Some(b.clone()));
+    r.fake.admin.lock().unwrap().elevated = false;
+    let job = r.job(r.call("POST", "/system/database/start").await).await;
+    assert_eq!(job["state"], "done", "{job}");
+    assert_eq!(*b.calls.lock().unwrap(), [("check".to_string(), vec!["--start-database".to_string()])]);
+    assert_eq!(*r.fake.db_starts.lock().unwrap(), 0, "the panel itself started nothing");
+    // A "No" at the prompt: the job says so, with Ask again and the command.
+    set_broker_override(Some(broker(true, false)));
+    let job = r.job(r.call("POST", "/system/database/start").await).await;
+    set_broker_override(None);
+    assert_eq!(job["error"]["code"], "admin.declined", "{job}");
+    let kinds: Vec<&str> = job["error"]["actions"].as_array().unwrap().iter().map(|a| a["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["request_admin", "show_command"]);
 }
 
 #[cfg(unix)]

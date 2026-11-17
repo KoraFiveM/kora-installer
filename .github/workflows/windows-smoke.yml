@@ -63,6 +63,14 @@ jobs:
       - name: "12. Saved licence keys (secrets.json permissions, masking, named install)"
         timeout-minutes: 10
         run: ./scripts/smoke/12-keys.ps1
+      - name: "13. Panel's administrator worker without the prompt (pipe security, peer checks, protocol, allow-list, a step child)"
+        timeout-minutes: 10
+        run: ./scripts/smoke/13-admin-worker.ps1
+      - name: "13b. Worker unit tests on Windows (pipe names, peer checks, protocol helpers)"
+        timeout-minutes: 15
+        run: |
+          cargo test --locked -p kora-core -- helper:: system_ops
+          if ($LASTEXITCODE -ne 0) { throw 'worker unit tests failed' }
       - name: Collect logs
         if: always()
         run: |
