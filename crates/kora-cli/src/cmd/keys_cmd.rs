@@ -12,7 +12,7 @@ use clap::Subcommand;
 use kora_core::installer::paused::{self, PausedStore};
 use kora_core::installer::registry;
 use kora_core::keystore::KeyStore;
-use kora_core::problem::{plain_text, Problem};
+use kora_core::problem::Problem;
 use kora_core::profile::{Field, ProfileStore};
 
 #[derive(Subcommand)]
@@ -68,9 +68,7 @@ pub enum ProfileCmd {
 }
 
 fn say(p: Problem) -> i32 {
-    let s: String = p.into();
-    eprintln!("error: {}", plain_text(&s));
-    1
+    crate::ui::fail(p)
 }
 
 /// The key to save: from the environment, else one line of standard input.
@@ -291,7 +289,7 @@ pub fn uninstall_note(dry_run: bool, ask: Option<&mut dyn kora_core::installer::
                 for k in store.list().unwrap_or_default() {
                     match store.remove(&k.name) {
                         Ok(()) => println!("Deleted the saved key \"{}\".", k.name),
-                        Err(p) => eprintln!("  failed: could not delete the saved key \"{}\": {}", k.name, plain_text(&String::from(p))),
+                        Err(p) => eprintln!("  failed: could not delete the saved key \"{}\": {}", k.name, p),
                     }
                 }
                 match ProfileStore::default().forget_all() {
@@ -307,22 +305,21 @@ pub fn uninstall_note(dry_run: bool, ask: Option<&mut dyn kora_core::installer::
 
 /// What `kora install --license-key-name` and `--save-license-key` do before the install starts:
 /// returns the key to install with and the saved name it belongs to, if any.
-pub fn resolve_install_key(key: Option<String>, name: Option<&str>, save_as: Option<&str>) -> Result<(Option<String>, Option<String>), String> {
+pub fn resolve_install_key(key: Option<String>, name: Option<&str>, save_as: Option<&str>) -> Result<(Option<String>, Option<String>), Problem> {
     let store = KeyStore::default();
     if let Some(n) = name {
-        let k = store.get(n).map_err(|p| plain_text(&String::from(p)))?;
-        let canonical = store.list().map_err(|p| plain_text(&String::from(p)))?.into_iter().find(|i| i.name.eq_ignore_ascii_case(n)).map(|i| i.name);
+        let k = store.get(n)?;
+        let canonical = store.list()?.into_iter().find(|i| i.name.eq_ignore_ascii_case(n)).map(|i| i.name);
         return Ok((Some(k), canonical.or_else(|| Some(n.to_string()))));
     }
     let Some(save) = save_as else { return Ok((key, None)) };
     let Some(k) = key else { return Err("--save-license-key needs a key: set CFX_LICENSE_KEY (or use --license-key).".into()) };
     let k = k.trim().to_string();
-    let plain = |p: Problem| plain_text(&String::from(p));
-    let saved = match store.name_of(&k).map_err(plain)? {
+    let saved = match store.name_of(&k)? {
         Some(existing) => existing,
         None => {
-            kora_core::keystore::check_key(&k).map_err(plain)?;
-            store.add(save, &k).map_err(plain)?.name
+            kora_core::keystore::check_key(&k)?;
+            store.add(save, &k)?.name
         }
     };
     Ok((Some(k), Some(saved)))

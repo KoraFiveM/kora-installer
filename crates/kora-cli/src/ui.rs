@@ -2,6 +2,19 @@
 
 use kora_core::installer::{self, registry};
 
+/// THE place a [`Problem`] is printed for a terminal: `error: <message>`, then the details and one
+/// hint line per action that has one (`Problem`'s `Display`). Everything that fails in front of a
+/// person on the command line comes through here.
+pub(crate) fn print_error(p: &kora_core::problem::Problem) {
+    eprintln!("error: {p}");
+}
+
+/// [`print_error`], and the exit code 1.
+pub(crate) fn fail(p: impl Into<kora_core::problem::Problem>) -> i32 {
+    print_error(&p.into());
+    1
+}
+
 pub(crate) fn print_lines(prefix: &str, lines: &[String]) {
     for l in lines {
         println!("{prefix}{l}");
