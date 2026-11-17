@@ -28,7 +28,7 @@ computer first. `kora panel --tailscale` instead opens it to your own devices ov
 `kora install` with options stays the scriptable, non-interactive installer. The terminal screens (TUI) of earlier
 versions are gone: everything they did is in the panel.
 
-Guide: [docs/panel.md](docs/panel.md).
+Guide: [docs/panel.md](docs/panel.md). Where Kora keeps its own data, backups and the way back to older versions: [docs/store.md](docs/store.md).
 
 ## Install
 

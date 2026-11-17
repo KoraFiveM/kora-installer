@@ -154,17 +154,21 @@ pub fn hand_to_owner_of_parent(path: &Path) {
     {
         use crate::userhome::UserEnv;
         use std::os::unix::fs::MetadataExt;
-        if crate::userhome::SystemUserEnv.euid() != 0 {
-            return;
-        }
+        let euid = crate::userhome::SystemUserEnv.euid();
         if let Some(m) = path.parent().and_then(|p| std::fs::metadata(p).ok()) {
-            if m.uid() != 0 {
-                let _ = std::os::unix::fs::lchown(path, Some(m.uid()), Some(m.gid()));
+            if let Some((uid, gid)) = handoff_target(euid, m.uid(), m.gid()) {
+                let _ = std::os::unix::fs::lchown(path, Some(uid), Some(gid));
             }
         }
     }
     #[cfg(not(unix))]
     let _ = path;
+}
+
+/// Who a file made by this process should be handed to: only root hands things over, and only to a folder
+/// owner that is not root. (Pure, so it is tested without being root.)
+pub fn handoff_target(euid: u32, folder_uid: u32, folder_gid: u32) -> Option<(u32, u32)> {
+    (euid == 0 && folder_uid != 0).then_some((folder_uid, folder_gid))
 }
 
 /// Hand the database and its side files over (see [`hand_to_owner_of_parent`]). The files' owner is
@@ -196,6 +200,14 @@ mod tests {
     fn open_modes_are_spotted() {
         assert!(!too_open(0o600) && !too_open(0o700));
         assert!(too_open(0o644) && too_open(0o660) && too_open(0o607));
+    }
+
+    #[test]
+    fn only_root_hands_files_over_and_only_to_somebody_else() {
+        assert_eq!(handoff_target(0, 1000, 1000), Some((1000, 1000)), "sudo kora in someone's Kora folder");
+        assert_eq!(handoff_target(0, 0, 0), None, "root's own folder");
+        assert_eq!(handoff_target(1000, 1001, 1001), None, "a normal user never chowns");
+        assert_eq!(handoff_target(1000, 0, 0), None);
     }
 
     #[test]
