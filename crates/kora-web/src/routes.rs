@@ -75,6 +75,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::CheckDbLogin => on_op(op, handlers::install::check_db_login),
         Op::InstallPlan => on_op(op, handlers::install::install_plan),
         Op::InstallStart => on_op(op, handlers::install::install_start),
+        Op::InstallResume => on_op(op, handlers::install::install_resume),
         Op::InstallLog => on_op(op, handlers::install::install_log),
         Op::SelfUpdateCheck => on_op(op, handlers::maintenance::self_update_check),
         Op::SelfUpdateApply => on_op(op, handlers::maintenance::self_update_apply),

@@ -74,6 +74,8 @@ pub enum Op {
     CheckDbLogin,
     InstallPlan,
     InstallStart,
+    /// Carry on with an install that stopped at a failed step: retry it, or skip it when safe.
+    InstallResume,
     InstallLog,
     SelfUpdateCheck,
     SelfUpdateApply,
@@ -165,6 +167,7 @@ impl Op {
         Op::CheckDbLogin,
         Op::InstallPlan,
         Op::InstallStart,
+        Op::InstallResume,
         Op::InstallLog,
         Op::SelfUpdateCheck,
         Op::SelfUpdateApply,
@@ -256,6 +259,7 @@ impl Op {
             Op::CheckDbLogin => "check_db_login",
             Op::InstallPlan => "install_plan",
             Op::InstallStart => "install_start",
+            Op::InstallResume => "install_resume",
             Op::InstallLog => "install_log",
             Op::SelfUpdateCheck => "self_update_check",
             Op::SelfUpdateApply => "self_update_apply",
@@ -348,6 +352,7 @@ impl Op {
             Op::CheckDbLogin => (Method::Post, "/checks/db-login"),
             Op::InstallPlan => (Method::Post, "/installs/plan"),
             Op::InstallStart => (Method::Post, "/installs"),
+            Op::InstallResume => (Method::Post, "/installs/{job}/resume"),
             Op::InstallLog => (Method::Get, "/installs/{job}/log"),
             Op::SelfUpdateCheck => (Method::Get, "/self-update"),
             Op::SelfUpdateApply => (Method::Post, "/self-update"),
@@ -403,6 +408,7 @@ impl Op {
                 | Op::ResourcesAdd
                 | Op::GithubLogin
                 | Op::InstallStart
+                | Op::InstallResume
                 | Op::SelfUpdateApply
                 | Op::UninstallRun
                 | Op::NodeServerControl
@@ -525,6 +531,7 @@ mod tests {
             | Op::CheckDbLogin
             | Op::InstallPlan
             | Op::InstallStart
+            | Op::InstallResume
             | Op::InstallLog
             | Op::SelfUpdateCheck
             | Op::SelfUpdateApply
@@ -566,7 +573,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 86);
+        assert_eq!(Op::ALL.len(), 87);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }
