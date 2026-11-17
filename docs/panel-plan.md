@@ -96,6 +96,7 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 | check_db_login | POST /checks/db-login | |
 | install_plan | POST /installs/plan | dry run |
 | install_start | POST /installs | body = `InstallRequest`; job with `ProgressEvent`s |
+| install_resume | POST /installs/{job}/resume | `{skip?}`: carry on with a stopped install (retry the failed step, or skip it when safe); job |
 | install_log | GET /installs/{job}/log | |
 | self_update_check | GET /self-update | |
 | self_update_apply | POST /self-update | `{version?}`; job |
@@ -135,6 +136,11 @@ All routes are under `/api/v1`. `{s}` is the server's registry name, percent-enc
 - JSON, snake_case. Errors: `{"error": {"code": "not_found", "message": "..."}}` with a matching
   HTTP status. Codes: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
   `needs_elevation` (carries `command: ["kora", ...]`), `internal`.
+- An error (and a failed job's `error`) may be a Problem (`kora_core::problem`): it adds
+  `details` (technical text) and `actions` (`[{"kind": "retry_step", "step": ...}, ...]`, what the
+  user can do), and its `code` can be a dotted one such as `github.gh_missing` or
+  `install.step_failed`. The UI shows one button per action it has a handler for
+  (`web/src/lib/problemActions.tsx`) and ignores kinds it does not know.
 - Secrets (licence key, database passwords, webhook URL) are accepted but never returned.
 - Jobs: a slow operation answers `202 {"job": "<id>"}`. `GET /jobs/{id}` returns
   `{id, op, server, state: "running"|"done"|"failed", events: [...], result, error}`.

@@ -5,6 +5,14 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Errors that say what to do, with buttons to do it.** When an install, a GitHub action or something that needs administrator rights fails, the panel says in plain words what happened, keeps the technical part under "Show details", and offers buttons for the fixes (try the step again, change an answer, sign in to GitHub, the command to run as administrator, ...). Other errors get "Try again" and "Copy details".
+- **A failed install step can be tried again, or skipped when that is safe, without starting over.** The install stops at the failed step and waits: "Try this step again" carries on from there with the same answers (the licence key is kept in Kora's memory only, never written to disk), "Change my answers" goes back to the summary. Only optional steps can be skipped: opening the firewall, the daily update schedule, the Kora app, and starting the server.
+- The GitHub status tells "the GitHub CLI is not installed", "not signed in" and "signed in without the permissions Kora needs" apart.
+
+### Changed
+- The install no longer asks you to close the window or run the installer again when git was just installed, the GitHub sign-in did not finish or permissions are missing: it says what happened and what to do. `kora install` in a terminal prints the same plain message.
+
 ## [0.6.5] - 2026-11-17
 
 ### Added
