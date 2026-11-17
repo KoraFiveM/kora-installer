@@ -25,6 +25,7 @@ pub mod nav;
 pub mod platform;
 pub mod session;
 pub mod settings;
+pub mod sse;
 pub mod toast;
 pub mod tray;
 

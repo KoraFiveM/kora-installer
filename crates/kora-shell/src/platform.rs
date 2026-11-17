@@ -73,6 +73,13 @@ pub fn webview_missing_message(windows: bool) -> Vec<String> {
     }
 }
 
+/// The `kora` program that sits next to the desktop app (`kora.exe` on Windows); `None` when `exists` says it is not.
+pub fn kora_beside(shell_exe: &Path, windows: bool, exists: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    let name = if windows { "kora.exe" } else { "kora" };
+    let candidate = shell_exe.parent()?.join(name);
+    exists(&candidate).then_some(candidate)
+}
+
 /// The shell's own program name for the browser fallback hint and window title.
 pub fn window_title(version: &str) -> String {
     if version.is_empty() {
@@ -107,6 +114,13 @@ mod tests {
     fn arguments_are_quoted_for_windows() {
         assert_eq!(quote_args(&["service".into(), "install".into()]), "service install");
         assert_eq!(quote_args(&["a b".into(), "".into(), "say \"hi\"".into()]), "\"a b\" \"\" \"say \\\"hi\\\"\"");
+    }
+
+    #[test]
+    fn kora_is_found_next_to_the_app() {
+        let here = |p: &Path| p == Path::new("/opt/kora/kora");
+        assert_eq!(kora_beside(Path::new("/opt/kora/kora-desktop"), false, &here), Some(PathBuf::from("/opt/kora/kora")));
+        assert_eq!(kora_beside(Path::new("/elsewhere/kora-desktop"), false, &here), None);
     }
 
     #[test]

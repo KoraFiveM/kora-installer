@@ -91,6 +91,18 @@ pub fn link_on_route(link: &str, route: &str) -> String {
     }
 }
 
+/// The one-time code in the answer of `POST /api/v1/session/link` (`{"code":"..."}`): plain letters and digits only.
+pub fn code_from_json(body: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    let code = v["code"].as_str()?;
+    (code.len() >= 16 && code.len() <= 128 && code.bytes().all(|b| b.is_ascii_alphanumeric())).then(|| code.to_string())
+}
+
+/// The sign-in link of the panel on `port` for a one-time `code`.
+pub fn code_link(port: u16, code: &str) -> String {
+    format!("http://127.0.0.1:{port}/#code={code}")
+}
+
 /// Wait before asking the panel again: 1, 2, 4, 8, 15, 15 ... seconds.
 pub fn backoff_secs(attempt: u32) -> u64 {
     match attempt {
@@ -152,6 +164,15 @@ mod tests {
         assert_eq!(link_on_route("http://127.0.0.1:47120/#code=abc", "/servers/a"), "http://127.0.0.1:47120/servers/a#code=abc");
         assert_eq!(link_on_route("http://127.0.0.1:47120/#code=abc", "/"), "http://127.0.0.1:47120/#code=abc");
         assert_eq!(link_on_route("http://127.0.0.1:47120/#code=abc", "//evil"), "http://127.0.0.1:47120/#code=abc");
+    }
+
+    #[test]
+    fn a_one_time_code_is_read_only_when_it_is_plain() {
+        assert_eq!(code_from_json(r#"{"code":"abcdefghijklmnop1234"}"#).as_deref(), Some("abcdefghijklmnop1234"));
+        for bad in [r#"{"code":"short"}"#, r#"{"code":"abcdefghijklmnop/../x"}"#, r#"{"code":5}"#, "nope", r#"{"code":"abcdefghijklmnop&evil=1"}"#] {
+            assert_eq!(code_from_json(bad), None, "{bad}");
+        }
+        assert_eq!(code_link(47120, "abc"), "http://127.0.0.1:47120/#code=abc");
     }
 
     #[test]

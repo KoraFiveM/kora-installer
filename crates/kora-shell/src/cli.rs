@@ -10,6 +10,7 @@
 //! * `--smoke <file>`: the automated test of the CI (`.github/workflows/desktop.yml`): start, load the panel,
 //!   write a JSON report to `<file>`, drive one tray action, quit. It also never starts a background service
 //!   or changes autostart.
+//! * `--uninstall`: remove this app's start-up entry and notification identity, then exit.
 //! * `--version`, `--help`.
 
 use std::path::PathBuf;
@@ -22,6 +23,8 @@ pub struct Args {
     pub route: Option<String>,
     pub kora: Option<PathBuf>,
     pub smoke: Option<PathBuf>,
+    /// Take this app's start-up entry and notification identity out (run by `kora app uninstall` and the uninstaller).
+    pub uninstall: bool,
     pub version: bool,
     pub help: bool,
 }
@@ -34,6 +37,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--background" => a.background = true,
+            "--uninstall" => a.uninstall = true,
             "--version" | "-V" => a.version = true,
             "--help" | "-h" => a.help = true,
             "--open" => {
@@ -64,6 +68,7 @@ mod tests {
         assert_eq!(p(&[]).unwrap(), Args::default());
         let a = p(&["--background", "--open", "/settings", "--kora", "C:\\k\\kora.exe", "--smoke", "r.json"]).unwrap();
         assert!(a.background && a.route.as_deref() == Some("/settings") && a.kora == Some(PathBuf::from("C:\\k\\kora.exe")) && a.smoke == Some(PathBuf::from("r.json")));
+        assert!(p(&["--uninstall"]).unwrap().uninstall);
         assert!(p(&["--version"]).unwrap().version && p(&["-h"]).unwrap().help);
     }
 
