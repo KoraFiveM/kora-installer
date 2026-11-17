@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense, lazy } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderPlus, Plus, RefreshCw } from 'lucide-react'
@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/Skeleton'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { AddExistingDialog } from '@/components/AddExistingDialog'
 import { StatusChip, StyleChip, UpdateChip } from '@/components/Status'
 import { ServerControls } from '@/components/ServerControls'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton } from '@/components/ServerLinks'
@@ -22,6 +21,9 @@ import { TidyUpBanner } from '@/components/Shortcuts'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/servers/serversPage'
+
+// Only needed when someone asks to add a server they set up another way.
+const AddExistingDialog = lazy(() => import('@/components/AddExistingDialog').then((m) => ({ default: m.AddExistingDialog })))
 
 /** Asked once per browser tab: a first visit with no servers goes straight to the install wizard. */
 const FIRST_RUN_KEY = 'kora.firstRunShown'
@@ -123,7 +125,7 @@ export default function ServersPage() {
           </table>
         </Card>
       )}
-      <AddExistingDialog open={adding} onOpenChange={setAdding} />
+      {adding && <Suspense fallback={null}><AddExistingDialog open={adding} onOpenChange={setAdding} /></Suspense>}
     </div>
   )
 }

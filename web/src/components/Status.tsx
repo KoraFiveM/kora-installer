@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { Badge as BadgeT, Mode, ServerStatus, Source, Versions } from '@/api/types'
-import { styleOfMode } from '@/pages/install/form'
+import { styleOfMode } from '@/lib/style'
 import { Badge } from '@/components/ui/badge'
 import { t } from '@/i18n'
 import '@/i18n/en/core/status'

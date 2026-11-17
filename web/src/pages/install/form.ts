@@ -1,17 +1,13 @@
-import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
+import type { DbChoice, InstallDefaults, InstallRequest, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
+import { styleOfMode } from '@/lib/style'
 import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/install/form'
 
+export { styleOfMode }
+
 export type ArtifactChoice = 'recommended' | 'pick' | 'custom'
 
-/**
- * The old `mode` as the two settings (production = clones of released versions, development = your own copies of the
- * latest changes). The one place the web reads that old spelling, for answers saved by an older Kora.
- */
-export function styleOfMode(m: Mode): { source: Source; versions: Versions } {
-  return m === 'development' ? { source: 'fork', versions: 'latest' } : { source: 'clone', versions: 'released' }
-}
 
 /** What "Which versions" starts as for a source: released for plain clones, the latest changes for your own copies. */
 export function defaultVersions(source: Source): Versions {

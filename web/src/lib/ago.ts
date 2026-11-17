@@ -1,4 +1,5 @@
 import { fmt, t } from '@/i18n'
+import '@/i18n/en/core/ago'
 
 /** "just now", "2 minutes ago", "3 hours ago", for a moment `then` (ms) seen at `now` (ms): the wording is Intl's, in the current language. */
 export function timeAgo(then: number, now: number): string {
