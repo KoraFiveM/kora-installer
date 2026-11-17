@@ -16,7 +16,9 @@
   --kora-success: #22c55e;
   --kora-amber: #f5a623;
   --kora-orange: #e67e22;
-  --kora-danger: #ef4444;
+  --kora-danger: #dc2626;
+  /* Red TEXT on a dark or tinted background needs a lighter red to reach 4.5:1 (the solid red is for fills). */
+  --kora-danger-text: #f87171;
   --kora-steel: #95a5a6;
 
   /* shadcn/ui variables mapped onto the brand */
@@ -62,6 +64,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-danger-text: var(--kora-danger-text);
   --color-success: var(--kora-success);
   --color-amber: var(--kora-amber);
   --color-orange: var(--kora-orange);

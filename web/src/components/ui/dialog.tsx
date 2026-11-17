@@ -7,12 +7,29 @@ export const Dialog = DialogPrimitive.Root
 export const DialogTrigger = DialogPrimitive.Trigger
 export const DialogClose = DialogPrimitive.Close
 
-export function DialogContent({ className, children, title, description, ...p }: Omit<React.ComponentProps<typeof DialogPrimitive.Content>, 'title'> & { title: string; description?: string }) {
+export function DialogContent({ className, children, title, description, onOpenAutoFocus, onCloseAutoFocus, ...p }: Omit<React.ComponentProps<typeof DialogPrimitive.Content>, 'title'> & { title: string; description?: string }) {
+  // Dialogs here are opened by state, not by a DialogTrigger, so Radix does not know which control to give focus back to
+  // (focus would be lost to the page). Remember what had focus when the dialog opened and return to it when it closes.
+  const opener = React.useRef<HTMLElement | null>(null)
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/70" />
       <DialogPrimitive.Content
         className={cn('fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-xl', className)}
+        onOpenAutoFocus={(e) => {
+          const a = document.activeElement
+          opener.current = a instanceof HTMLElement && a !== document.body ? a : null
+          onOpenAutoFocus?.(e)
+        }}
+        onCloseAutoFocus={(e) => {
+          onCloseAutoFocus?.(e)
+          const el = opener.current
+          opener.current = null
+          if (!e.defaultPrevented && el?.isConnected) {
+            e.preventDefault()
+            el.focus()
+          }
+        }}
         {...p}
       >
         <DialogPrimitive.Title className="font-heading text-lg font-semibold">{title}</DialogPrimitive.Title>

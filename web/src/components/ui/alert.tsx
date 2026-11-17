@@ -9,7 +9,7 @@ const alertVariants = cva('flex gap-3 rounded-lg border p-4 text-sm', {
       info: 'border-info/40 bg-info/10 [&>svg]:text-info',
       success: 'border-success/40 bg-success/10 [&>svg]:text-success',
       warning: 'border-amber/40 bg-amber/10 [&>svg]:text-amber',
-      danger: 'border-destructive/50 bg-destructive/10 [&>svg]:text-destructive',
+      danger: 'border-destructive/50 bg-destructive/10 [&>svg]:text-danger-text',
     },
   },
   defaultVariants: { tone: 'info' },

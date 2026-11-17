@@ -394,10 +394,10 @@ let lastHeaders = new Headers()
 /** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
 const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
-const keysMock = installKeysMock(route, Fail, () => servers)
+const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: false }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
 const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
@@ -560,6 +560,8 @@ route('POST', '/servers/{s}/update/preview', (m, b) => {
   return startJob('update_preview', s.name, async () => {
     await sleep(1500)
     const p = makePreview(s)
+    // A resource switched to another branch or a pull request is left alone by updates.
+    if (s.mode === 'development') p.resources = p.resources.map((r) => { const note = resetBranches.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
     dirtyPreviewed[s.name] = p
     s.badge = badgeFrom(p)
     pushServer(s)
@@ -1135,6 +1137,7 @@ export function activeScenario(): ScenarioName {
 export function installMock(opts: MockOptions = {}): ScenarioName {
   const name = opts.scenario ?? resolveScenario(window.location.search, safeStorage())
   init(name)
+  viewer = resolveViewer(window.location.search, safeStorage())
   if (opts.speed !== undefined) speed = opts.speed
   startTicker()
   const real = realFetch ?? (realFetch = window.fetch.bind(window))
@@ -1148,6 +1151,34 @@ export function installMock(opts: MockOptions = {}): ScenarioName {
 }
 
 let realFetch: typeof window.fetch | null = null
+
+/**
+ * Who is looking, for the browser tests of what other people see: `?as=operator` (this computer, an operator),
+ * `?as=remote-operator` (another device through Tailscale), `?as=remote-admin` (another device with an admin token).
+ * Remembered for the tab like the scenario; `?as=local` goes back to the default.
+ */
+type Viewer = { identity: T.Meta['identity']; remote: boolean }
+const VIEWERS: Record<string, Viewer> = {
+  operator: { identity: { name: 'kim', provider: 'local', role: 'operator' }, remote: false },
+  'remote-operator': { identity: { name: 'kim', provider: 'tailscale', role: 'operator' }, remote: true },
+  'remote-admin': { identity: { name: 'sam', provider: 'token', role: 'admin' }, remote: true },
+}
+let viewer: Viewer = { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
+function resolveViewer(search: string, storage: Storage | null): Viewer {
+  const key = 'kora-mock-as'
+  try {
+    const q = new URLSearchParams(search).get('as')
+    if (q) {
+      if (VIEWERS[q]) storage?.setItem(key, q)
+      else storage?.removeItem(key)
+    }
+    const saved = storage?.getItem(key)
+    if (saved && VIEWERS[saved]) return VIEWERS[saved]
+  } catch {
+    /* storage blocked: the default viewer */
+  }
+  return { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
+}
 function safeStorage(): Storage | null {
   try {
     return window.sessionStorage

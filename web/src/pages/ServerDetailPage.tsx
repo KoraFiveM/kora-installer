@@ -1,7 +1,9 @@
+import { Suspense, lazy, type ComponentType, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { api, ApiError } from '@/api/client'
+import type { ServerDetail } from '@/api/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/Skeleton'
 import { ErrorNotice } from '@/components/ErrorNotice'
@@ -9,16 +11,30 @@ import { ModeChip, StatusChip } from '@/components/Status'
 import { useServerControl } from '@/hooks/useServerControl'
 import NotFound from '@/pages/NotFound'
 import { OverviewTab } from './server/OverviewTab'
-import { ConsoleTab } from './server/ConsoleTab'
-import { LogsTab } from './server/LogsTab'
-import { ResourcesTab } from './server/ResourcesTab'
-import { PaidAssetsTab } from './server/PaidAssetsTab'
-import { ScheduleTab } from './server/ScheduleTab'
-import { NotificationsTab } from './server/NotificationsTab'
-import { PortsTab } from './server/PortsTab'
-import { MonitoringTab } from './server/MonitoringTab'
-import { GithubTab } from './server/GithubTab'
-import { DangerTab } from './server/DangerTab'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { RouteLoading } from '@/components/RouteLoading'
+
+// The Overview is the landing tab and loads with the page; every other tab is fetched when first opened.
+const lazyTab = <K extends string>(load: () => Promise<Record<K, ComponentType<{ server: ServerDetail }>>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })))
+const ConsoleTab = lazyTab(() => import('./server/ConsoleTab'), 'ConsoleTab')
+const LogsTab = lazyTab(() => import('./server/LogsTab'), 'LogsTab')
+const MonitoringTab = lazyTab(() => import('./server/MonitoringTab'), 'MonitoringTab')
+const ResourcesTab = lazyTab(() => import('./server/ResourcesTab'), 'ResourcesTab')
+const PaidAssetsTab = lazyTab(() => import('./server/PaidAssetsTab'), 'PaidAssetsTab')
+const ScheduleTab = lazyTab(() => import('./server/ScheduleTab'), 'ScheduleTab')
+const NotificationsTab = lazyTab(() => import('./server/NotificationsTab'), 'NotificationsTab')
+const PortsTab = lazyTab(() => import('./server/PortsTab'), 'PortsTab')
+const GithubTab = lazyTab(() => import('./server/GithubTab'), 'GithubTab')
+const DangerTab = lazyTab(() => import('./server/DangerTab'), 'DangerTab')
+
+/** One tab's content: its own loading state, and its own error screen so a tab that cannot load leaves the rest usable. */
+function Lazy({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <ErrorBoundary resetKey={id}>
+      <Suspense fallback={<RouteLoading />}>{children}</Suspense>
+    </ErrorBoundary>
+  )
+}
 
 export default function ServerDetailPage() {
   const { name = '' } = useParams()
@@ -32,7 +48,7 @@ export default function ServerDetailPage() {
   const dev = s.mode === 'development'
   // The Updates tab now lives in Resources; old links to ?tab=updates land there.
   const requested = params.get('tab') ?? 'overview'
-  const tab = requested === 'updates' ? 'resources' : requested
+  const current = requested === 'updates' ? 'resources' : requested
   return (
     <div className="space-y-5">
       <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> All servers</Link>
@@ -41,7 +57,7 @@ export default function ServerDetailPage() {
         <ModeChip mode={s.mode} />
         <StatusChip status={s.status} pending={ctl.pending} />
       </div>
-      <Tabs value={tab} onValueChange={(t) => setParams({ tab: t }, { replace: true })}>
+      <Tabs value={current} onValueChange={(t) => setParams({ tab: t }, { replace: true })}>
         <TabsList aria-label="Server sections">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="console">Console</TabsTrigger>
@@ -56,16 +72,16 @@ export default function ServerDetailPage() {
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
         <TabsContent value="overview"><OverviewTab server={s} ctl={ctl} /></TabsContent>
-        <TabsContent value="console"><ConsoleTab server={s} /></TabsContent>
-        <TabsContent value="logs"><LogsTab server={s} /></TabsContent>
-        <TabsContent value="monitoring"><MonitoringTab server={s} /></TabsContent>
-        <TabsContent value="resources"><ResourcesTab server={s} /></TabsContent>
-        <TabsContent value="assets"><PaidAssetsTab server={s} /></TabsContent>
-        {dev && <TabsContent value="schedule"><ScheduleTab server={s} /></TabsContent>}
-        <TabsContent value="notifications"><NotificationsTab server={s} /></TabsContent>
-        <TabsContent value="ports"><PortsTab server={s} /></TabsContent>
-        {dev && <TabsContent value="github"><GithubTab server={s} /></TabsContent>}
-        <TabsContent value="danger"><DangerTab server={s} /></TabsContent>
+        <TabsContent value="console"><Lazy id="console"><ConsoleTab server={s} /></Lazy></TabsContent>
+        <TabsContent value="logs"><Lazy id="logs"><LogsTab server={s} /></Lazy></TabsContent>
+        <TabsContent value="monitoring"><Lazy id="monitoring"><MonitoringTab server={s} /></Lazy></TabsContent>
+        <TabsContent value="resources"><Lazy id="resources"><ResourcesTab server={s} /></Lazy></TabsContent>
+        <TabsContent value="assets"><Lazy id="assets"><PaidAssetsTab server={s} /></Lazy></TabsContent>
+        {dev && <TabsContent value="schedule"><Lazy id="schedule"><ScheduleTab server={s} /></Lazy></TabsContent>}
+        <TabsContent value="notifications"><Lazy id="notifications"><NotificationsTab server={s} /></Lazy></TabsContent>
+        <TabsContent value="ports"><Lazy id="ports"><PortsTab server={s} /></Lazy></TabsContent>
+        {dev && <TabsContent value="github"><Lazy id="github"><GithubTab server={s} /></Lazy></TabsContent>}
+        <TabsContent value="danger"><Lazy id="danger"><DangerTab server={s} /></Lazy></TabsContent>
       </Tabs>
     </div>
   )
