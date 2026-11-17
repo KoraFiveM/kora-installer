@@ -32,6 +32,7 @@ fn summary(b: &mut dyn Backend, e: &ServerEntry) -> wire::ServerSummary {
 }
 
 fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> wire::ServerSummary {
+    let rec = kora_core::container::ContainerRecord::load(&e.dir);
     wire::ServerSummary {
         name: e.name.clone(),
         dir: e.dir.clone(),
@@ -44,6 +45,8 @@ fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> 
         badge: badge.map(wire::Badge::from),
         managed: is_managed(e),
         connect: connect_address(e.ports.game),
+        run_mode: if rec.is_some() { kora_core::container::RunMode::Container } else { kora_core::container::RunMode::Service },
+        run_label: rec.map(|r| r.describe()),
     }
 }
 

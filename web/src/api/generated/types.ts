@@ -1554,6 +1554,14 @@ export type FleetServer = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+  /**
+   * How the server runs: as a service (or by hand), or in a container.
+   */
+  run_mode: RunMode,
+  /**
+   * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
+   */
+  run_label?: string,
 };
 
 /**
@@ -1849,6 +1857,15 @@ export type ImportPreview = {
    * page should ask for one (host, port, user, password: used once, never stored).
    */
   db_login: DbLoginNote | null,
+  /**
+   * How the backed-up server ran. Offered again here when this computer can do the same (see `container_engine`).
+   */
+  run_mode: RunMode,
+  /**
+   * The container engine this computer would use (`podman, rootless`), when it has one that looks usable:
+   * container mode can be chosen for the new server. `None`: only a service.
+   */
+  container_engine?: string,
 };
 
 export type ImportRequest = {
@@ -1872,6 +1889,10 @@ export type ImportRequest = {
    * Start the server when it is imported.
    */
   start: boolean,
+  /**
+   * How the new server runs here. `None` = as a service (the way every import worked before container mode).
+   */
+  run_mode?: RunMode,
   /**
    * Remove what an earlier, failed import of this server made, and begin again.
    */
@@ -3483,6 +3504,11 @@ export type RollbackRequest = {
 export type RunAs = "installing_user" | "system";
 
 /**
+ * How a server runs. Servers made before container mode are all `Service`.
+ */
+export type RunMode = "service" | "container";
+
+/**
  * What is known about updates, shown as a small badge. Absent = not known yet.
  */
 export type SampleBadge = "up_to_date"
@@ -3715,6 +3741,14 @@ export type ServerDetail = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+  /**
+   * How the server runs: as a service (or by hand), or in a container.
+   */
+  run_mode: RunMode,
+  /**
+   * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
+   */
+  run_label?: string,
 };
 
 export type ServerInfo = {
@@ -3750,6 +3784,10 @@ export type ServerInfo = {
    * The GitHub account the forks are in (a fork server only). A login is not a secret.
    */
   github_owner?: string,
+  /**
+   * How the server ran: as a service (or by hand), or in a container. Older backups have no such field: service.
+   */
+  run_mode: RunMode,
 };
 
 export type ServerKeyChanged = {
@@ -3807,6 +3845,14 @@ export type ServerSummary = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+  /**
+   * How the server runs: as a service (or by hand), or in a container.
+   */
+  run_mode: RunMode,
+  /**
+   * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
+   */
+  run_label?: string,
 };
 
 /**
