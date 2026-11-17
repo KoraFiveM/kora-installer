@@ -155,3 +155,24 @@ test.describe('on this computer', () => {
     await scan('settings https card')
   })
 })
+
+test.describe('saved licence keys and the keychain', () => {
+  test('Settings says where each key is kept and the keychain can be turned on and off', async ({ page, open, scan }) => {
+    await open('/settings', { as: 'local', scenario: 'keylost' })
+    await expect(page.getByText(/Kept in Kora's private file \(no system keychain on this computer\)/)).toBeVisible()
+    await page.getByRole('button', { name: 'Use the system keychain' }).click()
+    await expect(page.getByText('New keys are kept in your system keychain.')).toBeVisible()
+    await expect(page.getByText('Kept in your system keychain', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: "Keep keys in Kora's private file instead" }).click()
+    await expect(page.getByText(/you turned the system keychain off/)).toBeVisible()
+  })
+
+  test('a key whose keychain entry is gone says so and offers to enter it again', async ({ page, open, scan }) => {
+    await open('/settings', { as: 'local', scenario: 'keylost' })
+    await expect(page.getByText('This key cannot be read from here').first()).toBeVisible()
+    await expect(page.getByText(/not in your system keychain any more/).first()).toBeVisible()
+    await scan('settings lost key')
+    await page.getByRole('button', { name: 'Enter it again: Main' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  })
+})

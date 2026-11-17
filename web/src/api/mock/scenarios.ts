@@ -1,7 +1,7 @@
 // Mock scenarios: which fake world the in-app backend simulates. Chosen with `?scenario=<name>` (kept in
 // sessionStorage so navigating keeps it) or with the floating "Mock" switcher. Only bundled in mock builds.
 
-export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows', 'restarted'] as const
+export const SCENARIOS = ['default', 'empty', 'fleet', 'trouble', 'slow', 'offline', 'down', 'windows', 'restarted', 'keylost'] as const
 export type ScenarioName = (typeof SCENARIOS)[number]
 
 export const SCENARIO_INFO: Record<ScenarioName, string> = {
@@ -13,6 +13,7 @@ export const SCENARIO_INFO: Record<ScenarioName, string> = {
   offline: 'The API answers 401: the "session expired" screen.',
   down: 'Every request fails with a network error (Kora is not answering).',
   restarted: 'The panel was restarted: Settings shows the jobs and activity from before, one install was stopped by the restart (Carry on), one update job was interrupted.',
+  keylost: 'Like default, with one saved licence key (Main) whose system keychain entry has disappeared: Settings says so and offers to enter it again.',
   windows: 'Windows: Kora asks Windows for permission itself. Install names starting with "decline" (No at the prompt), "nobody" (no answer) or "remote" (signed in from another device) show the choices.',
 }
 

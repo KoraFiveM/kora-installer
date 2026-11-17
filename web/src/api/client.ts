@@ -418,6 +418,8 @@ export const api = {
     /** Rename, put a new key under the name, or both. */
     update: (name: string, body: { new_name?: string; license_key?: string }) => call('key_update', { params: { name }, body }),
     remove: (name: string) => call('key_remove', { params: { name } }),
+    /** Use the system keychain (and move the saved keys in), or keep every key in Kora's private file. */
+    keychain: (use_keychain: boolean) => call('keychain_set', { body: { use_keychain } }),
     /** Change the licence key of an installed server: a saved key by name, or a new one (optionally saved). */
     setForServer: (server: string, body: { name: string } | { license_key: string; save_as?: string }) => call('server_key_set', { params: { s: server }, body }),
   },

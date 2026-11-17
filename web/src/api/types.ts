@@ -305,6 +305,8 @@ export type {
   DeviceView,
   EnrolRequest,
   EnrolResponse,
+  KeychainChanged,
+  KeychainView,
   LoginRequest,
   LoginResponse,
   NewApiToken,
