@@ -53,6 +53,10 @@ export const test = base.extend<Fixtures>({
   scan: async ({ page }, use) => {
     await use(async (label) => {
       const r = await new AxeBuilder({ page }).exclude('#kora-mock-switcher').analyze()
+      // E2E_AXE_REPORT=1 also prints the moderate and minor findings (they do not fail the test): for the accessibility backlog.
+      if (process.env.E2E_AXE_REPORT) {
+        for (const v of r.violations.filter((x) => x.impact !== 'serious' && x.impact !== 'critical')) console.log(`AXE[${v.impact}] ${v.id} @ ${label}: ${v.nodes.slice(0, 2).map((n) => n.target.join(' ')).join(' ; ')}`)
+      }
       const bad = r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
       const text = bad.map((v) => `[${v.impact}] ${v.id}: ${v.help}\n    ${v.nodes.slice(0, 4).map((n) => n.target.join(' ') + ' :: ' + (n.failureSummary ?? '').split('\n').slice(0, 3).join(' | ')).join('\n    ')}`).join('\n')
       expect(text, `accessibility violations on "${label}" (${page.url()})`).toBe('')
