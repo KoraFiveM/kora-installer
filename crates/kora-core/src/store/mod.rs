@@ -104,6 +104,20 @@ impl From<rusqlite::Error> for Problem {
 pub struct Store {
     conn: Connection,
     home: PathBuf,
+    blocked: Vec<Blocked>,
+}
+
+/// An old JSON file that could not be imported (damaged, unreadable or from a newer Kora). It is left
+/// exactly where it was, and the part of Kora that depends on it says so instead of starting empty.
+#[derive(Debug, Clone)]
+pub struct Blocked {
+    /// `servers`, `keys`, `remote` or `hub`.
+    pub domain: &'static str,
+    /// Plain words for "why" (no secret).
+    pub why: String,
+    /// Technical details (no secret).
+    pub details: String,
+    pub file: PathBuf,
 }
 
 impl std::fmt::Debug for Store {
@@ -167,14 +181,30 @@ impl Store {
         // Deleted rows (a forgotten key) are zeroed in the file; commits reach the disk (a saved key is not lost
         // to a power cut); WAL lets the panel read while a command writes.
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON; PRAGMA synchronous = FULL; PRAGMA trusted_schema = OFF;")?;
-        let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
+        // Switching a brand-new file to WAL needs a moment alone with it and, unlike every other statement,
+        // does not wait for the busy timeout: when two Kora programs start together, try again.
+        let started = std::time::Instant::now();
+        let mode: String = loop {
+            match conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get::<_, String>(0)) {
+                Ok(m) => break m,
+                Err(e) if matches!(e.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)) && started.elapsed() < BUSY_TIMEOUT => {
+                    std::thread::sleep(Duration::from_millis(15));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
         if !mode.eq_ignore_ascii_case("wal") {
             // e.g. a network drive: still correct, just slower and with writers blocking readers.
             let _ = conn.execute_batch("PRAGMA journal_mode = DELETE");
         }
-        let s = Store { conn, home: home.to_path_buf() };
+        let s = Store { conn, home: home.to_path_buf(), blocked: Vec::new() };
         privacy::fix_owner(&db);
         Ok(s)
+    }
+
+    /// Is this part of the state waiting on an old file that could not be imported?
+    pub fn blocked(&self, domain: &str) -> Option<&Blocked> {
+        self.blocked.iter().find(|b| b.domain == domain)
     }
 
     pub fn home(&self) -> &Path {

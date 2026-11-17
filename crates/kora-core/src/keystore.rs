@@ -1,44 +1,50 @@
-//! Saved Cfx.re licence keys: `<kora home>/secrets.json`, picked by name.
+//! Saved Cfx.re licence keys, picked by name. They live in the Kora home's private database
+//! ([`crate::store`]; `<kora home>/secrets.json` before v0.8, which the store imports once).
 //!
-//! One plain-text JSON file (not encrypted, like the per-server `secrets.cfg`), readable only by the
-//! person who runs Kora: created `0600` on Linux/macOS and, on Windows, with the inherited permissions
-//! removed (the same helper the panel token and the per-server `secrets.cfg` use, `monitor::write_private`).
+//! Not encrypted (like the per-server `secrets.cfg`), but as private as the file was: the database folder is
+//! `0700` and its files `0600` from creation on Linux/macOS, and on Windows the inherited permissions are
+//! removed from the folder ([`crate::store::privacy`]). The key VALUES are in their own table behind the
+//! [`KeyMaterial`] trait ([`material()`] is the one place that picks the implementation), so that a later
+//! version can keep them in the system keychain instead.
 //!
 //! The rules the rest of Kora relies on:
 //! * Everything that leaves this module for a screen, an API answer, a log or an event is a [`KeyInfo`]:
 //!   the name and the LAST FOUR characters. The full key only comes out of [`KeyStore::get`], which is
 //!   for writing the server's own config and nothing else.
-//! * Writes are atomic (temp file, then rename) and the temp file is private from the moment it exists.
-//! * A missing file is an empty store. A file that cannot be read or is damaged is never replaced: every
+//! * Every change is ONE database transaction that reads, checks and writes together, so the panel and a
+//!   `kora keys` command running at the same moment cannot overwrite each other's change (the old file
+//!   could not promise that).
+//! * A store that cannot be read (or an old `secrets.json` that cannot be imported) is never replaced: every
 //!   call says so (a [`Problem`]) and leaves it alone, so keys are never silently lost.
-//! * One process-wide lock makes changes safe between requests of the panel. Two different programs
-//!   changing the file in the same instant (the panel and a `kora keys` command) is not guarded: the
-//!   later write wins whole, never half.
 //!
 //! Key names: 1 to 40 characters, no control characters, compared without regard to case ("main" and
 //! "Main" are the same name). The key itself is checked with the installer's own rule
 //! ([`crate::txadmin::license_key_ok`]).
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::installer::registry::{kora_home, ServerEntry};
 use crate::problem::{codes, Action, Problem};
+use crate::store::material::{KeyMaterial, SqliteKeyMaterial};
+use crate::store::Store;
 
-/// The file in the Kora home.
+/// The old file in the Kora home. Its name still says which Kora home a [`KeyStore::at`] path means.
 pub const FILE_NAME: &str = "secrets.json";
-const VERSION: u32 = 1;
 pub const MAX_NAME: usize = 40;
 
-static LOCK: Mutex<()> = Mutex::new(());
+/// Where the key VALUES live. The one line to change when they move to the system keychain.
+fn material() -> &'static dyn KeyMaterial {
+    &SqliteKeyMaterial
+}
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 struct Entry {
+    /// Row id; 0 for a key that is not saved yet.
+    id: i64,
     name: String,
     key: String,
-    #[serde(default)]
     added: u64,
 }
 
@@ -46,18 +52,6 @@ impl std::fmt::Debug for Entry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Entry").field("name", &self.name).field("key", &"<redacted>").finish()
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Doc {
-    #[serde(default = "one")]
-    version: u32,
-    #[serde(default)]
-    keys: Vec<Entry>,
-}
-
-fn one() -> u32 {
-    VERSION
 }
 
 /// What may be shown about a saved key: never more than its name and last four characters.
@@ -116,7 +110,7 @@ fn same(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
-/// The saved keys file. [`KeyStore::default`] is the one in the Kora home; tests use [`KeyStore::at`].
+/// The saved keys of one Kora home. [`KeyStore::default`] is the one of this process; tests use [`KeyStore::at`].
 #[derive(Debug, Clone)]
 pub struct KeyStore {
     path: PathBuf,
@@ -126,6 +120,41 @@ impl Default for KeyStore {
     fn default() -> Self {
         Self { path: kora_home().join(FILE_NAME) }
     }
+}
+
+fn load_entries(c: &rusqlite::Connection) -> Result<Vec<Entry>, Problem> {
+    let mut st = c.prepare("SELECT id, name, added FROM license_keys ORDER BY id")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?.collect::<Result<Vec<_>, _>>()?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (id, name, added) in rows {
+        let key = material().get(c, id)?.unwrap_or_default();
+        out.push(Entry { id, name, key, added: added as u64 });
+    }
+    Ok(out)
+}
+
+/// Write the difference between `before` and `after` (inside the caller's transaction).
+fn persist(c: &rusqlite::Connection, before: &[Entry], after: &[Entry]) -> Result<(), Problem> {
+    for b in before {
+        if !after.iter().any(|a| a.id == b.id) {
+            material().delete(c, b.id)?;
+            c.execute("DELETE FROM license_keys WHERE id = ?1", [b.id])?;
+        }
+    }
+    for a in after {
+        if a.id == 0 {
+            c.execute("INSERT INTO license_keys (name, name_folded, added) VALUES (?1, ?2, ?3)", rusqlite::params![a.name, a.name.to_lowercase(), a.added as i64])?;
+            material().put(c, c.last_insert_rowid(), &a.key)?;
+        } else if let Some(b) = before.iter().find(|b| b.id == a.id) {
+            if b.name != a.name {
+                c.execute("UPDATE license_keys SET name = ?1, name_folded = ?2 WHERE id = ?3", rusqlite::params![a.name, a.name.to_lowercase(), a.id])?;
+            }
+            if b.key != a.key {
+                material().put(c, a.id, &a.key)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 impl KeyStore {
@@ -149,51 +178,50 @@ impl KeyStore {
         .with_action(Action::CopyDetails)
     }
 
-    fn read(&self) -> Result<Doc, Problem> {
-        let text = match std::fs::read(&self.path) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Doc { version: VERSION, keys: vec![] }),
-            Err(e) => return Err(self.unreadable("the file cannot be opened", format!("{}: {e}", self.path.display()))),
-        };
-        tighten(&self.path);
-        // serde's messages can quote the offending value, which could be a key: only the position is kept.
-        let doc: Doc =
-            serde_json::from_slice(&text).map_err(|e| self.unreadable("the file is damaged", format!("{} is not valid at line {}, column {}", self.path.display(), e.line(), e.column())))?;
-        if doc.version > VERSION {
-            return Err(self.unreadable("it was written by a newer Kora", format!("{} has format version {}, this Kora understands {VERSION}", self.path.display(), doc.version)));
+    /// A store problem about the keys is told as the keys problem it is.
+    fn blocked(&self, s: &Store) -> Result<(), Problem> {
+        match s.blocked("keys") {
+            Some(why) => Err(self.unreadable(&why.why, why.details.clone())),
+            None => Ok(()),
         }
-        Ok(doc)
     }
 
-    fn write(&self, doc: &Doc) -> Result<(), Problem> {
-        let text = serde_json::to_string_pretty(doc).map_err(|e| Problem::generic("Kora could not save your licence keys.").with_details(e.to_string()))?;
-        // A leftover temp file from a crash could have looser permissions: start from nothing.
-        let _ = std::fs::remove_file(self.path.with_extension("tmp"));
-        crate::monitor::write_private(&self.path, &text).map_err(|e| {
-            Problem::new(codes::FAILED, format!("Kora could not save your licence keys to {}. Check that the folder can be written to.", self.path.display()))
-                .with_details(e)
-                .with_action(Action::CopyDetails)
-        })?;
-        hand_to_home_owner(&self.path);
-        Ok(())
+    /// Read-only: `None` when there is no store yet (nothing saved).
+    fn open_read(&self) -> Result<Option<Store>, Problem> {
+        match Store::open_existing_beside(&self.path)? {
+            Some(s) => {
+                self.blocked(&s)?;
+                Ok(Some(s))
+            }
+            None => Ok(None),
+        }
     }
 
-    /// Run `f` on the keys under the lock; the file is written only when `f` says it changed something.
+    fn read(&self) -> Result<Vec<Entry>, Problem> {
+        match self.open_read()? {
+            Some(s) => s.read(|c| load_entries(c)),
+            None => Ok(vec![]),
+        }
+    }
+
+    /// Run `f` on the keys inside one transaction; the database is written only when `f` says it changed something.
     fn change<T>(&self, f: impl FnOnce(&mut Vec<Entry>) -> Result<(T, bool), Problem>) -> Result<T, Problem> {
-        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let mut doc = self.read()?;
-        let (out, changed) = f(&mut doc.keys)?;
-        if changed {
-            doc.version = VERSION;
-            self.write(&doc)?;
-        }
-        Ok(out)
+        let s = Store::open_beside(&self.path)?;
+        self.blocked(&s)?;
+        s.write(|tx| {
+            let before = load_entries(tx)?;
+            let mut keys = before.clone();
+            let (out, changed) = f(&mut keys)?;
+            if changed {
+                persist(tx, &before, &keys)?;
+            }
+            Ok(out)
+        })
     }
 
     /// The saved keys, safe to show.
     pub fn list(&self) -> Result<Vec<KeyInfo>, Problem> {
-        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        Ok(self.read()?.keys.iter().map(info).collect())
+        Ok(self.read()?.iter().map(info).collect())
     }
 
     /// Does a key with this name exist (no key is read out)?
@@ -204,15 +232,13 @@ impl KeyStore {
     /// The FULL key. Only for writing the server's own configuration or starting an install: never
     /// put the result in an answer, a log, an event or an error.
     pub fn get(&self, name: &str) -> Result<String, Problem> {
-        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        self.read()?.keys.into_iter().find(|e| same(&e.name, name)).map(|e| e.key).ok_or_else(|| not_found(name))
+        self.read()?.into_iter().find(|e| same(&e.name, name)).map(|e| e.key).ok_or_else(|| not_found(name))
     }
 
     /// The name a key value is already saved under, if any.
     pub fn name_of(&self, key: &str) -> Result<Option<String>, Problem> {
-        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let k = key.trim();
-        Ok(self.read()?.keys.into_iter().find(|e| e.key == k).map(|e| e.name))
+        Ok(self.read()?.into_iter().find(|e| e.key == k).map(|e| e.name))
     }
 
     /// Save a new key.
@@ -225,7 +251,7 @@ impl KeyStore {
             if let Some(e) = keys.iter().find(|e| e.key == key) {
                 return Err(duplicate(&e.name));
             }
-            let e = Entry { name, key, added: crate::monitor::now_unix() };
+            let e = Entry { id: 0, name, key, added: crate::monitor::now_unix() };
             let i = info(&e);
             keys.push(e);
             Ok((i, true))
@@ -271,8 +297,7 @@ impl KeyStore {
 
     /// Every saved key (safe to show) with the servers whose configuration holds exactly that key.
     pub fn list_with_servers(&self, servers: &[ServerEntry]) -> Result<Vec<(KeyInfo, Vec<String>)>, Problem> {
-        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        Ok(self.read()?.keys.iter().map(|e| (info(e), servers_using(&e.key, servers))).collect())
+        Ok(self.read()?.iter().map(|e| (info(e), servers_using(&e.key, servers))).collect())
     }
 
     /// Forget a saved key. Servers installed with it are not touched.
@@ -296,44 +321,6 @@ fn name_taken(name: &str) -> Problem {
 
 fn duplicate(name: &str) -> Problem {
     Problem::new(codes::KEYS_DUPLICATE, format!("That key is already saved as \"{name}\". Pick it from the list instead of adding it again.")).with_action(Action::change_answers("licence"))
-}
-
-/// Run as root (`sudo kora ...`) inside someone else's Kora folder, a file Kora creates would belong to root and
-/// that person could no longer read their own keys: give it to the owner of the folder (best effort; nothing
-/// happens off Unix, when not root, or when the folder is root's own).
-pub(crate) fn hand_to_home_owner(path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if !crate::installer::is_admin() {
-            return;
-        }
-        if let Some(m) = path.parent().and_then(|p| std::fs::metadata(p).ok()) {
-            if m.uid() != 0 {
-                // `lchown`: the folder belongs to someone else, who could swap `path` for a link to any file
-                // while root is here; `chown` would follow it and hand that file over.
-                let _ = std::os::unix::fs::lchown(path, Some(m.uid()), Some(m.gid()));
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-}
-
-/// A file made by an older tool or copied around may be readable by others: take that away (best effort).
-fn tighten(path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        // On the open file, never through a link (root may be reading inside someone else's folder).
-        if let Ok(f) = crate::fsutil::open_no_follow(path, crate::fsutil::Access::Read, None) {
-            if f.metadata().is_ok_and(|m| m.permissions().mode() & 0o077 != 0) {
-                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = path;
 }
 
 // ---- the key inside a server's own configuration ----------------------------------------------
@@ -475,10 +462,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_is_an_empty_store_and_is_not_created_by_reading() {
+    fn missing_store_is_empty_and_is_not_created_by_reading() {
         let (d, s) = store();
         assert!(s.list().unwrap().is_empty());
-        assert!(!d.path().join("secrets.json").exists());
+        assert!(!crate::store::db_path(d.path()).exists() && !d.path().join("secrets.json").exists());
+        assert_eq!(s.get("x").unwrap_err().code, codes::KEYS_NOT_FOUND);
     }
 
     #[test]
@@ -497,23 +485,59 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn file_is_private_from_creation_and_made_private_again_when_read() {
+    fn the_database_is_as_private_as_secrets_json_was() {
         use std::os::unix::fs::PermissionsExt;
         let (d, s) = store();
         s.add("Main", K1).unwrap();
-        let p = d.path().join("secrets.json");
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&p), 0o600);
-        assert!(!d.path().join("secrets.tmp").exists(), "no temp file is left");
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let dir = crate::store::store_dir(d.path());
+        assert_eq!(mode(&dir), 0o700);
+        let mut files = 0;
+        for f in std::fs::read_dir(&dir).unwrap().flatten().filter(|f| f.path().is_file()) {
+            files += 1;
+            assert_eq!(mode(&f.path()), 0o600, "{}", f.path().display());
+        }
+        assert!(files >= 1);
+        // a copy made too open is closed again when Kora next opens it
+        let db = crate::store::db_path(d.path());
+        std::fs::set_permissions(&db, std::fs::Permissions::from_mode(0o644)).unwrap();
         s.list().unwrap();
-        assert_eq!(mode(&p), 0o600);
-        // A stale temp file with loose permissions is not reused.
-        let tmp = d.path().join("secrets.tmp");
-        std::fs::write(&tmp, "old").unwrap();
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
-        s.add("Second", K2).unwrap();
-        assert_eq!(mode(&p), 0o600);
+        assert_eq!(mode(&db), 0o600);
+        // the key is in the file and nowhere else is it handed out
+        let bytes = std::fs::read(&db).unwrap();
+        let wal = std::fs::read(crate::store::privacy::side_file(&db, "-wal")).unwrap_or_default();
+        assert!(bytes.windows(K1.len()).any(|w| w == K1.as_bytes()) || wal.windows(K1.len()).any(|w| w == K1.as_bytes()));
+    }
+
+    #[test]
+    fn a_forgotten_key_is_wiped_from_the_file() {
+        let (d, s) = store();
+        s.add("Main", K1).unwrap();
+        s.remove("Main").unwrap();
+        // fold the write-ahead log into the main file, then look
+        let st = Store::open(d.path()).unwrap();
+        st.read(|c| {
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+            Ok(())
+        })
+        .unwrap();
+        let bytes = std::fs::read(crate::store::db_path(d.path())).unwrap();
+        assert!(!bytes.windows(K1.len()).any(|w| w == K1.as_bytes()), "secure_delete should have zeroed it");
+    }
+
+    #[test]
+    fn two_stores_in_one_process_see_each_others_changes() {
+        let d = tempfile::tempdir().unwrap();
+        let a = KeyStore::at(d.path().join("secrets.json"));
+        let b = KeyStore::at(d.path().join("secrets.json"));
+        a.add("One", K1).unwrap();
+        b.add("Two", K2).unwrap();
+        assert_eq!(a.list().unwrap().len(), 2);
+        b.remove("One").unwrap();
+        assert_eq!(a.list().unwrap().len(), 1);
+        // order of saving is kept
+        a.add("Three", "cfxk_CCCCCCCCCCCCCCCC_3333").unwrap();
+        assert_eq!(a.list().unwrap().iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), ["Two", "Three"]);
     }
 
     #[test]
@@ -555,37 +579,6 @@ mod tests {
     }
 
     #[test]
-    fn a_damaged_file_is_reported_and_never_overwritten() {
-        let (d, s) = store();
-        let p = d.path().join("secrets.json");
-        let junk = format!("{{\"keys\": [{{\"name\": \"Main\", \"key\": \"{K1}\" ");
-        std::fs::write(&p, &junk).unwrap();
-        for e in [s.list().unwrap_err(), s.add("New", K2).unwrap_err(), s.get("Main").unwrap_err(), s.remove("Main").unwrap_err()] {
-            assert_eq!(e.code, codes::KEYS_UNREADABLE);
-            assert!(e.message.contains("no key was lost"), "{}", e.message);
-            let all = format!("{} {:?}", e.message, e.details);
-            assert!(!all.contains("AAAAAAAA"), "no key in an error: {all}");
-        }
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), junk, "left exactly as it was");
-        // A wrong type: serde would quote the value; we must not.
-        std::fs::write(&p, format!("{{\"keys\": \"{K1}\"}}")).unwrap();
-        let e = s.list().unwrap_err();
-        assert!(!format!("{} {:?}", e.message, e.details).contains("AAAAAAAA"));
-        // Written by a newer Kora.
-        std::fs::write(&p, r#"{"version": 99, "keys": []}"#).unwrap();
-        assert_eq!(s.add("New", K2).unwrap_err().code, codes::KEYS_UNREADABLE);
-    }
-
-    #[test]
-    fn unreadable_path_is_a_problem_not_a_panic() {
-        let d = tempfile::tempdir().unwrap();
-        // The "file" is a folder.
-        std::fs::create_dir(d.path().join("secrets.json")).unwrap();
-        let e = KeyStore::at(d.path().join("secrets.json")).list().unwrap_err();
-        assert_eq!(e.code, codes::KEYS_UNREADABLE);
-    }
-
-    #[test]
     fn concurrent_adds_all_land() {
         let (_d, s) = store();
         let hs: Vec<_> = (0..8)
@@ -602,7 +595,7 @@ mod tests {
 
     #[test]
     fn debug_never_prints_a_key() {
-        let e = Entry { name: "Main".into(), key: K1.into(), added: 1 };
+        let e = Entry { id: 1, name: "Main".into(), key: K1.into(), added: 1 };
         assert!(!format!("{e:?}").contains("AAAAAAAA"));
     }
 
