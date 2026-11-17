@@ -478,6 +478,16 @@ enum Command {
         #[command(subcommand)]
         cmd: keys_cmd::ProfileCmd,
     },
+    /// Development servers: see and change which branch each resource is on, and go back to the normal version.
+    Branch {
+        #[command(subcommand)]
+        cmd: branch::BranchCmd,
+    },
+    /// Development servers: list and try pull requests on a resource.
+    Pr {
+        #[command(subcommand)]
+        cmd: branch::PrCmd,
+    },
     /// GitHub helpers for development mode.
     Github {
         #[command(subcommand)]
@@ -2526,7 +2536,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
         // The panel runs as the user; privileged actions report the command to run instead.
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Tools { .. } | Command::Check { .. } | Command::Keys { .. } | Command::Profile { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Tools { .. } | Command::Check { .. } | Command::Keys { .. } | Command::Profile { .. } | Command::Branch { .. } | Command::Pr { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
         Some(Command::Helper { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
@@ -2694,6 +2704,8 @@ fn main() {
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
+        Some(Command::Branch { cmd }) => branch::branch(cmd),
+        Some(Command::Pr { cmd }) => branch::pr(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),
         Some(Command::Github { cmd: GithubCmd::Owners }) => github_owners(),
         Some(Command::Tools { cmd: ToolsCmd::Status }) => toolchain::run_tools_status(),
@@ -2729,6 +2741,7 @@ fn main() {
 
 mod bare;
 mod keys_cmd;
+mod branch;
 mod panel_tailscale;
 mod toolchain;
 

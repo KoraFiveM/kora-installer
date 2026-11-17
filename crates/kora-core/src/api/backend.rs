@@ -179,11 +179,19 @@ pub trait Backend {
     fn asset_import(&mut self, _e: &ServerEntry, _zip: &Path, _o: &ImportOpts, _say: &mut dyn FnMut(&str)) -> Res<ImportReport> {
         Err(NO_PAID_ASSETS.into())
     }
+    /// Branches and pull requests of a Development server's resources (see [`crate::branches`]). `say(done, total, resource)`
+    /// reports progress of the bulk operations. Front ends without it keep the default.
+    fn branches(&mut self, _e: &ServerEntry, _req: &crate::branches::Request, _say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
+        Err(NO_BRANCHES.into())
+    }
     /// Take an imported paid asset off the server (it is kept as a backup). Returns notes to show.
     fn asset_remove(&mut self, _e: &ServerEntry, _name: &str) -> Res<Vec<String>> {
         Err(NO_PAID_ASSETS.into())
     }
 }
+
+/// What a front end without branch switching answers.
+pub const NO_BRANCHES: &str = "Branches can't be changed from here.";
 
 /// What a front end without paid-asset support answers.
 pub const NO_PAID_ASSETS: &str = "Paid assets can't be managed from here.";

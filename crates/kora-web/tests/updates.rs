@@ -105,6 +105,7 @@ fn change(id: &str, status: ChangeStatus) -> ResourceChange {
         changelog: vec!["Fix".into()],
         needs_restart: false,
         status,
+        note: None,
     }
 }
 

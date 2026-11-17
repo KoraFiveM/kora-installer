@@ -4,6 +4,7 @@
 //! talks to the real GitHub. Bootstrap installation is only *planned* ([`plan_bootstrap`]); the
 //! caller decides when (and with which privileges) to run the described steps.
 
+pub mod branches;
 pub mod forkfind;
 pub mod owners;
 

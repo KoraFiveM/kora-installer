@@ -60,6 +60,8 @@ pub struct FakeState {
     /// What `asset_import` answers (`None`: one asset named after the zip).
     pub asset_import: Option<Res<ImportReport>>,
     pub asset_remove_error: Option<String>,
+    /// What `branches` answers (`None`: an error that says nothing is set up). Every request is in `calls` as `branches {request:?}`.
+    pub branches: Option<Res<crate::branches::Reply>>,
 }
 
 /// Cheap to clone; clones share state. Give `move || Box::new(fake.clone())` to the panel.
@@ -103,6 +105,15 @@ fn err_or<T>(e: &Option<String>, ok: impl FnOnce() -> T) -> Res<T> {
 }
 
 impl Backend for FakeBackend {
+    fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
+        let mut s = self.state();
+        s.calls.push(format!("branches {} {req:?}", e.name));
+        if matches!(req, crate::branches::Request::BulkPreview { .. } | crate::branches::Request::BulkApply { .. }) {
+            say(0, 1, "");
+            say(1, 1, "kora_hud");
+        }
+        s.branches.clone().unwrap_or_else(|| Err("No branch answer is set up.".into()))
+    }
     fn list(&mut self) -> Res<Vec<ServerEntry>> {
         let s = self.state();
         err_or(&s.list_error, || s.servers.clone())

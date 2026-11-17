@@ -253,6 +253,22 @@ export const api = {
     prPlan: (name: string, resource: string) => post<T.PrPlan>(`${s(name)}/pr/plan`, { resource }),
     prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => post<{ url: string }>(`${s(name)}/pr`, body),
   },
+  branches: {
+    /** Where each resource is (nothing is downloaded). Development servers only. */
+    list: (name: string) => get<{ resources: T.ResourceBranch[] }>(`${s(name)}/branches`).then((r) => r.resources),
+    /** Branches and kept-aside changes of one resource; `refresh` downloads the newest lists from GitHub first. */
+    choices: (name: string, resource: string, refresh = false) => get<T.BranchChoices>(`${s(name)}/resources/${enc(resource)}/branches${refresh ? '?refresh=1' : ''}`),
+    /** Open pull requests of the original repository and of the person's fork. */
+    prs: (name: string, resource: string) => get<T.PrChoices>(`${s(name)}/resources/${enc(resource)}/prs`),
+    /** Switch one resource: another branch, a pull request, or back to the normal version. */
+    switch: (name: string, resource: string, body: T.SwitchRequest) => post<T.SwitchResult>(`${s(name)}/resources/${enc(resource)}/branch`, body),
+    /** Bring kept-aside changes back. */
+    restore: (name: string, resource: string, index: number) => post<T.SwitchResult>(`${s(name)}/resources/${enc(resource)}/stash/restore`, { index }),
+    /** Which resources have a branch (a job; result is a `BulkPreview`). */
+    bulkPreview: (name: string, branch: string, fetch = true) => post<T.JobStarted>(`${s(name)}/branches/preview`, { branch, fetch }),
+    /** Switch every resource that has the branch, or all back to the normal version (a job; result is a `BulkResult`). */
+    bulkApply: (name: string, body: { action: 'branch'; branch: string; resources?: string[]; changes?: T.ChangesChoice } | { action: 'default'; resources?: string[]; changes?: T.ChangesChoice }) => post<T.JobStarted>(`${s(name)}/branches/apply`, body),
+  },
   github: {
     status: () => get<T.GithubStatus>('/github/status'),
     login: () => post<T.GithubLoginStart>('/github/login'),

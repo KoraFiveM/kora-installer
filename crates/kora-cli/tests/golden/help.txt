@@ -18,6 +18,8 @@ Commands:
   app            The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
   keys           Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
   profile        What Kora remembers between installs (your Cfx.re name and GitHub owner)
+  branch         Development servers: see and change which branch each resource is on, and go back to the normal version
+  pr             Development servers: list and try pull requests on a resource
   github         GitHub helpers for development mode
   tools          Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
   check          Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
@@ -112,14 +114,14 @@ Options:
       --start
           Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --no-start
           Do not start the server after installing (start it later with `kora start <name>`)
 
       --dry-run
           Show the full plan and change nothing
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --auto-ports
           If a port is in use, silently use the next free one and say what changed
@@ -974,6 +976,251 @@ Forget it all: the next install asks again
 Usage: kora profile forget [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch =====
+Development servers: see and change which branch each resource is on, and go back to the normal version
+
+Usage: kora branch [OPTIONS] <COMMAND>
+
+Commands:
+  list     Show which branch each resource of a Development server is on
+  show     Show the branches of one resource, and changes you kept aside
+  switch   Put one resource on another branch
+  default  Back to the normal version: one resource, or all of them when none is named
+  all      Put every resource that has a branch on it (`--preview` only shows which ones have it)
+  restore  Bring changes you kept aside back (see `kora branch show`)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch list =====
+Show which branch each resource of a Development server is on
+
+Usage: kora branch list [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch show =====
+Show the branches of one resource, and changes you kept aside
+
+Usage: kora branch show [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+Options:
+      --refresh
+          Download the newest branch lists from GitHub first
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch switch =====
+Put one resource on another branch
+
+Usage: kora branch switch [OPTIONS] <SERVER> <RESOURCE> <BRANCH>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+  <BRANCH>
+          
+
+Options:
+      --from <origin|upstream>
+          Where to take the branch from if the resource does not have it yet: origin (your fork) or upstream (the original)
+
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch default =====
+Back to the normal version: one resource, or all of them when none is named
+
+Usage: kora branch default [OPTIONS] <SERVER> [RESOURCE]
+
+Arguments:
+  <SERVER>
+          
+
+  [RESOURCE]
+          
+
+Options:
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch all =====
+Put every resource that has a branch on it (`--preview` only shows which ones have it)
+
+Usage: kora branch all [OPTIONS] <SERVER> <BRANCH>
+
+Arguments:
+  <SERVER>
+          
+
+  <BRANCH>
+          
+
+Options:
+      --preview
+          Only show which resources have the branch
+
+      --no-fetch
+          Do not download the newest branch lists first
+
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora branch restore =====
+Bring changes you kept aside back (see `kora branch show`)
+
+Usage: kora branch restore [OPTIONS] <SERVER> <RESOURCE> <INDEX>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+  <INDEX>
+          The number shown by `kora branch show`
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr =====
+Development servers: list and try pull requests on a resource
+
+Usage: kora pr [OPTIONS] <COMMAND>
+
+Commands:
+  list      List the open pull requests of the original repository and your fork, for one resource
+  checkout  Try a pull request on one resource: its number or its GitHub address
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr list =====
+List the open pull requests of the original repository and your fork, for one resource
+
+Usage: kora pr list [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr checkout =====
+Try a pull request on one resource: its number or its GitHub address
+
+Usage: kora pr checkout [OPTIONS] <SERVER> <RESOURCE> <PR>
+
+Arguments:
+  <SERVER>
+          
+
+  <RESOURCE>
+          
+
+  <PR>
+          The pull request's number (12) or address (https://github.com/owner/name/pull/12)
+
+Options:
+      --source <upstream|fork>
+          Which repository a bare number is on: upstream (the original, the default) or fork (yours)
+
+      --stash
+          If a resource has changes of your own: keep them aside (they can be brought back with `kora branch restore`)
+
+      --discard
+          If a resource has changes of your own: throw them away (asks first, unless --yes)
+
+  -y, --yes
+          Do not ask before discarding
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

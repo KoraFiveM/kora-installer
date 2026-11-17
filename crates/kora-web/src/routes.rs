@@ -108,6 +108,13 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::PanelRestart => on_op(op, handlers::system::panel_restart),
         Op::CheckCfx => on_op(op, handlers::install::check_cfx),
         Op::AssetsList => on_op(op, handlers::assets::assets_list),
+        Op::BranchesList => on_op(op, handlers::branches::branches_list),
+        Op::BranchChoices => on_op(op, handlers::branches::branch_choices),
+        Op::PrList => on_op(op, handlers::branches::pr_list),
+        Op::BranchSwitch => on_op(op, handlers::branches::branch_switch),
+        Op::StashRestore => on_op(op, handlers::branches::stash_restore),
+        Op::BranchBulkPreview => on_op(op, handlers::branches::bulk_preview),
+        Op::BranchBulkApply => on_op(op, handlers::branches::bulk_apply),
         // The zip is the request body: streamed to a file, so the panel-wide 1 MiB limit does not apply.
         Op::AssetInspect => on_op(op, handlers::assets::asset_inspect)
             .layer(DefaultBodyLimit::max(handlers::assets::UPLOAD_LIMIT as usize)),

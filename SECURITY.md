@@ -40,6 +40,7 @@ reasonable time to release a fix before you disclose publicly.
   The file is verified before anything is unpacked, unpacked without links or paths that leave the folder, and moved into
   place in one step. They live in the user's own Kora folder and need no administrator rights; a Git or GitHub CLI already on
   the computer is preferred, and the folder Kora itself runs from is never searched for them.
+- Switching a Development resource to another branch or a pull request (`kora branch`, `kora pr`, the GitHub tab) runs `git` and `gh` as the installing user, only inside the server's `resources` folder (a folder that points elsewhere is refused), and only with checked values: branch names and pull request numbers are validated before they reach a command line, and an address is only accepted when it is the resource's own repository or your fork. It never pushes, never forces, never deletes a branch or a stash, and never touches changes you have not saved without your explicit choice. A pull request is other people's code that then runs on your server: trying one needs the admin role, like other changes to the server (adding resources, rolling back). Production servers cannot be switched.
 
 Full user-facing description: [docs/panel.md](docs/panel.md). Report a panel vulnerability privately, in the same way
 as any other (see above). Include the version, your platform, and whether the panel was local or remote.

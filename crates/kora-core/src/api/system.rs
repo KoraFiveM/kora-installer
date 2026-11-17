@@ -398,6 +398,11 @@ impl Backend for SystemBackend {
     fn asset_remove(&mut self, e: &ServerEntry, name: &str) -> Res<Vec<String>> {
         paidassets::remove(&e.dir, name)
     }
+
+    fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
+        crate::installer::gitops::with_runner(&e.dir, |r| crate::branches::run(r, &sf, req, say)).map_err(String::from)
+    }
 }
 
 #[cfg(test)]
