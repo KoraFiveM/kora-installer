@@ -39,6 +39,27 @@ if you add or update a dependency.
   for user-visible changes.
 - Install scripts: HTTPS only, always verify SHA-256, never overwrite a file that is not a kora program.
 
+## Adding a command
+
+`crates/kora-cli/src/main.rs` holds only the top-level `Cli` and `Command` enums, the process-level
+concerns (which commands need administrator rights, relaunching, pausing the window) and the dispatch
+`match`. Everything a command does lives in its own file under `crates/kora-cli/src/cmd/`
+(shared prompts and printing helpers are in `ui.rs`). To add a command:
+
+1. Create `cmd/<area>.rs` (and add `pub(crate) mod <area>;` to `cmd/mod.rs`). Put its clap definitions
+   (`Args` struct or `Subcommand` enum), its handler (`pub(crate) fn run(..) -> i32`) and its tests there.
+   Keep items private unless `main.rs` or another module needs them; use `pub(crate)`, never `pub`.
+2. In `main.rs`, add one variant to `Command` (with its `///` help text), one arm in `command_kind` (does it
+   need administrator rights?), and one dispatch arm in `main()`. If it needs root on Linux, add it to
+   `admin_reasons_for_command`.
+3. Add every command and flag to the table in `crates/kora-cli/src/parity.rs`: the panel operation that serves it
+   (`Route(Op::..)`), or `CliOnly("why")`. `every_cli_item_is_classified` fails until you do.
+4. Regenerate the help golden and read the diff: `KORA_UPDATE_GOLDEN=1 cargo test -p kora-cli help_tree_matches_golden`
+   (it rewrites `crates/kora-cli/tests/golden/help.txt`).
+5. Run `cargo fmt --all`, `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
+
+Do not add handlers to `main.rs`. A file that grows past roughly 800 lines is a sign to split the area.
+
 ## Windows smoke tests
 
 Real Windows behaviour (services, firewall, MariaDB, install script) is tested by the **Windows smoke** workflow.

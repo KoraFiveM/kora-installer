@@ -96,7 +96,7 @@ pub enum PrCmd {
 
 fn changes_of(a: &ChangeArgs) -> Option<Changes> {
     if a.discard {
-        if !a.yes && !crate::confirm("This throws away the changes you made in the resource folder, for good. Continue?") {
+        if !a.yes && !crate::ui::confirm("This throws away the changes you made in the resource folder, for good. Continue?") {
             println!("Cancelled. Nothing was changed.");
             return None;
         }
