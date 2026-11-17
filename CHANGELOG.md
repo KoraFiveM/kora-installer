@@ -37,6 +37,12 @@ versions follow [SemVer](https://semver.org/).
 - **Your own changes are never lost by a switch.** If a resource has changes you have not saved, Kora does nothing until you choose: keep them aside (they are listed afterwards, with "Bring my changes back"), throw them away (asked twice, with a warning), or cancel. Commits that belong to no branch are saved on a branch of their own before Kora leaves them. Kora never deletes a branch or a kept-aside set of changes, never pushes, and never forces anything.
 - After a switch Kora says the running server still has the old version, and offers to restart the resource.
 
+### Security
+- Pre-release review of the 0.7.0 changes. When Kora runs as root through the helper, inside your own Kora folder, it no longer writes `profile.json`, the stopped-install files or `last-install.json` through a link left there (they use a fresh temporary file renamed into place), and files it hands back to you (`secrets.json` and the others) are changed with `lchown`, so a link swapped in meanwhile cannot make root give another file to your account.
+- `git` and `gh` are started by the full path of the copy Kora found, never by name, so a `PATH` with an empty or relative entry can no longer make the operating system pick a program from the resource's own folder (a pull request's files) while Kora runs `git` there.
+- On Windows a job address such as `CON` or `NUL` can no longer be used to read a device instead of a stopped-install file; a literal `%` in the program path of the Linux launcher is written `%%`.
+- The pull request dialog says that a pull request is someone else's code that then runs on your server. `SECURITY.md` is corrected where it overstated where Git and the GitHub CLI are looked for, and says what a pull request, a token and a saved key can and cannot do.
+
 ### Removed
 - Code that nothing used any more since the machine-wide app was retired (the old app's install planner now only exists in the tests that set up an old install), the `BSL-1.0` licence from `deny.toml` (only the removed clipboard crate needed it; `ryu` is `Apache-2.0 OR BSL-1.0`), and the last wording that mentioned the terminal screens or `kora manager`. `kora panel --foreground` run as root now says the same as a bare `kora` does.
 - The Windows `winget` / vendor-installer route for Git and the GitHub CLI (it needed administrator rights and a restart of every open window); the private copies replace it. On Linux the GitHub CLI is no longer installed from GitHub's apt repository either.
