@@ -287,6 +287,7 @@ fn db_missing(what_to_do: &str) -> Problem {
 /// A database service that is installed but stopped: the command that starts it.
 fn db_stopped(name: &str, start: &[&str]) -> Problem {
     Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running. Start it, then try this step again."))
+        .with_message_id("errors.problems.dbStoppedStep", &[("name", name)])
         .with_action(Action::StartDatabase)
         .with_action(Action::show_command(start, true))
 }
@@ -294,6 +295,7 @@ fn db_stopped(name: &str, start: &[&str]) -> Problem {
 /// Installing the database server needs administrator rights.
 fn db_needs_admin(req: &InstallRequest, why: String) -> Problem {
     Problem::new(codes::NEEDS_ELEVATION, "Installing the database server needs administrator rights.")
+        .with_message_id("errors.problems.dbNeedsAdmin", &[])
         .with_details(why)
         .with_action(Action::InstallAdminService)
         .with_action(Action::show_command(&crate::api::install::install_command(req), true))
@@ -303,6 +305,7 @@ fn db_needs_admin(req: &InstallRequest, why: String) -> Problem {
 /// Git is missing, and the system package manager (administrator rights) is the way to get it.
 fn git_needs_admin() -> Problem {
     Problem::new(codes::INSTALL_TOOL_MISSING, "Git is not installed, and installing it here needs administrator rights.")
+        .with_message_id("errors.problems.gitNeedsAdmin", &[])
         .with_action(Action::InstallAdminService)
         .with_action(Action::open_link(known::GIT_URL))
 }
@@ -728,7 +731,12 @@ impl InstallStep {
         let ctx = &*self.ctx;
         ctx.emit(self.id, StepStatus::Running, "Starting the GitHub sign-in...", 0.2);
         let session = begin_login(&SystemLogin, false).map_err(|e| {
-            InstallError::from(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))
+            InstallError::from(
+                Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.")
+                    .with_message_id("errors.problems.githubSignInNotStarted", &[])
+                    .with_details(e.to_string())
+                    .with_action(Action::SignInGithub { scopes: vec![] }),
+            )
         })?;
         let opened = open_github_page(&session.url);
         let msg = format!("Sign in to GitHub: {} {} and enter this code: {}  (waiting for you, up to 15 minutes)", if opened { "your browser is opening" } else { "open" }, session.url, session.code);
@@ -740,10 +748,15 @@ impl InstallStep {
                 ctx.emit(self.id, StepStatus::Running, format!("Signed in to GitHub as {login}"), 0.8);
                 Ok(())
             }
-            Ok(_) => {
-                Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).").with_action(Action::SignInGithub { scopes: vec![] }).into())
-            }
-            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }).into()),
+            Ok(_) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).")
+                .with_message_id("errors.problems.githubSignInNotCompleted", &[])
+                .with_action(Action::SignInGithub { scopes: vec![] })
+                .into()),
+            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
+                .with_message_id("errors.problems.githubSignInUnfinished", &[])
+                .with_details(e.to_string())
+                .with_action(Action::SignInGithub { scopes: vec![] })
+                .into()),
         }
     }
 
@@ -804,7 +817,10 @@ impl InstallStep {
                 self.sign_in_to_github()?;
                 st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
                 if !st.logged_in {
-                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_action(Action::SignInGithub { scopes: vec![] }).into());
+                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
+                        .with_message_id("errors.problems.githubSignInUnfinished", &[])
+                        .with_action(Action::SignInGithub { scopes: vec![] })
+                        .into());
                 }
             }
             let missing = st.missing_scopes(false);

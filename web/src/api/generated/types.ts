@@ -2443,6 +2443,17 @@ export type Message = {
 };
 
 /**
+ * A message for a front end's catalogue: the id (`errors.problems.<name>`) and its parameters, all as text (a front end
+ * reads a count as a number where its message says so). The English `message` of the problem is what this id says in English.
+ */
+export type MessageRef = {
+  id: string,
+  params?: {
+    [key in string]: string
+  },
+};
+
+/**
  * `GET /meta`. `identity` is `null` unless the request carries a valid session or token.
  */
 export type Meta = {
@@ -2904,6 +2915,11 @@ export type Problem = {
    * What the user can do, best first. Empty: the front end offers its generic choices.
    */
   actions: Array<Action>,
+  /**
+   * The same message as a catalogue id plus named parameters, so a front end can show it in its own language
+   * (`docs/translations.md`). Optional and backwards compatible: without it, `message` (English) is shown.
+   */
+  i18n?: MessageRef,
 };
 
 /**
