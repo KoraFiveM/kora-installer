@@ -414,7 +414,8 @@ route('GET', '/system', () => {
   const platform = beh.windows ? 'windows' : 'linux'
   const home = beh.windows ? 'C:\\Users\\Sam\\.kora' : '/home/sam/.kora'
   const base = { headless: false, version: prefs.version, local: true, kora_home: home, can_restart: true, platform } as const
-  if (svc() !== 'none') return { ...base, admin: false, elevated: false, helper_installed: svc() === 'ready', admin_service: { state: svc() } } satisfies T.SystemInfo
+  const state = svc()
+  if (state !== 'none') return { ...base, admin: false, elevated: false, helper_installed: state === 'ready', admin_service: { state } } satisfies T.SystemInfo
   return { ...base, admin: !beh.trouble, elevated: !beh.trouble, helper_installed: false } satisfies T.SystemInfo
 })
 route('POST', '/system/admin-service/install', () => {
