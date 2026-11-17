@@ -443,12 +443,11 @@ function Get-SecretText([System.Security.SecureString]$Secret) {
 # in PowerShell 7 without the compatibility layer.
 function Initialize-TestAccount([Parameter(Mandatory)][string]$Name, [switch]$Administrator) {
     if ($Name.Length -gt 20 -or $Name -notmatch '^[A-Za-z][A-Za-z0-9_-]*$') { throw "bad test account name '$Name'" }
-    $plain = Get-RandomSecret
     $null = Invoke-Native 'net.exe' @('user', $Name, '/delete')   # a leftover from an earlier run (an error here is fine)
-    # A password over 14 characters makes `net user` ask a Y/N question about old Windows versions: answer it on stdin.
-    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    try { $o = 'Y' | & net.exe user $Name $plain /add /expires:never /passwordchg:no '/comment:Kora CI test account' 2>&1 | ForEach-Object { "$_" } | Out-String; $r = [pscustomobject]@{ Output = $o; Code = $LASTEXITCODE } }
-    finally { $ErrorActionPreference = $prev }
+    # 14 characters at most: a longer password makes `net user` ask a Y/N question about pre-Windows 2000 computers, on the
+    # console (not on stdin), which cannot be answered from a script.
+    $plain = Get-RandomSecret -Length 14
+    $r = Invoke-Native 'net.exe' @('user', $Name, $plain, '/add', '/expires:never', '/passwordchg:no', '/comment:Kora CI test account')
     if ($r.Code -ne 0) { throw "net user /add $Name failed: $($r.Output)" }
     if ($Administrator) {
         $r = Invoke-Native 'net.exe' @('localgroup', 'Administrators', $Name, '/add')
