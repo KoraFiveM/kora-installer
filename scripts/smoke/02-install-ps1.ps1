@@ -41,6 +41,10 @@ try {
     $v = Invoke-Native "$default\kora.exe" @('--version')
     Assert-That ($v.Code -eq 0) 'the installed kora.exe runs'
     Assert-That ($out -notmatch 'Starting Kora Panel' -and $out -match 'Next step: run   kora panel') 'KORA_NO_LAUNCH=1: the panel is not started, the next step is printed'
+    $startLnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Kora.lnk'
+    Assert-That (Test-Path $startLnk) 'the per-user Start Menu shortcut was made (no administrator rights)'
+    $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($startLnk)
+    Assert-That ($lnk.TargetPath -ieq "$default\kora.exe" -and $lnk.Arguments -eq '') 'the shortcut runs a bare kora from the install folder'
     Remove-Item Env:KORA_NO_LAUNCH
 
     # Second run: up to date, PATH not duplicated, and Kora Panel starts in the background. SSH_CONNECTION
