@@ -79,7 +79,7 @@ impl<'a> Manager<'a> {
 
     /// The arguments the game container should be created with right now.
     pub fn desired_game_args(&self) -> Result<Vec<String>, Problem> {
-        let sf = crate::installer::registry::ServerFile::load(self.dir).map_err(|e| Problem::from(e).lead("cannot read kora-server.json"))?;
+        let sf = crate::installer::registry::ServerFile::load(self.dir).map_err(|e| e.lead("cannot read kora-server.json"))?;
         let store = crate::artifacts::ArtifactStore::new(self.dir.join("artifacts"));
         let st = store.state()?;
         let build = st.current.ok_or_else(|| Problem::generic("this server has no FXServer build installed"))?;
