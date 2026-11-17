@@ -13,7 +13,6 @@ name = "kora"
 path = "src/main.rs"
 
 [dependencies]
-kora-tui.workspace = true
 kora-core.workspace = true
 kora-web.workspace = true
 clap = { workspace = true, features = ["env"] }
