@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Extension, Json};
+use axum::Json;
 use kora_core::api::{adopt, logs, Backend, Op, Status, UpdateBadge};
 use kora_core::installer::registry::{self, ServerEntry};
 use kora_core::service::ControlAction;
@@ -141,14 +141,7 @@ pub struct DeleteBody {
     db_admin_password: Option<String>,
 }
 
-pub async fn server_delete(
-    State(st): State<AppState>,
-    Extension(caller): Extension<crate::remote::Caller>,
-    headers: axum::http::HeaderMap,
-    Path(s): Path<String>,
-    Json(body): Json<DeleteBody>,
-) -> Result<Response, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+pub async fn server_delete(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<DeleteBody>) -> Result<Response, ApiError> {
     let stc = st.clone();
     let (e, running) = blocking(move || {
         let e = stc.entry(&s)?;
@@ -168,7 +161,7 @@ pub async fn server_delete(
     // Windows: removing the service, firewall rules or update task (or dropping the database with
     // Kora's own MariaDB login) needs the elevated worker: one permission prompt, asked when the
     // delete reaches those parts.
-    let admin = if crate::elevated::worker_supported() {
+    let admin = if crate::elevated::service_ready() {
         let (dir, keep_db, pw) = (e.dir.clone(), body.keep_db, body.db_admin_password.as_deref().is_some_and(|p| !p.is_empty()));
         let needs = blocking(move || Ok(!kora_core::elevate::is_elevated() && kora_core::installer::system_ops::delete_needs_admin_at(&dir, keep_db, pw))).await?;
         if needs {
@@ -179,9 +172,9 @@ pub async fn server_delete(
             if body.keep_db {
                 command.push("--keep-db".into());
             }
-            let ctx = kora_core::helper::worker::Context { what: "remove the server's background service, firewall rules and database".into(), command, can_skip_admin: false };
-            crate::elevated::precheck(ask, &ctx, "Removing the server's background service needs administrator rights. Run this command as administrator:")?;
-            Some(kora_core::installer::system_ops::SharedAdmin(std::sync::Arc::new(crate::elevated::WorkerAdmin::new(ask, ctx))))
+            let ctx = kora_core::privsvc::problems::Context { what: "remove the server's background service, firewall rules and database".into(), command, can_skip_admin: false };
+            crate::elevated::precheck(&ctx, "Removing the server's background service needs administrator rights. Run this command as administrator:")?;
+            Some(kora_core::installer::system_ops::SharedAdmin(std::sync::Arc::new(crate::elevated::ServiceAdmin::new(ctx))))
         } else {
             None
         }

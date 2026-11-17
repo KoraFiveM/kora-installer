@@ -135,12 +135,10 @@ pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiE
             // The UI reads `admin`; `elevated` is the same answer under the plan's name.
             "admin": elevated,
             // Kept for older pages: the administrator service is there and serves this account.
-            "helper_installed": crate::elevated::helper_installed(),
+            "helper_installed": crate::elevated::service_ready(),
             // Kora's administrator service for this account: ready (no prompt, locally or remotely),
             // missing (a per-user install: Settings offers to install it) or not_allowed.
             "admin_service": crate::elevated::service_state(),
-            // The old Windows worker only: the panel asks Windows for permission itself.
-            "admin_prompt": crate::elevated::prompts() && crate::elevated::worker_supported() && !elevated,
             "headless": headless,
             "local": loopback && !headless,
             "kora_home": kora_core::installer::registry::kora_home(),
@@ -296,7 +294,7 @@ mod tests {
 /// an administrator terminal (`kora service install`). Local callers only (see `remote::roles`).
 pub async fn admin_service_install(State(st): State<AppState>) -> Result<axum::response::Response, ApiError> {
     use kora_core::problem::{codes, Action, Problem};
-    if crate::elevated::worker_supported() {
+    if crate::elevated::service_ready() {
         return Err(ApiError::conflict("Kora's administrator service is already installed and turned on for you."));
     }
     let command = vec!["kora".to_string(), "service".into(), "install".into()];
@@ -335,6 +333,6 @@ pub async fn admin_service_install(State(st): State<AppState>) -> Result<axum::r
             let why = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("the installer stopped").trim_start_matches("error: ").to_string();
             return Err(format!("Kora's administrator service was not installed: {why}"));
         }
-        Ok(json!({"installed": crate::elevated::worker_supported()}))
+        Ok(json!({"installed": crate::elevated::service_ready()}))
     })
 }

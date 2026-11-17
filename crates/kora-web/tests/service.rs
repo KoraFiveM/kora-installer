@@ -18,11 +18,11 @@ use kora_core::api::maintenance;
 use kora_core::api::maintenance::fake::FakeMaintenance;
 use kora_core::artifacts::ArtifactList;
 use kora_core::firewall::ports::PortProber;
-use kora_core::helper::client::HelperError;
-use kora_core::helper::worker::{OpenError, StepOutcome};
 use kora_core::installer::{DbAdmin, InstallOutcome, InstallRequest, ProgressSink};
+use kora_core::privsvc::conn::ClientError;
+use kora_core::privsvc::problems::Availability;
 use kora_core::space::DiskInfo;
-use kora_web::elevated::{set_broker_override, Broker, Channel};
+use kora_web::elevated::{set_broker_override, Broker, StepOutcome};
 use kora_web::handlers::install as install_seam;
 use kora_web::{router, AppState};
 use serde_json::{json, Value};
@@ -64,30 +64,20 @@ struct FakeService {
 }
 
 impl Broker for FakeService {
-    fn supported(&self) -> bool {
-        self.helper.as_ref().is_some_and(|h| h.up)
-    }
-    fn prompts(&self) -> bool {
-        false
+    fn availability(&self) -> Availability {
+        if self.helper.as_ref().is_some_and(|h| h.up) {
+            Availability::Ready
+        } else {
+            Availability::Missing
+        }
     }
     fn handles(&self, verb: &str) -> bool {
         kora_core::privsvc::op::VERBS.contains(&verb)
     }
-    fn open(&self, _: Option<&str>) -> Result<Box<dyn Channel>, OpenError> {
-        match &self.helper {
-            Some(h) => Ok(Box::new(FakeConn(h.clone()))),
-            None => Err(OpenError::Unsupported),
-        }
-    }
-}
-
-struct FakeConn(Arc<FakeHelper>);
-
-impl Channel for FakeConn {
-    fn run(&mut self, verb: &str, args: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, HelperError> {
-        let h = &self.0;
+    fn call(&self, verb: &str, args: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, ClientError> {
+        let Some(h) = &self.helper else { return Err(ClientError::Unavailable("not installed".into())) };
         if h.vanish {
-            return Err(HelperError::Unavailable("gone".into()));
+            return Err(ClientError::Unavailable("gone".into()));
         }
         h.calls.lock().unwrap().push((verb.into(), args.to_vec(), env.to_vec()));
         for l in &h.lines {
@@ -95,7 +85,6 @@ impl Channel for FakeConn {
         }
         Ok(StepOutcome { ok: h.code == 0, code: h.code, data: None })
     }
-    fn finish(self: Box<Self>) {}
 }
 
 // ---- install env ----------------------------------------------------------------------------
@@ -238,7 +227,7 @@ fn kinds(e: &Value) -> Vec<String> {
 async fn without_the_service_everything_answers_needs_elevation_with_the_choices() {
     let r = rig(None).await;
     let (s, j) = r.call("GET", "/system", None).await;
-    assert_eq!((s, &j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (200, &json!(false), &json!("missing"), &json!(false)));
+    assert_eq!((s, &j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (200, &json!(false), &json!("missing"), &Value::Null), "no prompt exists any more");
 
     // "Tidy up old shortcuts": the per-user half is done, the old copy needs the command (never the service's job).
     r.maint.app.lock().unwrap().legacy = true;
@@ -274,7 +263,7 @@ async fn system_reports_the_service() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h)).await;
     let j = r.call("GET", "/system", None).await.1;
-    assert_eq!((&j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (&json!(true), &json!("ready"), &json!(false)));
+    assert_eq!((&j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (&json!(true), &json!("ready"), &Value::Null), "no prompt exists any more");
     set_broker_override(None);
 }
 

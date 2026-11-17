@@ -9,11 +9,11 @@ use axum::http::{header, Request};
 use kora_core::api::fake::FakeBackend;
 use kora_core::api::install::github::{GithubEnv, GithubUser, LoginFlow, OwnerChoice};
 use kora_core::api::toolchain::{AdminState, DbState, ToolchainEnv};
-use kora_core::helper::client::HelperError;
-use kora_core::helper::worker::{OpenError, StepOutcome};
+use kora_core::privsvc::conn::ClientError;
+use kora_core::privsvc::problems::Availability;
 use kora_core::problem::{codes, Action, Problem, Tool};
 use kora_core::tools::{Source, ToolStatus};
-use kora_web::elevated::{set_broker_override, Broker, Channel};
+use kora_web::elevated::{set_broker_override, Broker, StepOutcome};
 use kora_web::handlers::{github as gh_seam, toolchain as seam};
 use kora_web::{router, AppState};
 use serde_json::{json, Value};
@@ -116,7 +116,7 @@ async fn rig(github: GithubUser) -> Rig {
     let fake = Fake::new();
     seam::set_env(Some(fake.clone()));
     gh_seam::set_env(Some(Arc::new(Gh(github))));
-    set_broker_override(Some(broker(false, false)));
+    set_broker_override(Some(broker(false)));
     let fb = FakeBackend::sample();
     let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(fb.clone())));
     Rig { app: router(st), fake, _turn: turn }
@@ -249,7 +249,7 @@ async fn git_on_linux_needs_root_so_without_the_helper_it_is_the_command_to_run(
 #[tokio::test]
 async fn git_on_linux_goes_through_the_service_when_it_is_installed() {
     let r = rig(GithubUser::ready("sam")).await;
-    let h = broker(true, true);
+    let h = broker(true);
     set_broker_override(Some(h.clone()));
     r.fake.admin.lock().unwrap().elevated = false;
     let job = r.job(r.call("POST", "/tools/git/install").await).await;
@@ -281,42 +281,37 @@ async fn starting_a_database_that_is_not_installed_says_so() {
 
 type Calls = Arc<Mutex<Vec<(String, Vec<String>)>>>;
 
-/// A Windows worker stand-in: `supported` = the panel can ask Windows itself; `yes` = the prompt's answer.
+/// The administrator service stand-in: `supported` = it is there for this account.
 struct FakeBroker {
     supported: bool,
-    yes: bool,
     calls: Calls,
 }
-struct FakeChannel(Calls);
-impl Channel for FakeChannel {
-    fn run(&mut self, verb: &str, args: &[String], _: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, HelperError> {
-        self.0.lock().unwrap().push((verb.into(), args.to_vec()));
+impl Broker for FakeBroker {
+    fn availability(&self) -> Availability {
+        if self.supported {
+            Availability::Ready
+        } else {
+            Availability::Missing
+        }
+    }
+    fn handles(&self, verb: &str) -> bool {
+        kora_core::privsvc::op::VERBS.contains(&verb)
+    }
+    fn call(&self, verb: &str, args: &[String], _: &[(String, String)], on_line: &mut dyn FnMut(&str)) -> Result<StepOutcome, ClientError> {
+        self.calls.lock().unwrap().push((verb.into(), args.to_vec()));
         on_line("The database server mariadb is running.");
         Ok(StepOutcome { ok: true, code: 0, data: None })
     }
-    fn finish(self: Box<Self>) {}
 }
-impl Broker for FakeBroker {
-    fn supported(&self) -> bool {
-        self.supported
-    }
-    fn open(&self, _: Option<&str>) -> Result<Box<dyn Channel>, OpenError> {
-        if self.yes {
-            Ok(Box::new(FakeChannel(self.calls.clone())))
-        } else {
-            Err(OpenError::Declined)
-        }
-    }
-}
-fn broker(supported: bool, yes: bool) -> Arc<FakeBroker> {
-    Arc::new(FakeBroker { supported, yes, calls: Arc::default() })
+fn broker(supported: bool) -> Arc<FakeBroker> {
+    Arc::new(FakeBroker { supported, calls: Arc::default() })
 }
 
 #[tokio::test]
 async fn without_administrator_rights_the_start_is_the_elevation_problem() {
     let r = rig(GithubUser::ready("sam")).await;
     // No way to ask (Linux without the helper, or a panel that cannot ask Windows itself).
-    set_broker_override(Some(broker(false, false)));
+    set_broker_override(Some(broker(false)));
     r.fake.admin.lock().unwrap().elevated = false;
     let (s, v) = r.call("POST", "/system/database/start").await;
     set_broker_override(None);
@@ -328,29 +323,9 @@ async fn without_administrator_rights_the_start_is_the_elevation_problem() {
 }
 
 #[tokio::test]
-async fn on_windows_start_it_for_me_goes_through_the_worker_after_one_prompt() {
-    let r = rig(GithubUser::ready("sam")).await;
-    let b = broker(true, true);
-    set_broker_override(Some(b.clone()));
-    r.fake.admin.lock().unwrap().elevated = false;
-    let job = r.job(r.call("POST", "/system/database/start").await).await;
-    assert_eq!(job["state"], "done", "{job}");
-    assert_eq!(*b.calls.lock().unwrap(), [("check".to_string(), vec!["--start-database".to_string()])]);
-    assert_eq!(*r.fake.db_starts.lock().unwrap(), 0, "the panel itself started nothing");
-    // A "No" at the prompt: the job says so, with Ask again and the command.
-    set_broker_override(Some(broker(true, false)));
-    let job = r.job(r.call("POST", "/system/database/start").await).await;
-    set_broker_override(None);
-    assert_eq!(job["error"]["code"], "admin.declined", "{job}");
-    let kinds: Vec<&str> = job["error"]["actions"].as_array().unwrap().iter().map(|a| a["kind"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["request_admin", "show_command"]);
-}
-
-#[cfg(unix)]
-#[tokio::test]
 async fn the_database_start_goes_through_the_service_when_it_is_installed() {
     let r = rig(GithubUser::ready("sam")).await;
-    let h = broker(true, true);
+    let h = broker(true);
     set_broker_override(Some(h.clone()));
     r.fake.admin.lock().unwrap().elevated = false;
     let job = r.job(r.call("POST", "/system/database/start").await).await;

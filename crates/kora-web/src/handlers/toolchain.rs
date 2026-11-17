@@ -58,13 +58,7 @@ fn parse_tool(s: &str) -> Result<Tool, ApiError> {
 /// checksum), with no administrator rights. Git on Linux is the system package: that needs root, through the
 /// helper when it is installed, else the `needs_elevation` answer with the command. The job result is
 /// `{tool, version, path, source}`; failures carry a Problem (Retry, a manual link).
-pub async fn tool_install(
-    State(st): State<AppState>,
-    axum::Extension(caller): axum::Extension<crate::remote::Caller>,
-    headers: axum::http::HeaderMap,
-    Path(tool): Path<String>,
-) -> Result<axum::response::Response, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+pub async fn tool_install(State(st): State<AppState>, Path(tool): Path<String>) -> Result<axum::response::Response, ApiError> {
     let tool = parse_tool(&tool)?;
     let e = env();
     let system_git = tool == Tool::Git && !cfg!(windows);
@@ -78,9 +72,9 @@ pub async fn tool_install(
         let msg = "Installing Git needs administrator rights. Run this command as administrator:";
         let command = cmd(&["tools", "install", "git"]);
         let what = "install Git";
-        crate::elevated::precheck_verb(ask, &kora_core::helper::worker::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, msg)?;
+        crate::elevated::precheck_verb(&kora_core::privsvc::problems::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, msg)?;
         return st.spawn_job(Op::ToolInstall, None, move |h| {
-            let out = crate::elevated::privileged_as(ask, what, msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| e.message)?;
+            let out = crate::elevated::privileged_as(what, msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| e.message)?;
             Ok(json!({"tool": "git", "output": out["output"]}))
         });
     }
@@ -93,8 +87,7 @@ pub async fn tool_install(
 /// `POST /system/database/start` → `202 {job}`: start the installed (stopped) database server. It needs
 /// administrator rights: through the administrator service when it is there for this account (no prompt),
 /// else `needs_elevation` with the choices (install the service, the command).
-pub async fn db_start(State(st): State<AppState>, axum::Extension(caller): axum::Extension<crate::remote::Caller>, headers: axum::http::HeaderMap) -> Result<axum::response::Response, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+pub async fn db_start(State(st): State<AppState>) -> Result<axum::response::Response, ApiError> {
     let e = env();
     let (db, admin) = {
         let e = e.clone();
@@ -117,12 +110,9 @@ pub async fn db_start(State(st): State<AppState>, axum::Extension(caller): axum:
         let msg = format!("Starting the database server {name} needs administrator rights. Run this command as administrator:");
         let command = cmd(&["check", "--start-database"]);
         let what = "start the database server";
-        crate::elevated::precheck_verb(ask, &kora_core::helper::worker::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, &msg)?;
+        crate::elevated::precheck_verb(&kora_core::privsvc::problems::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, &msg)?;
         return st.spawn_job(Op::DbStart, None, move |h| {
-            if crate::elevated::prompts() {
-                h.event(json!({"type": "status", "message": "Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on."}));
-            }
-            let out = crate::elevated::privileged_as(ask, what, &msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| {
+            let out = crate::elevated::privileged_as(what, &msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| {
                 if e.actions().is_empty() {
                     e.message
                 } else {
