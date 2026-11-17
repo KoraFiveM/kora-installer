@@ -27,6 +27,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-3 text-sm">
             <dt className="text-muted-foreground">Server</dt><dd><Check ok={s.running} yes="Running" no={s.status === 'missing' ? 'Folder missing' : 'Stopped'} /></dd>
+            {s.run_mode === 'container' && <><dt className="text-muted-foreground">Runs</dt><dd>{s.run_label ?? 'In a container'}</dd></>}
             <dt className="text-muted-foreground">Game port {s.ports.game}</dt><dd><Check ok={s.game_listening} yes="Listening" no="Not listening" /></dd>
             <dt className="text-muted-foreground">txAdmin port {s.ports.txadmin}</dt><dd><Check ok={s.txadmin_up} yes="Answering" no="Not answering" /></dd>
             <dt className="text-muted-foreground">Updates</dt><dd><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></dd>

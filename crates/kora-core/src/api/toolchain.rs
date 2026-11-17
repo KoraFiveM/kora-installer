@@ -49,12 +49,20 @@ pub trait ToolchainEnv: Send + Sync {
     /// Start the installed database server; `Err` is a packed [`Problem`] (administrator rights needed, or it did not start).
     fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, Problem>;
     fn admin(&self) -> AdminState;
+    /// The container engine check (Linux only; `None` elsewhere, and in fakes that do not care).
+    fn container(&self) -> Option<crate::container::detect::ContainerCheck> {
+        None
+    }
 }
 
 /// The real computer.
 pub struct SystemToolchain;
 
 impl ToolchainEnv for SystemToolchain {
+    fn container(&self) -> Option<crate::container::detect::ContainerCheck> {
+        cfg!(target_os = "linux").then(crate::container::detect::check_cached)
+    }
+
     fn tools(&self) -> Vec<ToolStatus> {
         [Tool::Git, Tool::Gh].iter().map(|t| tools::status(&crate::git::SystemRunner, *t)).collect()
     }
@@ -289,7 +297,29 @@ pub fn check_json(items: &[CheckItem]) -> Value {
 
 /// Run the whole System check against `env` and the GitHub state.
 pub fn system_check(env: &dyn ToolchainEnv, github: &GithubUser) -> Vec<CheckItem> {
-    build_check(cfg!(windows), &env.tools(), github, &env.database(), &env.admin())
+    let mut items = build_check(cfg!(windows), &env.tools(), github, &env.database(), &env.admin());
+    if let Some(c) = env.container() {
+        items.push(container_item(&c));
+    }
+    items
+}
+
+/// The "Containers" line: which engine, rootless or not, its version, and whether it really ran a container.
+/// Never a failure of the check by itself (container mode is optional): a missing engine is information, a
+/// broken one carries its guided problem.
+pub fn container_item(c: &crate::container::detect::ContainerCheck) -> CheckItem {
+    let problem = c.engines.iter().find(|e| Some(e.kind) == c.chosen).and_then(|e| e.problem.clone()).or_else(|| c.engines.first().and_then(|e| e.problem.clone()));
+    match (c.available, c.engines.is_empty()) {
+        (true, _) => item("container", "Containers", CheckState::Ok, format!("{}. Servers can run in containers.", c.summary), problem.filter(|p| p.has_code(crate::container::codes::NOT_LINGERING))),
+        (false, true) => item(
+            "container",
+            "Containers",
+            CheckState::Info,
+            "No container engine (Podman or Docker) found. That is fine: servers run as system services. Install Podman if you would like to run servers in containers.",
+            None,
+        ),
+        (false, false) => item("container", "Containers", CheckState::Info, format!("{}.", c.summary), problem),
+    }
 }
 
 #[cfg(test)]

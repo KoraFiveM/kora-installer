@@ -13,6 +13,7 @@ pub mod catalog;
 pub mod cfx;
 pub mod collab;
 pub mod console;
+pub mod container;
 pub mod db;
 pub mod elevate;
 pub mod feedback;

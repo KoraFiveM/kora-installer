@@ -346,6 +346,26 @@ saved key can also carry on after Kora Panel was restarted ("Carry on"); the dat
 typed one, is not kept and the install uses the automatic login or fails at that step again. A key you pasted without
 saving it is only remembered while the panel runs. The wizard also checks free disk space before it begins.
 
+### Running a server in a container (Linux)
+
+On Linux, when **Podman** or **Docker** is installed and works, the wizard (in "Choose everything myself", and as a line on the last screen) also asks **How should this server run?**: *As a system service* (the default, as always) or *In a container*. `kora install --run-mode container [--engine podman|docker] [--bind <ip>] [--memory-mb N] [--cpus N]` does the same.
+
+A container server is the same server: start, stop, restart, the console and logs, txAdmin through the panel, updates, resources, branches and pull requests, backups, the reachability check and the resource page all work as before. What is different is what Kora sets up. There is **no system service, no service account and no systemd unit**; with rootless Podman nothing needs administrator rights at all.
+
+- **One container per server**, named `kora-<name>` and labelled `kora.server=<name>`, on a small pinned Alpine image (Kora publishes no image of its own). The FXServer build is downloaded and verified by Kora as always into the server folder and mounted into the container, at the same path inside as outside. Everything you see in the folder (`server.cfg`, `txData`, resources) is the real folder.
+- **The database** is, by default, a **MariaDB container next to the server** (`kora-<name>-db`) on a private network `kora-<name>-net`, with its data in the volume `kora-<name>-dbdata`. The login is generated like always and kept in `database.json`; nothing is published to the network. "Use a database I already have" stays available (give its network address: `127.0.0.1` inside a container is the container itself).
+- **Ports:** the game port is published for TCP and UDP (on every address, or only on the one you chose with `--bind`); txAdmin's port is published on this computer only, and the panel's **Open txAdmin** reaches it there.
+- **Files stay yours.** The container runs as the folder's owner (rootless Podman maps your own id through unchanged), so Kora can update, back up and delete everything the server writes.
+- **Starting at boot and after a crash:** the engine's restart policy. With rootless Podman Kora also enables the user unit `podman-restart.service` and `loginctl enable-linger` (the System check says if that needs one command from an administrator). One difference: Docker keeps a server you stopped stopped across a reboot; Podman starts it again.
+- **Logs and the console:** the Logs and Console tabs read the container's output, copied to `.kora/console.log` by a small background follower that Kora starts and keeps running; the live console's command file is in the folder, so it works unchanged.
+- **Updates** that change the FXServer build, the ports or the container settings recreate the container (it holds no data of its own) at the next start.
+- **Backups** run the database dump inside the database container (no database client is needed on this computer). The backup records how the server ran; **bringing a server in from a backup** offers a container when this computer has an engine, and a service when it has none. Restoring a backup never changes how a server runs.
+- **Deleting** removes the containers and the private network, and (you are asked, like for databases) the database volume. `kora status` and the panel say **in a container (podman, rootless)**.
+- **Docker and your firewall:** Docker (and Podman run as root) publish ports with their own firewall rules, which `ufw` and `firewalld` do not see: the server's port is open to the network whatever your firewall says. The reachability check says so instead of asking you to open a port. Rootless Podman and rootless Docker forward from an ordinary program, so your firewall applies.
+- **Docker needs trust:** being in the `docker` group is the same as being root on the computer. Kora says so before offering it; rootless Podman does not need that trust.
+
+What a container does and does not protect is in [SECURITY.md](../SECURITY.md#container-mode-linux). Not in this release: converting an existing service server to a container (and back) in place. Make a backup, then bring it in as a new container server (**Bring a server from a backup**), or the other way round.
+
 ## 6. Settings
 
 - **Kora version:** check for a newer Kora and update it (same as `kora self-update`), or install a specific version.
@@ -388,6 +408,7 @@ words with a button where something is wrong:
   administrator rights: with the helper (Linux) it just works, otherwise the panel shows the command (`kora check
   --start-database`; Windows asks for administrator permission).
 - **Administrator rights** and **Background service**: what Kora can do without asking, for your information.
+- **Containers** (Linux, when Podman or Docker is installed): which engine, its version, whether it is rootless, and whether it really ran a test container. A problem comes with its fix: no subuid/subgid range for rootless (an administrator adds one), cgroup v1, lingering off (containers stop when you sign out: `loginctl enable-linger`), the Docker socket refusing this account. Not having an engine is not a problem: servers run as system services.
 
 The same buttons appear wherever an error offers them (the install wizard, the GitHub account card), and those errors link here.
 `kora uninstall` also removes Kora's own copies of Git and the GitHub CLI.

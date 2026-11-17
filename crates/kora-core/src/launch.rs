@@ -37,6 +37,10 @@ impl Spec {
         self.dir.join(".kora")
     }
     pub fn log_path(&self) -> PathBuf {
+        // A container's output is copied to console.log by the container's log follower (see `container::logs`).
+        if crate::container::record::is_container(&self.dir) {
+            return self.meta().join("console.log");
+        }
         self.meta().join("server.log")
     }
     pub fn pid_path(&self) -> PathBuf {
@@ -241,7 +245,8 @@ pub fn start_with(env: &dyn LaunchEnv, spec: &Spec, progress: &mut dyn FnMut(&st
     let (method, pid) = if has_service {
         if svc != ServiceState::Running {
             if let Err(e) = env.service_start(spec) {
-                return done(Method::Service, None, false, false, Some(Problem::StartFailed), format!("Could not start the background service: {}", e.one_line()), vec![]);
+                let what = if crate::container::record::is_container(&spec.dir) { "the server's container" } else { "the background service" };
+                return done(Method::Service, None, false, false, Some(Problem::StartFailed), format!("Could not start {what}: {}", e.one_line()), vec![]);
             }
         }
         (Method::Service, None)

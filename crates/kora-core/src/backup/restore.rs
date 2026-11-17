@@ -370,6 +370,10 @@ fn apply(e: &ServerEntry, m: &Manifest, stage: &Path, tools: &Tools<'_>, ev: &mu
         if matches!(top, "artifacts" | "resources" | ".kora" | ".git") {
             continue;
         }
+        // A restore never changes how a server runs: the container record stays as it is (or stays absent).
+        if rel == crate::container::record::FILE {
+            continue;
+        }
         if is_secret_name(&rel) && dest.exists() {
             report.notes.push(format!("{rel} was kept as it is now (it holds today's licence key and database login)."));
             continue;

@@ -306,6 +306,8 @@ impl HealthCheck for FaultInjecting<'_> {
 /// a service cannot be restarted by Kora: it is left alone and reported healthy.
 pub struct ServiceHealth {
     pub managed: ManagedServer,
+    /// A container-mode server: restarted through its engine, not systemd.
+    pub container: Option<crate::container::lifecycle::Target>,
     pub game_port: u16,
     pub wait: Duration,
 }
@@ -315,6 +317,9 @@ impl ServiceHealth {
         matches!(firewall::check_port(self.game_port, false), firewall::PortStatus::InUse { .. })
     }
     fn has_service(&self) -> bool {
+        if self.container.is_some() {
+            return true;
+        }
         if cfg!(windows) {
             return self.has_service_via(&service::SystemRunner, service::Platform::Windows);
         }
@@ -326,6 +331,9 @@ impl ServiceHealth {
         !matches!(ServiceManager::new(platform, rn).status(&self.managed), Ok(service::ServiceState::NotInstalled))
     }
     fn restart(&self) -> std::result::Result<(), String> {
+        if let Some(t) = &self.container {
+            return crate::container::lifecycle::control(t, service::ControlAction::Restart, &crate::container::lifecycle::system()).map_err(|p| p.message);
+        }
         let rn = service::SystemRunner;
         ServiceManager::new(service::Platform::current(), &rn).restart(&self.managed).map_err(|e| e.to_string())
     }
@@ -452,7 +460,8 @@ pub(crate) fn service_health(name: &str, dir: &Path, sf: &ServerFile) -> Service
         kora_exe: "kora".into(),
         windows_run_as: None,
     };
-    ServiceHealth { managed, game_port: sf.ports.game, wait: Duration::from_secs(90) }
+    let container = crate::container::lifecycle::target_of(name, dir).ok().flatten();
+    ServiceHealth { managed, container, game_port: sf.ports.game, wait: Duration::from_secs(90) }
 }
 
 /// Run `f` with the command runner appropriate for who owns `dir` (the same choice as [`with_git`]): for work that needs
@@ -568,7 +577,7 @@ mod tests {
             kora_exe: "kora".into(),
             windows_run_as: None,
         };
-        let h = ServiceHealth { managed, game_port: 30120, wait: Duration::from_secs(1) };
+        let h = ServiceHealth { managed, container: None, game_port: 30120, wait: Duration::from_secs(1) };
         let r = FakeRunner::default();
         r.respond("sc.exe query", 1060, "[SC] EnumQueryServicesStatus:OpenService FAILED 1060");
         assert!(!h.has_service_via(&r, service::Platform::Windows));

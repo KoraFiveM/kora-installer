@@ -161,6 +161,12 @@ enum Command {
         /// Registry name, or the server folder (absolute path).
         name: String,
     },
+    /// Copy a container server's output to its console log (started by Kora for container-mode servers).
+    #[command(hide = true)]
+    ContainerLogs {
+        /// The server folder (absolute path).
+        dir: std::path::PathBuf,
+    },
     /// Start a server's background service.
     Start {
         /// Registry name.
@@ -230,6 +236,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         // The panel runs as the user; privileged actions report the command to run instead.
         Some(
             Command::ServiceHost { .. }
+            | Command::ContainerLogs { .. }
             | Command::Github { .. }
             | Command::Tools { .. }
             | Command::Check { .. }
@@ -405,7 +412,15 @@ fn main() {
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
         command,
-        Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Service { .. } | Command::AdminStep(_) | Command::AdminDb(_) | Command::Update(UpdateArgs { auto: true, .. }))
+        Some(
+            Command::ServiceHost { .. }
+                | Command::ContainerLogs { .. }
+                | Command::SelfUpdate { .. }
+                | Command::Service { .. }
+                | Command::AdminStep(_)
+                | Command::AdminDb(_)
+                | Command::Update(UpdateArgs { auto: true, .. })
+        )
     );
     // The worker has a hidden window and its step children no terminal: never wait for a key.
     match &command {
@@ -465,6 +480,7 @@ fn main() {
                 1
             }
         },
+        Some(Command::ContainerLogs { dir }) => kora_core::container::logs::run_follower(&dir),
         Some(Command::Start { server }) => control(&server, kora_core::service::ControlAction::Start),
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),

@@ -274,6 +274,7 @@ mod tests {
             dry_run: false,
             db_admin: Some(DbAdmin { host: "127.0.0.1".into(), port: 3306, user: "root".into(), password: Some("hunter2".into()) }),
             start: true,
+            container: None,
             app: None,
         }
     }

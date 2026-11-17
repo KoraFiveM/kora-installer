@@ -123,6 +123,9 @@ pub(crate) enum BackupCmd {
         /// Remove what an earlier, failed import of this server made, and begin again.
         #[arg(long)]
         start_over: bool,
+        /// How the new server runs: `service` (the default) or `container` (Linux, Podman or Docker).
+        #[arg(long, value_parser = ["service", "container"])]
+        run_mode: Option<String>,
         /// Do not ask for confirmation.
         #[arg(long)]
         yes: bool,
@@ -220,8 +223,8 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             };
             if scheduled {
                 // What an operating-system task runs: the same as the panel's schedule does.
-                let (db, git) = (kora_core::db::SystemRunner, kora_core::git::SystemRunner);
-                let tools = kora_core::backup::Tools::system(&db, &git);
+                let set = kora_core::container::backup::ToolSet::for_server(&e.name, &e.dir);
+                let tools = set.tools();
                 let mut host = kora_core::backup::host::BackendHost::new(&mut b, &e);
                 return match kora_core::backup::scheduler::run_scheduled(&e, &mut host, &tools) {
                     kora_core::backup::scheduler::Outcome::Made(id) => {
@@ -411,7 +414,7 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 Err(m) => fail(m),
             }
         }
-        BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, fork_choice, start, start_over, yes } => {
+        BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, fork_choice, start, start_over, run_mode, yes } => {
             use kora_core::backup::import::{ImportChoices, ImportRequest, ImportSource};
             let passphrase = match password(&pw, false) {
                 Ok(p) => p,
@@ -436,6 +439,13 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             preview.will_create.iter().for_each(|l| println!("  will create: {l}"));
             preview.wont_carry.iter().for_each(|l| println!("  does not come along: {l}"));
             preview.warnings.iter().for_each(|l| println!("  note: {l}"));
+            if preview.run_mode == Some(kora_core::container::RunMode::Container) || preview.container_engine.is_some() {
+                println!(
+                    "  run mode: the backed-up server ran {}; here {} (choose with --run-mode service|container).",
+                    if preview.run_mode == Some(kora_core::container::RunMode::Container) { "in a container" } else { "as a service" },
+                    preview.container_engine.as_deref().map_or("only a service is possible".to_string(), |e| format!("a container ({e}) is possible"))
+                );
+            }
             if let Some(f) = &preview.fork {
                 println!("  fork: {}", f.message);
             }
@@ -456,7 +466,17 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 "originals" => kora_core::backup::import::ForkChoice::Originals,
                 _ => kora_core::backup::import::ForkChoice::Keep,
             };
-            let req = ImportRequest { source, passphrase, choices, licence_key_name: licence_key, db_admin: None, fork_choice, start, start_over };
+            let req = ImportRequest {
+                source,
+                passphrase,
+                choices,
+                licence_key_name: licence_key,
+                db_admin: None,
+                fork_choice,
+                start,
+                start_over,
+                run_mode: run_mode.as_deref().map(|m| if m == "container" { kora_core::container::RunMode::Container } else { kora_core::container::RunMode::Service }),
+            };
             match b.import_run(&req, true, &mut |ev| show(&ev)) {
                 Ok(r) => {
                     println!("Done: \"{}\" is in {}.", r.name, r.dir);

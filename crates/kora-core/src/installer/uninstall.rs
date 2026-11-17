@@ -171,6 +171,37 @@ pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, s
                 }
             }
         }
+        // A container server: its containers and private network are the system-wide part (no unit, no account).
+        match crate::container::lifecycle::target_of(&name, &dir) {
+            Ok(Some(t)) => {
+                let what = format!(
+                    "remove this server's containers and private network ({}){}",
+                    t.rec.engine().label(),
+                    if del_db { " and the database's data volume" } else { "; the database's data volume stays" }
+                );
+                if opts.dry_run {
+                    say(&format!("  {verb}: {what}"));
+                } else if ask.ask(&format!("{}?", crate::container::lifecycle::capitalised(&what)), true) {
+                    let runner = crate::container::lifecycle::system();
+                    match crate::container::lifecycle::Manager::new(&dir, &t.rec, &runner).remove_all(del_db) {
+                        Ok(done) => {
+                            for d in &done {
+                                say(&format!("  done: {d}"));
+                            }
+                            sum.removed.push(format!("{name}: containers and network"));
+                        }
+                        Err(p) => {
+                            sum.failed.push(format!("{name}: containers: {}", p.message));
+                            say(&format!("  FAILED: {}", p.message));
+                        }
+                    }
+                } else {
+                    sum.kept.push(format!("{name}: containers kept"));
+                }
+            }
+            Ok(None) => {}
+            Err(why) => sum.failed.push(format!("{name}: {why}")),
+        }
         if opts.dry_run {
             say(&format!(
                 "  {verb} KEEP the server folder and database{}.",
@@ -313,6 +344,7 @@ mod tests {
             dry_run: false,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         }
     }

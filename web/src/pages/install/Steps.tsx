@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { DbChoice, Problem, Source } from '@/api/types'
+import type { CheckItem, DbChoice, Problem, Source } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
@@ -12,7 +12,7 @@ import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { slug, validatePorts } from '@/lib/utils'
-import { dbLoginProblem, defaultVersions, dirBase, folderFor, type WizardForm } from './form'
+import { dbLoginProblem, defaultVersions, dirBase, folderFor, runModePatch, type WizardForm } from './form'
 import type { PortsChecked } from './ports'
 
 export interface StepProps {
@@ -176,9 +176,41 @@ export function ResourcesStep({ f, set }: StepProps) {
   )
 }
 
+/** "How should this server run?" (asked only where a container engine works). */
+export function RunModeStep({ f, set, containers }: StepProps & { containers?: CheckItem }) {
+  const docker = /docker/i.test(containers?.summary ?? '') && !/rootless/i.test(containers?.summary ?? '')
+  return (
+    <div className="space-y-4">
+      <fieldset className="space-y-3">
+        <legend className="mb-2 text-sm text-muted-foreground">How should this server run?</legend>
+        <Radio name="runmode" checked={f.runMode === 'service'} onChange={() => set(runModePatch(f, 'service'))} label="As a system service (the usual way)" hint="Starts with the computer and restarts if it crashes. Setting it up needs administrator rights." />
+        <Radio name="runmode" checked={f.runMode === 'container'} onChange={() => set(runModePatch(f, 'container'))} label="In a container" hint="The server runs in a container (Podman or Docker) with its files in its own folder. It does not change your system: no service, no extra account, and with rootless Podman no administrator rights at all." />
+      </fieldset>
+      {containers && <p className="text-sm text-muted-foreground">{containers.summary}</p>}
+      {containers?.problem && <ErrorNotice error={containers.problem} />}
+      {f.runMode === 'container' && docker && (
+        <Alert tone="warning" title="Docker runs as root">
+          Being allowed to use Docker is the same as having root on this computer: anyone who can start a container can see every file. If you can, install Podman instead, which runs containers without administrator rights.
+        </Alert>
+      )}
+      {f.runMode === 'container' && (
+        <Alert tone="info" title="What a container does and does not protect">
+          The server cannot see the rest of the computer, but it can read and change its own folder, including the licence key and the database login stored there. Its game port is published to the network; txAdmin&apos;s only on this computer, and the panel reaches it for you.
+        </Alert>
+      )}
+    </div>
+  )
+}
+
 const DB_OPTIONS: { v: DbChoice; label: string; hint: string }[] = [
   { v: 'install_if_missing', label: 'Set up the database for me (recommended)', hint: 'Uses MariaDB or MySQL if it is already here, installs MariaDB if not (installing it needs administrator rights). Your other databases are not touched.' },
   { v: 'use_existing', label: 'Use the database already on this computer', hint: 'Kora creates a new database and user for this server. Your other databases are not touched. The install stops if no database is found.' },
+  { v: 'skip', label: 'Skip the database', hint: 'You will connect a database yourself later.' },
+]
+
+const CONTAINER_DB_OPTIONS: { v: DbChoice; label: string; hint: string }[] = [
+  { v: 'container', label: 'A MariaDB container next to the server (recommended)', hint: 'Kora runs MariaDB in its own container on a private network, keeps its data in a volume, and makes the login for you. Nothing is installed on this computer.' },
+  { v: 'use_existing', label: 'Use a database I already have', hint: 'It must be reachable by its network address (not 127.0.0.1: inside a container that is the container itself). Kora creates a new database and user for this server.' },
   { v: 'skip', label: 'Skip the database', hint: 'You will connect a database yourself later.' },
 ]
 
@@ -203,9 +235,9 @@ export function DatabaseStep({ f, set }: StepProps) {
     <div className="space-y-4">
       <fieldset className="space-y-3">
         <legend className="mb-2 text-sm text-muted-foreground">Where should the server keep its data?</legend>
-        {DB_OPTIONS.map((o) => <Radio key={o.v} name="db" checked={f.db === o.v} onChange={() => set({ db: o.v })} label={o.label} hint={o.hint} />)}
+        {(f.runMode === 'container' ? CONTAINER_DB_OPTIONS : DB_OPTIONS).map((o) => <Radio key={o.v} name="db" checked={f.db === o.v} onChange={() => set({ db: o.v })} label={o.label} hint={o.hint} />)}
       </fieldset>
-      {f.db !== 'skip' && (
+      {f.db !== 'skip' && f.db !== 'container' && (
         <fieldset className="space-y-3">
           <legend className="mb-2 text-sm font-semibold">Database administrator login</legend>
           <Radio name="dbadmin" checked={!f.dbCustom} onChange={() => set({ dbCustom: false })} label="Automatic" hint="Kora tries the normal local login. Works on most fresh installs." />
@@ -238,7 +270,9 @@ export function OptionsStep({ f, set, advanced }: StepProps) {
     <div className="space-y-4">
       <Checkbox label="Open the game port in the firewall" hint="Lets players outside this computer connect. Needs administrator rights." checked={f.firewall} onChange={(e) => set({ firewall: e.target.checked })} />
       {advanced && <Checkbox label="Also open the txAdmin port" hint="You do not need this to use txAdmin from other devices: the panel's Open txAdmin button reaches it for you, signed in with the panel (it uses one more port on the panel's own address). Open txAdmin's own port only if you want to reach it directly, without the panel. Anyone who can reach it can try to sign in, so leave this off unless you need it." checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
-      <Checkbox label="Install as a background service" hint="The server starts with the computer and restarts if it crashes. Needs administrator rights." checked={f.service} onChange={(e) => set({ service: e.target.checked })} />
+      {f.runMode === 'container'
+        ? <p className="text-sm text-muted-foreground">The container restarts the server if it crashes and starts it again when the computer starts. There is no background service to install.</p>
+        : <Checkbox label="Install as a background service" hint="The server starts with the computer and restarts if it crashes. Needs administrator rights." checked={f.service} onChange={(e) => set({ service: e.target.checked })} />}
     </div>
   )
 }

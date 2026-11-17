@@ -66,7 +66,8 @@ pub fn view<B: Backend + ?Sized>(_b: &mut B, e: &ServerEntry) -> Res<BackupsView
         Ok(create::DbSource::None(why)) => (DbKind::None, why),
         Err(p) => (DbKind::Failed, p.message),
     };
-    let tool_missing = matches!(kind, DbKind::Dumped | DbKind::External) && dbdump::dump_program(&crate::installer::db_client(), &dbdump::program_runs).is_none();
+    let in_container = crate::container::backup::ToolSet::for_server(&e.name, &e.dir).container_db;
+    let tool_missing = !in_container && matches!(kind, DbKind::Dumped | DbKind::External) && dbdump::dump_program(&crate::installer::db_client(), &dbdump::program_runs).is_none();
     let folder = d.local_dir().map(|p| p.display().to_string()).unwrap_or_default();
     Ok(BackupsView {
         backups: list,
@@ -105,8 +106,8 @@ pub fn create_backup<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, req: &Back
         label: if req.for_move { Label::Move } else { Label::Manual },
         folder,
     };
-    let (db, git) = (SystemRunner, crate::git::SystemRunner);
-    let tools = tools_for(&db, &git);
+    let set = crate::container::backup::ToolSet::for_server(&e.name, &e.dir);
+    let tools = set.tools();
     let mut host = super::host::BackendHost::new(b, e);
     let r = create::create(e, &o, &mut host, &tools, say)?;
     Ok(BackupCreated { info: r.info, path: r.path.display().to_string(), notes: r.notes, pruned: r.pruned })
@@ -161,15 +162,15 @@ pub fn preview<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, id: &str, p: Opt
 
 pub fn restore_backup<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, id: &str, p: Option<&str>, say: &mut dyn FnMut(BackupEvent)) -> Res<RestoreReport> {
     let (_, path) = find(e, id)?;
-    let (db, git) = (SystemRunner, crate::git::SystemRunner);
-    let tools = tools_for(&db, &git);
+    let set = crate::container::backup::ToolSet::for_server(&e.name, &e.dir);
+    let tools = set.tools();
     let mut host = super::host::BackendHost::new(b, e);
     restore::restore(e, &path, &RestoreOptions { passphrase: pass(p), no_safety_backup: false }, &mut host, &tools, say)
 }
 
 pub fn undo<B: Backend + ?Sized>(b: &mut B, e: &ServerEntry, p: Option<&str>, say: &mut dyn FnMut(BackupEvent)) -> Res<RestoreReport> {
-    let (db, git) = (SystemRunner, crate::git::SystemRunner);
-    let tools = tools_for(&db, &git);
+    let set = crate::container::backup::ToolSet::for_server(&e.name, &e.dir);
+    let tools = set.tools();
     let mut host = super::host::BackendHost::new(b, e);
     restore::undo(e, &destination(e), pass(p).as_ref(), &mut host, &tools, say)
 }

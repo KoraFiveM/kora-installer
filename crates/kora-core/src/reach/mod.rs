@@ -589,7 +589,12 @@ pub fn assess(f: &Facts) -> ReachReport {
 
 /// [`gather`] then [`assess`].
 pub fn check(env: &dyn ReachEnv, e: &ServerEntry, consent_override: Option<Consent>) -> ReachReport {
-    assess(&gather(env, e, consent_override))
+    let mut report = assess(&gather(env, e, consent_override));
+    // A container server's port is published by its engine; the firewall line says what that means.
+    if let Some(rec) = crate::container::record::ContainerRecord::load(&e.dir) {
+        crate::container::reach::adjust(&mut report, &rec.engine());
+    }
+    report
 }
 
 /// Turn automatic port forwarding on or off for a server. Off also takes the mapping away at once

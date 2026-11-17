@@ -404,6 +404,7 @@ mod tests {
             dry_run: false,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         };
         for (source, versions) in [(Source::Fork, Versions::Latest), (Source::Clone, Versions::Released), (Source::Clone, Versions::Latest), (Source::Fork, Versions::Released)] {

@@ -7,7 +7,7 @@ import type { ServerDetail } from '@/api/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/Skeleton'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { StatusChip, StyleChip } from '@/components/Status'
+import { RunChip, StatusChip, StyleChip } from '@/components/Status'
 import { useServerControl } from '@/hooks/useServerControl'
 import NotFound from '@/pages/NotFound'
 import { OverviewTab } from './server/OverviewTab'
@@ -55,6 +55,7 @@ export default function ServerDetailPage() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-heading text-2xl font-bold">{s.name}</h1>
         <StyleChip source={s.source} versions={s.versions} />
+        <RunChip mode={s.run_mode} label={s.run_label} />
         <StatusChip status={s.status} pending={ctl.pending} />
       </div>
       <Tabs value={current} onValueChange={(t) => setParams({ tab: t }, { replace: true })}>

@@ -509,6 +509,7 @@ impl Backend for FakeBackend {
                 os: "windows".into(),
                 dir: "C:\\Servers\\old".into(),
                 github_owner: Some("old-owner".into()),
+                run_mode: None,
             }),
             database: Some(crate::backup::DatabaseBackup {
                 kind: crate::backup::DbKind::Dumped,
@@ -527,6 +528,8 @@ impl Backend for FakeBackend {
             warnings: vec!["This server was made on a different operating system.".into()],
             saved_keys: vec!["Main".into()],
             licence_note: crate::backup::import::LICENCE_NOTE.into(),
+            run_mode: None,
+            container_engine: None,
             db_login: Some(crate::backup::import::DbLoginNote { ok: false, message: "Kora could not log in to the database as root.".into() }),
             fork: Some(crate::backup::import::ForkNote {
                 owner: "old-owner".into(),

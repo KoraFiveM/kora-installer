@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import type { Badge as BadgeT, Mode, ServerStatus, Source, Versions } from '@/api/types'
+import type { Badge as BadgeT, Mode, RunMode, ServerStatus, Source, Versions } from '@/api/types'
 import { styleOfMode } from '@/pages/install/form'
 import { Badge } from '@/components/ui/badge'
 
@@ -43,4 +43,10 @@ export function StyleChip({ source, versions }: { source: Source; versions: Vers
 export function ModeChip({ mode }: { mode: Mode }) {
   const { source, versions } = styleOfMode(mode)
   return <StyleChip source={source} versions={versions} />
+}
+
+/** "In a container (podman, rootless)": only for a server that runs in a container; nothing for the others. */
+export function RunChip({ mode, label }: { mode?: RunMode; label?: string | null }) {
+  if (mode !== 'container') return null
+  return <Badge tone="plain" title="This server runs in a container: its files are in its own folder and it restarts through the container engine.">{label ? label.charAt(0).toUpperCase() + label.slice(1) : 'In a container'}</Badge>
 }
