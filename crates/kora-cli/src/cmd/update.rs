@@ -3,12 +3,12 @@
 use crate::ui::confirm;
 use std::io::IsTerminal;
 
-use clap::{Args, Parser, ValueEnum};
+use clap::{Args, ValueEnum};
 use kora_core::installer::gitops;
 
 /// What to do when an update needs a restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-enum RestartArg {
+pub(crate) enum RestartArg {
     /// Apply the files, restart nothing.
     None,
     /// Apply the files without restarting; the server loads them on its next restart or an `ensure` in txAdmin (Kora cannot do that for you without credentials).

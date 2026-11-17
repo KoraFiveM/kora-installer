@@ -6,10 +6,7 @@ use crate::cmd::panel_running::{one_time_link, print_running, running_panel};
 use crate::ui::ask_yes_no;
 use std::io::IsTerminal;
 
-use clap::{Args, Parser, Subcommand};
-use kora_core::elevate;
-use kora_core::firewall::ports;
-use kora_core::launch;
+use clap::{Args, Subcommand};
 
 #[derive(Args, Debug)]
 pub(crate) struct PanelArgs {

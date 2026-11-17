@@ -5,8 +5,6 @@ use crate::cmd::schedule::ScheduleCmd;
 use crate::cmd::toolchain::ToolsCmd;
 use crate::{Cli, Command};
 use clap::{Parser, Subcommand};
-use kora_core::elevate;
-use kora_core::installer::host;
 
 #[derive(Subcommand)]
 pub(crate) enum HelperCmd {

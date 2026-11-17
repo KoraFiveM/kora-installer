@@ -2,11 +2,6 @@
 
 use crate::cmd::panel::{headless_session, PanelArgs};
 use crate::cmd::panel_running::{background_port, one_time_link, running_panel, Running};
-use std::path::PathBuf;
-
-use clap::Parser;
-use kora_core::firewall::ports;
-use kora_core::launch;
 
 /// Install and start the background panel (systemd user service on Linux, a Startup entry on Windows).
 pub(crate) fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {

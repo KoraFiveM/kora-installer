@@ -2,9 +2,8 @@
 
 use crate::cmd::install::CODE_REMOVED;
 use crate::ui::{confirm, server_dir};
-use std::path::PathBuf;
 
-use clap::{Args, Parser};
+use clap::Args;
 use kora_core::installer::Mode;
 
 #[derive(Args, Debug, Default)]

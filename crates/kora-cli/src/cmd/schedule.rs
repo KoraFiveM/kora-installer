@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use kora_core::firewall::ports;
 use kora_core::installer::{self, registry};
 
 #[derive(Subcommand, Debug)]

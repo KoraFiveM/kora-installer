@@ -3,9 +3,9 @@
 use crate::cmd::github::{github_owners, resolve_github_owner};
 use std::path::PathBuf;
 
-use clap::{Args, Parser, ValueEnum};
+use clap::{Args, ValueEnum};
 use kora_core::firewall::ports::{self, PortProber, SystemProber};
-use kora_core::installer::{self, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, StepStatus};
+use kora_core::installer::{self, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, StepStatus};
 
 #[derive(Clone, Copy, ValueEnum)]
 pub(crate) enum ModeArg {

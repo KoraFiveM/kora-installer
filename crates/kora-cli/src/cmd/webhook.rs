@@ -101,7 +101,7 @@ pub(crate) fn webhook(cmd: WebhookCmd) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     use crate::Cli;
     use clap::Parser;
 

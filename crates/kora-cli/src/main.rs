@@ -1,5 +1,12 @@
 //! `kora` command line entry point.
 
+use std::io::IsTerminal;
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+use kora_core::elevate;
+use kora_core::installer::{self, host, registry};
+
 use crate::cmd::app::{app_install, app_status, app_uninstall, AppCmd};
 use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::helper::{helper, HelperCmd};
@@ -12,15 +19,7 @@ use crate::cmd::toolchain::ToolsCmd;
 use crate::cmd::uninstall::uninstall;
 use crate::cmd::update::{update, UpdateArgs};
 use crate::cmd::webhook::{webhook, WebhookCmd};
-use crate::cmd::{admin_worker, bare, branch, keys_cmd, panel_tailscale, toolchain};
-use std::io::IsTerminal;
-use std::path::PathBuf;
-
-use clap::{Args, Parser, Subcommand, ValueEnum};
-use kora_core::elevate;
-use kora_core::firewall::ports::{self, PortProber, SystemProber};
-use kora_core::installer::{self, gitops, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, RollbackOptions, StepStatus};
-use kora_core::launch;
+use crate::cmd::{admin_worker, bare, branch, keys_cmd, toolchain};
 
 #[derive(Parser)]
 #[command(name = "kora", version, about = "Kora installer and server manager")]

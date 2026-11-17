@@ -3,7 +3,6 @@
 use crate::cmd::install::Printer;
 use std::path::PathBuf;
 
-use kora_core::firewall::ports;
 use kora_core::installer::{self, host, registry, Mode, RollbackOptions};
 use kora_core::launch;
 

@@ -1,6 +1,6 @@
 //! `kora panel remote-actions` and `kora panel user`: who may sign in from other computers.
 
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
 
 #[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RemoteActionsCmd {

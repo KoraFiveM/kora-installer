@@ -1,9 +1,6 @@
 //! Finding the panel that is already running (background service or window) and the port a background panel should use.
 
 use crate::cmd::panel::{headless_session, PanelArgs};
-use kora_core::firewall::ports;
-use kora_core::installer::Ports;
-use kora_core::launch;
 
 /// A Kora Panel of ours that is already answering.
 #[derive(Debug, PartialEq, Eq)]
