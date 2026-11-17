@@ -23,7 +23,7 @@ diag() {
   sudo cat /etc/kora/service.json /var/lib/kora/owners.json 2>&1 || true
   sudo tail -n 30 /var/log/kora/audit.log 2>&1 || true
 }
-trap 'rc=$?; [ $rc -ne 0 ] && diag; sudo userdel -r "$A" 2>/dev/null; sudo userdel -r "$B" 2>/dev/null; sudo userdel -r "$C" 2>/dev/null; sudo userdel -r "$D" 2>/dev/null; sudo userdel kora-old 2>/dev/null; sudo systemctl disable --now kora-helper.service 2>/dev/null; sudo rm -f /etc/systemd/system/kora-helper.service /etc/systemd/system/kora-old.service; rm -rf "$WORK"; exit $rc' EXIT
+trap 'rc=$?; set +e; [ $rc -ne 0 ] && diag; sudo userdel -r "$A" 2>/dev/null; sudo userdel -r "$B" 2>/dev/null; sudo userdel -r "$C" 2>/dev/null; sudo userdel -r "$D" 2>/dev/null; sudo userdel kora-old 2>/dev/null; sudo systemctl disable --now kora-helper.service 2>/dev/null; sudo rm -f /etc/systemd/system/kora-helper.service /etc/systemd/system/kora-old.service; rm -rf "$WORK"; exit $rc' EXIT
 
 as_user() { local u="$1"; shift; sudo -u "$u" env -i HOME="/home/$u" PATH=/usr/bin:/bin "$@"; }
 # svc USER VERB ARGS...: ask the service as USER; sets OUT and CODE (never aborts)
