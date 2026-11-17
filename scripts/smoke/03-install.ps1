@@ -5,7 +5,7 @@ $fakeKey = 'cfxk_FAKEFAKEFAKEFAKEFAKE_smoke'
 $env:KORA_CATALOG = (Resolve-Path "$PWD/tests/fixtures/smoke-catalog.json").Path
 $env:CFX_LICENSE_KEY = $fakeKey
 
-$r = Invoke-Native $kora @('install', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '-y')
+$r = Invoke-Native $kora @('install', '--source', 'clone', '--versions', 'released', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '-y')
 Show 'kora install (production, no service)' $r
 Assert-That ($r.Code -eq 0) 'kora install exits 0'
 Assert-That ($r.Output -notmatch [regex]::Escape($fakeKey)) 'the license key is never printed'
