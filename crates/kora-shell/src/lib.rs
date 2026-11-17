@@ -18,9 +18,11 @@
 pub mod autostart;
 pub mod bridge;
 pub mod cli;
+pub mod icon;
 pub mod instance;
 pub mod model;
 pub mod nav;
+pub mod platform;
 pub mod session;
 pub mod settings;
 pub mod toast;
