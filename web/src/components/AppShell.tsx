@@ -35,7 +35,7 @@ export function AppShell() {
       <a href="#main" onClick={(e) => { e.preventDefault(); mainRef.current?.focus() }} className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground">Skip to the main content</a>
       <aside className="border-b border-border bg-card md:min-h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r">
         <div className="px-5 py-4"><KoraLogo className="h-7 w-auto text-foreground" /></div>
-        <nav aria-label="Main" className="flex gap-1 px-3 pb-3 md:flex-col md:pb-0">
+        <nav aria-label="Main" className="flex flex-wrap gap-1 px-3 pb-3 md:flex-col md:flex-nowrap md:pb-0">
           {/* The fleet uses the tokens of other panels stored here, so it is only offered on this computer. */}
           {nav.filter((n) => !(n.to === '/fleet' && meta.data?.remote)).map(({ to, label, icon: Icon, end }) => {
             // Installing would be refused for this sign-in: say why here instead of after the whole wizard.

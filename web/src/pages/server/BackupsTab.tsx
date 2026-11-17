@@ -425,7 +425,7 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
   }, [v?.undo])
   if (noList) return <Alert tone="info">{noList}</Alert>
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <div className="space-y-5">
         <ErrorNotice error={view.error} />
         {v && (

@@ -99,6 +99,8 @@
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    /* A long address or path wraps instead of pushing the page wider than a small screen (WCAG 1.4.10 reflow). */
+    overflow-wrap: break-word;
   }
   h1,
   h2,
