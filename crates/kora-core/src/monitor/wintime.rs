@@ -14,7 +14,7 @@ const EPOCH_DIFF_SECS: u64 = 11_644_473_600;
 /// A FILETIME (`dwHighDateTime << 32 | dwLowDateTime`) as seconds since 1970. `None` for zero (a process that has no time) and for
 /// anything before 1970.
 pub fn filetime_to_unix(ft: u64) -> Option<u64> {
-    (ft != 0).then(|| ft / 10_000_000).and_then(|s| s.checked_sub(EPOCH_DIFF_SECS))
+    (ft != 0).then_some(ft / 10_000_000).and_then(|s| s.checked_sub(EPOCH_DIFF_SECS))
 }
 
 /// Windows folders compare without regard to case and treat `/` and `\` alike; a `\\?\` prefix means the same folder.

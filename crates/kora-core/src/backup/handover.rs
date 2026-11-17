@@ -83,9 +83,11 @@ pub fn note_into(outcome: HandOver, notes: &mut Vec<String>, problems: &mut Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::installer::Created;
     use crate::privsvc::client::testing::{Scripted, SERIAL};
 
+    #[cfg(unix)]
     fn server_with_account() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();
         let meta = d.path().join(".kora");

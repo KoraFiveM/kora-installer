@@ -342,20 +342,8 @@ mod os {
         None
     }
 
-    // The documented Win32 calls (kernel32), declared here so no extra dependency is needed.
-    #[repr(C)]
-    struct ProcessEntry32W {
-        size: u32,
-        usage: u32,
-        pid: u32,
-        heap_id: usize,
-        module_id: u32,
-        threads: u32,
-        parent_pid: u32,
-        priority: i32,
-        flags: u32,
-        exe_file: [u16; 260],
-    }
+    // The documented Win32 calls (kernel32). The process-list ones are declared once, in `privsvc::winclient`.
+    use crate::privsvc::winclient::{CloseHandle, CreateToolhelp32Snapshot, OpenProcess, Process32FirstW, Process32NextW, ProcessEntry32W};
     #[repr(C)]
     #[derive(Default, Clone, Copy)]
     struct FileTime {
@@ -364,13 +352,8 @@ mod os {
     }
     #[link(name = "kernel32")]
     extern "system" {
-        fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> isize;
-        fn Process32FirstW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
-        fn Process32NextW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
-        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
-        fn QueryFullProcessImageNameW(process: isize, flags: u32, name: *mut u16, size: *mut u32) -> i32;
-        fn GetProcessTimes(process: isize, creation: *mut FileTime, exit: *mut FileTime, kernel: *mut FileTime, user: *mut FileTime) -> i32;
-        fn CloseHandle(handle: isize) -> i32;
+        fn QueryFullProcessImageNameW(process: *mut std::ffi::c_void, flags: u32, name: *mut u16, size: *mut u32) -> i32;
+        fn GetProcessTimes(process: *mut std::ffi::c_void, creation: *mut FileTime, exit: *mut FileTime, kernel: *mut FileTime, user: *mut FileTime) -> i32;
     }
     const TH32CS_SNAPPROCESS: u32 = 0x2;
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
@@ -395,7 +378,7 @@ mod os {
                 }
                 more = Process32NextW(snap, &mut entry) != 0;
             }
-            CloseHandle(snap);
+            CloseHandle(snap as *mut std::ffi::c_void);
         }
         out
     }
@@ -405,7 +388,7 @@ mod os {
         // SAFETY: the handle is closed before returning; the buffers are as long as the sizes we pass say.
         unsafe {
             let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if h == 0 {
+            if h.is_null() {
                 return None;
             }
             let mut buf = [0u16; 1024];

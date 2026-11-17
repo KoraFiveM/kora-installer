@@ -132,7 +132,7 @@ fn is_audit_line(l: &str) -> bool {
 
 /// The account a line is about: its second column (`uid:1000 (jo)` -> `uid:1000`).
 fn line_account(l: &str) -> Option<&str> {
-    l.splitn(3, " | ").nth(1).map(|w| w.split(" (").next().unwrap_or(w).trim())
+    l.split(" | ").nth(1).map(|w| w.split(" (").next().unwrap_or(w).trim())
 }
 
 /// The lines `me` may see, oldest first, at most `limit` of the newest: only the lines about the calling account, unless the

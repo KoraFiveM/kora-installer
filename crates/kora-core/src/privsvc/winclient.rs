@@ -4,29 +4,29 @@ use std::ffi::c_void;
 
 use super::installer_user::Proc;
 
-type Handle = *mut c_void;
+pub(crate) type Handle = *mut c_void;
 
 #[repr(C)]
-struct ProcessEntry32W {
-    size: u32,
-    usage: u32,
-    pid: u32,
-    heap_id: usize,
-    module_id: u32,
-    threads: u32,
-    parent_pid: u32,
-    priority: i32,
-    flags: u32,
-    exe_file: [u16; 260],
+pub(crate) struct ProcessEntry32W {
+    pub(crate) size: u32,
+    pub(crate) usage: u32,
+    pub(crate) pid: u32,
+    pub(crate) heap_id: usize,
+    pub(crate) module_id: u32,
+    pub(crate) threads: u32,
+    pub(crate) parent_pid: u32,
+    pub(crate) priority: i32,
+    pub(crate) flags: u32,
+    pub(crate) exe_file: [u16; 260],
 }
 
 #[link(name = "kernel32")]
 extern "system" {
-    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
-    fn CloseHandle(h: Handle) -> i32;
-    fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> isize;
-    fn Process32FirstW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
-    fn Process32NextW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
+    pub(crate) fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+    pub(crate) fn CloseHandle(h: Handle) -> i32;
+    pub(crate) fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> isize;
+    pub(crate) fn Process32FirstW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
+    pub(crate) fn Process32NextW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
     fn LocalFree(p: *mut c_void) -> *mut c_void;
 }
 #[link(name = "advapi32")]
@@ -111,8 +111,10 @@ fn one(pid: u32) -> Option<Proc> {
         }
         let sid = String::from_utf16_lossy(std::slice::from_raw_parts(out, n));
         LocalFree(out.cast());
-        let session = *(token_info(tok.0, TOKEN_SESSION_ID)?.as_ptr() as *const u32);
-        let elevated = *(token_info(tok.0, TOKEN_ELEVATION)?.as_ptr() as *const u32) != 0;
+        let session_buf = token_info(tok.0, TOKEN_SESSION_ID)?;
+        let session = *(session_buf.as_ptr() as *const u32);
+        let elevation_buf = token_info(tok.0, TOKEN_ELEVATION)?;
+        let elevated = *(elevation_buf.as_ptr() as *const u32) != 0;
         Some(Proc { sid, elevated, session, parent: None })
     }
 }
