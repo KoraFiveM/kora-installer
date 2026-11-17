@@ -30,4 +30,5 @@ pub mod launch;
 pub mod monitor;
 pub mod notify;
 pub mod paidassets;
+pub mod problem;
 pub mod self_update;
