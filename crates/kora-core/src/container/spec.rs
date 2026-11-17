@@ -380,4 +380,11 @@ mod tests {
         assert_eq!(restart_policy(EngineKind::Docker), "unless-stopped");
         assert_eq!(restart_policy(EngineKind::Podman), "always");
     }
+
+    /// Container mode is Linux-only: a Windows folder is refused with a reason, never mounted.
+    #[test]
+    fn a_windows_folder_is_refused_in_words() {
+        let e = check_dir(Path::new(r"C:\kora\main")).unwrap_err();
+        assert!(e.contains("absolute path"), "{e}");
+    }
 }
