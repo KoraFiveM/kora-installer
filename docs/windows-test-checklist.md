@@ -344,6 +344,54 @@ run `kora app install` (this is how 0.6.x made the machine-wide app, with its ad
 45. [ ] **Tidy the test machine**: delete the test forks on GitHub, run `kora uninstall` in a terminal and answer **yes**
     to removing saved keys and Kora's own tools; the folder `%LOCALAPPDATA%\Kora` is gone or empty apart from the program.
 
+## The desktop app: tray icon, window, notifications (never run on Windows before this pass)
+
+The desktop app (`kora-desktop.exe`) was compiled and smoke-tested only by CI; this is its first real pass. Install it next
+to `kora.exe` (for now copy `kora-desktop-windows-x86_64.exe` from the CI artifact next to `kora.exe` and rename it
+`kora-desktop.exe`), then run `kora app install`. Note for each failure what you saw and, if the window is blank, whether
+the address bar of your browser shows the panel when you run `kora`.
+
+D1. [ ] **Start it** (the Kora shortcut, now pointing at `kora-desktop.exe`; check with `kora app status`). A small Kora
+    window opens, already signed in, showing the servers screen. No console window flashes. An icon appears in the
+    notification area (click the little arrow by the clock if it is hidden; drag it onto the bar to keep it visible).
+D2. [ ] **Tray colour and words.** Hover the icon: "Kora: all N servers are running" with the icon green. Stop one server from
+    its tray submenu: the icon turns amber/red within about 10 seconds and the hover text says "1 of N servers running".
+    Start it again from the menu: green again.
+D3. [ ] **Menu.** Right-click: Open Kora, each server (Open in Kora, Start/Stop/Restart, Open txAdmin when running), Check
+    for updates, Pause notifications, Start with Windows (ticked), a line saying Quit keeps your servers and the background
+    service running, Quit, Quit and turn off Kora's background service. Left-click the icon opens/shows the window.
+D4. [ ] **Close to tray.** Close the window with the X: a notification says Kora is still running in the notification
+    area (once only). The icon stays. Left-click it: the window is back, still signed in, on the same page.
+D5. [ ] **Single instance.** With the window closed to the tray, start Kora from the Start menu again: the existing window
+    appears; no second icon; Task Manager shows one `kora-desktop.exe`.
+D6. [ ] **Notification on a crash.** End a server's process in Task Manager (`FXServer.exe`) with the window closed to the
+    tray and alert rule "stopped" on (server, Monitoring tab): within about a minute a Windows notification says "<name>
+    stopped" and clicking it opens that server's page. With the rule off: no notification. With **Pause notifications**: none;
+    "Turn notifications back on" restores them. Stop 4 servers at once (if you have them): ONE summary notification.
+    *If no notification appears at all, note it: it is the first thing to check (the notification identity `Kora.Desktop`).*
+D7. [ ] **Update notification.** (Only when a newer Kora exists.) "Kora X is ready" once, clicking it opens Settings.
+D8. [ ] **Start with Windows.** Sign out and in: the Kora icon appears with no window; the background panel is running.
+    Untick "Start with Windows" in the tray menu, sign out and in: no icon. Tick it again.
+    Also check Settings > Apps > Startup: Kora is listed; switch it off there and the tray menu shows it unticked.
+D9. [ ] **Browser still works.** Run `kora` in PowerShell with the app running: it opens your browser at the panel as
+    before (the app and the browser can be open at once).
+D10. [ ] **Links.** In the window, click a link to GitHub (or "Open txAdmin" on a local server): it opens in your default
+    browser, and the app window does not navigate away.
+D11. [ ] **Browse.** Servers > Add an existing server > **Browse...**: the Windows folder dialog opens; the chosen folder
+    appears in the box. Cancel leaves the box alone. In a normal browser there is no Browse button.
+D12. [ ] **The administrator prompt in front.** (Needs the privileged-service build.) From the app press "Install Kora's
+    administrator service": the Windows prompt appears **in front of the Kora window** (not a flashing shield in the
+    taskbar). Say No: "Windows asked for permission and it was not given." Compare with the same button in a browser (the
+    old behaviour): note whether it flashes in the taskbar.
+D13. [ ] **WebView2 missing.** On a machine or VM without WebView2 (or after uninstalling "Microsoft Edge WebView2 Runtime"
+    where Windows allows it): starting the app gives one notification explaining it and opens Kora in the browser; the tray
+    icon still works. The message names the Microsoft download link.
+D14. [ ] **Quit.** Quit: the icon disappears (no ghost icon), the game servers and the background panel keep running
+    (`Get-Process kora*`, the browser still reaches the panel). Start the app again, then **Quit and turn off Kora's
+    background service**: the panel stops answering; servers keep running; the next `kora` starts the panel again.
+D15. [ ] **Uninstall.** `kora app uninstall` (or the MSI uninstall) removes the shortcuts and the start-up entry
+    (`reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Kora` finds nothing).
+
 ## 9. Report back
 
 Paste into the release issue: the Kora version, Windows version (`winver`), whether each numbered step passed, the UAC

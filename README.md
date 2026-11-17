@@ -28,6 +28,11 @@ computer first. `kora panel --tailscale` instead opens it to your own devices ov
 `kora install` with options stays the scriptable, non-interactive installer. The terminal screens (TUI) of earlier
 versions are gone: everything they did is in the panel.
 
+**The desktop app (optional).** `kora-desktop` is a tray icon and a small native window that shows the same panel: the icon
+shows at a glance whether your servers run, its menu starts, stops and restarts them, and you get a notification when one
+stops. It is a thin client of the panel (nothing changes for the browser route, remote use or a server without a screen),
+Windows first (WebView2; Linux with WebKitGTK second). See [docs/desktop-app.md](docs/desktop-app.md).
+
 Guide: [docs/panel.md](docs/panel.md). Where Kora keeps its own data, backups and the way back to older versions: [docs/store.md](docs/store.md).
 
 ## Install

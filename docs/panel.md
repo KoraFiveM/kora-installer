@@ -116,6 +116,19 @@ On your own computer, open a second terminal and run the `ssh -L` line it printe
 Leave it open, then paste the full link, including the `#code=...` part, into your browser. The tunnel carries the page
 over SSH, so nothing is exposed to the network.
 
+### The desktop app (optional)
+
+Instead of a browser tab you can use the **Kora desktop app**: a tray icon (notification area on Windows) with a small
+window that shows this same panel. Start `kora-desktop` or the Kora shortcut (`kora app install` points the shortcut at it
+when it is installed next to `kora`). The icon is green when every server runs, amber when something deserves a look, red
+when something needs attention and grey when the panel is not reachable; its menu opens Kora, starts, stops and restarts a
+server, opens txAdmin, checks for updates, pauses notifications and switches "Start with Windows" on and off. Closing the
+window keeps it in the tray; **Quit** closes the icon only: your servers and Kora's background panel keep running. It
+notifies you when a server stops unexpectedly or an update is ready, using the alert rules of the Monitoring and
+Notifications tabs (a rule that is off never notifies). Inside the app, "Add an existing server" has a **Browse...** button
+for the folder. The panel itself is unchanged (still `127.0.0.1` only), and the browser route keeps working. Details:
+[desktop-app.md](desktop-app.md).
+
 ## 2. Signing in
 
 The link that `kora panel` prints contains a one-time code: it works once, within 10 minutes. When you open it:
