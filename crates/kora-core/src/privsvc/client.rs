@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::conn::{Answer, ClientError};
+pub use super::conn::{Answer, ClientError};
 use super::problems::Availability;
 
 /// The way to the service.
