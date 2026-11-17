@@ -1075,7 +1075,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 164);
+        assert_eq!(Op::ALL.len(), 165);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }
