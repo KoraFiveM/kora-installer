@@ -160,7 +160,7 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
         Op::ScheduleSet { dir, .. } => (false, StepId::Schedule, Some(dir), None),
         Op::ScheduleOff { dir } => (true, StepId::Schedule, Some(dir), None),
         // The backup job is a separate thing from the update task: its own ledger key, below.
-        Op::BackupJobSet { dir, .. } | Op::ChownServer { dir } => (false, StepId::Schedule, Some(dir), None),
+        Op::BackupJobSet { dir, .. } | Op::HandOver { dir } => (false, StepId::Schedule, Some(dir), None),
         Op::BackupJobOff { dir } => (true, StepId::Schedule, Some(dir), None),
         _ => (false, StepId::Schedule, None, None),
     };
@@ -188,7 +188,7 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
             let db = host.db_name(dir);
             p.keys = match operation {
                 Op::BackupJobSet { .. } | Op::BackupJobOff { .. } => vec![ownership::backup_key(&p.slug)],
-                Op::ChownServer { .. } => vec![],
+                Op::HandOver { .. } => vec![],
                 _ => ownership::keys_for(step, &p.slug, db.as_deref()),
             };
             // A folder handed to the server's own account (a root-run install, or this service's earlier
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn handing_over_files_checks_the_folder_and_records_nothing() {
         let h = fake();
-        let go = |h: &Fake, who: AccountId| handle(h, &policy(), &caller(who), "chown-server", &s(&[DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        let go = |h: &Fake, who: AccountId| handle(h, &policy(), &caller(who), "hand-over", &s(&[DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
         assert!(matches!(go(&h, me()), Reply::Ran(Ran { code: 0, .. })));
         assert!(h.ledger.borrow().owners.is_empty());
         assert!(matches!(go(&h, AccountId::uid(1001)), Reply::Refused(m) if m.0.contains("does not belong")));

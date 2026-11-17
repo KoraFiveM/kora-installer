@@ -21,7 +21,7 @@ const MAX_ENV_VALUE: usize = 2048;
 /// The only environment variables a request may set for the child.
 pub const SECRET_ENV: &[&str] = &["CFX_LICENSE_KEY", "KORA_DB_ADMIN_PASSWORD"];
 /// The wire verbs the service takes (what [`parse`] accepts at all).
-pub const VERBS: &[&str] = &["admin-step", "admin-db", "check", "tools", "schedule", "self-update", "backup-job", "chown-server"];
+pub const VERBS: &[&str] = &["admin-step", "admin-db", "check", "tools", "schedule", "self-update", "backup-job", "hand-over"];
 /// Ports are opened only from here up.
 pub const FIRST_PORT: u16 = 1024;
 /// Never opened, even above 1023: remote administration and database ports.
@@ -135,7 +135,7 @@ pub enum Op {
     /// Hand the files in the server folder `dir` to the account the server runs as (after a restore or an import wrote
     /// them as the person). The account comes from the server's own install record read on the service side, never
     /// from the request.
-    ChownServer {
+    HandOver {
         dir: String,
     },
     /// Install Git from the system package manager (Linux only).
@@ -158,7 +158,7 @@ impl Op {
             Op::ScheduleOff { .. } => "schedule off".into(),
             Op::BackupJobSet { .. } => "backup job set".into(),
             Op::BackupJobOff { .. } => "backup job off".into(),
-            Op::ChownServer { .. } => "chown server".into(),
+            Op::HandOver { .. } => "hand over".into(),
             Op::InstallGit => "install git".into(),
             Op::UpdateApply { .. } => "update".into(),
         }
@@ -170,7 +170,7 @@ impl Op {
             Op::Step { step: StepId::PrepareDb, .. } | Op::DbServer(DbAction::Install) => 30,
             Op::Step { step: StepId::BuildDb, .. } => 10,
             Op::Step { .. } | Op::ScheduleSet { .. } | Op::ScheduleOff { .. } | Op::BackupJobSet { .. } | Op::BackupJobOff { .. } => 3,
-            Op::ChownServer { .. } => 30,
+            Op::HandOver { .. } => 30,
             Op::DbServer(DbAction::Start) | Op::StartDatabase => 5,
             Op::InstallGit => 15,
             Op::UpdateApply { .. } => 20,
@@ -215,7 +215,7 @@ impl Op {
                 }
             }
             Op::BackupJobOff { dir } => v.extend([s("backup-job"), s("off"), dir.clone()]),
-            Op::ChownServer { dir } => v.extend([s("chown-server"), dir.clone()]),
+            Op::HandOver { dir } => v.extend([s("hand-over"), dir.clone()]),
             Op::InstallGit => v.extend([s("tools"), s("install"), s("git")]),
             Op::UpdateApply { version } => {
                 v.extend([s("self-update"), s("--yes")]);
@@ -230,7 +230,7 @@ impl Op {
     /// The server folder this operation works on, if any (the service checks it on its side).
     pub fn dir(&self) -> Option<&str> {
         match self {
-            Op::Step { dir, .. } | Op::ScheduleSet { dir, .. } | Op::ScheduleOff { dir } | Op::BackupJobSet { dir, .. } | Op::BackupJobOff { dir } | Op::ChownServer { dir } => Some(dir),
+            Op::Step { dir, .. } | Op::ScheduleSet { dir, .. } | Op::ScheduleOff { dir } | Op::BackupJobSet { dir, .. } | Op::BackupJobOff { dir } | Op::HandOver { dir } => Some(dir),
             _ => None,
         }
     }
@@ -324,8 +324,8 @@ pub fn parse(verb: &str, args: &[String], env: &BTreeMap<String, String>) -> Res
         },
         "schedule" => parse_schedule(&mut w)?,
         "backup-job" => parse_backup_job(&mut w)?,
-        "chown-server" => match (w.next(), w.done()) {
-            (Some(d), true) if dir_shape_ok(d) => Op::ChownServer { dir: d.to_string() },
+        "hand-over" => match (w.next(), w.done()) {
+            (Some(d), true) if dir_shape_ok(d) => Op::HandOver { dir: d.to_string() },
             _ => return no("The Kora service needs the server's full folder path."),
         },
         "self-update" => parse_update(&mut w)?,
@@ -670,12 +670,12 @@ mod tests {
 
     #[test]
     fn handing_a_server_folder_over_takes_only_a_full_folder_path() {
-        assert_eq!(p("chown-server", &[DIR]), Ok(Op::ChownServer { dir: DIR.into() }));
+        assert_eq!(p("hand-over", &[DIR]), Ok(Op::HandOver { dir: DIR.into() }));
         for args in [vec![], vec!["relative"], vec![DIR, "--to", "root"], vec!["/a/../b"]] {
-            assert!(p("chown-server", &args).is_err(), "{args:?}");
+            assert!(p("hand-over", &args).is_err(), "{args:?}");
         }
-        let op = Op::ChownServer { dir: DIR.into() };
-        assert_eq!(op.child_args(), ["--no-elevate", "chown-server", DIR]);
-        assert_eq!(parse("chown-server", &op.child_args()[2..], &BTreeMap::new()), Ok(op));
+        let op = Op::HandOver { dir: DIR.into() };
+        assert_eq!(op.child_args(), ["--no-elevate", "hand-over", DIR]);
+        assert_eq!(parse("hand-over", &op.child_args()[2..], &BTreeMap::new()), Ok(op));
     }
 }
