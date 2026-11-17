@@ -269,6 +269,16 @@ mod stream {
     }
 
     #[test]
+    fn the_child_gets_only_the_environment_it_is_given() {
+        std::env::set_var("KORA_MARIADB_HOME_TEST_LEAK", "/tmp/evil");
+        let ex = ChildExecutor { exe: "/bin/sh".into() };
+        let mut out = Vec::new();
+        let code = ex.run(&["-c".into(), "echo \"leak=$KORA_MARIADB_HOME_TEST_LEAK home=$HOME given=$GIVEN\"".into()], &[("GIVEN".into(), "yes".into())], &mut |_, l| out.push(l.to_string())).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(out, ["leak= home= given=yes"], "nothing of the worker's own environment reaches the elevated child");
+    }
+
+    #[test]
     fn the_child_executor_runs_without_a_shell_and_keeps_result_lines_whole() {
         let ex = ChildExecutor { exe: "/bin/sh".into() };
         let mut out = Vec::new();
@@ -281,4 +291,26 @@ mod stream {
         let res = out.iter().find_map(|(_, l)| result_line(l)).unwrap();
         assert_eq!(res["v"].as_str().unwrap().len(), 10_000);
     }
+}
+
+#[test]
+fn elevated_children_get_system_folders_from_windows_and_the_panel_users_profile() {
+    let sys = SystemDirs { system_root: r"C:\Windows".into(), program_files: r"C:\Program Files".into(), program_files_x86: r"C:\Program Files (x86)".into(), program_data: r"C:\ProgramData".into() };
+    let u = crate::helper::winpipe::PanelUser { sid: "S-1-5-21-1-2-3-1001".into(), domain: "PC".into(), name: "jo".into(), admin_member: true };
+    let e = elevated_child_env(&sys, &u, Some(r"C:\Users\jo"), Some(r"C:\Users\jo\AppData\Local\Kora"));
+    let get = |k: &str| e.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    assert_eq!(get("PATH"), Some(r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0"), "system folders only");
+    assert_eq!(get("ProgramFiles"), Some(r"C:\Program Files"));
+    assert_eq!(get("ProgramData"), Some(r"C:\ProgramData"));
+    assert_eq!(get("TEMP"), Some(r"C:\Windows\Temp"));
+    assert_eq!(get("USERNAME"), Some("jo"));
+    assert_eq!(get("LOCALAPPDATA"), Some(r"C:\Users\jo\AppData\Local"), "the panel user's profile, not the administrator's who answered");
+    assert_eq!(get("APPDATA"), Some(r"C:\Users\jo\AppData\Roaming"));
+    assert_eq!(get("KORA_HOME"), Some(r"C:\Users\jo\AppData\Local\Kora"));
+    for k in OVERRIDE_VARS {
+        assert!(get(k).is_none(), "{k}");
+    }
+    assert!(e.iter().all(|(k, _)| !crate::helper::SECRET_ENV.contains(&k.as_str())), "secrets come per request only");
+    let e = elevated_child_env(&sys, &u, None, None);
+    assert!(!e.iter().any(|(k, _)| k == "USERPROFILE" || k == "KORA_HOME"));
 }

@@ -125,11 +125,12 @@ pub struct ServiceConfig {
 }
 
 impl ServiceConfig {
-    /// The base environment of every child: who "you" is, the fixed Kora folder, service mode.
-    pub fn child_env(&self) -> Vec<(String, String)> {
+    /// The whole environment of every child (built from nothing, see
+    /// [`super::worker::elevated_child_env`]): system folders, who "you" is, the fixed Kora
+    /// folder, service mode.
+    pub fn child_env(&self, sys: &super::worker::SystemDirs, profile: Option<&str>) -> Vec<(String, String)> {
         let u = super::winpipe::PanelUser { sid: self.sid.clone(), domain: self.domain.clone(), name: self.user.clone(), admin_member: false };
-        let mut v = super::winpipe::child_env(&u);
-        v.push(("KORA_HOME".into(), self.kora_home.clone()));
+        let mut v = super::worker::elevated_child_env(sys, &u, profile, Some(&self.kora_home));
         v.push((SERVICE_ENV.into(), "1".into()));
         v
     }
@@ -141,9 +142,10 @@ pub fn in_service() -> bool {
 }
 
 /// A user SID as Windows writes it, and an ordinary account's: `S-1-5-21-<3 numbers>-<RID>`
-/// (local or domain account). SYSTEM, groups and well-known SIDs are refused.
+/// (local or domain account) or `S-1-12-1-<4 numbers>` (Microsoft Entra ID account). SYSTEM,
+/// groups and well-known SIDs are refused.
 pub fn valid_user_sid(s: &str) -> bool {
-    let Some(rest) = s.strip_prefix("S-1-5-21-") else { return false };
+    let Some(rest) = s.strip_prefix("S-1-5-21-").or_else(|| s.strip_prefix("S-1-12-1-")) else { return false };
     let parts: Vec<&str> = rest.split('-').collect();
     parts.len() == 4 && parts.iter().all(|p| !p.is_empty() && p.len() <= 10 && p.bytes().all(|b| b.is_ascii_digit()))
 }

@@ -42,7 +42,19 @@ pub fn child_env(u: &PanelUser) -> Vec<(String, String)> {
 }
 
 #[cfg(windows)]
-pub use imp::{open_session, path_owner_sid, run_worker, selftest};
+pub use imp::{open_session, path_owner_sid, profile_dir, run_worker, selftest, system_dirs};
+
+/// The system folders as Windows reports them (elsewhere: empty).
+#[cfg(not(windows))]
+pub fn system_dirs() -> super::worker::SystemDirs {
+    super::worker::SystemDirs::default()
+}
+
+/// The profile folder of the account `sid` (`ProfileImagePath`), elsewhere `None`.
+#[cfg(not(windows))]
+pub fn profile_dir(_sid: &str) -> Option<String> {
+    None
+}
 
 #[cfg(not(windows))]
 pub fn open_session(_kora_home: Option<&str>, _limit: Duration) -> Result<Session, OpenError> {
@@ -131,6 +143,7 @@ mod imp {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
         fn QueryFullProcessImageNameW(h: Handle, flags: u32, buf: *mut u16, len: *mut u32) -> i32;
         fn LocalFree(p: *mut c_void) -> *mut c_void;
+        fn GetSystemWindowsDirectoryW(buf: *mut u16, size: u32) -> u32;
     }
 
     #[link(name = "advapi32")]
@@ -140,17 +153,68 @@ mod imp {
         fn OpenProcessToken(process: Handle, access: u32, token: *mut Handle) -> i32;
         fn GetTokenInformation(token: Handle, class: u32, info: *mut c_void, len: u32, ret: *mut u32) -> i32;
         fn LookupAccountSidW(system: *const u16, sid: *mut c_void, name: *mut u16, name_len: *mut u32, domain: *mut u16, domain_len: *mut u32, sid_use: *mut u32) -> i32;
+        fn RegGetValueW(key: isize, sub: *const u16, value: *const u16, flags: u32, kind: *mut u32, data: *mut c_void, len: *mut u32) -> i32;
         fn GetNamedSecurityInfoW(name: *const u16, object_type: u32, info: u32, owner: *mut *mut c_void, group: *mut *mut c_void, dacl: *mut *mut c_void, sacl: *mut *mut c_void, sd: *mut *mut c_void) -> u32;
     }
 
     #[link(name = "shell32")]
     extern "system" {
         fn ShellExecuteExW(info: *mut ShellExecuteInfoW) -> i32;
+        fn SHGetKnownFolderPath(id: *const Guid, flags: u32, token: Handle, path: *mut *mut u16) -> i32;
     }
 
     #[link(name = "ole32")]
     extern "system" {
         fn CoInitializeEx(reserved: *mut c_void, flags: u32) -> i32;
+        fn CoTaskMemFree(p: *mut c_void);
+    }
+
+    #[repr(C)]
+    struct Guid(u32, u16, u16, [u8; 8]);
+    const FOLDERID_PROGRAM_FILES: Guid = Guid(0x905e63b6, 0xc1bf, 0x494e, [0xb2, 0xdc, 0x28, 0xd6, 0xe0, 0xda, 0xd5, 0xc8]);
+    const FOLDERID_PROGRAM_FILES_X86: Guid = Guid(0x7c5a40ef, 0xa0fb, 0x4bfc, [0x87, 0x4a, 0xc0, 0xf2, 0xe0, 0xb9, 0xfa, 0x8e]);
+    const FOLDERID_PROGRAM_DATA: Guid = Guid(0x62ab5d82, 0xfdc1, 0x4dc3, [0xa9, 0xdd, 0x07, 0x0d, 0x1d, 0x49, 0x5d, 0x97]);
+    const HKEY_LOCAL_MACHINE: isize = 0x8000_0002u32 as i32 as isize;
+
+    fn known_folder(id: &Guid) -> Option<String> {
+        let mut p: *mut u16 = std::ptr::null_mut();
+        // SAFETY: valid GUID and out pointer; the string is freed with CoTaskMemFree.
+        let hr = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut p) };
+        let s = if hr == 0 { Some(from_wide(p)) } else { None };
+        if !p.is_null() {
+            // SAFETY: allocated by SHGetKnownFolderPath.
+            unsafe { CoTaskMemFree(p.cast()) };
+        }
+        s.filter(|s| !s.is_empty())
+    }
+
+    /// The system folders from Windows itself (not from this process's variables).
+    pub fn system_dirs() -> worker::SystemDirs {
+        let mut buf = vec![0u16; 1024];
+        // SAFETY: buffer and size match.
+        let n = unsafe { GetSystemWindowsDirectoryW(buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        let root = if n > 0 && n < buf.len() { String::from_utf16_lossy(&buf[..n]) } else { r"C:\Windows".to_string() };
+        let drive: String = root.chars().take(2).collect();
+        worker::SystemDirs {
+            program_files: known_folder(&FOLDERID_PROGRAM_FILES).unwrap_or_else(|| format!(r"{drive}\Program Files")),
+            program_files_x86: known_folder(&FOLDERID_PROGRAM_FILES_X86).unwrap_or_default(),
+            program_data: known_folder(&FOLDERID_PROGRAM_DATA).unwrap_or_else(|| format!(r"{drive}\ProgramData")),
+            system_root: root,
+        }
+    }
+
+    /// `HKLM\...\ProfileList\<sid>\ProfileImagePath` (expanded).
+    pub fn profile_dir(sid: &str) -> Option<String> {
+        if sid.is_empty() || !sid.bytes().all(|b| b == b'S' || b == b'-' || b.is_ascii_digit()) {
+            return None;
+        }
+        let key = wide(&format!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}"));
+        let value = wide("ProfileImagePath");
+        let mut buf = vec![0u16; 1024];
+        let mut len = (buf.len() * 2) as u32;
+        // SAFETY: valid strings, buffer and length in bytes; REG_SZ | REG_EXPAND_SZ (expanded).
+        let r = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), value.as_ptr(), 0x2 | 0x4, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut len) };
+        (r == 0).then(|| from_wide(buf.as_ptr())).filter(|s| !s.is_empty())
     }
 
     const PIPE_ACCESS_DUPLEX: u32 = 3;
@@ -588,7 +652,9 @@ mod imp {
         let mut reader = BufReader::new(file.try_clone().map_err(|e| e.to_string())?);
         let mut writer = file;
         let exec = worker::ChildExecutor { exe: own };
-        worker::serve(&mut reader, &mut writer, validator.as_ref(), &exec, &child_env(&user), &touch).map_err(|e| e.to_string())
+        // The children's whole environment, built from nothing (never this process's inherited one).
+        let base = worker::elevated_child_env(&system_dirs(), &user, profile_dir(&user.sid).as_deref(), None);
+        worker::serve(&mut reader, &mut writer, validator.as_ref(), &exec, &base, &touch).map_err(|e| e.to_string())
     }
 }
 

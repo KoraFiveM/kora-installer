@@ -298,8 +298,91 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
     }
 }
 
-/// Runs `exe argv` as a child with the worker's environment plus `env`, no shell, no window, and
-/// streams its output lines. Works on every platform (tests run it on Linux).
+/// Folders as Windows itself reports them (system directory and known-folder APIs), never from
+/// inherited variables: a user can set `ProgramFiles` or `TEMP` in their own environment, and an
+/// elevated child must not take its trust roots from there.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SystemDirs {
+    /// `C:\Windows`
+    pub system_root: String,
+    /// `C:\Program Files`
+    pub program_files: String,
+    /// `C:\Program Files (x86)` (may be empty)
+    pub program_files_x86: String,
+    /// `C:\ProgramData`
+    pub program_data: String,
+}
+
+/// Variables that steer Kora (test seams and overrides). Never honoured by an elevated child of the
+/// worker or the helper: [`elevated_child_env`] does not pass them, and the child removes them
+/// again at start ([`scrub_overrides`]) as a second fence.
+pub const OVERRIDE_VARS: &[&str] = &[
+    "KORA_SELF_UPDATE_API",
+    "KORA_TEST_ARTIFACT_MIRROR",
+    "KORA_TEST_FAIL_HEALTH",
+    "KORA_MARIADB_HOME",
+    "KORA_CATALOG",
+    "KORA_SERVICE_USER",
+    "KORA_DB_HOST",
+    "KORA_DB_PORT",
+    "KORA_DB_ADMIN_USER",
+    "KORA_APP_PREFIX",
+    "KORA_SKIP_SPACE_CHECK",
+    "KORA_ALLOW_ROOT_PANEL",
+    "KORA_UPDATE_AS",
+];
+
+/// The complete environment of an elevated child, built from nothing (the child is started with
+/// an empty environment plus this): system folders from Windows, a PATH of system folders only,
+/// who "you" is (the panel's account, also when another administrator answered the prompt) with
+/// that account's own profile folders (`profile` = its `ProfileImagePath`), the Kora folder, and
+/// nothing else. The request's two secret variables are added per request.
+pub fn elevated_child_env(sys: &SystemDirs, user: &super::winpipe::PanelUser, profile: Option<&str>, kora_home: Option<&str>) -> Vec<(String, String)> {
+    let root = sys.system_root.trim_end_matches(['\\', '/']);
+    let s32 = format!("{root}\\System32");
+    let drive: String = root.chars().take(2).collect();
+    let mut v: Vec<(String, String)> = vec![
+        ("SystemRoot".into(), root.into()),
+        ("windir".into(), root.into()),
+        ("SystemDrive".into(), drive),
+        ("ComSpec".into(), format!("{s32}\\cmd.exe")),
+        ("PATHEXT".into(), ".COM;.EXE;.BAT;.CMD".into()),
+        ("PATH".into(), format!("{s32};{root};{s32}\\Wbem;{s32}\\WindowsPowerShell\\v1.0")),
+        ("TEMP".into(), format!("{root}\\Temp")),
+        ("TMP".into(), format!("{root}\\Temp")),
+        ("ProgramFiles".into(), sys.program_files.clone()),
+        ("ProgramW6432".into(), sys.program_files.clone()),
+        ("CommonProgramFiles".into(), format!("{}\\Common Files", sys.program_files)),
+        ("ProgramData".into(), sys.program_data.clone()),
+        ("ALLUSERSPROFILE".into(), sys.program_data.clone()),
+    ];
+    if !sys.program_files_x86.is_empty() {
+        v.push(("ProgramFiles(x86)".into(), sys.program_files_x86.clone()));
+    }
+    v.extend(super::winpipe::child_env(user));
+    if let Some(p) = profile.map(|p| p.trim_end_matches(['\\', '/'])).filter(|p| !p.is_empty()) {
+        v.push(("USERPROFILE".into(), p.into()));
+        v.push(("APPDATA".into(), format!("{p}\\AppData\\Roaming")));
+        v.push(("LOCALAPPDATA".into(), format!("{p}\\AppData\\Local")));
+    }
+    if let Some(h) = kora_home {
+        v.push(("KORA_HOME".into(), h.into()));
+    }
+    v
+}
+
+/// In an elevated child of the worker or the helper (`KORA_HELPER=1`): forget [`OVERRIDE_VARS`]
+/// before anything reads them. Call first thing in `main`, before any thread starts.
+pub fn scrub_overrides() {
+    if std::env::var("KORA_HELPER").is_ok_and(|v| v == "1") && crate::elevate::is_elevated() {
+        for k in OVERRIDE_VARS {
+            std::env::remove_var(k);
+        }
+    }
+}
+
+/// Runs `exe argv` as a child with ONLY `env` (the environment is cleared first), no shell, no
+/// window, and streams its output lines. Works on every platform (tests run it on Linux).
 pub struct ChildExecutor {
     pub exe: std::path::PathBuf,
 }
@@ -308,7 +391,7 @@ impl Executor for ChildExecutor {
     fn run(&self, argv: &[String], env: &[(String, String)], on_line: &mut dyn FnMut(&str, &str)) -> io::Result<i32> {
         use std::process::{Command, Stdio};
         let mut cmd = Command::new(&self.exe);
-        cmd.args(argv).envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(argv).env_clear().envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

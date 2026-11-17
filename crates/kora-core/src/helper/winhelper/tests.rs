@@ -13,6 +13,7 @@ fn s(v: &[&str]) -> Vec<String> {
 #[test]
 fn only_ordinary_account_sids_are_accepted() {
     assert!(valid_user_sid(ME));
+    assert!(valid_user_sid("S-1-12-1-1111111111-2222222222-3333333333-4444444444"), "Entra ID account");
     for bad in ["S-1-5-18", "S-1-5-32-544", "S-1-1-0", "S-1-5-21-1-2-3", "S-1-5-21-1-2-3-4-5", "S-1-5-21-a-2-3-4", "", "S-1-5-21-1-2-3-4)(A;;GA;;;WD"] {
         assert!(!valid_user_sid(bad), "{bad}");
     }
@@ -165,7 +166,8 @@ fn the_ledger_lets_each_account_remove_only_its_own_things() {
 
 #[test]
 fn children_get_the_fixed_folder_and_service_mode() {
-    let e = cfg().child_env();
+    let sys = crate::helper::worker::SystemDirs { system_root: r"C:\Windows".into(), program_files: r"C:\Program Files".into(), program_files_x86: String::new(), program_data: r"C:\ProgramData".into() };
+    let e = cfg().child_env(&sys, None);
     assert!(e.contains(&(SERVICE_ENV.to_string(), "1".to_string())));
     assert!(e.contains(&("KORA_HOME".to_string(), cfg().kora_home)));
     assert!(e.contains(&("KORA_WORKER_USER_SID".to_string(), ME.to_string())));
