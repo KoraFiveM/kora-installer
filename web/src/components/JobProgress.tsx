@@ -59,6 +59,24 @@ export function StepProgress({ events, planned }: { events: ProgressEvent[]; pla
   )
 }
 
+/** Percent of a count, 0 to 100 (0 when there is nothing to count). */
+export function percentOf(done: number, total: number): number {
+  return total > 0 ? Math.round((Math.min(Math.max(done, 0), total) / total) * 100) : 0
+}
+
+/** A count bar: the bar, the "N of M" text, and an optional line about what is happening now. */
+export function CountBar({ label, done, total, text, detail, className }: { label: string; done: number; total: number; text: string; detail?: string; className?: string }) {
+  return (
+    <div className={cn('space-y-1', className)} aria-live="polite">
+      <div className="flex items-center gap-3">
+        <Progress value={percentOf(done, total)} label={label} className="flex-1" />
+        <span className="shrink-0 text-sm tabular-nums text-muted-foreground">{text}</span>
+      </div>
+      {detail && <div className="text-xs text-muted-foreground">{detail}</div>}
+    </div>
+  )
+}
+
 export interface ResourceEvent {
   type?: string
   id?: string

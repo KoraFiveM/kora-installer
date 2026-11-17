@@ -31,6 +31,8 @@ pub fn update_event_json(e: &UpdateEvent) -> Value {
         UpdateEvent::Snapshot(id) => json!({"type": "snapshot", "id": id}),
         UpdateEvent::Health(m) => json!({"type": "health", "message": m}),
         UpdateEvent::Progress(m) => json!({"type": "progress", "message": m}),
+        UpdateEvent::Checked { done, total, id } => json!({"type": "checked", "done": done, "total": total, "id": id}),
+        UpdateEvent::Planned(ids) => json!({"type": "planned", "ids": ids}),
         UpdateEvent::Done => json!({"type": "done"}),
     }
 }

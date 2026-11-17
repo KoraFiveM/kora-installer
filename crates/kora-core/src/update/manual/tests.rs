@@ -1094,3 +1094,72 @@ fn a_report_with_not_attempted_items_counts_them_as_still_waiting() {
     let st = apply_status(&r, 1, &None);
     assert_eq!((st.updates, st.attention), (2, 1));
 }
+
+/// The planned ids; the plan comes before any resource is touched.
+fn planned(ev: &[UpdateEvent]) -> Vec<String> {
+    let at = ev.iter().position(|e| matches!(e, UpdateEvent::Planned(_))).unwrap_or_else(|| panic!("no plan: {ev:?}"));
+    let first_resource = ev.iter().position(|e| matches!(e, UpdateEvent::Resource { .. })).unwrap_or(usize::MAX);
+    assert!(at < first_resource, "the plan must come before the resources: {ev:?}");
+    match &ev[at] {
+        UpdateEvent::Planned(ids) => ids.clone(),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn the_plan_comes_first_and_every_planned_resource_reaches_a_final_state() {
+    // Success: every planned resource is announced, then ends "updated".
+    let env = dev_env();
+    let (_, ev) = run(&env, Scope::All, opts(RestartPolicy::FullRestart, &[]), &Health::ok(), Some(0), 40);
+    let ids = planned(&ev);
+    assert!(!ids.is_empty());
+    for id in ids {
+        assert!(ev.contains(&UpdateEvent::Resource { id: id.clone(), state: "updated".into() }), "{id} never finished: {ev:?}");
+    }
+
+    // A failed fast-forward: the failed one and the ones never tried are all given a final state, so a
+    // progress bar counting them reaches the total.
+    struct FailFirst(GitCli, std::cell::Cell<bool>);
+    impl GitOps for FailFirst {
+        fn fetch(&self, r: &Path) -> GitResult<()> {
+            self.0.fetch(r)
+        }
+        fn fetch_many(&self, t: &[&UpdateTarget], m: FetchMode) -> Vec<GitResult<()>> {
+            self.0.fetch_many(t, m)
+        }
+        fn head_commit(&self, r: &Path, rev: &str) -> GitResult<String> {
+            self.0.head_commit(r, rev)
+        }
+        fn fast_forward(&self, r: &Path, u: &str) -> GitResult<()> {
+            if self.1.replace(false) {
+                return Err(UpdateError::Git("boom".into()));
+            }
+            self.0.fast_forward(r, u)
+        }
+        fn reset_to(&self, r: &Path, c: &str) -> GitResult<()> {
+            self.0.reset_to(r, c)
+        }
+        fn is_dirty(&self, r: &Path) -> GitResult<bool> {
+            self.0.is_dirty(r)
+        }
+        fn is_diverged(&self, r: &Path, u: &str) -> GitResult<bool> {
+            self.0.is_diverged(r, u)
+        }
+        fn behind_count(&self, r: &Path, u: &str) -> GitResult<u32> {
+            self.0.behind_count(r, u)
+        }
+    }
+    let env = dev_env();
+    let git = FailFirst(GitCli::default(), std::cell::Cell::new(true));
+    let mut ev = vec![];
+    apply_with(&env.sf, Scope::All, opts(RestartPolicy::FullRestart, &[]), &git, &Health::ok(), None, Some(0), 41, &mut |e| ev.push(e)).unwrap();
+    let ids = planned(&ev);
+    for id in &ids {
+        let last = ev.iter().rev().find_map(|e| match e {
+            UpdateEvent::Resource { id: i, state } if i == id => Some(state.clone()),
+            _ => None,
+        });
+        let last = last.unwrap_or_else(|| panic!("{id} has no event: {ev:?}"));
+        assert!(!matches!(last.as_str(), "updating" | "rolling back"), "{id} stuck at {last}: {ev:?}");
+    }
+}

@@ -149,6 +149,34 @@ async fn preview_returns_the_changes_and_a_badge() {
 }
 
 #[tokio::test]
+async fn preview_reports_each_resource_checked_in_order_and_keeps_the_result() {
+    let fake = FakeBackend::sample();
+    fake.state().preview = Some(Ok(UpdatePreview {
+        resources: vec![
+            change("kora_core", ChangeStatus::Clean),
+            change("kora_hud", ChangeStatus::UpToDate),
+            change("kora_lib", ChangeStatus::Dirty),
+        ],
+        new_release: None,
+        notes: vec![],
+    }));
+    let app = app(&fake);
+    let j = run_job(&app, "POST", "/servers/dev/update/preview", Some(json!({"scope": "all"}))).await;
+    assert_eq!(j["state"], "done", "{j}");
+    // Progress: one `checked` event per resource, counting up to the total, each naming the resource.
+    let ev = j["events"].as_array().unwrap();
+    assert_eq!(ev.len(), 3, "{ev:?}");
+    for (n, (id, e)) in ["kora_core", "kora_hud", "kora_lib"].iter().zip(ev).enumerate() {
+        assert_eq!(e, &json!({"type": "checked", "done": n + 1, "total": 3, "id": id}));
+    }
+    // The response is the same as before progress existed.
+    assert_eq!(j["result"]["resources"].as_array().unwrap().len(), 3);
+    assert_eq!(j["result"]["resources"][1]["status"], "up_to_date");
+    // kora_lib is dirty, so the badge asks for attention (not a count of updates).
+    assert_eq!(j["result"]["badge"], json!({"kind": "needs_attention"}));
+}
+
+#[tokio::test]
 async fn preview_failure_is_a_failed_job_and_bad_input_is_refused() {
     let fake = FakeBackend::sample();
     fake.state().preview = Some(Err("Could not reach GitHub.".into()));

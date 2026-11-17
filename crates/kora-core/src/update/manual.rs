@@ -14,7 +14,7 @@ use super::lock;
 use super::status;
 use super::orgcache::{self, OrgHints};
 use super::{
-    decide_restart, plan_fetch, run_update_with, Action, DeferReason, FetchMode, GitOps, GitResult,
+    decide_restart, plan_fetch, plan_fetch_with, run_update_with, Action, DeferReason, FetchMode, GitOps, GitResult,
     HealthCheck, HealthOutcome, HealthRequest, NoMigrations, PlanItem, QuietConfig, ResourceClass,
     RestartDecision, RunEvent, RunOptions, SkipReason, Snapshot, UpdateError, UpdatePlan,
     UpdateReport, UpdateTarget,
@@ -132,6 +132,11 @@ pub enum UpdateEvent {
     Health(String),
     /// Something slow before the update itself (e.g. "Syncing your GitHub forks 3/14").
     Progress(String),
+    /// A check: `done` of `total` resources have been looked at (`id` is the one just finished).
+    /// `done` 0 with an empty `id` means the checks are starting (the network part is one batch).
+    Checked { done: usize, total: usize, id: String },
+    /// The resources an update is about to try, in order (the total for the progress bar).
+    Planned(Vec<String>),
     Done,
 }
 
@@ -489,6 +494,11 @@ fn change_of(git: &dyn GitOps, item: &super::PlanItem) -> ResourceChange {
 /// Fetch and compare. Changes nothing in any checkout. Holds the server's update lock while it runs
 /// git (a fetch must not race an update): busy is an error.
 pub fn preview(server: &ServerRecord, scope: Scope) -> Result<UpdatePreview> {
+    preview_events(server, scope, &mut |_| {})
+}
+
+/// [`preview`] that reports each resource as it is checked ([`UpdateEvent::Checked`]).
+pub fn preview_events(server: &ServerRecord, scope: Scope, sink: &mut dyn FnMut(UpdateEvent)) -> Result<UpdatePreview> {
     if lock::is_busy(&server.dir) {
         return err(lock::LockError::Busy.to_string());
     }
@@ -496,13 +506,14 @@ pub fn preview(server: &ServerRecord, scope: Scope) -> Result<UpdatePreview> {
     // One organisation-level request tells which repositories moved (whole-server checks only: a single resource is one fetch).
     let mut hints = org_hints_for(server, &scope);
     with_git(&server.dir, |g| {
-        preview_with_hints(
+        preview_checked(
             server,
             scope,
             g,
             cat.as_ref(),
             note.as_deref(),
             hints.as_mut(),
+            sink,
         )
     })
 }
@@ -586,12 +597,26 @@ pub fn preview_with_hints(
     catalog_note: Option<&str>,
     hints: Option<&mut OrgHints>,
 ) -> Result<UpdatePreview> {
+    preview_checked(server, scope, git, catalog, catalog_note, hints, &mut |_| {})
+}
+
+fn preview_checked(
+    server: &ServerRecord,
+    scope: Scope,
+    git: &dyn GitOps,
+    catalog: Option<&Catalog>,
+    catalog_note: Option<&str>,
+    hints: Option<&mut OrgHints>,
+    sink: &mut dyn FnMut(UpdateEvent),
+) -> Result<UpdatePreview> {
     let _lock = locked(server)?;
     let sel = select(server, &scope, &[], catalog, None)?;
     let pinned = PinnedGit(git);
     let g = git_view(server, git, &pinned);
     let (skip, slugs) = hint_skips(g, hints.as_deref(), &sel.targets);
-    let (p, fetched) = plan_fetch(g, &sel.targets, FetchMode::Fresh, &skip);
+    let (p, fetched) = plan_fetch_with(g, &sel.targets, FetchMode::Fresh, &skip, &mut |done, total, id| {
+        sink(UpdateEvent::Checked { done, total, id: id.to_string() })
+    });
     record_hints(hints, &sel.targets, &slugs, &fetched, &skip);
     let p = finish_plan(g, &sel, p);
     let resources: Vec<ResourceChange> = p.items.iter().map(|i| change_of(g, i)).collect();
@@ -815,6 +840,8 @@ pub fn apply_with_hints(
             RunEvent::ApplyFailed(r, why) => sink(UpdateEvent::Resource { id: r, state: format!("failed: {why}") }),
             RunEvent::HealthCheck => sink(UpdateEvent::Health("checking the server".into())),
             RunEvent::RollingBack(r) => sink(UpdateEvent::Resource { id: r, state: "rolling back".into() }),
+            RunEvent::Planned(ids) => sink(UpdateEvent::Planned(ids)),
+            RunEvent::Skipped(id, state) => sink(UpdateEvent::Resource { id, state }),
         };
         run_update_with(g, &ph, &NoMigrations, &the_plan, &run, &mut on).map_err(|e| InstallError(e.to_string()))?
     };

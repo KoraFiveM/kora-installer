@@ -189,6 +189,15 @@ impl Backend for FakeBackend {
             })
         })
     }
+    fn preview_events(&mut self, e: &ServerEntry, scope: Scope, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdatePreview> {
+        let p = self.preview(e, scope)?;
+        // One event per resource, in order, as the real check reports them (the fake has no network).
+        let total = p.resources.len();
+        for (n, r) in p.resources.iter().enumerate() {
+            on(UpdateEvent::Checked { done: n + 1, total, id: r.id.clone() });
+        }
+        Ok(p)
+    }
     fn apply(
         &mut self,
         e: &ServerEntry,

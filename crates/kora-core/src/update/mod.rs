@@ -284,7 +284,15 @@ pub fn plan(git: &dyn GitOps, targets: &[UpdateTarget]) -> UpdatePlan {
 /// is in `skip_fetch` are not fetched (the caller knows their remote has not moved). Also returns the ids that were
 /// really fetched successfully.
 pub fn plan_fetch(git: &dyn GitOps, targets: &[UpdateTarget], mode: FetchMode, skip_fetch: &[String]) -> (UpdatePlan, Vec<String>) {
+    plan_fetch_with(git, targets, mode, skip_fetch, &mut |_, _, _| {})
+}
+
+/// [`plan_fetch`] that reports progress: `progress(0, total, "")` before the fetch (one batch, so nothing finer
+/// is known while it runs), then `progress(done, total, id)` as each target's result is read, in order.
+pub fn plan_fetch_with(git: &dyn GitOps, targets: &[UpdateTarget], mode: FetchMode, skip_fetch: &[String], progress: &mut dyn FnMut(usize, usize, &str)) -> (UpdatePlan, Vec<String>) {
     let to_fetch: Vec<&UpdateTarget> = targets.iter().filter(|t| !skip_fetch.contains(&t.id)).collect();
+    let total = targets.len();
+    progress(0, total, "");
     let results = git.fetch_many(&to_fetch, mode);
     let mut fetched = Vec::new();
     let mut failed: Vec<(String, String)> = Vec::new();
@@ -296,8 +304,9 @@ pub fn plan_fetch(git: &dyn GitOps, targets: &[UpdateTarget], mode: FetchMode, s
     }
     let items = targets
         .iter()
-        .map(|t| {
-            match failed.iter().find(|(id, _)| *id == t.id) {
+        .enumerate()
+        .map(|(n, t)| {
+            let item = match failed.iter().find(|(id, _)| *id == t.id) {
                 Some((_, e)) => Err(UpdateError::Git(e.trim_start_matches("git error: ").to_string())),
                 None => classify_fetched(git, t),
             }
@@ -307,7 +316,9 @@ pub fn plan_fetch(git: &dyn GitOps, targets: &[UpdateTarget], mode: FetchMode, s
                 upstream: String::new(),
                 behind: 0,
                 action: Action::Skipped(SkipReason::Error(e.to_string())),
-            })
+            });
+            progress(n + 1, total, &t.id);
+            item
         })
         .collect();
     (UpdatePlan { items }, fetched)
@@ -702,6 +713,10 @@ pub enum RunEvent {
     HealthCheck,
     /// This resource is being put back to the snapshot commit.
     RollingBack(String),
+    /// The resources that will be tried, in order (sent once, before anything moves).
+    Planned(Vec<String>),
+    /// This resource is done without moving (carries the text to show): diverged, or never reached.
+    Skipped(String, String),
 }
 
 /// Apply a plan: snapshot, fast-forward, health check, auto-rollback on failure.
@@ -743,6 +758,7 @@ pub fn run_update_with(
     if apply.is_empty() {
         return Ok(report);
     }
+    events(RunEvent::Planned(apply.iter().map(|i| i.target.id.clone()).collect()));
 
     Snapshot {
         created_unix: opts.now_unix,
@@ -774,6 +790,7 @@ pub fn run_update_with(
             Err(_) if git.is_diverged(&item.target.path, &item.target.upstream_ref).unwrap_or(false) => {
                 report.skipped.push((item.target.id.clone(), SkipReason::Diverged));
                 report.needs_attention.push((item.target.id.clone(), SkipReason::Diverged.text()));
+                events(RunEvent::Skipped(item.target.id.clone(), format!("skipped: {}", SkipReason::Diverged.text())));
             }
             Err(e) => {
                 let msg = format!("fast-forward failed: {e}");
@@ -786,9 +803,10 @@ pub fn run_update_with(
     }
     // Everything after the failed one was never tried: say so, item by item.
     if let Some(n) = stopped_at {
-        report
-            .not_attempted
-            .extend(apply[n + 1..].iter().map(|i| i.target.id.clone()));
+        for i in &apply[n + 1..] {
+            report.not_attempted.push(i.target.id.clone());
+            events(RunEvent::Skipped(i.target.id.clone(), "not attempted: the update stopped before it got here".into()));
+        }
     }
 
     let full_restart = applied.iter().any(|&n| apply[n].action == Action::NeedsRestart);

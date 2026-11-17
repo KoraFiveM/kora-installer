@@ -57,6 +57,8 @@ impl Live {
             UpdateEvent::Snapshot(id) => self.snapshot = Some(id.clone()),
             UpdateEvent::Health(h) => self.health = Some(h.clone()),
             UpdateEvent::Progress(m) => self.health = Some(m.clone()),
+            // The terminal screen does not show check or plan progress (the panel does).
+            UpdateEvent::Checked { .. } | UpdateEvent::Planned(_) => {}
             UpdateEvent::Done => self.done = true,
         }
     }
