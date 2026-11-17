@@ -4,6 +4,10 @@ export interface ApiErrorBody {
   code: string
   message: string
   command?: string[]
+  /** Technical details (a Problem's `details`). */
+  details?: string
+  /** What the user can do (a Problem's `actions`). */
+  actions?: T.ProblemAction[]
 }
 
 /** An error answered by the API (or a network failure, code `network`). `message` is for end users. */
@@ -11,12 +15,16 @@ export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly command?: string[]
+  readonly details?: string
+  readonly actions?: T.ProblemAction[]
   constructor(status: number, body: ApiErrorBody) {
     super(body.message)
     this.name = 'ApiError'
     this.status = status
     this.code = body.code
     this.command = body.command
+    this.details = body.details
+    this.actions = body.actions
   }
   get needsElevation(): boolean {
     return this.code === 'needs_elevation'
@@ -77,7 +85,7 @@ async function readError(res: Response): Promise<ApiError> {
   let body: ApiErrorBody | null = null
   try {
     const j = (await res.json()) as { error?: Partial<ApiErrorBody> }
-    if (j?.error?.message) body = { code: j.error.code ?? 'internal', message: j.error.message, command: j.error.command }
+    if (j?.error?.message) body = { code: j.error.code ?? 'internal', message: j.error.message, command: j.error.command, details: j.error.details, actions: Array.isArray(j.error.actions) ? j.error.actions : undefined }
   } catch {
     /* not JSON */
   }
@@ -263,6 +271,8 @@ export const api = {
     checkDbLogin: (admin: T.DbAdmin | null) => post<T.DbLoginCheck>('/checks/db-login', { admin }),
     plan: (req: T.InstallRequest) => post<T.InstallPlan>('/installs/plan', req),
     start: (req: T.InstallRequest) => post<T.JobStarted>('/installs', req),
+    /** Carry on with a stopped install (its job error has `resume: true`): retry the failed step, or skip it. */
+    resume: (job: string, skip?: string) => post<T.JobStarted>(`/installs/${enc(job)}/resume`, skip ? { skip } : {}),
     log: (job: string) => get<{ lines: string[] }>(`/installs/${enc(job)}/log`).then((r) => r.lines),
   },
   selfUpdate: {

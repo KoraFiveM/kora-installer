@@ -118,13 +118,50 @@ export type ControlAction = 'start' | 'stop' | 'restart'
 
 export type JobState = 'running' | 'done' | 'failed'
 
-export interface JobError {
-  code?: string
+// ---- problems -------------------------------------------------------------------------------
+
+/**
+ * Something the user can do about a problem (`kora_core::problem::Action`). Data only: what each
+ * kind does is decided by the page (see `lib/problemActions.ts`). A kind this page does not know
+ * is not shown.
+ */
+export type ProblemAction =
+  | { kind: 'retry' }
+  | { kind: 'retry_step'; step: string }
+  | { kind: 'skip_step'; step: string }
+  | { kind: 'change_answers'; section?: string }
+  | { kind: 'sign_in_github'; scopes?: string[] }
+  | { kind: 'install_tool'; tool: 'git' | 'gh' | 'mariadb' | 'unknown' }
+  | { kind: 'request_admin' }
+  | { kind: 'continue_without_admin' }
+  | { kind: 'show_command'; command: string[]; elevated?: boolean }
+  | { kind: 'open_link'; url: string }
+  | { kind: 'open_log'; job?: string; path?: string }
+  | { kind: 'copy_details' }
+
+export type ProblemActionKind = ProblemAction['kind']
+
+/** An error a person can act on (`kora_core::problem::Problem`): what API and job errors carry. */
+export interface Problem {
+  /** Stable machine code, e.g. `github.gh_missing`, `install.step_failed`, `failed`. */
+  code: string
+  message: string
+  /** Technical details for "Show details". */
+  details?: string
+  /** What the user can do, best first. Empty or missing: the page's generic choices. */
+  actions?: ProblemAction[]
+}
+
+export interface JobError extends Partial<Omit<Problem, 'message'>> {
   message: string
   command?: string[]
   /** Install failures: what was kept on disk. */
   kept?: string[]
   log_path?: string
+  /** Install failures: the step that failed (absent: it stopped before the first step). */
+  failed_step?: string
+  /** Install failures: `POST /installs/{job}/resume` can carry on with the same answers. */
+  resume?: boolean
 }
 
 export interface Job<R = unknown, E = unknown> {
@@ -411,6 +448,11 @@ export interface WebhookState {
 export interface GithubStatus {
   signed_in: boolean
   user: string | null
+  /** Missing on older panels (then only `signed_in` is known). */
+  state?: 'ready' | 'gh_missing' | 'signed_out' | 'missing_scopes'
+  missing_scopes?: string[]
+  /** What to do when GitHub is not ready (null when it is). */
+  problem?: Problem | null
 }
 export interface GithubOwner {
   login: string
