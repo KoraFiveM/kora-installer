@@ -73,6 +73,16 @@ export function streamUrl(path: string): string {
   return secret ? `${BASE}${path}?ks=${encodeURIComponent(secret)}` : `${BASE}${path}`
 }
 
+/**
+ * Asked when the panel says a sensitive action needs a fresh passkey or one-time-code check
+ * (`remote.reauth_required`): the app shows the check and answers whether it succeeded; the request is then sent again once.
+ */
+type ReauthHandler = () => Promise<boolean>
+let onReauth: ReauthHandler | null = null
+export function setReauthHandler(fn: ReauthHandler | null): void {
+  onReauth = fn
+}
+
 type UnauthorizedHandler = () => void
 let onUnauthorized: UnauthorizedHandler | null = null
 /** The app registers one handler that shows the "session expired" screen. */
@@ -106,6 +116,8 @@ export interface RequestOptions {
   raw?: { body: Blob; type: string; headers?: Record<string, string> }
   /** The person chose "Ask for administrator permission": Windows may show its prompt even for a remote session. */
   askAdmin?: boolean
+  /** Do not ask for a fresh passkey check and retry (set on the retry itself). */
+  noReauth?: boolean
 }
 
 /** Header of [`RequestOptions.askAdmin`] (`kora_web::elevated::ASK_HEADER`). */
@@ -156,6 +168,7 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   if (!res.ok) {
     const err = await readError(res)
     err.replay = () => request<R>(path, opts)
+    if (err.code === 'remote.reauth_required' && onReauth && !opts.noReauth && (await onReauth())) return request<R>(path, { ...opts, noReauth: true })
     // The session ended: forget its secret (in every tab, it is shared). Not for a failed sign-in (a stale
     // link opened in a new tab must not sign the other tabs out), nor when another tab has signed in
     // since this request left.
@@ -187,6 +200,8 @@ export type UntypedResponseOps = { [K in OpName]: IsUntyped<OpTypes[K]['response
 export interface CallOptions {
   signal?: AbortSignal
   quiet401?: boolean
+  /** Do not ask for a fresh passkey check and retry (the check's own calls). */
+  noReauth?: boolean
   raw?: RequestOptions['raw']
   askAdmin?: boolean
 }
@@ -227,6 +242,13 @@ async function signInWith(body: { token?: string; code?: string }): Promise<void
   setSessionSecret((r as T.SessionCreated | undefined)?.secret)
 }
 
+/** A sign-in step that finished: remember the session secret that comes with it. */
+function keepSecret<R extends { step: string }>(r: R): R {
+  const secret = (r as { secret?: string }).secret
+  if (secret) setSessionSecret(secret)
+  return r
+}
+
 /** One function per operation (the route table is generated: `generated/routes.ts`). */
 export const api = {
   meta: () => call('meta', {}),
@@ -245,8 +267,31 @@ export const api = {
   },
   users: {
     list: () => call('users_list', {}).then((r) => r.users),
+    /** Invite a person: they have no token; the answer holds the one-time enrolment link (shown once). */
     add: (name: string, role: T.Role) => call('user_add', { body: { name, role } }),
     remove: (name: string) => call('user_remove', { params: { name } }),
+    credentials: (name: string) => call('user_credentials', { params: { name } }),
+    reset: (name: string, what: T.ResetWhat) => call('user_reset', { params: { name }, body: { what } }),
+  },
+  /** API tokens for scripts (never for signing in). */
+  apiTokens: {
+    list: () => call('api_tokens_list', {}).then((r) => r.tokens),
+    create: (body: T.ApiTokenRequest) => call('api_token_create', { body }),
+    revoke: (id: number) => call('api_token_revoke', { params: { id: String(id) } }),
+  },
+  /** Remote sign-in: passkeys, one-time codes, enrolment links, your own credentials. */
+  auth: {
+    options: () => call('auth_options', {}, { quiet401: true }),
+    login: (body: T.LoginRequest) => call('auth_login', { body }, { quiet401: true }).then(keepSecret),
+    enrol: (body: T.EnrolRequest) => call('auth_enrol', { body }, { quiet401: true }).then(keepSecret),
+    account: () => call('auth_account', {}),
+    change: (body: T.AccountChange) => call('auth_account_change', { body }, { noReauth: true }),
+    reauth: (body: T.ReauthRequest) => call('auth_reauth', { body }, { noReauth: true }),
+  },
+  tls: {
+    status: () => call('tls_status', {}),
+    renew: () => call('tls_renew', {}),
+    ca: () => call('tls_ca', {}),
   },
   system: () => call('system_info', {}),
   panel: {

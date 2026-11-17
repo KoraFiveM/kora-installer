@@ -1,7 +1,7 @@
 import { ApiError, api } from '@/api/client'
 
 /** `signed_out`: not signed in and nothing to try (show the sign-in screen, with no error). */
-export type BootResult = { status: 'none' } | { status: 'signed_in' } | { status: 'signed_out' } | { status: 'failed'; error: ApiError }
+export type BootResult = { status: 'none' } | { status: 'signed_in' } | { status: 'signed_out' } | { status: 'failed'; error: ApiError } | { status: 'enrol'; link: string }
 
 function fromHash(hash: string, key: string): string | null {
   const t = new URLSearchParams(hash.replace(/^#/, '')).get(key)
@@ -18,6 +18,11 @@ export function codeFromHash(hash: string): string | null {
   return fromHash(hash, 'code')
 }
 
+/** Read `enrol=` from the URL hash (`#enrol=abc`, a one-time enrolment link for a new user), or null. */
+export function enrolFromHash(hash: string): string | null {
+  return fromHash(hash, 'enrol')
+}
+
 /** Remove the hash from the address bar without adding a history entry or reloading. */
 export function clearHash(): void {
   history.replaceState(null, '', window.location.pathname + window.location.search)
@@ -30,6 +35,12 @@ export function clearHash(): void {
  * Tailscale sign-in once: if this device's account is allowed, the person is simply in.
  */
 export async function bootstrapSession(): Promise<BootResult> {
+  // An enrolment link opens the set-up page, never a sign-in (it is not a credential for the session).
+  const enrol = enrolFromHash(window.location.hash)
+  if (enrol) {
+    clearHash()
+    return { status: 'enrol', link: enrol }
+  }
   const code = codeFromHash(window.location.hash)
   const token = code ? null : tokenFromHash(window.location.hash)
   if (code || token) {
