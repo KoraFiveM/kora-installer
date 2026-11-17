@@ -30,13 +30,23 @@ pub struct SelfUpdateInfo {
     pub versions: Vec<String>,
 }
 
+/// The "Kora app" as the panel shows it. Since 0.7.0 the app is the panel plus per-user shortcuts;
+/// `installed`/`version`/`path`/`desktop_shortcut` describe the OLD machine-wide copy (`legacy`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppStatusView {
+    /// The old machine-wide app is installed (`%ProgramFiles%\Kora`, `/opt/kora`).
     pub installed: bool,
     pub version: Option<String>,
     pub path: Option<String>,
     pub desktop_shortcut: bool,
     pub supported: bool,
+    /// The old app, its machine-wide shortcuts or its administrator launchers are still here: the panel
+    /// offers "Tidy up old shortcuts".
+    pub legacy: bool,
+    /// What the tidy-up would remove, one plain sentence each.
+    pub legacy_items: Vec<String>,
+    /// The per-user shortcut (Start Menu / launcher) is in place.
+    pub shortcuts: bool,
 }
 
 /// One thing the uninstall would (or would not) remove.
@@ -77,7 +87,8 @@ pub trait Maintenance: Send + Sync {
         status: &mut dyn FnMut(&str),
     ) -> Result<String, String>;
     fn app_status(&self) -> AppStatusView;
-    /// Lines describing the changes made (or, with `dry_run`, that would be).
+    /// Make the per-user shortcuts (no administrator rights; `force` is ignored). Lines describing the
+    /// changes made (or, with `dry_run`, that would be).
     fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, String>;
     fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, String>;
     fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, String>;
@@ -103,9 +114,14 @@ pub fn current() -> Arc<dyn Maintenance> {
         .unwrap_or_else(|| Arc::new(SystemMaintenance))
 }
 
-/// Would `kora app install/uninstall` (not a dry run) ask for administrator rights? Same test as the CLI.
+/// Would `kora app uninstall` (not a dry run) ask for administrator rights? Same test as the CLI.
 pub fn app_change_needs_admin(m: &dyn Maintenance, dry_run: bool) -> bool {
     !dry_run && !m.is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none()
+}
+
+/// Does the tidy-up still have a machine-wide part that this user cannot do (removing the old copy)?
+pub fn tidy_needs_admin(m: &dyn Maintenance, dry_run: bool) -> bool {
+    m.app_status().legacy && app_change_needs_admin(m, dry_run)
 }
 
 pub struct SystemMaintenance;
@@ -284,17 +300,21 @@ impl Maintenance for SystemMaintenance {
 
     fn app_status(&self) -> AppStatusView {
         let st = app::status();
+        let legacy = app::user::legacy_present();
         AppStatusView {
             installed: st.installed,
             version: st.version.clone(),
             path: st.installed.then(|| st.exe.display().to_string()),
             desktop_shortcut: st.desktop.unwrap_or(false),
             supported: app::supported(),
+            legacy: legacy.present(),
+            legacy_items: legacy.items,
+            shortcuts: app::user::user_status().in_place(),
         }
     }
 
     fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, String> {
-        let out = app::install_app(opts).map_err(|e| e.to_string())?;
+        let out = app::user::install_user(&app::user::UserOptions { desktop_shortcut: opts.desktop_shortcut, dry_run: opts.dry_run }).map_err(|e| e.to_string())?;
         let mut lines = out.changes.clone();
         lines.extend(out.notes.iter().map(|n| format!("note: {n}")));
         Ok(lines)
@@ -522,6 +542,9 @@ pub mod fake {
                     path: None,
                     desktop_shortcut: false,
                     supported: true,
+                    legacy: false,
+                    legacy_items: vec![],
+                    shortcuts: false,
                 }),
                 plan: Mutex::new(vec![
                     PlanItem {

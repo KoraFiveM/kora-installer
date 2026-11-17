@@ -307,7 +307,7 @@ fn install_body(dir: &Path) -> Value {
         "artifact_url": null, "game_build": null, "resources": "all", "db": "use_existing",
         "service": false, "firewall": false, "github_owner": null, "dry_run": false,
         "db_admin": {"host": "127.0.0.1", "port": 3306, "user": "root", "password": DBPASS},
-        "start": true, "app": null
+        "start": true
     })
 }
 
@@ -691,7 +691,7 @@ async fn install_needing_administrator_rights_answers_needs_elevation_without_se
     b["service"] = json!(true);
     b["firewall"] = json!(true);
     b["resources"] = json!({"only": ["kora_hud", "ox_lib"]});
-    b["app"] = json!({"desktop_shortcut": false});
+    b["app"] = json!({"desktop_shortcut": false}); // an old UI may still send it: ignored
     let (s, v) = r.call("POST", "/installs", Some(b.clone())).await;
     assert_eq!(s, 403, "{v}");
     assert_eq!(v["error"]["code"], "needs_elevation");
@@ -714,7 +714,6 @@ async fn install_needing_administrator_rights_answers_needs_elevation_without_se
         "--db",
         "existing",
         "--db-admin-user",
-        "--no-desktop-shortcut",
         "--start",
     ] {
         assert!(cmd.iter().any(|c| c == want), "missing {want} in {cmd:?}");

@@ -101,11 +101,17 @@ pub async fn self_update_apply(
 pub async fn app_status() -> Result<Json<Value>, ApiError> {
     let s = blocking(|| Ok(maint::current().app_status())).await?;
     Ok(Json(json!({
+        // The old machine-wide app (kept under these names for older UIs).
         "installed": s.installed,
         "version": s.version,
         "path": s.path,
         "desktop_shortcut": s.desktop_shortcut,
         "supported": s.supported,
+        // Since 0.7.0: is the old app, or an old administrator shortcut, still here ("Tidy up old shortcuts")?
+        "legacy": s.legacy,
+        "legacy_items": s.legacy_items,
+        // The per-user shortcut that opens the panel is in place.
+        "shortcuts": s.shortcuts,
     })))
 }
 
@@ -113,6 +119,7 @@ pub async fn app_status() -> Result<Json<Value>, ApiError> {
 #[serde(default)]
 pub struct AppInstallReq {
     pub desktop_shortcut: bool,
+    /// Accepted from older UIs; there is nothing to force any more.
     pub force: bool,
     pub dry_run: bool,
 }
@@ -126,24 +133,33 @@ impl Default for AppInstallReq {
     }
 }
 
+/// "Tidy up old shortcuts": make the per-user shortcuts that open the panel (no administrator rights, done
+/// first so the old ones keep working until the end), then remove the old machine-wide copy and its
+/// shortcuts. That last part needs administrator rights: through the helper when it is installed, otherwise
+/// the `needs_elevation` answer with the command to run.
 pub async fn app_install(bytes: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
     let req: AppInstallReq = body(&bytes)?;
     blocking(move || {
         let m = maint::current();
-        if maint::app_change_needs_admin(m.as_ref(), req.dry_run) {
-            let mut c = cmd(&["app", "install", "--yes"]);
-            if !req.desktop_shortcut {
-                c.push("--no-desktop-shortcut".into());
-            }
-            if req.force {
-                c.push("--force".into());
-            }
-            crate::elevated::privileged_msg("Installing the Kora app needs administrator rights. Run this command as administrator:", c, vec![], &mut |_| {})?;
-            return Ok(Json(json!({"message": "The Kora app is installed."})));
+        let made = m
+            .app_install(&AppOptions { desktop_shortcut: req.desktop_shortcut, force: false, dry_run: req.dry_run })
+            .map_err(ApiError::core)?;
+        let old = m.app_status();
+        let made_text = if made.is_empty() { "The Kora shortcuts are already in place".to_string() } else { format!("The Kora shortcuts are ready: {}", made.join("; ")) };
+        if req.dry_run {
+            let tail = if old.legacy { format!(" Removing the old copy would: {}.", old.legacy_items.join("; ")) } else { String::new() };
+            return Ok(Json(json!({"message": format!("Nothing was changed. {made_text}.{tail}")})));
         }
-        let lines = m.app_install(&AppOptions { desktop_shortcut: req.desktop_shortcut, force: req.force, dry_run: req.dry_run }).map_err(ApiError::core)?;
-        let head = if req.dry_run { "Nothing was changed. The Kora app install would" } else { "The Kora app is installed" };
-        Ok(Json(json!({"message": format!("{head}: {}.", lines.join("; ")).replace(": .", ".") })))
+        if !old.legacy {
+            return Ok(Json(json!({"message": format!("{made_text}.")})));
+        }
+        if maint::tidy_needs_admin(m.as_ref(), false) {
+            let msg = "Your new Kora shortcuts are ready, and the old ones keep working. Removing the old copy of Kora needs administrator rights. Run this command as administrator:";
+            crate::elevated::privileged_msg(msg, cmd(&["app", "uninstall", "--yes"]), vec![], &mut |_| {})?;
+        } else {
+            m.app_uninstall(false).map_err(ApiError::core)?;
+        }
+        Ok(Json(json!({"message": "Done. Kora now opens from your own shortcuts, and the old copy and its administrator shortcuts are gone. Your servers were not touched."})))
     })
     .await
 }
