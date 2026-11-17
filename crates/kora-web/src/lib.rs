@@ -301,7 +301,7 @@ pub(crate) async fn session_create(
     let code = req.code.as_deref().map(str::trim).filter(|t| !t.is_empty());
     let (session, identity) = if caller.remote {
         if code.is_some() {
-            return Err(ApiError::forbidden("Sign-in links only work on the computer that runs Kora. Sign in with your user token or your Tailscale account."));
+            return Err(ApiError::forbidden("Sign-in links only work on the computer that runs Kora. Sign in with your passkey, a one-time code or your Tailscale account."));
         }
         remote_sign_in(&st, &caller, token).await?
     } else {
@@ -413,7 +413,7 @@ async fn remote_sign_in(st: &AppState, caller: &remote::Caller, token: Option<&s
         }
         None => {
             if !r.config().tailscale {
-                return Err(ApiError::unauthorized("Sign in with your user token."));
+                return Err(ApiError::unauthorized("Sign in with your passkey or a one-time code."));
             }
             let peer = caller.peer.ok_or_else(|| ApiError::unauthorized("Could not tell where you are connecting from."))?;
             let remote = st.remote.clone();

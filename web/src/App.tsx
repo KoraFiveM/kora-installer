@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ApiError, setUnauthorizedHandler } from '@/api/client'
 import { AlertsProvider } from '@/lib/app'
-import { signIn, signInByIdentity, type BootResult } from '@/lib/session'
+import { clearHash, enrolFromHash, signIn, signInByIdentity, type BootResult } from '@/lib/session'
 import { AppShell } from '@/components/AppShell'
 import { AdminActions } from '@/components/AdminActions'
 import { ToolchainActions } from '@/components/ToolchainActions'
@@ -42,6 +42,19 @@ export function App({ boot }: { boot: BootResult }) {
   useEffect(() => {
     setUnauthorizedHandler(() => setSignedOut((s) => s || true))
     return () => setUnauthorizedHandler(null)
+  }, [])
+
+  // An enrolment link opened in a tab that already has the panel open only changes the address's hash (no reload): follow it.
+  useEffect(() => {
+    const onHash = () => {
+      const link = enrolFromHash(window.location.hash)
+      if (link) {
+        clearHash()
+        setEnrolling(link)
+      }
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
   if (enrolling) {

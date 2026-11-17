@@ -172,7 +172,9 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
     // The session ended: forget its secret (in every tab, it is shared). Not for a failed sign-in (a stale
     // link opened in a new tab must not sign the other tabs out), nor when another tab has signed in
     // since this request left.
-    if (res.status === 401 && path !== '/session' && sessionSecret() === secret) setSessionSecret(null)
+    // (The public sign-in routes answer 401 for a wrong name, code or an old link: that says nothing about a session.)
+    const signingIn = path === '/session' || path === '/auth/login' || path === '/auth/enrol'
+    if (res.status === 401 && !signingIn && sessionSecret() === secret) setSessionSecret(null)
     if (err.unauthorized && !opts.quiet401) onUnauthorized?.()
     throw err
   }

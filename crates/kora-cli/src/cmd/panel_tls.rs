@@ -72,6 +72,11 @@ fn hints_from_settings(home: &Path) -> Hints {
     Hints { names, tailnet: false }
 }
 
+/// A name or address that can go in the allowed hosts (the remote settings' own rule).
+fn valid_host_name(n: &str) -> bool {
+    remote::config::valid_host(n).is_ok()
+}
+
 fn describe(i: &CertInfo, days: i64) {
     println!("  Certificate: {}", i.source.label());
     println!("  Names: {}", i.names.join(", "));
@@ -147,6 +152,23 @@ fn run_tls(cmd: &TlsCmd, home: &Path) -> Result<(), String> {
             println!("Before you install it on another computer, compare its fingerprint with this one: {ca_fp}");
             for (what, how) in selfsigned::trust_instructions(&to.to_string_lossy()) {
                 println!("  {what}: {how}");
+            }
+            // The names given here are the names people will type: the panel must also accept them in the `Host` header.
+            if !names.is_empty() {
+                let path = home.join(remote::config::FILE_NAME);
+                let added = remote::RemoteConfig::update_at(&path, |c| {
+                    let mut added = Vec::new();
+                    for n in selfsigned::clean_names(names) {
+                        if valid_host_name(&n) && !c.allowed_hosts.iter().any(|h| h.eq_ignore_ascii_case(&n)) {
+                            c.allowed_hosts.push(n.clone());
+                            added.push(n);
+                        }
+                    }
+                    Ok(added)
+                })?;
+                if !added.is_empty() {
+                    println!("Added {} to the names the panel answers to (Settings > Remote access).", added.join(", "));
+                }
             }
             println!("Open the panel with one of the names above. Names not listed give a warning: add them with `kora panel tls self-signed --name <name>`.");
             Ok(())
