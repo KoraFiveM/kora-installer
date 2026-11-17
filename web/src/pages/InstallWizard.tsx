@@ -343,7 +343,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       {at === 0 && !editing && (
         <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline-offset-4 hover:underline">Add an existing server</Link> instead.</p>
       )}
-      {saved && resumeOffered && at === 0 && !editing && (
+      {saved && !defaults.resumable?.some((r) => r.name === saved.name) && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
           <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
           {defaults.saved_key_missing && <p className="mt-1">The saved key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
@@ -359,6 +359,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
             <div key={r.job} className="mt-1 flex flex-wrap items-center gap-2">
               <span>&quot;{r.name}&quot; stopped{r.failed_step ? ` at the step ${r.failed_step}` : ''}. Its answers and licence key are kept.</span>
               <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>Carry on</Button>
+              {saved && saved.name === r.name && (
+                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Change my answers first</Button>
+              )}
             </div>
           ))}
           <ErrorNotice error={carryErr} actions={startActions} />

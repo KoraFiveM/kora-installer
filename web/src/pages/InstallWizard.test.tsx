@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
@@ -425,5 +425,28 @@ describe('Install wizard: when a step fails', () => {
     await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Start it for me' }))
     expect(await heading('All done', { timeout: 8000 })).toBeInTheDocument()
     expect(resume).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Install wizard: an install that stopped', () => {
+  it('shows ONE banner for it (not "continue" and "carry on" for the same install), with both ways forward', async () => {
+    const user = userEvent.setup()
+    installMock({ scenario: 'default', speed: 0 })
+    renderApp(<InstallWizard />, '/install')
+    await user.type(await screen.findByLabelText('Licence key'), KEY)
+    await next(user)
+    const box = await screen.findByLabelText('Server name')
+    await user.clear(box)
+    await user.type(box, 'fail-twice')
+    await next(user)
+    await waitFor(() => expect(installButton()).toBeEnabled(), { timeout: 3000 })
+    await user.click(installButton())
+    await screen.findByRole('heading', { name: 'The install stopped' })
+    cleanup()
+    renderApp(<InstallWizard />, '/install')
+    expect(await screen.findByText(/An install stopped and can carry on/)).toBeInTheDocument()
+    expect(screen.queryByText('Continue where you left off?')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Carry on' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change my answers first' })).toBeInTheDocument()
   })
 })
