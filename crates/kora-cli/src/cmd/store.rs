@@ -116,7 +116,8 @@ fn service_audit(a: &AuditArgs) -> i32 {
     };
     let data = answer.data.unwrap_or_default();
     let all = data.get("admin").and_then(serde_json::Value::as_bool).unwrap_or(false);
-    let rows: Vec<kora_core::privsvc::audit::Parsed> = data.get("lines").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(serde_json::Value::as_str).filter_map(kora_core::privsvc::audit::parse_line).collect();
+    let rows: Vec<kora_core::privsvc::audit::Parsed> =
+        data.get("lines").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(serde_json::Value::as_str).filter_map(kora_core::privsvc::audit::parse_line).collect();
     if a.json {
         for r in rows.iter().rev() {
             println!("{}", serde_json::json!({"at": r.at, "account": r.account, "what": r.what, "result": r.result, "detail": r.detail}));

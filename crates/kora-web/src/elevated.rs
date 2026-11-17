@@ -94,7 +94,12 @@ pub fn service_ready() -> bool {
     broker().availability() == Availability::Ready
 }
 
-/// `ready`, `missing` or `not_allowed` (with the service's reason): for `GET /system`.
+/// Is the service there and serving this account (for the machine-level alerts).
+pub fn availability() -> Availability {
+    broker().availability()
+}
+
+/// `ready`, `missing` or `not_allowed' (with the service's reason): for `GET /system`.
 pub fn service_state() -> Value {
     match broker().availability() {
         Availability::Ready => json!({"state": "ready"}),

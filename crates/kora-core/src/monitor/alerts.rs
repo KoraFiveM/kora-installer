@@ -29,16 +29,28 @@ pub enum AlertKind {
     UpdateAttention,
     /// A backup (usually a scheduled one) did not work.
     BackupFailed,
+    /// Machine-level (belongs to no server): the panel's HTTPS certificate ends soon.
+    CertExpiring,
+    /// Machine-level: the panel's HTTPS certificate has expired.
+    CertExpired,
+    /// Machine-level: Kora could not renew the panel's HTTPS certificate by itself.
+    CertRenewalFailed,
+    /// Machine-level: Kora's administrator service was answering and stopped.
+    ServiceStopped,
 }
 
 impl AlertKind {
     /// The tone the UI shows: `danger`, `warning` or `success`.
     pub fn tone(self) -> &'static str {
         match self {
-            AlertKind::Stopped | AlertKind::BackupFailed => "danger",
+            AlertKind::Stopped | AlertKind::BackupFailed | AlertKind::CertExpired | AlertKind::ServiceStopped => "danger",
             AlertKind::Recovered => "success",
-            AlertKind::DiskLow | AlertKind::RamHigh | AlertKind::UpdateAttention => "warning",
+            AlertKind::DiskLow | AlertKind::RamHigh | AlertKind::UpdateAttention | AlertKind::CertExpiring | AlertKind::CertRenewalFailed => "warning",
         }
+    }
+    /// Machine-level kinds belong to no server (their alert has an empty `server`): they are about Kora's own panel and service.
+    pub fn machine(self) -> bool {
+        matches!(self, AlertKind::CertExpiring | AlertKind::CertExpired | AlertKind::CertRenewalFailed | AlertKind::ServiceStopped)
     }
     pub fn title(self) -> &'static str {
         match self {
@@ -48,6 +60,10 @@ impl AlertKind {
             AlertKind::RamHigh => "Memory is nearly full",
             AlertKind::UpdateAttention => "Updates need attention",
             AlertKind::BackupFailed => "Backup failed",
+            AlertKind::CertExpiring => "HTTPS certificate ending soon",
+            AlertKind::CertExpired => "HTTPS certificate expired",
+            AlertKind::CertRenewalFailed => "HTTPS certificate not renewed",
+            AlertKind::ServiceStopped => "Administrator service stopped answering",
         }
     }
 }
@@ -55,6 +71,7 @@ impl AlertKind {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Alert {
     pub id: u64,
+    /// The server it is about; empty for a machine-level alert ([`AlertKind::machine`]).
     pub server: String,
     pub kind: AlertKind,
     pub tone: &'static str,
@@ -76,11 +93,15 @@ pub struct Rules {
     pub disk: bool,
     pub ram: bool,
     pub updates: bool,
+    /// Machine-level alerts (the panel's certificate, the administrator service, a backup pass that could not run) are sent to this
+    /// server's Discord / webhook too. They belong to no server: they go to every server's notification settings that have this on,
+    /// each address once.
+    pub machine: bool,
 }
 
 impl Default for Rules {
     fn default() -> Self {
-        Self { stopped: true, recovered: true, disk: true, ram: true, updates: true }
+        Self { stopped: true, recovered: true, disk: true, ram: true, updates: true, machine: true }
     }
 }
 
@@ -281,6 +302,7 @@ pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, 
                         "disk" => s.rules.disk = b,
                         "ram" => s.rules.ram = b,
                         "updates" => s.rules.updates = b,
+                        "machine" => s.rules.machine = b,
                         other => return Err(format!("There is no alert rule called '{other}'.")),
                     }
                 }
@@ -419,6 +441,28 @@ pub(crate) fn post_via(url: &str, body: &Value, resolve: impl Fn(&str) -> std::i
     }
 }
 
+/// What a machine-level alert is sent to: the Discord addresses and generic webhooks of the servers whose notification settings allow it,
+/// each address once (`servers`: each server's settings and its Discord webhook). Pure; [`super::RealSink`] does the sending.
+pub fn machine_targets(servers: &[(AlertSettings, Option<String>)]) -> (Vec<String>, Vec<(String, bool)>) {
+    let (mut discord, mut hooks): (Vec<String>, Vec<(String, bool)>) = (vec![], vec![]);
+    for (set, discord_url) in servers {
+        if !set.enabled || !set.rules.machine {
+            continue;
+        }
+        if let Some(u) = discord_url.as_ref().filter(|_| set.discord) {
+            if !discord.contains(u) {
+                discord.push(u.clone());
+            }
+        }
+        if let Some(u) = &set.webhook_url {
+            if !hooks.iter().any(|(h, _)| h == u) {
+                hooks.push((u.clone(), set.webhook_set_remotely));
+            }
+        }
+    }
+    (discord, hooks)
+}
+
 /// The JSON a generic webhook receives.
 pub fn webhook_payload(a: &Alert) -> Value {
     json!({
@@ -498,6 +542,37 @@ mod tests {
         // Everything off: active alerts resolve.
         set = AlertSettings { enabled: false, ..AlertSettings::default() };
         assert_eq!(ev(&s, &facts(None), &set, &[AlertKind::RamHigh]), vec![Change::Resolve(AlertKind::RamHigh)]);
+    }
+
+    #[test]
+    fn machine_alerts_go_to_each_address_once_and_only_where_the_server_allows_them() {
+        let on = AlertSettings { webhook_url: Some("https://hooks.test/a".into()), ..AlertSettings::default() };
+        let off = AlertSettings { rules: Rules { machine: false, ..Rules::default() }, webhook_url: Some("https://hooks.test/b".into()), ..AlertSettings::default() };
+        let disabled = AlertSettings { enabled: false, webhook_url: Some("https://hooks.test/c".into()), ..AlertSettings::default() };
+        let no_discord = AlertSettings { discord: false, ..AlertSettings::default() };
+        let (discord, hooks) = machine_targets(&[
+            (on.clone(), Some("https://discord.test/1".into())),
+            (on, Some("https://discord.test/1".into())),
+            (off, Some("https://discord.test/2".into())),
+            (disabled, Some("https://discord.test/3".into())),
+            (no_discord, Some("https://discord.test/4".into())),
+        ]);
+        assert_eq!(discord, ["https://discord.test/1"]);
+        assert_eq!(hooks, [("https://hooks.test/a".to_string(), false)]);
+        // the new rule is switched with the others and old files without it mean "on"
+        let s = apply_update(&AlertSettings::default(), &json!({"rules": {"machine": false}})).unwrap();
+        assert!(!s.rules.machine);
+        let old: AlertSettings = serde_json::from_str(r#"{"rules": {"stopped": true}}"#).unwrap();
+        assert!(old.rules.machine, "a settings file from before has no such rule: it is on");
+    }
+
+    #[test]
+    fn machine_kinds_have_words_a_tone_and_belong_to_no_server() {
+        for k in [AlertKind::CertExpiring, AlertKind::CertExpired, AlertKind::CertRenewalFailed, AlertKind::ServiceStopped] {
+            assert!(k.machine() && !k.title().is_empty() && matches!(k.tone(), "danger" | "warning"), "{k:?}");
+        }
+        assert!(!AlertKind::Stopped.machine() && !AlertKind::BackupFailed.machine());
+        assert_eq!((AlertKind::CertExpired.tone(), AlertKind::CertExpiring.tone()), ("danger", "warning"));
     }
 
     #[test]

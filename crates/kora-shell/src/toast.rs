@@ -93,6 +93,10 @@ pub fn toast_for_alert(a: &AlertRow) -> Toast {
         AlertKind::Stopped => Toast { title: format!("{} stopped", a.server), body: "It stopped without being asked to. Open Kora to start it again.".into(), route, urgent: true },
         AlertKind::Recovered => Toast { title: format!("{} is back up", a.server), body: "It is running again.".into(), route, urgent: false },
         AlertKind::BackupFailed => Toast { title: format!("{}: backup failed", a.server), body: clip(&a.message, 200), route: format!("{route}?tab=backups"), urgent: true },
+        // Machine-level alerts belong to no server: they open Settings, where the certificate and the service are.
+        AlertKind::CertExpiring | AlertKind::CertExpired | AlertKind::CertRenewalFailed | AlertKind::ServiceStopped => {
+            Toast { title: if a.title.is_empty() { "Kora needs a look".into() } else { clip(&a.title, 80) }, body: clip(&a.message, 200), route: "/settings".into(), urgent }
+        }
         _ => Toast { title: if a.title.is_empty() { "Kora needs a look".into() } else { clip(&a.title, 80) }, body: clip(&a.message, 200), route, urgent },
     }
 }
@@ -198,6 +202,22 @@ mod tests {
     }
 
     const NOW: u64 = 1_000_000;
+
+    #[test]
+    fn a_machine_level_alert_has_no_server_and_opens_settings() {
+        let mut n = Notifier::default();
+        n.on_alerts(NOW, &[]);
+        let mut a = alert(9, "", AlertKind::CertExpiring, Tone::Warning, NOW + 9);
+        a.title = "HTTPS certificate ending soon".into();
+        a.message = "The panel's HTTPS certificate expires in 9 days.".into();
+        let t = toast_for_alert(&a);
+        assert_eq!((t.title.as_str(), t.route.as_str(), t.urgent), ("HTTPS certificate ending soon", "/settings", false));
+        assert!(t.body.contains("9 days"));
+        let gone = toast_for_alert(&alert(10, "", AlertKind::ServiceStopped, Tone::Danger, NOW));
+        assert_eq!((gone.route.as_str(), gone.urgent), ("/settings", true));
+        n.on_alerts(NOW + 10, &[a]);
+        assert_eq!(n.drain(NOW + 26, 12 * 60).len(), 1, "it is announced like any other alert");
+    }
 
     #[test]
     fn a_new_alert_becomes_one_toast_that_opens_the_servers_page() {

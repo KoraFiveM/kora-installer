@@ -45,6 +45,15 @@ impl AlertSink for Recorder {
     }
 }
 
+#[derive(Default)]
+struct MachineRecorder(Mutex<Vec<(AlertKind, String)>>);
+impl AlertSink for MachineRecorder {
+    fn deliver(&self, _: &ServerEntry, _: &Alert, _: &AlertSettings) {}
+    fn deliver_machine(&self, a: &Alert) {
+        self.0.lock().unwrap().push((a.kind, a.message.clone()));
+    }
+}
+
 struct Rig {
     dir: tempfile::TempDir,
     fake: FakeBackend,
@@ -295,4 +304,26 @@ fn a_failed_backup_raises_one_alert_that_closes_when_a_backup_works() {
     // a later failure is a new alert
     r.mon.raise_external(&r.entry, AlertKind::BackupFailed, "a week later".into(), 400);
     assert_eq!(r.mon.alerts().len(), 2);
+}
+
+#[test]
+fn a_machine_alert_has_no_server_shows_in_the_list_is_sent_once_and_clears() {
+    let sink = Arc::new(MachineRecorder::default());
+    let mon = Monitor::new(Arc::new(|| Box::new(FakeBackend::sample())), Arc::new(FakeProbe::default()), sink.clone());
+    mon.raise_machine(AlertKind::CertExpiring, "The panel's HTTPS certificate ends in 9 days.".into(), 100);
+    mon.raise_machine(AlertKind::CertExpiring, "ends in 8 days".into(), 200);
+    let list = mon.alerts();
+    assert_eq!(list.len(), 1, "one open alert per kind");
+    assert_eq!((list[0].server.as_str(), list[0].kind, list[0].tone, list[0].title), ("", AlertKind::CertExpiring, "warning", "HTTPS certificate ending soon"));
+    assert_eq!(sink.0.lock().unwrap().len(), 1, "announced once");
+    mon.resolve_machine(AlertKind::CertExpiring, 300);
+    assert_eq!(mon.alerts()[0].resolved, Some(300));
+    // a second, different kind and a later repeat of the first are separate alerts
+    mon.raise_machine(AlertKind::CertExpired, "It has expired.".into(), 400);
+    mon.raise_machine(AlertKind::CertExpiring, "again".into(), 500);
+    assert_eq!(mon.alerts().len(), 3);
+    assert_eq!(sink.0.lock().unwrap().len(), 3);
+    // acknowledging works like any other alert
+    let id = mon.alerts()[0].id;
+    assert!(mon.ack(id));
 }

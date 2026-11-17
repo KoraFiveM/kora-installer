@@ -63,6 +63,9 @@ pub fn run_scheduled(e: &ServerEntry, host: &mut dyn Host, tools: &Tools<'_>) ->
 pub trait Announce: Send + Sync {
     fn failed(&self, e: &ServerEntry, message: &str);
     fn recovered(&self, e: &ServerEntry);
+    /// A pass that could not run at all for a reason that belongs to no server (the server list or the store could not be read).
+    fn machine_failed(&self, _message: &str) {}
+    fn machine_recovered(&self) {}
 }
 
 pub struct Handle(Arc<AtomicBool>);
@@ -98,7 +101,16 @@ fn look(make: &(dyn Fn() -> Box<dyn crate::api::Backend + Send> + Send + Sync), 
         return;
     }
     let mut backend = make();
-    let Ok(servers) = backend.list() else { return };
+    let servers = match backend.list() {
+        Ok(s) => {
+            announce.machine_recovered();
+            s
+        }
+        Err(e) => {
+            announce.machine_failed(&format!("Kora could not read its list of servers, so scheduled backups did not run ({e})"));
+            return;
+        }
+    };
     let (db, git) = (crate::db::SystemRunner, crate::git::SystemRunner);
     for e in servers {
         let Some(cfg) = all.get(&e.name) else { continue };
