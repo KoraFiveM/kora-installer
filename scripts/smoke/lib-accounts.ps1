@@ -445,7 +445,10 @@ function Initialize-TestAccount([Parameter(Mandatory)][string]$Name, [switch]$Ad
     if ($Name.Length -gt 20 -or $Name -notmatch '^[A-Za-z][A-Za-z0-9_-]*$') { throw "bad test account name '$Name'" }
     $plain = Get-RandomSecret
     $null = Invoke-Native 'net.exe' @('user', $Name, '/delete')   # a leftover from an earlier run (an error here is fine)
-    $r = Invoke-Native 'net.exe' @('user', $Name, $plain, '/add', '/expires:never', '/passwordchg:no', '/comment:Kora CI test account')
+    # A password over 14 characters makes `net user` ask a Y/N question about old Windows versions: answer it on stdin.
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $o = 'Y' | & net.exe user $Name $plain /add /expires:never /passwordchg:no '/comment:Kora CI test account' 2>&1 | ForEach-Object { "$_" } | Out-String; $r = [pscustomobject]@{ Output = $o; Code = $LASTEXITCODE } }
+    finally { $ErrorActionPreference = $prev }
     if ($r.Code -ne 0) { throw "net user /add $Name failed: $($r.Output)" }
     if ($Administrator) {
         $r = Invoke-Native 'net.exe' @('localgroup', 'Administrators', $Name, '/add')
