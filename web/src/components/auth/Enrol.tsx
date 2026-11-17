@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { usePageTitle } from '@/hooks/useRouteAnnouncer'
 import { api, ApiError } from '@/api/client'
 import type { EnrolResponse } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
@@ -19,6 +20,7 @@ function messageOf(e: unknown): string {
 
 /** The enrolment page (`/#enrol=<link>`): one person sets up their first passkey or one-time codes, then is signed in. */
 export function Enrol({ link, onDone }: { link: string; onDone: () => void }) {
+  usePageTitle('Set up your sign-in')
   const [who, setWho] = useState<Who | null>(null)
   const [gone, setGone] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -89,7 +91,7 @@ export function Enrol({ link, onDone }: { link: string; onDone: () => void }) {
       <KoraLogo className="h-9 w-auto text-foreground" />
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">{who ? `Welcome, ${who.user}` : 'Set up your sign-in'}</CardTitle>
+          <CardTitle as="h1" className="text-xl">{who ? `Welcome, ${who.user}` : 'Set up your sign-in'}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {gone && <Alert tone="danger">{gone}</Alert>}

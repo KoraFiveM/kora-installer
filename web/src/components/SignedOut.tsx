@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { Alert } from '@/components/ui/alert'
 import { KoraLogo } from '@/components/KoraLogo'
+import { usePageTitle } from '@/hooks/useRouteAnnouncer'
 import { RemoteSignIn } from '@/components/auth/RemoteSignIn'
 
 /** Opened from another computer (not 127.0.0.1 / localhost)? Used until the panel has said (`/meta`), and if it cannot. */
@@ -28,6 +29,7 @@ export function SignedOut({
   /** A passkey or one-time-code sign-in finished (the session exists). */
   onSignedIn?: (notice: string | null) => void
 }) {
+  usePageTitle('Sign in')
   const [token, setToken] = useState('')
   const [err, setErr] = useState<ApiError | null>(error)
   const [busy, setBusy] = useState(false)
@@ -79,7 +81,7 @@ export function SignedOut({
       <KoraLogo className="h-9 w-auto text-foreground" />
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Sign in to Kora</CardTitle>
+          <CardTitle as="h1" className="text-xl">Sign in to Kora</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {remote ? (

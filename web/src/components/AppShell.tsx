@@ -12,6 +12,7 @@ import { RouteLoading } from '@/components/RouteLoading'
 import { KoraLogo } from '@/components/KoraLogo'
 import { useInstallBlock } from '@/pages/install/access'
 import { cn } from '@/lib/utils'
+import { useRouteAnnouncer } from '@/hooks/useRouteAnnouncer'
 
 const nav = [
   { to: '/', label: 'Servers', icon: Server, end: true },
@@ -23,6 +24,7 @@ const nav = [
 
 export function AppShell() {
   const loc = useLocation()
+  const mainRef = useRouteAnnouncer(loc.pathname)
   const { alerts, dismiss } = useAlerts()
   const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, refetchInterval: 15000 })
   useServerEvents()
@@ -30,6 +32,7 @@ export function AppShell() {
   const unreachable = meta.isError
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
+      <a href="#main" onClick={(e) => { e.preventDefault(); mainRef.current?.focus() }} className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground">Skip to the main content</a>
       <aside className="border-b border-border bg-card md:min-h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r">
         <div className="px-5 py-4"><KoraLogo className="h-7 w-auto text-foreground" /></div>
         <nav aria-label="Main" className="flex gap-1 px-3 pb-3 md:flex-col md:pb-0">
@@ -65,26 +68,26 @@ export function AppShell() {
           <span className="font-medium">{meta.data?.node ?? ' '}</span>
           <span className="text-muted-foreground">{meta.data ? `Kora ${meta.data.version}` : ''}</span>
         </header>
-        <div className="space-y-3 px-6 pt-4 empty:hidden" aria-label="Alerts">
-          {unreachable && <Alert tone="danger" title="Kora is not answering">This page cannot reach Kora. Check that <code>kora panel</code> is still running. This page keeps trying.</Alert>}
-          {alerts.map((a) => (
-            <div key={a.id} className="relative">
-              <Alert tone={a.tone}>{a.text}</Alert>
-              <button className="absolute right-3 top-3 text-muted-foreground hover:text-foreground" aria-label="Dismiss" onClick={() => dismiss(a.id)}>
-                <X className="size-4" />
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="px-6 pt-4 empty:hidden"><AlertsBanner /></div>
-        {meta.data?.auth_upgrade && location.pathname !== '/settings' && (
-          <div className="px-6 pt-4">
-            <Alert tone="warning" title="Replace your token link">
-              You signed in with a token: a secret link that works for whoever holds it. <NavLink className="underline" to="/settings">Set up a passkey or one-time codes</NavLink> in Settings; after that the token link stops working for signing in.
-            </Alert>
+        <main id="main" ref={mainRef} tabIndex={-1} className="p-6 outline-none">
+          <div className="mb-4 space-y-3 empty:hidden">
+            {unreachable && <Alert tone="danger" title="Kora is not answering">This page cannot reach Kora. Check that <code>kora panel</code> is still running. This page keeps trying.</Alert>}
+            {alerts.map((a) => (
+              <div key={a.id} className="relative">
+                <Alert tone={a.tone}>{a.text}</Alert>
+                <button className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground hover:text-foreground" aria-label="Dismiss this notice" onClick={() => dismiss(a.id)}>
+                  <X className="size-4" aria-hidden />
+                </button>
+              </div>
+            ))}
           </div>
-        )}
-        <main className="p-6">
+          <div className="mb-4 empty:hidden"><AlertsBanner /></div>
+          {meta.data?.auth_upgrade && location.pathname !== '/settings' && (
+            <div className="mb-4">
+              <Alert tone="warning" title="Replace your token link">
+                You signed in with a token: a secret link that works for whoever holds it. <NavLink className="underline" to="/settings">Set up a passkey or one-time codes</NavLink> in Settings; after that the token link stops working for signing in.
+              </Alert>
+            </div>
+          )}
           <ErrorBoundary resetKey={loc.pathname}>
             <Suspense fallback={<RouteLoading />}>
               <Outlet />
