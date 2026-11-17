@@ -212,9 +212,11 @@ fn localapi(_path: &str) -> Option<Result<String, String>> {
 /// Run `tailscale <args>` with a 5 second limit and return its output.
 fn cli(args: &[&str]) -> Result<String, String> {
     use std::io::Read;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
-    let mut c = Command::new("tailscale");
+    // Through `sysexe`: by name Windows looks next to kora.exe first, and what this program says decides who a
+    // remote visitor is.
+    let mut c = kora_core::sysexe::command("tailscale");
     c.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
