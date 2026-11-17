@@ -1,4 +1,5 @@
 //! Kora Panel HTTP server: security middleware, sessions, jobs/SSE, embedded UI.
+mod audit;
 pub mod elevated;
 mod error;
 pub mod handlers;
@@ -148,7 +149,9 @@ impl AppState {
     }
     /// The real setup: `SystemBackend` and one registry that both starts and serves jobs.
     pub fn system(token: String, addr: SocketAddr) -> Self {
-        let registry = JobRegistry::new();
+        // Jobs are kept in the store: history survives a restart, and what was running when the last panel died is
+        // marked interrupted.
+        let registry = JobRegistry::durable();
         let mut st = Self::new(token, addr, Arc::new(registry.clone()));
         st.registry = registry;
         st
@@ -184,8 +187,14 @@ impl AppState {
             cache.clear();
             r
         };
+        let server_name = server.clone();
         match self.registry.spawn(op, server, body) {
-            Ok(id) => Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response()),
+            Ok(id) => {
+                let mut resp = (StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response();
+                // The guard follows the job to its end for the audit log.
+                resp.extensions_mut().insert(audit::JobStarted { id: id.0.clone(), server: server_name });
+                Ok(resp)
+            }
             Err(c) => Err(ApiError::conflict(conflict_message(&c))),
         }
     }

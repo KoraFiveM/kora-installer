@@ -406,12 +406,15 @@ fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &InstallRequ
     });
     log_finish(id, None);
     match r {
-        Ok(_) => Ok(json!({
-            "name": req.name,
-            "dir": req.dir,
-            "txadmin_url": format!("http://127.0.0.1:{}", req.ports.txadmin),
-            "notes": ["Installed by the Kora helper."],
-        })),
+        Ok(_) => {
+            PausedStore::default().remove(id);
+            Ok(json!({
+                "name": req.name,
+                "dir": req.dir,
+                "txadmin_url": format!("http://127.0.0.1:{}", req.ports.txadmin),
+                "notes": ["Installed by the Kora helper."],
+            }))
+        }
         Err(e) => {
             let mut p = e.to_problem();
             if p.code == "bad_request" || p.code == "internal" {
@@ -458,6 +461,11 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
         for ev in &finished {
             h.event(ev.clone());
         }
+        // Written down (without any secret, and only when the key is a SAVED one) so that a panel that dies
+        // mid-install leaves something to carry on from; see `PausedStore::save_in_progress`.
+        if !req.dry_run {
+            let _ = PausedStore::default().save_in_progress(&id, &req, mode == AdminMode::Helper, &finished);
+        }
         if mode == AdminMode::Helper {
             return install_via_helper(h, &id, &req);
         }
@@ -495,7 +503,10 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
         });
         log_finish(&id, fin.log_path.clone());
         match fin.outcome {
-            Ok(out) => Ok(core::outcome_json(&out)),
+            Ok(out) => {
+                PausedStore::default().remove(&id);
+                Ok(core::outcome_json(&out))
+            }
             Err(msg) => {
                 let problem = fin.problem.unwrap_or_else(|| Problem::decode(&msg));
                 if !req.dry_run {

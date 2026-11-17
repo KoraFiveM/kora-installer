@@ -493,8 +493,16 @@ pub async fn guard(State(st): State<AppState>, mut req: Request, next: Next) -> 
     let api = req.uri().path() == "/api" || req.uri().path().starts_with("/api/");
     let mut resp = match check(&st, &req) {
         Ok(caller) => {
+            let audit_ctx = crate::audit::Ctx::begin(req.method(), req.uri().path(), &caller);
             req.extensions_mut().insert(caller);
-            next.run(req).await
+            let resp = next.run(req).await;
+            if let Some(ctx) = audit_ctx {
+                if let Some(job) = resp.extensions().get::<crate::audit::JobStarted>().cloned() {
+                    ctx.follow_job(&st, &job);
+                }
+                ctx.answered(&resp);
+            }
+            resp
         }
         Err(e) => e.into_response(),
     };
@@ -640,7 +648,7 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
             return Err(ApiError::unauthorized("missing or invalid session"));
         };
         if remote {
-            authorise(st, method, path, &id)?;
+            authorise(st, method, path, &id).inspect_err(|_| crate::audit::refused(method, path, &id))?;
         }
     }
     Ok(caller)

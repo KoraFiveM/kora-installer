@@ -25,6 +25,10 @@ pub trait Jobs: Send + Sync {
     fn get(&self, id: &str) -> Option<Value>;
     /// Past events plus a receiver of later messages (ends with `Done`/`Failed`).
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)>;
+    /// The recent jobs, newest first, without their events (what the Jobs page shows, also after a restart).
+    fn history(&self, _limit: usize) -> Vec<Value> {
+        Vec::new()
+    }
     /// The operation that started the job (`None`: unknown job, or not one of ours).
     fn op(&self, id: &str) -> Option<Op> {
         let v = self.get(id)?;
@@ -65,6 +69,18 @@ impl Jobs for kora_core::api::JobRegistry {
     }
     fn op(&self, id: &str) -> Option<Op> {
         kora_core::api::JobRegistry::get(self, id).map(|s| s.op)
+    }
+    fn history(&self, limit: usize) -> Vec<Value> {
+        kora_core::api::JobRegistry::history(self, limit)
+            .into_iter()
+            .filter_map(|s| {
+                let mut v = serde_json::to_value(s).ok()?;
+                if let Some(e) = v.get("error").and_then(Value::as_str).map(job_error) {
+                    v["error"] = e;
+                }
+                Some(v)
+            })
+            .collect()
     }
 }
 
@@ -175,6 +191,24 @@ pub async fn job_get(State(st): State<AppState>, Extension(caller): Extension<Ca
         let v = jobs.get(&id).ok_or_else(|| ApiError::not_found("unknown job"))?;
         may_read(&caller, jobs.op(&id))?;
         Ok(Json(v))
+    })
+    .await
+}
+
+/// `GET /jobs?limit=`: the recent jobs the caller could have started (this run's and, after a restart, the
+/// remembered ones), newest first, without their events. A remote caller only sees jobs of operations their
+/// role allows, and never a local-only operation's.
+pub async fn jobs_list(
+    State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let jobs = st.jobs.clone();
+    crate::blocking(move || {
+        let limit: usize = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).clamp(1, 300);
+        let all = jobs.history(limit);
+        let shown: Vec<Value> = all.into_iter().filter(|j| may_read(&caller, j.get("op").and_then(Value::as_str).and_then(|n| Op::ALL.iter().copied().find(|o| o.name() == n))).is_ok()).collect();
+        Ok(Json(json!({"jobs": shown})))
     })
     .await
 }

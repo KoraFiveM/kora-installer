@@ -86,6 +86,10 @@ pub enum Op {
     UninstallRun,
     JobsGet,
     JobEvents,
+    /// The recent jobs, including those from before the panel last restarted.
+    JobsList,
+    /// The audit log: who did what (admins only).
+    AuditList,
     Events,
     MetricsGet,
     AlertsList,
@@ -214,6 +218,8 @@ impl Op {
         Op::UninstallRun,
         Op::JobsGet,
         Op::JobEvents,
+        Op::JobsList,
+        Op::AuditList,
         Op::Events,
         Op::MetricsGet,
         Op::AlertsList,
@@ -324,6 +330,8 @@ impl Op {
             Op::UninstallRun => "uninstall_run",
             Op::JobsGet => "jobs_get",
             Op::JobEvents => "job_events",
+            Op::JobsList => "jobs_list",
+            Op::AuditList => "audit_list",
             Op::Events => "events",
             Op::MetricsGet => "metrics_get",
             Op::AlertsList => "alerts_list",
@@ -435,6 +443,8 @@ impl Op {
             Op::UninstallRun => (Method::Post, "/uninstall"),
             Op::JobsGet => (Method::Get, "/jobs/{id}"),
             Op::JobEvents => (Method::Get, "/jobs/{id}/events"),
+            Op::JobsList => (Method::Get, "/jobs"),
+            Op::AuditList => (Method::Get, "/audit"),
             Op::Events => (Method::Get, "/events"),
             Op::MetricsGet => (Method::Get, "/servers/{s}/metrics"),
             Op::AlertsList => (Method::Get, "/alerts"),
@@ -643,6 +653,8 @@ mod tests {
             | Op::UninstallRun
             | Op::JobsGet
             | Op::JobEvents
+            | Op::JobsList
+            | Op::AuditList
             | Op::Events
             | Op::MetricsGet
             | Op::AlertsList
@@ -692,7 +704,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 105);
+        assert_eq!(Op::ALL.len(), 107);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }
