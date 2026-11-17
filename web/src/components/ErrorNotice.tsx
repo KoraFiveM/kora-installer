@@ -73,7 +73,12 @@ export function systemCheckHelps(code: string): boolean {
 function SystemCheckLink() {
   const inRouter = useInRouterContext()
   const cls = 'text-info underline'
-  return <p className="mt-2 text-xs">{inRouter ? <Link className={cls} to="/system">Open the System check</Link> : <a className={cls} href="/system">Open the System check</a>} to see what Kora needs on this computer.</p>
+  // In the install wizard the answers live on that page: the check opens beside it, so nothing typed is lost.
+  const beside = window.location.pathname.startsWith('/install')
+  const link = inRouter && !beside
+    ? <Link className={cls} to="/system">Open the System check</Link>
+    : <a className={cls} href="/system" {...(beside ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>Open the System check{beside ? ' in a new tab' : ''}</a>
+  return <p className="mt-2 text-xs">{link} to see what Kora needs on this computer.</p>
 }
 
 /** Errors where "Copy details" helps when nothing better is offered: real failures, not answers to a bad request. */
@@ -87,13 +92,18 @@ function isFailure(p: NoticeProblem): boolean {
  * here. Plain errors keep their wording; real failures without actions get "Try again" (when
  * `onRetry` is given) and "Copy details".
  */
-export function ErrorNotice({ error, title, actions, onRetry }: {
+export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   error: unknown
   title?: string
   /** Handlers for this page's actions (they win over the app-wide ones). */
   actions?: ActionHandlers
   /** The generic "Try again" when the error offers nothing more specific. */
   onRetry?: () => void
+  /**
+   * What to do once a fix button here (install Git, sign in to GitHub, start the database) has worked.
+   * Defaults to `onRetry`: whatever can simply be tried again is tried again by itself.
+   */
+  onFixed?: () => void | Promise<void>
 }) {
   const handlers = useProblemHandlers(actions)
   const [busy, setBusy] = useState<ProblemAction | null>(null)
@@ -117,7 +127,7 @@ export function ErrorNotice({ error, title, actions, onRetry }: {
   const run = async (a: ProblemAction) => {
     setBusy(a)
     try {
-      await runAction(handlers, a, { problem: p, retry: onRetry ?? p.replay })
+      await runAction(handlers, a, { problem: p, retry: onRetry ?? p.replay, afterFix: onFixed ?? onRetry })
     } finally {
       setBusy(null)
     }

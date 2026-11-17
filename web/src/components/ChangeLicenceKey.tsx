@@ -26,7 +26,7 @@ export function LicenceKeyCard({ server, restart, busy }: { server: ServerDetail
       <CardHeader><CardTitle>Licence key</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          {using ? <>This server uses your saved key <strong>{using.name}</strong> (ending {using.last4}).</> : 'The licence key is part of this server’s own configuration.'}{' '}
+          {using ? <>This server uses your saved licence key <strong>{using.name}</strong> (ending {using.last4}).</> : 'The licence key is part of this server’s own configuration.'}{' '}
           Change it here if you got a new key or want to move this server to another one.
         </p>
         <Button onClick={() => { setDone(null); setOpen(true) }}>Change licence key</Button>
@@ -62,12 +62,12 @@ function ChangeDialog({ server, open, onClose, onDone }: { server: ServerDetail;
       onDone(r)
     },
   })
-  const problem = choice === null ? 'Pick one of the saved keys.' : choice === 'new' ? (key.trim().length < 8 ? 'Paste the new licence key.' : save && !saveName.trim() ? 'Give the key a name, or turn off "Save this key".' : null) : null
+  const problem = choice === null ? 'Pick one of the saved licence keys.' : choice === 'new' ? (key.trim().length < 8 ? 'Paste the new licence key.' : save && !saveName.trim() ? 'Give the key a name, or turn off "Save this key".' : null) : null
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }}>
       <DialogContent title="Change licence key" description={`Choose the key ${server.name} should use. Kora writes it into the server's own configuration.`}>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (!problem) m.mutate() }}>
-          <ErrorNotice error={q.error} title="Kora cannot read your saved keys" />
+          <ErrorNotice error={q.error} title="Kora cannot read your saved licence keys" />
           {saved.length > 0 && (
             <fieldset className="space-y-2">
               <legend className="mb-1 text-sm text-muted-foreground">Saved keys</legend>
@@ -78,7 +78,7 @@ function ChangeDialog({ server, open, onClose, onDone }: { server: ServerDetail;
               {canManage && <Radio name="server-key" checked={choice === 'new'} onChange={() => { setPick('new'); setSaveName(saveName || `Key ${saved.length + 1}`) }} label="A new key" hint="Paste a key you have not saved yet." />}
             </fieldset>
           )}
-          {q.isSuccess && saved.length === 0 && !canManage && <Alert tone="info">There are no saved keys to pick from. Ask an administrator to add one in Settings.</Alert>}
+          {q.isSuccess && saved.length === 0 && !canManage && <Alert tone="info">There are no saved licence keys to pick from. Ask an administrator to add one in Settings.</Alert>}
           {choice === 'new' && (
             <div className="space-y-3">
               <SecretInput label="New licence key" value={key} onChange={setKey} hint="Get one at portal.cfx.re, under Server keys." />

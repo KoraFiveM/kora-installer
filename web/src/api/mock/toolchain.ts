@@ -132,3 +132,11 @@ export function mockDbStoppedProblem(): T.Problem | null {
 export function stopMockDatabase(): void {
   state.dbRunning = false
 }
+
+/** Demo/tests: the GitHub CLI is (not) installed. */
+export function setMockGhInstalled(installed: boolean): void {
+  state.gh = installed
+}
+
+/** The problem GitHub being missing or signed out raises inside an install (null when `gh` is installed). */
+export const mockGhMissingProblem = (): T.Problem | null => (state.gh ? null : ghMissing)

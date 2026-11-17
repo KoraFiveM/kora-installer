@@ -75,7 +75,7 @@ describe('Licence key step', () => {
     expect(document.body.textContent).not.toMatch(/MAINKEYMAINKEY|TESTKEYTESTKEY/)
     await user.click(screen.getByRole('radio', { name: /Test server/ }))
     await toReview(user)
-    expect(screen.getByText('Your saved key "Test server"')).toBeInTheDocument()
+    expect(screen.getByText('Your saved licence key "Test server"')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Install the server' })).toBeEnabled(), { timeout: 3000 })
     await user.click(screen.getByRole('button', { name: 'Install the server' }))
     const sent = start.mock.calls[0][0]
@@ -89,7 +89,7 @@ describe('Licence key step', () => {
     const user = userEvent.setup()
     await api.keys.add('Main', MAIN)
     renderApp(<InstallWizard />, '/install')
-    await user.click(await screen.findByRole('radio', { name: /Add a new key/ }))
+    await user.click(await screen.findByRole('radio', { name: /Add a new licence key/ }))
     expect(screen.getByLabelText('Licence key')).toBeInTheDocument()
     expect(screen.getByLabelText('Name for this key')).toHaveValue('Key 2')
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()

@@ -20,13 +20,20 @@ import { ApiError } from '@/api/client'
 import type { JobError, Problem, ProblemAction, ProblemActionKind } from '@/api/types'
 
 export type ActionOf<K extends ProblemActionKind> = Extract<ProblemAction, { kind: K }>
-/** Where the button was pressed: the problem it belongs to, and how to repeat what failed. */
+/**
+ * Given to every handler: where the button was pressed and how to carry on.
+ * `afterFix` is what to do once a fix action (install a tool, sign in, start the database) has worked: the
+ * page that showed the error says how to carry on (retry the failed step, reload). Absent when the error
+ * sits on something that cannot simply be retried.
+ */
 export interface ActionContext {
-  problem: NoticeProblem
+  /** The problem the button belongs to. */
+  problem?: NoticeProblem
   /** Repeat what failed: the page's own "Try again", else the same request sent again. */
   retry?: () => unknown
+  afterFix?: () => void | Promise<void>
 }
-export type ActionHandlers = { [K in ProblemActionKind]?: (a: ActionOf<K>, ctx?: ActionContext) => void | Promise<void> }
+export type ActionHandlers = { [K in ProblemActionKind]?: (a: ActionOf<K>, ctx: ActionContext) => void | Promise<void> }
 
 /** Kinds ErrorNotice draws by itself (a copy field, a link, the log, a copy button). */
 export const BUILT_IN: readonly ProblemActionKind[] = ['show_command', 'open_link', 'open_log', 'copy_details']
@@ -143,8 +150,8 @@ export function useProblemHandlers(own?: ActionHandlers): ActionHandlers {
 }
 
 /** Run the handler of `a` (the caller checked that there is one). */
-export function runAction(handlers: ActionHandlers, a: ProblemAction, ctx?: ActionContext): void | Promise<void> {
-  const h = handlers[a.kind] as ((x: ProblemAction, c?: ActionContext) => void | Promise<void>) | undefined
+export function runAction(handlers: ActionHandlers, a: ProblemAction, ctx: ActionContext = {}): void | Promise<void> {
+  const h = handlers[a.kind] as ((x: ProblemAction, c: ActionContext) => void | Promise<void>) | undefined
   return h?.(a, ctx)
 }
 

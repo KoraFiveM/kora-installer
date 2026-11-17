@@ -20,9 +20,14 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { GithubSignIn } from '@/components/GithubSignIn'
+import { useRole } from '@/hooks/useRole'
 import { ProblemActions, type ActionHandlers } from '@/lib/problemActions'
 
-type Request = { kind: 'install'; tool: 'git' | 'gh'; id: number } | { kind: 'signin'; id: number } | { kind: 'database'; id: number }
+type Request = (
+  | { kind: 'install'; tool: 'git' | 'gh' }
+  | { kind: 'signin' }
+  | { kind: 'database' }
+) & { id: number; afterFix?: () => void | Promise<void> }
 
 const TOOL_NAME = { git: 'Git', gh: 'the GitHub CLI' } as const
 
@@ -32,15 +37,18 @@ const STALE = [['github'], ['github-owners'], ['tools'], ['system-check'], ['sys
 export function ToolchainActions({ children }: { children: ReactNode }) {
   const [req, setReq] = useState<Request | null>(null)
   const seq = useRef(0)
+  // Installing tools, signing in to GitHub and starting the database need an administrator: for anyone else the
+  // buttons are not drawn (the System check says who can fix it) instead of ending in a refusal.
+  const isAdmin = useRole().can('admin')
   const handlers = useMemo<ActionHandlers>(
-    () => ({
-      install_tool: (a) => {
-        if (a.tool === 'git' || a.tool === 'gh') setReq({ kind: 'install', tool: a.tool, id: ++seq.current })
+    () => !isAdmin ? {} : ({
+      install_tool: (a, c) => {
+        if (a.tool === 'git' || a.tool === 'gh') setReq({ kind: 'install', tool: a.tool, id: ++seq.current, afterFix: c.afterFix })
       },
-      sign_in_github: () => setReq({ kind: 'signin', id: ++seq.current }),
-      start_database: () => setReq({ kind: 'database', id: ++seq.current }),
+      sign_in_github: (_, c) => setReq({ kind: 'signin', id: ++seq.current, afterFix: c.afterFix }),
+      start_database: (_, c) => setReq({ kind: 'database', id: ++seq.current, afterFix: c.afterFix }),
     }),
-    [],
+    [isAdmin],
   )
   return (
     <ProblemActions handlers={handlers}>
@@ -48,9 +56,9 @@ export function ToolchainActions({ children }: { children: ReactNode }) {
       <Dialog open={!!req} onOpenChange={(o) => !o && setReq(null)}>
         {req && (
           <DialogContent title={titleOf(req)} description={descriptionOf(req)}>
-            {req.kind === 'install' && <RunJob key={req.id} start={() => api.tools.install(req.tool)} working={`Setting up ${TOOL_NAME[req.tool]}`} done={`${cap(TOOL_NAME[req.tool])} is ready. If something was waiting for it, you can try that again now.`} onClose={() => setReq(null)} />}
-            {req.kind === 'database' && <RunJob key={req.id} start={() => api.systemCheck.startDatabase()} working="Starting the database server" done="The database server is running. If something was waiting for it, you can try that again now." onClose={() => setReq(null)} />}
-            {req.kind === 'signin' && <SignIn key={req.id} onClose={() => setReq(null)} />}
+            {req.kind === 'install' && <RunJob key={req.id} start={() => api.tools.install(req.tool)} working={`Setting up ${TOOL_NAME[req.tool]}`} done={`${cap(TOOL_NAME[req.tool])} is ready.`} afterFix={req.afterFix} onClose={() => setReq(null)} />}
+            {req.kind === 'database' && <RunJob key={req.id} start={() => api.systemCheck.startDatabase()} working="Starting the database server" done="The database server is running." afterFix={req.afterFix} onClose={() => setReq(null)} />}
+            {req.kind === 'signin' && <SignIn key={req.id} afterFix={req.afterFix} onClose={() => setReq(null)} />}
           </DialogContent>
         )}
       </Dialog>
@@ -79,7 +87,7 @@ function useRefreshAfter() {
 }
 
 /** Start a job when the dialog opens, show its progress, and report how it ended. */
-function RunJob({ start, working, done, onClose }: { start: () => Promise<JobStarted>; working: string; done: string; onClose: () => void }) {
+function RunJob({ start, working, done, afterFix, onClose }: { start: () => Promise<JobStarted>; working: string; done: string; afterFix?: () => void | Promise<void>; onClose: () => void }) {
   const refresh = useRefreshAfter()
   const [jobId, setJobId] = useState<string | null>(null)
   const [startErr, setStartErr] = useState<unknown>(null)
@@ -94,15 +102,23 @@ function RunJob({ start, working, done, onClose }: { start: () => Promise<JobSta
     // `start` is a new function each render; only `attempt` restarts it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt])
+  const carried = useRef(false)
   const job = useJob<unknown, ToolInstallEvent>(jobId, (j) => {
-    if (j.state === 'done') refresh()
+    if (j.state !== 'done') return
+    refresh()
+    // What was waiting for this carries on by itself, and the dialog gets out of the way.
+    if (afterFix && !carried.current) {
+      carried.current = true
+      onClose()
+      void afterFix()
+    }
   })
   const retry = { retry: () => setAttempt((n) => n + 1) }
   const error = startErr ?? (job.phase === 'failed' ? job.error : null)
   if (error) {
     return (
       <div className="space-y-3">
-        <ErrorNotice error={error} actions={retry} onRetry={retry.retry} />
+        <ErrorNotice error={error} actions={retry} onRetry={retry.retry} onFixed={() => {}} />
         <div className="flex justify-end"><Button onClick={onClose}>Close</Button></div>
       </div>
     )
@@ -110,7 +126,7 @@ function RunJob({ start, working, done, onClose }: { start: () => Promise<JobSta
   if (job.phase === 'done') {
     return (
       <div className="space-y-4">
-        <Alert tone="success" title="Done">{done}</Alert>
+        <Alert tone="success" title="Done">{done}{afterFix ? ' Carrying on with what you were doing.' : ' If something was waiting for it, you can try that again now.'}</Alert>
         <div className="flex justify-end"><Button onClick={onClose}>Close</Button></div>
       </div>
     )
@@ -126,15 +142,22 @@ function RunJob({ start, working, done, onClose }: { start: () => Promise<JobSta
   )
 }
 
-function SignIn({ onClose }: { onClose: () => void }) {
+function SignIn({ afterFix, onClose }: { afterFix?: () => void | Promise<void>; onClose: () => void }) {
   const refresh = useRefreshAfter()
   const [done, setDone] = useState(false)
   return (
     <div className="space-y-4">
-      <GithubSignIn onSignedIn={() => { setDone(true); refresh() }} />
+      <GithubSignIn onSignedIn={() => {
+        setDone(true)
+        refresh()
+        if (afterFix) {
+          onClose()
+          void afterFix()
+        }
+      }} />
       {done && (
         <div className="flex items-center justify-between gap-3">
-          <p className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-success" aria-hidden />You are signed in. If something was waiting for it, you can try that again now.</p>
+          <p className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-success" aria-hidden />You are signed in.{afterFix ? ' Carrying on with what you were doing.' : ' If something was waiting for it, you can try that again now.'}</p>
           <Button onClick={onClose}>Close</Button>
         </div>
       )}

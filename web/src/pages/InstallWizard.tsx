@@ -5,7 +5,8 @@ import { ExternalLink, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
 import type { InstallDefaults, InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
-import { useServerControl } from '@/hooks/useServerControl'
+import { OpenFolderButton, useTxAdminLink } from '@/components/ServerLinks'
+import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -35,7 +36,7 @@ interface ReviewRow {
 function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
   const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
   const rows: ReviewRow[] = [
-    { label: 'Licence key', value: f.licenceChoice === 'saved' ? (f.licenceName ? `Your saved key "${f.licenceName}"` : 'Not picked yet') : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? `Provided (hidden). It will be saved as "${f.saveKeyName.trim()}".` : 'Provided (hidden). It will not be saved.') : 'Not given yet', step: 'licence' },
+    { label: 'Licence key', value: f.licenceChoice === 'saved' ? (f.licenceName ? `Your saved licence key "${f.licenceName}"` : 'Not picked yet') : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? `Provided (hidden). It will be saved as "${f.saveKeyName.trim()}".` : 'Provided (hidden). It will not be saved.') : 'Not given yet', step: 'licence' },
     { label: 'Kind of server', value: f.mode === 'production' ? 'Production (a server for players)' : 'Development (for building and changing resources)', step: 'mode' },
     { label: 'Name', value: req.name || 'Not given yet', step: 'name' },
     { label: 'Folder', value: req.dir || 'Not given yet', step: 'name' },
@@ -109,7 +110,7 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
           )
         })}
       </dl>
-      {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!disk.data.message.includes('GB') && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
+      {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!/Gi?B/.test(disk.data.message) && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
       <ErrorNotice error={disk.error ?? plan.error} />
       {plan.data?.admin_prompt && <AdminPromptNotice needs={plan.data.needs_admin} onWithout={onWithoutAdmin} />}
       {plan.data && !plan.data.admin_prompt && (
@@ -128,16 +129,25 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
 }
 
 export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin: number }; cfx?: string | null }) {
-  const ctl = useServerControl(o.name)
-  const tx = `http://${window.location.hostname}:${ports.txadmin}`
+  // The same address, hint and note the server's Overview page gives (right for local, tunnelled and remote visits).
+  const link = useTxAdminLink(ports.txadmin)
+  const tx = link.url
   return (
     <div className="space-y-4">
       <Alert tone={o.running ? 'success' : 'warning'} title={o.running ? 'Your server is installed and running' : 'Your server is installed'}>
         {o.running ? 'Players can connect now.' : o.launch_problem ?? 'It was not started. Start it from the server page.'}
       </Alert>
       {!o.running && o.log_tail.length > 0 && <pre className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{o.log_tail.join('\n')}</pre>}
-      <div className="space-y-1.5"><div className="text-sm text-muted-foreground">Connect address</div><CopyField value={o.connect} label="Connect address" /></div>
-      <div className="space-y-1.5"><div className="text-sm text-muted-foreground">txAdmin</div><CopyField value={tx} label="txAdmin address" /></div>
+      <div className="space-y-1.5">
+        <div className="text-sm text-muted-foreground">Connect address (players type this in the FiveM console, or use direct connect)</div>
+        <CopyField value={o.connect} label="Connect address" />
+        <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
+      </div>
+      <div className="space-y-1.5">
+        <div className="text-sm text-muted-foreground">txAdmin</div>
+        <CopyField value={tx} label="txAdmin address" />
+        {link.hint && <p className="text-xs text-muted-foreground">{link.hint}</p>}
+      </div>
       {!o.admin_user && cfx && (
         <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
       )}
@@ -148,7 +158,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="default"><a href={tx} target="_blank" rel="noopener noreferrer"><ExternalLink /> Open txAdmin</a></Button>
         <CopyButton text={o.connect} label="Copy connect address" size="default" />
-        <Button disabled={ctl.busy} onClick={() => ctl.run('stop')}>Stop server</Button>
+        <OpenFolderButton name={o.name} dir={o.dir} size="default" />
         <Button asChild><Link to={`/servers/${encodeURIComponent(o.name)}`}>Go to the server</Link></Button>
       </div>
     </div>
@@ -223,6 +233,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const [carryErr, setCarryErr] = useState<unknown>(null)
   /** A failure offered "Sign in to GitHub": the sign-in is shown under it. */
   const [githubAsked, setGithubAsked] = useState(false)
+  /** A fix (installing a tool, signing in, starting the database) worked and the failed step was retried by itself. */
+  const [autoRetried, setAutoRetried] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
   const ports = usePortsCheck(f.game, f.tx)
   const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
@@ -259,6 +271,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     try {
       const next = (await api.installs.resume(job, skip, opts)).job
       setGithubAsked(false)
+      setAutoRetried(false)
       setJob(next)
     } catch (e) {
       setResumeErr(e)
@@ -272,6 +285,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     setStep(steps.length - 1)
     setEditing(sectionStep(section, f.mode))
   }
+  /** A fix launched from the failed step worked: say so and retry that step (only when the install can carry on). */
+  const retryAfterFix = run.error?.resume ? async () => { await resume(); setAutoRetried(true) } : undefined
   /** What the buttons under an install error do (see lib/problemActions.tsx). */
   const installActions: ActionHandlers = {
     retry_step: () => resume(),
@@ -307,6 +322,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         <h1 className="font-heading text-2xl font-bold">{run.phase === 'done' ? 'All done' : run.phase === 'failed' ? 'The install stopped' : 'Installing your server'}</h1>
         <Card>
           <CardContent className="space-y-5 p-6">
+            {autoRetried && run.phase === 'running' && <Alert tone="success" title="Fixed. Trying the step again">That worked, so Kora tried the step that stopped again by itself. You do not need to do anything.</Alert>}
             {run.phase === 'running' && <p className="text-sm text-muted-foreground">This takes a few minutes. You can leave this page open; it keeps going.</p>}
             {(run.phase === 'idle' || run.phase === 'running') && run.events.length === 0 ? (
               <p role="status" className="flex items-center gap-2 text-sm">
@@ -318,11 +334,11 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
             {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
             {run.phase === 'failed' && (
               <div className="space-y-4">
-                <ErrorNotice error={run.error} title="The install could not finish" actions={installActions} />
+                <ErrorNotice error={run.error} title="The install could not finish" actions={installActions} onFixed={retryAfterFix} />
                 {githubAsked && (
                   <Alert tone="info" title="Sign in to GitHub">
-                    <p className="mb-2">When you are signed in, use &quot;Try this step again&quot; above. Your answers are kept.</p>
-                    <GithubSignIn onSignedIn={onGithubSignedIn} />
+                    <p className="mb-2">{retryAfterFix ? 'When you are signed in, Kora tries the step again by itself.' : 'When you are signed in, use "Try this step again" above.'} Your answers are kept.</p>
+                    <GithubSignIn onSignedIn={() => { onGithubSignedIn(); void retryAfterFix?.() }} />
                   </Alert>
                 )}
                 <ErrorNotice error={resumeErr} actions={installActions} />
@@ -364,10 +380,10 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       {at === 0 && !editing && (
         <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline-offset-4 hover:underline">Add an existing server</Link> instead.</p>
       )}
-      {saved && resumeOffered && at === 0 && !editing && (
+      {saved && !defaults.resumable?.some((r) => r.name === saved.name) && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
-          <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
-          {defaults.saved_key_missing && <p className="mt-1">The saved key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
+          <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved licence key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
+          {defaults.saved_key_missing && <p className="mt-1">The saved licence key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
           <div className="mt-2 flex gap-2">
             <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
             <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>
@@ -380,6 +396,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
             <div key={r.job} className="mt-1 flex flex-wrap items-center gap-2">
               <span>&quot;{r.name}&quot; stopped{r.failed_step ? ` at the step ${r.failed_step}` : ''}. Its answers and licence key are kept.</span>
               <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>Carry on</Button>
+              {saved && saved.name === r.name && (
+                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Change my answers first</Button>
+              )}
             </div>
           ))}
           <ErrorNotice error={carryErr} actions={startActions} />
@@ -414,7 +433,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
               onWithoutAdmin={() => setF(withoutAdmin(f))}
             />
           )}
-          <ErrorNotice error={startErr} actions={startActions} />
+          <ErrorNotice error={startErr} actions={startActions} onFixed={start} />
           {starting && (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your answers (ports, GitHub, permissions) and starting the install. This can take a few seconds.
