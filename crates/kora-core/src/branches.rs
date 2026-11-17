@@ -120,6 +120,10 @@ pub struct ResourceBranch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub pr: Option<u32>,
+    /// The title of that pull request, when Kora has it (kept when the pull request is tried, refreshed by "Get the latest commits").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub pr_title: Option<String>,
     /// The normal branch (`dev`).
     pub default_branch: String,
     /// Plain words for where it is: "the normal version (dev)", "pull request #12".
@@ -143,6 +147,7 @@ fn base_row(rec: &ResourceRecord) -> ResourceBranch {
         state: State::Unavailable,
         branch: None,
         pr: None,
+        pr_title: None,
         default_branch: rec.branch.clone(),
         label: String::new(),
         changed_count: 0,
@@ -193,6 +198,10 @@ fn row_of(r: &dyn CommandRunner, sf: &ServerFile, rec: &ResourceRecord) -> Resou
             row.stashes = gb::stashes(r, &dir).map(|s| s.len()).unwrap_or(0);
             row.branch = w.branch;
             row.pr = w.pr;
+            row.pr_title = w.pr.and_then(|n| crate::resourcestate::pr_title(&sf.dir, &rec.id, n));
+            if let (Some(n), Some(t)) = (w.pr, &row.pr_title) {
+                row.label = format!("pull request #{n}: {t}");
+            }
         }
         Err(p) => {
             row.label = "not available".into();
@@ -357,6 +366,10 @@ pub fn switch(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, target: &T
     let _lock = lock_for(sf)?;
     let outcome = go(r, &dir, &rec.branch, release_pin(sf, rec), target, changes)?;
     let moved = outcome.status == Status::Switched;
+    // The title travels with the pull request being tried.
+    if let (Some(n), Some(t)) = (outcome.now.pr, &outcome.title) {
+        crate::resourcestate::set_pr_title(&sf.dir, &rec.id, n, t);
+    }
     if moved {
         crate::resourcestate::mark_changed(&sf.dir, std::slice::from_ref(&rec.id), &format!("moved to {}", outcome.now.label(&rec.branch)));
     }

@@ -340,6 +340,7 @@ mod tests {
             state,
             branch: None,
             pr: None,
+        pr_title: None,
             default_branch: "dev".into(),
             label: label.into(),
             changed_count: 0,

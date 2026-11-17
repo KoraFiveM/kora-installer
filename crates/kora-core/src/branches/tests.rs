@@ -357,3 +357,16 @@ fn a_clone_has_only_origin_and_that_is_the_original() {
     let (up, fork) = crate::git::branches::slugs_for_test(&SystemRunner, &dir);
     assert_eq!((up.as_deref(), fork), (Some("KoraFiveM/kora_a"), None));
 }
+
+#[test]
+fn the_title_of_a_tried_pull_request_comes_with_its_row_and_only_for_that_number() {
+    let s = server(Mode::Development);
+    sh(&path_of(&s, 0), &["checkout", "-q", "-b", "pr/7"]);
+    assert_eq!(overview(&SystemRunner, &s.sf).unwrap()[0].pr_title, None, "nothing stored yet");
+    crate::resourcestate::set_pr_title(&s.sf.dir, "kora-a", 7, "Fix the HUD");
+    let row = &overview(&SystemRunner, &s.sf).unwrap()[0];
+    assert_eq!((row.pr, row.pr_title.as_deref()), (Some(7), Some("Fix the HUD")));
+    // Trying another one: the old title is not shown for it.
+    sh(&path_of(&s, 0), &["checkout", "-q", "-b", "pr/8"]);
+    assert_eq!(overview(&SystemRunner, &s.sf).unwrap()[0].pr_title, None);
+}

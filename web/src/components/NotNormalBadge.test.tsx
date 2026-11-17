@@ -19,6 +19,7 @@ describe('the not-on-its-normal-version badge', () => {
   it('one wording for every kind', () => {
     expect(offNormalText(row({ state: 'branch', branch: 'fix' }))).toBe('On branch fix')
     expect(offNormalText(row({ state: 'detached' }))).toBe('On a single commit')
+    expect(offNormalText(row({ state: 'pr', pr: 12, pr_title: 'Fix the HUD' }))).toBe('Trying pull request #12: Fix the HUD')
     expect(isOffNormal(row({ state: 'unavailable' }))).toBe(false)
   })
   it('summarises a server', () => {

@@ -63,7 +63,7 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
   const row = (server: string, id: string): T.ResourceBranch => {
     const v = get(server, id)
     const state: T.BranchState = v.branch === DEFAULT ? 'default' : v.pr !== undefined ? 'pr' : 'branch'
-    return { id, folder: id, state, branch: v.branch, pr: v.pr, default_branch: DEFAULT, label: labelOf(v), changed_count: v.dirty.length, stashes: v.stashes.length }
+    return { id, folder: id, state, branch: v.branch, pr: v.pr, pr_title: v.pr !== undefined ? v.title : undefined, default_branch: DEFAULT, label: v.pr !== undefined && v.title ? `${labelOf(v)}: ${v.title}` : labelOf(v), changed_count: v.dirty.length, stashes: v.stashes.length }
   }
   const where = (v: Res): T.SwitchResult['now'] => ({ kind: v.branch === DEFAULT ? 'default' : v.pr !== undefined ? 'pr' : 'branch', branch: v.branch, pr: v.pr, changed_files: v.dirty, changed_count: v.dirty.length })
   const signedOut = () => new Fail(403, 'github.signed_out', 'You are not signed in to GitHub.', undefined, { actions: [{ kind: 'sign_in_github' }] })

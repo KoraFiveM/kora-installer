@@ -60,6 +60,7 @@ fn row(id: &str) -> ResourceBranch {
         state: State::Default,
         branch: Some("dev".into()),
         pr: None,
+        pr_title: None,
         default_branch: "dev".into(),
         label: "the normal version (dev)".into(),
         changed_count: 0,

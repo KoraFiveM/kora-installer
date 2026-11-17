@@ -323,6 +323,7 @@ fn branch_state(id: &str) -> kora_core::branches::ResourceBranch {
         state: kora_core::branches::State::Branch,
         branch: Some("fix-hud".into()),
         pr: None,
+        pr_title: None,
         default_branch: "dev".into(),
         label: "branch fix-hud".into(),
         changed_count: 1,

@@ -464,3 +464,40 @@ fn an_extra_home_file_moves_in_as_a_document_and_comes_back_out() {
     assert_eq!(std::fs::read_to_string(h.path().join("reach-consent.json")).unwrap(), "{ nope");
     assert!(crate::store::documents::valid_name("reach-consent") && !crate::store::documents::valid_name("Bad Name"));
 }
+
+/// Literal v0.7.0 files (only `mode`, none of the 0.8 fields): they import, the two new settings come out of the one
+/// mapping function, and the way-back export still carries `mode` so an older Kora reads the records.
+#[test]
+fn v070_records_with_only_a_mode_are_mapped_to_clone_or_fork_and_released_or_latest() {
+    use crate::installer::{Source, Versions};
+    let h = tempfile::tempdir().unwrap();
+    let p = h.path();
+    std::fs::write(
+        p.join("servers.json"),
+        r#"{"servers":[
+            {"name":"Dev Den","dir":"/srv/dev-den","mode":"development","ports":{"game":30120,"txadmin":40120},"created_unix":1},
+            {"name":"Live","dir":"/srv/live","mode":"production","ports":{"game":30121,"txadmin":40121},"created_unix":2}]}"#,
+    )
+    .unwrap();
+    let mut saved = serde_json::to_value(request("/srv/dev-den", None)).unwrap();
+    let o = saved.as_object_mut().unwrap();
+    o.remove("source");
+    o.remove("versions");
+    o.insert("mode".into(), "production".into());
+    std::fs::write(p.join("last-install.json"), saved.to_string()).unwrap();
+    let s = Store::open(p).unwrap();
+    let reg = s.read(crate::installer::registry::read_servers_pub).unwrap();
+    let style = |n: &str| reg.iter().find(|e| e.name == n).map(|e| (e.source(), e.versions())).unwrap();
+    assert_eq!(style("Dev Den"), (Source::Fork, Versions::Latest));
+    assert_eq!(style("Live"), (Source::Clone, Versions::Released));
+    // The saved answers of the same age read as clone + released (their mode said production).
+    let text: String = s.read(|c| Ok(c.query_row("SELECT req_json FROM saved_answers WHERE id = 1", [], |r| r.get::<_, String>(0)).unwrap())).unwrap();
+    let answers: InstallRequest = serde_json::from_str(&text).unwrap();
+    assert_eq!((answers.source(), answers.versions()), (Source::Clone, Versions::Released));
+    // Way back: `mode` is still written for every record.
+    let out = tempfile::tempdir().unwrap();
+    crate::store::export::export_json(&s, &out.path().join("back")).unwrap();
+    let back: serde_json::Value = serde_json::from_slice(&std::fs::read(out.path().join("back/servers.json")).unwrap()).unwrap();
+    let modes: Vec<&str> = back["servers"].as_array().unwrap().iter().map(|e| e["mode"].as_str().unwrap()).collect();
+    assert_eq!(modes, vec!["development", "production"]);
+}

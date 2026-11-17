@@ -2277,6 +2277,10 @@ export type ResourceBranch = {
   branch?: string,
   pr?: number,
   /**
+   * The title of that pull request, when Kora has it (kept when the pull request is tried, refreshed by "Get the latest commits").
+   */
+  pr_title?: string,
+  /**
    * The normal branch (`dev`).
    */
   default_branch: string,

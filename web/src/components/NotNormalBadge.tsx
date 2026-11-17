@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import type { ResourceBranch } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 
-type Where = Pick<ResourceBranch, 'state' | 'branch' | 'pr' | 'default_branch'>
+type Where = Pick<ResourceBranch, 'state' | 'branch' | 'pr' | 'pr_title' | 'default_branch'>
 
 /** Is this resource somewhere other than its normal version (a branch, a pull request, a single commit)? */
 export function isOffNormal(r: Pick<ResourceBranch, 'state'> | undefined | null): boolean {
@@ -12,7 +12,7 @@ export function isOffNormal(r: Pick<ResourceBranch, 'state'> | undefined | null)
 
 /** The words, the same everywhere: "Trying pull request #12", "On branch fix-hud". */
 export function offNormalText(r: Where): string {
-  if (r.state === 'pr') return `Trying pull request #${r.pr}`
+  if (r.state === 'pr') return `Trying pull request #${r.pr}${r.pr_title ? `: ${r.pr_title}` : ''}`
   if (r.state === 'detached') return 'On a single commit'
   return `On branch ${r.branch}`
 }

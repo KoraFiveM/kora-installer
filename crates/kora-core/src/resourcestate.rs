@@ -38,6 +38,12 @@ pub struct ResourceMark {
     pub restarted_seq: u64,
     #[serde(default)]
     pub restarted_unix: u64,
+    /// The pull request being tried here and its title ("Trying pull request #12: <title>" everywhere), set when it is
+    /// checked out and again by "Get the latest commits".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,7 +190,33 @@ pub fn pending_with(store: &dyn StateStore, dir: &Path, server_running: bool) ->
     st.resources.keys().filter(|id| info_of(&st, id, server_running, started).needed).cloned().collect()
 }
 
+/// Remember the title of the pull request now being tried in `id`'s folder (cut to 200 characters; a title is GitHub text, shown
+/// as plain text).
+pub fn set_pr_title_with(store: &dyn StateStore, dir: &Path, id: &str, number: u32, title: &str) {
+    let mut st = store.load(dir);
+    st.version = 1;
+    let m = st.resources.entry(key(id)).or_default();
+    m.pr = Some(number);
+    m.pr_title = Some(title.chars().filter(|c| !c.is_control()).take(200).collect());
+    let _ = store.save(dir, &st);
+}
+
+/// The remembered title, only when it is for this pull request.
+pub fn pr_title_with(store: &dyn StateStore, dir: &Path, id: &str, number: u32) -> Option<String> {
+    let st = store.load(dir);
+    let m = st.resources.get(&key(id))?;
+    (m.pr == Some(number)).then(|| m.pr_title.clone()).flatten().filter(|t| !t.is_empty())
+}
+
 // Everyday entry points: the file store and the clock.
+
+pub fn set_pr_title(dir: &Path, id: &str, number: u32, title: &str) {
+    set_pr_title_with(&FileStore, dir, id, number, title);
+}
+
+pub fn pr_title(dir: &Path, id: &str, number: u32) -> Option<String> {
+    pr_title_with(&FileStore, dir, id, number)
+}
 
 pub fn mark_changed(dir: &Path, ids: &[String], why: &str) {
     mark_changed_with(&FileStore, dir, ids, why, now_unix());
@@ -280,6 +312,21 @@ mod tests {
         assert!(info_of(&st, "a", true, None).needed);
         assert!(info_of(&st, "a", true, Some(900)).needed, "started before the change: still old");
         assert!(!info_of(&st, "a", true, Some(1001)).needed, "restarted from txAdmin after the change");
+    }
+
+    #[test]
+    fn the_title_of_the_tried_pull_request_is_kept_for_that_number_only() {
+        let d = dir();
+        assert_eq!(pr_title(d.path(), "a", 12), None);
+        set_pr_title(d.path(), "a", 12, "Fix the HUD");
+        assert_eq!(pr_title(d.path(), "a", 12).as_deref(), Some("Fix the HUD"));
+        assert_eq!(pr_title(d.path(), "a", 13), None, "another pull request has another title");
+        set_pr_title(d.path(), "a", 12, "Fix the HUD (renamed)\u{7}");
+        assert_eq!(pr_title(d.path(), "a", 12).as_deref(), Some("Fix the HUD (renamed)"), "refreshed, control characters dropped");
+        // It does not disturb the restart bookkeeping.
+        mark_changed(d.path(), &["a".into()], "x");
+        assert!(info(d.path(), "a", true).needed);
+        assert_eq!(pr_title(d.path(), "a", 12).as_deref(), Some("Fix the HUD (renamed)"));
     }
 
     #[test]
