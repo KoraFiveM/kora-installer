@@ -56,6 +56,17 @@ pub trait InstallEnv: Send + Sync {
         req: &InstallRequest,
         sink: &mut dyn ProgressSink,
     ) -> Result<InstallOutcome, String>;
+    /// [`InstallEnv::run`] with an administrator helper for the steps that need one (the Windows
+    /// panel's worker, see `installer::system_ops`). Fakes may ignore it.
+    fn run_with_admin(
+        &self,
+        req: &InstallRequest,
+        sink: &mut dyn ProgressSink,
+        admin: Option<installer::system_ops::SharedAdmin>,
+    ) -> Result<InstallOutcome, String> {
+        let _ = admin;
+        self.run(req, sink)
+    }
 }
 
 /// The real machine.
@@ -97,6 +108,15 @@ impl InstallEnv for SystemInstallEnv {
     ) -> Result<InstallOutcome, String> {
         // The raw text: it may be a packed Problem (see `installer::InstallError`).
         installer::run(req, sink).map_err(|e| e.0)
+    }
+    fn run_with_admin(
+        &self,
+        req: &InstallRequest,
+        sink: &mut dyn ProgressSink,
+        admin: Option<installer::system_ops::SharedAdmin>,
+    ) -> Result<InstallOutcome, String> {
+        let hooks = installer::Hooks { admin, ..installer::Hooks::from_env() };
+        installer::run_with(req, sink, &hooks).map_err(|e| e.0)
     }
 }
 
@@ -815,6 +835,16 @@ pub struct Finished {
 pub fn run_install(
     env: &dyn InstallEnv,
     req: &InstallRequest,
+    on_event: impl FnMut(&ProgressEvent) + Send,
+) -> Finished {
+    run_install_with(env, req, None, on_event)
+}
+
+/// [`run_install`] with an administrator helper for the steps that need one.
+pub fn run_install_with(
+    env: &dyn InstallEnv,
+    req: &InstallRequest,
+    admin: Option<installer::system_ops::SharedAdmin>,
     mut on_event: impl FnMut(&ProgressEvent) + Send,
 ) -> Finished {
     let mut log: Vec<String> = Vec::new();
@@ -831,7 +861,7 @@ pub fn run_install(
                 on_event(ev);
             },
         };
-        env.run(req, &mut sink)
+        env.run_with_admin(req, &mut sink, admin)
     };
     let done = |outcome, log_path| Finished {
         outcome,
