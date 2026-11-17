@@ -75,7 +75,9 @@ Assert-That ($q -match 'SeChangeNotifyPrivilege' -and $q -notmatch 'SeImpersonat
 # The installing user may start and stop this one service (what the unelevated update task needs).
 $me = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
 $sd = (& sc.exe sdshow $svc 2>&1 | Out-String); Write-Host $sd
-Assert-That ($sd -match [regex]::Escape(";;;$me)")) 'sc sdshow: an entry for the installing user'
+# sc prints the built-in Administrator account (the CI runner's) as LA instead of its SID.
+$meShown = if ($me -match '-500$') { "(?:$([regex]::Escape($me))|LA)" } else { [regex]::Escape($me) }
+Assert-That ($sd -match "\(A;;CCLCSWRPWPDTLOCRRC;;;$meShown\)") 'sc sdshow: an entry for the installing user (start and stop, nothing more)'
 
 Start-Sleep -Seconds 15
 Assert-That ((Get-SvcState) -eq 'RUNNING') 'the service is STILL running 15 s after start (FXServer did not die and get restarted by the SCM)'

@@ -10,20 +10,34 @@ Remove-Item -Recurse -Force $home_ -ErrorAction SilentlyContinue
 $bare = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
 $env_ = @{ KORA_HOME = $home_; PATH = $bare }
 
-$r = Invoke-Native $kora @('tools', 'status') $env_; Show 'kora tools status (git and gh hidden)' $r
-Assert-That ($r.Code -eq 1) 'status says something is missing (exit 1)'
-Assert-That ($r.Output -match 'Git: not installed') 'Git is reported as not installed'
+# A copy already installed on the computer (Program Files, as on the CI runner) is found without PATH and is used
+# first, by design. So ask for Kora's own copies by name: that always downloads them.
+$r = Invoke-Native $kora @('tools', 'status') $env_; Show 'kora tools status (git and gh not on PATH)' $r
+$systemGit = $r.Output -match 'Git: \d+\.\d+.*on this computer'
+$systemGh = $r.Output -match 'GitHub CLI: \d+\.\d+.*on this computer'
+if (-not $systemGit) {
+    Assert-That ($r.Code -eq 1) 'status says something is missing (exit 1)'
+    Assert-That ($r.Output -match 'Git: not installed') 'Git is reported as not installed'
+}
 
-$r = Invoke-Native $kora @('tools', 'install') $env_; Show 'kora tools install' $r
-Assert-That ($r.Code -eq 0) 'install exits 0'
-Assert-That (Test-Path (Join-Path $home_ 'tools\git\cmd\git.exe')) 'MinGit is unpacked into the Kora folder'
-Assert-That (Test-Path (Join-Path $home_ 'tools\gh\bin\gh.exe')) 'the GitHub CLI is unpacked into the Kora folder'
+foreach ($t in 'git', 'gh') {
+    $r = Invoke-Native $kora @('tools', 'install', $t) $env_; Show "kora tools install $t" $r
+    Assert-That ($r.Code -eq 0) "install $t exits 0"
+}
+$git = Join-Path $home_ 'tools\git\cmd\git.exe'
+$gh = Join-Path $home_ 'tools\gh\bin\gh.exe'
+Assert-That (Test-Path $git) 'MinGit is unpacked into the Kora folder'
+Assert-That (Test-Path $gh) 'the GitHub CLI is unpacked into the Kora folder'
 Assert-That (-not (Get-ChildItem (Join-Path $home_ 'tools') -Force | Where-Object { $_.Name -like '.dl-*' -or $_.Name -like '.stage-*' })) 'no partial downloads are left behind'
+$r = Invoke-Native $git @('--version') $env_; Show 'Kora''s own git --version' $r
+Assert-That ($r.Code -eq 0 -and $r.Output -match 'git version \d+\.\d+') 'Kora''s own git runs without any PATH change'
+$r = Invoke-Native $gh @('--version') $env_; Show 'Kora''s own gh --version' $r
+Assert-That ($r.Code -eq 0 -and $r.Output -match 'gh version \d+\.\d+') 'Kora''s own gh runs without any PATH change'
 
 $r = Invoke-Native $kora @('tools', 'status') $env_; Show 'kora tools status (after)' $r
 Assert-That ($r.Code -eq 0) 'status is fine now'
-Assert-That ($r.Output -match "Git: \d+\.\d+.*Kora's own copy") 'git runs from Kora''s own copy without any PATH change'
-Assert-That ($r.Output -match "GitHub CLI: \d+\.\d+.*Kora's own copy") 'gh runs from Kora''s own copy without any PATH change'
+if (-not $systemGit) { Assert-That ($r.Output -match "Git: \d+\.\d+.*Kora's own copy") 'git is Kora''s own copy' }
+if (-not $systemGh) { Assert-That ($r.Output -match "GitHub CLI: \d+\.\d+.*Kora's own copy") 'gh is Kora''s own copy' }
 
 $r = Invoke-Native $kora @('check') $env_; Show 'kora check' $r
 Assert-That ($r.Output -match 'Git: Installed') 'the system check lists Git'

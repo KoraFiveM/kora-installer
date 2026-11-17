@@ -295,6 +295,11 @@ fn admin_details(job: &Value) -> Vec<String> {
 async fn the_panel_says_windows_will_ask_and_the_plan_says_it_up_front() {
     let r = rig(FakeBroker::new(&[Answer::Yes])).await;
     let (s, j) = r.call("GET", "/system", None).await;
+    if j["elevated"] == json!(true) {
+        // Already an administrator (the Windows CI runner): there is nothing to ask Windows for.
+        assert_eq!((s, &j["admin_prompt"]), (200, &json!(false)), "{j}");
+        return;
+    }
     assert_eq!((s, &j["admin_prompt"]), (200, &json!(true)), "{j}");
     let (s, j) = r.call("POST", "/installs/plan", Some(install_body(&abs("kora-uac-plan")))).await;
     assert_eq!(s, 200, "{j}");
