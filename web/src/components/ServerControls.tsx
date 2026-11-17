@@ -7,7 +7,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/serverControls'
 
 export function ServerControls({ name, status, busy, run, size = 'sm' }: { name: string; status: ServerStatus; busy: boolean; run: (a: ControlAction) => void; size?: 'sm' | 'default' }) {
   const [confirm, setConfirm] = useState(false)

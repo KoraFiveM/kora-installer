@@ -10,7 +10,7 @@ import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t, msg, type Msg, fmt, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/settings'
+import '@/i18n/en/settings/tlsCard'
 
 const SOURCE: Record<string, Msg> = {
   provided: msg('settings.tlsCard.sourceProvided'),

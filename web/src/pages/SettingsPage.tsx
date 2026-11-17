@@ -23,9 +23,12 @@ import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { ResourceProgress } from '@/components/JobProgress'
 import { restartPanel } from '@/lib/restart'
-import { t } from '@/i18n'
+import { t, infoOf } from '@/i18n'
+import { useLocale } from '@/i18n/react'
+import { LanguagePicker } from '@/components/LanguagePicker'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/settings'
+import '@/i18n/en/core/language'
+import '@/i18n/en/settings/settingsPage'
 
 function RestartNow({ version }: { version?: string }) {
   const [state, setState] = useState<'idle' | 'restarting' | 'timeout'>('idle')
@@ -131,6 +134,21 @@ function Uninstall() {
   )
 }
 
+/** Settings > Language: the picker, remembered by this browser. */
+function LanguageCard() {
+  const current = useLocale()
+  const beta = infoOf(current).beta
+  return (
+    <Card>
+      <CardHeader><CardTitle>{t('core.language.label')}</CardTitle></CardHeader>
+      <CardContent className="space-y-2">
+        <LanguagePicker />
+        <p className="text-xs text-muted-foreground">{beta ? t('core.language.hint') : t('core.language.remembered')}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function SettingsPage() {
   const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta })
   const sys = useQuery({ queryKey: ['system'], queryFn: api.system })
@@ -138,6 +156,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <h1 className="font-heading text-2xl font-bold">{t('settings.settingsPage.settings')}</h1>
+      <LanguageCard />
       {role.remote ? <SignedInCard /> : <RemoteAccessCard />}
       {role.remote && <AccountCard />}
       {role.can('admin') && <TlsCard />}

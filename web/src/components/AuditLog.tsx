@@ -13,8 +13,8 @@ import { useRole } from '@/hooks/useRole'
 import { when } from '@/components/JobHistory'
 import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/settings'
-import '@/i18n/en/core'
+import '@/i18n/en/core/auditLog'
+import '@/i18n/en/settings/auditLog'
 
 const RESULT: Record<string, { label: Msg | null; tone: Tone }> = {
   ok: { label: msg('core.auditLog.done'), tone: 'success' },

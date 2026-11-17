@@ -27,7 +27,7 @@ import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, Op
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/install'
+import '@/i18n/en/install/installWizard'
 
 interface ReviewRow {
   label: string

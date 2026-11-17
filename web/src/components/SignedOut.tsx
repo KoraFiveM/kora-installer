@@ -8,10 +8,11 @@ import { Field } from '@/components/Field'
 import { Alert } from '@/components/ui/alert'
 import { KoraLogo } from '@/components/KoraLogo'
 import { usePageTitle } from '@/hooks/useRouteAnnouncer'
+import { LanguagePicker } from '@/components/LanguagePicker'
 import { RemoteSignIn } from '@/components/auth/RemoteSignIn'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/auth'
+import '@/i18n/en/auth/signedOut'
 
 /** Opened from another computer (not 127.0.0.1 / localhost)? Used until the panel has said (`/meta`), and if it cannot. */
 function openedRemotely(): boolean {
@@ -79,7 +80,10 @@ export function SignedOut({
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 p-6">
-      <KoraLogo className="h-9 w-auto text-foreground" />
+      <div className="flex items-center justify-between gap-4">
+        <KoraLogo className="h-9 w-auto text-foreground" />
+        <LanguagePicker compact />
+      </div>
       <Card>
         <CardHeader>
           <CardTitle as="h1" className="text-xl">{t('auth.signedOut.signKora')}</CardTitle>

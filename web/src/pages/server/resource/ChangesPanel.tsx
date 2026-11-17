@@ -16,7 +16,7 @@ import { ActingAs } from './ActingAs'
 import { OpenPullRequest } from './OpenPullRequest'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/changesPanel'
 
 /** A diff, read-only, with the added and removed lines marked by a sign and a colour. */
 export function DiffView({ diff }: { diff: string }) {

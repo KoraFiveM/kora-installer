@@ -1,6 +1,6 @@
 import { sessionSecret } from '@/api/client'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/download'
 
 /** Largest file saved through memory when the browser cannot save a stream straight to disk. */
 export const BLOB_LIMIT = 1024 * 1024 * 1024

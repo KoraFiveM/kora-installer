@@ -13,7 +13,7 @@ import { Field } from '@/components/Field'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { ModeChip } from '@/components/Status'
 import { t } from '@/i18n'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/addExistingDialog'
 
 export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient()

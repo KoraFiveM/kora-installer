@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { isOffNormal, NotNormalBadge } from '@/components/NotNormalBadge'
 import { branchBadge } from './useBranches'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/versionBadge'
 
 /** Where a resource is: the shared warning badge when it is not on its normal version, a quiet one when it is. */
 export function VersionBadge({ branch, to }: { branch: ResourceBranch; to?: string }) {

@@ -3,7 +3,7 @@ import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { isChunkLoadError } from '@/lib/chunkError'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/errorBoundary'
 
 export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { error: Error | null }> {
   state = { error: null as Error | null }

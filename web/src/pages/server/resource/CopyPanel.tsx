@@ -12,7 +12,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { ActingAs } from './ActingAs'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/copyPanel'
 
 /**
  * "Make my own copy (fork)" for a resource that is a plain clone, and for the whole server. Features that need your own

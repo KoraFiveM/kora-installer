@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { getPasskey, passkeyErrorText, passkeysSupported } from '@/lib/webauthn'
 import { t } from '@/i18n'
-import '@/i18n/en/auth'
+import '@/i18n/en/auth/remoteSignIn'
 
 type Method = 'passkey' | 'code'
 

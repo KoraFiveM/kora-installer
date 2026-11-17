@@ -19,7 +19,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { t, msg, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/backups'
+import '@/i18n/en/backups/steps'
 
 export const FILE_HINT = msg('backups.steps.fileMadeOldComputer')
 

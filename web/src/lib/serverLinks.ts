@@ -1,5 +1,5 @@
 import { t, msg } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/serverLinks'
 // Where the per-server buttons point, worked out from how the person reached the panel.
 
 /** Is this the name of the computer the browser is on (so `localhost` means the same machine as Kora)? */

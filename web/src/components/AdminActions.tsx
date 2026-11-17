@@ -5,7 +5,7 @@ import { elevateInstallService } from '@/lib/shell'
 import { useAlerts } from '@/lib/app'
 import { ProblemActions, toProblem, type ActionContext, type ActionHandlers } from '@/lib/problemActions'
 import { t } from '@/i18n'
-import '@/i18n/en/errors'
+import '@/i18n/en/errors/adminActions'
 
 /** How long the installer may take before the panel stops waiting (the person answers Windows' prompt meanwhile). */
 const INSTALL_WAIT_MS = 15 * 60_000

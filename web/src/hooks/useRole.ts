@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { Identity, Role } from '@/api/types'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/useRole'
 
 const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 }
 

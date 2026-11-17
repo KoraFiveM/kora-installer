@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
 import type { ChangesChoice } from '@/api/types'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/changesDialog'
 
 /**
  * "Your changes are in the way": asked when a resource has changes of the person's own that were never saved anywhere.

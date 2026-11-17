@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { LanguagePicker } from '@/components/LanguagePicker'
 import { usePageTitle } from '@/hooks/useRouteAnnouncer'
 import { api, ApiError } from '@/api/client'
 import type { EnrolResponse } from '@/api/types'
@@ -12,7 +13,7 @@ import { KoraLogo } from '@/components/KoraLogo'
 import { createPasskey, passkeyErrorText, passkeysSupported } from '@/lib/webauthn'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/auth'
+import '@/i18n/en/auth/enrol'
 
 type Who = Extract<EnrolResponse, { step: 'who' }>
 type CodeSetup = Extract<EnrolResponse, { step: 'code_setup' }>
@@ -91,7 +92,10 @@ export function Enrol({ link, onDone }: { link: string; onDone: () => void }) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 p-6">
-      <KoraLogo className="h-9 w-auto text-foreground" />
+      <div className="flex items-center justify-between gap-4">
+        <KoraLogo className="h-9 w-auto text-foreground" />
+        <LanguagePicker compact />
+      </div>
       <Card>
         <CardHeader>
           <CardTitle as="h1" className="text-xl">{who ? t('auth.enrol.welcomeUser', { user: who.user }) : t('auth.enrol.setUpSignin')}</CardTitle>

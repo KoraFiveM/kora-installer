@@ -9,7 +9,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { useRole } from '@/hooks/useRole'
 import { t as tt, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/system'
+import '@/i18n/en/system/systemCheckPage'
 
 const BADGE: Record<CheckState, { tone: 'success' | 'amber' | 'neutral'; text: Msg }> = {
   ok: { tone: 'success', text: msg('system.systemCheckPage.fine') },

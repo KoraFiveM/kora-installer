@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import type { RestartInfo } from '@/api/types'
 import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/restartNotice'
 
 const RESTART_NOTICE = msg('resources.restartNotice.restartNeededRunningServer')
 

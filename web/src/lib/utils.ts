@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { t as tt, fmt, unix } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/utils'
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))

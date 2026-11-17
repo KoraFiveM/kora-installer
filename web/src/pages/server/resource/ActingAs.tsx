@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/actingAs'
 
 /**
  * Says whose GitHub account an action will use. It is the one `gh` on the computer that runs Kora is signed in as, shared by

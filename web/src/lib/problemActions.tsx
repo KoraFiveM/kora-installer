@@ -19,7 +19,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { ApiError } from '@/api/client'
 import type { JobError, Problem, ProblemAction, ProblemActionKind } from '@/api/types'
 import { t, msg, type Msg } from '@/i18n'
-import '@/i18n/en/errors'
+import '@/i18n/en/errors/problemActions'
 
 export type ActionOf<K extends ProblemActionKind> = Extract<ProblemAction, { kind: K }>
 /**

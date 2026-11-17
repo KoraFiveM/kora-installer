@@ -9,7 +9,7 @@ import { useRole, whyNot } from '@/hooks/useRole'
 import { txAdminLink, type TxAdminLink } from '@/lib/serverLinks'
 import { t as tt } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/serverLinks'
 
 type Size = 'sm' | 'default'
 

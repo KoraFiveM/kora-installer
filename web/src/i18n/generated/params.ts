@@ -58,6 +58,7 @@ export interface MessageParams {
   'core.download.downloadFailedStatus': { status: string | number }
   'core.jobProgress.countSizeResourcesFinished': { count: string | number; size: string | number }
   'core.jobProgress.safetyCopySavedId': { id: string | number }
+  'core.language.beta': { name: string | number }
   'core.lineChart.nowFormatHighestFormat': { format: string | number; format2: string | number }
   'core.lineChart.titleNoMeasurementsYet': { title: string | number }
   'core.lineChart.titleNowFormatHighest': { title: string | number; format: string | number; format2: string | number }

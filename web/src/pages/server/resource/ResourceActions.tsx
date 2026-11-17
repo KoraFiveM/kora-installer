@@ -12,7 +12,7 @@ import { STATUS_INFO } from '../UpdatesPanel'
 import type { Updates } from '../useUpdates'
 import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/resourceActions'
 
 /** The resource Kora sends commands through. Stopping it would cut the panel off from the server. */
 export const CONSOLE_RESOURCE = 'kora_console'

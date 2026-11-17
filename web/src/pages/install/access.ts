@@ -1,6 +1,6 @@
 import { useRole, whyNot } from '@/hooks/useRole'
 import { t } from '@/i18n'
-import '@/i18n/en/install'
+import '@/i18n/en/install/access'
 
 /**
  * The command that lets token sign-ins delete servers (and use the other "destructive" actions).

@@ -7,7 +7,7 @@ import { Badge, type Tone } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t, msg, type Msg, fmt, unix } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/jobHistory'
 
 const STATE: Record<JobState, { label: Msg; tone: Tone }> = {
   running: { label: msg('core.jobHistory.running'), tone: 'info' },

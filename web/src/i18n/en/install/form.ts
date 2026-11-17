@@ -1,0 +1,41 @@
+import { register } from '../../index'
+
+const messages = {
+  'install.form.typeDatabaseAdministratorUser': 'Type the database administrator user name.',
+  'install.form.typeDatabaseAdministratorPassw': 'Type the database administrator password.',
+  'install.form.twoPasswordsSame': 'The two passwords are not the same.',
+  'install.form.databasePortMustNumber': 'The database port must be a number from 1 to 65535.',
+  'install.form.typeDatabaseHost': 'Type the database host.',
+  'install.form.giveServerName': 'Give the server a name.',
+  'install.form.chooseFolderServer': 'Choose a folder for the server.',
+  'install.form.typeDownloadAddressStarts': 'Type a download address that starts with https://.',
+  'install.form.pickBuildFromList': 'Pick a build from the list.',
+  'install.form.gameBuildMustNumber': 'The game build must be a number.',
+  'install.form.pickLeastOneResource': 'Pick at least one resource, or choose to install everything.',
+  'install.form.pickOneSavedKeys': 'Pick one of your saved keys, or add a new one.',
+  'install.form.pasteLicenceKeyLong': 'Paste your licence key. It is a long string of letters and numbers.',
+  'install.form.giveKeyNameFind': 'Give the key a name so you can find it next time, or turn off "Save this key".',
+  'install.form.checkCfxReUsername': 'Check the Cfx.re username, or clear the box to skip this step.',
+  'install.form.signGithubContinue': 'Sign in to GitHub to continue.',
+  'install.form.chooseWhereOwnCopies': 'Choose where your own copies go.',
+  'install.form.whereResourcesComeFrom': 'Where the resources come from',
+  'install.form.whichVersions': 'Which versions',
+  'install.form.nameServer': 'Name your server',
+  'install.form.ports': 'Ports',
+  'install.form.fivemServerBuild': 'FiveM server build',
+  'install.form.resources': 'Resources',
+  'install.form.database': 'Database',
+  'install.form.options': 'Options',
+  'install.form.licenceKey': 'Your licence key',
+  'install.form.cfxReAccount': 'Your Cfx.re account',
+  'install.form.checkInstall': 'Check and install',
+  'install.form.checkingPortsFree': 'Checking that the ports are free...',
+  'install.form.onePortsAlreadyUse': 'One of the ports is already in use. Pick a free one.',
+  'install.form.koraCouldCheckPorts': 'Kora could not check that the ports are free.',
+  'install.form.github': 'GitHub',
+  'install.form.main': 'Main',
+  'install.form.keyN': 'Key {n}',
+} as const
+
+register('en', messages)
+export default messages

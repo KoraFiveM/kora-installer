@@ -14,7 +14,7 @@ import { Field } from '@/components/Field'
 import { SecretInput } from '@/components/LicenceKeys'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/settings'
+import '@/i18n/en/settings/changeLicenceKey'
 
 /** Overview tab: which licence key this server uses, and a way to change it. */
 export function LicenceKeyCard({ server, restart, busy }: { server: ServerDetail; restart: () => void; busy: boolean }) {

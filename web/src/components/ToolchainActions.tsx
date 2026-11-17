@@ -25,7 +25,7 @@ import { useRole } from '@/hooks/useRole'
 import { ProblemActions, type ActionHandlers } from '@/lib/problemActions'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/errors'
+import '@/i18n/en/errors/toolchainActions'
 
 type Request = (
   | { kind: 'install'; tool: 'git' | 'gh' }

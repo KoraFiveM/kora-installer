@@ -1,5 +1,5 @@
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/webauthn'
 // Passkeys in the browser: the panel sends WebAuthn options as JSON with base64url strings, the browser API wants
 // ArrayBuffers, and the answer goes back as JSON with base64url strings again (what the Rust side, webauthn-rs, reads).
 // Nothing here is cryptography: the browser and the authenticator do it all.

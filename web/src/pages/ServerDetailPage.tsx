@@ -15,7 +15,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { RouteLoading } from '@/components/RouteLoading'
 import { t as tt } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/serverDetailPage'
 
 // The Overview is the landing tab and loads with the page; every other tab is fetched when first opened.
 const lazyTab = <K extends string>(load: () => Promise<Record<K, ComponentType<{ server: ServerDetail }>>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })))

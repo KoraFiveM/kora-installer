@@ -29,8 +29,8 @@ describe('the scanner itself', () => {
         if (state === 'not allowed') {}
         console.log('Something went wrong here')
         localStorage.getItem('kora panel session')
-        const c = t('core.skip')
-        const d = <p>{t('core.skip')}</p>
+        const c = t('core.appShell.skipMainContent')
+        const d = <p>{t('core.appShell.skipMainContent')}</p>
         const e = <p>Kora</p>
         const f = <p>{count}</p>
       `),

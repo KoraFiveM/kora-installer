@@ -16,7 +16,7 @@ import { dbLoginProblem, defaultVersions, dirBase, folderFor, type WizardForm } 
 import type { PortsChecked } from './ports'
 import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/install'
+import '@/i18n/en/install/steps'
 
 export interface StepProps {
   f: WizardForm

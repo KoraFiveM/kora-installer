@@ -14,7 +14,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { timeAgo } from '@/lib/ago'
 import { t, msg, type Msg, fmt, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/paidAssetsTab'
 
 export const PORTAL_URL = 'https://portal.cfx.re/assets/granted-assets'
 

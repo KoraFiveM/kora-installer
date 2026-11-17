@@ -13,7 +13,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { downloadFile } from '@/lib/download'
 import { t, fmt } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/errors'
+import '@/i18n/en/errors/supportBundleDialog'
 
 const size = (n: number) => fmt.bytes(n)
 

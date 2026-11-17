@@ -1,6 +1,6 @@
 import { normaliseUpdateEvent } from '@/components/JobProgress'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/updateProgress'
 export { percentOf } from '@/components/JobProgress'
 
 /** The latest "checked" event of a check job: `done` of `total` resources looked at; `id` is the one just finished. */

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/backups'
+import '@/i18n/en/backups/backupSuggestion'
 
 /**
  * "Back this server up every day?": offered when a server is new (the install's last page) and on the Backups tab until

@@ -16,7 +16,7 @@ import { Field } from '@/components/Field'
 import { ResourceProgress } from '@/components/JobProgress'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/dangerTab'
 
 type Stage = 'files' | 'db' | 'name'
 

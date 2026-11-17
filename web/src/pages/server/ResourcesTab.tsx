@@ -24,7 +24,7 @@ import { VersionBadge } from './branches/VersionBadge'
 import { useUpdates, type Updates } from './useUpdates'
 import { VersionsCard } from './VersionsCard'
 import { t, msg, type Msg } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/resourcesTab'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
   const [name, setName] = useState('')

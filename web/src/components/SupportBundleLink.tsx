@@ -2,7 +2,7 @@ import { Suspense, lazy, useContext, useState } from 'react'
 import { QueryClientContext } from '@tanstack/react-query'
 import { useRole } from '@/hooks/useRole'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/supportBundleLink'
 
 // The dialog (and what it needs) is fetched the first time someone opens it, so the link costs the first page almost nothing.
 const SupportBundleDialog = lazy(() => import('./SupportBundleDialog'))

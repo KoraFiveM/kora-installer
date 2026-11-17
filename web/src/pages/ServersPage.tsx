@@ -21,7 +21,7 @@ import { useInstallBlock } from './install/access'
 import { TidyUpBanner } from '@/components/Shortcuts'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/serversPage'
 
 /** Asked once per browser tab: a first visit with no servers goes straight to the install wizard. */
 const FIRST_RUN_KEY = 'kora.firstRunShown'

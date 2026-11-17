@@ -15,7 +15,7 @@ import { timeAgo } from '@/lib/ago'
 import { createPasskey, passkeyErrorText, passkeysSupported } from '@/lib/webauthn'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/auth'
+import '@/i18n/en/auth/accountCard'
 
 const when = (seconds: number) => (seconds ? timeAgo(seconds * 1000, Date.now()) : t('auth.accountCard.never'))
 

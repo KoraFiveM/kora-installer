@@ -1,7 +1,7 @@
 import type * as T from './types'
 import { ROUTES, type OpName, type OpTypes } from './generated/routes'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/client'
 
 export interface ApiErrorBody {
   code: string

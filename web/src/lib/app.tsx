@@ -1,7 +1,7 @@
 import { notifyIfAway } from '@/lib/shell'
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/app'
 
 export interface AppAlert {
   id: number

@@ -3,7 +3,7 @@ import type { Badge as BadgeT, Mode, ServerStatus, Source, Versions } from '@/ap
 import { styleOfMode } from '@/pages/install/form'
 import { Badge } from '@/components/ui/badge'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/status'
 
 export function StatusChip({ status, pending }: { status: ServerStatus; pending?: string }) {
   if (pending) return <Badge tone="amber" dot>{pending}</Badge>

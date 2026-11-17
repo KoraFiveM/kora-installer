@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { t as tt, fmt, unix } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/lineChart'
 
 export interface ChartPoint {
   t: number

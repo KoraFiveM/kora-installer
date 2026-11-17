@@ -14,7 +14,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { ActingAs } from './ActingAs'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/issuesPanel'
 
 /** Open issues of this resource's repository, a way to comment, and to report a new one. */
 export function IssuesPanel({ page }: { page: ResourcePage }) {

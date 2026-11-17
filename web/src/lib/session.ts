@@ -1,6 +1,6 @@
 import { ApiError, api } from '@/api/client'
 import { t as tt } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/session'
 
 /** `signed_out`: not signed in and nothing to try (show the sign-in screen, with no error). */
 export type BootResult = { status: 'none' } | { status: 'signed_in' } | { status: 'signed_out' } | { status: 'failed'; error: ApiError } | { status: 'enrol'; link: string }

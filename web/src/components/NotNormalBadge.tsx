@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import type { ResourceBranch } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/notNormalBadge'
 
 type Where = Pick<ResourceBranch, 'state' | 'branch' | 'pr' | 'pr_title' | 'default_branch'>
 

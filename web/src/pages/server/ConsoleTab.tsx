@@ -12,7 +12,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { parseAnsi } from '@/lib/ansi'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/consoleTab'
 
 const MAX_LINES = 1000
 

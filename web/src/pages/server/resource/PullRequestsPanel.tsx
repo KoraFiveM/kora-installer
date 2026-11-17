@@ -16,7 +16,7 @@ import { ChangesDialog } from '../branches/ChangesDialog'
 import { PrDetail } from './PrDetail'
 import { t as tt, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/pullRequestsPanel'
 
 const SOURCE_LABEL = { upstream: msg('resources.pullRequestsPanel.originalRepository'), fork: msg('resources.pullRequestsPanel.ownCopy') } as const
 

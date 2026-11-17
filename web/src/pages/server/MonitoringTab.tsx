@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/Skeleton'
 import { cn } from '@/lib/utils'
 import { t as tt, msg, type Msg, fmt } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/monitoringTab'
 
 export const METRICS_POLL_MS = 15000
 const RANGES: { id: MetricsRange; label: Msg }[] = [

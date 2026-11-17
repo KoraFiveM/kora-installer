@@ -25,7 +25,7 @@ import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { fileSize } from './PaidAssetsTab'
 import { t, msg, type Msg, unix as unixToDate } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/backups'
+import '@/i18n/en/backups/backupsTab'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const MIN_PASSWORD = 8

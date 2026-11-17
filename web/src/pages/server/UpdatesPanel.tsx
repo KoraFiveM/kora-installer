@@ -20,7 +20,7 @@ import type { Updates } from './useUpdates'
 import { applyProgress, checkProgress, rowCheckProgress, type CheckProgress } from './updateProgress'
 import { t as tt, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/updatesPanel'
 
 export const RESTART_OPTIONS: { value: RestartPolicy; label: Msg; hint: Msg }[] = [
   { value: 'none', label: msg('resources.updatesPanel.doRestart'), hint: msg('resources.updatesPanel.updateFilesOnlyChanges') },

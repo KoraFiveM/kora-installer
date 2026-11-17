@@ -16,7 +16,7 @@ import { ChangesDialog } from './ChangesDialog'
 import { useRefreshBranches } from './useBranches'
 import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/bulkSwitch'
 
 interface CountEvent { type: string; done: number; total: number; id: string }
 

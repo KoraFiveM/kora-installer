@@ -11,7 +11,7 @@ import { ResourceDialog } from './ResourceDialog'
 import { useBranches } from './useBranches'
 import { VersionBadge } from './VersionBadge'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/branchesPanel'
 
 /**
  * Branches and pull requests of a server's resources (the GitHub tab). Plain words first:

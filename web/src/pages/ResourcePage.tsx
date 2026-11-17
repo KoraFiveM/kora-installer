@@ -26,7 +26,7 @@ import { controlBlock, ResourceActions } from './server/resource/ResourceActions
 import { useRole, whyNot } from '@/hooks/useRole'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/resourcePage'
 
 /** `/servers/:name/resources/:resource`: the one place to see and do everything about a resource. */
 export default function ResourcePage() {

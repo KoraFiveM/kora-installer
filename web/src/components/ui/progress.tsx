@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/progress'
 
 export function Progress({ value, className, label }: { value: number; className?: string; label?: string }) {
   const v = Math.max(0, Math.min(100, value))

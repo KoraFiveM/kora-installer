@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t } from '@/i18n'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/shortcuts'
 
 /** Status of the Kora shortcuts, and the one-click "Tidy up old shortcuts" (see `PUT /app`). */
 function useShortcuts() {

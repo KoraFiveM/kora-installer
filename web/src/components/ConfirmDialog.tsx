@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/confirmDialog'
 
 export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel, destructive, busy, onConfirm, children }: {
   open: boolean

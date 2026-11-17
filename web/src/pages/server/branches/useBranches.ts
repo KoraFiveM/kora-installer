@@ -3,7 +3,7 @@ import { api } from '@/api/client'
 import type { ResourceBranch } from '@/api/types'
 import { offNormalText } from '@/components/NotNormalBadge'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/useBranches'
 
 /** Where each resource of a server is. Local only, so it is cheap to keep fresh. */
 export function useBranches(server: string, enabled = true) {

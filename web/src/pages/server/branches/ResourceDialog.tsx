@@ -18,7 +18,7 @@ import { VersionBadge } from './VersionBadge'
 import { ChangesDialog } from './ChangesDialog'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/resourceDialog'
 
 /** After files changed: say that the running server still has the old version, and offer the existing restart. */
 /** What the branch tools need to know about the server. */

@@ -14,7 +14,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { t, msg, type Msg, fmt, unix } from '@/i18n'
-import '@/i18n/en/settings'
+import '@/i18n/en/settings/licenceKeys'
 
 /** A key field that hides what is typed until the eye is pressed. */
 export function SecretInput({ label, value, onChange, hint }: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {

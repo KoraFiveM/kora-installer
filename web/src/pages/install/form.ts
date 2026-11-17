@@ -1,7 +1,7 @@
 import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
 import { t, msg, type Msg } from '@/i18n'
-import '@/i18n/en/install'
+import '@/i18n/en/install/form'
 
 export type ArtifactChoice = 'recommended' | 'pick' | 'custom'
 

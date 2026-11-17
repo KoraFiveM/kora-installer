@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { DoneStep, FileStep, PasswordStep, PreviewStep, RunStep } from './steps'
 import { t } from '@/i18n'
-import '@/i18n/en/backups'
+import '@/i18n/en/backups/importPage'
 
 /** "Bring a server from a backup or another machine": its own page and steps, next to (not inside) the install wizard. */
 export default function ImportPage() {

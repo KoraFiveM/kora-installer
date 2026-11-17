@@ -7,7 +7,7 @@ import { useRole } from '@/hooks/useRole'
 import { Alert } from '@/components/ui/alert'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/alertsBanner'
 
 /** Monitoring alerts at the top of every page, until someone acknowledges them. */
 export function AlertsBanner() {

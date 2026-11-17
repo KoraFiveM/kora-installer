@@ -14,7 +14,7 @@ import { ActingAs } from './ActingAs'
 import { ChecksBadge, ReviewBadge } from './PullRequestsPanel'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/prDetail'
 
 /**
  * One pull request in full: its checks, the files it changes, the conversation, and (with the right to) comment, approve,

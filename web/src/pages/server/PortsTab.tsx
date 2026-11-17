@@ -11,7 +11,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { validatePorts } from '@/lib/utils'
 import { t } from '@/i18n'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/portsTab'
 
 export function PortsForm({ name, ports, running }: { name: string; ports: Ports; running: boolean }) {
   const qc = useQueryClient()

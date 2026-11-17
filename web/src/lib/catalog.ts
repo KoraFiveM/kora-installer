@@ -1,6 +1,6 @@
 import type { CatalogResource, Group } from '@/api/types'
 import { msg, type Msg } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/catalog'
 
 export const GROUP_ORDER: Group[] = ['pre', 'kora', 'standalone', 'cfx-default', 'default-maps', 'compat', 'props', 'bridges', 'creators', 'other']
 

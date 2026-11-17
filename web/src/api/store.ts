@@ -2,8 +2,8 @@
 // the Rust side (`crates/kora-core/src/api/wire/`); the calls are `api.jobs.list` and `api.audit.list`.
 import type { AuditRow } from './types'
 import { t, msg, type Msg } from '@/i18n'
-import '@/i18n/en/core'
-import '@/i18n/en/settings'
+import '@/i18n/en/core/store'
+import '@/i18n/en/settings/store'
 
 /** Plain words for an operation name; anything unknown reads as its name with spaces. */
 const LABELS: Record<string, Msg> = {

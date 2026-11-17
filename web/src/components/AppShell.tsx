@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 import { useRouteAnnouncer } from '@/hooks/useRouteAnnouncer'
 import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/core'
+import '@/i18n/en/core/appShell'
 
 const nav = [
   { to: '/', label: msg('core.appShell.servers'), icon: Server, end: true },

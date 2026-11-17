@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/releasesPanel'
 
 /** Releases of this resource: which one the server is pinned to, what newer ones exist, and their notes. */
 export function ReleasesPanel({ page }: { page: ResourcePage }) {

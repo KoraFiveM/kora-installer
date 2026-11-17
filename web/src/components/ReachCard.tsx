@@ -12,7 +12,7 @@ import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { t, msg, type Msg } from '@/i18n'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/reachCard'
 
 const TONE: Record<ReachState, Tone> = { ok: 'success', likely: 'success', problem: 'danger', unknown: 'neutral' }
 const LABEL: Record<ReachState, Msg> = { ok: msg('servers.reachCard.ok'), likely: msg('servers.reachCard.probablyOk'), problem: msg('servers.reachCard.problem'), unknown: msg('servers.reachCard.notKnown') }

@@ -12,7 +12,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/notificationsTab'
 
 export function NotificationsTab({ server: s }: { server: ServerDetail }) {
   const qc = useQueryClient()

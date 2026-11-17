@@ -14,7 +14,7 @@ import { formatBytes } from '@/lib/utils'
 import { parseAnsi } from '@/lib/ansi'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/logsTab'
 
 export function LogsTab({ server: s }: { server: ServerDetail }) {
   const blocked = whyNot(useRole(), 'operator')

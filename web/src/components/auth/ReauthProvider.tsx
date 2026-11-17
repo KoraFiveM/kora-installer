@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { getPasskey, passkeyErrorText, passkeysSupported } from '@/lib/webauthn'
 import { t } from '@/i18n'
-import '@/i18n/en/auth'
+import '@/i18n/en/auth/reauthProvider'
 
 const Ctx = createContext<() => Promise<boolean>>(() => Promise.resolve(false))
 /** Ask the person to confirm it is them (passkey or one-time code). Resolves true when they did. */

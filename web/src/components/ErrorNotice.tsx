@@ -11,7 +11,7 @@ import { CopyButton, CopyField } from '@/components/CopyButton'
 import { actionLabel, buttonActions, detailsText, isAdminCode, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
 import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/errors'
+import '@/i18n/en/errors/errorNotice'
 
 /** Turn a command array into one line that can be pasted into a terminal. */
 export function commandLine(cmd: string[]): string {

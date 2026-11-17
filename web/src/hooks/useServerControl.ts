@@ -6,7 +6,7 @@ import { useAlerts } from '@/lib/app'
 import { toNotice } from '@/components/ErrorNotice'
 import { useJob } from './useJob'
 import { t, msg, type Msg } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/useServerControl'
 
 const ING: Record<ControlAction, Msg> = { start: msg('core.useServerControl.starting'), stop: msg('core.useServerControl.stopping'), restart: msg('core.useServerControl.restarting') }
 const DONE: Record<ControlAction, string> = { start: 'started', stop: 'stopped', restart: 'restarted' }

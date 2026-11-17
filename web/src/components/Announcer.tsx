@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/announcer'
 
 /**
  * A live region for screen readers that is not drawn. Put it next to whatever changes (a progress bar, a list of steps)

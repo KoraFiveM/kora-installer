@@ -10,7 +10,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { ActingAs } from './ActingAs'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/openPullRequest'
 
 /** Share a change with the original author: checks first that you have commits they do not, then opens the pull request. */
 export function OpenPullRequest({ page }: { page: ResourcePage }) {

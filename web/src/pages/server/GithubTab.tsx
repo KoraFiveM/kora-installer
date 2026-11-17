@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { BranchesPanel } from './branches/BranchesPanel'
 import { t } from '@/i18n'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/githubTab'
 
 export function GithubTab({ server: s }: { server: ServerDetail }) {
   return (

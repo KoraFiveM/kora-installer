@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Radio } from '@/components/ui/checkbox'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t } from '@/i18n'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/versionsCard'
 
 /**
  * "Which versions": released versions (pinned, stable) or the latest changes (the main branch). A setting of its own,

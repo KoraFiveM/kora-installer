@@ -12,7 +12,7 @@ import { CopyButton } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/resources'
+import '@/i18n/en/resources/githubSignIn'
 
 /** GitHub sign-in status plus the device-code flow (show the one-time code and link, wait for approval). */
 export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {

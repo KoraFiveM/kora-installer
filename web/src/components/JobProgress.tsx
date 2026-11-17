@@ -4,7 +4,7 @@ import { Progress } from '@/components/ui/progress'
 import { Announcer, progressSentence } from '@/components/Announcer'
 import { cn } from '@/lib/utils'
 import { t, msg, type Msg } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/jobProgress'
 
 const STATUS_TEXT: Record<StepStatus, Msg> = { pending: msg('core.jobProgress.waiting'), running: msg('core.jobProgress.inProgress'), done: msg('core.jobProgress.done'), skipped: msg('core.jobProgress.skipped'), failed: msg('core.jobProgress.failed') }
 

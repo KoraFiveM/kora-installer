@@ -12,7 +12,7 @@ import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
 import { BackupChip, useBackupLines } from '@/components/BackupChip'
 import { t } from '@/i18n'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/overviewTab'
 
 function Check({ ok, yes, no }: { ok: boolean; yes: string; no: string }) {
   return <Badge tone={ok ? 'success' : 'neutral'} dot>{ok ? yes : no}</Badge>

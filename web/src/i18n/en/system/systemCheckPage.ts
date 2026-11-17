@@ -1,4 +1,4 @@
-import { register } from '../index'
+import { register } from '../../index'
 
 const messages = {
   'system.systemCheckPage.systemCheck': 'System check',

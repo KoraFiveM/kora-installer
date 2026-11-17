@@ -20,7 +20,7 @@ import { StatusChip, StyleChip, UpdateChip } from '@/components/Status'
 import { useJob } from '@/hooks/useJob'
 import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/servers'
+import '@/i18n/en/servers/fleetPage'
 
 const ING: Record<ControlAction, Msg> = { start: msg('servers.fleetPage.starting'), stop: msg('servers.fleetPage.stopping'), restart: msg('servers.fleetPage.restarting') }
 const DONE: Record<ControlAction, string> = { start: 'started', stop: 'stopped', restart: 'restarted' }

@@ -16,7 +16,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { t as tt, msg, type Msg, fmt, unix } from '@/i18n'
 import { rich } from '@/i18n/react'
-import '@/i18n/en/settings'
+import '@/i18n/en/settings/remoteAccess'
 
 const ROLE_TEXT: Record<Role, Msg> = {
   viewer: msg('settings.remoteAccess.viewerLookServersStatus'),

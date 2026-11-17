@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/notFound'
 
 export default function NotFound() {
   return (

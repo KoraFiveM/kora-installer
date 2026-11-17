@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/copyButton'
 
 /** Copies text to the clipboard. Falls back to a hidden textarea where the clipboard API is unavailable (plain http). */
 export async function copyText(text: string): Promise<boolean> {

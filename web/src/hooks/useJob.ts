@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '@/api/client'
 import type { Job, JobError } from '@/api/types'
 import { t } from '@/i18n'
-import '@/i18n/en/core'
+import '@/i18n/en/core/useJob'
 
 export const JOB_POLL_MS = 1000
 /** How many times in a row asking about a job may fail before it is given up on. One lost request must not turn a running job into a failed one. */
