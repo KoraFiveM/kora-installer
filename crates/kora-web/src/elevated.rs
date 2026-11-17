@@ -200,6 +200,18 @@ pub fn privileged_as(what: &str, message: &str, command: Vec<String>, env: Vec<(
     }
 }
 
+/// **Open the firewall for this server's game port** (TCP and UDP), through the administrator service: the operation the
+/// reachability workstream's `kora reach <name> --open-firewall` (Op `ReachFirewallOpen`) calls when Kora is not
+/// elevated. `dir` is the server's folder; the service re-checks that it is the caller's own, reads the game port from the
+/// folder's install record (never from here), applies the same port rules as the install's firewall step (never below 1024,
+/// never remote administration or database ports) and records the rules as the caller's (`firewall:<slug>`, closed again when
+/// the server is deleted). Only the game port: never txAdmin.
+pub fn reach_open_firewall(dir: &std::path::Path, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
+    let dir = dir.to_string_lossy().into_owned();
+    let command = vec!["kora".to_string(), "admin-step".into(), "run".into(), "--step".into(), "reach.firewall".into(), "--dir".into(), dir];
+    privileged_as("open the firewall for this server's game port", "Opening the firewall for the game port needs administrator rights. Run this command as administrator:", command, vec![], on_line)
+}
+
 /// [`privileged_as`] for the toolchain actions, whose sentence names no particular thing.
 pub fn privileged_msg(message: &str, command: Vec<String>, env: Vec<(String, String)>, on_line: &mut dyn FnMut(&str)) -> Result<Value, ApiError> {
     privileged_as("do this", message, command, env, on_line)

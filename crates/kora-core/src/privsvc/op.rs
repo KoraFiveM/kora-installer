@@ -38,6 +38,10 @@ pub enum StepId {
     PrepareDb,
     BuildDb,
     Firewall,
+    /// Open the firewall for the server's GAME port only (TCP and UDP), nothing else: what
+    /// `kora reach <name> --open-firewall` needs. Same port rules as [`StepId::Firewall`]; records the
+    /// same ledger entry (`firewall:<slug>`), so deleting the server closes it again.
+    ReachFirewall,
     Service,
     Schedule,
 }
@@ -48,16 +52,17 @@ impl StepId {
             StepId::PrepareDb => "prepare.db",
             StepId::BuildDb => "build.db",
             StepId::Firewall => "system.firewall",
+            StepId::ReachFirewall => "reach.firewall",
             StepId::Service => "system.service",
             StepId::Schedule => "system.schedule",
         }
     }
     fn from_id(s: &str) -> Option<StepId> {
-        [StepId::PrepareDb, StepId::BuildDb, StepId::Firewall, StepId::Service, StepId::Schedule].into_iter().find(|x| x.id() == s)
+        [StepId::PrepareDb, StepId::BuildDb, StepId::Firewall, StepId::ReachFirewall, StepId::Service, StepId::Schedule].into_iter().find(|x| x.id() == s)
     }
     /// Steps that can be undone (deleting a server).
     pub fn undoable(self) -> bool {
-        self != StepId::PrepareDb
+        !matches!(self, StepId::PrepareDb | StepId::ReachFirewall)
     }
 }
 
@@ -393,6 +398,13 @@ pub fn check_context(op: &Op, own_version: &str, ports: Option<(u16, u16)>) -> R
             }
             None => no("The server's install record has no ports."),
         },
+        Op::Step { undo: false, step: StepId::ReachFirewall, .. } => match ports {
+            Some((g, _)) if port_ok(g) => Ok(()),
+            Some((g, _)) => Err(Rejected(format!(
+                "Kora does not open port {g} in the firewall from the panel: Windows, remote administration or databases use it. Choose another game port for the server (30120 is the usual one)."
+            ))),
+            None => no("The server's install record has no ports."),
+        },
         _ => Ok(()),
     }
 }
@@ -537,5 +549,18 @@ mod tests {
             let t = op.time_limit();
             assert!(t >= std::time::Duration::from_secs(60) && t <= std::time::Duration::from_secs(3600));
         }
+    }
+
+    #[test]
+    fn opening_the_firewall_for_the_game_port_is_a_typed_operation() {
+        let op = p("admin-step", &["run", "--step", "reach.firewall", "--dir", DIR]).unwrap();
+        assert_eq!(op, Op::Step { undo: false, step: StepId::ReachFirewall, dir: DIR.into(), known: None, keep_files: false, keep_db: false });
+        assert_eq!(op.label(), "run reach.firewall");
+        assert_eq!(op.child_args(), ["--no-elevate", "admin-step", "run", "--step", "reach.firewall", "--dir", DIR]);
+        assert!(p("admin-step", &["undo", "--step", "reach.firewall", "--dir", DIR]).is_err(), "closing goes with deleting the server");
+        assert!(check_context(&op, "0.8.0", Some((30120, 3389))).is_ok(), "only the game port counts");
+        assert!(check_context(&op, "0.8.0", Some((3389, 40120))).unwrap_err().0.contains("3389"));
+        assert!(check_context(&op, "0.8.0", Some((80, 40120))).is_err());
+        assert!(check_context(&op, "0.8.0", None).is_err());
     }
 }

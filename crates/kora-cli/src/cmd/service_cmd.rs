@@ -328,4 +328,48 @@ mod tests {
         assert_eq!(kind(&["service", "uninstall", "--purge"]), own);
         assert_eq!(kind(&["service", "unit"]), kora_core::elevate::CmdKind::Other);
     }
+
+    /// The service never forwards a caller's text: it builds the child's arguments from its typed operation
+    /// (`privsvc::op::Op::child_args`). Every one of them must be understood by THIS command-line definition as the
+    /// command it stands for, so a changed flag breaks here and not in a customer's install.
+    #[test]
+    fn what_the_service_runs_is_understood_by_this_command_line() {
+        use crate::cmd::schedule::ScheduleCmd;
+        use crate::cmd::toolchain::ToolsCmd;
+        use crate::{Cli, Command};
+        use clap::Parser;
+        use kora_core::privsvc::op::{DbAction, Known, Op, StepId, When};
+        let cases = [
+            Op::Step { undo: false, step: StepId::Service, dir: "/srv/a".into(), known: None, keep_files: false, keep_db: false },
+            Op::Step { undo: true, step: StepId::Firewall, dir: "/srv/a".into(), known: Some(Known { name: "a".into(), game_port: 30120, txadmin_port: 40120 }), keep_files: true, keep_db: true },
+            Op::Step { undo: false, step: StepId::ReachFirewall, dir: "/srv/a".into(), known: None, keep_files: false, keep_db: false },
+            Op::Step { undo: false, step: StepId::PrepareDb, dir: r"C:\Users\Jo Smith\kora\a".into(), known: None, keep_files: false, keep_db: false },
+            Op::DbServer(DbAction::Start),
+            Op::DbServer(DbAction::Install),
+            Op::StartDatabase,
+            Op::ScheduleSet { server: "a".into(), when: When::Default },
+            Op::ScheduleSet { server: "a".into(), when: When::Daily { hour: 3, minute: 5 } },
+            Op::ScheduleSet { server: "a".into(), when: When::Weekly { day: "fri", hour: 4, minute: 0 } },
+            Op::ScheduleOff { server: "a".into() },
+            Op::InstallGit,
+            Op::UpdateApply { version: None },
+            Op::UpdateApply { version: Some("v99.0.0".into()) },
+        ];
+        for op in cases {
+            let args = op.child_args();
+            let cli = Cli::try_parse_from(std::iter::once("kora".to_string()).chain(args.iter().cloned())).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            assert!(cli.no_elevate, "{args:?}: the child never asks for administrator rights itself");
+            let ok = match (&op, cli.command) {
+                (Op::Step { undo, step, dir, .. }, Some(Command::AdminStep(a))) => a.action == if *undo { "undo" } else { "run" } && a.step == step.id() && a.dir == std::path::Path::new(dir),
+                (Op::DbServer(a), Some(Command::AdminDb(b))) => b.action == if *a == DbAction::Start { "start" } else { "install" },
+                (Op::StartDatabase, Some(Command::Check { start_database: true })) => true,
+                (Op::ScheduleSet { server, .. }, Some(Command::Schedule { cmd: ScheduleCmd::Set { server: s, as_user, as_system, .. } })) => s == *server && as_user && !as_system,
+                (Op::ScheduleOff { server }, Some(Command::Schedule { cmd: ScheduleCmd::Off { server: s } })) => s == *server,
+                (Op::InstallGit, Some(Command::Tools { cmd: ToolsCmd::Install { tool: Some(t) } })) => t == "git",
+                (Op::UpdateApply { version }, Some(Command::SelfUpdate { yes, version: v, .. })) => yes && v == *version,
+                _ => false,
+            };
+            assert!(ok, "{args:?} was not understood as {op:?}");
+        }
+    }
 }

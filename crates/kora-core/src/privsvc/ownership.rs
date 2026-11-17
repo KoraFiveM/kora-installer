@@ -57,7 +57,7 @@ impl Ledger {
 pub fn ledger_keys(step: &str, slug: &str, db: Option<&str>) -> Vec<String> {
     match step {
         "system.service" => vec![format!("service:kora-{slug}")],
-        "system.firewall" => vec![format!("firewall:{slug}")],
+        "system.firewall" | "reach.firewall" => vec![format!("firewall:{slug}")],
         "system.schedule" => vec![format!("task:{slug}")],
         "build.db" => db.map(|d| vec![format!("db:{d}")]).unwrap_or_default(),
         _ => vec![],

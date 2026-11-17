@@ -449,4 +449,20 @@ mod tests {
         h.ledger.borrow_mut().record("service:kora-main".into(), "uid:1000");
         assert!(matches!(go(&h), Reply::Ran(_)), "adopted: stays manageable");
     }
+
+    #[test]
+    fn the_reach_firewall_operation_is_the_callers_own_game_port_and_is_recorded() {
+        let h = fake();
+        let go = |h: &Fake, who: AccountId| handle(h, &policy(), &caller(who), "admin-step", &s(&["run", "--step", "reach.firewall", "--dir", DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(go(&h, me()), Reply::Ran(Ran { code: 0, .. })));
+        assert_eq!(h.ledger.borrow().owner("firewall:main"), Some("uid:1000"), "recorded like the install's firewall step");
+        assert!(h.log.borrow()[0].contains("run reach.firewall | done") && !h.log.borrow()[0].contains("/home"));
+        // someone else's folder, or rules someone else made
+        assert!(matches!(go(&h, AccountId::uid(1001)), Reply::Refused(_)));
+        // a forged record with remote desktop as the game port
+        let mut bad = fake();
+        bad.record = Some(InstallRecord { name: "Main".into(), game_port: 3389, txadmin_port: 40120 });
+        assert!(matches!(go(&bad, me()), Reply::Refused(m) if m.0.contains("3389")));
+        assert!(bad.ledger.borrow().owners.is_empty());
+    }
 }

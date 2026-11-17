@@ -18,7 +18,7 @@ pub struct AdminStepArgs {
     #[arg(value_parser = ["run", "undo"])]
     pub action: String,
     /// The install step (see `kora_core::installer::system_ops`).
-    #[arg(long, value_parser = ["prepare.db", "build.db", "system.firewall", "system.service", "system.schedule"])]
+    #[arg(long, value_parser = ["prepare.db", "build.db", "system.firewall", "reach.firewall", "system.service", "system.schedule"])]
     pub step: String,
     /// The server folder.
     #[arg(long)]

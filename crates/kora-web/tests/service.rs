@@ -379,8 +379,27 @@ async fn installing_the_service_from_the_panel_is_a_command_on_linux_and_a_confl
     let shown = j["error"]["actions"].as_array().unwrap().iter().find(|a| a["kind"] == "show_command").unwrap();
     assert_eq!(shown["command"], json!(["kora", "service", "install"]));
     set_broker_override(None);
+    drop(r); // the rig holds the test turn
     let r = rig(Some(FakeHelper::new(0))).await;
     let (s, _) = r.call("POST", "/system/admin-service/install", Some(json!({}))).await;
     assert_eq!(s, 409, "already installed");
+    set_broker_override(None);
+}
+
+#[tokio::test]
+async fn opening_the_game_port_goes_to_the_service_as_one_typed_step() {
+    let h = FakeHelper::new(0);
+    let r = rig(Some(h.clone())).await;
+    let dir = std::path::Path::new("/home/jo/kora/main");
+    let out = kora_web::elevated::reach_open_firewall(dir, &mut |_| {}).unwrap();
+    assert_eq!(out["via_service"], true);
+    let calls = h.calls();
+    assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("admin-step", vec!["run".to_string(), "--step".into(), "reach.firewall".into(), "--dir".into(), "/home/jo/kora/main".into()]));
+    set_broker_override(None);
+    drop(r); // the rig holds the test turn
+             // without the service: the choices, never a silent failure
+    let _r = rig(None).await;
+    let e = kora_web::elevated::reach_open_firewall(dir, &mut |_| {}).unwrap_err();
+    assert_eq!(e.status, 403);
     set_broker_override(None);
 }

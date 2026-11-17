@@ -1588,7 +1588,7 @@ Options:
       --step <STEP>
           The install step (see `kora_core::installer::system_ops`)
           
-          [possible values: prepare.db, build.db, system.firewall, system.service, system.schedule]
+          [possible values: prepare.db, build.db, system.firewall, reach.firewall, system.service, system.schedule]
 
       --dir <DIR>
           The server folder

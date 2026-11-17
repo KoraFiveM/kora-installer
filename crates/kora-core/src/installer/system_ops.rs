@@ -55,7 +55,7 @@ impl std::fmt::Debug for SharedAdmin {
 }
 
 /// Steps the helper runs (`admin-step run --step <id>`).
-pub const RUN_STEPS: &[&str] = &["prepare.db", "build.db", "system.firewall", "system.service", "system.schedule"];
+pub const RUN_STEPS: &[&str] = &["prepare.db", "build.db", "system.firewall", "reach.firewall", "system.service", "system.schedule"];
 /// Steps the helper undoes (`admin-step undo --step <id>`, deleting a server).
 pub const UNDO_STEPS: &[&str] = &["build.db", "system.firewall", "system.service", "system.schedule"];
 
@@ -272,6 +272,15 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     let mut req = load_request_from(dir).ok_or_else(|| InstallError(format!("{} has no Kora install record", dir.display())))?;
     let in_service = crate::privsvc::paths::in_service();
     check_step_request(&req, step, undo, in_service || crate::privsvc::paths::in_service() || panel_user().is_some())?;
+    // `reach.firewall`: the game port only (never txAdmin), through the same firewall step and the same port rules.
+    let reach = step == "reach.firewall";
+    let step = if reach { "system.firewall" } else { step };
+    if reach {
+        if !crate::privsvc::op::port_ok(req.ports.game) {
+            return Err(InstallError(format!("Kora does not open port {} in the firewall from the panel.", req.ports.game)));
+        }
+        req.txadmin_public = false;
+    }
     // Removing system-wide things: the name and ports come from the server list, not from the
     // folder's own (changeable) record, exactly as `kora delete` does.
     let trusted = if undo {
