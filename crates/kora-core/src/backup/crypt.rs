@@ -35,6 +35,9 @@ impl Passphrase {
     pub fn new(s: impl Into<String>) -> Self {
         Passphrase(s.into())
     }
+    pub fn reveal(&self) -> &str {
+        &self.0
+    }
     fn secret(&self) -> SecretString {
         SecretString::from(self.0.clone())
     }

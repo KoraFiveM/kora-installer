@@ -55,3 +55,52 @@ pub mod codes {
     pub const NO_UNDO: &str = "backup.no_undo";
     pub const WEAK_PASSPHRASE: &str = "backup.weak_passphrase";
 }
+
+pub mod create;
+pub mod resources;
+
+use crate::db::SystemRunner;
+use serde::{Deserialize, Serialize};
+
+/// One step of a backup, restore or import, as a job event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct BackupEvent {
+    /// A short stable name of the step ("database", "files", ...).
+    pub step: String,
+    /// Plain words for the person.
+    pub message: String,
+    /// 0..=100 for the whole operation.
+    pub percent: u8,
+}
+
+/// Starting and stopping the server around a backup or restore (the panel's backend implements it).
+pub trait Host {
+    fn running(&mut self) -> bool;
+    fn stop(&mut self) -> Result<(), String>;
+    fn start(&mut self) -> Result<(), String>;
+}
+
+/// Everything that touches the machine, so tests can fake it.
+pub struct Tools<'a> {
+    pub db: &'a dyn dbdump::StreamRunner,
+    pub git: &'a dyn crate::git::CommandRunner,
+    /// The database client for queries and loading a dump.
+    pub db_client: String,
+    /// The dump program, when one was found.
+    pub dump_program: Option<String>,
+    /// Now, in unix seconds.
+    pub now: u64,
+}
+
+impl<'a> Tools<'a> {
+    /// The real tools: the database client Kora uses everywhere else, and its dump program.
+    pub fn system(db: &'a SystemRunner, git: &'a crate::git::SystemRunner) -> Tools<'a> {
+        let client = crate::installer::db_client();
+        let dump_program = dbdump::dump_program(&client, &dbdump::program_runs);
+        Tools { db, git, db_client: client, dump_program, now: crate::monitor::now_unix() }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests_support;
