@@ -26,6 +26,28 @@ reasonable time to release a fix before you disclose publicly.
   proxy or `tailscale serve` every visitor would look like this computer. Use `kora panel --tailscale` instead.
 - Every request must carry the panel's own address in `Host` (DNS rebinding). Changing requests must also have a
   matching `Origin` (when sent) and an `X-Kora` header (CSRF).
+- **txAdmin through the panel (the gateway).** txAdmin is full control of the game server (resources and `exec` run code),
+  so opening it needs the **admin** role and counts with the risky actions: a remote sign-in made with a user token needs
+  `kora panel remote-actions on`; a Tailscale administrator does not. The panel opens one extra TCP port per server for it
+  (txAdmin's port + 10000, only on the addresses the panel itself listens on). Nobody gets in without a one-time,
+  one-minute ticket made by an authenticated panel request (session cookie and per-session secret, the role check and the
+  remote gate); the ticket becomes a gateway cookie that names that panel session and is checked again on every request and
+  every 20 seconds on an open live console, so signing out, removing the user, a role change or turning the switch off ends
+  it. Requests go only to `127.0.0.1` and the txAdmin port the server list holds for that server (never chosen from the
+  request: absolute-form targets and other `Host` values are refused). The panel's cookies and secret are never sent to
+  txAdmin, txAdmin's cookies are renamed per gateway (two servers never share a session; nothing txAdmin sets can replace a
+  panel cookie), and `x-txadmin-token` / `x-txadmin-identifiers` (which txAdmin treats as FXServer's own, no login needed),
+  `Authorization`, proxy and hop-by-hop headers are dropped. Proxy headers refuse the request, and WebSocket handshakes
+  need an `Origin` equal to the gateway's own `Host`. What stays true: txAdmin sees every visitor as 127.0.0.1, so its
+  own sign-in rate limit is shared and its flood protection does not apply; txAdmin has no single sign-on, so a person
+  who may open it still signs in to txAdmin itself. Checked against txAdmin 8.1.2; the checklist for a real Windows
+  run is in `docs/windows-test-checklist.md`.
+- **Reachability check and port forwarding.** Nothing outside the computer is contacted unless the person allowed that
+  lookup (Cfx.re's public server list with the server's own join code; `api.ipify.org` for the public address). Router
+  discovery (UPnP, PCP, NAT-PMP) stays on the local network: the router's description must come from the address that
+  answered, control addresses on any other host are refused, replies are size-limited and parsed strictly. Forwarding is
+  off by default, per server, admin only; it only ever maps that server's own game port (TCP and UDP, 1024 or higher)
+  to this computer, with a lease that is renewed while the server runs and removed when it stops or is deleted.
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
   `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - Licence keys, database passwords and webhook addresses are accepted but never returned. Saved licence keys live in

@@ -275,6 +275,24 @@ W12. [ ] **Unusual ports.** Make a server with game port `3389` (wizard, advance
     stops with "Kora does not open port 3389 in the firewall from the panel" and offers to skip that step; no
     firewall rule for 3389 exists (`Get-NetFirewallRule -DisplayName "*kora*"`).
 
+## Can players reach my server, and txAdmin through the panel (unverified on Windows)
+
+These were written on Linux; what Windows prints and does is yours to check.
+
+- [ ] **Reachability card.** On a server's Overview press **Check now**. *Should happen:* four lines (Running, Firewall,
+  Router, Internet). With the server running the first is OK; the firewall line says Windows Firewall and "Kora did not
+  open port ..." unless the install opened it (then OK). Nothing outside is contacted (the card says so). Run
+  `kora reach <name>` in a terminal: the same lines.
+- [ ] **Gateway address.** `route print -4 0.0.0.0` shows your default gateway; Kora reads the same row for NAT-PMP/PCP.
+  *Should happen:* with a router that offers UPnP, **Forward port ... for me** turns the line OK, and your router's page
+  lists "Kora <name> game" for TCP and UDP. Stop the server: the entries disappear (within a minute).
+- [ ] **Service host.** With the server running as a service, switch forwarding on, then `sc stop kora-<name>`: the router
+  entries are removed before the service reports stopped.
+- [ ] **txAdmin through the panel.** From another device open the panel and press **Open txAdmin** on a server: a new tab
+  opens txAdmin's sign-in page on the panel's address with port txAdmin + 10000. Sign in to txAdmin; the live console
+  updates. Sign out of the panel: the console tab closes within about 20 seconds and reloading it shows "Open txAdmin
+  from the Kora panel". Windows Firewall may ask about the panel's new port (allow private networks only).
+
 ## 7. Upgrade delta: a machine that has 0.6.x with the old machine-wide app
 
 Do this **instead of** section 1 on a machine that already has 0.6.x, or on a second VM that has it. To make that
