@@ -188,8 +188,11 @@ pub fn check_item(info: Option<&CertInfo>, error: Option<&str>, exposed: bool, n
         }
         None if exposed => {
             let msg = error.map_or(String::new(), |e| format!(" ({e})"));
-            let p = Problem::new("tls.missing", format!("The panel can be reached from other computers over plain HTTP{msg}: the session cookie, sign-in links and licence keys cross the network unencrypted. Set up HTTPS."))
-                .with_action(Action::show_command(&["kora", "panel", "tls", "self-signed"], false));
+            let p = Problem::new(
+                "tls.missing",
+                format!("The panel can be reached from other computers over plain HTTP{msg}: the session cookie, sign-in links and licence keys cross the network unencrypted. Set up HTTPS."),
+            )
+            .with_action(Action::show_command(&["kora", "panel", "tls", "self-signed"], false));
             item(CheckState::Problem, "Plain HTTP on a reachable address".into(), Some(p))
         }
         None => item(CheckState::Info, "Plain HTTP on this computer (or inside Tailscale): nothing to do.".into(), None),

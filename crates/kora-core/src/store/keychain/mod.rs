@@ -142,12 +142,20 @@ pub fn set_backends_for_tests(b: Option<Backends>) {
     OVERRIDE.with(|o| *o.borrow_mut() = b);
 }
 
+static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The real `kora` program calls this once at start. Until then (every test, every embedder) the real keyring and DPAPI are never
+/// touched: a test that saves a key must not end up in a developer's own keychain.
+pub fn enable_system_keychain() {
+    ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The backends of this computer. `KORA_KEYCHAIN=off` in the environment turns them off (the opt-out for a whole machine).
 pub fn backends() -> Backends {
     if let Some(b) = OVERRIDE.with(|o| o.borrow().clone()) {
         return b;
     }
-    if cfg!(test) || std::env::var("KORA_KEYCHAIN").is_ok_and(|v| v == "off") {
+    if !ENABLED.load(std::sync::atomic::Ordering::Relaxed) || std::env::var("KORA_KEYCHAIN").is_ok_and(|v| v == "off") {
         return Backends::default();
     }
     real()

@@ -112,3 +112,33 @@ impl Vault for SecretServiceVault {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_session_bus_or_no_service_is_unavailable_and_never_hangs_or_panics() {
+        let _home = crate::installer::registry::use_test_home();
+        let v = SecretServiceVault::new();
+        // A bus address nothing listens on: the connection fails at once.
+        std::env::set_var("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/kora-test-bus");
+        let t = std::time::Instant::now();
+        let r = v.probe();
+        assert!(matches!(r, Err(VaultError::Unavailable(_) | VaultError::Other(_))), "{r:?}");
+        assert!(t.elapsed() < std::time::Duration::from_secs(10), "took {:?}", t.elapsed());
+        assert!(v.get(1).is_err() && v.put(1, "x", "y").is_err() && v.list().is_err());
+        std::env::remove_var("DBUS_SESSION_BUS_ADDRESS");
+    }
+
+    #[test]
+    fn items_are_named_by_this_kora_folder_and_the_key_id_only() {
+        let _home = crate::installer::registry::use_test_home();
+        let v = SecretServiceVault::new();
+        let a = v.attrs("7");
+        assert_eq!(a["application"], "kora");
+        assert_eq!(a["key-id"], "7");
+        assert_eq!(a["home"].len(), 16);
+        assert!(!a.values().any(|x| x.contains("cfxk")), "no key or name in the attributes");
+    }
+}

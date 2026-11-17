@@ -352,6 +352,8 @@ fn elevate_if_needed(cli: &Cli, effective: &Option<Command>) {
 fn main() {
     // An elevated child of the Windows worker or helper: drop every override variable first.
     kora_core::helper::worker::scrub_overrides();
+    // Saved licence keys may live in the system keychain (never touched by tests: see `store::keychain`).
+    kora_core::store::keychain::enable_system_keychain();
     if std::env::args_os().any(|a| a == "--license-key" || a.to_string_lossy().starts_with("--license-key=")) {
         eprintln!(
             "Note: a licence key on the command line is visible to other programs on this computer (process list) and stays in your shell history. Prefer the CFX_LICENSE_KEY environment variable."
