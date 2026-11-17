@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::dispatch::{self, Host, InstallRecord, Progress, Ran, Reply, RunSpec};
+use super::dispatch::{Host, InstallRecord, Progress, Ran, RunSpec};
 use super::op::MAX_LINE;
 use super::paths;
 use super::policy::{AccountId, Caller, Policy};
@@ -29,14 +29,7 @@ use crate::helper::{Message, Request, PING};
 
 const MAX_CONNECTIONS: usize = 16;
 
-/// What one served connection needs besides the OS facts.
-pub trait Svc: Send + Sync {
-    fn host(&self) -> &dyn Host;
-    /// The current settings (read at every connection).
-    fn policy(&self) -> Result<Policy, String>;
-    /// Run the child for `caller`.
-    fn run(&self, caller: &Caller, spec: &RunSpec<'_>, progress: Progress<'_>, cancel: &Arc<AtomicBool>) -> io::Result<Ran>;
-}
+pub use super::conn::Svc;
 
 /// The caller from the connection (never from the request).
 pub fn caller_of(s: &UnixStream) -> Caller {
@@ -47,62 +40,12 @@ pub fn caller_of(s: &UnixStream) -> Caller {
     }
 }
 
-fn send(out: &mut UnixStream, m: &Message) -> bool {
-    let mut line = serde_json::to_string(m).unwrap_or_default();
-    line.push('\n');
-    out.write_all(line.as_bytes()).and_then(|_| out.flush()).is_ok()
-}
-
 /// One connection: caller already identified (see [`caller_of`]).
 pub fn handle_connection(svc: &dyn Svc, stream: UnixStream, caller: Caller) {
     let Ok(mut out) = stream.try_clone() else { return };
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let mut line = String::new();
-    let n = BufReader::new((&stream).take(MAX_LINE as u64 + 1)).read_line(&mut line);
-    let _ = stream.set_read_timeout(None);
-    if n.is_err() || line.len() > MAX_LINE || !line.ends_with('\n') {
-        send(&mut out, &Message::Error { message: "The request was not understood.".into() });
-        return;
-    }
-    let Ok(req) = serde_json::from_str::<Request>(line.trim()) else {
-        send(&mut out, &Message::Error { message: "The request was not understood.".into() });
-        return;
-    };
-    let policy = svc.policy();
-    if req.verb == PING {
-        let answer = super::policy::authorise(&caller, &policy);
-        send(&mut out, &Message::Result { ok: answer.is_ok(), code: 0, message: answer.err().map(|r| r.0), version: Some(env!("CARGO_PKG_VERSION").into()), data: None });
-        return;
-    }
-    let secrets: Vec<String> = req.env.values().cloned().collect();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let mut alive = true;
-    let mut data = None;
-    let run = |spec: &RunSpec<'_>, progress: Progress<'_>| svc.run(&caller, spec, progress, &cancel);
-    let mut progress = |stream_name: &str, text: &str| {
-        if stream_name == "stdout" {
-            if let Some(v) = crate::helper::worker::result_line(text) {
-                data = Some(v);
-                return;
-            }
-        }
-        if alive {
-            let masked = crate::helper::mask_secrets(text, &secrets.iter().map(String::as_str).collect::<Vec<_>>());
-            alive = send(&mut out, &Message::Progress { stream: stream_name.to_string(), line: masked });
-            if !alive {
-                cancel.store(true, Ordering::SeqCst);
-            }
-        }
-    };
-    let reply = dispatch::handle(svc.host(), &policy, &caller, &req.verb, &req.args, &req.env, &run, &mut progress);
-    drop(progress);
-    let m = match reply {
-        Reply::Refused(r) => Message::Error { message: r.0 },
-        Reply::CouldNotRun(e) => Message::Error { message: format!("Kora's service could not run that: {e}") },
-        Reply::Ran(r) if r.timed_out => Message::Result { ok: false, code: -1, message: Some("The step took too long and was stopped.".into()), version: None, data: None },
-        Reply::Ran(r) => Message::Result { ok: r.code == 0, code: r.code, message: None, version: None, data: r.data.or(data) },
-    };
-    send(&mut out, &m);
+    let mut reader = BufReader::new((&stream).take(MAX_LINE as u64 + 1));
+    super::conn::handle_stream(svc, &mut reader, &mut out, caller);
 }
 
 /// Accept until `stop` is set.
@@ -352,24 +295,7 @@ pub fn check_program_trusted(exe: &Path) -> Result<(), String> {
 
 // ---- client (the panel and `kora service status`) ------------------------------------------------
 
-/// How a request ended, from the client's side.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Answer {
-    pub ok: bool,
-    pub code: i32,
-    pub message: Option<String>,
-    pub version: Option<String>,
-    pub data: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClientError {
-    /// Nobody is listening, or it is not the real service.
-    Unavailable(String),
-    /// The service answered with a refusal.
-    Refused(String),
-    Broken(String),
-}
+pub use super::conn::{Answer, ClientError};
 
 /// Talk to the service on `path`. Before sending anything the socket must be owned by root (the
 /// panel never hands a licence key to a socket another user made).
@@ -382,35 +308,14 @@ pub fn call_with(path: &Path, verb: &str, args: &[String], env: &[(String, Strin
     if require_root_owner && !paths::socket_owner_ok(m.uid()) {
         return Err(ClientError::Unavailable("That socket does not belong to Kora's administrator service (it is not owned by root), so nothing was sent to it.".into()));
     }
-    let mut s = UnixStream::connect(path).map_err(|e| ClientError::Unavailable(format!("Kora's administrator service is not running ({e}).")))?;
-    let req = Request { verb: verb.into(), args: args.to_vec(), env: env.iter().cloned().collect::<BTreeMap<_, _>>() };
-    let mut line = serde_json::to_string(&req).map_err(|e| ClientError::Broken(e.to_string()))?;
-    line.push('\n');
-    s.write_all(line.as_bytes()).map_err(|e| ClientError::Broken(e.to_string()))?;
-    let mut r = BufReader::new(s);
-    loop {
-        let mut l = String::new();
-        let n = r.read_line(&mut l).map_err(|e| ClientError::Broken(format!("Kora's administrator service stopped answering ({e}).")))?;
-        if n == 0 {
-            return Err(ClientError::Broken("Kora's administrator service stopped answering.".into()));
-        }
-        match serde_json::from_str::<Message>(l.trim()) {
-            Ok(Message::Progress { line, .. }) => on_line(&line),
-            Ok(Message::Result { ok, code, message, version, data }) => return Ok(Answer { ok, code, message, version, data }),
-            Ok(Message::Error { message }) => return Err(ClientError::Refused(message)),
-            _ => return Err(ClientError::Broken("Kora's administrator service sent something unexpected.".into())),
-        }
-    }
+    let s = UnixStream::connect(path).map_err(|e| ClientError::Unavailable(format!("Kora's administrator service is not running ({e}).")))?;
+    let mut w = s.try_clone().map_err(|e| ClientError::Broken(e.to_string()))?;
+    super::conn::converse(&mut BufReader::new(s), &mut w, verb, args, env, on_line)
 }
 
 /// Is the service there, and does it serve this account? `Ok(version)` or the reason.
 pub fn probe(path: &Path) -> Result<String, ClientError> {
-    let a = call(path, PING, &[], &[], &mut |_| {})?;
-    if a.ok {
-        Ok(a.version.unwrap_or_default())
-    } else {
-        Err(ClientError::Refused(a.message.unwrap_or_else(|| "Kora's administrator service is not turned on for this account.".into())))
-    }
+    super::conn::interpret_ping(call(path, PING, &[], &[], &mut |_| {}))
 }
 
 #[cfg(test)]
