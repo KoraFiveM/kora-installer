@@ -2599,7 +2599,9 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
         Some(Command::Helper { .. }) => K::Other,
-        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } }) => K::Uninstall { dry_run: false },
+        Some(Command::Service {
+            cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. },
+        }) => K::Uninstall { dry_run: false },
         Some(Command::Service { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },
@@ -2645,6 +2647,7 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
         Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } }) => one("change which accounts may use Kora's administrator service"),
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => one("install or remove Kora's administrator service"),
         _ => vec![],
     }
 }

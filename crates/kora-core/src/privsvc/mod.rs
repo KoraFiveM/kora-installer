@@ -66,6 +66,7 @@
 
 pub mod audit;
 pub mod dispatch;
+pub mod install;
 pub mod manage;
 pub mod op;
 pub mod ownership;

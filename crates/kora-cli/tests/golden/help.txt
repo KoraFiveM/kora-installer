@@ -1415,10 +1415,12 @@ Kora's administrator service: who may use it, and whether it is running
 Usage: kora service [OPTIONS] <COMMAND>
 
 Commands:
-  status  Say whether the service is installed and running, and whether it serves your account
-  list    List the accounts that may use the service
-  allow   Let an account use the service (administrators only). Give the account's name
-  deny    Stop an account using the service (administrators only). Servers it set up keep working
+  status     Say whether the service is installed and running, and whether it serves your account
+  list       List the accounts that may use the service
+  allow      Let an account use the service (administrators only). Give the account's name
+  install    Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
+  uninstall  Remove the service (needs administrator rights). Servers it set up keep working
+  deny       Stop an account using the service (administrators only). Servers it set up keep working
 
 Options:
       --no-elevate
@@ -1471,6 +1473,48 @@ Usage: kora service allow [OPTIONS] <ACCOUNT>
 Arguments:
   <ACCOUNT>
           Account name (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service install =====
+Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
+
+Usage: kora service install [OPTIONS]
+
+Options:
+      --allow <ACCOUNT>
+          Also let this account use the service (the account that ran sudo is always added)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service uninstall =====
+Remove the service (needs administrator rights). Servers it set up keep working
+
+Usage: kora service uninstall [OPTIONS]
+
+Options:
+      --purge
+          Also remove the list of allowed accounts, the ownership records and the audit log
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service unit =====
+Print the systemd unit text (the package is built from it; not for people)
+
+Usage: kora service unit [OPTIONS]
 
 Options:
       --no-elevate
