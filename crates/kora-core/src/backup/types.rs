@@ -190,9 +190,10 @@ pub struct ServerInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub github_owner: Option<String>,
-    /// How the server ran: as a service (or by hand), or in a container. Older backups have no such field: service.
-    #[serde(default)]
-    pub run_mode: crate::container::RunMode,
+    /// `container` when the server ran in a container. Absent in older backups and for a service (or by hand).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub run_mode: Option<crate::container::RunMode>,
 }
 
 /// What the archive says about itself: written first (without the checksums) and last (with them).

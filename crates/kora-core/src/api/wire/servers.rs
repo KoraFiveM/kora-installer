@@ -62,9 +62,10 @@ pub struct ServerSummary {
     /// `<this computer's network address>:<game port>`: what players on the same network type to join. `null` when
     /// Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
     pub connect: Option<String>,
-    /// How the server runs: as a service (or by hand), or in a container.
-    #[serde(default)]
-    pub run_mode: crate::container::RunMode,
+    /// `container` for a server that runs in a container; absent for every other (a service, or by hand).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub run_mode: Option<crate::container::RunMode>,
     /// For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]

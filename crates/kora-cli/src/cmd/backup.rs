@@ -440,10 +440,10 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             preview.will_create.iter().for_each(|l| println!("  will create: {l}"));
             preview.wont_carry.iter().for_each(|l| println!("  does not come along: {l}"));
             preview.warnings.iter().for_each(|l| println!("  note: {l}"));
-            if preview.run_mode == kora_core::container::RunMode::Container || preview.container_engine.is_some() {
+            if preview.run_mode == Some(kora_core::container::RunMode::Container) || preview.container_engine.is_some() {
                 println!(
                     "  run mode: the backed-up server ran {}; here {} (choose with --run-mode service|container).",
-                    if preview.run_mode == kora_core::container::RunMode::Container { "in a container" } else { "as a service" },
+                    if preview.run_mode == Some(kora_core::container::RunMode::Container) { "in a container" } else { "as a service" },
                     preview.container_engine.as_deref().map_or("only a service is possible".to_string(), |e| format!("a container ({e}) is possible"))
                 );
             }

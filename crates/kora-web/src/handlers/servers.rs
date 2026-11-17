@@ -45,7 +45,7 @@ fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> 
         badge: badge.map(wire::Badge::from),
         managed: is_managed(e),
         connect: connect_address(e.ports.game),
-        run_mode: if rec.is_some() { kora_core::container::RunMode::Container } else { kora_core::container::RunMode::Service },
+        run_mode: rec.is_some().then_some(kora_core::container::RunMode::Container),
         run_label: rec.map(|r| r.describe()),
     }
 }

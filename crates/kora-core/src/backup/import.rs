@@ -189,9 +189,11 @@ pub struct ImportPreview {
     /// The database administrator login Kora would use, tried now (only when the backup has a database). `ok: false` means the
     /// page should ask for one (host, port, user, password: used once, never stored).
     pub db_login: Option<DbLoginNote>,
-    /// How the backed-up server ran. Offered again here when this computer can do the same (see `container_engine`).
-    #[serde(default)]
-    pub run_mode: crate::container::RunMode,
+    /// `container` when the backed-up server ran in a container; absent otherwise. Offered again here when this
+    /// computer can do the same (see `container_engine`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub run_mode: Option<crate::container::RunMode>,
     /// The container engine this computer would use (`podman, rootless`), when it has one that looks usable:
     /// container mode can be chosen for the new server. `None`: only a service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -372,7 +374,7 @@ pub fn inspect(
         licence_note: LICENCE_NOTE.into(),
         fork: None,
         db_login: None,
-        run_mode: Default::default(),
+        run_mode: None,
         container_engine: None,
     };
     let head = match archive::read_head(file, pass(passphrase).as_ref()) {
@@ -464,7 +466,7 @@ pub fn inspect(
     }
     p.run_mode = head.server.run_mode;
     p.container_engine = crate::container::detect::quick_label();
-    if head.server.run_mode == crate::container::RunMode::Container && p.container_engine.is_none() {
+    if head.server.run_mode == Some(crate::container::RunMode::Container) && p.container_engine.is_none() {
         p.warnings.push("This server ran in a container, but this computer has no container engine (Podman or Docker) that Kora can use. It can be imported to run as a background service instead; or install Podman, then check again.".into());
     }
     p.server = Some(head.server);

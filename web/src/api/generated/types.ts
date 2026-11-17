@@ -1235,6 +1235,28 @@ export type Contacted = {
 };
 
 /**
+ * What an install asks for when it chooses container mode. Secret-free.
+ */
+export type ContainerRequest = {
+  /**
+   * `podman` or `docker`; `None` = the best one found (rootless Podman first).
+   */
+  engine?: EngineKind | null,
+  /**
+   * Address the game port is published on (`None` = every address).
+   */
+  bind?: string | null,
+  /**
+   * Memory limit in MiB (`None` = none).
+   */
+  memory_mb?: number | null,
+  /**
+   * CPU limit in tenths of a core, e.g. 20 = 2.0 cores (`None` = none).
+   */
+  cpu_tenths?: number | null,
+};
+
+/**
  * start/stop/restart verbs.
  */
 export type ControlAction = "start" | "stop" | "restart";
@@ -1310,7 +1332,7 @@ export type DbAdmin = {
   password?: string,
 };
 
-export type DbChoice = "use_existing" | "install_if_missing" | "skip";
+export type DbChoice = "use_existing" | "install_if_missing" | "skip" | "container";
 
 export type DbKind = "dumped" | "none" | "external" | "failed";
 
@@ -1396,6 +1418,11 @@ export type DownloadZip = {
   size: number,
   modified_unix: number,
 };
+
+/**
+ * Which engine.
+ */
+export type EngineKind = "podman" | "docker";
 
 /**
  * `POST /auth/enrol` (no sign-in needed; the link is the credential): the steps of the first set-up.
@@ -1555,9 +1582,9 @@ export type FleetServer = {
    */
   connect: string | null,
   /**
-   * How the server runs: as a service (or by hand), or in a container.
+   * `container` for a server that runs in a container; absent for every other (a service, or by hand).
    */
-  run_mode: RunMode,
+  run_mode?: RunMode,
   /**
    * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
    */
@@ -1858,9 +1885,10 @@ export type ImportPreview = {
    */
   db_login: DbLoginNote | null,
   /**
-   * How the backed-up server ran. Offered again here when this computer can do the same (see `container_engine`).
+   * `container` when the backed-up server ran in a container; absent otherwise. Offered again here when this
+   * computer can do the same (see `container_engine`).
    */
-  run_mode: RunMode,
+  run_mode?: RunMode,
   /**
    * The container engine this computer would use (`podman, rootless`), when it has one that looks usable:
    * container mode can be chosen for the new server. `None`: only a service.
@@ -2118,6 +2146,14 @@ export type InstallRequest = {
    * Cfx.re account that becomes the txAdmin admin, e.g. `fivem:4465268`. Null = a generated local admin.
    */
   cfx_identifier: string | null,
+  /**
+   * How the server runs: `service` (the default) or `container` (Linux, Podman or Docker).
+   */
+  run_mode?: RunMode,
+  /**
+   * What container mode asks for: which engine, the address to publish on, limits. Only with `run_mode: container`.
+   */
+  container?: ContainerRequest,
 };
 
 export type IssueItem = {
@@ -3549,6 +3585,8 @@ export type SavedInstall = {
    * The Cfx.re account that becomes the txAdmin admin (not a secret).
    */
   cfx_identifier: string | null,
+  run_mode?: RunMode,
+  container?: ContainerRequest,
 };
 
 export type SavedKey = {
@@ -3742,9 +3780,9 @@ export type ServerDetail = {
    */
   connect: string | null,
   /**
-   * How the server runs: as a service (or by hand), or in a container.
+   * `container` for a server that runs in a container; absent for every other (a service, or by hand).
    */
-  run_mode: RunMode,
+  run_mode?: RunMode,
   /**
    * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
    */
@@ -3785,9 +3823,9 @@ export type ServerInfo = {
    */
   github_owner?: string,
   /**
-   * How the server ran: as a service (or by hand), or in a container. Older backups have no such field: service.
+   * `container` when the server ran in a container. Absent in older backups and for a service (or by hand).
    */
-  run_mode: RunMode,
+  run_mode?: RunMode,
 };
 
 export type ServerKeyChanged = {
@@ -3846,9 +3884,9 @@ export type ServerSummary = {
    */
   connect: string | null,
   /**
-   * How the server runs: as a service (or by hand), or in a container.
+   * `container` for a server that runs in a container; absent for every other (a service, or by hand).
    */
-  run_mode: RunMode,
+  run_mode?: RunMode,
   /**
    * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
    */
