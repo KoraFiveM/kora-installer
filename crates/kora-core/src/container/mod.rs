@@ -57,6 +57,7 @@ pub mod engine;
 pub mod lifecycle;
 pub mod logs;
 pub mod pins;
+pub mod reach;
 pub mod record;
 pub mod spec;
 
