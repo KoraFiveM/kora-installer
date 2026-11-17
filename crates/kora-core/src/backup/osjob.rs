@@ -9,12 +9,13 @@
 //! Which is in charge is recorded in Kora's store (`BackupStatus::os_job`), never in the server folder. The privileged side
 //! creates the job from the typed operation `Op::BackupJobSet` and does not open the store; this module is the person's side.
 
-use super::settings;
 use super::types::{BackupSettings, Cadence};
+use super::{codes, settings};
 use crate::installer::registry::ServerEntry;
 use crate::installer::slug;
 use crate::privsvc::client;
 use crate::privsvc::problems::Availability;
+use crate::problem::Problem;
 
 const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -29,12 +30,12 @@ pub fn set_args(dir: &std::path::Path, cfg: &BackupSettings) -> Vec<String> {
     a
 }
 
-fn ask(args: &[String]) -> Result<(), String> {
+fn ask(args: &[String]) -> Result<(), Problem> {
     let mut last = String::new();
     match client::call("backup-job", args, &[], &mut |l| last = l.to_string()) {
         Ok(a) if a.ok => Ok(()),
-        Ok(_) => Err(if last.is_empty() { "the service could not make the change".into() } else { last }),
-        Err(client::ClientError::Refused(m) | client::ClientError::Unavailable(m) | client::ClientError::Broken(m)) => Err(m),
+        Ok(_) => Err(Problem::new(codes::OS_JOB_FAILED, if last.is_empty() { "the service could not make the change".to_string() } else { last })),
+        Err(client::ClientError::Refused(m) | client::ClientError::Unavailable(m) | client::ClientError::Broken(m)) => Err(Problem::new(codes::OS_JOB_FAILED, m)),
     }
 }
 
@@ -52,14 +53,14 @@ pub fn apply(e: &ServerEntry, cfg: &BackupSettings) {
                     let _ = ask(&["off".into(), e.dir.to_string_lossy().into_owned()]);
                 }
                 os_job = false;
-                error = Some(format!("Kora could not set up the operating-system job ({m}). The panel's own scheduler is used instead."));
+                error = Some(m.lead("Kora could not set up the operating-system job").and_say("The panel's own scheduler is used instead.").one_line());
             }
         }
     } else if before.os_job {
         if ready {
             match ask(&["off".into(), e.dir.to_string_lossy().into_owned()]) {
                 Ok(()) => os_job = false,
-                Err(m) => error = Some(format!("Kora could not remove the operating-system job ({m}). It does nothing while scheduled backups are off.")),
+                Err(m) => error = Some(m.lead("Kora could not remove the operating-system job").and_say("It does nothing while scheduled backups are off.").one_line()),
             }
             if error.is_some() {
                 os_job = false;
@@ -93,7 +94,7 @@ pub fn remove_for_delete(e: &ServerEntry) -> Option<String> {
             slug(&e.name)
         ));
     }
-    ask(&["off".into(), e.dir.to_string_lossy().into_owned()]).err().map(|m| format!("The scheduled-backup job of the operating system could not be removed: {m}"))
+    ask(&["off".into(), e.dir.to_string_lossy().into_owned()]).err().map(|m| m.lead("The scheduled-backup job of the operating system could not be removed").one_line())
 }
 
 /// Is the job still there? A job removed behind Kora's back (`kora uninstall`, by hand) must not leave the panel's own
@@ -255,5 +256,35 @@ mod tests {
         let e = entry("n");
         let on = crate::backup::BackupStatus { os_job: true, ..Default::default() };
         assert!(note(&e, &on).contains("job of your operating system (kora-backup-n)"));
+    }
+
+    #[test]
+    fn what_the_job_records_when_it_fails_is_what_the_monitors_probe_reads() {
+        use crate::monitor::probe::{Probe, SystemProbe};
+        let _ = crate::installer::registry::use_test_home();
+        let e = entry("os-fail");
+        let probe = SystemProbe::new();
+        assert_eq!(probe.os_job_backup_failure(&e), None, "not an OS job");
+        settings::update_status(&e.name, |s| s.os_job = true);
+        assert_eq!(probe.os_job_backup_failure(&e), Some(None));
+        // `kora backup create --scheduled` failing records this (see `create::create`)
+        settings::update_status(&e.name, |s| {
+            s.last_failed_unix = Some(5);
+            s.last_error = Some("the disk is full".into());
+        });
+        assert_eq!(probe.os_job_backup_failure(&e), Some(Some("the disk is full".into())));
+        settings::update_status(&e.name, |s| {
+            s.last_failed_unix = None;
+            s.last_error = None;
+        });
+        assert_eq!(probe.os_job_backup_failure(&e), Some(None));
+    }
+
+    #[test]
+    fn a_refused_request_is_a_problem_with_the_os_job_code() {
+        let svc = std::sync::Arc::new(Scripted { availability: Availability::Ready, reply: Err(client::ClientError::Refused("not yours".into())), seen: Default::default() });
+        let p = with_service(svc, || ask(&["off".into(), "/x".into()])).unwrap_err();
+        assert_eq!(p.code, codes::OS_JOB_FAILED);
+        assert!(p.message.contains("not yours") && p.actions.is_empty());
     }
 }

@@ -20,7 +20,12 @@
 use std::path::Path;
 
 use super::{check_dir_links, load_created_from, load_request_from, slug};
+use crate::problem::Problem;
 use crate::service::{self, account, CommandRunner, ManagedServer, Plan, Platform, SystemStep};
+
+fn fail(why: impl Into<String>) -> Problem {
+    Problem::new(crate::backup::codes::HANDOVER_FAILED, why.into())
+}
 
 /// What the step did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,8 +36,8 @@ pub enum Outcome {
 }
 
 /// The plan for `dir`, or why not. Pure apart from what `rn` and `ids` answer (tests fake both).
-pub fn plan_for(dir: &Path, platform: Platform, rn: &dyn CommandRunner, ids: &dyn Fn(&str) -> Option<(u32, u32)>, uid_min: u32) -> Result<(Plan, Outcome), String> {
-    let req = load_request_from(dir).ok_or("the folder has no Kora install record, so Kora does not know which account the server runs as")?;
+pub fn plan_for(dir: &Path, platform: Platform, rn: &dyn CommandRunner, ids: &dyn Fn(&str) -> Option<(u32, u32)>, uid_min: u32) -> Result<(Plan, Outcome), Problem> {
+    let req = load_request_from(dir).ok_or_else(|| fail("the folder has no Kora install record, so Kora does not know which account the server runs as"))?;
     let created = load_created_from(dir).unwrap_or_default();
     let slug = slug(&req.name);
     let none = |why: &str| Ok((Plan::default(), Outcome::NotNeeded(why.to_string())));
@@ -43,14 +48,14 @@ pub fn plan_for(dir: &Path, platform: Platform, rn: &dyn CommandRunner, ids: &dy
             }
             let expected = account::account_name(&slug);
             if created.service_account.as_deref().is_some_and(|r| r != expected) {
-                return Err(format!("the folder's records name a different account than the one Kora makes for this server ('{expected}'), so nothing was handed over"));
+                return Err(fail(format!("the folder's records name a different account than the one Kora makes for this server ('{expected}'), so nothing was handed over")));
             }
-            let uid = match account::user_status(rn, &expected).map_err(|e| e.to_string())? {
-                account::UserStatus::Missing => return Err(format!("the server's account '{expected}' does not exist")),
+            let uid = match account::user_status(rn, &expected).map_err(|e| fail(e.to_string()))? {
+                account::UserStatus::Missing => return Err(fail(format!("the server's account '{expected}' does not exist"))),
                 account::UserStatus::Exists(uid) if account::is_system_uid(uid, uid_min) => uid,
-                account::UserStatus::Exists(_) => return Err(format!("'{expected}' is not a system account Kora made for this server, so nothing was handed over")),
+                account::UserStatus::Exists(_) => return Err(fail(format!("'{expected}' is not a system account Kora made for this server, so nothing was handed over"))),
             };
-            let (uid, gid) = ids(&expected).filter(|(u, _)| *u == uid).ok_or_else(|| format!("cannot find the account '{expected}'"))?;
+            let (uid, gid) = ids(&expected).filter(|(u, _)| *u == uid).ok_or_else(|| fail(format!("cannot find the account '{expected}'")))?;
             let plan = Plan::new(vec![SystemStep::chown_tree(format!("Give '{expected}' ownership of the restored server files (and only the server folder)"), &dir.to_string_lossy(), uid, gid)]);
             Ok((plan, Outcome::Done(format!("The server's files now belong to '{expected}'."))))
         }
@@ -68,7 +73,7 @@ pub fn plan_for(dir: &Path, platform: Platform, rn: &dyn CommandRunner, ids: &dy
                 kora_exe: exe,
                 windows_run_as: None,
             };
-            server.validate().map_err(|e| e.to_string())?;
+            server.validate().map_err(|e| fail(e.to_string()))?;
             let plan = service::windows_grant_plan(&server);
             Ok((plan, Outcome::Done(format!("The server's service account has its rights on the restored files again ({}).", service::virtual_account(&server.service_name())))))
         }
@@ -76,10 +81,10 @@ pub fn plan_for(dir: &Path, platform: Platform, rn: &dyn CommandRunner, ids: &dy
 }
 
 /// Do it (as root / SYSTEM). The folder must be free of links first.
-pub fn run(dir: &Path) -> Result<Outcome, String> {
-    check_dir_links(dir).map_err(|e| e.to_string())?;
+pub fn run(dir: &Path) -> Result<Outcome, Problem> {
+    check_dir_links(dir)?;
     let (plan, outcome) = plan_for(dir, Platform::current(), &service::SystemRunner, &|n| crate::userhome::account_ids(n), account::uid_min())?;
-    service::apply_plan(&plan, &service::SystemRunner).map_err(|e| e.to_string())?;
+    service::apply_plan(&plan, &service::SystemRunner).map_err(|e| fail(e.to_string()))?;
     Ok(outcome)
 }
 
@@ -133,6 +138,8 @@ mod tests {
         let forged = Created { service_unit: Some("x".into()), service_account: Some("alice".into()), ..Default::default() };
         let d = folder(Some(&forged));
         let e = plan_for(d.path(), Platform::Linux, &account_998(), &ids, 1000).unwrap_err();
+        assert_eq!(e.code, crate::backup::codes::HANDOVER_FAILED);
+        let e = e.message;
         assert!(e.contains("different account"), "{e}");
         // the right name, but it is an ordinary person's account or root
         let ok = Created { service_unit: Some("x".into()), service_account: Some("kora-my-server".into()), ..Default::default() };
@@ -140,18 +147,18 @@ mod tests {
         for (uid, why) in [("1000", "not a system account"), ("0", "not a system account")] {
             let r = FakeRunner::default();
             r.respond("id -u kora-my-server", 0, &format!("{uid}\n"));
-            let e = plan_for(d.path(), Platform::Linux, &r, &|_| Some((uid.parse().unwrap(), 1)), 1000).unwrap_err();
+            let e = plan_for(d.path(), Platform::Linux, &r, &|_| Some((uid.parse().unwrap(), 1)), 1000).unwrap_err().message;
             assert!(e.contains(why), "{uid}: {e}");
         }
         let gone = FakeRunner::default();
         gone.respond("id -u", 1, "");
-        assert!(plan_for(d.path(), Platform::Linux, &gone, &ids, 1000).unwrap_err().contains("does not exist"));
+        assert!(plan_for(d.path(), Platform::Linux, &gone, &ids, 1000).unwrap_err().message.contains("does not exist"));
     }
 
     #[test]
     fn a_folder_without_an_install_record_is_refused() {
         let d = tempfile::tempdir().unwrap();
-        assert!(plan_for(d.path(), Platform::Linux, &FakeRunner::default(), &ids, 1000).unwrap_err().contains("no Kora install record"));
+        assert!(plan_for(d.path(), Platform::Linux, &FakeRunner::default(), &ids, 1000).unwrap_err().message.contains("no Kora install record"));
     }
 
     #[test]

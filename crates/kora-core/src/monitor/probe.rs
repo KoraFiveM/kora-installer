@@ -48,6 +48,12 @@ pub trait Probe: Send + Sync {
     fn disk(&self, dir: &Path) -> Option<DiskUsage>;
     /// RAM of the whole machine.
     fn memory(&self) -> Option<MemUsage>;
+    /// The scheduled backups of this server are a job of the operating system (`backup::osjob`) and the last run failed: why, in the
+    /// words `kora backup create --scheduled` recorded in the person's store. `Some(None)`: it is an OS job and fine; `None`: not an OS job
+    /// (the panel's own scheduler announces its failures itself).
+    fn os_job_backup_failure(&self, _e: &ServerEntry) -> Option<Option<String>> {
+        None
+    }
 }
 
 /// When the game server of this folder started (seconds since 1970), when it can be told: Linux reads `/proc`, Windows asks
@@ -109,6 +115,11 @@ impl SystemProbe {
 }
 
 impl Probe for SystemProbe {
+    fn os_job_backup_failure(&self, e: &ServerEntry) -> Option<Option<String>> {
+        let st = crate::backup::settings::load_status(&e.name);
+        st.os_job.then(|| st.last_failed_unix.map(|_| st.last_error.unwrap_or_else(|| "it did not finish".into())))
+    }
+
     fn dir_exists(&self, dir: &Path) -> bool {
         dir.is_dir()
     }

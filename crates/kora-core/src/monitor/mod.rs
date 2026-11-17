@@ -283,6 +283,7 @@ impl Monitor {
         let Ok(servers) = backend.list() else { return };
         for e in &servers {
             self.sample_one(&mut *backend, e, now);
+            self.watch_os_job_backup(e, now);
         }
         // Servers taken off the list: drop their state and close their alerts.
         let mut st = self.state();
@@ -292,6 +293,16 @@ impl Monitor {
             for a in st.alerts.iter_mut().filter(|a| a.server == name && a.resolved.is_none() && a.kind != AlertKind::Recovered) {
                 a.resolved = Some(now);
             }
+        }
+    }
+
+    /// A scheduled backup made by the operating system's job runs as the person, outside this process: when it fails it records that in the
+    /// person's store, and the alert is raised here, the same as for the panel's own scheduler (one open alert, closed by the next success).
+    fn watch_os_job_backup(&self, e: &ServerEntry, now: u64) {
+        match self.inner.probe.os_job_backup_failure(e) {
+            Some(Some(why)) => self.raise_external(e, AlertKind::BackupFailed, format!("The scheduled backup did not work: {why}"), now),
+            Some(None) => self.resolve_external(&e.name, AlertKind::BackupFailed, now),
+            None => {}
         }
     }
 

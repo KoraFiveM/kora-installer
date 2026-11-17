@@ -54,6 +54,10 @@ pub mod codes {
     pub const BUSY: &str = "backup.busy";
     pub const NO_UNDO: &str = "backup.no_undo";
     pub const WEAK_PASSPHRASE: &str = "backup.weak_passphrase";
+    /// The files a restore wrote could not be handed to the server's own account.
+    pub const HANDOVER_FAILED: &str = "backup.handover_failed";
+    /// The operating-system job of the scheduled backups could not be made or removed.
+    pub const OS_JOB_FAILED: &str = "backup.os_job_failed";
 }
 
 pub mod create;

@@ -48,7 +48,7 @@ pub fn after_write(dir: &Path) -> HandOver {
         return match crate::installer::handover::run(dir) {
             Ok(crate::installer::handover::Outcome::NotNeeded(_)) => HandOver::NotNeeded,
             Ok(crate::installer::handover::Outcome::Done(m)) => HandOver::Done(m),
-            Err(e) => HandOver::Failed(format!("The restored files could not be handed to the server's own account ({e}). Run this and then start the server: {cmd}")),
+            Err(e) => HandOver::Failed(e.lead("The restored files could not be handed to the server's own account").and_say(&format!("Run this and then start the server: {cmd}")).one_line()),
         };
     }
     match client::availability() {
