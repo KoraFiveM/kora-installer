@@ -69,7 +69,7 @@ export function ChangesPanel({ page }: { page: ResourcePage }) {
         {c && c.count === 0 && <p className="text-sm text-muted-foreground">{t('resources.changesPanel.nothingChangedResourcesFolder')}</p>}
         {c && c.count > 0 && (
           <div className="space-y-2">
-            <p className="text-sm">{rich('resources.changesPanel.countChangedFileValue', { count: c.count, code: <code className="font-mono text-xs">{c.branch ?? 'a single commit'}</code> })}</p>
+            <p className="text-sm">{rich('resources.changesPanel.countChangedFileValue', { count: c.count, code: <code className="font-mono text-xs">{c.branch ?? t('resources.changesPanel.singleCommit')}</code> })}</p>
             <ul className="divide-y divide-border rounded-md border border-border" aria-label={t('resources.changesPanel.changedFiles')}>
               {c.files.map((f) => <li key={f.path} className="flex items-center gap-2 px-3 py-1.5 text-sm"><Badge tone="plain">{f.status === 'new' ? t('resources.changesPanel.new') : f.status === 'added' ? t('resources.changesPanel.added2') : f.status === 'deleted' ? t('resources.changesPanel.deleted') : f.status === 'renamed' ? t('resources.changesPanel.renamed') : t('resources.changesPanel.changed')}</Badge><span className="break-all font-mono text-xs">{f.path}</span></li>)}
             </ul>

@@ -37,7 +37,7 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
   const view = useJob(job, (j) => {
     if (j.state === 'done') {
       void qc.invalidateQueries({ queryKey: ['servers'] })
-      push('success', `${s.name} was deleted.`)
+      push('success', t('servers.dangerTab.deleted', { name: s.name }))
       onDone?.()
     }
   })
@@ -55,7 +55,7 @@ export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, '
           {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
           <ErrorNotice error={err} />
           <ConfirmDialog open={open} onOpenChange={close} title={t('servers.dangerTab.removeNameFromList', { name: s.name })} description={t('servers.dangerTab.filesStayWhereThey')} confirmLabel={t('servers.dangerTab.removeFromList')} destructive
-            onConfirm={async () => { try { await api.servers.unregister(s.name); await qc.invalidateQueries({ queryKey: ['servers'] }); push('success', `${s.name} was removed from your list.`); onDone?.() } catch (e) { setErr(e); setOpen(false) } }} />
+            onConfirm={async () => { try { await api.servers.unregister(s.name); await qc.invalidateQueries({ queryKey: ['servers'] }); push('success', t('servers.dangerTab.removedFromList', { name: s.name })); onDone?.() } catch (e) { setErr(e); setOpen(false) } }} />
         </CardContent>
       </Card>
     )

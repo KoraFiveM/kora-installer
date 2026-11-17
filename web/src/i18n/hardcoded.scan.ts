@@ -94,7 +94,8 @@ export function scanSource(file: string, source: string): Finding[] {
     out.push({ file, line: line0 + 1, text: text.replace(/\s+/g, ' ').trim().slice(0, 90), kind })
   }
 
-  const inJsxChild = (n: ts.Node) => ts.isJsxExpression(n.parent) && (ts.isJsxElement(n.parent.parent) || ts.isJsxFragment(n.parent.parent))
+  const jsxChildExpr = (n: ts.JsxExpression) => ts.isJsxElement(n.parent) || ts.isJsxFragment(n.parent)
+  const inJsxChild = (n: ts.Node) => ts.isJsxExpression(n.parent) && jsxChildExpr(n.parent)
   const literalText = (n: ts.Node): string | null => (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ? n.text : ts.isTemplateExpression(n) ? n.head.text + n.templateSpans.map((s) => s.literal.text).join(' ') : null)
 
   /** String-ish leaves of an expression that ends up on screen: `cond ? 'a' : 'b'`, `x ?? 'a'`, `(a && 'b')`, templates. */
@@ -128,7 +129,7 @@ export function scanSource(file: string, source: string): Finding[] {
       }
       if (init && (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init))) check(init, 'jsx-attr')
       else if (init && ts.isJsxExpression(init) && init.expression) leaves(init.expression, (l) => check(l, 'jsx-attr'))
-    } else if (ts.isJsxExpression(n) && inJsxChild(n) && n.expression) {
+    } else if (ts.isJsxExpression(n) && jsxChildExpr(n) && n.expression) {
       leaves(n.expression, (l) => {
         const text = literalText(l)!
         if (looksLikeText(text, false)) add(l, text, 'jsx-expr')

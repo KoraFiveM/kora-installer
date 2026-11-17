@@ -116,7 +116,7 @@ function AddNodeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
     mutationFn: () => api.hub.addNode({ name, url, token }),
     onSuccess: (n) => {
       void qc.invalidateQueries({ queryKey: ['fleet'] })
-      push(n.insecure ? 'warning' : 'success', n.insecure ? `${n.name} was added, but ${n.warning ?? 'its address is not private.'}` : `${n.name} was added.`)
+      push(n.insecure ? 'warning' : 'success', n.insecure ? t('servers.fleetPage.addedButInsecure', { name: n.name, warning: n.warning ?? t('servers.fleetPage.addressNotPrivate') }) : t('servers.fleetPage.nodeAdded', { name: n.name }))
       setName('')
       setUrl('')
       setToken('')
@@ -183,7 +183,7 @@ function Fleet() {
   const remove = useMutation({
     mutationFn: (id: string) => api.hub.removeNode(id),
     onSuccess: () => {
-      push('success', `${removing?.name ?? t('servers.fleetPage.theNode')} was removed from this list.`)
+      push('success', t('servers.fleetPage.nodeRemoved', { name: removing?.name ?? t('servers.fleetPage.theNode') }))
       setRemoving(null)
       void qc.invalidateQueries({ queryKey: ['fleet'] })
     },

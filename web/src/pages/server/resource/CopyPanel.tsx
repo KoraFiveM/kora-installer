@@ -39,7 +39,7 @@ export function CopyPanel({ page }: { page: ResourcePage }) {
     <Card id="own-copy">
       <CardHeader><CardTitle>{t('resources.copyPanel.ownCopy')}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">{rich('resources.copyPanel.resourcePlainCopyStrong', { strong: <strong>{page.repos.original ?? 'the original'}</strong> })}</p>
+        <p className="text-sm text-muted-foreground">{rich('resources.copyPanel.resourcePlainCopyStrong', { strong: <strong>{page.repos.original ?? t('resources.copyPanel.theOriginal')}</strong> })}</p>
         <div className="flex flex-wrap gap-2">
           <Button variant="default" disabled={run.phase === 'running' || !!noAdmin} title={noAdmin ?? undefined} onClick={() => void start([page.id])}>{rich('resources.copyPanel.nodeNodeMakeMy', { node: run.phase === 'running' && <Loader2 className="animate-spin" aria-hidden /> })}</Button>
           <Button disabled={run.phase === 'running' || !!noAdmin} title={noAdmin ?? undefined} onClick={() => void start()}>{t('resources.copyPanel.doWholeServer')}</Button>

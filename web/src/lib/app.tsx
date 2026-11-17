@@ -33,6 +33,6 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
 
 export function useAlerts(): AlertsApi {
   const v = useContext(Ctx)
-  if (!v) throw new Error('useAlerts must be used inside AlertsProvider')
+  if (!v) throw new Error('useAlerts must be used inside AlertsProvider') // i18n-ignore: a developer error
   return v
 }

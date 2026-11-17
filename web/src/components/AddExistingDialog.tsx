@@ -33,7 +33,7 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
     try {
       const s = await api.servers.adopt(d)
       await qc.invalidateQueries({ queryKey: ['servers'] })
-      push('success', `${s.name} was added to your list.`)
+      push('success', t('servers.addExistingDialog.addedToList', { name: s.name }))
       onOpenChange(false)
     } catch (e) {
       setError(e)

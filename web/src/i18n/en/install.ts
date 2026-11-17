@@ -273,6 +273,7 @@ const messages = {
   'install.installWizard.no': 'No',
   'install.form.main': 'Main',
   'install.form.keyN': 'Key {n}',
+  'install.installWizard.resourcesPicked': '{count, plural, one {# picked, plus what it needs} other {# picked, plus what they need}}',
 } as const
 
 register('en', messages)

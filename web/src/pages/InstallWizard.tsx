@@ -49,7 +49,7 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
     { label: t('install.installWizard.serverNamePlayers'), value: req.hostname || '(default)', step: 'name', advanced: true },
     { label: t('install.installWizard.ports'), value: t('install.installWizard.gameValueTxadminValue', { value: f.game.trim() || '?', value2: f.tx.trim() || '?' }), step: 'ports' },
     { label: t('install.installWizard.fivemServerBuild'), value: f.gameBuild.trim() ? t('install.installWizard.buildGameBuildTrim', { build, trim: f.gameBuild.trim() }) : build, step: 'build' },
-    { label: t('install.installWizard.resources'), value: f.resourcesAll ? t('install.installWizard.everything') : `${f.resourceIds.length} picked, plus what they need`, step: 'resources' },
+    { label: t('install.installWizard.resources'), value: f.resourcesAll ? t('install.installWizard.everything') : t('install.installWizard.resourcesPicked', { count: f.resourceIds.length }), step: 'resources' },
     { label: t('install.installWizard.database'), value: f.db === 'use_existing' ? t('install.installWizard.useExistingDatabase') : f.db === 'install_if_missing' ? t('install.installWizard.setUpMe') : t('install.installWizard.skip'), step: 'database' },
     { label: t('install.installWizard.databaseLogin'), value: f.db === 'skip' ? t('install.installWizard.notNeeded') : f.dbCustom ? t('install.installWizard.typedUserDbuserPassword', { dbUser: f.dbUser }) : t('install.installWizard.automatic'), step: 'database' },
     { label: t('install.installWizard.firewall'), value: req.firewall ? (req.txadmin_public ? t('install.installWizard.openGameTxadminPorts') : t('install.installWizard.openGamePort')) : t('install.installWizard.leaveClosed'), step: 'options' },

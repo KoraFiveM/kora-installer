@@ -20,7 +20,7 @@ export interface ApplyProgress {
 }
 
 /** Resource states that mean "not finished yet". Everything else (updated, failed, skipped, waiting, rolled back...) is final. */
-const MOVING = new Set(['updating', 'rolling back'])
+const MOVING = new Set(['updating', 'rolling back']) // i18n-ignore: states the server sends, matched, not shown
 
 /** The latest checked event, or undefined before the first one arrives. */
 export function checkProgress(events: unknown[]): CheckProgress | undefined {

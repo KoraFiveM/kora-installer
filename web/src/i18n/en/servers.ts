@@ -333,6 +333,14 @@ const messages = {
   'servers.serversPage.alertsCount': '{count, plural, one {# alert} other {# alerts}}',
   'servers.serversPage.alertsNeedAttention': '{count, plural, one {# alert needs attention} other {# alerts need attention}}',
   'servers.fleetPage.serversCount': '{count, plural, one {# server} other {# servers}}',
+  'servers.addExistingDialog.addedToList': '{name} was added to your list.',
+  'servers.serverLinks.unknownError': 'unknown error',
+  'servers.fleetPage.addedButInsecure': '{name} was added, but {warning}',
+  'servers.fleetPage.addressNotPrivate': 'its address is not private.',
+  'servers.fleetPage.nodeAdded': '{name} was added.',
+  'servers.fleetPage.nodeRemoved': '{name} was removed from this list.',
+  'servers.dangerTab.deleted': '{name} was deleted.',
+  'servers.dangerTab.removedFromList': '{name} was removed from your list.',
 } as const
 
 register('en', messages)

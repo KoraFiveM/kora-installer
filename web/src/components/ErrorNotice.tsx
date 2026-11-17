@@ -75,7 +75,7 @@ function SystemCheckLink() {
   const beside = window.location.pathname.startsWith('/install')
   const link = inRouter && !beside
     ? <Link className={cls} to="/system">{t('errors.errorNotice.openSystemCheck')}</Link>
-    : <a className={cls} href="/system" {...(beside ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{beside ? t('errors.errorNotice.openSystemCheckNewTab') : t('errors.errorNotice.openSystemCheck')}</a>
+    : <a className={cls} href="/system" {...(beside ? { target: '_blank', rel: 'noopener noreferrer' /* i18n-ignore: an HTML token */ } : {})}>{beside ? t('errors.errorNotice.openSystemCheckNewTab') : t('errors.errorNotice.openSystemCheck')}</a>
   return <p className="mt-2 text-xs">{rich('errors.errorNotice.linkSeeWhatKora', { link })}</p>
 }
 

@@ -110,6 +110,7 @@ export interface MessageParams {
   'install.installWizard.movingServerFromAnother': { link: Tag }
   'install.installWizard.nameStoppedValueIts': { name: string | number; value: string | number }
   'install.installWizard.providedHiddenSavedTrim': { trim: string | number }
+  'install.installWizard.resourcesPicked': { count: number }
   'install.installWizard.savedLicenceKeyLicencename': { licenceName: string | number }
   'install.installWizard.savedLicenceKeySaved': { saved_key_missing: string | number }
   'install.installWizard.serverCannotInstalledYet': { count: number }
@@ -272,17 +273,23 @@ export interface MessageParams {
   'resources.updatesPanel.uptodateOtherResourceValue': { upToDate: number }
   'resources.updatesPanel.valueGoBackNormal': { value: string | number }
   'resources.useBranches.normalVersionDefaultBranch': { default_branch: string | number }
+  'servers.addExistingDialog.addedToList': { name: string | number }
   'servers.addExistingDialog.addName': { name: string | number }
   'servers.consoleTab.arrowdownNodePausedJump': { arrowDown: ReactNode }
+  'servers.dangerTab.deleted': { name: string | number }
   'servers.dangerTab.deleteName': { name: string | number }
   'servers.dangerTab.folderDir': { dir: string | number }
   'servers.dangerTab.inputNodeDeleteDatabase': { input: ReactNode }
   'servers.dangerTab.inputNodeDeleteFiles': { input: ReactNode }
   'servers.dangerTab.inputNodeKeepDatabase': { input: ReactNode }
   'servers.dangerTab.inputNodeKeepFiles': { input: ReactNode }
+  'servers.dangerTab.removedFromList': { name: string | number }
   'servers.dangerTab.removeNameFromList': { name: string | number }
   'servers.dangerTab.typeNameConfirm': { name: string | number }
+  'servers.fleetPage.addedButInsecure': { name: string | number; warning: string | number }
   'servers.fleetPage.everyonePlayingNameNode': { name: string | number; node_name: string | number }
+  'servers.fleetPage.nodeAdded': { name: string | number }
+  'servers.fleetPage.nodeRemoved': { name: string | number }
   'servers.fleetPage.playNodeStart': { play: ReactNode }
   'servers.fleetPage.plusNodeAddNode': { plus: ReactNode }
   'servers.fleetPage.refreshcwNodeRefresh': { refreshCw: ReactNode }

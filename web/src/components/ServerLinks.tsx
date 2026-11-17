@@ -37,7 +37,7 @@ export function OpenFolderButton({ name, dir, size = 'sm' }: { name: string; dir
     )
   }
   return (
-    <Button size={size} onClick={async () => { try { await api.servers.openFolder(name) } catch (e) { setFailed(toNotice(e)?.message ?? 'unknown error') } }}>{rich('servers.serverLinks.folderopenNodeOpenFolder', { folderOpen: <FolderOpen /> })}</Button>
+    <Button size={size} onClick={async () => { try { await api.servers.openFolder(name) } catch (e) { setFailed(toNotice(e)?.message ?? tt('servers.serverLinks.unknownError')) } }}>{rich('servers.serverLinks.folderopenNodeOpenFolder', { folderOpen: <FolderOpen /> })}</Button>
   )
 }
 
@@ -84,7 +84,7 @@ export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; p
       }
     } catch (e) {
       w?.close()
-      setFailed(toNotice(e)?.message ?? 'unknown error')
+      setFailed(toNotice(e)?.message ?? tt('servers.serverLinks.unknownError'))
     }
   }
   return (
