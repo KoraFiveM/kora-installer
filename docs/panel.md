@@ -49,7 +49,7 @@ What `kora` does when things are not simple:
 | No background service is possible (for example a container with no user session) | The panel runs in that window instead; closing the window stops it. |
 | A server with no screen (SSH) | Nothing opens. Kora prints the sign-in link, a ready-to-paste `ssh -L` command to run on your own computer first, and the Tailscale option (`kora panel --tailscale`). |
 | Typed with `sudo` (Linux) | Kora runs again as the person who typed `sudo` (the panel never runs as root). |
-| Typed as root with no `sudo` user (Linux), or in an "administrator" window (Windows) | A running panel is opened. Otherwise Kora explains what to do (log in as a normal user / open Kora from the Start menu or a normal PowerShell window). Nothing is changed. |
+| Typed as root with no `sudo` user (Linux), or in an "administrator" window (Windows) | A running panel is opened (on Windows, if the background panel was set up before, Kora starts it as your normal user). Otherwise Kora explains what to do (log in as a normal user / open Kora from the Start menu or a normal PowerShell window). Nothing is changed. |
 
 For a window that stays open and runs the panel in front, use `kora panel` (below). Kora starts a small web server, prints a line like `Kora Panel: http://127.0.0.1:47120/#code=...` and opens your
 browser at that address. The panel keeps running in that terminal; press Ctrl+C to stop it. Closing the terminal also
