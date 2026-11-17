@@ -133,6 +133,16 @@ fn db_state_path(ctx: &Ctx) -> PathBuf {
 /// The registered server (other than `dir`) whose records name the same database or database
 /// user as `st`. `st` comes from a folder the server's account can change: it must not be able to
 /// make `kora delete` drop another server's database.
+/// The server list for the "does another server use this too?" safety checks. Empty in the administrator service, which
+/// never opens a person's server list; the ownership records (one owner per database name) guard it there instead.
+fn list_for_safety_check() -> Registry {
+    if crate::privsvc::paths::in_service() {
+        Registry::default()
+    } else {
+        Registry::load().unwrap_or_default()
+    }
+}
+
 fn db_used_elsewhere(reg: &Registry, st: &ProvisionState, dir: &Path) -> Option<String> {
     reg.servers.iter().filter(|s| !registry::same_path(&s.dir, dir)).find_map(|s| {
         let other = ProvisionState::load(&super::meta_dir(&s.dir).join("db-provision.json")).ok()?;
@@ -1545,7 +1555,7 @@ impl InstallStep {
         }
         let Ok(mut st) = ProvisionState::load(&db_state_path(ctx)) else { return Ok(("No database to remove".into(), None)) };
         let (dbn, usr) = (st.database.clone(), st.user.clone());
-        if let Some(other) = db_used_elsewhere(&Registry::load().unwrap_or_default(), &st, &ctx.req.dir) {
+        if let Some(other) = db_used_elsewhere(&list_for_safety_check(), &st, &ctx.req.dir) {
             ctx.note(format!("Database '{dbn}' / user '{usr}' were kept: the server '{other}' uses them too (this folder's records name them)."));
             return Ok(("Database kept".into(), None));
         }
@@ -1638,7 +1648,7 @@ impl InstallStep {
                 let path = db_state_path(ctx);
                 let Ok(mut st) = ProvisionState::load(&path) else { return Ok("No database to remove".into()) };
                 let (dbn, usr) = (st.database.clone(), st.user.clone());
-                if let Some(other) = db_used_elsewhere(&Registry::load().unwrap_or_default(), &st, &ctx.req.dir) {
+                if let Some(other) = db_used_elsewhere(&list_for_safety_check(), &st, &ctx.req.dir) {
                     ctx.note(format!("Database '{dbn}' / user '{usr}' were kept: the server '{other}' uses them too (this folder's records name them)."));
                     return Ok("Database kept".into());
                 }
@@ -1699,8 +1709,10 @@ impl InstallStep {
                 let is_service = self.id == "system.service";
                 let wanted: &[system::Kind] = if is_service { &[system::Kind::Service, system::Kind::ServiceAccount, system::Kind::Binary] } else { &[system::Kind::UpdateTimer] };
                 let rn = service::SystemRunner;
-                let reg = Registry::load().unwrap_or_default();
-                let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&reg, b, &[ctx.req.dir.as_path()]));
+                // In the administrator service the person's server list is not opened (their file or database, see
+                // `store::forbid_in_this_process`): the shared root-owned program copy is then simply kept (an
+                // administrator's `kora uninstall` removes it when no server uses it).
+                let used = crate::privsvc::paths::in_service() || created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&Registry::load().unwrap_or_default(), b, &[ctx.req.dir.as_path()]));
                 let target = system::Target::from_request(&ctx.req);
                 let items: Vec<system::Item> = system::items_for(&target, &created, svc_platform(), &rn, ctx.keep_files, used)?.into_iter().filter(|i| wanted.contains(&i.kind)).collect();
                 if items.is_empty() {

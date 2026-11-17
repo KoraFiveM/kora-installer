@@ -116,6 +116,10 @@ pub fn elevated_child_env(sys: &SystemDirs, user: &PanelUser, profile: Option<&s
 /// In an elevated child of the service (`KORA_SERVICE=1`): forget [`OVERRIDE_VARS`]
 /// before anything reads them. Call first thing in `main`, before any thread starts.
 pub fn scrub_overrides() {
+    if super::paths::in_service() {
+        // ...and never open a person's data file: root would create files in their store folder (see `store::forbid_in_this_process`).
+        crate::store::forbid_in_this_process();
+    }
     if super::paths::in_service() && crate::elevate::is_elevated() {
         for k in OVERRIDE_VARS {
             std::env::remove_var(k);

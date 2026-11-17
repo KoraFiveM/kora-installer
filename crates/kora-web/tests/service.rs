@@ -244,7 +244,7 @@ async fn without_the_service_everything_answers_needs_elevation_with_the_choices
     r.fake.state().elevation = Some(vec!["schedule".into(), "off".into(), "dev".into()]);
     let (s, j) = r.call("DELETE", "/servers/dev/schedule", None).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
-    assert_eq!(j["error"]["command"], json!(["kora", "schedule", "off", "dev"]));
+    assert_eq!(j["error"]["command"], json!(["kora", "schedule", "off", "/srv/dev"]));
     assert_eq!(kinds(&j["error"]), ["install_admin_service", "show_command"], "no prompt to ask for any more");
     assert!(j["error"]["message"].as_str().unwrap().contains("administrator service"));
 

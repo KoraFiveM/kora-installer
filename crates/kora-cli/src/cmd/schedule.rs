@@ -44,6 +44,22 @@ pub(crate) fn schedule(cmd: ScheduleCmd) -> i32 {
     // folder that is theirs, and never another Windows account's update task.
     let for_panel = installer::system_ops::panel_user().is_some();
     let find = |server: &str| -> Option<registry::ServerEntry> {
+        // A child of the administrator service: the server is the FOLDER the service checked (owner, links, install
+        // record), described by that folder's own record; the person's server list (their file, their database) is
+        // never opened here.
+        if kora_core::privsvc::paths::in_service() {
+            let dir = PathBuf::from(server);
+            let req = installer::load_request_from(&dir)?;
+            return Some(registry::ServerEntry {
+                source: None,
+                versions: None,
+                name: req.name,
+                dir,
+                mode: req.mode,
+                ports: registry::PortsRecord { game: req.ports.game, txadmin: req.ports.txadmin },
+                created_unix: 0,
+            });
+        }
         let reg = registry::Registry::load().unwrap_or_default();
         if for_panel {
             return reg.find(server).cloned();

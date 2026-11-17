@@ -115,11 +115,11 @@ pub enum Op {
     /// Create or change the unattended-update task of the server called `server` on the person's list
     /// (it runs as that person, unelevated).
     ScheduleSet {
-        server: String,
+        dir: String,
         when: When,
     },
     ScheduleOff {
-        server: String,
+        dir: String,
     },
     /// Install Git from the system package manager (Linux only).
     InstallGit,
@@ -137,8 +137,8 @@ impl Op {
             Op::DbServer(DbAction::Start) => "db start".into(),
             Op::DbServer(DbAction::Install) => "db install".into(),
             Op::StartDatabase => "start-database".into(),
-            Op::ScheduleSet { server, .. } => format!("schedule set [{}]", safe_label(server)),
-            Op::ScheduleOff { server } => format!("schedule off [{}]", safe_label(server)),
+            Op::ScheduleSet { .. } => "schedule set".into(),
+            Op::ScheduleOff { .. } => "schedule off".into(),
             Op::InstallGit => "install git".into(),
             Op::UpdateApply { .. } => "update".into(),
         }
@@ -176,15 +176,15 @@ impl Op {
             }
             Op::DbServer(a) => v.extend([s("admin-db"), s(if *a == DbAction::Start { "start" } else { "install" })]),
             Op::StartDatabase => v.extend([s("check"), s("--start-database")]),
-            Op::ScheduleSet { server, when } => {
-                v.extend([s("schedule"), s("set"), server.clone(), s("--as-user")]);
+            Op::ScheduleSet { dir, when } => {
+                v.extend([s("schedule"), s("set"), dir.clone(), s("--as-user")]);
                 match when {
                     When::Daily { hour, minute } => v.extend([s("--daily"), format!("{hour:02}:{minute:02}")]),
                     When::Weekly { day, hour, minute } => v.extend([s("--weekly"), s(day), format!("{hour:02}:{minute:02}")]),
                     When::Default => {}
                 }
             }
-            Op::ScheduleOff { server } => v.extend([s("schedule"), s("off"), server.clone()]),
+            Op::ScheduleOff { dir } => v.extend([s("schedule"), s("off"), dir.clone()]),
             Op::InstallGit => v.extend([s("tools"), s("install"), s("git")]),
             Op::UpdateApply { version } => {
                 v.extend([s("self-update"), s("--yes")]);
@@ -199,7 +199,7 @@ impl Op {
     /// The server folder this operation works on, if any (the service checks it on its side).
     pub fn dir(&self) -> Option<&str> {
         match self {
-            Op::Step { dir, .. } => Some(dir),
+            Op::Step { dir, .. } | Op::ScheduleSet { dir, .. } | Op::ScheduleOff { dir } => Some(dir),
             _ => None,
         }
     }
@@ -336,12 +336,13 @@ fn parse_step(w: &mut Walk) -> Result<Op, Rejected> {
 
 fn parse_schedule(w: &mut Walk) -> Result<Op, Rejected> {
     let action = w.next();
-    let Some(server) = w.next().filter(|s| name_ok(s)) else {
-        return no("The Kora service takes a server's name from your server list, not a folder.");
+    // The server's FOLDER (checked by the service like every other step's), never a name looked up in the caller's own
+    // server list: that list is a file or database the caller controls and the privileged side does not open.
+    let Some(dir) = w.next().filter(|d| dir_shape_ok(d)).map(str::to_string) else {
+        return no("The Kora service needs the server's full folder path for its update schedule.");
     };
-    let server = server.to_string();
     match action {
-        Some("off") => Ok(Op::ScheduleOff { server }),
+        Some("off") => Ok(Op::ScheduleOff { dir }),
         Some("set") => {
             let mut when = When::Default;
             while !w.done() {
@@ -361,7 +362,7 @@ fn parse_schedule(w: &mut Walk) -> Result<Op, Rejected> {
                     _ => return no("The Kora service only makes update tasks that run as you."),
                 }
             }
-            Ok(Op::ScheduleSet { server, when })
+            Ok(Op::ScheduleSet { dir, when })
         }
         _ => no("The Kora service does not do that with update schedules."),
     }
@@ -427,9 +428,9 @@ mod tests {
         assert_eq!(p("admin-db", &["start"]), Ok(Op::DbServer(DbAction::Start)));
         assert_eq!(p("check", &["--start-database"]), Ok(Op::StartDatabase));
         assert_eq!(p("tools", &["install", "git"]), Ok(Op::InstallGit));
-        assert_eq!(p("schedule", &["off", "my-server"]), Ok(Op::ScheduleOff { server: "my-server".into() }));
-        assert_eq!(p("schedule", &["set", "a", "--daily", "03:30"]), Ok(Op::ScheduleSet { server: "a".into(), when: When::Daily { hour: 3, minute: 30 } }));
-        assert_eq!(p("schedule", &["set", "a", "--weekly", "sun", "04:00", "--as-user"]), Ok(Op::ScheduleSet { server: "a".into(), when: When::Weekly { day: "sun", hour: 4, minute: 0 } }));
+        assert_eq!(p("schedule", &["off", DIR]), Ok(Op::ScheduleOff { dir: DIR.into() }));
+        assert_eq!(p("schedule", &["set", DIR, "--daily", "03:30"]), Ok(Op::ScheduleSet { dir: DIR.into(), when: When::Daily { hour: 3, minute: 30 } }));
+        assert_eq!(p("schedule", &["set", DIR, "--weekly", "sun", "04:00", "--as-user"]), Ok(Op::ScheduleSet { dir: DIR.into(), when: When::Weekly { day: "sun", hour: 4, minute: 0 } }));
         assert_eq!(p("self-update", &["--yes"]), Ok(Op::UpdateApply { version: None }));
         assert_eq!(p("self-update", &["--version", "v0.8.0"]), Ok(Op::UpdateApply { version: Some("v0.8.0".into()) }));
     }
@@ -461,14 +462,14 @@ mod tests {
             ("admin-db", vec!["start", "--other"]),
             ("check", vec![]),
             ("tools", vec!["install", "node"]),
-            ("schedule", vec!["show", "a"]),
-            ("schedule", vec!["off", "/srv/other"]),
-            ("schedule", vec!["off", r"C:\Users\x\srv"]),
+            ("schedule", vec!["show", DIR]),
+            ("schedule", vec!["off", "my-server"]),
+            ("schedule", vec!["off", "relative/dir"]),
             ("schedule", vec!["off", ".."]),
-            ("schedule", vec!["set", "a", "--as-system"]),
-            ("schedule", vec!["set", "a", "--daily", "25:00"]),
-            ("schedule", vec!["set", "a", "--daily", "4:00"]),
-            ("schedule", vec!["set", "a", "--daily", "04:00", "--weekly", "mon", "04:00"]),
+            ("schedule", vec!["set", DIR, "--as-system"]),
+            ("schedule", vec!["set", DIR, "--daily", "25:00"]),
+            ("schedule", vec!["set", DIR, "--daily", "4:00"]),
+            ("schedule", vec!["set", DIR, "--daily", "04:00", "--weekly", "mon", "04:00"]),
             ("self-update", vec!["--version", "latest"]),
             ("self-update", vec!["--version", "v1.2.3; rm"]),
             ("self-update", vec!["--check"]),
@@ -499,13 +500,13 @@ mod tests {
         assert_eq!(op.child_args(), ["--no-elevate", "admin-step", "undo", "--step", "system.firewall", "--dir", DIR, "--name", "a", "--game-port", "30120", "--txadmin-port", "40120", "--keep-db"]);
         // the child's text round-trips to the same operation (what the service runs is what it checked)
         for op in
-            [op, Op::ScheduleSet { server: "a".into(), when: When::Weekly { day: "fri", hour: 2, minute: 5 } }, Op::UpdateApply { version: Some("v1.0.0".into()) }, Op::InstallGit, Op::StartDatabase]
+            [op, Op::ScheduleSet { dir: DIR.into(), when: When::Weekly { day: "fri", hour: 2, minute: 5 } }, Op::UpdateApply { version: Some("v1.0.0".into()) }, Op::InstallGit, Op::StartDatabase]
         {
             let a = op.child_args();
             assert_eq!(a[0], "--no-elevate");
             assert_eq!(parse(&a[1], &a[2..], &BTreeMap::new()), Ok(op.clone()), "{a:?}");
         }
-        let s = Op::ScheduleSet { server: "a".into(), when: When::Default };
+        let s = Op::ScheduleSet { dir: DIR.into(), when: When::Default };
         assert!(s.child_args().contains(&"--as-user".to_string()), "update tasks always run as the person");
         let u = Op::UpdateApply { version: None };
         assert_eq!(u.child_args(), ["--no-elevate", "self-update", "--yes"]);

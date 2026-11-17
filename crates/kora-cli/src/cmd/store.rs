@@ -257,6 +257,10 @@ fn write(op: Op, server: Option<&str>, res: &str, detail: Option<String>) {
 /// Work out from the command line (already known to parse) whether this command changes something, and note its start.
 pub fn audit_start<C: CommandFactory>() -> CliAudit {
     let none = CliAudit { op: None, server: None };
+    // A child of the administrator service never opens a person's store (the service has its own audit log).
+    if kora_core::privsvc::paths::in_service() {
+        return none;
+    }
     let Ok(top) = C::command().try_get_matches_from(std::env::args_os()) else { return none };
     let mut path: Vec<String> = Vec::new();
     let mut m = &top;

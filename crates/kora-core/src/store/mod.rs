@@ -129,6 +129,30 @@ impl std::fmt::Debug for Store {
     }
 }
 
+/// The privileged side (a child of the administrator service) must never open a person's store: root would create
+/// `-wal` / `-shm` files and change permissions there, and the database is a file the person controls. The child
+/// calls [`forbid_in_this_process`] first thing; every way of opening a store then fails and is counted, so a test can
+/// prove that no privileged path touches it (`crates/kora-core/tests/privileged_never_opens_a_store.rs`).
+static FORBIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static REFUSED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn forbid_in_this_process() {
+    FORBIDDEN.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// How many times something tried to open a store after [`forbid_in_this_process`].
+pub fn refused_opens() -> usize {
+    REFUSED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn check_allowed() -> Result<(), Problem> {
+    if FORBIDDEN.load(std::sync::atomic::Ordering::SeqCst) {
+        REFUSED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        return Err(Problem::new(codes::STORE_UNREADABLE, "Kora's administrator service does not open a person's data file."));
+    }
+    Ok(())
+}
+
 /// One process at a time may create/migrate/import inside this process; across processes SQLite's
 /// `BEGIN IMMEDIATE` does the same.
 static INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -148,6 +172,7 @@ impl Store {
 
     /// Open (creating, migrating and importing old JSON files as needed) the store in `home`.
     pub fn open(home: &Path) -> Result<Store, Problem> {
+        check_allowed()?;
         let mut s = Store::open_raw(home)?;
         let _g = INIT.lock().unwrap_or_else(|p| p.into_inner());
         s.migrate()?;
@@ -159,6 +184,7 @@ impl Store {
     /// old JSON files to import, so asking never creates anything (a fresh machine, or a test that never
     /// set `KORA_HOME`).
     pub fn open_existing(home: &Path) -> Result<Option<Store>, Problem> {
+        check_allowed()?;
         if !db_path(home).exists() && !legacy::any_legacy_files(home) {
             return Ok(None);
         }
@@ -171,6 +197,7 @@ impl Store {
 
     /// Open without migrating or importing (backups, `store status`, tests).
     pub fn open_raw(home: &Path) -> Result<Store, Problem> {
+        check_allowed()?;
         let dir = store_dir(home);
         let db = db_path(home);
         privacy::ensure_private_dir(home, &dir)?;

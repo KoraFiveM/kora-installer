@@ -338,6 +338,6 @@ async fn the_schedule_change_goes_to_the_service_and_never_to_the_panel() {
     r.fake.state().elevation = Some(vec!["schedule".into(), "off".into(), "dev".into()]);
     let (s, _) = r.call("DELETE", "/servers/dev/schedule", None).await;
     assert_eq!(s, 204);
-    assert_eq!(b.log().calls[0], ("schedule".to_string(), vec!["off".to_string(), "dev".into()]));
+    assert_eq!(b.log().calls[0], ("schedule".to_string(), vec!["off".to_string(), "/srv/dev".into()]));
     assert!(!r.fake.calls().iter().any(|c| c.starts_with("schedule_remove")), "the panel never does it itself");
 }

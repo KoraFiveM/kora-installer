@@ -153,8 +153,16 @@ struct Prepared {
 fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Result<Prepared, Rejected> {
     let mut ports = None;
     let mut p = Prepared::default();
-    match operation {
-        Op::Step { undo, step, dir, known, .. } => {
+    // Every operation on a server works on a FOLDER: an install step, and an update schedule too (never a name looked
+    // up in the caller's own server list, which the privileged side does not open).
+    let (undo, step, dir, known) = match operation {
+        Op::Step { undo, step, dir, known, .. } => (*undo, *step, Some(dir), known.as_ref()),
+        Op::ScheduleSet { dir, .. } => (false, StepId::Schedule, Some(dir), None),
+        Op::ScheduleOff { dir } => (true, StepId::Schedule, Some(dir), None),
+        _ => (false, StepId::Schedule, None, None),
+    };
+    match (operation.dir(), dir) {
+        (Some(_), Some(dir)) => {
             let owner = host.folder_owner(dir).map_err(|e| Rejected(format!("Kora's service will not work on {dir}: {e}.")))?;
             let rec = host.install_record(dir);
             // root may work on any folder with a record (root could do it all anyway); everyone else on their own.
@@ -175,7 +183,7 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
             ports = rec.map(|r| (r.game_port, r.txadmin_port));
             p.slug = crate::installer::slug(&name);
             let db = host.db_name(dir);
-            p.keys = ownership::keys_for(*step, &p.slug, db.as_deref());
+            p.keys = ownership::keys_for(step, &p.slug, db.as_deref());
             // A folder handed to the server's own account (a root-run install, or this service's earlier
             // run) is the caller's only when the ledger says the server's service is theirs.
             if by_server_account && !is_root {
@@ -185,10 +193,6 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
                     return Err(Rejected(format!("Kora's service will not work on {dir}: it belongs to the server's own account and Kora's records do not show it as yours. An administrator can finish upgrading Kora to fix that.")));
                 }
             }
-        }
-        Op::ScheduleSet { server, .. } | Op::ScheduleOff { server } => {
-            p.slug = crate::installer::slug(server);
-            p.keys = ownership::keys_for(StepId::Schedule, &p.slug, None);
         }
         _ => {}
     }
@@ -362,7 +366,7 @@ mod tests {
         let mut none = fake();
         none.record = None;
         assert!(matches!(run(DIR, &none), Reply::Refused(m) if m.0.contains("no Kora install record")));
-        for (v, a) in [("install", s(&["--dir", DIR])), ("uninstall", s(&[])), ("schedule", s(&["set", "a", "--as-system"])), ("self-update", s(&["--version", "v0.1.0"]))] {
+        for (v, a) in [("install", s(&["--dir", DIR])), ("uninstall", s(&[])), ("schedule", s(&["set", DIR, "--as-system"])), ("self-update", s(&["--version", "v0.1.0"]))] {
             let r = handle(&h, &policy(), &caller(me()), v, &a, &BTreeMap::new(), &never, &mut |_, _| {});
             assert!(matches!(r, Reply::Refused(_)), "{v}");
         }
@@ -419,9 +423,9 @@ mod tests {
         };
         let mut env = BTreeMap::new();
         env.insert("CFX_LICENSE_KEY".to_string(), "cfxk_x".to_string());
-        handle(&h, &policy(), &caller(me()), "schedule", &s(&["set", "Main", "--daily", "03:00"]), &env, &spy, &mut |_, _| {});
+        handle(&h, &policy(), &caller(me()), "schedule", &s(&["set", DIR, "--daily", "03:00"]), &env, &spy, &mut |_, _| {});
         let (a, e, t) = seen.borrow().clone().unwrap();
-        assert_eq!(a, ["--no-elevate", "schedule", "set", "Main", "--as-user", "--daily", "03:00"]);
+        assert_eq!(a, ["--no-elevate", "schedule", "set", DIR, "--as-user", "--daily", "03:00"]);
         assert_eq!(e.len(), 1);
         assert_eq!(t, std::time::Duration::from_secs(180));
         assert_eq!(h.ledger.borrow().owner("task:main"), Some("uid:1000"));
