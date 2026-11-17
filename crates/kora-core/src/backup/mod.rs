@@ -58,6 +58,7 @@ pub mod codes {
 
 pub mod create;
 pub mod resources;
+pub mod restore;
 
 use crate::db::SystemRunner;
 use serde::{Deserialize, Serialize};
