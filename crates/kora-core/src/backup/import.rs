@@ -808,12 +808,14 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         if in_container {
             if !st.done.iter().any(|d| d == "container") {
                 ev("container", "Setting up the container engine", 30);
-                let (engine, status, _) = crate::container::setup::choose_engine(None)?;
-                let lent: crate::container::ContainerRequest = std::fs::read(stage.join(SERVER_DIR).join(crate::container::record::FILE))
-                    .ok()
-                    .and_then(|b| serde_json::from_slice::<crate::container::ContainerRecord>(&b).ok())
-                    .map(|r| crate::container::ContainerRequest { engine: None, bind: r.bind, memory_mb: r.memory_mb, cpu_tenths: r.cpu_tenths })
-                    .unwrap_or_default();
+                let from_backup = std::fs::read(stage.join(SERVER_DIR).join(crate::container::record::FILE)).ok().and_then(|b| serde_json::from_slice::<crate::container::ContainerRecord>(&b).ok());
+                // The engine the server ran on comes along when this computer has it (a Docker server stays on Docker); else the best one found.
+                let (engine, status, _) = match from_backup.as_ref().map(|r| r.engine) {
+                    Some(kind) => crate::container::setup::choose_engine(Some(kind)).or_else(|_| crate::container::setup::choose_engine(None))?,
+                    None => crate::container::setup::choose_engine(None)?,
+                };
+                let lent: crate::container::ContainerRequest =
+                    from_backup.map(|r| crate::container::ContainerRequest { engine: None, bind: r.bind, memory_mb: r.memory_mb, cpu_tenths: r.cpu_tenths }).unwrap_or_default();
                 let rec = crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &lent, with_db_container)
                     .or_else(|_| crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &Default::default(), with_db_container))
                     .map_err(Problem::generic)?;
