@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { it } from 'vitest'
 import { resolve } from 'node:path'
 import { scanAll } from './hardcoded.scan'

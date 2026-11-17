@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * Finds user-facing text written straight into the source instead of the catalogue. Used by hardcoded.test.ts (which
  * fails when a new one appears) and by `scripts/i18n-todo.mjs`-style listings while extracting.
