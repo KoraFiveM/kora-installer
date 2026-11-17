@@ -5,7 +5,7 @@
 // the tests sign in with a one-time code link asked for like `kora panel --print-link` does. It is stopped when
 // the test run ends.
 import { test as base, expect, type Page } from '@playwright/test'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -116,7 +116,18 @@ async function startPanel(): Promise<{ panel: Panel; stop: () => Promise<void> }
       await new Promise((r) => setTimeout(r, 500))
       if (exited === null) child.kill('SIGKILL')
     }
-    rmSync(root, { recursive: true, force: true })
+    try {
+      rmSync(root, { recursive: true, force: true })
+    } catch {
+      // The panel's container-engine check runs `podman info` with this throw-away HOME, and rootless podman then keeps
+      // files owned by its own user-namespace ids there: only podman itself can remove them. Best effort, never a test failure.
+      spawnSync('podman', ['unshare', 'rm', '-rf', root], { stdio: 'ignore' })
+      try {
+        rmSync(root, { recursive: true, force: true })
+      } catch {
+        // left in /tmp of a throw-away runner
+      }
+    }
   }
   return { panel, stop }
 }
