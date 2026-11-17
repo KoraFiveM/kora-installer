@@ -21,15 +21,9 @@ enum Entry {
 use Entry::{CliOnly, Removed, Route};
 
 const TABLE: &[(&str, Entry)] = &[
-    (
-        "--no-elevate",
-        CliOnly("the panel runs as the signed-in user and never relaunches itself"),
-    ),
+    ("--no-elevate", CliOnly("the panel runs as the signed-in user and never relaunches itself")),
     ("install", Route(Op::InstallStart)),
-    (
-        "install --code",
-        Removed("setup codes no longer exist (0.4.0)"),
-    ),
+    ("install --code", Removed("setup codes no longer exist (0.4.0)")),
     ("install --name", Route(Op::InstallStart)),
     ("install --dir", Route(Op::InstallStart)),
     ("install --mode", Route(Op::InstallStart)),
@@ -47,12 +41,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --service", Route(Op::InstallStart)),
     ("install --firewall", Route(Op::InstallStart)),
     ("install --github-owner", Route(Op::InstallStart)),
-    (
-        "install --catalog",
-        CliOnly(
-            "hidden developer override of the catalog source; the panel reads the catalog itself",
-        ),
-    ),
+    ("install --catalog", CliOnly("hidden developer override of the catalog source; the panel reads the catalog itself")),
     ("install --db-admin-user", Route(Op::InstallStart)),
     ("install --db-admin-host", Route(Op::InstallStart)),
     ("install --db-admin-port", Route(Op::InstallStart)),
@@ -66,10 +55,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("install --game-build", Route(Op::InstallStart)),
     ("install --fix-permissions", CliOnly("changes folder permissions as administrator; the panel runs as the signed-in user and reports the problem with the command to run")),
     ("install --yes", CliOnly("the panel confirms in the UI")),
-    (
-        "manager",
-        CliOnly("an alias that opens the panel itself (the same as a bare `kora`)"),
-    ),
+    ("manager", CliOnly("an alias that opens the panel itself (the same as a bare `kora`)")),
     ("panel", CliOnly("starts the panel itself")),
     ("panel --port", CliOnly("starts the panel itself")),
     ("panel --no-open", CliOnly("starts the panel itself")),
@@ -118,24 +104,15 @@ const TABLE: &[(&str, Entry)] = &[
     ("update --force", Route(Op::SnapshotRollback)),
     ("add-resources", Route(Op::ResourcesAdd)),
     ("add-resources <server>", Route(Op::ResourcesAdd)),
-    (
-        "add-resources --code",
-        Removed("setup codes no longer exist (0.4.0)"),
-    ),
+    ("add-resources --code", Removed("setup codes no longer exist (0.4.0)")),
     ("add-resources --resource", Route(Op::ResourcesAdd)),
     ("add-resources --dry-run", Route(Op::ResourcesPlan)),
-    (
-        "add-resources --yes",
-        CliOnly("the panel confirms in the UI"),
-    ),
+    ("add-resources --yes", CliOnly("the panel confirms in the UI")),
     ("add-asset", Route(Op::AssetImport)),
     ("add-asset <server>", Route(Op::AssetImport)),
     ("add-asset <zip>", Route(Op::AssetImport)),
     ("add-asset --dry-run", Route(Op::AssetInspect)),
-    (
-        "add-asset --yes",
-        CliOnly("the panel confirms in the UI"),
-    ),
+    ("add-asset --yes", CliOnly("the panel confirms in the UI")),
     ("status", Route(Op::ServersList)),
     ("self-update", Route(Op::SelfUpdateApply)),
     ("self-update --check", Route(Op::SelfUpdateCheck)),
@@ -145,10 +122,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("webhook set", Route(Op::WebhookSet)),
     ("webhook set <server>", Route(Op::WebhookSet)),
     ("webhook set <url>", Route(Op::WebhookSet)),
-    (
-        "webhook set --stdin",
-        CliOnly("the panel takes the URL in the request body, not from a terminal"),
-    ),
+    ("webhook set --stdin", CliOnly("the panel takes the URL in the request body, not from a terminal")),
     ("webhook set --test", Route(Op::WebhookTest)),
     ("webhook test", Route(Op::WebhookTest)),
     ("webhook test <server>", Route(Op::WebhookTest)),
@@ -180,10 +154,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("app install --dry-run", Route(Op::AppInstall)),
     ("app status", Route(Op::AppStatus)),
     ("app uninstall", Route(Op::AppUninstall)),
-    (
-        "app uninstall --yes",
-        CliOnly("the panel confirms in the UI"),
-    ),
+    ("app uninstall --yes", CliOnly("the panel confirms in the UI")),
     ("app uninstall --dry-run", Route(Op::AppUninstall)),
     ("tools", Route(Op::ToolsStatus)),
     ("tools status", Route(Op::ToolsStatus)),
@@ -276,14 +247,8 @@ const TABLE: &[(&str, Entry)] = &[
     ("admin-step --txadmin-port", CliOnly("run by the panel's administrator helper for one install or delete step, never by a person")),
     ("admin-step --keep-files", CliOnly("run by the panel's administrator helper for one install or delete step, never by a person")),
     ("admin-step --keep-db", CliOnly("run by the panel's administrator helper for one install or delete step, never by a person")),
-    (
-        "service-host",
-        CliOnly("run by the operating system service, never by a person"),
-    ),
-    (
-        "service-host <name>",
-        CliOnly("run by the operating system service, never by a person"),
-    ),
+    ("service-host", CliOnly("run by the operating system service, never by a person")),
+    ("service-host <name>", CliOnly("run by the operating system service, never by a person")),
     ("start", Route(Op::ServerControl)),
     ("start <server>", Route(Op::ServerControl)),
     ("stop", Route(Op::ServerControl)),
@@ -301,17 +266,10 @@ const TABLE: &[(&str, Entry)] = &[
 
 fn walk(c: &clap::Command, prefix: &str, out: &mut BTreeSet<String>) {
     for a in c.get_arguments() {
-        if matches!(
-            a.get_action(),
-            clap::ArgAction::Help | clap::ArgAction::Version
-        ) {
+        if matches!(a.get_action(), clap::ArgAction::Help | clap::ArgAction::Version) {
             continue;
         }
-        let name = if a.is_positional() {
-            format!("<{}>", a.get_id())
-        } else {
-            format!("--{}", a.get_long().unwrap_or(a.get_id().as_str()))
-        };
+        let name = if a.is_positional() { format!("<{}>", a.get_id()) } else { format!("--{}", a.get_long().unwrap_or(a.get_id().as_str())) };
         out.insert(format!("{prefix} {name}").trim().to_string());
     }
     for s in c.get_subcommands().filter(|s| s.get_name() != "help") {
@@ -330,26 +288,15 @@ fn cli_items() -> BTreeSet<String> {
 #[test]
 fn every_cli_item_is_classified() {
     let listed: BTreeSet<&str> = TABLE.iter().map(|(k, _)| *k).collect();
-    let missing: Vec<String> = cli_items()
-        .into_iter()
-        .filter(|i| !listed.contains(i.as_str()))
-        .collect();
+    let missing: Vec<String> = cli_items().into_iter().filter(|i| !listed.contains(i.as_str())).collect();
     assert!(missing.is_empty(), "add these to TABLE in crates/kora-cli/src/parity.rs (Route(Op::..), CliOnly or Removed):\n{}", missing.join("\n"));
 }
 
 #[test]
 fn no_stale_entries() {
     let items = cli_items();
-    let stale: Vec<&str> = TABLE
-        .iter()
-        .map(|(k, _)| *k)
-        .filter(|k| !items.contains(*k))
-        .collect();
-    assert!(
-        stale.is_empty(),
-        "the CLI no longer has these; remove them from TABLE:\n{}",
-        stale.join("\n")
-    );
+    let stale: Vec<&str> = TABLE.iter().map(|(k, _)| *k).filter(|k| !items.contains(*k)).collect();
+    assert!(stale.is_empty(), "the CLI no longer has these; remove them from TABLE:\n{}", stale.join("\n"));
     let mut seen = BTreeSet::new();
     for (k, _) in TABLE {
         assert!(seen.insert(*k), "duplicate entry {k}");

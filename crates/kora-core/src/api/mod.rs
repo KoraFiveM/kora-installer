@@ -14,9 +14,9 @@ pub mod install;
 pub mod jobs;
 pub mod logs;
 pub mod maintenance;
-pub mod parity;
-pub mod panel_updates;
 pub mod ops;
+pub mod panel_updates;
+pub mod parity;
 pub mod system;
 pub mod toolchain;
 

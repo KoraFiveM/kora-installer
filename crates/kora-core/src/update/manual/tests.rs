@@ -7,15 +7,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn sh(dir: &Path, args: &[&str]) -> String {
-    let o = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@t")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@t")
-        .output()
-        .unwrap();
+    let o =
+        Command::new("git").args(args).current_dir(dir).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap();
     assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }
@@ -108,11 +101,7 @@ fn dev_env() -> Env {
 }
 
 fn opts(restart: RestartPolicy, skip: &[&str]) -> ApplyOpts {
-    ApplyOpts {
-        restart,
-        skip: skip.iter().map(|s| s.to_string()).collect(),
-        targets: None,
-    }
+    ApplyOpts { restart, skip: skip.iter().map(|s| s.to_string()).collect(), targets: None }
 }
 
 fn run(env: &Env, scope: Scope, o: ApplyOpts, h: &Health, players: Option<u32>, now: u64) -> (UpdateReport, Vec<UpdateEvent>) {
@@ -238,24 +227,10 @@ fn manual_rollback_from_a_saved_snapshot() {
     let old: Vec<String> = (0..3).map(|i| head(&env.path(i))).collect();
     run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 20);
     assert_ne!(head(&env.path(0)), old[0]);
-    run(
-        &env,
-        Scope::All,
-        opts(RestartPolicy::None, &[]),
-        &Health::ok(),
-        Some(0),
-        21,
-    );
-    assert_eq!(
-        snapshots(&env.sf).len(),
-        1,
-        "second run had nothing to update, so no snapshot"
-    );
+    run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 21);
+    assert_eq!(snapshots(&env.sf).len(), 1, "second run had nothing to update, so no snapshot");
     rollback_with(&env.sf, "20", &GitCli::default(), false).unwrap();
-    assert_eq!(
-        (0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(),
-        old[..3]
-    );
+    assert_eq!((0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(), old[..3]);
     assert!(rollback_with(&env.sf, "99", &GitCli::default(), false).is_err());
     assert!(rollback_with(&env.sf, "../x", &GitCli::default(), false).is_err());
 }
@@ -299,7 +274,15 @@ fn prod_env() -> (Env, [String; 3]) {
     std::fs::create_dir_all(fork.parent().unwrap()).unwrap();
     sh(t.path(), &["clone", "-q", up.to_str().unwrap(), fork.to_str().unwrap()]);
     sh(&fork, &["checkout", "-q", "--detach", &c1]);
-    let rec = ResourceRecord { id: "kora-chat".into(), path: "[kora]/kora_chat".into(), repository: "https://github.com/x/kora_chat.git".into(), branch: "main".into(), commit: Some(c1.clone()), third_party: false, ..Default::default() };
+    let rec = ResourceRecord {
+        id: "kora-chat".into(),
+        path: "[kora]/kora_chat".into(),
+        repository: "https://github.com/x/kora_chat.git".into(),
+        branch: "main".into(),
+        commit: Some(c1.clone()),
+        third_party: false,
+        ..Default::default()
+    };
     let env = server(Mode::Production, vec![rec], t, dir);
     env.sf.save().unwrap();
     (env, [c1, c2, c3])
@@ -401,20 +384,9 @@ fn a_single_resource_apply_refreshes_the_whole_server_status_without_fetching() 
     let env = dev_env();
     preview_with(&env.sf, Scope::All, &GitCli::default(), None).unwrap();
     assert_eq!(status_of(&env)["updates"], 3);
-    run(
-        &env,
-        Scope::Resources(vec!["kora-chat".into()]),
-        opts(RestartPolicy::None, &[]),
-        &Health::ok(),
-        Some(0),
-        34,
-    );
+    run(&env, Scope::Resources(vec!["kora-chat".into()]), opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 34);
     let v = status_of(&env);
-    assert_eq!(
-        (v["updates"].clone(), v["attention"].clone()),
-        (serde_json::json!(2), serde_json::json!(0)),
-        "{v}"
-    );
+    assert_eq!((v["updates"].clone(), v["attention"].clone()), (serde_json::json!(2), serde_json::json!(0)), "{v}");
 }
 
 #[test]
@@ -439,10 +411,7 @@ struct Spy {
 }
 impl Spy {
     fn new() -> Spy {
-        Spy {
-            inner: GitCli::default(),
-            fetched: RefCell::new(vec![]),
-        }
+        Spy { inner: GitCli::default(), fetched: RefCell::new(vec![]) }
     }
     fn last(&self) -> Vec<String> {
         self.fetched.borrow().last().cloned().unwrap_or_default()
@@ -453,9 +422,7 @@ impl GitOps for Spy {
         self.inner.fetch(r)
     }
     fn fetch_many(&self, t: &[&UpdateTarget], m: FetchMode) -> Vec<GitResult<()>> {
-        self.fetched
-            .borrow_mut()
-            .push(t.iter().map(|t| t.id.clone()).collect());
+        self.fetched.borrow_mut().push(t.iter().map(|t| t.id.clone()).collect());
         self.inner.fetch_many(t, m)
     }
     fn has_ref(&self, r: &Path, rev: &str) -> bool {
@@ -541,22 +508,11 @@ fn org_hint_unavailable_falls_back_to_fetching_everything() {
     let spy = Spy::new();
     let mut h = hints(&org_with("t1"), &file);
     preview_with_hints(&env.sf, Scope::All, &spy, None, None, Some(&mut h)).unwrap();
-    for (n, bad) in [
-        OrgReply::RateLimited,
-        OrgReply::Failed("offline".into()),
-        OrgReply::Fresh { etag: None, body: "<html>".into() },
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    for (n, bad) in [OrgReply::RateLimited, OrgReply::Failed("offline".into()), OrgReply::Fresh { etag: None, body: "<html>".into() }].into_iter().enumerate() {
         let up = commit(&env.up(0), &format!("x{n}"), "more");
         let mut h = hints(&Org(bad), &file);
         let p = preview_with_hints(&env.sf, Scope::All, &spy, None, None, Some(&mut h)).unwrap();
-        assert_eq!(
-            spy.last().len(),
-            3,
-            "a failed pre-check must run the full check"
-        );
+        assert_eq!(spy.last().len(), 3, "a failed pre-check must run the full check");
         assert_eq!(p.resources[0].to, up);
     }
 }
@@ -565,13 +521,7 @@ fn org_hint_unavailable_falls_back_to_fetching_everything() {
 fn one_resource_preview_fetches_only_that_resource() {
     let env = dev_env();
     let spy = Spy::new();
-    let p = preview_with(
-        &env.sf,
-        Scope::Resources(vec!["kora_hud".into()]),
-        &spy,
-        None,
-    )
-    .unwrap();
+    let p = preview_with(&env.sf, Scope::Resources(vec!["kora_hud".into()]), &spy, None).unwrap();
     assert_eq!(spy.last(), vec!["kora-hud"]);
     assert_eq!(p.resources.len(), 1);
 }
@@ -604,14 +554,7 @@ fn apply_right_after_a_preview_does_not_fetch_again() {
     for i in 0..3 {
         std::fs::remove_dir_all(env.up(i)).unwrap();
     }
-    let (r, _) = run(
-        &env,
-        Scope::All,
-        opts(RestartPolicy::None, &[]),
-        &Health::ok(),
-        Some(0),
-        11,
-    );
+    let (r, _) = run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 11);
     assert_eq!(r.updated.len(), 3, "skipped: {:?}", r.skipped);
 }
 
@@ -620,23 +563,12 @@ fn production_with_the_pinned_commit_already_present_needs_no_network() {
     let env = dev_env();
     let git = GitCli::default();
     let path = env.path(0);
-    sh(
-        &path,
-        &["remote", "set-url", "origin", "/nonexistent/nowhere"],
-    );
+    sh(&path, &["remote", "set-url", "origin", "/nonexistent/nowhere"]);
     let present = head(&path);
-    let t = |c: &str| UpdateTarget {
-        id: "kora-chat".into(),
-        path: path.clone(),
-        upstream_ref: c.into(),
-        class: crate::update::ResourceClass::from_id("kora-chat"),
-    };
+    let t = |c: &str| UpdateTarget { id: "kora-chat".into(), path: path.clone(), upstream_ref: c.into(), class: crate::update::ResourceClass::from_id("kora-chat") };
     let r = git.fetch_many(&[&t(&present)], FetchMode::Fresh);
     assert!(r[0].is_ok(), "the commit is here: no fetch");
-    let r = git.fetch_many(
-        &[&t("0123456789abcdef0123456789abcdef01234567")],
-        FetchMode::Fresh,
-    );
+    let r = git.fetch_many(&[&t("0123456789abcdef0123456789abcdef01234567")], FetchMode::Fresh);
     assert!(r[0].is_err(), "a missing commit does ask the remote");
 }
 
@@ -654,28 +586,10 @@ fn production_never_moves_away_from_a_commit_of_the_users_own() {
     let cat = prod_cat(&env, &[("0.2.0", &c2), ("0.1.0", &c1)], "0.2.0");
     let p = preview_with(&env.sf, Scope::All, &GitCli::default(), Some(&cat)).unwrap();
     assert_eq!(p.resources[0].status, ChangeStatus::Diverged, "{p:?}");
-    let r = apply_with(
-        &env.sf,
-        Scope::All,
-        opts(RestartPolicy::None, &[]),
-        &GitCli::default(),
-        &Health::ok(),
-        Some(&cat),
-        Some(0),
-        70,
-        &mut |_| {},
-    )
-    .unwrap();
+    let r = apply_with(&env.sf, Scope::All, opts(RestartPolicy::None, &[]), &GitCli::default(), &Health::ok(), Some(&cat), Some(0), 70, &mut |_| {}).unwrap();
     assert!(r.updated.is_empty());
-    assert_eq!(
-        r.skipped,
-        vec![("kora-chat".to_string(), SkipReason::Diverged)]
-    );
-    assert_eq!(
-        head(&env.path(0)),
-        mine,
-        "the user's commit is still checked out"
-    );
+    assert_eq!(r.skipped, vec![("kora-chat".to_string(), SkipReason::Diverged)]);
+    assert_eq!(head(&env.path(0)), mine, "the user's commit is still checked out");
     assert_eq!(exit_code(&r), 3);
 }
 
@@ -686,18 +600,7 @@ fn production_never_moves_to_an_older_release() {
     let cat = prod_cat(&env, &[("0.2.0", &c2), ("0.1.0", &c1)], "0.2.0");
     let p = preview_with(&env.sf, Scope::All, &GitCli::default(), Some(&cat)).unwrap();
     assert_eq!(p.resources[0].status, ChangeStatus::UpToDate);
-    let r = apply_with(
-        &env.sf,
-        Scope::All,
-        opts(RestartPolicy::None, &[]),
-        &GitCli::default(),
-        &Health::ok(),
-        Some(&cat),
-        Some(0),
-        71,
-        &mut |_| {},
-    )
-    .unwrap();
+    let r = apply_with(&env.sf, Scope::All, opts(RestartPolicy::None, &[]), &GitCli::default(), &Health::ok(), Some(&cat), Some(0), 71, &mut |_| {}).unwrap();
     assert!(r.updated.is_empty());
     assert_eq!(head(&env.path(0)), c3);
 }
@@ -705,23 +608,12 @@ fn production_never_moves_to_an_older_release() {
 #[test]
 fn production_offline_with_a_missing_release_says_it_could_not_check() {
     let (env, [c1, _, _]) = prod_env();
-    sh(
-        &env.path(0),
-        &["remote", "set-url", "origin", "/nonexistent/nowhere"],
-    );
+    sh(&env.path(0), &["remote", "set-url", "origin", "/nonexistent/nowhere"]);
     let missing = "0123456789abcdef0123456789abcdef01234567";
     let cat = prod_cat(&env, &[("0.3.0", missing), ("0.1.0", &c1)], "0.3.0");
     let p = preview_with(&env.sf, Scope::All, &GitCli::default(), Some(&cat)).unwrap();
-    assert_ne!(
-        p.resources[0].status,
-        ChangeStatus::Clean,
-        "never 'ready' when nothing could be compared"
-    );
-    assert!(
-        p.resources[0].changelog[0].contains("couldn't check (offline?)"),
-        "{:?}",
-        p.resources[0].changelog
-    );
+    assert_ne!(p.resources[0].status, ChangeStatus::Clean, "never 'ready' when nothing could be compared");
+    assert!(p.resources[0].changelog[0].contains("couldn't check (offline?)"), "{:?}", p.resources[0].changelog);
     assert_eq!(head(&env.path(0)), c1);
 }
 
@@ -740,29 +632,9 @@ fn production_lists_resources_the_catalog_dropped_and_warns_about_the_built_in_c
     });
     let cat = prod_cat(&env, &[("0.2.0", &c2), ("0.1.0", &c1)], "0.2.0");
     let note = catalog_note(&catalog::CatalogOrigin::Embedded("offline".into()));
-    let p = preview_with_hints(
-        &sf,
-        Scope::All,
-        &GitCli::default(),
-        Some(&cat),
-        note.as_deref(),
-        None,
-    )
-    .unwrap();
-    assert!(
-        p.notes
-            .iter()
-            .any(|n| n.contains("built into this version of Kora")),
-        "{:?}",
-        p.notes
-    );
-    assert!(
-        p.notes
-            .iter()
-            .any(|n| n == "kora-gone: no longer in the catalog (left as is)"),
-        "{:?}",
-        p.notes
-    );
+    let p = preview_with_hints(&sf, Scope::All, &GitCli::default(), Some(&cat), note.as_deref(), None).unwrap();
+    assert!(p.notes.iter().any(|n| n.contains("built into this version of Kora")), "{:?}", p.notes);
+    assert!(p.notes.iter().any(|n| n == "kora-gone: no longer in the catalog (left as is)"), "{:?}", p.notes);
     assert!(render_preview(&p).contains("Note: kora-gone"));
     assert_eq!(catalog_note(&catalog::CatalogOrigin::Remote), None);
 }
@@ -774,23 +646,9 @@ fn production_records_the_new_pin_without_losing_what_another_tool_wrote() {
     on_disk.kora_version = "9.9.9".into();
     on_disk.save().unwrap();
     let cat = prod_cat(&env, &[("0.2.0", &c2), ("0.1.0", &c1)], "0.2.0");
-    apply_with(
-        &env.sf,
-        Scope::All,
-        opts(RestartPolicy::None, &[]),
-        &GitCli::default(),
-        &Health::ok(),
-        Some(&cat),
-        Some(0),
-        72,
-        &mut |_| {},
-    )
-    .unwrap();
+    apply_with(&env.sf, Scope::All, opts(RestartPolicy::None, &[]), &GitCli::default(), &Health::ok(), Some(&cat), Some(0), 72, &mut |_| {}).unwrap();
     let after = ServerFile::load(&env.sf.dir).unwrap();
-    assert_eq!(
-        after.kora_version, "9.9.9",
-        "the file is read again under the lock"
-    );
+    assert_eq!(after.kora_version, "9.9.9", "the file is read again under the lock");
     assert_eq!(after.resources[0].commit.as_deref(), Some(c2.as_str()));
 }
 
@@ -801,26 +659,11 @@ fn preview_apply_and_rollback_refuse_while_another_update_runs() {
     let held = crate::update::lock::acquire(&env.sf.dir).unwrap();
     let e = preview_with(&env.sf, Scope::All, &GitCli::default(), None).unwrap_err();
     assert!(lock::is_busy_message(&e.to_string()), "{e}");
-    let e = apply_with(
-        &env.sf,
-        Scope::All,
-        opts(RestartPolicy::None, &[]),
-        &GitCli::default(),
-        &Health::ok(),
-        None,
-        Some(0),
-        80,
-        &mut |_| {},
-    )
-    .unwrap_err();
+    let e = apply_with(&env.sf, Scope::All, opts(RestartPolicy::None, &[]), &GitCli::default(), &Health::ok(), None, Some(0), 80, &mut |_| {}).unwrap_err();
     assert!(lock::is_busy_message(&e.to_string()), "{e}");
     let e = rollback_with(&env.sf, "1", &GitCli::default(), false).unwrap_err();
     assert!(lock::is_busy_message(&e.to_string()), "{e}");
-    assert_eq!(
-        (0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(),
-        before,
-        "nothing moved"
-    );
+    assert_eq!((0..3).map(|i| head(&env.path(i))).collect::<Vec<_>>(), before, "nothing moved");
     assert!(snapshots(&env.sf).is_empty());
     drop(held);
     assert!(preview_with(&env.sf, Scope::All, &GitCli::default(), None).is_ok());
@@ -832,30 +675,17 @@ fn a_preview_cannot_start_while_an_apply_holds_the_lock() {
     struct Probe<'a>(&'a ServerFile, RefCell<Option<String>>);
     impl HealthCheck for Probe<'_> {
         fn check(&self, _: &HealthRequest) -> HealthOutcome {
-            *self.1.borrow_mut() = Some(
-                match preview_with(self.0, Scope::All, &GitCli::default(), None) {
-                    Ok(_) => "ran".into(),
-                    Err(e) => e.to_string(),
-                },
-            );
+            *self.1.borrow_mut() = Some(match preview_with(self.0, Scope::All, &GitCli::default(), None) {
+                Ok(_) => "ran".into(),
+                Err(e) => e.to_string(),
+            });
             HealthOutcome::Healthy
         }
         fn recover(&self, _: &HealthRequest) {}
     }
     let env = dev_env();
     let probe = Probe(&env.sf, RefCell::new(None));
-    apply_with(
-        &env.sf,
-        Scope::All,
-        opts(RestartPolicy::FullRestart, &[]),
-        &GitCli::default(),
-        &probe,
-        None,
-        Some(0),
-        81,
-        &mut |_| {},
-    )
-    .unwrap();
+    apply_with(&env.sf, Scope::All, opts(RestartPolicy::FullRestart, &[]), &GitCli::default(), &probe, None, Some(0), 81, &mut |_| {}).unwrap();
     let got = probe.1.borrow().clone().unwrap();
     assert!(lock::is_busy_message(&got), "{got}");
 }
@@ -864,27 +694,12 @@ fn a_preview_cannot_start_while_an_apply_holds_the_lock() {
 fn rollback_refuses_to_throw_away_uncommitted_changes_unless_forced() {
     let env = dev_env();
     let old = head(&env.path(0));
-    run(
-        &env,
-        Scope::All,
-        opts(RestartPolicy::None, &[]),
-        &Health::ok(),
-        Some(0),
-        90,
-    );
+    run(&env, Scope::All, opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 90);
     std::fs::write(env.path(0).join("a"), "my edit").unwrap();
-    let e = rollback_with(&env.sf, "90", &GitCli::default(), false)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        e.contains("kora-chat") && e.contains("--force") && e.starts_with("nothing was changed"),
-        "{e}"
-    );
+    let e = rollback_with(&env.sf, "90", &GitCli::default(), false).unwrap_err().to_string();
+    assert!(e.contains("kora-chat") && e.contains("--force") && e.starts_with("nothing was changed"), "{e}");
     assert_ne!(head(&env.path(0)), old);
-    assert_eq!(
-        std::fs::read_to_string(env.path(0).join("a")).unwrap(),
-        "my edit"
-    );
+    assert_eq!(std::fs::read_to_string(env.path(0).join("a")).unwrap(), "my edit");
     rollback_with(&env.sf, "90", &GitCli::default(), true).unwrap();
     assert_eq!(head(&env.path(0)), old);
 }
@@ -903,16 +718,8 @@ fn apply_takes_exactly_the_previewed_versions() {
     let mut o = opts(RestartPolicy::None, &[]);
     o.targets = Some(targets);
     let (r, _) = run(&env, Scope::All, o, &Health::ok(), Some(0), 100);
-    assert_eq!(
-        head(&env.path(0)),
-        previewed,
-        "what was previewed, not {newer}"
-    );
-    assert_eq!(
-        head(&env.path(1)),
-        hud,
-        "not in the preview's plan: left alone"
-    );
+    assert_eq!(head(&env.path(0)), previewed, "what was previewed, not {newer}");
+    assert_eq!(head(&env.path(1)), hud, "not in the preview's plan: left alone");
     assert_eq!(r.updated.len(), 2);
     // A commit that is not on the original branch is refused.
     sh(&env.path(1), &["checkout", "-q", "-b", "side"]);
@@ -922,46 +729,23 @@ fn apply_takes_exactly_the_previewed_versions() {
     o.targets = Some([("kora-hud".to_string(), side)].into_iter().collect());
     let (r, _) = run(&env, Scope::All, o, &Health::ok(), Some(0), 101);
     assert!(r.updated.is_empty());
-    assert!(
-        r.needs_attention[0]
-            .1
-            .contains("no longer on the original repository"),
-        "{:?}",
-        r.needs_attention
-    );
+    assert!(r.needs_attention[0].1.contains("no longer on the original repository"), "{:?}", r.needs_attention);
     assert_eq!(head(&env.path(1)), hud);
 }
 
 #[test]
 fn rolled_back_versions_are_held_from_automatic_updates() {
     let env = dev_env();
-    let (r, _) = run(
-        &env,
-        Scope::All,
-        opts(RestartPolicy::FullRestart, &[]),
-        &Health::bad(),
-        Some(0),
-        110,
-    );
+    let (r, _) = run(&env, Scope::All, opts(RestartPolicy::FullRestart, &[]), &Health::bad(), Some(0), 110);
     assert_eq!(r.rolled_back.len(), 3);
     let holds = crate::update::load_holds(&env.sf.dir);
     assert_eq!(holds.get("kora-chat"), Some(&head(&env.up(0))));
     // A manual update that works releases the hold.
-    run(
-        &env,
-        Scope::Resources(vec!["kora-chat".into()]),
-        opts(RestartPolicy::None, &[]),
-        &Health::ok(),
-        Some(0),
-        111,
-    );
+    run(&env, Scope::Resources(vec!["kora-chat".into()]), opts(RestartPolicy::None, &[]), &Health::ok(), Some(0), 111);
     assert!(!crate::update::load_holds(&env.sf.dir).contains_key("kora-chat"));
     // Rolling back by hand holds what was undone.
     rollback_with(&env.sf, "111", &GitCli::default(), false).unwrap();
-    assert_eq!(
-        crate::update::load_holds(&env.sf.dir).get("kora-chat"),
-        Some(&head(&env.up(0)))
-    );
+    assert_eq!(crate::update::load_holds(&env.sf.dir).get("kora-chat"), Some(&head(&env.up(0))));
 }
 
 #[test]
@@ -995,11 +779,7 @@ fn fork_sync_reports_progress_and_the_player_count_is_read_after_it() {
         fn behind_count(&self, r: &Path, u: &str) -> GitResult<u32> {
             self.inner.behind_count(r, u)
         }
-        fn sync_forks(
-            &self,
-            t: &[UpdateTarget],
-            progress: &mut dyn FnMut(usize, usize),
-        ) -> Vec<(String, crate::git::SyncOutcome)> {
+        fn sync_forks(&self, t: &[UpdateTarget], progress: &mut dyn FnMut(usize, usize)) -> Vec<(String, crate::git::SyncOutcome)> {
             for i in 0..t.len() {
                 progress(i + 1, t.len());
             }
@@ -1008,51 +788,23 @@ fn fork_sync_reports_progress_and_the_player_count_is_read_after_it() {
         }
     }
     let env = dev_env();
-    let g = Forks {
-        inner: GitCli::default(),
-        log: RefCell::new(vec![]),
-    };
+    let g = Forks { inner: GitCli::default(), log: RefCell::new(vec![]) };
     let mut ev = vec![];
     let players = || {
         g.log.borrow_mut().push("players".into());
         Some(3)
     };
-    let r = apply_with_hints(
-        &env.sf,
-        Scope::All,
-        opts(RestartPolicy::WhenQuiet, &[]),
-        &g,
-        &Health::ok(),
-        None,
-        None,
-        &players,
-        120,
-        &mut |e| ev.push(e),
-        None,
-    )
-    .unwrap();
+    let r = apply_with_hints(&env.sf, Scope::All, opts(RestartPolicy::WhenQuiet, &[]), &g, &Health::ok(), None, None, &players, 120, &mut |e| ev.push(e), None).unwrap();
     assert_eq!(*g.log.borrow(), vec!["synced", "players"]);
-    assert!(
-        ev.contains(&UpdateEvent::Progress(
-            "Syncing your GitHub forks 3/3".into()
-        )),
-        "{ev:?}"
-    );
+    assert!(ev.contains(&UpdateEvent::Progress("Syncing your GitHub forks 3/3".into())), "{ev:?}");
     assert_eq!(r.deferred.len(), 1, "3 players online: kora-core waits");
 }
 
 #[test]
 fn the_restart_policy_also_governs_the_restart_after_a_rollback() {
     let inner = Health::ok();
-    let req = HealthRequest {
-        full_restart: true,
-        updated: vec!["x".into()],
-    };
-    PolicyHealth {
-        inner: &inner,
-        policy: RestartPolicy::None,
-    }
-    .recover(&req);
+    let req = HealthRequest { full_restart: true, updated: vec!["x".into()] };
+    PolicyHealth { inner: &inner, policy: RestartPolicy::None }.recover(&req);
     assert_eq!(*inner.recovers.borrow(), 0, "none: never restarted");
     struct Rec(RefCell<Vec<bool>>);
     impl HealthCheck for Rec {
@@ -1064,33 +816,14 @@ fn the_restart_policy_also_governs_the_restart_after_a_rollback() {
         }
     }
     let rec = Rec(RefCell::new(vec![]));
-    PolicyHealth {
-        inner: &rec,
-        policy: RestartPolicy::Ensure,
-    }
-    .recover(&req);
-    PolicyHealth {
-        inner: &rec,
-        policy: RestartPolicy::WhenQuiet,
-    }
-    .recover(&HealthRequest {
-        full_restart: false,
-        updated: vec![],
-    });
-    assert_eq!(
-        *rec.0.borrow(),
-        vec![false, false],
-        "ensure and a busy when_quiet never ask for a full restart"
-    );
+    PolicyHealth { inner: &rec, policy: RestartPolicy::Ensure }.recover(&req);
+    PolicyHealth { inner: &rec, policy: RestartPolicy::WhenQuiet }.recover(&HealthRequest { full_restart: false, updated: vec![] });
+    assert_eq!(*rec.0.borrow(), vec![false, false], "ensure and a busy when_quiet never ask for a full restart");
 }
 
 #[test]
 fn a_report_with_not_attempted_items_counts_them_as_still_waiting() {
-    let r = UpdateReport {
-        not_attempted: vec!["a".into(), "b".into()],
-        needs_attention: vec![("c".into(), "x".into())],
-        ..Default::default()
-    };
+    let r = UpdateReport { not_attempted: vec!["a".into(), "b".into()], needs_attention: vec![("c".into(), "x".into())], ..Default::default() };
     let st = apply_status(&r, 1, &None);
     assert_eq!((st.updates, st.attention), (2, 1));
 }

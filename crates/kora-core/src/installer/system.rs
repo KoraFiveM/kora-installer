@@ -81,26 +81,14 @@ pub fn binary_used_elsewhere(reg: &Registry, path: &str, excluding: &[&Path]) ->
 /// * `keep_files`: the server folder stays, so its ownership is handed back before the account goes
 ///   (otherwise the files would belong to a number that a future account could reuse).
 /// * `binary_still_used`: another server still runs the shared copy: keep it.
-pub fn items_for(
-    t: &Target,
-    c: &Created,
-    platform: Platform,
-    runner: &dyn CommandRunner,
-    keep_files: bool,
-    binary_still_used: bool,
-) -> super::Result<Vec<Item>> {
+pub fn items_for(t: &Target, c: &Created, platform: Platform, runner: &dyn CommandRunner, keep_files: bool, binary_still_used: bool) -> super::Result<Vec<Item>> {
     let err = |e: service::ServiceError| super::InstallError(e.to_string());
     let account_name = c.service_account.clone().unwrap_or_else(|| account::account_name(&slug(&t.name)));
     let server = t.managed(if account_name == "root" { "kora" } else { &account_name });
     let mut v = Vec::new();
 
     if c.update_timer {
-        v.push(Item {
-            kind: Kind::UpdateTimer,
-            title: "Remove the daily automatic-update schedule".into(),
-            plan: service::scheduler_uninstall_plan(&server, platform).map_err(err)?,
-            note: None,
-        });
+        v.push(Item { kind: Kind::UpdateTimer, title: "Remove the daily automatic-update schedule".into(), plan: service::scheduler_uninstall_plan(&server, platform).map_err(err)?, note: None });
     }
     if c.service_unit.is_some() {
         v.push(Item {
@@ -158,12 +146,7 @@ pub fn items_for(
                             }
                         }
                         steps.extend(account::delete_plan(name).map_err(err)?.steps);
-                        v.push(Item {
-                            kind: Kind::ServiceAccount,
-                            title: format!("Delete the system account '{name}' that Kora created"),
-                            plan: Plan::new(steps),
-                            note: None,
-                        });
+                        v.push(Item { kind: Kind::ServiceAccount, title: format!("Delete the system account '{name}' that Kora created"), plan: Plan::new(steps), note: None });
                     }
                 }
             }

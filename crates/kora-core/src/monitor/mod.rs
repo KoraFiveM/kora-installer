@@ -125,20 +125,11 @@ impl AlertSink for RealSink {
                         "success" => 0x2ecc71,
                         _ => 0xf1c40f,
                     };
-                    let _ = notify::send_alert(
-                        &cfg,
-                        &format!("{}: {}", server.name, alert.title),
-                        &alert.message,
-                        colour,
-                    );
+                    let _ = notify::send_alert(&cfg, &format!("{}: {}", server.name, alert.title), &alert.message, colour);
                 }
             }
             if let Some(url) = &settings.webhook_url {
-                let _ = alerts::post_json(
-                    url,
-                    &alerts::webhook_payload(&alert),
-                    settings.webhook_set_remotely,
-                );
+                let _ = alerts::post_json(url, &alerts::webhook_payload(&alert), settings.webhook_set_remotely);
             }
         });
     }
@@ -173,9 +164,7 @@ pub struct Monitor {
 }
 
 pub fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// Write a file only its owner can read (settings with secrets, the panel token).
@@ -183,14 +172,7 @@ pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
     std::fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("tmp");
     let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty());
-    crate::db::write_secret_file(
-        &crate::db::SystemRunner,
-        crate::db::Os::current(),
-        &tmp,
-        text,
-        user.as_deref(),
-    )
-    .map_err(|e| e.to_string())?;
+    crate::db::write_secret_file(&crate::db::SystemRunner, crate::db::Os::current(), &tmp, text, user.as_deref()).map_err(|e| e.to_string())?;
     crate::fsutil::rename_retrying(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         e.to_string()
@@ -211,11 +193,7 @@ pub fn mark_stop_intent(dir: &Path) {
 }
 
 fn read_intent(dir: &Path) -> Option<u64> {
-    std::fs::read_to_string(intent_path(dir))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
+    std::fs::read_to_string(intent_path(dir)).ok()?.trim().parse().ok()
 }
 
 fn round1(v: f64) -> f32 {
@@ -224,15 +202,7 @@ fn round1(v: f64) -> f32 {
 
 impl Monitor {
     pub fn new(make: BackendMaker, probe: Arc<dyn Probe>, sink: Arc<dyn AlertSink>) -> Self {
-        Self {
-            inner: Arc::new(Inner {
-                make,
-                probe,
-                sink,
-                state: Mutex::new(State::default()),
-                stop: AtomicBool::new(false),
-            }),
-        }
+        Self { inner: Arc::new(Inner { make, probe, sink, state: Mutex::new(State::default()), stop: AtomicBool::new(false) }) }
     }
 
     /// The real thing: reads this machine, delivers to Discord and the generic webhook.
@@ -241,10 +211,7 @@ impl Monitor {
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
-        self.inner
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Start the sampling thread (first pass at once, then every [`INTERVAL`]); it ends on [`Monitor::stop`].
@@ -256,9 +223,7 @@ impl Monitor {
                 while !me.inner.stop.load(Ordering::Relaxed) {
                     // A bug in one pass must not end monitoring.
                     let m = me.clone();
-                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                        m.tick(now_unix())
-                    }));
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || m.tick(now_unix())));
                     let mut waited = Duration::ZERO;
                     while waited < INTERVAL && !me.inner.stop.load(Ordering::Relaxed) {
                         std::thread::sleep(Duration::from_millis(500));
@@ -282,17 +247,10 @@ impl Monitor {
         }
         // Servers taken off the list: drop their state and close their alerts.
         let mut st = self.state();
-        let gone: Vec<String> = st
-            .servers
-            .keys()
-            .filter(|k| !servers.iter().any(|e| &e.name == *k))
-            .cloned()
-            .collect();
+        let gone: Vec<String> = st.servers.keys().filter(|k| !servers.iter().any(|e| &e.name == *k)).cloned().collect();
         for name in gone {
             st.servers.remove(&name);
-            for a in st.alerts.iter_mut().filter(|a| {
-                a.server == name && a.resolved.is_none() && a.kind != AlertKind::Recovered
-            }) {
+            for a in st.alerts.iter_mut().filter(|a| a.server == name && a.resolved.is_none() && a.kind != AlertKind::Recovered) {
                 a.resolved = Some(now);
             }
         }
@@ -304,16 +262,8 @@ impl Monitor {
             return;
         }
         let detail = backend.status_detail(e);
-        let game = if detail.running {
-            probe.game_info(e.ports.game)
-        } else {
-            None
-        };
-        let proc_ = if detail.running {
-            probe.process(e)
-        } else {
-            None
-        };
+        let game = if detail.running { probe.game_info(e.ports.game) } else { None };
+        let proc_ = if detail.running { probe.process(e) } else { None };
         let mem = probe.memory();
         let disk = probe.disk(&e.dir);
         let sample = Sample {
@@ -323,13 +273,9 @@ impl Monitor {
             max_players: game.and_then(|g| g.max_players),
             cpu: proc_.and_then(|p| p.cpu_pct).map(|c| round1(f64::from(c))),
             ram_mb: proc_.map(|p| u32::try_from(p.rss_bytes / (1024 * 1024)).unwrap_or(u32::MAX)),
-            sys_ram_pct: mem.filter(|m| m.total > 0).map(|m| {
-                round1((m.total - m.available.min(m.total)) as f64 / m.total as f64 * 100.0)
-            }),
+            sys_ram_pct: mem.filter(|m| m.total > 0).map(|m| round1((m.total - m.available.min(m.total)) as f64 / m.total as f64 * 100.0)),
             disk_free_mb: disk.map(|d| d.free / (1024 * 1024)),
-            disk_free_pct: disk
-                .filter(|d| d.total > 0)
-                .map(|d| round1(d.free as f64 / d.total as f64 * 100.0)),
+            disk_free_pct: disk.filter(|d| d.total > 0).map(|d| round1(d.free as f64 / d.total as f64 * 100.0)),
             game_up: detail.game_listening,
             txadmin_up: detail.txadmin_up,
             badge: backend.badge(e),
@@ -342,32 +288,14 @@ impl Monitor {
         {
             let mut st = self.state();
             let st = &mut *st;
-            let track = st.servers.entry(e.name.clone()).or_insert_with(|| Track {
-                history: history::History::load(&e.dir, now),
-                last_up: None,
-                active: HashMap::new(),
-            });
-            let facts = alerts::Facts {
-                prev_up: track.last_up,
-                intentional_stop: intent_fresh,
-                disk_total: disk.map(|d| d.total),
-            };
+            let track = st.servers.entry(e.name.clone()).or_insert_with(|| Track { history: history::History::load(&e.dir, now), last_up: None, active: HashMap::new() });
+            let facts = alerts::Facts { prev_up: track.last_up, intentional_stop: intent_fresh, disk_total: disk.map(|d| d.total) };
             let changes = alerts::evaluate(&sample, &facts, &settings, &track.active);
             for c in changes {
                 match c {
                     alerts::Change::Raise(kind, message) | alerts::Change::Event(kind, message) => {
                         st.next_id += 1;
-                        let alert = Alert {
-                            id: st.next_id,
-                            server: e.name.clone(),
-                            kind,
-                            tone: kind.tone(),
-                            title: kind.title(),
-                            message,
-                            raised: now,
-                            resolved: None,
-                            acked: false,
-                        };
+                        let alert = Alert { id: st.next_id, server: e.name.clone(), kind, tone: kind.tone(), title: kind.title(), message, raised: now, resolved: None, acked: false };
                         if kind != AlertKind::Recovered {
                             track.active.insert(kind, alert.id);
                         }
@@ -384,11 +312,7 @@ impl Monitor {
                 }
             }
             while st.alerts.len() > MAX_ALERTS {
-                let pos = st
-                    .alerts
-                    .iter()
-                    .position(|a| a.resolved.is_some() || a.acked)
-                    .unwrap_or(0);
+                let pos = st.alerts.iter().position(|a| a.resolved.is_some() || a.acked).unwrap_or(0);
                 st.alerts.remove(pos);
             }
             // A stop that was asked for has been seen; an old marker left by a restart is cleaned up.
@@ -409,10 +333,7 @@ impl Monitor {
     pub fn metrics(&self, e: &ServerEntry, range: Range, now: u64) -> MetricsView {
         let st = self.state();
         let track = st.servers.get(&e.name);
-        let view = |h: &history::History| MetricsView {
-            samples: h.range(now, range.secs(), MAX_POINTS),
-            latest: h.latest().cloned(),
-        };
+        let view = |h: &history::History| MetricsView { samples: h.range(now, range.secs(), MAX_POINTS), latest: h.latest().cloned() };
         match track {
             Some(t) => view(&t.history),
             None => view(&history::History::load(&e.dir, now)),

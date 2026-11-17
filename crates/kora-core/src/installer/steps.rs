@@ -19,10 +19,7 @@ use crate::txadmin::{self, CfxIdentity, DbConnection, ServerConfig};
 const CLONE_WORKERS: usize = 4;
 
 pub(crate) fn build(ctx: &Arc<Ctx>) -> Vec<Box<dyn Step>> {
-    ctx.plan
-        .iter()
-        .map(|p| Box::new(InstallStep { ctx: ctx.clone(), id: p.id, title: p.title }) as Box<dyn Step>)
-        .collect()
+    ctx.plan.iter().map(|p| Box::new(InstallStep { ctx: ctx.clone(), id: p.id, title: p.title }) as Box<dyn Step>).collect()
 }
 
 /// The elevated part of one step, in the administrator helper's child (see `system_ops`): `ctx`
@@ -176,13 +173,7 @@ fn open_github_page(url: &str) -> bool {
         return false;
     }
     let (program, args): (&str, Vec<&str>) = if cfg!(windows) { ("explorer.exe", vec![url]) } else { ("xdg-open", vec![url]) };
-    crate::sysexe::command(program)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok()
+    crate::sysexe::command(program).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().is_ok()
 }
 
 /// Where the MariaDB / MySQL installers put their command line client (Windows).
@@ -251,12 +242,7 @@ pub(crate) fn db_override(req: &InstallRequest) -> bool {
 /// Used by the wizard's "Test login" button. Returns a short plain-language error.
 pub fn check_db_admin(db_admin: Option<&DbAdmin>) -> std::result::Result<(), String> {
     let admin = admin_conn_for(db_admin);
-    login_problem(&admin).map_or(Ok(()), |why| {
-        Err(format!(
-            "could not log in to the database server as '{}' ({why}). Check the user, password and port, or pick another option.",
-            admin.user
-        ))
-    })
+    login_problem(&admin).map_or(Ok(()), |why| Err(format!("could not log in to the database server as '{}' ({why}). Check the user, password and port, or pick another option.", admin.user)))
 }
 
 /// `None` = the login works, otherwise the client's first error line.
@@ -275,13 +261,10 @@ fn check_admin_login(admin: &AdminConn) -> Result<()> {
     } else {
         "Give the database administrator login, or (from a terminal) run as root with MariaDB unix-socket auth or pass --db-admin-user / --db-admin-host / --db-admin-port with KORA_DB_ADMIN_PASSWORD."
     };
-    Err(Problem::new(
-        codes::INSTALL_DB_LOGIN,
-        format!("Could not log in to the database server as '{}'. Kora needs an administrator account to create a NEW database and user. {advice}", admin.user),
-    )
-    .with_details(why)
-    .with_action(Action::change_answers("database"))
-    .into())
+    Err(Problem::new(codes::INSTALL_DB_LOGIN, format!("Could not log in to the database server as '{}'. Kora needs an administrator account to create a NEW database and user. {advice}", admin.user))
+        .with_details(why)
+        .with_action(Action::change_answers("database"))
+        .into())
 }
 
 /// No database server, and Kora will not install one with the current answers.
@@ -334,9 +317,7 @@ fn verify_requested_owner(r: &dyn git::CommandRunner, requested: Option<&str>) -
     git::owners::check_login_syntax(want).map_err(|m| InstallError::from(Problem::new(codes::GH_OWNER_INVALID, m).with_action(Action::change_answers("github"))))?;
     let all = git::owners::list_owners(r).map_err(|e| {
         InstallError::from(
-            Problem::new(codes::GH_UNAVAILABLE, "Kora could not read your GitHub accounts. Nothing was forked.")
-                .with_details(e.to_string())
-                .with_action(Action::SignInGithub { scopes: vec![] }),
+            Problem::new(codes::GH_UNAVAILABLE, "Kora could not read your GitHub accounts. Nothing was forked.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }),
         )
     })?;
     match git::owners::choose_owner(&all, Some(want)) {
@@ -594,9 +575,8 @@ fn managed_server(ctx: &Ctx, user: &str, kora_exe: &str) -> Result<ManagedServer
 /// root `chown -R` the folder to her. Returns (account, create it?, note).
 fn linux_service_account(recorded: Option<&str>, expected: &str, runner: &dyn service::CommandRunner, uid_min: u32) -> Result<(String, bool, Option<String>)> {
     use service::account::{is_system_uid, user_status, UserStatus};
-    let note = recorded
-        .filter(|r| *r != expected)
-        .map(|r| format!("Kora's records named the account '{r}' for this server; that is not the account Kora makes for it, so '{expected}' is used instead."));
+    let note =
+        recorded.filter(|r| *r != expected).map(|r| format!("Kora's records named the account '{r}' for this server; that is not the account Kora makes for it, so '{expected}' is used instead."));
     match user_status(runner, expected).map_err(|e| InstallError(e.to_string()))? {
         UserStatus::Exists(0) => err(format!("'{expected}' is the root account: refusing to run a server as it. Remove it or choose another server name.")),
         // A system account with this server's name: the one Kora made in an earlier attempt.
@@ -621,10 +601,7 @@ fn owner_of(_p: &Path) -> Option<String> {
 }
 
 fn txadmin_env_text(ctx: &Ctx) -> String {
-    txadmin::txadmin_env(&ctx.req.dir.join("txData"), ctx.req.ports.txadmin)
-        .into_iter()
-        .map(|(k, v)| format!("{k}={v}\n"))
-        .collect()
+    txadmin::txadmin_env(&ctx.req.dir.join("txData"), ctx.req.ports.txadmin).into_iter().map(|(k, v)| format!("{k}={v}\n")).collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -680,25 +657,14 @@ impl InstallStep {
             // Done before the engine starts (see `prepare_account`).
             "prepare.account" => true,
             "prepare.dir" => ctx.req.dir.is_dir() && ctx.meta_dir().is_dir(),
-            "build.forks" => std::fs::read(forks_path(ctx))
-                .ok()
-                .and_then(|b| serde_json::from_slice::<git::ForkState>(&b).ok())
-                .is_some_and(|s| s.is_complete()),
+            "build.forks" => std::fs::read(forks_path(ctx)).ok().and_then(|b| serde_json::from_slice::<git::ForkState>(&b).ok()).is_some_and(|s| s.is_complete()),
             "build.resources" => match items(ctx) {
                 Ok(v) => !v.is_empty() && v.iter().all(item_ok),
                 Err(_) => false,
             },
-            "build.db" => {
-                ProvisionState::load(&db_state_path(ctx)).map(|s| s.granted).unwrap_or(false) && ctx.req.dir.join("database.json").is_file()
-            }
-            "build.artifact" => artifact_store(ctx)
-                .current_dir()
-                .ok()
-                .flatten()
-                .is_some_and(|d| d.join(ArtPlatform::current().executable()).is_file()),
-            "build.config" => ["server.cfg", "permissions.cfg", "secrets.cfg", "txData/default/config.json"]
-                .iter()
-                .all(|f| ctx.req.dir.join(f).is_file()),
+            "build.db" => ProvisionState::load(&db_state_path(ctx)).map(|s| s.granted).unwrap_or(false) && ctx.req.dir.join("database.json").is_file(),
+            "build.artifact" => artifact_store(ctx).current_dir().ok().flatten().is_some_and(|d| d.join(ArtPlatform::current().executable()).is_file()),
+            "build.config" => ["server.cfg", "permissions.cfg", "secrets.cfg", "txData/default/config.json"].iter().all(|f| ctx.req.dir.join(f).is_file()),
             "system.firewall" => ctx.admin && ctx.load_created().firewall,
             "system.service" => ctx.load_created().service_unit.is_some(),
             "system.schedule" => ctx.load_created().update_timer,
@@ -750,19 +716,10 @@ impl InstallStep {
         let ctx = &*self.ctx;
         ctx.emit(self.id, StepStatus::Running, "Starting the GitHub sign-in...", 0.2);
         let session = begin_login(&SystemLogin, false).map_err(|e| {
-            InstallError::from(
-                Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.")
-                    .with_details(e.to_string())
-                    .with_action(Action::SignInGithub { scopes: vec![] }),
-            )
+            InstallError::from(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "Kora could not start the GitHub sign-in.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }))
         })?;
         let opened = open_github_page(&session.url);
-        let msg = format!(
-            "Sign in to GitHub: {} {} and enter this code: {}  (waiting for you, up to 15 minutes)",
-            if opened { "your browser is opening" } else { "open" },
-            session.url,
-            session.code
-        );
+        let msg = format!("Sign in to GitHub: {} {} and enter this code: {}  (waiting for you, up to 15 minutes)", if opened { "your browser is opening" } else { "open" }, session.url, session.code);
         ctx.note(format!("GitHub sign-in code {} at {}", session.code, session.url));
         ctx.emit(self.id, StepStatus::Running, msg, 0.5);
         match session.wait() {
@@ -771,13 +728,10 @@ impl InstallStep {
                 ctx.emit(self.id, StepStatus::Running, format!("Signed in to GitHub as {login}"), 0.8);
                 Ok(())
             }
-            Ok(_) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).")
-                .with_action(Action::SignInGithub { scopes: vec![] })
-                .into()),
-            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
-                .with_details(e.to_string())
-                .with_action(Action::SignInGithub { scopes: vec![] })
-                .into()),
+            Ok(_) => {
+                Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in was not completed (the code expired or was refused).").with_action(Action::SignInGithub { scopes: vec![] }).into())
+            }
+            Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }).into()),
         }
     }
 
@@ -838,9 +792,7 @@ impl InstallStep {
                 self.sign_in_to_github()?;
                 st = git::auth_status(&r).map_err(|e| InstallError(e.to_string()))?;
                 if !st.logged_in {
-                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
-                        .with_action(Action::SignInGithub { scopes: vec![] })
-                        .into());
+                    return Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_action(Action::SignInGithub { scopes: vec![] }).into());
                 }
             }
             let missing = st.missing_scopes(false);
@@ -993,11 +945,9 @@ impl InstallStep {
         let cfg = git::ForkConfig { sync_existing: true, cache_path: Some(git::forkfind::default_cache_path()), ..git::ForkConfig::default() };
         let out = git::run_forks(&r, &mut state, &cfg, &mut on_progress).map_err(|e| InstallError(e.to_string()))?;
         match out {
-            git::ForkOutcome::Paused => Err(Problem::new(
-                codes::GH_RATE_LIMITED,
-                "GitHub asked Kora to slow down. The forks made so far are kept: wait a few minutes, then try this step again.",
-            )
-            .into()),
+            git::ForkOutcome::Paused => {
+                Err(Problem::new(codes::GH_RATE_LIMITED, "GitHub asked Kora to slow down. The forks made so far are kept: wait a few minutes, then try this step again.").into())
+            }
             git::ForkOutcome::Finished if !state.failed.is_empty() => Err(Problem::new(
                 codes::INSTALL_FORKS_FAILED,
                 format!("{} of your forks could not be made. The others are kept; trying this step again only retries the missing ones.", state.failed.len()),
@@ -1144,8 +1094,7 @@ impl InstallStep {
         let json = serde_json::to_string_pretty(&creds).map_err(|e| InstallError(e.to_string()))?;
         let path = ctx.req.dir.join("database.json");
         ctx.update_created(|c| c.files.push("database.json".into()))?;
-        db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, windows_user().as_deref())
-            .map_err(|e| InstallError(e.to_string()))?;
+        db::write_secret_file(&db::SystemRunner, db::Os::current(), &path, &json, windows_user().as_deref()).map_err(|e| InstallError(e.to_string()))?;
         // Prove the new account works over TCP, the way oxmysql will connect.
         ctx.emit(self.id, StepStatus::Running, "Testing the new login", 0.8);
         verify_login(&admin.client, &creds)?;
@@ -1272,10 +1221,7 @@ impl InstallStep {
                 let f = sdir.join("txadmin-admin.txt");
                 txadmin::write_file(&f, &txadmin::local_admin_note(username, password, req.ports.txadmin), true).map_err(|e| InstallError(e.to_string()))?;
                 // The password itself is never put in a note or log: it is in the file, and the final screen shows it.
-                ctx.note(format!(
-                    "txAdmin login (no Cfx.re account was linked): user '{username}', password in {}. Change it after the first login.",
-                    f.display()
-                ));
+                ctx.note(format!("txAdmin login (no Cfx.re account was linked): user '{username}', password in {}. Change it after the first login.", f.display()));
             }
         }
         // .gitignore
@@ -1734,10 +1680,7 @@ impl InstallStep {
                 let reg = Registry::load().unwrap_or_default();
                 let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&reg, b, &[ctx.req.dir.as_path()]));
                 let target = system::Target::from_request(&ctx.req);
-                let items: Vec<system::Item> = system::items_for(&target, &created, svc_platform(), &rn, ctx.keep_files, used)?
-                    .into_iter()
-                    .filter(|i| wanted.contains(&i.kind))
-                    .collect();
+                let items: Vec<system::Item> = system::items_for(&target, &created, svc_platform(), &rn, ctx.keep_files, used)?.into_iter().filter(|i| wanted.contains(&i.kind)).collect();
                 if items.is_empty() {
                     return Ok("Nothing to undo".into());
                 }
@@ -1785,10 +1728,7 @@ impl InstallStep {
 fn verify_login(client: &str, c: &Credentials) -> Result<()> {
     let spec = CommandSpec {
         program: client.to_string(),
-        args: ["--batch", "--skip-column-names", "--protocol=tcp", "-h", &c.host, "-P", &c.port.to_string(), "-u", &c.user, &c.database]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
+        args: ["--batch", "--skip-column-names", "--protocol=tcp", "-h", &c.host, "-P", &c.port.to_string(), "-u", &c.user, &c.database].iter().map(|s| s.to_string()).collect(),
         env: vec![("MYSQL_PWD".into(), c.password.expose().to_string())],
         stdin: Some("SELECT 1;".into()),
     };

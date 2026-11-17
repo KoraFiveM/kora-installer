@@ -116,7 +116,10 @@ fn child_path_puts_the_private_git_folder_first() {
 fn the_credential_helper_points_at_the_private_gh_and_is_quoted_for_git() {
     assert_eq!(credential_helper_for(Path::new("/home/a b/.kora/tools/gh/bin/gh"), false), "!'/home/a b/.kora/tools/gh/bin/gh' auth git-credential");
     assert_eq!(credential_helper_for(Path::new("/h/o'neil/gh"), false), "!'/h/o'\\''neil/gh' auth git-credential");
-    assert_eq!(credential_helper_for(Path::new(r"C:\Users\Zoë Müller\AppData\Local\Kora\tools\gh\bin\gh.exe"), true), "!\"C:/Users/Zoë Müller/AppData/Local/Kora/tools/gh/bin/gh.exe\" auth git-credential");
+    assert_eq!(
+        credential_helper_for(Path::new(r"C:\Users\Zoë Müller\AppData\Local\Kora\tools\gh\bin\gh.exe"), true),
+        "!\"C:/Users/Zoë Müller/AppData/Local/Kora/tools/gh/bin/gh.exe\" auth git-credential"
+    );
 }
 
 #[test]
@@ -182,7 +185,19 @@ fn zip_with(entries: &[(&str, &[u8])]) -> Vec<u8> {
 fn pin_for_body(body: &[u8], exe: &'static str) -> Pin {
     // Leaked so the test pin can hold `&'static str`.
     let sum: &'static str = Box::leak(sha(body).into_boxed_str());
-    Pin { tool: Tool::Gh, version: "1.2.3", os: "linux", arch: "x86_64", file: "gh.zip", url: "https://github.com/cli/cli/releases/download/v1.2.3/gh.zip", sha256: sum, format: Format::Zip, strip_top: false, exe, size: body.len() as u64 }
+    Pin {
+        tool: Tool::Gh,
+        version: "1.2.3",
+        os: "linux",
+        arch: "x86_64",
+        file: "gh.zip",
+        url: "https://github.com/cli/cli/releases/download/v1.2.3/gh.zip",
+        sha256: sum,
+        format: Format::Zip,
+        strip_top: false,
+        exe,
+        size: body.len() as u64,
+    }
 }
 
 fn leftovers(root: &Path) -> Vec<String> {

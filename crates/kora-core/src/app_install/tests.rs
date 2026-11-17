@@ -152,10 +152,7 @@ fn windows_install_creates_everything_and_is_idempotent() {
         assert!(s.run_as_admin && s.workdir == l.dir && s.icon == r"C:\Program Files\Kora\kora.exe,0");
     }
     let k = f.key.clone().unwrap();
-    assert_eq!(
-        (k.display_name.as_str(), k.display_version.as_str(), k.publisher.as_str(), k.install_location.as_str()),
-        ("Kora", "0.2.0", "Kora", r"C:\Program Files\Kora")
-    );
+    assert_eq!((k.display_name.as_str(), k.display_version.as_str(), k.publisher.as_str(), k.install_location.as_str()), ("Kora", "0.2.0", "Kora", r"C:\Program Files\Kora"));
     assert_eq!(k.uninstall_string, r#""C:\Program Files\Kora\kora.exe" uninstall --app"#, "quoted because of the space");
     // second run: nothing changes
     f.log.borrow_mut().clear();
@@ -176,7 +173,19 @@ fn uninstall_removes_only_what_the_app_made() {
     f.files.insert(PathBuf::from(r"C:\Program Files\Kora\bin\0.2.0-abc\kora.exe"), b"service copy".to_vec());
     f.files.insert(PathBuf::from(r"D:\servers\alpha\server.cfg"), b"cfg".to_vec());
     let other = PathBuf::from(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Other.lnk");
-    f.shortcuts.insert(other.clone(), ShortcutSpec { path: other.clone(), target: r"C:\other.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
+    f.shortcuts.insert(
+        other.clone(),
+        ShortcutSpec {
+            path: other.clone(),
+            target: r"C:\other.exe".into(),
+            args: String::new(),
+            workdir: PathBuf::new(),
+            icon: String::new(),
+            description: String::new(),
+            run_as_admin: false,
+            minimized: false,
+        },
+    );
     f.path = Some(format!("{};C:\\Program Files\\Kora Tools", f.path.unwrap()));
 
     let out = uninstall_app_with(&mut f, &l, false).unwrap();
@@ -196,7 +205,19 @@ fn uninstall_leaves_a_foreign_shortcut_named_kora() {
     let l = win_layout();
     let mut f = Fake { path: Some(String::new()), ..Fake::default() };
     let p = l.start_menu.clone().unwrap();
-    f.shortcuts.insert(p.clone(), ShortcutSpec { path: p.clone(), target: r"C:\games\kora-game.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
+    f.shortcuts.insert(
+        p.clone(),
+        ShortcutSpec {
+            path: p.clone(),
+            target: r"C:\games\kora-game.exe".into(),
+            args: String::new(),
+            workdir: PathBuf::new(),
+            icon: String::new(),
+            description: String::new(),
+            run_as_admin: false,
+            minimized: false,
+        },
+    );
     let out = uninstall_app_with(&mut f, &l, false).unwrap();
     assert!(f.shortcuts.contains_key(&p));
     assert!(out.iter().any(|s| s.contains("left alone")));
@@ -563,7 +584,16 @@ mod per_user {
         let mut f = fake_with(EXE);
         let (start, desk) = (ul.start_menu.clone().unwrap(), ul.desktop.clone().unwrap());
         // the old machine-wide app's shortcut ran `kora manager` as administrator
-        let old = ShortcutSpec { path: start.clone(), target: r"C:\Program Files\Kora\kora.exe".into(), args: "manager".into(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: true, minimized: false };
+        let old = ShortcutSpec {
+            path: start.clone(),
+            target: r"C:\Program Files\Kora\kora.exe".into(),
+            args: "manager".into(),
+            workdir: PathBuf::new(),
+            icon: String::new(),
+            description: String::new(),
+            run_as_admin: true,
+            minimized: false,
+        };
         // someone else's program
         let other = ShortcutSpec { path: desk.clone(), target: r"C:\games\other.exe".into(), args: String::new(), ..old.clone() };
         f.shortcuts.insert(start.clone(), old);
@@ -644,7 +674,19 @@ mod per_user {
         let old = win_layout();
         let mut f = Fake::default();
         let p = old.start_menu.clone().unwrap();
-        f.shortcuts.insert(p.clone(), ShortcutSpec { path: p, target: r"C:\games\other.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
+        f.shortcuts.insert(
+            p.clone(),
+            ShortcutSpec {
+                path: p,
+                target: r"C:\games\other.exe".into(),
+                args: String::new(),
+                workdir: PathBuf::new(),
+                icon: String::new(),
+                description: String::new(),
+                run_as_admin: false,
+                minimized: false,
+            },
+        );
         assert!(!detect_legacy(&f, &old).present());
     }
 

@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 // Shared with the installer's hardened client: bounded hops, absolute-URL-only redirect resolution.
 use crate::installer::http::{resolve_redirect, MAX_REDIRECTS};
 
-pub const ALLOWED_HOSTS: &[&str] =
-    &["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
+pub const ALLOWED_HOSTS: &[&str] = &["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
 
 /// Largest program we will download.
 pub const MAX_BINARY: u64 = 100 * 1024 * 1024;
@@ -57,12 +56,7 @@ pub fn check_url(url: &str, allow_loopback: bool) -> Result<(), String> {
 
 impl Net {
     fn agent(&self) -> ureq::Agent {
-        ureq::AgentBuilder::new()
-            .redirects(0)
-            .timeout_connect(self.connect_timeout)
-            .timeout_read(self.read_timeout)
-            .user_agent("kora-installer-self-update")
-            .build()
+        ureq::AgentBuilder::new().redirects(0).timeout_connect(self.connect_timeout).timeout_read(self.read_timeout).user_agent("kora-installer-self-update").build()
     }
 
     /// GET with manual redirect following; every hop must pass [`check_url`].

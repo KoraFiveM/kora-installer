@@ -16,9 +16,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use kora_core::api::Op;
-use kora_core::hub::{
-    check_url, Meta, NodeConfig, NodeStore, RemoteBackend, RemoteError, Transport, UreqTransport,
-};
+use kora_core::hub::{check_url, Meta, NodeConfig, NodeStore, RemoteBackend, RemoteError, Transport, UreqTransport};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -45,11 +43,7 @@ fn store() -> NodeStore {
     }
 }
 fn transport() -> Arc<dyn Transport> {
-    TRANSPORT
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| Arc::new(UreqTransport))
+    TRANSPORT.lock().unwrap().clone().unwrap_or_else(|| Arc::new(UreqTransport))
 }
 fn remote(n: &NodeConfig) -> RemoteBackend {
     RemoteBackend::new(&n.url, &n.token, transport())
@@ -101,20 +95,12 @@ impl FleetCache {
 /// the user out of *this* panel), so those are `502 node_unauthorized`.
 fn remote_err(e: RemoteError) -> ApiError {
     match e {
-        RemoteError::Unreachable(m) => {
-            ApiError::new(StatusCode::BAD_GATEWAY, "node_unreachable", m)
-        }
-        RemoteError::Unauthorized(m) => {
-            ApiError::new(StatusCode::BAD_GATEWAY, "node_unauthorized", m)
-        }
-        RemoteError::Unsupported(m) => {
-            ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "node_unsupported", m)
-        }
+        RemoteError::Unreachable(m) => ApiError::new(StatusCode::BAD_GATEWAY, "node_unreachable", m),
+        RemoteError::Unauthorized(m) => ApiError::new(StatusCode::BAD_GATEWAY, "node_unauthorized", m),
+        RemoteError::Unsupported(m) => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "node_unsupported", m),
         RemoteError::Invalid(m) => ApiError::new(StatusCode::BAD_GATEWAY, "node_error", m),
         RemoteError::JobFailed(m) => ApiError::new(StatusCode::BAD_GATEWAY, "node_error", m),
-        RemoteError::Status {
-            status, message, ..
-        } => match status {
+        RemoteError::Status { status, message, .. } => match status {
             404 => ApiError::not_found(message),
             409 => ApiError::conflict(message),
             400 | 422 => ApiError::bad_request(message),
@@ -127,10 +113,7 @@ fn load_nodes() -> Result<Vec<NodeConfig>, ApiError> {
     store().load().map_err(ApiError::internal)
 }
 fn find_node(id: &str) -> Result<NodeConfig, ApiError> {
-    load_nodes()?
-        .into_iter()
-        .find(|n| n.id == id)
-        .ok_or_else(|| ApiError::not_found(format!("There is no node '{id}'.")))
+    load_nodes()?.into_iter().find(|n| n.id == id).ok_or_else(|| ApiError::not_found(format!("There is no node '{id}'.")))
 }
 
 // ---- probing -----------------------------------------------------------------------------------------
@@ -146,17 +129,11 @@ fn probe(n: &NodeConfig) -> Probe {
     match rb.meta() {
         Err(e) => {
             let m = e.to_string();
-            Probe {
-                meta: Err(m.clone()),
-                servers: Err(m),
-            }
+            Probe { meta: Err(m.clone()), servers: Err(m) }
         }
         Ok(meta) => {
             let servers = rb.servers_list().map_err(|e| e.to_string());
-            Probe {
-                meta: Ok(meta),
-                servers,
-            }
+            Probe { meta: Ok(meta), servers }
         }
     }
 }
@@ -165,14 +142,7 @@ fn probe(n: &NodeConfig) -> Probe {
 fn probe_all(nodes: &[NodeConfig]) -> Vec<Probe> {
     std::thread::scope(|s| {
         let hs: Vec<_> = nodes.iter().map(|n| s.spawn(move || probe(n))).collect();
-        hs.into_iter()
-            .map(|h| {
-                h.join().unwrap_or(Probe {
-                    meta: Err("The check failed.".into()),
-                    servers: Err("The check failed.".into()),
-                })
-            })
-            .collect()
+        hs.into_iter().map(|h| h.join().unwrap_or(Probe { meta: Err("The check failed.".into()), servers: Err("The check failed.".into()) })).collect()
     })
 }
 
@@ -220,11 +190,7 @@ fn node_view(n: &NodeConfig, p: &Probe) -> Value {
 fn tag(mut s: Value, n: &NodeConfig, meta: &Meta) -> Value {
     s["node_id"] = json!(n.id);
     s["node_name"] = json!(n.name);
-    s["actions"] = if can_control(meta) {
-        json!(["start", "stop", "restart"])
-    } else {
-        json!([])
-    };
+    s["actions"] = if can_control(meta) { json!(["start", "stop", "restart"]) } else { json!([]) };
     s
 }
 
@@ -255,52 +221,26 @@ pub async fn node_add(State(st): State<AppState>, Json(b): Json<NodeBody>) -> Re
     let r = blocking(move || {
         let name = b.name.trim().to_string();
         if name.is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
-            return Err(ApiError::bad_request(
-                "Give the node a name of up to 64 characters.",
-            ));
+            return Err(ApiError::bad_request("Give the node a name of up to 64 characters."));
         }
         let token = b.token.trim().to_string();
-        if token.is_empty()
-            || token.len() > 512
-            || token.chars().any(|c| c.is_control() || c.is_whitespace())
-        {
-            return Err(ApiError::bad_request(
-                "Enter the token from that panel (see 'kora panel user add' there).",
-            ));
+        if token.is_empty() || token.len() > 512 || token.chars().any(|c| c.is_control() || c.is_whitespace()) {
+            return Err(ApiError::bad_request("Enter the token from that panel (see 'kora panel user add' there)."));
         }
         let chk = check_url(&b.url).map_err(ApiError::bad_request)?;
         // Check it is a Kora panel and that the token works before anything is saved. `/meta` needs no
         // login, so the server list is what proves the token.
-        let probe_node = NodeConfig {
-            id: String::new(),
-            name: name.clone(),
-            url: chk.url.clone(),
-            token: token.clone(),
-        };
+        let probe_node = NodeConfig { id: String::new(), name: name.clone(), url: chk.url.clone(), token: token.clone() };
         let p = probe(&probe_node);
         if let Err(e) = &p.meta {
-            return Err(ApiError::new(
-                StatusCode::BAD_GATEWAY,
-                "node_unreachable",
-                e.clone(),
-            ));
+            return Err(ApiError::new(StatusCode::BAD_GATEWAY, "node_unreachable", e.clone()));
         }
         let rb = remote(&probe_node);
         if let Err(e) = rb.servers_list() {
             return Err(remote_err(e));
         }
-        let node = store().add(&name, &chk.url, &token).map_err(|m| {
-            if m.contains("already") {
-                ApiError::conflict(m)
-            } else {
-                ApiError::internal(m)
-            }
-        })?;
-        Ok((
-            StatusCode::CREATED,
-            Json(json!({ "node": node_view(&node, &p) })),
-        )
-            .into_response())
+        let node = store().add(&name, &chk.url, &token).map_err(|m| if m.contains("already") { ApiError::conflict(m) } else { ApiError::internal(m) })?;
+        Ok((StatusCode::CREATED, Json(json!({ "node": node_view(&node, &p) }))).into_response())
     })
     .await;
     cache.clear();
@@ -308,14 +248,8 @@ pub async fn node_add(State(st): State<AppState>, Json(b): Json<NodeBody>) -> Re
 }
 
 pub async fn node_remove(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, ApiError> {
-    let r = blocking(move || {
-        if store().remove(&id).map_err(ApiError::internal)? {
-            Ok(StatusCode::NO_CONTENT.into_response())
-        } else {
-            Err(ApiError::not_found(format!("There is no node '{id}'.")))
-        }
-    })
-    .await;
+    let r = blocking(move || if store().remove(&id).map_err(ApiError::internal)? { Ok(StatusCode::NO_CONTENT.into_response()) } else { Err(ApiError::not_found(format!("There is no node '{id}'."))) })
+        .await;
     st.fleet_cache.clear();
     r
 }
@@ -326,9 +260,7 @@ pub async fn node_servers(Path(id): Path<String>) -> Result<Json<Value>, ApiErro
         let rb = remote(&n);
         let meta = rb.meta().map_err(remote_err)?;
         let list = rb.servers_list().map_err(remote_err)?;
-        Ok(Json(
-            json!({ "servers": list.into_iter().map(|s| tag(s, &n, &meta)).collect::<Vec<_>>() }),
-        ))
+        Ok(Json(json!({ "servers": list.into_iter().map(|s| tag(s, &n, &meta)).collect::<Vec<_>>() })))
     })
     .await
 }
@@ -339,15 +271,9 @@ pub struct ControlBody {
     action: String,
 }
 
-pub async fn node_server_control(
-    State(st): State<AppState>,
-    Path((id, s)): Path<(String, String)>,
-    Json(b): Json<ControlBody>,
-) -> Result<Response, ApiError> {
+pub async fn node_server_control(State(st): State<AppState>, Path((id, s)): Path<(String, String)>, Json(b): Json<ControlBody>) -> Result<Response, ApiError> {
     if !matches!(b.action.as_str(), "start" | "stop" | "restart") {
-        return Err(ApiError::bad_request(
-            "The action must be start, stop or restart.",
-        ));
+        return Err(ApiError::bad_request("The action must be start, stop or restart."));
     }
     let n = blocking({
         let id = id.clone();
@@ -366,18 +292,11 @@ pub async fn node_server_control(
     })
     .await?;
     let action = b.action;
-    st.spawn_job(
-        Op::NodeServerControl,
-        Some(format!("node:{id}:{s}")),
-        move |h| {
-            h.event(
-                json!({"type": "status", "message": format!("Asking {} to {}", n.name, action)}),
-            );
-            let rb = remote(&n);
-            rb.server_control(&s, &action, &mut |e| h.event(e.clone()))
-                .map_err(|e| e.to_string())
-        },
-    )
+    st.spawn_job(Op::NodeServerControl, Some(format!("node:{id}:{s}")), move |h| {
+        h.event(json!({"type": "status", "message": format!("Asking {} to {}", n.name, action)}));
+        let rb = remote(&n);
+        rb.server_control(&s, &action, &mut |e| h.event(e.clone())).map_err(|e| e.to_string())
+    })
 }
 
 pub async fn fleet(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -435,13 +354,6 @@ trait JoinProbes {
 }
 impl JoinProbes for std::thread::Result<Vec<Probe>> {
     fn unwrap_or_default_probes(self, n: usize) -> Vec<Probe> {
-        self.unwrap_or_else(|_| {
-            (0..n)
-                .map(|_| Probe {
-                    meta: Err("The check failed.".into()),
-                    servers: Err("The check failed.".into()),
-                })
-                .collect()
-        })
+        self.unwrap_or_else(|_| (0..n).map(|_| Probe { meta: Err("The check failed.".into()), servers: Err("The check failed.".into()) }).collect())
     }
 }

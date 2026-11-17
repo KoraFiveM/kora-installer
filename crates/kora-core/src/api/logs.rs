@@ -21,10 +21,7 @@ pub fn discover(dir: &Path) -> Vec<LogSource> {
         ("service-host.log", [dir.join(".kora").join("service-host.log"), dir.join("service-host.log")]),
         ("update.log", [dir.join("update.log"), dir.join(".kora").join("update.log")]),
     ];
-    candidates
-        .into_iter()
-        .filter_map(|(name, paths)| paths.into_iter().find(|p| p.is_file()).map(|path| LogSource { name, path }))
-        .collect()
+    candidates.into_iter().filter_map(|(name, paths)| paths.into_iter().find(|p| p.is_file()).map(|path| LogSource { name, path })).collect()
 }
 
 /// Remove ANSI escape sequences and other control characters (tabs become spaces).

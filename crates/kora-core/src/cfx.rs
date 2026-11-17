@@ -36,12 +36,7 @@ pub struct Forum;
 
 impl Fetch for Forum {
     fn get(&self, url: &str) -> Result<Option<String>, String> {
-        let agent = ureq::AgentBuilder::new()
-            .redirects(0)
-            .timeout_connect(Duration::from_secs(8))
-            .timeout(Duration::from_secs(15))
-            .user_agent("kora-installer")
-            .build();
+        let agent = ureq::AgentBuilder::new().redirects(0).timeout_connect(Duration::from_secs(8)).timeout(Duration::from_secs(15)).user_agent("kora-installer").build();
         match agent.get(url).call() {
             Ok(r) => r.into_string().map(Some).map_err(|_| "The Cfx.re forum sent an answer that could not be read.".to_string()),
             Err(ureq::Error::Status(404, _)) => Ok(None),
@@ -64,9 +59,7 @@ pub fn lookup_with(fetch: &dyn Fetch, name: &str) -> Result<CfxAccount, String> 
         return Err("A Cfx.re username has 3 to 20 letters, numbers, dots, dashes or underscores. It is the name you see on forum.cfx.re.".into());
     }
     let url = format!("https://forum.cfx.re/u/{name}.json");
-    let body = fetch
-        .get(&url)?
-        .ok_or_else(|| format!("There is no Cfx.re account called '{name}'. Check the spelling: it is the name on your forum.cfx.re profile."))?;
+    let body = fetch.get(&url)?.ok_or_else(|| format!("There is no Cfx.re account called '{name}'. Check the spelling: it is the name on your forum.cfx.re profile."))?;
     parse(&body).ok_or_else(|| "The Cfx.re forum answer was not in the expected form.".to_string())
 }
 

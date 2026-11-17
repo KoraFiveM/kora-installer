@@ -31,10 +31,7 @@ pub(crate) fn headless() -> bool {
     if std::env::var_os("SSH_CONNECTION").is_some() {
         return true;
     }
-    cfg!(unix)
-        && !cfg!(target_os = "macos")
-        && std::env::var_os("DISPLAY").is_none()
-        && std::env::var_os("WAYLAND_DISPLAY").is_none()
+    cfg!(unix) && !cfg!(target_os = "macos") && std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none()
 }
 
 /// A test seam: lets tests pretend to be headless or not, and choose what "elevated" means.
@@ -45,35 +42,27 @@ pub mod seam {
 
     /// Tests only: force the headless answer (`None` = detect for real).
     pub fn set_headless(v: Option<bool>) {
-        *HEADLESS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = v;
+        *HEADLESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = v;
     }
     static CAN_RESTART: Mutex<Option<bool>> = Mutex::new(None);
     static RESTARTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     /// Tests only: force the "can restart" answer. While set, a restart only counts (no command runs).
     pub fn set_can_restart(v: Option<bool>) {
-        *CAN_RESTART
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = v;
+        *CAN_RESTART.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = v;
     }
     /// Tests only: how many restarts were asked for while [`set_can_restart`] was set.
     pub fn restarts() -> usize {
         RESTARTS.load(std::sync::atomic::Ordering::SeqCst)
     }
     pub(super) fn can_restart_override() -> Option<bool> {
-        *CAN_RESTART
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *CAN_RESTART.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     pub(super) fn count_restart() {
         RESTARTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
     pub(super) fn headless_override() -> Option<bool> {
-        *HEADLESS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *HEADLESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -89,18 +78,13 @@ fn can_restart(port: u16) -> bool {
 
 /// `POST /panel/restart`: 202 `{"restarting": true}`, then the panel restarts (local admin only).
 /// Sign-in sessions live in memory, so the page signs in again afterwards.
-pub async fn panel_restart(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+pub async fn panel_restart(State(st): State<AppState>, Extension(caller): Extension<Caller>) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
     if caller.remote {
         return Err(ApiError::forbidden("The panel can only be restarted from the computer that runs Kora."));
     }
     let port = st.addr.port();
     if !blocking(move || Ok(can_restart(port))).await? {
-        return Err(ApiError::conflict(
-            "This panel is not the background service, so it cannot restart itself. Stop it and run `kora panel` again.",
-        ));
+        return Err(ApiError::conflict("This panel is not the background service, so it cannot restart itself. Stop it and run `kora panel` again."));
     }
     if seam::can_restart_override().is_some() {
         seam::count_restart();
@@ -121,10 +105,7 @@ fn restart_now(port: u16) {
     let exe = std::env::current_exe().unwrap_or_default();
     let (program, args) = svc::restart_command(platform, &exe, port, svc::saved_tailscale(&home));
     let mut cmd = std::process::Command::new(program);
-    cmd.args(args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -143,10 +124,7 @@ fn restart_now(port: u16) {
 
 pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
     let port = st.addr.port();
-    let loopback = st
-        .allowed_hosts
-        .iter()
-        .any(|h| h.starts_with("127.") || h.starts_with("localhost:") || h.starts_with("[::1]"));
+    let loopback = st.allowed_hosts.iter().any(|h| h.starts_with("127.") || h.starts_with("localhost:") || h.starts_with("[::1]"));
     blocking(move || {
         let elevated = kora_core::elevate::is_elevated();
         let headless = headless();
@@ -194,15 +172,10 @@ impl Default for EventsHub {
 
 impl EventsHub {
     pub fn new(poll: Duration) -> Self {
-        Self {
-            poll,
-            slot: Mutex::default(),
-        }
+        Self { poll, slot: Mutex::default() }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, Slot> {
-        self.slot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     /// Join the poller (starting it if needed): the latest list, if any, and the later changes.
     pub fn subscribe(self: &Arc<Self>, make: BackendFactory) -> (Option<Value>, broadcast::Receiver<Value>) {
@@ -249,10 +222,7 @@ impl EventsHub {
     }
 }
 
-pub async fn events(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-) -> Result<Sse<Limited<ReceiverStream<Result<Event, Infallible>>>>, ApiError> {
+pub async fn events(State(st): State<AppState>, Extension(caller): Extension<Caller>) -> Result<Sse<Limited<ReceiverStream<Result<Event, Infallible>>>>, ApiError> {
     let permit = st.stream_permit(&caller)?;
     let (first, mut sub) = st.events.subscribe(st.backend.clone());
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(16);
@@ -278,8 +248,7 @@ pub async fn events(
             }
         }
     });
-    Ok(Sse::new(Limited::new(ReceiverStream::new(rx), permit))
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+    Ok(Sse::new(Limited::new(ReceiverStream::new(rx), permit)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
 #[cfg(test)]

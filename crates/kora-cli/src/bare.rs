@@ -17,8 +17,8 @@ use kora_core::monitor::panel_service as svc;
 use kora_web::launch::{self, PortCheck, SystemPorts};
 
 use super::{
-    background_port_for, headless_session, one_time_link, panel_tailscale, panel_with, running_panel, start_background_service, svc_tailscale,
-    user_services_available, Running, ROOT_ONLY_HELP, SETUP_WAIT,
+    background_port_for, headless_session, one_time_link, panel_tailscale, panel_with, running_panel, start_background_service, svc_tailscale, user_services_available, Running, ROOT_ONLY_HELP,
+    SETUP_WAIT,
 };
 
 /// Which page of the panel opens.

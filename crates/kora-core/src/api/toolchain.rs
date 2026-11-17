@@ -255,7 +255,9 @@ pub fn build_check(windows: bool, tools: &[ToolStatus], github: &GithubUser, db:
         (_, _, true) => item("database", "Database", CheckState::Info, "Kora could not look for a database server here.", None),
         (false, _, _) => item("database", "Database", CheckState::Info, "No database server found. Kora can set one up for you when you install a server.", None),
         (true, true, _) => item("database", "Database", CheckState::Ok, format!("{} is running.", db_name(db)), None),
-        (true, false, _) => item("database", "Database", CheckState::Problem, format!("{} is installed but not running.", db_name(db)), Some(known::db_stopped(db.name.as_deref().unwrap_or("the database")))),
+        (true, false, _) => {
+            item("database", "Database", CheckState::Problem, format!("{} is installed but not running.", db_name(db)), Some(known::db_stopped(db.name.as_deref().unwrap_or("the database"))))
+        }
     });
     let who = if windows { "administrator" } else { "root" };
     items.push(if admin.elevated {

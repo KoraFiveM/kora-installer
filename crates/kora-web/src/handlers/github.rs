@@ -31,10 +31,7 @@ pub fn set_env(e: Option<Arc<dyn GithubEnv>>) {
 
 /// The GitHub seam in use.
 pub fn env() -> Arc<dyn GithubEnv> {
-    ENV.read()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone()
-        .unwrap_or_else(|| Arc::new(SystemGithub))
+    ENV.read().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_else(|| Arc::new(SystemGithub))
 }
 
 const SIGN_IN_FIRST: &str = "Sign in to GitHub first.";
@@ -56,9 +53,7 @@ fn sign_in_first() -> ApiError {
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, ApiError> {
-    serde_json::from_value(v).map_err(|_| {
-        ApiError::bad_request("That request was not understood. Reload the page and try again.")
-    })
+    serde_json::from_value(v).map_err(|_| ApiError::bad_request("That request was not understood. Reload the page and try again."))
 }
 
 /// `GET /github/status` → `{signed_in, user, state, missing_scopes, problem}`. `state` is `ready`,
@@ -97,11 +92,7 @@ pub async fn github_login(State(st): State<AppState>) -> Result<Response, ApiErr
             wait().map(|user| json!({"user": user}))
         })
         .map_err(|c| ApiError::conflict(crate::conflict_message(&c)))?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(json!({"job": id.0, "code": code, "url": url})),
-    )
-        .into_response())
+    Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0, "code": code, "url": url}))).into_response())
 }
 
 /// `GET /github/owners` → `{owners: [{login, kind: "user"|"org", can_fork, reason}]}`.
@@ -117,10 +108,7 @@ pub async fn github_owners() -> Result<Json<Value>, ApiError> {
         e.owners().map_err(ApiError::core)
     })
     .await?;
-    let list: Vec<Value> = owners
-        .iter()
-        .map(|o| json!({"login": o.login, "kind": if o.is_org { "org" } else { "user" }, "can_fork": o.can_fork, "reason": o.reason}))
-        .collect();
+    let list: Vec<Value> = owners.iter().map(|o| json!({"login": o.login, "kind": if o.is_org { "org" } else { "user" }, "can_fork": o.can_fork, "reason": o.reason})).collect();
     Ok(Json(json!({"owners": list})))
 }
 
@@ -138,18 +126,12 @@ fn check_resource(r: &str) -> Result<(), ApiError> {
     if valid_resource_name(r) {
         Ok(())
     } else {
-        Err(ApiError::bad_request(
-            "Choose which resource this is about.",
-        ))
+        Err(ApiError::bad_request("Choose which resource this is about."))
     }
 }
 
 /// `POST /servers/{s}/issues` `{resource, title, text}` → `{url}`.
-pub async fn issue_report(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn issue_report(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let b: IssueBody = parse(body)?;
     let url = blocking(move || {
         let e = st.entry(&s)?;
@@ -165,8 +147,7 @@ pub async fn issue_report(
         if !be.github_signed_in() {
             return Err(sign_in_first());
         }
-        be.report_issue(&e, &b.resource, title, &b.text)
-            .map_err(ApiError::core)
+        be.report_issue(&e, &b.resource, title, &b.text).map_err(ApiError::core)
     })
     .await?;
     Ok(Json(json!({"url": url})))
@@ -179,11 +160,7 @@ struct PlanBody {
 }
 
 /// `POST /servers/{s}/pr/plan` `{resource}` → the plan (resource, upstream, base, head_owner, head_branch, ahead, dir).
-pub async fn pr_plan(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<PrPlan>, ApiError> {
+pub async fn pr_plan(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<PrPlan>, ApiError> {
     let b: PlanBody = parse(body)?;
     let plan = blocking(move || {
         let e = st.entry(&s)?;
@@ -210,11 +187,7 @@ struct OpenBody {
 /// `POST /servers/{s}/pr` `{plan, title, text}` → `{url}`. The plan is worked out again here from
 /// the resource and must be exactly what the client sent: a plan the client changed (another
 /// folder, branch or repository) is refused, so the browser cannot make Kora push somewhere else.
-pub async fn pr_open(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn pr_open(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let b: OpenBody = parse(body)?;
     let client: PrPlan = parse(b.plan)?;
     let url = blocking(move || {

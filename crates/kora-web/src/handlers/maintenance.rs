@@ -39,14 +39,11 @@ fn cmd(parts: &[&str]) -> Vec<String> {
 }
 
 /// An optional JSON body: a missing or empty body means "all defaults".
-fn body<T: serde::de::DeserializeOwned + Default>(
-    bytes: &axum::body::Bytes,
-) -> Result<T, ApiError> {
+fn body<T: serde::de::DeserializeOwned + Default>(bytes: &axum::body::Bytes) -> Result<T, ApiError> {
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return Ok(T::default());
     }
-    serde_json::from_slice(bytes)
-        .map_err(|_| ApiError::bad_request("The request was not understood."))
+    serde_json::from_slice(bytes).map_err(|_| ApiError::bad_request("The request was not understood."))
 }
 
 pub async fn self_update_check() -> Result<Json<Value>, ApiError> {
@@ -66,24 +63,12 @@ pub struct SelfUpdateReq {
     pub version: Option<String>,
 }
 
-pub async fn self_update_apply(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-    bytes: axum::body::Bytes,
-) -> Result<Response, ApiError> {
+pub async fn self_update_apply(State(st): State<AppState>, Extension(caller): Extension<Caller>, headers: HeaderMap, bytes: axum::body::Bytes) -> Result<Response, ApiError> {
     let ask = AdminAsk::of(&caller, &headers);
     let req: SelfUpdateReq = body(&bytes)?;
-    let version = req
-        .version
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
+    let version = req.version.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
     if let Some(v) = &version {
-        if v.len() > 40
-            || !v
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
-        {
+        if v.len() > 40 || !v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
             return Err(ApiError::bad_request("That is not a version number."));
         }
     }
@@ -100,15 +85,12 @@ pub async fn self_update_apply(
         crate::elevated::precheck(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
         // The worker (Windows) or the helper (Linux) does it: the same command, run as administrator, as a job.
         return st.spawn_job(Op::SelfUpdateApply, None, move |h| {
-            let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
-                .map_err(job_error)?;
+            let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(job_error)?;
             Ok(json!({"version": v2, "output": out["output"]}))
         });
     }
     st.spawn_job(Op::SelfUpdateApply, None, move |h| {
-        let new = maint::current().self_update_apply(version.as_deref(), &mut |m| {
-            h.event(json!({"type": "status", "message": m}))
-        })?;
+        let new = maint::current().self_update_apply(version.as_deref(), &mut |m| h.event(json!({"type": "status", "message": m})))?;
         Ok(json!({"version": new}))
     })
 }
@@ -140,11 +122,7 @@ pub struct AppInstallReq {
 }
 impl Default for AppInstallReq {
     fn default() -> Self {
-        Self {
-            desktop_shortcut: true,
-            force: false,
-            dry_run: false,
-        }
+        Self { desktop_shortcut: true, force: false, dry_run: false }
     }
 }
 
@@ -157,9 +135,7 @@ pub async fn app_install(Extension(caller): Extension<Caller>, headers: HeaderMa
     let req: AppInstallReq = body(&bytes)?;
     blocking(move || {
         let m = maint::current();
-        let made = m
-            .app_install(&AppOptions { desktop_shortcut: req.desktop_shortcut, force: false, dry_run: req.dry_run })
-            .map_err(ApiError::core)?;
+        let made = m.app_install(&AppOptions { desktop_shortcut: req.desktop_shortcut, force: false, dry_run: req.dry_run }).map_err(ApiError::core)?;
         let old = m.app_status();
         let made_text = if made.is_empty() { "The Kora shortcuts are already in place".to_string() } else { format!("The Kora shortcuts are ready: {}", made.join("; ")) };
         if req.dry_run {
@@ -186,12 +162,7 @@ pub struct AppUninstallReq {
     pub dry_run: bool,
 }
 
-pub async fn app_uninstall(
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-    Query(q): Query<AppUninstallReq>,
-    bytes: axum::body::Bytes,
-) -> Result<Json<Value>, ApiError> {
+pub async fn app_uninstall(Extension(caller): Extension<Caller>, headers: HeaderMap, Query(q): Query<AppUninstallReq>, bytes: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
     let ask = AdminAsk::of(&caller, &headers);
     // The UI sends `{dry_run}` as a body; a query string works too.
     let b: AppUninstallReq = body(&bytes)?;
@@ -199,7 +170,14 @@ pub async fn app_uninstall(
     blocking(move || {
         let m = maint::current();
         if maint::app_change_needs_admin(m.as_ref(), dry_run) {
-            crate::elevated::privileged_as(ask, "remove the Kora app", "Removing the Kora app needs administrator rights. Run this command as administrator:", cmd(&["uninstall", "--app", "--yes"]), vec![], &mut |_| {})?;
+            crate::elevated::privileged_as(
+                ask,
+                "remove the Kora app",
+                "Removing the Kora app needs administrator rights. Run this command as administrator:",
+                cmd(&["uninstall", "--app", "--yes"]),
+                vec![],
+                &mut |_| {},
+            )?;
             return Ok(Json(json!({"message": "The Kora app was removed. Your servers and databases were not touched."})));
         }
         let lines = m.app_uninstall(dry_run).map_err(ApiError::core)?;
@@ -216,22 +194,14 @@ pub struct PlanReq {
     pub server: Option<String>,
 }
 
-pub async fn uninstall_plan(
-    State(st): State<AppState>,
-    bytes: axum::body::Bytes,
-) -> Result<Json<Value>, ApiError> {
+pub async fn uninstall_plan(State(st): State<AppState>, bytes: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
     let req: PlanReq = body(&bytes)?;
     let only = req.server.filter(|s| !s.is_empty());
     if let Some(n) = only.clone() {
         let st2 = st.clone();
         blocking(move || st2.entry(&n).map(|_| ())).await?;
     }
-    let items = blocking(move || {
-        maint::current()
-            .uninstall_plan(only.as_deref())
-            .map_err(ApiError::core)
-    })
-    .await?;
+    let items = blocking(move || maint::current().uninstall_plan(only.as_deref()).map_err(ApiError::core)).await?;
     let items: Vec<Value> = items.iter().map(|i| json!({"item": i.item, "description": i.description, "kind": i.kind, "remove": i.remove})).collect();
     Ok(Json(json!({"items": items})))
 }
@@ -251,27 +221,13 @@ pub struct RunReq {
     pub only: Vec<String>,
 }
 
-pub async fn uninstall_run(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-    bytes: axum::body::Bytes,
-) -> Result<Response, ApiError> {
+pub async fn uninstall_run(State(st): State<AppState>, Extension(caller): Extension<Caller>, headers: HeaderMap, bytes: axum::body::Bytes) -> Result<Response, ApiError> {
     let ask = AdminAsk::of(&caller, &headers);
     let req: RunReq = body(&bytes)?;
     let st2 = st.clone();
     let only = req.only.clone();
     blocking(move || only.iter().try_for_each(|n| st2.entry(n).map(|_| ()))).await?;
-    let r = UninstallRequest {
-        answers: req
-            .answers
-            .into_iter()
-            .map(|a| (a.item, a.remove))
-            .collect(),
-        delete_files: req.delete_files,
-        delete_databases: req.delete_databases,
-        only: req.only,
-    };
+    let r = UninstallRequest { answers: req.answers.into_iter().map(|a| (a.item, a.remove)).collect(), delete_files: req.delete_files, delete_databases: req.delete_databases, only: req.only };
     let admin = blocking(|| Ok(maint::current().is_admin())).await?;
     if !admin {
         // The administrator part never deletes files: the folders are the person's, and this
@@ -304,8 +260,7 @@ pub async fn uninstall_run(
         crate::elevated::precheck(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
         let server = if let [one] = r.only.as_slice() { Some(one.clone()) } else { None };
         return st.spawn_job(Op::UninstallRun, server, move |h| {
-            let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
-                .map_err(job_error)?;
+            let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(job_error)?;
             let mut notes = vec!["Your server folders and databases were kept unless you chose to delete them.".to_string()];
             for (name, dir) in &folders {
                 h.event(json!({"type": "status", "message": format!("Deleting the server folder of {name}")}));
@@ -317,25 +272,13 @@ pub async fn uninstall_run(
             Ok(json!({"notes": notes, "output": out["output"]}))
         });
     }
-    let server = if let [one] = r.only.as_slice() {
-        Some(one.clone())
-    } else {
-        None
-    };
+    let server = if let [one] = r.only.as_slice() { Some(one.clone()) } else { None };
     st.spawn_job(Op::UninstallRun, server, move |h| {
-        let out = maint::current().uninstall_run(&r, &mut |m| {
-            h.event(json!({"type": "status", "message": m}))
-        })?;
+        let out = maint::current().uninstall_run(&r, &mut |m| h.event(json!({"type": "status", "message": m})))?;
         if !out.failed.is_empty() {
-            return Err(format!(
-                "Some things could not be removed: {}",
-                out.failed.join("; ")
-            ));
+            return Err(format!("Some things could not be removed: {}", out.failed.join("; ")));
         }
-        let mut notes = vec![
-            "Your server folders and databases were kept unless you chose to delete them."
-                .to_string(),
-        ];
+        let mut notes = vec!["Your server folders and databases were kept unless you chose to delete them.".to_string()];
         notes.extend(out.kept.iter().cloned());
         Ok(json!({"removed": out.removed, "kept": out.kept, "notes": notes}))
     })

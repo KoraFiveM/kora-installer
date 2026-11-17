@@ -15,9 +15,7 @@ use kora_core::api::install::InstallEnv;
 use kora_core::artifacts::{ArtifactBuild, ArtifactList};
 use kora_core::feedback::PrPlan;
 use kora_core::firewall::ports::PortProber;
-use kora_core::installer::{
-    DbAdmin, InstallOutcome, InstallRequest, ProgressEvent, ProgressSink, StepStatus,
-};
+use kora_core::installer::{DbAdmin, InstallOutcome, InstallRequest, ProgressEvent, ProgressSink, StepStatus};
 use kora_core::space::DiskInfo;
 use kora_web::handlers::{github as gh_seam, install as install_seam};
 use kora_web::{router, AppState};
@@ -75,15 +73,7 @@ struct Env {
 
 impl Env {
     fn new() -> Arc<Env> {
-        Arc::new(Env {
-            prober: Prober(vec![30125]),
-            disk: Disk(100 << 30),
-            s: Mutex::new(S {
-                elevated: true,
-                db_ok: true,
-                ..Default::default()
-            }),
-        })
+        Arc::new(Env { prober: Prober(vec![30125]), disk: Disk(100 << 30), s: Mutex::new(S { elevated: true, db_ok: true, ..Default::default() }) })
     }
     fn st(&self) -> std::sync::MutexGuard<'_, S> {
         self.s.lock().unwrap()
@@ -105,10 +95,7 @@ impl InstallEnv for Env {
         }
     }
     fn artifacts(&self) -> Result<ArtifactList, String> {
-        self.st()
-            .artifacts
-            .clone()
-            .unwrap_or_else(|| Err("offline".into()))
+        self.st().artifacts.clone().unwrap_or_else(|| Err("offline".into()))
     }
     fn is_elevated(&self) -> bool {
         self.st().elevated
@@ -130,19 +117,9 @@ impl InstallEnv for Env {
     fn saved_clear(&self) {
         self.st().saved = None;
     }
-    fn run(
-        &self,
-        req: &InstallRequest,
-        sink: &mut dyn ProgressSink,
-    ) -> Result<InstallOutcome, String> {
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
         self.st().runs.push(req.clone());
-        let ev = |step: &str, status, pct| ProgressEvent {
-            step: step.into(),
-            title: format!("Title of {step}"),
-            status,
-            detail: "detail".into(),
-            percent: pct,
-        };
+        let ev = |step: &str, status, pct| ProgressEvent { step: step.into(), title: format!("Title of {step}"), status, detail: "detail".into(), percent: pct };
         sink.event(ev("prepare.dir", StepStatus::Running, 10));
         sink.event(ev("prepare.dir", StepStatus::Done, 30));
         let (fail, step) = {
@@ -205,32 +182,13 @@ impl GithubEnv for Gh {
     }
     fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
         Ok(vec![
-            OwnerChoice {
-                login: "sam".into(),
-                is_org: false,
-                can_fork: true,
-                reason: None,
-            },
-            OwnerChoice {
-                login: "acme".into(),
-                is_org: true,
-                can_fork: false,
-                reason: Some("members cannot create repositories".into()),
-            },
+            OwnerChoice { login: "sam".into(), is_org: false, can_fork: true, reason: None },
+            OwnerChoice { login: "acme".into(), is_org: true, can_fork: false, reason: Some("members cannot create repositories".into()) },
         ])
     }
     fn begin_login(&self) -> Result<LoginFlow, String> {
-        let rx = self
-            .release
-            .lock()
-            .unwrap()
-            .take()
-            .ok_or("no sign-in prepared")?;
-        Ok(LoginFlow {
-            code: "ABCD-1234".into(),
-            url: "https://github.com/login/device".into(),
-            wait: Box::new(move || rx.recv().map_err(|_| "closed".to_string())?),
-        })
+        let rx = self.release.lock().unwrap().take().ok_or("no sign-in prepared")?;
+        Ok(LoginFlow { code: "ABCD-1234".into(), url: "https://github.com/login/device".into(), wait: Box::new(move || rx.recv().map_err(|_| "closed".to_string())?) })
     }
     fn resolve_owner(&self, requested: Option<&str>) -> Result<String, String> {
         match requested {
@@ -253,27 +211,15 @@ async fn rig() -> Rig {
     let turn = TURN.lock().await;
     let env = Env::new();
     install_seam::set_env(Some(env.clone()));
-    gh_seam::set_env(Some(Arc::new(Gh {
-        user: Mutex::new(Some("sam".into())),
-        release: Mutex::new(None),
-    })));
+    gh_seam::set_env(Some(Arc::new(Gh { user: Mutex::new(Some("sam".into())), release: Mutex::new(None) })));
     let fake = FakeBackend::sample();
     let f = fake.clone();
-    let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap())
-        .with_backend(Arc::new(move || Box::new(f.clone())));
-    Rig {
-        app: router(st),
-        fake,
-        env,
-        _turn: turn,
-    }
+    let st = AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone())));
+    Rig { app: router(st), fake, env, _turn: turn }
 }
 
 fn tmp(name: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!(
-        "kora-web-install-test-{}-{name}",
-        std::process::id()
-    ));
+    let p = std::env::temp_dir().join(format!("kora-web-install-test-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&p);
     std::fs::create_dir_all(&p).unwrap();
     p
@@ -281,11 +227,7 @@ fn tmp(name: &str) -> PathBuf {
 
 impl Rig {
     async fn call(&self, method: &str, uri: &str, body: Option<Value>) -> (u16, Value) {
-        let mut b = Request::builder()
-            .method(method)
-            .uri(format!("/api/v1{uri}"))
-            .header(header::HOST, ADDR)
-            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
+        let mut b = Request::builder().method(method).uri(format!("/api/v1{uri}")).header(header::HOST, ADDR).header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
         let body = match body {
             Some(v) => {
                 b = b.header(header::CONTENT_TYPE, "application/json");
@@ -293,22 +235,10 @@ impl Rig {
             }
             None => Body::empty(),
         };
-        let r: Response<Body> = self
-            .app
-            .clone()
-            .oneshot(b.body(body).unwrap())
-            .await
-            .unwrap();
+        let r: Response<Body> = self.app.clone().oneshot(b.body(body).unwrap()).await.unwrap();
         let status = r.status().as_u16();
         let bytes = axum::body::to_bytes(r.into_body(), 1 << 22).await.unwrap();
-        (
-            status,
-            if bytes.is_empty() {
-                Value::Null
-            } else {
-                serde_json::from_slice(&bytes).unwrap_or(Value::Null)
-            },
-        )
+        (status, if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) })
     }
 
     async fn job(&self, id: &str) -> Value {
@@ -319,10 +249,7 @@ impl Rig {
             if v["state"] != "running" {
                 return v;
             }
-            assert!(
-                start.elapsed() < Duration::from_secs(20),
-                "job did not finish: {v}"
-            );
+            assert!(start.elapsed() < Duration::from_secs(20), "job did not finish: {v}");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
@@ -341,10 +268,7 @@ fn install_body(dir: &Path) -> Value {
 
 fn no_secrets(v: &Value) {
     let t = v.to_string();
-    assert!(
-        !t.contains("SECRETLICENCE") && !t.contains(DBPASS),
-        "secret leaked: {t}"
-    );
+    assert!(!t.contains("SECRETLICENCE") && !t.contains(DBPASS), "secret leaked: {t}");
 }
 
 // ---- defaults, saved, checks ----------------------------------------------------------------
@@ -361,10 +285,7 @@ async fn defaults_avoid_registered_ports_and_saved_answers_hold_no_secrets() {
     assert_eq!(v["ports"], json!({"game": 30121, "txadmin": 40121}));
     assert!(v["saved"].is_null());
 
-    let mut req = kora_core::api::install::build_request(
-        &serde_json::from_value(install_body(&tmp("saved"))).unwrap(),
-    )
-    .unwrap();
+    let mut req = kora_core::api::install::build_request(&serde_json::from_value(install_body(&tmp("saved"))).unwrap()).unwrap();
     req.license_key = Some(LICENCE.into()); // a leaky store would hand this out
     r.env.st().saved = Some(req);
     let (_, v) = r.call("GET", "/installs/defaults", None).await;
@@ -383,59 +304,21 @@ async fn defaults_avoid_registered_ports_and_saved_answers_hold_no_secrets() {
 #[tokio::test]
 async fn port_check_gives_the_next_free_port_and_knows_other_servers() {
     let r = rig().await;
-    let (s, v) = r
-        .call(
-            "POST",
-            "/checks/ports",
-            Some(json!({"game": 30140, "txadmin": 40140})),
-        )
-        .await;
+    let (s, v) = r.call("POST", "/checks/ports", Some(json!({"game": 30140, "txadmin": 40140}))).await;
     assert_eq!(s, 200);
-    assert_eq!(
-        v["game"],
-        json!({"port": 30140, "ok": true, "text": "30140 is free", "suggestion": null})
-    );
+    assert_eq!(v["game"], json!({"port": 30140, "ok": true, "text": "30140 is free", "suggestion": null}));
     assert!(v["txadmin"]["ok"].as_bool().unwrap());
 
-    let (_, v) = r
-        .call(
-            "POST",
-            "/checks/ports",
-            Some(json!({"game": 30125, "txadmin": 40130})),
-        )
-        .await;
+    let (_, v) = r.call("POST", "/checks/ports", Some(json!({"game": 30125, "txadmin": 40130}))).await;
     assert_eq!(v["game"]["ok"], false);
     assert_eq!(v["game"]["suggestion"], 30126);
-    assert!(v["game"]["text"]
-        .as_str()
-        .unwrap()
-        .contains("already in use"));
+    assert!(v["game"]["text"].as_str().unwrap().contains("already in use"));
     assert_eq!(v["txadmin"]["ok"], false);
-    assert!(
-        v["txadmin"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("your other server 'dev'"),
-        "{v}"
-    );
+    assert!(v["txadmin"]["text"].as_str().unwrap().contains("your other server 'dev'"), "{v}");
 
-    let (_, v) = r
-        .call(
-            "POST",
-            "/checks/ports",
-            Some(json!({"game": 31000, "txadmin": 31000})),
-        )
-        .await;
-    assert!(
-        v["txadmin"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("same as the other port"),
-        "{v}"
-    );
-    let (s, _) = r
-        .call("POST", "/checks/ports", Some(json!({"game": "x"})))
-        .await;
+    let (_, v) = r.call("POST", "/checks/ports", Some(json!({"game": 31000, "txadmin": 31000}))).await;
+    assert!(v["txadmin"]["text"].as_str().unwrap().contains("same as the other port"), "{v}");
+    let (s, _) = r.call("POST", "/checks/ports", Some(json!({"game": "x"}))).await;
     assert_eq!(s, 400);
 }
 
@@ -443,44 +326,24 @@ async fn port_check_gives_the_next_free_port_and_knows_other_servers() {
 async fn disk_check_compares_free_space_with_what_the_install_needs() {
     let r = rig().await;
     let dir = tmp("disk");
-    let (s, v) = r
-        .call(
-            "POST",
-            "/checks/disk",
-            Some(json!({"dir": dir.to_string_lossy()})),
-        )
-        .await;
+    let (s, v) = r.call("POST", "/checks/disk", Some(json!({"dir": dir.to_string_lossy()}))).await;
     assert_eq!(s, 200);
     assert_eq!(v["ok"], true);
     assert_eq!(v["free_bytes"], 100u64 << 30);
     assert!(v["needed_bytes"].as_u64().unwrap() > (1u64 << 30));
-    let r2 = Env {
-        prober: Prober(vec![]),
-        disk: Disk(1 << 30),
-        s: Mutex::new(S::default()),
-    };
+    let r2 = Env { prober: Prober(vec![]), disk: Disk(1 << 30), s: Mutex::new(S::default()) };
     install_seam::set_env(Some(Arc::new(r2)));
-    let (_, v) = r
-        .call(
-            "POST",
-            "/checks/disk",
-            Some(json!({"dir": dir.to_string_lossy()})),
-        )
-        .await;
+    let (_, v) = r.call("POST", "/checks/disk", Some(json!({"dir": dir.to_string_lossy()}))).await;
     assert_eq!(v["ok"], false, "{v}");
     assert!(!v["message"].as_str().unwrap().is_empty());
-    let (s, _) = r
-        .call("POST", "/checks/disk", Some(json!({"dir": "  "})))
-        .await;
+    let (s, _) = r.call("POST", "/checks/disk", Some(json!({"dir": "  "}))).await;
     assert_eq!(s, 400);
 }
 
 #[tokio::test]
 async fn database_login_test_never_echoes_the_password() {
     let r = rig().await;
-    let (s, v) = r
-        .call("POST", "/checks/db-login", Some(json!({"admin": null})))
-        .await;
+    let (s, v) = r.call("POST", "/checks/db-login", Some(json!({"admin": null}))).await;
     assert_eq!((s, &v["ok"]), (200, &json!(true)));
     let (_, v) = r.call("POST", "/checks/db-login", Some(json!({"admin": {"user": "root", "password": DBPASS, "host": "127.0.0.1", "port": 3306}}))).await;
     assert_eq!(v["ok"], true);
@@ -488,13 +351,7 @@ async fn database_login_test_never_echoes_the_password() {
     let (_, v) = r.call("POST", "/checks/db-login", Some(json!({"admin": {"user": "root", "password": "wrong", "host": "127.0.0.1", "port": 3306}}))).await;
     assert_eq!(v["ok"], false);
     assert!(!v.to_string().contains("wrong\""));
-    let (s, _) = r
-        .call(
-            "POST",
-            "/checks/db-login",
-            Some(json!({"admin": {"user": "root", "host": "bad host;", "port": 1}})),
-        )
-        .await;
+    let (s, _) = r.call("POST", "/checks/db-login", Some(json!({"admin": {"user": "root", "host": "bad host;", "port": 1}}))).await;
     assert_eq!(s, 400);
 }
 
@@ -535,17 +392,9 @@ async fn a_failed_database_login_offers_to_start_a_stopped_database() {
 #[tokio::test]
 async fn artifacts_are_listed_without_broken_builds() {
     let r = rig().await;
-    let b = |n: u32, broken: Option<&str>| ArtifactBuild {
-        build: n,
-        url: format!("https://runtime.fivem.net/x/{n}"),
-        broken: broken.map(String::from),
-    };
-    r.env.st().artifacts = Some(Ok(ArtifactList {
-        recommended: Some(b(17000, None)),
-        latest: Some(b(17200, None)),
-        all: vec![b(17200, None), b(17100, Some("crashes")), b(17000, None)],
-        ..Default::default()
-    }));
+    let b = |n: u32, broken: Option<&str>| ArtifactBuild { build: n, url: format!("https://runtime.fivem.net/x/{n}"), broken: broken.map(String::from) };
+    r.env.st().artifacts =
+        Some(Ok(ArtifactList { recommended: Some(b(17000, None)), latest: Some(b(17200, None)), all: vec![b(17200, None), b(17100, Some("crashes")), b(17000, None)], ..Default::default() }));
     let (s, v) = r.call("GET", "/artifacts", None).await;
     assert_eq!(s, 200);
     assert_eq!(v["recommended"], 17000);
@@ -573,49 +422,24 @@ async fn plan_validates_like_the_cli_and_returns_no_secrets() {
     assert_eq!(s, 200, "{v}");
     no_secrets(&v);
     assert!(v["summary"].as_str().unwrap().contains("Alpha Town"));
-    assert!(v["steps"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|s| s["id"] == "system.service"));
-    assert_eq!(
-        v["needs_admin"],
-        json!(["Register the server as a system service (systemd)"])
-    );
+    assert!(v["steps"].as_array().unwrap().iter().any(|s| s["id"] == "system.service"));
+    assert_eq!(v["needs_admin"], json!(["Register the server as a system service (systemd)"]));
     assert_eq!(v["disk"]["ok"], true);
-    assert!(v["warnings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|w| w.as_str().unwrap().contains("administrator")));
+    assert!(v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("administrator")));
 
     let mut port_clash = install_body(&tmp("plan2"));
     port_clash["ports"] = json!({"game": 30125, "txadmin": 40140});
     let (_, v) = r.call("POST", "/installs/plan", Some(port_clash)).await;
-    assert!(
-        v["warnings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|w| w.as_str().unwrap().contains("30125")),
-        "{v}"
-    );
+    assert!(v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("30125")), "{v}");
 
-    for (field, value) in [
-        ("name", json!("bad/name")),
-        ("dir", json!("relative/dir")),
-        ("ports", json!({"game": 30120, "txadmin": 30120})),
-        ("artifact_url", json!("https://evil.example/a.zip")),
-    ] {
+    for (field, value) in [("name", json!("bad/name")), ("dir", json!("relative/dir")), ("ports", json!({"game": 30120, "txadmin": 30120})), ("artifact_url", json!("https://evil.example/a.zip"))] {
         let mut b = install_body(&tmp("plan3"));
         b[field] = value;
         let (s, v) = r.call("POST", "/installs/plan", Some(b)).await;
         assert_eq!(s, 400, "{field}: {v}");
         no_secrets(&v);
     }
-    let (s, _) = r
-        .call("POST", "/installs/plan", Some(json!({"name": 5})))
-        .await;
+    let (s, _) = r.call("POST", "/installs/plan", Some(json!({"name": 5}))).await;
     assert_eq!(s, 400);
 }
 
@@ -626,12 +450,7 @@ async fn install_runs_as_a_job_with_progress_events_and_a_safe_outcome() {
     let r = rig().await;
     let dir = tmp("run");
     std::fs::create_dir_all(dir.join(".kora")).unwrap();
-    r.env.st().saved = Some(
-        kora_core::api::install::build_request(
-            &serde_json::from_value(install_body(&dir)).unwrap(),
-        )
-        .unwrap(),
-    );
+    r.env.st().saved = Some(kora_core::api::install::build_request(&serde_json::from_value(install_body(&dir)).unwrap()).unwrap());
     let (s, v) = r.call("POST", "/installs", Some(install_body(&dir))).await;
     assert_eq!(s, 202, "{v}");
     let id = v["job"].as_str().unwrap().to_string();
@@ -640,19 +459,13 @@ async fn install_runs_as_a_job_with_progress_events_and_a_safe_outcome() {
     assert_eq!(job["op"], "install_start");
     let events = job["events"].as_array().unwrap();
     assert_eq!(events.len(), 3);
-    assert_eq!(
-        events[0],
-        json!({"step": "prepare.dir", "title": "Title of prepare.dir", "status": "running", "detail": "detail", "percent": 10})
-    );
+    assert_eq!(events[0], json!({"step": "prepare.dir", "title": "Title of prepare.dir", "status": "running", "detail": "detail", "percent": 10}));
     assert_eq!(events[2]["status"], "done");
     let res = &job["result"];
     assert_eq!(res["connect"], "localhost:30140");
     assert_eq!(res["txadmin_url"], "http://localhost:40140");
     assert_eq!(res["admin_user"], "admin");
-    assert!(res["admin_password_file"]
-        .as_str()
-        .unwrap()
-        .ends_with("txadmin-admin.txt"));
+    assert!(res["admin_password_file"].as_str().unwrap().ends_with("txadmin-admin.txt"));
     no_secrets(&job);
     // what the installer was given (secrets only in memory), and the saved answers are gone
     let run = r.env.st().runs[0].clone();
@@ -664,11 +477,7 @@ async fn install_runs_as_a_job_with_progress_events_and_a_safe_outcome() {
     let (s, log) = r.call("GET", &format!("/installs/{id}/log"), None).await;
     assert_eq!(s, 200);
     assert!(log["path"].as_str().unwrap().ends_with("install.log"));
-    assert!(log["lines"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|l| l.as_str().unwrap().contains("prepare.dir")));
+    assert!(log["lines"].as_array().unwrap().iter().any(|l| l.as_str().unwrap().contains("prepare.dir")));
     no_secrets(&log);
     let (s, _) = r.call("GET", "/installs/nope/log", None).await;
     assert_eq!(s, 404);
@@ -689,24 +498,15 @@ async fn a_failed_install_reports_what_was_kept_and_saves_the_answers_without_se
     let err: Value = job["error"].clone();
     assert_eq!(err["code"], "install.step_failed");
     assert_eq!((err["failed_step"].as_str(), err["resume"].as_bool()), (Some("build.db"), Some(true)));
-    assert!(err["message"]
-        .as_str()
-        .unwrap()
-        .contains("could not log in to the database"));
+    assert!(err["message"].as_str().unwrap().contains("could not log in to the database"));
     assert!(err["kept"].as_array().unwrap().len() >= 2, "{err}");
     let log_path = err["log_path"].as_str().unwrap().to_string();
-    assert!(std::fs::read_to_string(&log_path)
-        .unwrap()
-        .contains("ERROR: could not log in"));
+    assert!(std::fs::read_to_string(&log_path).unwrap().contains("ERROR: could not log in"));
     no_secrets(&job);
     let saved = r.env.st().saved.clone().expect("answers kept");
     assert_eq!(saved.name, "Alpha Town");
     let (_, log) = r.call("GET", &format!("/installs/{id}/log"), None).await;
-    assert!(log["lines"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|l| l.as_str().unwrap().starts_with("ERROR")));
+    assert!(log["lines"].as_array().unwrap().iter().any(|l| l.as_str().unwrap().starts_with("ERROR")));
     // the next defaults offer them again, without secrets
     let (_, d) = r.call("GET", "/installs/defaults", None).await;
     assert_eq!(d["saved"]["name"], "Alpha Town");
@@ -798,10 +598,7 @@ async fn install_refuses_bad_requests_before_starting() {
     b["license_key"] = Value::Null;
     let (s, v) = r.call("POST", "/installs", Some(b)).await;
     assert_eq!(s, 400);
-    assert!(v["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("licence key"));
+    assert!(v["error"]["message"].as_str().unwrap().contains("licence key"));
     let mut b = install_body(&dir);
     b["name"] = json!("prod");
     let (s, v) = r.call("POST", "/installs", Some(b)).await;
@@ -809,11 +606,7 @@ async fn install_refuses_bad_requests_before_starting() {
     let mut b = install_body(&dir);
     b["ports"] = json!({"game": 30125, "txadmin": 40140});
     let (s, v) = r.call("POST", "/installs", Some(b)).await;
-    assert_eq!(
-        (s, v["error"]["code"].as_str()),
-        (409, Some("conflict")),
-        "{v}"
-    );
+    assert_eq!((s, v["error"]["code"].as_str()), (409, Some("conflict")), "{v}");
     assert!(v["error"]["message"].as_str().unwrap().contains("30126"));
     let mut b = install_body(&dir);
     b["ports"] = json!({"game": 30120, "txadmin": 40140});
@@ -841,35 +634,14 @@ async fn install_needing_administrator_rights_answers_needs_elevation_without_se
     let (s, v) = r.call("POST", "/installs", Some(b.clone())).await;
     assert_eq!(s, 403, "{v}");
     assert_eq!(v["error"]["code"], "needs_elevation");
-    let cmd: Vec<String> = v["error"]["command"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c.as_str().unwrap().to_string())
-        .collect();
+    let cmd: Vec<String> = v["error"]["command"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
     assert_eq!(&cmd[..2], ["kora", "install"]);
-    for want in [
-        "--name",
-        "Alpha Town",
-        "--service",
-        "--firewall",
-        "--game-port",
-        "30140",
-        "--resources",
-        "kora_hud,ox_lib",
-        "--db",
-        "existing",
-        "--db-admin-user",
-        "--start",
-    ] {
+    for want in ["--name", "Alpha Town", "--service", "--firewall", "--game-port", "30140", "--resources", "kora_hud,ox_lib", "--db", "existing", "--db-admin-user", "--start"] {
         assert!(cmd.iter().any(|c| c == want), "missing {want} in {cmd:?}");
     }
     no_secrets(&v);
     let msg = v["error"]["message"].as_str().unwrap();
-    assert!(
-        msg.contains("CFX_LICENSE_KEY") && msg.contains("KORA_DB_ADMIN_PASSWORD"),
-        "{msg}"
-    );
+    assert!(msg.contains("CFX_LICENSE_KEY") && msg.contains("KORA_DB_ADMIN_PASSWORD"), "{msg}");
     assert!(r.env.st().runs.is_empty());
     // a dry run changes nothing, so it never needs elevation
     b["dry_run"] = json!(true);
@@ -904,15 +676,9 @@ async fn github_status_and_owners() {
     assert_eq!((s, v), (200, json!({"signed_in": true, "user": "sam", "state": "ready", "missing_scopes": [], "problem": null})));
     let (s, v) = r.call("GET", "/github/owners", None).await;
     assert_eq!(s, 200);
-    assert_eq!(
-        v["owners"][0],
-        json!({"login": "sam", "kind": "user", "can_fork": true, "reason": null})
-    );
+    assert_eq!(v["owners"][0], json!({"login": "sam", "kind": "user", "can_fork": true, "reason": null}));
     assert_eq!(v["owners"][1]["kind"], "org");
-    gh_seam::set_env(Some(Arc::new(Gh {
-        user: Mutex::new(None),
-        release: Mutex::new(None),
-    })));
+    gh_seam::set_env(Some(Arc::new(Gh { user: Mutex::new(None), release: Mutex::new(None) })));
     let (_, v) = r.call("GET", "/github/status", None).await;
     assert_eq!((v["signed_in"].clone(), v["state"].clone()), (json!(false), json!("signed_out")));
     assert_eq!(v["problem"]["actions"], json!([{"kind": "sign_in_github"}]));
@@ -932,10 +698,7 @@ async fn github_status_and_owners() {
 async fn github_login_answers_with_the_code_and_completes_when_approved() {
     let r = rig().await;
     let (tx, rx) = mpsc::channel();
-    gh_seam::set_env(Some(Arc::new(Gh {
-        user: Mutex::new(None),
-        release: Mutex::new(Some(rx)),
-    })));
+    gh_seam::set_env(Some(Arc::new(Gh { user: Mutex::new(None), release: Mutex::new(Some(rx)) })));
     let (s, v) = r.call("POST", "/github/login", None).await;
     assert_eq!(s, 202, "{v}");
     assert_eq!(v["code"], "ABCD-1234");
@@ -944,10 +707,7 @@ async fn github_login_answers_with_the_code_and_completes_when_approved() {
     // still waiting: a second sign-in is refused
     let (s, v2) = r.call("POST", "/github/login", None).await;
     assert_eq!((s, v2["error"]["code"].as_str()), (409, Some("conflict")));
-    assert_eq!(
-        r.call("GET", &format!("/jobs/{id}"), None).await.1["state"],
-        "running"
-    );
+    assert_eq!(r.call("GET", &format!("/jobs/{id}"), None).await.1["state"], "running");
     tx.send(Ok(Some("sam".into()))).unwrap();
     let job = r.job(&id).await;
     assert_eq!(job["state"], "done");
@@ -955,14 +715,10 @@ async fn github_login_answers_with_the_code_and_completes_when_approved() {
 
     // a failed sign-in fails the job and lets the next one start
     let (tx, rx) = mpsc::channel();
-    gh_seam::set_env(Some(Arc::new(Gh {
-        user: Mutex::new(None),
-        release: Mutex::new(Some(rx)),
-    })));
+    gh_seam::set_env(Some(Arc::new(Gh { user: Mutex::new(None), release: Mutex::new(Some(rx)) })));
     let (s, v) = r.call("POST", "/github/login", None).await;
     assert_eq!(s, 202, "{v}");
-    tx.send(Err("GitHub did not confirm the sign-in.".into()))
-        .unwrap();
+    tx.send(Err("GitHub did not confirm the sign-in.".into())).unwrap();
     let job = r.job(v["job"].as_str().unwrap()).await;
     assert_eq!(job["state"], "failed");
     assert!(job["error"]["message"].as_str().unwrap().contains("did not confirm"));
@@ -972,51 +728,21 @@ async fn github_login_answers_with_the_code_and_completes_when_approved() {
 async fn issues_need_a_server_a_title_and_a_github_sign_in() {
     let r = rig().await;
     let ok = json!({"resource": "kora_hud", "title": "  It crashes  ", "text": "Steps..."});
-    let (s, v) = r
-        .call("POST", "/servers/nope/issues", Some(ok.clone()))
-        .await;
+    let (s, v) = r.call("POST", "/servers/nope/issues", Some(ok.clone())).await;
     assert_eq!((s, v["error"]["code"].as_str()), (404, Some("not_found")));
-    let (s, _) = r
-        .call(
-            "POST",
-            "/servers/dev/issues",
-            Some(json!({"resource": "kora_hud", "title": "  ", "text": "x"})),
-        )
-        .await;
+    let (s, _) = r.call("POST", "/servers/dev/issues", Some(json!({"resource": "kora_hud", "title": "  ", "text": "x"}))).await;
     assert_eq!(s, 400);
-    let (s, _) = r
-        .call(
-            "POST",
-            "/servers/dev/issues",
-            Some(json!({"resource": "bad name!", "title": "t"})),
-        )
-        .await;
+    let (s, _) = r.call("POST", "/servers/dev/issues", Some(json!({"resource": "bad name!", "title": "t"}))).await;
     assert_eq!(s, 400);
-    let (s, v) = r
-        .call("POST", "/servers/dev/issues", Some(ok.clone()))
-        .await;
+    let (s, v) = r.call("POST", "/servers/dev/issues", Some(ok.clone())).await;
     assert_eq!(s, 403, "{v}");
     r.fake.state().signed_in = true;
     let (s, v) = r.call("POST", "/servers/dev/issues", Some(ok)).await;
     assert_eq!(s, 200, "{v}");
-    assert!(v["url"]
-        .as_str()
-        .unwrap()
-        .starts_with("https://github.com/"));
-    assert!(r
-        .fake
-        .state()
-        .calls
-        .iter()
-        .any(|c| c == "issue dev kora_hud [It crashes] [Steps...]"));
+    assert!(v["url"].as_str().unwrap().starts_with("https://github.com/"));
+    assert!(r.fake.state().calls.iter().any(|c| c == "issue dev kora_hud [It crashes] [Steps...]"));
     r.fake.state().issue_result = Some(Err("GitHub said no.".into()));
-    let (s, v) = r
-        .call(
-            "POST",
-            "/servers/dev/issues",
-            Some(json!({"resource": "kora_hud", "title": "t", "text": ""})),
-        )
-        .await;
+    let (s, v) = r.call("POST", "/servers/dev/issues", Some(json!({"resource": "kora_hud", "title": "t", "text": ""}))).await;
     assert_eq!(s, 422);
     assert_eq!(v["error"]["message"], "GitHub said no.");
 }
@@ -1038,116 +764,43 @@ async fn pull_requests_recompute_the_plan_and_refuse_a_changed_one() {
     let r = rig().await;
     r.fake.state().signed_in = true;
     r.fake.state().pr_plan = Some(Ok(plan()));
-    let (s, v) = r
-        .call(
-            "POST",
-            "/servers/dev/pr/plan",
-            Some(json!({"resource": "kora_hud"})),
-        )
-        .await;
+    let (s, v) = r.call("POST", "/servers/dev/pr/plan", Some(json!({"resource": "kora_hud"}))).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["upstream"], "KoraFiveM/kora_hud");
     assert_eq!(v["dir"], "/srv/dev/resources/[kora]/kora_hud");
     assert_eq!(v["ahead"], 2);
-    let (s, _) = r
-        .call(
-            "POST",
-            "/servers/nope/pr/plan",
-            Some(json!({"resource": "kora_hud"})),
-        )
-        .await;
+    let (s, _) = r.call("POST", "/servers/nope/pr/plan", Some(json!({"resource": "kora_hud"}))).await;
     assert_eq!(s, 404);
 
     // the plan exactly as the server gave it: goes ahead
-    let (s, v) = r
-        .call(
-            "POST",
-            "/servers/dev/pr",
-            Some(json!({"plan": plan(), "title": " Fix it ", "text": "body"})),
-        )
-        .await;
+    let (s, v) = r.call("POST", "/servers/dev/pr", Some(json!({"plan": plan(), "title": " Fix it ", "text": "body"}))).await;
     assert_eq!(s, 200, "{v}");
     assert!(v["url"].as_str().unwrap().contains("/pull/"));
-    assert!(r
-        .fake
-        .state()
-        .calls
-        .iter()
-        .any(|c| c == "pr_open kora_hud [Fix it] [body]"));
+    assert!(r.fake.state().calls.iter().any(|c| c == "pr_open kora_hud [Fix it] [body]"));
 
     // changed by the client: refused, nothing pushed
-    let before = r
-        .fake
-        .state()
-        .calls
-        .iter()
-        .filter(|c| c.starts_with("pr_open"))
-        .count();
-    for tamper in [
-        json!({"dir": "/etc"}),
-        json!({"upstream": "evil/repo"}),
-        json!({"head_branch": "main"}),
-        json!({"head_owner": "mallory"}),
-        json!({"base": "master"}),
-        json!({"ahead": 99}),
-    ] {
+    let before = r.fake.state().calls.iter().filter(|c| c.starts_with("pr_open")).count();
+    for tamper in [json!({"dir": "/etc"}), json!({"upstream": "evil/repo"}), json!({"head_branch": "main"}), json!({"head_owner": "mallory"}), json!({"base": "master"}), json!({"ahead": 99})] {
         let mut p = serde_json::to_value(plan()).unwrap();
         for (k, v) in tamper.as_object().unwrap() {
             p[k] = v.clone();
         }
-        let (s, v) = r
-            .call(
-                "POST",
-                "/servers/dev/pr",
-                Some(json!({"plan": p, "title": "t", "text": ""})),
-            )
-            .await;
+        let (s, v) = r.call("POST", "/servers/dev/pr", Some(json!({"plan": p, "title": "t", "text": ""}))).await;
         assert_eq!(s, 400, "{tamper}: {v}");
     }
-    assert_eq!(
-        r.fake
-            .state()
-            .calls
-            .iter()
-            .filter(|c| c.starts_with("pr_open"))
-            .count(),
-        before
-    );
-    let (s, _) = r
-        .call(
-            "POST",
-            "/servers/dev/pr",
-            Some(json!({"plan": plan(), "title": "", "text": ""})),
-        )
-        .await;
+    assert_eq!(r.fake.state().calls.iter().filter(|c| c.starts_with("pr_open")).count(), before);
+    let (s, _) = r.call("POST", "/servers/dev/pr", Some(json!({"plan": plan(), "title": "", "text": ""}))).await;
     assert_eq!(s, 400);
-    let (s, _) = r
-        .call("POST", "/servers/dev/pr", Some(json!({"title": "t"})))
-        .await;
+    let (s, _) = r.call("POST", "/servers/dev/pr", Some(json!({"title": "t"}))).await;
     assert_eq!(s, 400);
     // not signed in
     r.fake.state().signed_in = false;
-    let (s, _) = r
-        .call(
-            "POST",
-            "/servers/dev/pr",
-            Some(json!({"plan": plan(), "title": "t", "text": ""})),
-        )
-        .await;
+    let (s, _) = r.call("POST", "/servers/dev/pr", Some(json!({"plan": plan(), "title": "t", "text": ""}))).await;
     assert_eq!(s, 403);
     // the resource has nothing to send any more
     r.fake.state().signed_in = true;
     r.fake.state().pr_plan = Some(Err("kora_hud has no commits to propose.".into()));
-    let (s, v) = r
-        .call(
-            "POST",
-            "/servers/dev/pr",
-            Some(json!({"plan": plan(), "title": "t", "text": ""})),
-        )
-        .await;
+    let (s, v) = r.call("POST", "/servers/dev/pr", Some(json!({"plan": plan(), "title": "t", "text": ""}))).await;
     assert_eq!(s, 422);
-    assert!(v["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("no commits"));
+    assert!(v["error"]["message"].as_str().unwrap().contains("no commits"));
 }

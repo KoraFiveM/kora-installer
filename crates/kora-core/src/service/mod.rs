@@ -12,9 +12,9 @@ pub mod binary;
 mod schedule;
 
 pub use schedule::{
-    describe, describe_for, exec_program, get, get_with, repair_plan, repair_root_update_units, repaired_update_unit, schedule_install_plan, installing_user, managed_for, parse_task_xml, parse_time, parse_timer, remove, save_schedule,
-    scheduler_install_plan, scheduler_install_plan_as, scheduler_uninstall_plan, set, set_args, systemd_timer_unit, systemd_update_unit,
-    systemd_update_unit_as, task_xml, Preset, RunAs, Schedule, ScheduleConfig, ServerRecord, TimeOfDay, Weekday, RUN_AS_HELP,
+    describe, describe_for, exec_program, get, get_with, installing_user, managed_for, parse_task_xml, parse_time, parse_timer, remove, repair_plan, repair_root_update_units, repaired_update_unit,
+    save_schedule, schedule_install_plan, scheduler_install_plan, scheduler_install_plan_as, scheduler_uninstall_plan, set, set_args, systemd_timer_unit, systemd_update_unit, systemd_update_unit_as,
+    task_xml, Preset, RunAs, Schedule, ScheduleConfig, ServerRecord, TimeOfDay, Weekday, RUN_AS_HELP,
 };
 
 use std::io;
@@ -101,11 +101,7 @@ pub struct SystemRunner;
 impl CommandRunner for SystemRunner {
     fn run(&self, program: &str, args: &[String]) -> io::Result<CommandOutput> {
         let out = crate::sysexe::command(program).args(args).output()?;
-        Ok(CommandOutput {
-            code: out.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        Ok(CommandOutput { code: out.status.code().unwrap_or(-1), stdout: String::from_utf8_lossy(&out.stdout).into_owned(), stderr: String::from_utf8_lossy(&out.stderr).into_owned() })
     }
 
     /// Never through a symbolic link: some targets (`<server>/secrets.env`) are in folders the
@@ -183,57 +179,29 @@ impl SystemStep {
         SystemStep {
             description: description.into(),
             needs_admin: true,
-            action: Action::Run {
-                program: program.to_string(),
-                args: args.iter().map(|s| s.to_string()).collect(),
-            },
+            action: Action::Run { program: program.to_string(), args: args.iter().map(|s| s.to_string()).collect() },
             ignore_failure: false,
         }
     }
 
     pub fn run_owned(description: impl Into<String>, program: &str, args: Vec<String>) -> Self {
-        SystemStep {
-            description: description.into(),
-            needs_admin: true,
-            action: Action::Run { program: program.to_string(), args },
-            ignore_failure: false,
-        }
+        SystemStep { description: description.into(), needs_admin: true, action: Action::Run { program: program.to_string(), args }, ignore_failure: false }
     }
 
     pub fn write(description: impl Into<String>, path: &str, contents: String, mode: u32) -> Self {
-        SystemStep {
-            description: description.into(),
-            needs_admin: true,
-            action: Action::WriteFile { path: path.to_string(), contents, mode: Some(mode) },
-            ignore_failure: false,
-        }
+        SystemStep { description: description.into(), needs_admin: true, action: Action::WriteFile { path: path.to_string(), contents, mode: Some(mode) }, ignore_failure: false }
     }
 
     pub fn remove(description: impl Into<String>, path: &str) -> Self {
-        SystemStep {
-            description: description.into(),
-            needs_admin: true,
-            action: Action::RemoveFile { path: path.to_string() },
-            ignore_failure: true,
-        }
+        SystemStep { description: description.into(), needs_admin: true, action: Action::RemoveFile { path: path.to_string() }, ignore_failure: true }
     }
 
     pub fn copy(description: impl Into<String>, src: &str, dst: &str, mode: u32) -> Self {
-        SystemStep {
-            description: description.into(),
-            needs_admin: true,
-            action: Action::CopyFile { src: src.to_string(), dst: dst.to_string(), mode: Some(mode) },
-            ignore_failure: false,
-        }
+        SystemStep { description: description.into(), needs_admin: true, action: Action::CopyFile { src: src.to_string(), dst: dst.to_string(), mode: Some(mode) }, ignore_failure: false }
     }
 
     pub fn remove_dir_if_empty(description: impl Into<String>, path: &str) -> Self {
-        SystemStep {
-            description: description.into(),
-            needs_admin: true,
-            action: Action::RemoveEmptyDir { path: path.to_string() },
-            ignore_failure: true,
-        }
+        SystemStep { description: description.into(), needs_admin: true, action: Action::RemoveEmptyDir { path: path.to_string() }, ignore_failure: true }
     }
 
     pub fn tolerant(mut self) -> Self {
@@ -284,16 +252,11 @@ pub fn apply_plan(plan: &Plan, runner: &dyn CommandRunner) -> ServiceResult<()> 
                 let line = step.command_line().unwrap_or_default();
                 match runner.run(program, args) {
                     Ok(o) if o.success() => Ok(()),
-                    Ok(o) => Err(ServiceError::Command {
-                        command: line,
-                        detail: format!("exit {}: {}", o.code, o.stderr.trim()),
-                    }),
+                    Ok(o) => Err(ServiceError::Command { command: line, detail: format!("exit {}: {}", o.code, o.stderr.trim()) }),
                     Err(e) => Err(ServiceError::Command { command: line, detail: e.to_string() }),
                 }
             }
-            Action::WriteFile { path, contents, mode } => {
-                runner.write_file(path, contents, *mode).map_err(Into::into)
-            }
+            Action::WriteFile { path, contents, mode } => runner.write_file(path, contents, *mode).map_err(Into::into),
             Action::RemoveFile { path } => runner.remove_file(path).map_err(Into::into),
             Action::CopyFile { src, dst, mode } => runner.copy_file(src, dst, *mode).map_err(Into::into),
             Action::RemoveEmptyDir { path } => runner.remove_empty_dir(path).map_err(Into::into),
@@ -337,13 +300,8 @@ fn bad_chars(s: &str) -> bool {
 impl ManagedServer {
     pub fn validate(&self) -> ServiceResult<()> {
         let n = &self.name;
-        if n.is_empty()
-            || n.len() > 48
-            || !n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
-        {
-            return Err(ServiceError::Invalid(
-                "server name must be 1-48 characters: lowercase letters, digits, '-' or '_'".into(),
-            ));
+        if n.is_empty() || n.len() > 48 || !n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_') {
+            return Err(ServiceError::Invalid("server name must be 1-48 characters: lowercase letters, digits, '-' or '_'".into()));
         }
         if self.dir.is_empty() || bad_chars(&self.dir) || self.dir.contains('"') {
             return Err(ServiceError::Invalid("server folder is empty or has control characters".into()));
@@ -382,9 +340,7 @@ impl ManagedServer {
     }
 
     pub fn env_file_path(&self) -> String {
-        self.env_file
-            .clone()
-            .unwrap_or_else(|| format!("{}/secrets.env", self.dir.trim_end_matches('/')))
+        self.env_file.clone().unwrap_or_else(|| format!("{}/secrets.env", self.dir.trim_end_matches('/')))
     }
 }
 
@@ -494,8 +450,7 @@ pub fn windows_register_plan_for(server: &ManagedServer, user_sid: Option<&str>)
     let mut p = windows_register_plan(server);
     if let Some(sddl) = user_sid.and_then(windows_user_control_sddl) {
         p.steps.push(
-            SystemStep::run_owned("Let the person who installed start and stop this server's service (and nothing more)", "sc.exe", vec!["sdset".into(), server.service_name(), sddl])
-                .tolerant(),
+            SystemStep::run_owned("Let the person who installed start and stop this server's service (and nothing more)", "sc.exe", vec!["sdset".into(), server.service_name(), sddl]).tolerant(),
         );
     }
     p
@@ -510,36 +465,31 @@ pub fn windows_register_plan(server: &ManagedServer) -> Plan {
             format!("Register the Windows service '{svc}' so '{}' starts automatically when Windows boots", server.name),
             "sc.exe",
             vec![
-                "create".into(), svc.clone(), "binPath=".into(), bin, "start=".into(), "auto".into(),
-                "DisplayName=".into(), format!("Kora server {}", server.name),
+                "create".into(),
+                svc.clone(),
+                "binPath=".into(),
+                bin,
+                "start=".into(),
+                "auto".into(),
+                "DisplayName=".into(),
+                format!("Kora server {}", server.name),
                 // The per-service virtual account needs no password and has no rights beyond what is granted to it.
-                "obj=".into(), virtual_account(&svc),
+                "obj=".into(),
+                virtual_account(&svc),
             ],
         ),
-        SystemStep::run_owned(
-            "Add a description to the service",
-            "sc.exe",
-            vec!["description".into(), svc.clone(), format!("Kora-managed server {}", server.name)],
-        ),
+        SystemStep::run_owned("Add a description to the service", "sc.exe", vec!["description".into(), svc.clone(), format!("Kora-managed server {}", server.name)]),
         SystemStep::run_owned(
             "Make the service restart itself if it crashes (after 60 seconds, up to three times, counter reset daily)",
             "sc.exe",
             vec!["failure".into(), svc.clone(), "reset=".into(), "86400".into(), "actions=".into(), "restart/60000/restart/60000/restart/60000".into()],
         ),
-        SystemStep::run_owned(
-            "Treat a non-zero exit as a crash so the restart rule applies",
-            "sc.exe",
-            vec!["failureflag".into(), svc.clone(), "1".into()],
-        ),
+        SystemStep::run_owned("Treat a non-zero exit as a crash so the restart rule applies", "sc.exe", vec!["failureflag".into(), svc.clone(), "1".into()]),
         // Every service process gets "impersonate a client" and a few other privileges by default,
         // and those are a well-known way from a service account to SYSTEM. The server runs programs
         // from its own folder (which its owner can change), so it keeps only what an ordinary
         // signed-in user has.
-        SystemStep::run_owned(
-            "Give the service only the privileges an ordinary user has (no 'impersonate a client')",
-            "sc.exe",
-            vec!["privs".into(), svc, SERVICE_PRIVILEGES.into()],
-        ),
+        SystemStep::run_owned("Give the service only the privileges an ordinary user has (no 'impersonate a client')", "sc.exe", vec!["privs".into(), svc, SERVICE_PRIVILEGES.into()]),
     ])
 }
 
@@ -658,12 +608,8 @@ pub fn uninstall_plan(server: &ManagedServer, platform: Platform) -> ServiceResu
             SystemStep::run(format!("Clear any leftover 'failed' mark for '{}'", server.name), "systemctl", &["reset-failed", &svc]).tolerant(),
         ]),
         Platform::Windows => Plan::new(vec![
-            SystemStep::run_owned(
-                format!("Take the service account's access to {} away again", server.dir),
-                "icacls.exe",
-                vec![server.dir.clone(), "/remove".into(), virtual_account(&svc)],
-            )
-            .tolerant(),
+            SystemStep::run_owned(format!("Take the service account's access to {} away again", server.dir), "icacls.exe", vec![server.dir.clone(), "/remove".into(), virtual_account(&svc)])
+                .tolerant(),
             SystemStep::run(format!("Stop '{}' if it is running", server.name), "sc.exe", &["stop", &svc]).tolerant(),
             SystemStep::run(format!("Remove the Windows service '{svc}' that Kora created"), "sc.exe", &["delete", &svc]),
         ]),
@@ -832,10 +778,7 @@ pub(crate) mod testing {
 
     impl FakeRunner {
         pub fn respond(&self, needle: &str, code: i32, stdout: &str) {
-            self.responses.borrow_mut().push((
-                needle.to_string(),
-                CommandOutput { code, stdout: stdout.to_string(), stderr: String::new() },
-            ));
+            self.responses.borrow_mut().push((needle.to_string(), CommandOutput { code, stdout: stdout.to_string(), stderr: String::new() }));
         }
         pub fn calls(&self) -> Vec<String> {
             self.log.borrow().clone()

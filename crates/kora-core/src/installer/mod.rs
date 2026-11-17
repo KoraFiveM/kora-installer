@@ -17,8 +17,8 @@ pub mod gitops;
 pub mod host;
 pub mod http;
 pub mod layout;
-pub mod pinned;
 pub mod paused;
+pub mod pinned;
 pub mod registry;
 pub mod saved;
 mod steps;
@@ -40,9 +40,9 @@ use crate::problem::{codes, Action, Problem};
 use crate::steps::{rollback_plan, run_plan, Step, StepError};
 
 pub use http::HttpClient;
+pub use registry::{Registry, ServerEntry, ServerFile};
 pub use steps::check_db_admin;
 pub(crate) use steps::db_override;
-pub use registry::{Registry, ServerEntry, ServerFile};
 
 /// Installer error: plain-language message, safe to show (never contains secrets).
 ///
@@ -118,13 +118,7 @@ impl Hooks {
     /// `KORA_TEST_ARTIFACT_MIRROR=http://127.0.0.1:PORT` redirects artifact downloads (test seam).
     pub fn from_env() -> Self {
         let mirror = std::env::var("KORA_TEST_ARTIFACT_MIRROR").ok().filter(|s| !s.is_empty());
-        Hooks {
-            http: HttpClient { allow_http_localhost: mirror.is_some(), artifact_mirror: mirror },
-            assume_admin: None,
-            disk: None,
-            fix_permissions: false,
-            admin: None,
-        }
+        Hooks { http: HttpClient { allow_http_localhost: mirror.is_some(), artifact_mirror: mirror }, assume_admin: None, disk: None, fix_permissions: false, admin: None }
     }
 
     fn disk(&self) -> &dyn crate::space::DiskInfo {
@@ -139,17 +133,9 @@ impl Hooks {
 pub fn is_admin() -> bool {
     if cfg!(windows) {
         // `net session` needs the Server service (often disabled); the token's integrity level does not.
-        crate::sysexe::command("whoami")
-            .arg("/groups")
-            .output()
-            .map(|o| groups_show_elevated(&String::from_utf8_lossy(&o.stdout)))
-            .unwrap_or(false)
+        crate::sysexe::command("whoami").arg("/groups").output().map(|o| groups_show_elevated(&String::from_utf8_lossy(&o.stdout))).unwrap_or(false)
     } else {
-        std::process::Command::new("id")
-            .arg("-u")
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
-            .unwrap_or(false)
+        std::process::Command::new("id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0").unwrap_or(false)
     }
 }
 
@@ -160,16 +146,17 @@ pub fn groups_show_elevated(whoami_groups: &str) -> bool {
 
 /// Lowercase slug usable for service names, firewall rule names and file names.
 pub fn slug(name: &str) -> String {
-    let mut s: String = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
-        .collect();
+    let mut s: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
     while s.contains("--") {
         s = s.replace("--", "-");
     }
     let s = s.trim_matches('-');
     let s: String = s.chars().take(48).collect();
-    if s.is_empty() { "server".into() } else { s }
+    if s.is_empty() {
+        "server".into()
+    } else {
+        s
+    }
 }
 
 /// `https://github.com/Owner/name.git` -> `Owner/name`.
@@ -284,13 +271,7 @@ pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep>
     v.extend([
         PlannedStep { id: "prepare.dir", title: "Create the server folder", weight: 2, needs_admin: false, skippable: false },
         PlannedStep { id: "prepare.catalog", title: "Load the resource catalog", weight: 3, needs_admin: false, skippable: false },
-        PlannedStep {
-            id: "prepare.tools",
-            title: "Check git, GitHub CLI, database server and ports",
-            weight: 5,
-            needs_admin: false,
-            skippable: false,
-        },
+        PlannedStep { id: "prepare.tools", title: "Check git, GitHub CLI, database server and ports", weight: 5, needs_admin: false, skippable: false },
     ]);
     if req.mode == Mode::Development {
         v.push(PlannedStep { id: "build.forks", title: "Fork the resources into your GitHub account", weight: 30, needs_admin: false, skippable: false });
@@ -411,13 +392,7 @@ impl Ctx {
         let f = if matches!(status, StepStatus::Done | StepStatus::Skipped) { 1.0 } else { frac.clamp(0.0, 1.0) };
         let percent = (((base as f32 + weight as f32 * f) * 100.0 / total as f32) as u32).min(100) as u8;
         self.emitted.lock().unwrap().insert(step.to_string());
-        let _ = self.tx.lock().unwrap().send(ProgressEvent {
-            step: step.to_string(),
-            title: title.to_string(),
-            status,
-            detail: detail.into(),
-            percent,
-        });
+        let _ = self.tx.lock().unwrap().send(ProgressEvent { step: step.to_string(), title: title.to_string(), status, detail: detail.into(), percent });
     }
 
     pub fn was_emitted(&self, step: &str) -> bool {
@@ -428,10 +403,7 @@ impl Ctx {
         if let Some(s) = &self.shadow {
             return s.lock().unwrap().clone();
         }
-        std::fs::read(self.meta_dir().join("created.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+        std::fs::read(self.meta_dir().join("created.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
 
     /// Read-modify-write the created manifest (thread safe).
@@ -528,12 +500,9 @@ pub fn skip_step(req: &InstallRequest, id: &str) -> std::result::Result<(), Prob
         return Err(Problem::new(codes::INSTALL_CANNOT_RESUME, format!("This install has no step called '{id}'.")));
     };
     if !step.skippable {
-        return Err(Problem::new(
-            codes::INSTALL_CANNOT_RESUME,
-            format!("\"{}\" cannot be skipped: your server needs it. Try it again, or change your answers.", step.title),
-        )
-        .with_action(Action::RetryStep { step: id.to_string() })
-        .with_action(Action::ChangeAnswers { section: None }));
+        return Err(Problem::new(codes::INSTALL_CANNOT_RESUME, format!("\"{}\" cannot be skipped: your server needs it. Try it again, or change your answers.", step.title))
+            .with_action(Action::RetryStep { step: id.to_string() })
+            .with_action(Action::ChangeAnswers { section: None }));
     }
     crate::steps::mark_skipped(&meta_dir(&req.dir).join("plan-state.json"), id)
         .map(|_| ())
@@ -687,10 +656,7 @@ fn check_dir_links_with(dir: &Path, trust: &dyn Fn(u32, u32) -> bool) -> Result<
 /// `/home/kora` is left out when Kora makes it passable itself (the `prepare.account` step).
 pub fn service_blocking_dirs(dir: &Path) -> Vec<PathBuf> {
     let kora_user = crate::userhome::kora_user_planned(dir);
-    crate::service::binary::blocking_dirs(dir)
-        .into_iter()
-        .filter(|d| !(kora_user && d == Path::new(crate::userhome::KORA_USER_HOME)))
-        .collect()
+    crate::service::binary::blocking_dirs(dir).into_iter().filter(|d| !(kora_user && d == Path::new(crate::userhome::KORA_USER_HOME))).collect()
 }
 
 fn save_request(ctx: &Ctx) -> Result<()> {
@@ -742,7 +708,9 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
             ),
             "prepare.dir" => format!("Create {}", req.dir.display()),
             "prepare.catalog" => format!("{} resources selected", selected.len()),
-            "prepare.tools" => format!("Needs git{}; ports {} (game) and {} (txAdmin) must be free", if req.mode == Mode::Development { " and a logged-in `gh`" } else { "" }, req.ports.game, req.ports.txadmin),
+            "prepare.tools" => {
+                format!("Needs git{}; ports {} (game) and {} (txAdmin) must be free", if req.mode == Mode::Development { " and a logged-in `gh`" } else { "" }, req.ports.game, req.ports.txadmin)
+            }
             "build.forks" => format!(
                 "Fork {} repositories into {}, reusing any forks already there (needs `gh auth login`; paced in batches)",
                 selected.len(),
@@ -750,7 +718,13 @@ fn dry_run(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks, adm
             ),
             "build.resources" => {
                 let pinned = selected.iter().filter(|r| !r.versions.is_empty()).count();
-                format!("{} resources under {}/resources ({} pinned to releases, {} default-branch head), 4 at a time", selected.len(), req.dir.display(), if req.mode == Mode::Production { pinned } else { 0 }, if req.mode == Mode::Production { selected.len() - pinned } else { selected.len() })
+                format!(
+                    "{} resources under {}/resources ({} pinned to releases, {} default-branch head), 4 at a time",
+                    selected.len(),
+                    req.dir.display(),
+                    if req.mode == Mode::Production { pinned } else { 0 },
+                    if req.mode == Mode::Production { selected.len() - pinned } else { selected.len() }
+                )
             }
             "build.db" => match req.db {
                 DbChoice::InstallIfMissing => "Install MariaDB if missing (admin needed), then create a new database + user with a generated password".into(),
@@ -835,9 +809,15 @@ fn rollback_inner(dir: &Path, opts: &RollbackOptions, db_admin_password: Option<
 }
 
 /// `known`: the name and ports from the operator's server list (`None`: the folder is not in it).
-fn rollback_known(dir: &Path, known: Option<(String, registry::PortsRecord)>, opts: &RollbackOptions, db_admin_password: Option<&str>, sink: &mut dyn ProgressSink, hooks: &Hooks) -> Result<Vec<String>> {
-    let bytes = std::fs::read(meta_dir(dir).join("request.json"))
-        .map_err(|_| InstallError(format!("{} has no Kora install record (.kora/request.json): nothing to roll back", dir.display())))?;
+fn rollback_known(
+    dir: &Path,
+    known: Option<(String, registry::PortsRecord)>,
+    opts: &RollbackOptions,
+    db_admin_password: Option<&str>,
+    sink: &mut dyn ProgressSink,
+    hooks: &Hooks,
+) -> Result<Vec<String>> {
+    let bytes = std::fs::read(meta_dir(dir).join("request.json")).map_err(|_| InstallError(format!("{} has no Kora install record (.kora/request.json): nothing to roll back", dir.display())))?;
     let mut req: InstallRequest = serde_json::from_slice(&bytes).map_err(|e| InstallError(format!("corrupt install record: {e}")))?;
     req.dir = dir.to_path_buf();
     // `request.json` is in the server folder, which the server's own account can change: a forged
@@ -953,11 +933,7 @@ mod tests {
         (r.dry_run, r.db, r.service, r.firewall) = (false, DbChoice::Skip, false, false);
         std::fs::write(dir.join(".kora/request.json"), serde_json::to_vec(&r).unwrap()).unwrap();
         let abs = victim.join("file").to_string_lossy().into_owned();
-        let c = Created {
-            resources: vec!["etc".into(), "../../victim/etc".into(), abs.clone()],
-            files: vec![abs, "../victim/file".into(), "server.cfg".into(), "own".into()],
-            ..Created::default()
-        };
+        let c = Created { resources: vec!["etc".into(), "../../victim/etc".into(), abs.clone()], files: vec![abs, "../victim/file".into(), "server.cfg".into(), "own".into()], ..Created::default() };
         std::fs::write(dir.join(".kora/created.json"), serde_json::to_vec(&c).unwrap()).unwrap();
         let mut st = crate::steps::PlanState::default();
         for id in ["build.resources", "build.config"] {

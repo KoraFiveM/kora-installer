@@ -7,17 +7,7 @@ use crate::db::{DbError, DbResult};
 use crate::problem::Action;
 
 fn tool(t: Tool, installed: bool, source: Option<Source>, broken: bool) -> ToolStatus {
-    ToolStatus {
-        tool: t,
-        name: tools::program_name(t),
-        label: t.label(),
-        installed,
-        version: installed.then(|| "2.0.0".to_string()),
-        source,
-        path: None,
-        broken,
-        can_install: true,
-    }
+    ToolStatus { tool: t, name: tools::program_name(t), label: t.label(), installed, version: installed.then(|| "2.0.0".to_string()), source, path: None, broken, can_install: true }
 }
 
 fn running_db() -> DbState {

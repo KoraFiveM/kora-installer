@@ -157,14 +157,10 @@ impl KeyStore {
         };
         tighten(&self.path);
         // serde's messages can quote the offending value, which could be a key: only the position is kept.
-        let doc: Doc = serde_json::from_slice(&text).map_err(|e| {
-            self.unreadable("the file is damaged", format!("{} is not valid at line {}, column {}", self.path.display(), e.line(), e.column()))
-        })?;
+        let doc: Doc =
+            serde_json::from_slice(&text).map_err(|e| self.unreadable("the file is damaged", format!("{} is not valid at line {}, column {}", self.path.display(), e.line(), e.column())))?;
         if doc.version > VERSION {
-            return Err(self.unreadable(
-                "it was written by a newer Kora",
-                format!("{} has format version {}, this Kora understands {VERSION}", self.path.display(), doc.version),
-            ));
+            return Err(self.unreadable("it was written by a newer Kora", format!("{} has format version {}, this Kora understands {VERSION}", self.path.display(), doc.version)));
         }
         Ok(doc)
     }
@@ -209,12 +205,7 @@ impl KeyStore {
     /// put the result in an answer, a log, an event or an error.
     pub fn get(&self, name: &str) -> Result<String, Problem> {
         let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        self.read()?
-            .keys
-            .into_iter()
-            .find(|e| same(&e.name, name))
-            .map(|e| e.key)
-            .ok_or_else(|| not_found(name))
+        self.read()?.keys.into_iter().find(|e| same(&e.name, name)).map(|e| e.key).ok_or_else(|| not_found(name))
     }
 
     /// The name a key value is already saved under, if any.
@@ -295,11 +286,8 @@ impl KeyStore {
 }
 
 fn not_found(name: &str) -> Problem {
-    Problem::new(
-        codes::KEYS_NOT_FOUND,
-        format!("There is no saved licence key called \"{name}\" (it may have been renamed or deleted). Pick another saved key or add the key again."),
-    )
-    .with_action(Action::change_answers("licence"))
+    Problem::new(codes::KEYS_NOT_FOUND, format!("There is no saved licence key called \"{name}\" (it may have been renamed or deleted). Pick another saved key or add the key again."))
+        .with_action(Action::change_answers("licence"))
 }
 
 fn name_taken(name: &str) -> Problem {
@@ -385,7 +373,13 @@ pub fn replace_key_line(text: &str, key: &str) -> Option<String> {
     for line in text.split_inclusive('\n') {
         if !done && parse_key_line(line).is_some() {
             done = true;
-            let eol = if line.ends_with("\r\n") { "\r\n" } else if line.ends_with('\n') { "\n" } else { "" };
+            let eol = if line.ends_with("\r\n") {
+                "\r\n"
+            } else if line.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
             let t = line.trim_start();
             let indent = &line[..line.len() - t.len()];
             let set = if t.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("set ")) { "set " } else { "" };

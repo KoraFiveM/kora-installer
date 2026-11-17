@@ -89,13 +89,7 @@ pub fn ssh_client_on_tailnet(ssh_connection: Option<&str>) -> Option<SocketAddr>
 
 /// Choose the first admin. `None` means Kora cannot tell (a tagged computer reached without Tailscale):
 /// ask, or tell the person to use `--admin`.
-pub fn choose_admin(
-    flag: Option<&str>,
-    ssh: Option<SocketAddr>,
-    ts: &dyn Whois,
-    status: &TsSelf,
-    cfg: &RemoteConfig,
-) -> Result<Option<(String, AdminSource)>, String> {
+pub fn choose_admin(flag: Option<&str>, ssh: Option<SocketAddr>, ts: &dyn Whois, status: &TsSelf, cfg: &RemoteConfig) -> Result<Option<(String, AdminSource)>, String> {
     if let Some(f) = flag {
         return Ok(Some((normalise_login(f)?, AdminSource::Flag)));
     }
@@ -162,15 +156,13 @@ pub fn configure(admin_flag: Option<&str>) -> Result<Ready, String> {
     let (admin, source) = match choose_admin(admin_flag, ssh, &SystemWhois, &status, &cfg)? {
         // Chosen by Kora (not by you): confirm when someone is at the terminal, so an SSH jump host or an
         // old auth key never quietly decides who owns the panel.
-        Some((l, src)) if !matches!(src, AdminSource::Flag | AdminSource::Existing) => {
-            match ask_line(&format!("Make {l} the panel's admin ({})? [Y/n] ", src.why())) {
-                Some(answer) if is_no(&answer) => match ask_line("Their Tailscale login instead (name@example.com): ") {
-                    Some(other) if !other.trim().is_empty() => (normalise_login(&other)?, AdminSource::Flag),
-                    _ => return Err("No admin chosen; nothing was changed. Run it again with --admin you@example.com.".into()),
-                },
-                _ => (l, src),
-            }
-        }
+        Some((l, src)) if !matches!(src, AdminSource::Flag | AdminSource::Existing) => match ask_line(&format!("Make {l} the panel's admin ({})? [Y/n] ", src.why())) {
+            Some(answer) if is_no(&answer) => match ask_line("Their Tailscale login instead (name@example.com): ") {
+                Some(other) if !other.trim().is_empty() => (normalise_login(&other)?, AdminSource::Flag),
+                _ => return Err("No admin chosen; nothing was changed. Run it again with --admin you@example.com.".into()),
+            },
+            _ => (l, src),
+        },
         Some(a) => a,
         None => match ask_line("This computer belongs to no Tailscale account (it is tagged), so Kora cannot tell who should be the panel's admin.\nYour Tailscale login (name@example.com): ") {
             Some(l) if !l.trim().is_empty() => (normalise_login(&l)?, AdminSource::Flag),
@@ -213,12 +205,7 @@ pub fn start_background(a: &super::PanelArgs, home: &Path, ready: &Ready) -> i32
         }
         return 1;
     }
-    let listening = ready
-        .status
-        .ips
-        .iter()
-        .filter(|i| is_tailnet_ip(**i))
-        .any(|ip| wait_for_port(SocketAddr::new(*ip, port), Duration::from_secs(10)));
+    let listening = ready.status.ips.iter().filter(|i| is_tailnet_ip(**i)).any(|ip| wait_for_port(SocketAddr::new(*ip, port), Duration::from_secs(10)));
     open_firewall(port);
     println!();
     match ready.status.url(port) {
@@ -400,10 +387,7 @@ fn wait_for_port(addr: SocketAddr, timeout: Duration) -> bool {
 
 /// `ufw` rule that lets Tailscale devices reach the panel (only on the Tailscale interface).
 pub fn ufw_rule(port: u16) -> Vec<String> {
-    ["allow", "in", "on", "tailscale0", "to", "any", "port", &port.to_string(), "proto", "tcp", "comment", "Kora Panel over Tailscale"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    ["allow", "in", "on", "tailscale0", "to", "any", "port", &port.to_string(), "proto", "tcp", "comment", "Kora Panel over Tailscale"].iter().map(|s| s.to_string()).collect()
 }
 
 /// A host firewall can block Tailscale traffic to the panel. With `ufw` active, add a rule for the

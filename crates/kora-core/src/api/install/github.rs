@@ -103,8 +103,7 @@ pub trait GithubEnv: Send + Sync {
 /// The real `gh`.
 pub struct SystemGithub;
 
-const GH_HELP: &str =
-    "Is the GitHub CLI (gh) installed? You can also run `gh auth login` yourself.";
+const GH_HELP: &str = "Is the GitHub CLI (gh) installed? You can also run `gh auth login` yourself.";
 
 impl GithubEnv for SystemGithub {
     fn auth(&self) -> GithubUser {
@@ -112,17 +111,8 @@ impl GithubEnv for SystemGithub {
     }
 
     fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
-        let list = owners::list_owners(&SystemRunner)
-            .map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
-        Ok(list
-            .into_iter()
-            .map(|o| OwnerChoice {
-                login: o.login,
-                is_org: o.kind == OwnerKind::Org,
-                can_fork: o.can_fork,
-                reason: o.reason,
-            })
-            .collect())
+        let list = owners::list_owners(&SystemRunner).map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
+        Ok(list.into_iter().map(|o| OwnerChoice { login: o.login, is_org: o.kind == OwnerKind::Org, can_fork: o.can_fork, reason: o.reason }).collect())
     }
 
     fn begin_login(&self) -> Result<LoginFlow, String> {
@@ -136,18 +126,15 @@ impl GithubEnv for SystemGithub {
         Ok(LoginFlow {
             code,
             url,
-            wait: Box::new(move || {
-                match session.wait() {
+            wait: Box::new(move || match session.wait() {
                 Ok(GhAuth::LoggedIn { login }) => Ok(Some(login)),
                 Ok(GhAuth::LoggedOut) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "GitHub did not confirm the sign-in. Start it again and approve it in your browser.")
                     .with_action(Action::SignInGithub { scopes: vec![] })
                     .encode()),
                 Ok(GhAuth::Missing) => Err(known::gh_missing().encode()),
-                Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
-                    .with_details(e.to_string())
-                    .with_action(Action::SignInGithub { scopes: vec![] })
-                    .encode()),
-            }
+                Err(e) => {
+                    Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] }).encode())
+                }
             }),
         })
     }
@@ -165,9 +152,7 @@ pub fn auth_with(runner: &dyn crate::git::CommandRunner) -> GithubUser {
         GhAuth::LoggedIn { login } => {
             // `gh auth status` answered a moment ago; if it cannot be read now, or lists no scopes at all
             // (a token from GH_TOKEN, a fine-grained token), do not invent a problem.
-            let missing = crate::git::auth_status(runner)
-                .map(|s| if s.scopes.is_empty() { vec![] } else { s.missing_scopes(false) })
-                .unwrap_or_default();
+            let missing = crate::git::auth_status(runner).map(|s| if s.scopes.is_empty() { vec![] } else { s.missing_scopes(false) }).unwrap_or_default();
             if missing.is_empty() {
                 GithubUser::ready(&login)
             } else {
@@ -178,10 +163,7 @@ pub fn auth_with(runner: &dyn crate::git::CommandRunner) -> GithubUser {
 }
 
 /// Same rules as the CLI's `resolve_github_owner_with`.
-pub fn resolve_owner_with(
-    runner: &dyn crate::git::CommandRunner,
-    requested: Option<&str>,
-) -> Result<String, String> {
+pub fn resolve_owner_with(runner: &dyn crate::git::CommandRunner, requested: Option<&str>) -> Result<String, String> {
     if let Some(want) = requested {
         return match owners::check_requested_owner(runner, want)? {
             owners::OwnerCheck::Verified(l) | owners::OwnerCheck::Deferred(l) => Ok(l),
@@ -193,8 +175,7 @@ pub fn resolve_owner_with(
         GhAuth::LoggedOut => return Err(known::github_signed_out().encode()),
         GhAuth::LoggedIn { .. } => {}
     }
-    let all = owners::list_owners(runner)
-        .map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
+    let all = owners::list_owners(runner).map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
     owners::choose_owner(&all, requested).map(|o| o.login)
 }
 

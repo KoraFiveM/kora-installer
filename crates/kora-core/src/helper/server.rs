@@ -31,12 +31,7 @@ const LINE_CAP: usize = 8 * 1024;
 
 /// Split a chunk of child output into display lines (handles `\r` progress redraws).
 pub fn split_lines(chunk: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(chunk)
-        .split(['\n', '\r'])
-        .map(|l| l.trim_end())
-        .filter(|l| !l.is_empty())
-        .map(|l| l.chars().take(LINE_CAP).collect())
-        .collect()
+    String::from_utf8_lossy(chunk).split(['\n', '\r']).map(|l| l.trim_end()).filter(|l| !l.is_empty()).map(|l| l.chars().take(LINE_CAP).collect()).collect()
 }
 
 /// Read the installing user's record.
@@ -269,10 +264,7 @@ mod unix {
         while let Some(path) = p {
             let m = std::fs::metadata(path).map_err(|e| format!("cannot inspect {}: {e}", path.display()))?;
             if writable_by_others(m.uid(), m.mode()) {
-                return Err(format!(
-                    "{} can be changed by someone other than root, so the helper will not run from it. Run `sudo kora helper install` again.",
-                    path.display()
-                ));
+                return Err(format!("{} can be changed by someone other than root, so the helper will not run from it. Run `sudo kora helper install` again.", path.display()));
             }
             p = path.parent().filter(|q| !q.as_os_str().is_empty());
         }

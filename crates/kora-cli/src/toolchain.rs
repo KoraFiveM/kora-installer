@@ -106,7 +106,10 @@ pub fn check(env: &dyn ToolchainEnv, github: &dyn GithubEnv, start_database: boo
         }
     }
     if fix > 0 {
-        println!("\n{fix} thing{} to fix. `kora tools install` sets up Git and the GitHub CLI; `kora check --start-database` starts the database; `gh auth login` signs in to GitHub.", if fix == 1 { "" } else { "s" });
+        println!(
+            "\n{fix} thing{} to fix. `kora tools install` sets up Git and the GitHub CLI; `kora check --start-database` starts the database; `gh auth login` signs in to GitHub.",
+            if fix == 1 { "" } else { "s" }
+        );
     }
     i32::from(fix > 0)
 }
@@ -134,7 +137,17 @@ mod tests {
         installs: Mutex<Vec<Tool>>,
     }
     fn st(t: Tool, ok: bool) -> ToolStatus {
-        ToolStatus { tool: t, name: if t == Tool::Git { "git" } else { "gh" }, label: t.label(), installed: ok, version: ok.then(|| "1.0".into()), source: ok.then_some(Source::Private), path: None, broken: false, can_install: true }
+        ToolStatus {
+            tool: t,
+            name: if t == Tool::Git { "git" } else { "gh" },
+            label: t.label(),
+            installed: ok,
+            version: ok.then(|| "1.0".into()),
+            source: ok.then_some(Source::Private),
+            path: None,
+            broken: false,
+            can_install: true,
+        }
     }
     impl ToolchainEnv for Fake {
         fn tools(&self) -> Vec<ToolStatus> {

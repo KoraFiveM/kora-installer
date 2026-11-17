@@ -43,9 +43,7 @@ pub(crate) fn may_read(caller: &Caller, op: Option<Op>) -> Result<(), ApiError> 
     let refuse = || ApiError::forbidden("Your account cannot follow this job.");
     let op = op.ok_or_else(refuse)?;
     if roles::local_only(op) {
-        return Err(ApiError::forbidden(
-            "This job can only be followed on the computer that runs Kora.",
-        ));
+        return Err(ApiError::forbidden("This job can only be followed on the computer that runs Kora."));
     }
     match &caller.identity {
         Some(id) if id.role >= roles::min_role(op) => Ok(()),
@@ -120,16 +118,12 @@ impl MemoryJobs {
         Self::default()
     }
     pub fn create(&self, id: &str) {
-        self.inner
-            .lock()
-            .unwrap()
-            .insert(id.to_string(), Entry::default());
+        self.inner.lock().unwrap().insert(id.to_string(), Entry::default());
     }
     pub fn push(&self, id: &str, ev: Value) {
         if let Some(e) = self.inner.lock().unwrap().get_mut(id) {
             e.events.push(ev.clone());
-            e.subs
-                .retain(|s| s.send(JobMessage::Event(ev.clone())).is_ok());
+            e.subs.retain(|s| s.send(JobMessage::Event(ev.clone())).is_ok());
         }
     }
     pub fn finish(&self, id: &str, result: Value) {
@@ -158,10 +152,8 @@ impl Jobs for MemoryJobs {
             Some(JobMessage::Failed(m)) => ("failed", Value::Null, json!(m)),
             Some(JobMessage::Event(_)) => ("running", Value::Null, Value::Null),
         };
-        Some(
-            json!({"id": id, "op": "test", "server": null, "state": state,
-            "events": e.events, "result": result, "error": error}),
-        )
+        Some(json!({"id": id, "op": "test", "server": null, "state": state,
+            "events": e.events, "result": result, "error": error}))
     }
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
         let mut g = self.inner.lock().unwrap();
@@ -177,11 +169,7 @@ impl Jobs for MemoryJobs {
     }
 }
 
-pub async fn job_get(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn job_get(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
     let jobs = st.jobs.clone();
     crate::blocking(move || {
         let v = jobs.get(&id).ok_or_else(|| ApiError::not_found("unknown job"))?;
@@ -191,11 +179,7 @@ pub async fn job_get(
     .await
 }
 
-pub async fn job_events(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(id): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
+pub async fn job_events(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(id): Path<String>) -> Result<impl IntoResponse, ApiError> {
     let jobs = st.jobs.clone();
     let c = caller.clone();
     let (past, rx) = crate::blocking(move || {
@@ -203,8 +187,7 @@ pub async fn job_events(
             return Err(ApiError::not_found("unknown job"));
         }
         may_read(&c, jobs.op(&id))?;
-        jobs.subscribe(&id)
-            .ok_or_else(|| ApiError::not_found("unknown job"))
+        jobs.subscribe(&id).ok_or_else(|| ApiError::not_found("unknown job"))
     })
     .await?;
     let permit = st.stream_permit(&caller)?;
@@ -232,27 +215,18 @@ pub async fn job_events(
                     return;
                 }
                 Ok(JobMessage::Failed(m)) => {
-                    send(
-                        Event::default()
-                            .event("failed")
-                            .data(json!({"error": m}).to_string()),
-                    );
+                    send(Event::default().event("failed").data(json!({"error": m}).to_string()));
                     return;
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    send(
-                        Event::default()
-                            .event("failed")
-                            .data(json!({"error": "job ended unexpectedly"}).to_string()),
-                    );
+                    send(Event::default().event("failed").data(json!({"error": "job ended unexpectedly"}).to_string()));
                     return;
                 }
             }
         }
     });
-    Ok(Sse::new(Limited::new(ReceiverStream::new(trx), permit))
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+    Ok(Sse::new(Limited::new(ReceiverStream::new(trx), permit)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
 fn progress(v: &Value) -> Event {
@@ -267,11 +241,7 @@ mod tests {
     use serde_json::json;
 
     fn remote(role: Role) -> Caller {
-        Caller {
-            remote: true,
-            peer: Some("100.64.0.9:5000".parse().unwrap()),
-            identity: Some(Identity { name: "x".into(), provider: Provider::Token, role }),
-        }
+        Caller { remote: true, peer: Some("100.64.0.9:5000".parse().unwrap()), identity: Some(Identity { name: "x".into(), provider: Provider::Token, role }) }
     }
 
     #[test]

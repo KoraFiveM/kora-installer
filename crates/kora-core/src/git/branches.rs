@@ -256,9 +256,9 @@ fn bad_name(what: &str, v: &str) -> Problem {
 pub fn problem_of(e: &GitError) -> Problem {
     match e {
         GitError::Spawn(cmd, why) if cmd.starts_with("gh ") => known::gh_missing().with_details(why.clone()),
-        GitError::Spawn(_, why) => Problem::new(pcodes::INSTALL_TOOL_MISSING, "Git is not installed, or Kora cannot find it.")
-            .with_details(why.clone())
-            .with_action(Action::InstallTool { tool: Tool::Git }),
+        GitError::Spawn(_, why) => {
+            Problem::new(pcodes::INSTALL_TOOL_MISSING, "Git is not installed, or Kora cannot find it.").with_details(why.clone()).with_action(Action::InstallTool { tool: Tool::Git })
+        }
         GitError::Invalid(what, v) => bad_name(what, v),
         GitError::Parse(cmd, _) => Problem::new(pcodes::FAILED, "GitHub or git answered in a way Kora did not understand.").with_details(cmd.clone()).with_action(Action::CopyDetails),
         GitError::Command { cmd, stderr, .. } => {
@@ -270,9 +270,19 @@ pub fn problem_of(e: &GitError) -> Problem {
                 known::github_signed_out()
             } else if super::is_rate_limited(stderr) {
                 Problem::new(pcodes::GH_RATE_LIMITED, "GitHub says to slow down. Wait a minute and try again.").with_action(Action::Retry)
-            } else if ["could not resolve host", "unable to access", "timed out", "connection refused", "network is unreachable", "failed to connect", "operation too slow", "tls connection", "could not connect"]
-                .iter()
-                .any(|m| low.contains(m))
+            } else if [
+                "could not resolve host",
+                "unable to access",
+                "timed out",
+                "connection refused",
+                "network is unreachable",
+                "failed to connect",
+                "operation too slow",
+                "tls connection",
+                "could not connect",
+            ]
+            .iter()
+            .any(|m| low.contains(m))
             {
                 Problem::new(codes::NO_NETWORK, "Kora could not reach GitHub. Check your internet connection and try again.").with_details(stderr.clone()).with_action(Action::Retry)
             } else {
@@ -578,7 +588,9 @@ pub(crate) fn current(r: &dyn CommandRunner, repo: &Path) -> super::Result<Optio
 pub fn restore_stash(r: &dyn CommandRunner, repo: &Path, default_branch: &str, index: u32) -> PResult<Outcome> {
     let now = locate(r, repo, default_branch)?;
     if now.dirty() {
-        return Err(Problem::new(codes::STASH_NEEDS_CLEAN, "This resource has changes of its own right now. Put them aside or discard them first, then bring the old ones back.").with_action(Action::Retry));
+        return Err(
+            Problem::new(codes::STASH_NEEDS_CLEAN, "This resource has changes of its own right now. Put them aside or discard them first, then bring the old ones back.").with_action(Action::Retry)
+        );
     }
     let list = stashes(r, repo)?;
     let Some(stash) = list.iter().find(|s| s.index == index).cloned() else {
@@ -590,13 +602,10 @@ pub fn restore_stash(r: &dyn CommandRunner, repo: &Path, default_branch: &str, i
         // Conflicts: put the folder back exactly as it was (it was clean), keep the stash.
         let _ = run(r, "git", &["reset", "--hard"], Some(repo));
         let _ = run(r, "git", &["clean", "-fd"], Some(repo));
-        return Err(Problem::new(
-            codes::STASH_CONFLICT,
-            "Your kept-aside changes don't fit on top of this version (they touch the same lines). Nothing was changed, and they are still kept aside.",
-        )
-        .with_details(first_lines(&o))
-        .with_action(Action::show_command(&["git", "stash", "show", "-p", &reference], false))
-        .with_action(Action::CopyDetails));
+        return Err(Problem::new(codes::STASH_CONFLICT, "Your kept-aside changes don't fit on top of this version (they touch the same lines). Nothing was changed, and they are still kept aside.")
+            .with_details(first_lines(&o))
+            .with_action(Action::show_command(&["git", "stash", "show", "-p", &reference], false))
+            .with_action(Action::CopyDetails));
     }
     let after = locate(r, repo, default_branch)?;
     Ok(Outcome {
@@ -720,10 +729,14 @@ fn view_pr(r: &dyn CommandRunner, repo_slug: &str, number: u32) -> PResult<Optio
                 head_gone: v.get("headRepository").is_none_or(Value::is_null),
             }))
         }
-        Err(GitError::Command { stderr, .. }) if {
-            let l = stderr.to_ascii_lowercase();
-            l.contains("could not resolve to a pullrequest") || l.contains("no pull requests found") || l.contains("http 404")
-        } => Ok(None),
+        Err(GitError::Command { stderr, .. })
+            if {
+                let l = stderr.to_ascii_lowercase();
+                l.contains("could not resolve to a pullrequest") || l.contains("no pull requests found") || l.contains("http 404")
+            } =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(problem_of(&e)),
     }
 }
@@ -751,8 +764,11 @@ pub fn checkout_pr(r: &dyn CommandRunner, repo: &Path, default_branch: &str, inp
             match known {
                 Some(s) => candidates.push(s.clone()),
                 None => {
-                    return Err(Problem::new(codes::PR_OTHER_REPO, format!("That pull request is on {want}, which is not this resource's repository or your fork of it. Kora can only try pull requests of those two."))
-                        .with_action(Action::open_link(&format!("https://github.com/{want}/pull/{}", input.number))))
+                    return Err(Problem::new(
+                        codes::PR_OTHER_REPO,
+                        format!("That pull request is on {want}, which is not this resource's repository or your fork of it. Kora can only try pull requests of those two."),
+                    )
+                    .with_action(Action::open_link(&format!("https://github.com/{want}/pull/{}", input.number))))
                 }
             }
         }
@@ -781,12 +797,13 @@ pub fn checkout_pr(r: &dyn CommandRunner, repo: &Path, default_branch: &str, inp
     match d.state.as_str() {
         "OPEN" => {}
         "MERGED" => {
-            return Err(Problem::new(codes::PR_CLOSED, format!("Pull request #{} has already been merged, so there is nothing separate to try. Go back to the normal version to get it.", input.number))
-                .with_action(Action::open_link(&d.url)))
+            return Err(Problem::new(
+                codes::PR_CLOSED,
+                format!("Pull request #{} has already been merged, so there is nothing separate to try. Go back to the normal version to get it.", input.number),
+            )
+            .with_action(Action::open_link(&d.url)))
         }
-        _ => {
-            return Err(Problem::new(codes::PR_CLOSED, format!("Pull request #{} was closed without being merged.", input.number)).with_action(Action::open_link(&d.url)))
-        }
+        _ => return Err(Problem::new(codes::PR_CLOSED, format!("Pull request #{} was closed without being merged.", input.number)).with_action(Action::open_link(&d.url))),
     }
     let remote = remote_for(r, repo, &slug)?;
     let n = input.number;
@@ -830,7 +847,14 @@ pub fn checkout_pr(r: &dyn CommandRunner, repo: &Path, default_branch: &str, inp
     };
     let up_to_date = exists && local == base && !fast_forward;
     if up_to_date && now.branch.as_deref() == Some(local.as_str()) {
-        return Ok(Outcome { status: Status::Already, message: format!("Already trying pull request #{n}, and there is nothing new in it."), now, stashed: None, saved_branch: None, title: Some(d.title) });
+        return Ok(Outcome {
+            status: Status::Already,
+            message: format!("Already trying pull request #{n}, and there is nothing new in it."),
+            now,
+            stashed: None,
+            saved_branch: None,
+            title: Some(d.title),
+        });
     }
     let (stashed, saved_branch) = match prepare_leave(r, repo, &now, &format!("pull request #{n}"), changes)? {
         Prep::NeedsChoice => return Ok(needs_choice(now)),

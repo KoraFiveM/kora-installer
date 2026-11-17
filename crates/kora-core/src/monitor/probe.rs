@@ -81,18 +81,11 @@ pub(crate) fn http_get_local(port: u16, path: &str) -> Option<String> {
 pub(crate) fn parse_game_info(players_json: &str, info_json: Option<&str>) -> Option<GameInfo> {
     let players = serde_json::from_str::<serde_json::Value>(players_json).ok()?;
     let players = u32::try_from(players.as_array()?.len()).ok()?;
-    let max_players = info_json
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
-        .and_then(|v| {
-            let m = &v["vars"]["sv_maxClients"];
-            m.as_u64()
-                .or_else(|| m.as_str().and_then(|s| s.trim().parse().ok()))
-                .and_then(|n| u32::try_from(n).ok())
-        });
-    Some(GameInfo {
-        players,
-        max_players,
-    })
+    let max_players = info_json.and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok()).and_then(|v| {
+        let m = &v["vars"]["sv_maxClients"];
+        m.as_u64().or_else(|| m.as_str().and_then(|s| s.trim().parse().ok())).and_then(|n| u32::try_from(n).ok())
+    });
+    Some(GameInfo { players, max_players })
 }
 
 // ------------------------------------------------------------------------- the real thing
@@ -123,23 +116,16 @@ impl Probe for SystemProbe {
     fn process(&self, e: &ServerEntry) -> Option<ProcUsage> {
         let (cpu_secs, rss) = os::process_tree(&e.dir)?;
         let now = Instant::now();
-        let mut last = self
-            .last_cpu
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut last = self.last_cpu.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let cpu_pct = match last.insert(e.name.clone(), (cpu_secs, now)) {
             Some((prev, at)) if cpu_secs >= prev => {
                 let dt = now.duration_since(at).as_secs_f64();
                 let cores = std::thread::available_parallelism().map_or(1, usize::from) as f64;
-                (dt > 0.5)
-                    .then(|| (((cpu_secs - prev) / dt / cores) * 100.0).clamp(0.0, 100.0) as f32)
+                (dt > 0.5).then(|| (((cpu_secs - prev) / dt / cores) * 100.0).clamp(0.0, 100.0) as f32)
             }
             _ => None,
         };
-        Some(ProcUsage {
-            cpu_pct,
-            rss_bytes: rss,
-        })
+        Some(ProcUsage { cpu_pct, rss_bytes: rss })
     }
 
     fn disk(&self, dir: &Path) -> Option<DiskUsage> {
@@ -180,22 +166,8 @@ mod os {
     }
 
     pub fn parse_meminfo(text: &str) -> Option<MemUsage> {
-        let kb = |key: &str| -> Option<u64> {
-            text.lines()
-                .find_map(|l| {
-                    l.strip_prefix(key)?
-                        .trim()
-                        .trim_end_matches("kB")
-                        .trim()
-                        .parse::<u64>()
-                        .ok()
-                })
-                .map(|v| v * 1024)
-        };
-        Some(MemUsage {
-            total: kb("MemTotal:")?,
-            available: kb("MemAvailable:")?,
-        })
+        let kb = |key: &str| -> Option<u64> { text.lines().find_map(|l| l.strip_prefix(key)?.trim().trim_end_matches("kB").trim().parse::<u64>().ok()).map(|v| v * 1024) };
+        Some(MemUsage { total: kb("MemTotal:")?, available: kb("MemAvailable:")? })
     }
 
     /// `(utime + stime in ticks, ppid, rss pages)` from the text of `/proc/<pid>/stat`.
@@ -210,12 +182,7 @@ mod os {
     }
 
     fn pids() -> Vec<u32> {
-        std::fs::read_dir("/proc")
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| e.file_name().to_str()?.parse().ok())
-            .collect()
+        std::fs::read_dir("/proc").into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str()?.parse().ok()).collect()
     }
 
     /// Does this process belong to the server folder? Its program or first argument lives inside it.
@@ -234,29 +201,19 @@ mod os {
         let me = std::process::id();
         let mut table: HashMap<u32, (u64, u32, u64)> = HashMap::new();
         for pid in pids() {
-            if let Some(st) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-                .ok()
-                .and_then(|t| parse_stat(&t))
-            {
+            if let Some(st) = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|t| parse_stat(&t)) {
                 table.insert(pid, st);
             }
         }
         let mut roots: Vec<u32> = Vec::new();
         // A server Kora started itself keeps its pid in `.kora/server.pid`.
-        if let Some(p) = std::fs::read_to_string(dir.join(".kora").join("server.pid"))
-            .ok()
-            .and_then(|t| t.trim().parse::<u32>().ok())
-        {
+        if let Some(p) = std::fs::read_to_string(dir.join(".kora").join("server.pid")).ok().and_then(|t| t.trim().parse::<u32>().ok()) {
             if table.contains_key(&p) {
                 roots.push(p);
             }
         }
         if roots.is_empty() {
-            roots = table
-                .keys()
-                .copied()
-                .filter(|p| *p != me && belongs(*p, dir))
-                .collect();
+            roots = table.keys().copied().filter(|p| *p != me && belongs(*p, dir)).collect();
         }
         if roots.is_empty() {
             return None;
@@ -276,10 +233,7 @@ mod os {
         }
         let tick = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
         let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(1) as u64;
-        let (ticks, rss) = set
-            .iter()
-            .filter_map(|p| table.get(p))
-            .fold((0u64, 0u64), |(t, r), (ti, _, rs)| (t + ti, r + rs));
+        let (ticks, rss) = set.iter().filter_map(|p| table.get(p)).fold((0u64, 0u64), |(t, r), (ti, _, rs)| (t + ti, r + rs));
         Some((ticks as f64 / tick, rss * page))
     }
 
@@ -295,14 +249,8 @@ mod os {
 
         #[test]
         fn meminfo_is_read_in_bytes() {
-            let m = parse_meminfo(
-                "MemTotal:       16000000 kB\nMemFree: 1 kB\nMemAvailable:    4000000 kB\n",
-            )
-            .unwrap();
-            assert_eq!(
-                (m.total, m.available),
-                (16_000_000 * 1024, 4_000_000 * 1024)
-            );
+            let m = parse_meminfo("MemTotal:       16000000 kB\nMemFree: 1 kB\nMemAvailable:    4000000 kB\n").unwrap();
+            assert_eq!((m.total, m.available), (16_000_000 * 1024, 4_000_000 * 1024));
         }
 
         #[test]
@@ -310,9 +258,7 @@ mod os {
             let dir = tempfile::tempdir().unwrap();
             // Named `sleep`: a multi-call coreutils binary decides what to do from its own file name.
             let sleep = dir.path().join("sleep");
-            std::fs::copy("/bin/sleep", &sleep)
-                .or_else(|_| std::fs::copy("/usr/bin/sleep", &sleep))
-                .unwrap();
+            std::fs::copy("/bin/sleep", &sleep).or_else(|_| std::fs::copy("/usr/bin/sleep", &sleep)).unwrap();
             // Another test thread forking at this moment can still hold the copy open for writing
             // ("Text file busy"): try again shortly.
             let mut child = (0..50)
@@ -346,10 +292,7 @@ mod os {
             let _ = child.wait();
             let (cpu, rss) = found.unwrap_or_else(|| panic!("the stand-in belongs to the folder ({why})"));
             assert!(cpu >= 0.0 && rss > 0);
-            assert!(
-                process_tree(dir.path()).is_none(),
-                "nothing left once it is gone"
-            );
+            assert!(process_tree(dir.path()).is_none(), "nothing left once it is gone");
         }
     }
 }
@@ -367,32 +310,16 @@ mod os {
         use std::os::windows::ffi::OsStrExt;
         #[link(name = "kernel32")]
         extern "system" {
-            fn GetDiskFreeSpaceExW(
-                dir: *const u16,
-                available: *mut u64,
-                total: *mut u64,
-                free: *mut u64,
-            ) -> i32;
+            fn GetDiskFreeSpaceExW(dir: *const u16, available: *mut u64, total: *mut u64, free: *mut u64) -> i32;
         }
         let mut p = p.to_path_buf();
         while !p.exists() {
             p = p.parent()?.to_path_buf();
         }
-        let wide: Vec<u16> = p
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
+        let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
         let mut total = 0u64;
         // SAFETY: `wide` is NUL-terminated; the two optional out-parameters may be null.
-        let ok = unsafe {
-            GetDiskFreeSpaceExW(
-                wide.as_ptr(),
-                std::ptr::null_mut(),
-                &mut total,
-                std::ptr::null_mut(),
-            )
-        };
+        let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), std::ptr::null_mut(), &mut total, std::ptr::null_mut()) };
         (ok != 0).then_some(total)
     }
 
@@ -426,10 +353,7 @@ mod os {
             avail_extended_virtual: 0,
         };
         // SAFETY: `m` is a correctly laid out MEMORYSTATUSEX with `length` set.
-        (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(MemUsage {
-            total: m.total_phys,
-            available: m.avail_phys,
-        })
+        (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(MemUsage { total: m.total_phys, available: m.avail_phys })
     }
 }
 
@@ -446,10 +370,7 @@ mod tests {
                 if let Ok((mut c, _)) = l.accept() {
                     let mut buf = [0u8; 512];
                     let _ = c.read(&mut buf);
-                    let _ = write!(
-                        c,
-                        "HTTP/1.0 {status}\r\nContent-Type: application/json\r\n\r\n{body}"
-                    );
+                    let _ = write!(c, "HTTP/1.0 {status}\r\nContent-Type: application/json\r\n\r\n{body}");
                 }
             }
         });
@@ -460,49 +381,22 @@ mod tests {
     fn local_http_reads_a_200_body() {
         let port = serve_once(r#"[{"id":1},{"id":2}]"#, "200 OK");
         let body = http_get_local(port, "/players.json").unwrap();
-        assert_eq!(
-            parse_game_info(&body, Some(r#"{"vars":{"sv_maxClients":"48"}}"#)),
-            Some(GameInfo {
-                players: 2,
-                max_players: Some(48)
-            })
-        );
+        assert_eq!(parse_game_info(&body, Some(r#"{"vars":{"sv_maxClients":"48"}}"#)), Some(GameInfo { players: 2, max_players: Some(48) }));
     }
 
     #[test]
     fn local_http_ignores_other_statuses_and_closed_ports() {
         let port = serve_once("nope", "404 Not Found");
         assert_eq!(http_get_local(port, "/players.json"), None);
-        let closed = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         assert_eq!(http_get_local(closed, "/players.json"), None);
     }
 
     #[test]
     fn game_info_survives_missing_or_odd_info() {
-        assert_eq!(
-            parse_game_info("[]", None),
-            Some(GameInfo {
-                players: 0,
-                max_players: None
-            })
-        );
-        assert_eq!(
-            parse_game_info("[]", Some("{")),
-            Some(GameInfo {
-                players: 0,
-                max_players: None
-            })
-        );
+        assert_eq!(parse_game_info("[]", None), Some(GameInfo { players: 0, max_players: None }));
+        assert_eq!(parse_game_info("[]", Some("{")), Some(GameInfo { players: 0, max_players: None }));
         assert_eq!(parse_game_info(r#"{"not":"a list"}"#, None), None);
-        assert_eq!(
-            parse_game_info("[1]", Some(r#"{"vars":{"sv_maxClients":64}}"#))
-                .unwrap()
-                .max_players,
-            Some(64)
-        );
+        assert_eq!(parse_game_info("[1]", Some(r#"{"vars":{"sv_maxClients":64}}"#)).unwrap().max_players, Some(64));
     }
 }

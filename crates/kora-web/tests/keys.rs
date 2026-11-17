@@ -359,7 +359,8 @@ async fn a_stopped_install_with_a_saved_key_carries_on_after_a_restart_without_a
     r.add("Main", MAIN).await;
     let dir = new_dir(&r, "resume");
     r.env.st().fail = Some("download failed".into());
-    let (_, v) = r.call("POST", "/installs", Some(install_body(&dir, json!({"license_key_name": "Main", "db_admin": {"host": "127.0.0.1", "port": 3306, "user": "root", "password": "hunter2-db"}})))).await;
+    let (_, v) =
+        r.call("POST", "/installs", Some(install_body(&dir, json!({"license_key_name": "Main", "db_admin": {"host": "127.0.0.1", "port": 3306, "user": "root", "password": "hunter2-db"}})))).await;
     let first = v["job"].as_str().unwrap().to_string();
     let job = r.job(&first).await;
     assert_eq!(job["state"], "failed", "{job}");

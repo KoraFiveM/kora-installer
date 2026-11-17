@@ -33,7 +33,9 @@ pub enum GhAuth {
     /// `gh` is not installed.
     Missing,
     LoggedOut,
-    LoggedIn { login: String },
+    LoggedIn {
+        login: String,
+    },
 }
 
 const PER_PAGE: usize = 100;
@@ -64,11 +66,7 @@ fn user_login(r: &dyn CommandRunner) -> Result<String, GhError> {
         return Err(GitError::Command { cmd: "gh api user".into(), code: o.code, stderr: o.stderr.trim().to_string() });
     }
     let v: serde_json::Value = serde_json::from_str(o.stdout.trim()).map_err(|_| GitError::Parse("gh api user".into(), o.stdout.clone()))?;
-    v.get("login")
-        .and_then(|l| l.as_str())
-        .filter(|l| valid_name(l))
-        .map(str::to_string)
-        .ok_or_else(|| GitError::Parse("gh api user".into(), o.stdout.clone()))
+    v.get("login").and_then(|l| l.as_str()).filter(|l| valid_name(l)).map(str::to_string).ok_or_else(|| GitError::Parse("gh api user".into(), o.stdout.clone()))
 }
 
 /// Logins of the organisations the user belongs to (all pages, unsorted).
@@ -104,9 +102,7 @@ fn approval_url(org: &str) -> String {
 fn blocked_reason(org: &str, stderr: &str) -> Option<String> {
     let s = stderr.to_ascii_lowercase();
     if s.contains("saml") {
-        return Some(format!(
-            "This organisation requires single sign-on: authorise the GitHub CLI for it at https://github.com/orgs/{org}/sso, then try again"
-        ));
+        return Some(format!("This organisation requires single sign-on: authorise the GitHub CLI for it at https://github.com/orgs/{org}/sso, then try again"));
     }
     let is403 = s.contains("403") || s.contains("forbidden");
     if (is403 || s.contains("oauth")) && (s.contains("oauth") || s.contains("third-party") || s.contains("access restrictions") || s.contains("application_policy")) {
@@ -189,12 +185,7 @@ pub fn choose_owner(owners: &[Owner], requested: Option<&str>) -> Result<Owner, 
             let want = want.trim();
             match owners.iter().find(|o| o.login.eq_ignore_ascii_case(want)) {
                 Some(o) if o.can_fork => Ok(o.clone()),
-                Some(o) => Err(format!(
-                    "You cannot fork into '{}': {}.\n{}",
-                    o.login,
-                    o.reason.as_deref().unwrap_or("not allowed"),
-                    format_owner_list(owners)
-                )),
+                Some(o) => Err(format!("You cannot fork into '{}': {}.\n{}", o.login, o.reason.as_deref().unwrap_or("not allowed"), format_owner_list(owners))),
                 None => Err(format!("'{want}' is not your GitHub account or an organisation you belong to.\n{}", format_owner_list(owners))),
             }
         }
@@ -211,17 +202,11 @@ pub fn choose_owner(owners: &[Owner], requested: Option<&str>) -> Result<Owner, 
 /// A legal GitHub login: 1-39 characters of `[A-Za-z0-9-]`, no leading or trailing hyphen.
 pub fn check_login_syntax(login: &str) -> Result<(), String> {
     let l = login.trim();
-    let legal = !l.is_empty()
-        && l.len() <= 39
-        && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        && !l.starts_with('-')
-        && !l.ends_with('-');
+    let legal = !l.is_empty() && l.len() <= 39 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !l.starts_with('-') && !l.ends_with('-');
     if legal {
         Ok(())
     } else {
-        Err(format!(
-            "'{login}' is not a valid GitHub user or organisation name (1-39 letters, digits or hyphens, not starting or ending with a hyphen)."
-        ))
+        Err(format!("'{login}' is not a valid GitHub user or organisation name (1-39 letters, digits or hyphens, not starting or ending with a hyphen)."))
     }
 }
 
@@ -822,7 +807,11 @@ mod tests {
             let n = std::rc::Rc::new(std::cell::Cell::new(0));
             move |_| {
                 n.set(n.get() + 1);
-                if n.get() < 3 { ok(r#"[{"login":"old"}]"# ) } else { ok(r#"[{"login":"old"},{"login":"fresh"}]"#) }
+                if n.get() < 3 {
+                    ok(r#"[{"login":"old"}]"#)
+                } else {
+                    ok(r#"[{"login":"old"},{"login":"fresh"}]"#)
+                }
             }
         });
         let slept = RefCell::new(Duration::ZERO);

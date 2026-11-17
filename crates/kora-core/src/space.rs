@@ -229,11 +229,7 @@ mod tests {
 
     #[test]
     fn needs_on_one_volume_add_up_but_separate_volumes_are_checked_alone() {
-        let needs = vec![
-            Need::new("resources", "/data/srv", 3 * GIB),
-            Need::new("the FXServer build", "/data/srv/artifacts", 3 * GIB),
-            Need::new("the kora program", "/opt/kora", 100 * MIB),
-        ];
+        let needs = vec![Need::new("resources", "/data/srv", 3 * GIB), Need::new("the FXServer build", "/data/srv/artifacts", 3 * GIB), Need::new("the kora program", "/opt/kora", 100 * MIB)];
         // same volume: 6 GiB needed, only 5 free -> fails although each need alone would fit
         let one = Fake { volumes: vec![("/", "r", 5 * GIB)], fail: false };
         assert!(check(&one, &needs).is_err());

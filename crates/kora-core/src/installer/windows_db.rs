@@ -149,7 +149,8 @@ pub fn harden_ini(existing: &str, port: u16) -> String {
 }
 
 /// Appended to errors where a virus scanner is the likely culprit (it holds or quarantines new .exe files).
-pub const AV_HINT: &str = "Windows Security (or another antivirus) may have blocked or quarantined a file: open Windows Security > Virus & threat protection > Protection history, allow it, and run the install again.";
+pub const AV_HINT: &str =
+    "Windows Security (or another antivirus) may have blocked or quarantined a file: open Windows Security > Virus & threat protection > Protection history, allow it, and run the install again.";
 
 /// `my.ini` is read as ANSI by some MariaDB builds, so a folder with non-ASCII letters is refused up front.
 pub fn check_ascii_path(p: &Path) -> Result<()> {
@@ -251,9 +252,13 @@ pub fn owner_sid_command(path: &Path) -> CommandSpec {
     let quoted = path.to_string_lossy().replace('\'', "''");
     CommandSpec::new(
         "powershell",
-        &["-NoProfile", "-NonInteractive", "-Command", // .NET directly, not Get-Acl: started from PowerShell 7, Windows PowerShell inherits a module
-        // path it cannot load Microsoft.PowerShell.Security from.
-        &format!("(New-Object System.Security.AccessControl.DirectorySecurity -ArgumentList '{quoted}', 'Owner').GetOwner([System.Security.Principal.SecurityIdentifier]).Value")],
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command", // .NET directly, not Get-Acl: started from PowerShell 7, Windows PowerShell inherits a module
+            // path it cannot load Microsoft.PowerShell.Security from.
+            &format!("(New-Object System.Security.AccessControl.DirectorySecurity -ArgumentList '{quoted}', 'Owner').GetOwner([System.Security.Principal.SecurityIdentifier]).Value"),
+        ],
     )
 }
 
@@ -336,11 +341,7 @@ pub fn wait_for_login(admin: &AdminConn, timeout: Duration) -> Result<()> {
 }
 
 fn service_exists(name: &str) -> bool {
-    crate::sysexe::command("sc.exe")
-        .args(["query", name])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::sysexe::command("sc.exe").args(["query", name]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 pub fn list_service_names() -> Vec<String> {
@@ -642,7 +643,8 @@ mod tests {
         let svc = p.service_name.unwrap();
         assert!(svc.starts_with("KoraMariaDB_") && svc != "KoraMariaDB_aaaa");
         assert!(p.steps.iter().all(|s| match &s.action {
-            StepAction::DownloadVerified { dest, sources, .. } => dest.starts_with(&root) && sources.iter().all(|u| u.starts_with("https://")) && sources[0].contains("downloads.mariadb.org") && sources[1].contains("archive.mariadb.org"),
+            StepAction::DownloadVerified { dest, sources, .. } =>
+                dest.starts_with(&root) && sources.iter().all(|u| u.starts_with("https://")) && sources[0].contains("downloads.mariadb.org") && sources[1].contains("archive.mariadb.org"),
             StepAction::ExtractZip { dest, .. } => dest.starts_with(&root),
             _ => true,
         }));

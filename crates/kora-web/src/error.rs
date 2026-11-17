@@ -30,13 +30,7 @@ struct Extra {
 
 impl ApiError {
     pub fn new(status: StatusCode, code: &str, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            code: code.to_string(),
-            message: message.into(),
-            command: None,
-            extra: None,
-        }
+        Self { status, code: code.to_string(), message: message.into(), command: None, extra: None }
     }
     /// Technical details for the "Show details" box.
     pub fn details(&self) -> Option<&str> {
@@ -123,9 +117,7 @@ impl ApiError {
 
 /// The [`Problem`] for "this needs administrator rights": ask for them, or run `command` as administrator.
 pub fn elevation_problem(m: impl Into<String>, command: Vec<String>) -> Problem {
-    Problem::new(codes::NEEDS_ELEVATION, m)
-        .with_action(Action::RequestAdmin)
-        .with_action(Action::ShowCommand { command, elevated: true })
+    Problem::new(codes::NEEDS_ELEVATION, m).with_action(Action::RequestAdmin).with_action(Action::ShowCommand { command, elevated: true })
 }
 
 impl From<Problem> for ApiError {
@@ -174,9 +166,7 @@ impl IntoResponse for ApiError {
 }
 
 /// Run blocking work off the async runtime; a panic becomes an `internal` error.
-pub async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
-) -> Result<T, ApiError> {
+pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + Send + 'static) -> Result<T, ApiError> {
     match tokio::task::spawn_blocking(f).await {
         Ok(r) => r,
         Err(_) => Err(ApiError::internal("operation panicked")),
@@ -205,9 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_packed_problem_reaches_the_browser_whole() {
-        let p = Problem::new(codes::GH_MISSING, "The GitHub CLI is not installed.")
-            .with_details("gh: not found")
-            .with_action(Action::InstallTool { tool: kora_core::problem::Tool::Gh });
+        let p = Problem::new(codes::GH_MISSING, "The GitHub CLI is not installed.").with_details("gh: not found").with_action(Action::InstallTool { tool: kora_core::problem::Tool::Gh });
         // Through a `Res<T>` string, as a Backend method would return it.
         let (status, v) = body(ApiError::core(String::from(p.clone()))).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);

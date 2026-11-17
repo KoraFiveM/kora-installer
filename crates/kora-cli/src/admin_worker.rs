@@ -152,9 +152,7 @@ pub fn worker_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&Path
         }
         Some(Command::AdminDb(_)) if verb == "admin-db" => Ok(()),
         Some(Command::Check { start_database: true }) if verb == "check" => Ok(()),
-        Some(Command::SelfUpdate { version: Some(v), .. })
-            if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) =>
-        {
+        Some(Command::SelfUpdate { version: Some(v), .. }) if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) => {
             Err(format!("Kora's administrator helper only updates Kora to a newer version. To go back to {v}, run `kora self-update --version {v}` yourself from an administrator terminal."))
         }
         Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
@@ -163,9 +161,7 @@ pub fn worker_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&Path
         Some(Command::Schedule { cmd: ScheduleCmd::Set { server, .. } | ScheduleCmd::Off { server } }) if verb == "schedule" => name_only(&server),
         Some(Command::App { cmd: AppCmd::Uninstall { .. } }) if verb == "app" => Ok(()),
         // Never deletes files elevated: Kora Panel deletes the folders itself, as the person.
-        Some(Command::Uninstall { delete_files: true, .. }) if verb == "uninstall" => {
-            Err("Kora's administrator helper does not delete server folders; Kora Panel deletes them itself.".into())
-        }
+        Some(Command::Uninstall { delete_files: true, .. }) if verb == "uninstall" => Err("Kora's administrator helper does not delete server folders; Kora Panel deletes them itself.".into()),
         Some(Command::Uninstall { server, .. }) if verb == "uninstall" => server.as_deref().map_or(Ok(()), name_only),
         _ => deny(),
     }

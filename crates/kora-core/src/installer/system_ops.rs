@@ -353,9 +353,7 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
             }
         }
         Ok(match r {
-            Ok((detail, db)) => {
-                StepResult { detail, notes, created, db, error: None, grants_left }
-            }
+            Ok((detail, db)) => StepResult { detail, notes, created, db, error: None, grants_left },
             Err(e) => StepResult { detail: String::new(), notes, created, db: None, error: Some(Problem::decode(&e.0)), grants_left: false },
         })
     })

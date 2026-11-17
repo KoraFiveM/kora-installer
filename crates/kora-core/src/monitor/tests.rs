@@ -41,10 +41,7 @@ impl Probe for FakeProbe {
 struct Recorder(Mutex<Vec<(String, AlertKind, AlertSettings)>>);
 impl AlertSink for Recorder {
     fn deliver(&self, server: &ServerEntry, a: &Alert, s: &AlertSettings) {
-        self.0
-            .lock()
-            .unwrap()
-            .push((server.name.clone(), a.kind, s.clone()));
+        self.0.lock().unwrap().push((server.name.clone(), a.kind, s.clone()));
     }
 }
 
@@ -59,98 +56,44 @@ struct Rig {
 
 fn rig() -> Rig {
     let dir = tempfile::tempdir().unwrap();
-    let entry = ServerEntry {
-        name: "prod".into(),
-        dir: dir.path().to_path_buf(),
-        mode: Mode::Production,
-        ports: PortsRecord {
-            game: 30120,
-            txadmin: 40120,
-        },
-        created_unix: 0,
-    };
+    let entry = ServerEntry { name: "prod".into(), dir: dir.path().to_path_buf(), mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 };
     let fake = FakeBackend::new();
     fake.state().servers.push(entry.clone());
     fake.state().status.insert("prod".into(), Status::Running);
     let probe = Arc::new(FakeProbe::default());
     let sink = Arc::new(Recorder::default());
     let f = fake.clone();
-    let mon = Monitor::new(
-        Arc::new(move || Box::new(f.clone())),
-        probe.clone(),
-        sink.clone(),
-    );
-    Rig {
-        dir,
-        fake,
-        probe,
-        sink,
-        mon,
-        entry,
-    }
+    let mon = Monitor::new(Arc::new(move || Box::new(f.clone())), probe.clone(), sink.clone());
+    Rig { dir, fake, probe, sink, mon, entry }
 }
 
 #[test]
 fn a_sample_collects_status_players_cpu_ram_and_disk() {
     let r = rig();
     *r.probe.0.lock().unwrap() = Machine {
-        players: Some(GameInfo {
-            players: 12,
-            max_players: Some(48),
-        }),
-        proc_: Some(ProcUsage {
-            cpu_pct: Some(12.34),
-            rss_bytes: 3 << 30,
-        }),
-        disk: Some(DiskUsage {
-            free: 50 << 30,
-            total: 100 << 30,
-        }),
-        mem: Some(MemUsage {
-            total: 16 << 30,
-            available: 4 << 30,
-        }),
+        players: Some(GameInfo { players: 12, max_players: Some(48) }),
+        proc_: Some(ProcUsage { cpu_pct: Some(12.34), rss_bytes: 3 << 30 }),
+        disk: Some(DiskUsage { free: 50 << 30, total: 100 << 30 }),
+        mem: Some(MemUsage { total: 16 << 30, available: 4 << 30 }),
         gone: false,
     };
-    r.fake
-        .state()
-        .badges
-        .insert("prod".into(), UpdateBadge::Updates(2));
+    r.fake.state().badges.insert("prod".into(), UpdateBadge::Updates(2));
     r.mon.tick(1_000);
     let v = r.mon.metrics(&r.entry, Range::Hour, 1_000);
     let s = v.latest.expect("a sample");
     assert_eq!(v.samples.len(), 1);
-    assert_eq!(
-        (s.up, s.players, s.max_players, s.cpu, s.ram_mb),
-        (true, Some(12), Some(48), Some(12.3), Some(3072))
-    );
-    assert_eq!(
-        (s.sys_ram_pct, s.disk_free_mb, s.disk_free_pct),
-        (Some(75.0), Some(51_200), Some(50.0))
-    );
+    assert_eq!((s.up, s.players, s.max_players, s.cpu, s.ram_mb), (true, Some(12), Some(48), Some(12.3), Some(3072)));
+    assert_eq!((s.sys_ram_pct, s.disk_free_mb, s.disk_free_pct), (Some(75.0), Some(51_200), Some(50.0)));
     assert!(s.game_up && s.txadmin_up);
     assert_eq!(s.badge, Some(UpdateBadge::Updates(2)));
-    assert!(
-        r.sink.0.lock().unwrap().is_empty(),
-        "a healthy server raises nothing"
-    );
+    assert!(r.sink.0.lock().unwrap().is_empty(), "a healthy server raises nothing");
 }
 
 #[test]
 fn a_stopped_server_has_no_player_or_process_numbers() {
     let r = rig();
     r.fake.state().status.insert("prod".into(), Status::Stopped);
-    *r.probe.0.lock().unwrap() = Machine {
-        players: Some(GameInfo {
-            players: 3,
-            max_players: None,
-        }),
-        proc_: Some(ProcUsage {
-            cpu_pct: None,
-            rss_bytes: 1,
-        }),
-        ..Machine::default()
-    };
+    *r.probe.0.lock().unwrap() = Machine { players: Some(GameInfo { players: 3, max_players: None }), proc_: Some(ProcUsage { cpu_pct: None, rss_bytes: 1 }), ..Machine::default() };
     r.mon.tick(10);
     let s = r.mon.metrics(&r.entry, Range::Hour, 10).latest.unwrap();
     assert!(!s.up && s.players.is_none() && s.ram_mb.is_none() && !s.game_up);
@@ -165,11 +108,7 @@ fn a_crash_raises_once_and_coming_back_says_so() {
     r.mon.tick(130);
     r.mon.tick(145);
     let kinds: Vec<AlertKind> = r.sink.0.lock().unwrap().iter().map(|x| x.1).collect();
-    assert_eq!(
-        kinds,
-        vec![AlertKind::Stopped],
-        "one alert while it stays down"
-    );
+    assert_eq!(kinds, vec![AlertKind::Stopped], "one alert while it stays down");
     let a = r.mon.alerts();
     assert_eq!((a.len(), a[0].tone, a[0].resolved), (1, "danger", None));
     r.fake.state().status.insert("prod".into(), Status::Running);
@@ -181,16 +120,7 @@ fn a_crash_raises_once_and_coming_back_says_so() {
     // And a second crash raises again.
     r.fake.state().status.insert("prod".into(), Status::Stopped);
     r.mon.tick(175);
-    assert_eq!(
-        r.sink
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|x| x.1 == AlertKind::Stopped)
-            .count(),
-        2
-    );
+    assert_eq!(r.sink.0.lock().unwrap().iter().filter(|x| x.1 == AlertKind::Stopped).count(), 2);
 }
 
 #[test]
@@ -233,56 +163,20 @@ fn a_server_that_was_already_down_when_the_panel_started_is_not_a_crash() {
 #[test]
 fn disk_ram_and_update_alerts_debounce_until_they_clear() {
     let r = rig();
-    r.fake
-        .state()
-        .badges
-        .insert("prod".into(), UpdateBadge::NeedsAttention);
-    *r.probe.0.lock().unwrap() = Machine {
-        disk: Some(DiskUsage {
-            free: 2 << 30,
-            total: 500 << 30,
-        }),
-        mem: Some(MemUsage {
-            total: 16 << 30,
-            available: 1 << 30,
-        }),
-        ..Machine::default()
-    };
+    r.fake.state().badges.insert("prod".into(), UpdateBadge::NeedsAttention);
+    *r.probe.0.lock().unwrap() = Machine { disk: Some(DiskUsage { free: 2 << 30, total: 500 << 30 }), mem: Some(MemUsage { total: 16 << 30, available: 1 << 30 }), ..Machine::default() };
     for t in [100, 115, 130] {
         r.mon.tick(t);
     }
-    let mut kinds: Vec<String> = r
-        .sink
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|x| format!("{:?}", x.1))
-        .collect();
+    let mut kinds: Vec<String> = r.sink.0.lock().unwrap().iter().map(|x| format!("{:?}", x.1)).collect();
     kinds.sort();
     assert_eq!(kinds, ["DiskLow", "RamHigh", "UpdateAttention"]);
     // Everything clears, then the disk fills up again: only that one is raised a second time.
-    r.fake
-        .state()
-        .badges
-        .insert("prod".into(), UpdateBadge::UpToDate);
-    *r.probe.0.lock().unwrap() = Machine {
-        disk: Some(DiskUsage {
-            free: 300 << 30,
-            total: 500 << 30,
-        }),
-        mem: Some(MemUsage {
-            total: 16 << 30,
-            available: 8 << 30,
-        }),
-        ..Machine::default()
-    };
+    r.fake.state().badges.insert("prod".into(), UpdateBadge::UpToDate);
+    *r.probe.0.lock().unwrap() = Machine { disk: Some(DiskUsage { free: 300 << 30, total: 500 << 30 }), mem: Some(MemUsage { total: 16 << 30, available: 8 << 30 }), ..Machine::default() };
     r.mon.tick(145);
     assert!(r.mon.alerts().iter().all(|a| a.resolved == Some(145)));
-    r.probe.0.lock().unwrap().disk = Some(DiskUsage {
-        free: 1 << 30,
-        total: 500 << 30,
-    });
+    r.probe.0.lock().unwrap().disk = Some(DiskUsage { free: 1 << 30, total: 500 << 30 });
     r.mon.tick(160);
     assert_eq!(r.sink.0.lock().unwrap().len(), 4);
 }
@@ -290,30 +184,17 @@ fn disk_ram_and_update_alerts_debounce_until_they_clear() {
 #[test]
 fn settings_switch_rules_off_and_travel_with_the_delivery() {
     let r = rig();
-    let set = AlertSettings {
-        rules: alerts::Rules {
-            stopped: false,
-            ..Default::default()
-        },
-        webhook_url: Some("https://example.test/h".into()),
-        ..AlertSettings::default()
-    };
+    let set = AlertSettings { rules: alerts::Rules { stopped: false, ..Default::default() }, webhook_url: Some("https://example.test/h".into()), ..AlertSettings::default() };
     alerts::save_settings(r.dir.path(), &set).unwrap();
     r.mon.tick(100);
     r.fake.state().status.insert("prod".into(), Status::Stopped);
     r.mon.tick(115);
     assert!(r.mon.alerts().is_empty(), "the stopped rule is off");
-    r.probe.0.lock().unwrap().disk = Some(DiskUsage {
-        free: 1 << 30,
-        total: 10 << 30,
-    });
+    r.probe.0.lock().unwrap().disk = Some(DiskUsage { free: 1 << 30, total: 10 << 30 });
     r.mon.tick(130);
     let sent = r.sink.0.lock().unwrap();
     assert_eq!(sent.len(), 1);
-    assert_eq!(
-        sent[0].2.webhook_url.as_deref(),
-        Some("https://example.test/h")
-    );
+    assert_eq!(sent[0].2.webhook_url.as_deref(), Some("https://example.test/h"));
 }
 
 #[test]
@@ -373,8 +254,7 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
     let port = l.local_addr().unwrap().port();
     let t = std::thread::spawn(move || {
         let (mut c, _) = l.accept().unwrap();
-        c.set_read_timeout(Some(std::time::Duration::from_secs(3)))
-            .unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
         let mut got = Vec::new();
         let mut buf = vec![0u8; 4096];
         // Headers and body may arrive in separate packets.
@@ -387,41 +267,13 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
         let _ = c.write_all(b"HTTP/1.0 204 No Content\r\n\r\n");
         String::from_utf8_lossy(&got).into_owned()
     });
-    let a = Alert {
-        id: 1,
-        server: "prod".into(),
-        kind: AlertKind::Stopped,
-        tone: "danger",
-        title: "Server stopped",
-        message: "m".into(),
-        raised: 5,
-        resolved: None,
-        acked: false,
-    };
-    alerts::post_json(
-        &format!("http://127.0.0.1:{port}/secret-path"),
-        &alerts::webhook_payload(&a),
-        false,
-    )
-    .unwrap();
+    let a = Alert { id: 1, server: "prod".into(), kind: AlertKind::Stopped, tone: "danger", title: "Server stopped", message: "m".into(), raised: 5, resolved: None, acked: false };
+    alerts::post_json(&format!("http://127.0.0.1:{port}/secret-path"), &alerts::webhook_payload(&a), false).unwrap();
     let req = t.join().unwrap();
     assert!(req.starts_with("POST /secret-path "), "{req}");
-    assert!(
-        req.contains(r#""server":"prod""#)
-            && req.contains(r#""kind":"stopped""#)
-            && req.contains(r#""severity":"danger""#),
-        "{req}"
-    );
+    assert!(req.contains(r#""server":"prod""#) && req.contains(r#""kind":"stopped""#) && req.contains(r#""severity":"danger""#), "{req}");
     // Port 0 never answers. (A port freed by an earlier listener could be taken by another test
     // running at the same time, and then answer.)
-    let e = alerts::post_json(
-        "http://127.0.0.1:0/secret-path",
-        &serde_json::json!({}),
-        false,
-    )
-    .unwrap_err();
-    assert!(
-        e.contains("Could not reach") && !e.contains("secret-path") && !e.contains("127.0.0.1"),
-        "{e}"
-    );
+    let e = alerts::post_json("http://127.0.0.1:0/secret-path", &serde_json::json!({}), false).unwrap_err();
+    assert!(e.contains("Could not reach") && !e.contains("secret-path") && !e.contains("127.0.0.1"), "{e}");
 }

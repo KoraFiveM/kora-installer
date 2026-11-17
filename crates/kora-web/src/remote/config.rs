@@ -56,32 +56,17 @@ pub fn hash_token(salt: &str, token: &str) -> String {
 
 /// A user name: letters, digits, `.`, `_`, `-`; 1 to 40 characters.
 pub fn valid_user_name(name: &str) -> Result<(), String> {
-    let ok = !name.is_empty()
-        && name.len() <= 40
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    let ok = !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
     if ok {
         Ok(())
     } else {
-        Err(
-            "A user name uses letters, numbers, dots, dashes and underscores, up to 40 characters."
-                .into(),
-        )
+        Err("A user name uses letters, numbers, dots, dashes and underscores, up to 40 characters.".into())
     }
 }
 
 /// A host name or address someone will type in the browser (no scheme, path or spaces).
 pub fn valid_host(h: &str) -> Result<(), String> {
-    let bad = h.is_empty()
-        || h.len() > 255
-        || h.bytes().any(|b| {
-            b.is_ascii_whitespace()
-                || matches!(
-                    b,
-                    b'/' | b'\\' | b'@' | b'?' | b'#' | b'"' | b'\'' | b'<' | b'>'
-                )
-        });
+    let bad = h.is_empty() || h.len() > 255 || h.bytes().any(|b| b.is_ascii_whitespace() || matches!(b, b'/' | b'\\' | b'@' | b'?' | b'#' | b'"' | b'\'' | b'<' | b'>'));
     if bad || h.contains("://") {
         Err(format!("'{h}' is not a host name or address. Use just the name, for example box.example.ts.net."))
     } else {
@@ -90,10 +75,7 @@ pub fn valid_host(h: &str) -> Result<(), String> {
 }
 
 fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 impl RemoteConfig {
@@ -102,12 +84,7 @@ impl RemoteConfig {
     pub fn load(path: &Path) -> Result<Self, String> {
         match std::fs::read_to_string(path) {
             Ok(s) if s.trim().is_empty() => Ok(Self::default()),
-            Ok(s) => serde_json::from_str(&s).map_err(|e| {
-                format!(
-                    "The remote access settings file {} is not valid: {e}",
-                    path.display()
-                )
-            }),
+            Ok(s) => serde_json::from_str(&s).map_err(|e| format!("The remote access settings file {} is not valid: {e}", path.display())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(format!("Could not read {}: {e}", path.display())),
         }
@@ -115,19 +92,11 @@ impl RemoteConfig {
 
     /// Write atomically (temp file in the same folder, then rename), mode 0600 on Unix.
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        let dir = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
-        let tmp = dir.join(format!(
-            ".{FILE_NAME}.{}.tmp",
-            random_hex().get(..12).unwrap_or("tmp")
-        ));
+        let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        std::fs::create_dir_all(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
+        let tmp = dir.join(format!(".{FILE_NAME}.{}.tmp", random_hex().get(..12).unwrap_or("tmp")));
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        write_private(&tmp, json.as_bytes())
-            .map_err(|e| format!("Could not write {}: {e}", tmp.display()))?;
+        write_private(&tmp, json.as_bytes()).map_err(|e| format!("Could not write {}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, path).map_err(|e| {
             let _ = std::fs::remove_file(&tmp);
             format!("Could not save {}: {e}", path.display())
@@ -135,9 +104,7 @@ impl RemoteConfig {
     }
 
     pub fn user(&self, name: &str) -> Option<&TokenUser> {
-        self.users
-            .iter()
-            .find(|u| u.name.eq_ignore_ascii_case(name))
+        self.users.iter().find(|u| u.name.eq_ignore_ascii_case(name))
     }
 
     /// Add a user and return the new token (shown once, never stored).
@@ -150,13 +117,7 @@ impl RemoteConfig {
         let token = random_hex();
         let salt = random_hex();
         let hash = hash_token(&salt, &token);
-        self.users.push(TokenUser {
-            name: name.to_string(),
-            role,
-            salt,
-            hash,
-            created: now(),
-        });
+        self.users.push(TokenUser { name: name.to_string(), role, salt, hash, created: now() });
         Ok(token)
     }
 
@@ -180,10 +141,7 @@ impl RemoteConfig {
 
     pub fn tailscale_role(&self, login: &str) -> Option<Role> {
         let login = login.to_ascii_lowercase();
-        self.tailscale_users
-            .iter()
-            .find(|(k, _)| k.to_ascii_lowercase() == login)
-            .map(|(_, r)| *r)
+        self.tailscale_users.iter().find(|(k, _)| k.to_ascii_lowercase() == login).map(|(_, r)| *r)
     }
 }
 
@@ -191,11 +149,7 @@ impl RemoteConfig {
 fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
     f.write_all(data)?;
     f.sync_all()
 }
@@ -216,10 +170,7 @@ mod tests {
         let t = c.add_user("alice", Role::Operator).unwrap();
         let t2 = c.add_user("bob", Role::Viewer).unwrap();
         assert_ne!(t, t2);
-        assert!(
-            !serde_json::to_string(&c).unwrap().contains(&t),
-            "token must not be stored"
-        );
+        assert!(!serde_json::to_string(&c).unwrap().contains(&t), "token must not be stored");
         assert_eq!(c.user_for_token(&t).unwrap().name, "alice");
         assert_eq!(c.user_for_token(&t2).unwrap().name, "bob");
         assert!(c.user_for_token("nope").is_none());
@@ -238,16 +189,10 @@ mod tests {
         let mut c = RemoteConfig::default();
         c.add_user("a", Role::Admin).unwrap();
         c.save(&p).unwrap();
-        assert_eq!(
-            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         // Saving again (rename over the old file) keeps it private.
         c.save(&p).unwrap();
-        assert_eq!(
-            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(RemoteConfig::load(&p).unwrap(), c);
         // No temp files left behind.
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);

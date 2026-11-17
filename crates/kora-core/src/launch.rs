@@ -535,9 +535,8 @@ impl LaunchEnv for SystemEnv {
         }
         // Never through a link planted in the server folder (this can run as root).
         // Read-write, not append: Windows cannot empty (`set_len`) a file opened for appending only.
-        let out = crate::fsutil::open_no_follow(log, crate::fsutil::Access::ReadWrite, Some(0o644))
-            .and_then(|f| f.set_len(0).map(|_| f))
-            .map_err(|e| format!("cannot write {}: {e}", log.display()))?;
+        let out =
+            crate::fsutil::open_no_follow(log, crate::fsutil::Access::ReadWrite, Some(0o644)).and_then(|f| f.set_len(0).map(|_| f)).map_err(|e| format!("cannot write {}: {e}", log.display()))?;
         let err = out.try_clone().map_err(|e| e.to_string())?;
         cmd.stdin(std::process::Stdio::null()).stdout(out).stderr(err);
         #[cfg(unix)]

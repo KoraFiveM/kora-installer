@@ -686,8 +686,7 @@ mod tests {
             | Op::BranchSwitch
             | Op::StashRestore
             | Op::BranchBulkPreview
-            | Op::BranchBulkApply
-            => Op::ALL.contains(&op),
+            | Op::BranchBulkApply => Op::ALL.contains(&op),
         }
     }
 

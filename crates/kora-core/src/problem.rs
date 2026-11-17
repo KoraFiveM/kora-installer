@@ -140,8 +140,7 @@ pub mod known {
 
     /// A database server is installed but not running.
     pub fn db_stopped(name: &str) -> Problem {
-        Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running."))
-            .with_action(Action::StartDatabase)
+        Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running.")).with_action(Action::StartDatabase)
     }
 
     /// `gh` is installed but not signed in.
@@ -151,12 +150,9 @@ pub mod known {
 
     /// Signed in without the permissions Kora needs.
     pub fn github_missing_scopes(missing: &[String]) -> Problem {
-        Problem::new(
-            codes::GH_MISSING_SCOPES,
-            "Your GitHub sign-in does not give Kora all the permissions it needs. Sign in again to give them.",
-        )
-        .with_details(format!("Missing permissions (scopes): {}", missing.join(", ")))
-        .with_action(Action::SignInGithub { scopes: missing.to_vec() })
+        Problem::new(codes::GH_MISSING_SCOPES, "Your GitHub sign-in does not give Kora all the permissions it needs. Sign in again to give them.")
+            .with_details(format!("Missing permissions (scopes): {}", missing.join(", ")))
+            .with_action(Action::SignInGithub { scopes: missing.to_vec() })
     }
 }
 
@@ -259,13 +255,9 @@ impl Action {
     /// The line a terminal prints for this action (`None`: nothing useful to say there).
     fn terminal_hint(&self) -> Option<String> {
         match self {
-            Action::ShowCommand { command, elevated } => {
-                Some(format!("{}: {}", if *elevated { "Run as administrator" } else { "Run" }, command.join(" ")))
-            }
+            Action::ShowCommand { command, elevated } => Some(format!("{}: {}", if *elevated { "Run as administrator" } else { "Run" }, command.join(" "))),
             Action::OpenLink { url } => Some(format!("See {url}")),
-            Action::SignInGithub { scopes } if !scopes.is_empty() => {
-                Some(format!("Sign in again with more permissions: gh auth refresh -h github.com -s {}", scopes.join(",")))
-            }
+            Action::SignInGithub { scopes } if !scopes.is_empty() => Some(format!("Sign in again with more permissions: gh auth refresh -h github.com -s {}", scopes.join(","))),
             Action::SignInGithub { .. } => Some("Sign in to GitHub: gh auth login".into()),
             Action::InstallTool { tool } => Some(format!("Install {}.", tool.label())),
             Action::StartDatabase => Some("Start the database: kora check --start-database".into()),
@@ -521,10 +513,7 @@ mod tests {
     #[test]
     fn terminals_get_readable_text() {
         let t = plain_text(&sample().encode());
-        assert_eq!(
-            t,
-            "Your GitHub sign-in is missing a permission.\nmissing: read:org\nSign in again with more permissions: gh auth refresh -h github.com -s read:org\nRun: gh auth refresh"
-        );
+        assert_eq!(t, "Your GitHub sign-in is missing a permission.\nmissing: read:org\nSign in again with more permissions: gh auth refresh -h github.com -s read:org\nRun: gh auth refresh");
         assert!(!t.contains("kora-problem") && !t.contains('{'));
         assert_eq!(plain_text("as it was"), "as it was");
     }

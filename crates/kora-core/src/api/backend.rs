@@ -126,13 +126,7 @@ pub trait Backend {
     fn preview_events(&mut self, e: &ServerEntry, scope: Scope, _on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdatePreview> {
         self.preview(e, scope)
     }
-    fn apply(
-        &mut self,
-        e: &ServerEntry,
-        scope: Scope,
-        o: ApplyOpts,
-        on: &mut dyn FnMut(UpdateEvent),
-    ) -> Res<UpdateReport>;
+    fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport>;
     /// `force`: roll back even resources with uncommitted changes (they are thrown away).
     fn rollback(&mut self, e: &ServerEntry, snapshot: &str, force: bool) -> Res<()>;
     /// Saved snapshots, newest first.

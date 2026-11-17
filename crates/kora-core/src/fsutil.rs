@@ -280,9 +280,7 @@ mod nofollow {
             let tmp_c = cstr(temp_name(name).as_bytes())?;
             // O_EXCL + O_NOFOLLOW: a file or link someone planted under that name is never opened.
             // SAFETY: valid fd and NUL-terminated name.
-            let fd = unsafe {
-                libc::openat(dir.as_raw_fd(), tmp_c.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, mode as libc::c_uint)
-            };
+            let fd = unsafe { libc::openat(dir.as_raw_fd(), tmp_c.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, mode as libc::c_uint) };
             if fd < 0 {
                 let e = io::Error::last_os_error();
                 tries += 1;
@@ -468,9 +466,7 @@ mod nofollow {
             match std::fs::symlink_metadata(&p) {
                 Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
                 Err(e) => return Err(e),
-                Ok(m) if m.file_type().is_symlink() && i + 1 < parts.len() => {
-                    return Err(refused(format!("'{}' is a link, so Kora will not go through it", part.to_string_lossy())))
-                }
+                Ok(m) if m.file_type().is_symlink() && i + 1 < parts.len() => return Err(refused(format!("'{}' is a link, so Kora will not go through it", part.to_string_lossy()))),
                 Ok(_) => {}
             }
         }

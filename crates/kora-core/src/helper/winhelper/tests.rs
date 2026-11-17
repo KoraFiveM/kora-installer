@@ -166,7 +166,8 @@ fn the_ledger_lets_each_account_remove_only_its_own_things() {
 
 #[test]
 fn children_get_the_fixed_folder_and_service_mode() {
-    let sys = crate::helper::worker::SystemDirs { system_root: r"C:\Windows".into(), program_files: r"C:\Program Files".into(), program_files_x86: String::new(), program_data: r"C:\ProgramData".into() };
+    let sys =
+        crate::helper::worker::SystemDirs { system_root: r"C:\Windows".into(), program_files: r"C:\Program Files".into(), program_files_x86: String::new(), program_data: r"C:\ProgramData".into() };
     let e = cfg().child_env(&sys, None);
     assert!(e.contains(&(SERVICE_ENV.to_string(), "1".to_string())));
     assert!(e.contains(&("KORA_HOME".to_string(), cfg().kora_home)));

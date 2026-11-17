@@ -53,11 +53,7 @@ impl PlanState {
 
     pub fn ensure(&mut self, id: &str) {
         if self.status(id).is_none() {
-            self.steps.push(StepRecord {
-                id: id.to_string(),
-                status: StepStatus::Pending,
-                error: None,
-            });
+            self.steps.push(StepRecord { id: id.to_string(), status: StepStatus::Pending, error: None });
         }
     }
 

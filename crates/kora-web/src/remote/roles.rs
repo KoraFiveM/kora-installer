@@ -40,9 +40,7 @@ impl std::str::FromStr for Role {
             "viewer" => Ok(Role::Viewer),
             "operator" => Ok(Role::Operator),
             "admin" => Ok(Role::Admin),
-            _ => Err(format!(
-                "'{s}' is not a role. Use viewer, operator or admin."
-            )),
+            _ => Err(format!("'{s}' is not a role. Use viewer, operator or admin.")),
         }
     }
 }
@@ -611,10 +609,7 @@ pub fn op_for(method: &str, path: &str) -> Option<Op> {
         }
     }
     let (_, pattern) = best?;
-    Op::ALL
-        .iter()
-        .copied()
-        .find(|op| op.route().1 == pattern && op.route().0 == m)
+    Op::ALL.iter().copied().find(|op| op.route().1 == pattern && op.route().0 == m)
 }
 
 #[cfg(test)]
@@ -628,21 +623,10 @@ mod tests {
         for op in Op::ALL {
             let role = min_role(*op);
             if destructive(*op) || local_only(*op) {
-                assert_eq!(
-                    role,
-                    Role::Admin,
-                    "{op:?} is destructive or local-only, so admin"
-                );
+                assert_eq!(role, Role::Admin, "{op:?} is destructive or local-only, so admin");
             }
             let (m, p) = op.route();
-            let path = format!(
-                "{PREFIX}{}",
-                p.replace("{s}", "prod")
-                    .replace("{id}", "x")
-                    .replace("{file}", "f.log")
-                    .replace("{job}", "j")
-                    .replace("{name}", "bob")
-            );
+            let path = format!("{PREFIX}{}", p.replace("{s}", "prod").replace("{id}", "x").replace("{file}", "f.log").replace("{job}", "j").replace("{name}", "bob"));
             assert_eq!(op_for(m.as_str(), &path), Some(*op), "{op:?} {path}");
         }
     }
@@ -652,26 +636,14 @@ mod tests {
         for op in Op::ALL {
             if min_role(*op) == Role::Viewer {
                 let m = op.route().0;
-                assert!(
-                    m == Method::Get || matches!(op, Op::SessionCreate | Op::SessionLogout),
-                    "{op:?} is a viewer op but not a GET"
-                );
+                assert!(m == Method::Get || matches!(op, Op::SessionCreate | Op::SessionLogout), "{op:?} is a viewer op but not a GET");
             }
         }
     }
 
     #[test]
     fn the_listed_destructive_ops() {
-        let want = [
-            Op::ServerDelete,
-            Op::ServerUnregister,
-            Op::UninstallRun,
-            Op::AppUninstall,
-            Op::ConsoleSend,
-            Op::SelfUpdateApply,
-            Op::ScheduleSet,
-            Op::ScheduleRemove,
-        ];
+        let want = [Op::ServerDelete, Op::ServerUnregister, Op::UninstallRun, Op::AppUninstall, Op::ConsoleSend, Op::SelfUpdateApply, Op::ScheduleSet, Op::ScheduleRemove];
         for op in Op::ALL {
             assert_eq!(destructive(*op), want.contains(op), "{op:?}");
         }
@@ -733,19 +705,10 @@ mod tests {
 
     #[test]
     fn literal_segments_beat_parameters() {
-        assert_eq!(
-            op_for("POST", "/api/v1/servers/scan"),
-            Some(Op::ServersScan)
-        );
-        assert_eq!(
-            op_for("POST", "/api/v1/servers/adopt"),
-            Some(Op::ServersAdopt)
-        );
+        assert_eq!(op_for("POST", "/api/v1/servers/scan"), Some(Op::ServersScan));
+        assert_eq!(op_for("POST", "/api/v1/servers/adopt"), Some(Op::ServersAdopt));
         assert_eq!(op_for("GET", "/api/v1/servers/scan"), None);
-        assert_eq!(
-            op_for("DELETE", "/api/v1/servers/prod"),
-            Some(Op::ServerDelete)
-        );
+        assert_eq!(op_for("DELETE", "/api/v1/servers/prod"), Some(Op::ServerDelete));
         assert_eq!(op_for("HEAD", "/api/v1/servers/prod"), Some(Op::ServerGet));
         assert_eq!(op_for("GET", "/api/v1/nothing"), None);
         assert_eq!(op_for("PATCH", "/api/v1/servers"), None);

@@ -20,12 +20,8 @@ pub fn kora_home() -> PathBuf {
     }
     // HOME as before (under a plain `sudo` that is root's: the relaunch pins KORA_HOME first, see
     // `elevate`), then the account's passwd entry; never a relative `.kora`.
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
-        .or_else(crate::userhome::real_user_home)
-        .unwrap_or_else(std::env::temp_dir);
+    let home =
+        std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|h| !h.is_empty()).map(PathBuf::from).or_else(crate::userhome::real_user_home).unwrap_or_else(std::env::temp_dir);
     home.join(".kora")
 }
 
@@ -208,10 +204,7 @@ impl ServerFile {
 }
 
 pub fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -224,13 +217,7 @@ mod tests {
         let p = d.path().join("sub/servers.json");
         let mut r = Registry::load_from(&p).unwrap();
         assert!(r.servers.is_empty());
-        let e = ServerEntry {
-            name: "a".into(),
-            dir: "/x".into(),
-            mode: Mode::Production,
-            ports: PortsRecord { game: 30120, txadmin: 40120 },
-            created_unix: 1,
-        };
+        let e = ServerEntry { name: "a".into(), dir: "/x".into(), mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
         r.upsert(e.clone());
         r.upsert(ServerEntry { created_unix: 2, ..e });
         r.save_to(&p).unwrap();

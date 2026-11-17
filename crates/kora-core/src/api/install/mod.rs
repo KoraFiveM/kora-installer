@@ -17,10 +17,7 @@ use crate::artifacts::{self, Platform};
 use crate::firewall::ports::{self, PortProber, SystemProber};
 use crate::firewall::PortRequest;
 use crate::installer::registry::ServerEntry;
-use crate::installer::{
-    self, slug, DbAdmin, DbChoice, InstallOutcome, InstallRequest, Mode, Ports, ProgressEvent,
-    ProgressSink, ResourceSelection, StepStatus,
-};
+use crate::installer::{self, slug, DbAdmin, DbChoice, InstallOutcome, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, StepStatus};
 use crate::problem::{codes, Action, Problem};
 use crate::space::{self, DiskInfo, SystemDisk};
 
@@ -50,19 +47,10 @@ pub trait InstallEnv: Send + Sync {
     }
     /// Run the installer (a dry run when `req.dry_run`). The error text may be a packed
     /// [`Problem`] ([`Problem::decode`] reads both).
-    fn run(
-        &self,
-        req: &InstallRequest,
-        sink: &mut dyn ProgressSink,
-    ) -> Result<InstallOutcome, String>;
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String>;
     /// [`InstallEnv::run`] with an administrator helper for the steps that need one (the Windows
     /// panel's worker, see `installer::system_ops`). Fakes may ignore it.
-    fn run_with_admin(
-        &self,
-        req: &InstallRequest,
-        sink: &mut dyn ProgressSink,
-        admin: Option<installer::system_ops::SharedAdmin>,
-    ) -> Result<InstallOutcome, String> {
+    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, String> {
         let _ = admin;
         self.run(req, sink)
     }
@@ -100,20 +88,11 @@ impl InstallEnv for SystemInstallEnv {
     fn saved_clear(&self) {
         installer::saved::clear();
     }
-    fn run(
-        &self,
-        req: &InstallRequest,
-        sink: &mut dyn ProgressSink,
-    ) -> Result<InstallOutcome, String> {
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
         // The raw text: it may be a packed Problem (see `installer::InstallError`).
         installer::run(req, sink).map_err(|e| e.0)
     }
-    fn run_with_admin(
-        &self,
-        req: &InstallRequest,
-        sink: &mut dyn ProgressSink,
-        admin: Option<installer::system_ops::SharedAdmin>,
-    ) -> Result<InstallOutcome, String> {
+    fn run_with_admin(&self, req: &InstallRequest, sink: &mut dyn ProgressSink, admin: Option<installer::system_ops::SharedAdmin>) -> Result<InstallOutcome, String> {
         let hooks = installer::Hooks { admin, ..installer::Hooks::from_env() };
         installer::run_with(req, sink, &hooks).map_err(|e| e.0)
     }
@@ -217,27 +196,16 @@ pub struct WireInstall {
 impl WireDbAdmin {
     pub fn to_admin(&self) -> DbAdmin {
         DbAdmin {
-            host: if self.host.trim().is_empty() {
-                "127.0.0.1".into()
-            } else {
-                self.host.trim().to_string()
-            },
+            host: if self.host.trim().is_empty() { "127.0.0.1".into() } else { self.host.trim().to_string() },
             port: self.port.unwrap_or(3306),
-            user: if self.user.trim().is_empty() {
-                "root".into()
-            } else {
-                self.user.trim().to_string()
-            },
+            user: if self.user.trim().is_empty() { "root".into() } else { self.user.trim().to_string() },
             password: self.password.clone().filter(|p| !p.is_empty()),
         }
     }
 }
 
 fn non_empty(s: &Option<String>) -> Option<String> {
-    s.as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(String::from)
+    s.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(String::from)
 }
 
 /// Default install folder (see `userhome::default_server_dir`); empty when no home folder can be
@@ -255,10 +223,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     if n.chars().count() > 32 {
         return Err("That name is too long. Please use 32 characters or fewer.".into());
     }
-    if !n
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-' || c == '_')
-    {
+    if !n.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-' || c == '_') {
         return Err("Please use only letters, numbers, spaces, dashes and underscores.".into());
     }
     if slug(n).is_empty() {
@@ -269,10 +234,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 
 /// A resource id as accepted by `--resources` and the wizard (letters, digits, `_ . -`).
 fn valid_resource_id(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
 /// Check the UI's request and turn it into an [`InstallRequest`]: the CLI's `into_request`
@@ -282,46 +244,24 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
     validate_name(&w.name)?;
     let name = w.name.trim().to_string();
     let dir_text = w.dir.trim();
-    let dir = if dir_text.is_empty() {
-        crate::userhome::default_server_dir(&slug(&name))?
-    } else {
-        PathBuf::from(dir_text)
-    };
+    let dir = if dir_text.is_empty() { crate::userhome::default_server_dir(&slug(&name))? } else { PathBuf::from(dir_text) };
     if !dir.is_absolute() {
-        return Err(
-            "Please give the full path of the folder, for example /home/you/kora/my-server.".into(),
-        );
+        return Err("Please give the full path of the folder, for example /home/you/kora/my-server.".into());
     }
     let defaults = Ports::default();
-    let ports = w.ports.as_ref().map_or(defaults, |p| Ports {
-        game: p.game,
-        txadmin: p.txadmin,
-    });
+    let ports = w.ports.as_ref().map_or(defaults, |p| Ports { game: p.game, txadmin: p.txadmin });
     for (label, p) in [("game", ports.game), ("txAdmin", ports.txadmin)] {
         if p < 1024 {
-            return Err(format!(
-                "The {label} port must be a number between 1024 and 65535."
-            ));
+            return Err(format!("The {label} port must be a number between 1024 and 65535."));
         }
     }
-    PortRequest {
-        server: slug(&name),
-        game_port: ports.game,
-        txadmin_port: ports.txadmin,
-        expose_txadmin: w.txadmin_public,
-    }
-    .validate()
-    .map_err(|e| e.to_string())?;
+    PortRequest { server: slug(&name), game_port: ports.game, txadmin_port: ports.txadmin, expose_txadmin: w.txadmin_public }.validate().map_err(|e| e.to_string())?;
     let mode = w.mode.unwrap_or(Mode::Production);
     let artifact_url = non_empty(&w.artifact_url);
     if let Some(u) = &artifact_url {
         artifacts::validate_url(u, Platform::current()).map_err(|e| e.to_string())?;
     }
-    let github_owner = if mode == Mode::Development {
-        non_empty(&w.github_owner)
-    } else {
-        None
-    };
+    let github_owner = if mode == Mode::Development { non_empty(&w.github_owner) } else { None };
     if let Some(o) = &github_owner {
         if !o.eq_ignore_ascii_case("list") {
             crate::git::owners::check_login_syntax(o)?;
@@ -330,15 +270,9 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
     let resources = match &w.resources {
         None | Some(WireResources::All) => ResourceSelection::All,
         Some(WireResources::Only(ids)) => {
-            let ids: Vec<String> = ids
-                .iter()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let ids: Vec<String> = ids.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             if let Some(bad) = ids.iter().find(|i| !valid_resource_id(i)) {
-                return Err(format!(
-                    "'{bad}' is not a resource name (letters, digits, _ . - only)."
-                ));
+                return Err(format!("'{bad}' is not a resource name (letters, digits, _ . - only)."));
             }
             ResourceSelection::Only(ids)
         }
@@ -418,10 +352,7 @@ pub fn request_json(r: &InstallRequest) -> Value {
 pub fn avoid_ports(servers: &[ServerEntry], own_name: &str, own_dir: Option<&Path>) -> Vec<u16> {
     servers
         .iter()
-        .filter(|s| {
-            (own_name.is_empty() || slug(&s.name) != slug(own_name))
-                && (own_dir.is_none() || Some(s.dir.as_path()) != own_dir)
-        })
+        .filter(|s| (own_name.is_empty() || slug(&s.name) != slug(own_name)) && (own_dir.is_none() || Some(s.dir.as_path()) != own_dir))
         .flat_map(|s| [s.ports.game, s.ports.txadmin])
         .collect()
 }
@@ -442,28 +373,13 @@ impl PortLineInfo {
 }
 
 /// Status of both port boxes with the next free port when one is taken (the wizard's text).
-pub fn port_lines(
-    game: u16,
-    txadmin: u16,
-    servers: &[ServerEntry],
-    prober: &dyn PortProber,
-) -> (PortLineInfo, PortLineInfo) {
+pub fn port_lines(game: u16, txadmin: u16, servers: &[ServerEntry], prober: &dyn PortProber) -> (PortLineInfo, PortLineInfo) {
     let avoid = avoid_ports(servers, "", None);
     let report = ports::check_ports(game, txadmin, &avoid, prober);
-    let other_server = |port: u16| {
-        servers
-            .iter()
-            .find(|s| s.ports.game == port || s.ports.txadmin == port)
-            .map(|s| s.name.clone())
-    };
+    let other_server = |port: u16| servers.iter().find(|s| s.ports.game == port || s.ports.txadmin == port).map(|s| s.name.clone());
     let line = |port: u16, other: u16, st: ports::PortStatus| -> PortLineInfo {
         match st {
-            ports::PortStatus::Free => PortLineInfo {
-                port,
-                ok: true,
-                text: format!("{port} is free"),
-                suggestion: None,
-            },
+            ports::PortStatus::Free => PortLineInfo { port, ok: true, text: format!("{port} is free"), suggestion: None },
             ports::PortStatus::InUse { suggestion } => {
                 let why = if port == other {
                     "is the same as the other port".to_string()
@@ -478,30 +394,17 @@ pub fn port_lines(
                         format!("{port} {why} - no free port found nearby, please type another")
                     }
                 };
-                PortLineInfo {
-                    port,
-                    ok: false,
-                    text,
-                    suggestion,
-                }
+                PortLineInfo { port, ok: false, text, suggestion }
             }
         }
     };
-    (
-        line(game, txadmin, report.game),
-        line(txadmin, game, report.txadmin),
-    )
+    (line(game, txadmin, report.game), line(txadmin, game, report.txadmin))
 }
 
 /// Check the requested ports against this machine (and the other servers). With `auto`, move
 /// taken ports to the next free ones and return what changed; without, a taken port is an error
 /// naming the port and the next free one. (The CLI's `settle_ports_avoiding`.)
-pub fn settle_ports(
-    req: &mut InstallRequest,
-    auto: bool,
-    prober: &dyn PortProber,
-    avoid: &[u16],
-) -> Result<Vec<String>, String> {
+pub fn settle_ports(req: &mut InstallRequest, auto: bool, prober: &dyn PortProber, avoid: &[u16]) -> Result<Vec<String>, String> {
     let (game, tx) = (req.ports.game, req.ports.txadmin);
     let report = ports::check_ports(game, tx, avoid, prober);
     if report.all_free() {
@@ -538,8 +441,7 @@ pub fn defaults(env: &dyn InstallEnv, servers: &[ServerEntry]) -> Value {
     let name = "My Kora Server";
     let avoid = avoid_ports(servers, "", None);
     let d = Ports::default();
-    let (game, tx) = ports::effective_ports(d.game, d.txadmin, &avoid, env.prober())
-        .unwrap_or((d.game, d.txadmin));
+    let (game, tx) = ports::effective_ports(d.game, d.txadmin, &avoid, env.prober()).unwrap_or((d.game, d.txadmin));
     json!({
         "name": name,
         "dir": default_dir(name),
@@ -574,29 +476,12 @@ pub fn disk_check(disk: &dyn DiskInfo, dir: &Path, selected: Option<usize>) -> D
         Ok(()) => {
             let free_bytes = free.unwrap_or(0);
             let message = match free {
-                Some(f) => format!(
-                    "{} free, about {} needed.",
-                    space::human(f),
-                    space::human(needed)
-                ),
-                None => format!(
-                    "About {} is needed. Kora could not read how much is free here.",
-                    space::human(needed)
-                ),
+                Some(f) => format!("{} free, about {} needed.", space::human(f), space::human(needed)),
+                None => format!("About {} is needed. Kora could not read how much is free here.", space::human(needed)),
             };
-            DiskReport {
-                ok: true,
-                free_bytes,
-                needed_bytes: needed,
-                message,
-            }
+            DiskReport { ok: true, free_bytes, needed_bytes: needed, message }
         }
-        Err(message) => DiskReport {
-            ok: false,
-            free_bytes: free.unwrap_or(0),
-            needed_bytes: needed,
-            message,
-        },
+        Err(message) => DiskReport { ok: false, free_bytes: free.unwrap_or(0), needed_bytes: needed, message },
     }
 }
 
@@ -641,26 +526,14 @@ pub fn plan(env: &dyn InstallEnv, req: &InstallRequest, servers: &[ServerEntry])
     let mut live = req.clone();
     live.dry_run = false;
     let admin = env.is_elevated();
-    let steps: Vec<Value> = installer::plan_steps(&live, admin)
-        .iter()
-        .map(|s| json!({"id": s.id, "title": s.title}))
-        .collect();
-    let needs_admin: Vec<String> = env
-        .admin_reasons(&live)
-        .iter()
-        .map(|r| capitalised(r))
-        .collect();
+    let steps: Vec<Value> = installer::plan_steps(&live, admin).iter().map(|s| json!({"id": s.id, "title": s.title})).collect();
+    let needs_admin: Vec<String> = env.admin_reasons(&live).iter().map(|r| capitalised(r)).collect();
     let disk = disk_check(env.disk(), &req.dir, selection_size(req));
     let mut warnings: Vec<String> = Vec::new();
     if !already_installed(req) {
         let avoid = avoid_ports(servers, &req.name, Some(&req.dir));
         let report = ports::check_ports(req.ports.game, req.ports.txadmin, &avoid, env.prober());
-        warnings.extend(ports::conflict_messages(
-            req.ports.game,
-            req.ports.txadmin,
-            &report,
-            &avoid,
-        ));
+        warnings.extend(ports::conflict_messages(req.ports.game, req.ports.txadmin, &report, &avoid));
     }
     if !disk.ok {
         warnings.push(disk.message.clone());
@@ -690,30 +563,14 @@ pub fn plan(env: &dyn InstallEnv, req: &InstallRequest, servers: &[ServerEntry])
 /// contains the licence key or the database password: the caller tells the user to set
 /// `CFX_LICENSE_KEY` / `KORA_DB_ADMIN_PASSWORD` (which the CLI reads).
 pub fn install_command(req: &InstallRequest) -> Vec<String> {
-    let mut v: Vec<String> = ["kora", "install", "--name"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let mut v: Vec<String> = ["kora", "install", "--name"].iter().map(|s| s.to_string()).collect();
     v.push(req.name.clone());
     v.extend(["--dir".to_string(), req.dir.to_string_lossy().into_owned()]);
-    v.extend([
-        "--mode".to_string(),
-        if req.mode == Mode::Production {
-            "prod"
-        } else {
-            "dev"
-        }
-        .to_string(),
-    ]);
+    v.extend(["--mode".to_string(), if req.mode == Mode::Production { "prod" } else { "dev" }.to_string()]);
     if !req.hostname.is_empty() && req.hostname != req.name {
         v.extend(["--hostname".to_string(), req.hostname.clone()]);
     }
-    v.extend([
-        "--game-port".to_string(),
-        req.ports.game.to_string(),
-        "--txadmin-port".to_string(),
-        req.ports.txadmin.to_string(),
-    ]);
+    v.extend(["--game-port".to_string(), req.ports.game.to_string(), "--txadmin-port".to_string(), req.ports.txadmin.to_string()]);
     if req.txadmin_public {
         v.push("--txadmin-public".into());
     }
@@ -739,14 +596,7 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
         .to_string(),
     ]);
     if let Some(a) = &req.db_admin {
-        v.extend([
-            "--db-admin-user".to_string(),
-            a.user.clone(),
-            "--db-admin-host".to_string(),
-            a.host.clone(),
-            "--db-admin-port".to_string(),
-            a.port.to_string(),
-        ]);
+        v.extend(["--db-admin-user".to_string(), a.user.clone(), "--db-admin-host".to_string(), a.host.clone(), "--db-admin-port".to_string(), a.port.to_string()]);
     }
     if req.service {
         v.push("--service".into());
@@ -790,10 +640,7 @@ pub fn elevation_message(req: &InstallRequest, reasons: &[String]) -> String {
         vars.push("KORA_DB_ADMIN_PASSWORD (the database administrator password)");
     }
     if !vars.is_empty() {
-        m.push_str(&format!(
-            " For your safety the command does not contain secrets: set {} first.",
-            vars.join(" and ")
-        ));
+        m.push_str(&format!(" For your safety the command does not contain secrets: set {} first.", vars.join(" and ")));
     }
     m
 }
@@ -819,10 +666,7 @@ pub fn progress_json(ev: &ProgressEvent) -> Value {
 
 /// The plain-text log line the CLI keeps for an event.
 pub fn log_line(ev: &ProgressEvent) -> String {
-    format!(
-        "{:>3}% {:?} {} ({}): {}",
-        ev.percent, ev.status, ev.title, ev.step, ev.detail
-    )
+    format!("{:>3}% {:?} {} ({}): {}", ev.percent, ev.status, ev.title, ev.step, ev.detail)
 }
 
 struct FnSink<F: FnMut(&ProgressEvent) + Send> {
@@ -853,21 +697,12 @@ pub struct Finished {
 
 /// Run the install, calling `on_event` for every progress event, then write the log and keep or
 /// forget the saved answers exactly like the CLI does (a dry run saves nothing).
-pub fn run_install(
-    env: &dyn InstallEnv,
-    req: &InstallRequest,
-    on_event: impl FnMut(&ProgressEvent) + Send,
-) -> Finished {
+pub fn run_install(env: &dyn InstallEnv, req: &InstallRequest, on_event: impl FnMut(&ProgressEvent) + Send) -> Finished {
     run_install_with(env, req, None, on_event)
 }
 
 /// [`run_install`] with an administrator helper for the steps that need one.
-pub fn run_install_with(
-    env: &dyn InstallEnv,
-    req: &InstallRequest,
-    admin: Option<installer::system_ops::SharedAdmin>,
-    mut on_event: impl FnMut(&ProgressEvent) + Send,
-) -> Finished {
+pub fn run_install_with(env: &dyn InstallEnv, req: &InstallRequest, admin: Option<installer::system_ops::SharedAdmin>, mut on_event: impl FnMut(&ProgressEvent) + Send) -> Finished {
     let mut log: Vec<String> = Vec::new();
     let mut failed_step: Option<String> = None;
     let result = {
@@ -884,14 +719,7 @@ pub fn run_install_with(
         };
         env.run_with_admin(req, &mut sink, admin)
     };
-    let done = |outcome, log_path| Finished {
-        outcome,
-        log_path,
-        kept: vec![],
-        next: String::new(),
-        failed_step: None,
-        problem: None,
-    };
+    let done = |outcome, log_path| Finished { outcome, log_path, kept: vec![], next: String::new(), failed_step: None, problem: None };
     if req.dry_run {
         return done(result, None);
     }
@@ -912,14 +740,7 @@ pub fn run_install_with(
                 kept.push("Your answers (not the licence key or database password)".to_string());
             }
             let problem = failure_problem(req, &msg, failed_step.as_deref());
-            Finished {
-                outcome: Err(msg),
-                log_path,
-                kept,
-                next: failure_next_steps(req, saved),
-                failed_step,
-                problem: Some(problem),
-            }
+            Finished { outcome: Err(msg), log_path, kept, next: failure_next_steps(req, saved), failed_step, problem: Some(problem) }
         }
     }
 }
@@ -970,17 +791,9 @@ pub fn failure_next_steps(req: &InstallRequest, saved: bool) -> String {
 }
 
 /// Where the install log goes: inside the server's state folder when it exists, else the temp dir.
-pub fn write_install_log(
-    req: &InstallRequest,
-    lines: &[String],
-    error: Option<&str>,
-) -> Option<PathBuf> {
+pub fn write_install_log(req: &InstallRequest, lines: &[String], error: Option<&str>) -> Option<PathBuf> {
     let meta = req.dir.join(".kora");
-    let path = if meta.is_dir() {
-        meta.join("install.log")
-    } else {
-        std::env::temp_dir().join(format!("kora-install-{}.log", slug(&req.name)))
-    };
+    let path = if meta.is_dir() { meta.join("install.log") } else { std::env::temp_dir().join(format!("kora-install-{}.log", slug(&req.name))) };
     let mut text = lines.join("\n");
     if let Some(e) = error {
         text.push_str(&format!("\nERROR: {e}\n"));
@@ -999,12 +812,7 @@ pub fn outcome_json(o: &InstallOutcome) -> Value {
 
 /// `GET /artifacts`: builds that are not known to be broken, newest first.
 pub fn artifacts_json(list: &artifacts::ArtifactList) -> Value {
-    let items: Vec<Value> = list
-        .all
-        .iter()
-        .filter(|b| b.broken.is_none())
-        .map(|b| json!({"build": b.build, "url": b.url}))
-        .collect();
+    let items: Vec<Value> = list.all.iter().filter(|b| b.broken.is_none()).map(|b| json!({"build": b.build, "url": b.url})).collect();
     json!({"recommended": list.recommended.as_ref().map(|b| b.build), "items": items})
 }
 
@@ -1025,32 +833,15 @@ mod tests {
     fn the_command_never_carries_secrets() {
         let mut w = wire("Alpha");
         w.license_key = Some("cfxk_SECRETKEYSECRETKEY".into());
-        w.db_admin = Some(WireDbAdmin {
-            host: "".into(),
-            port: None,
-            user: "root".into(),
-            password: Some("hunter2".into()),
-        });
+        w.db_admin = Some(WireDbAdmin { host: "".into(), port: None, user: "root".into(), password: Some("hunter2".into()) });
         w.service = true;
-        w.ports = Some(WirePorts {
-            game: 30125,
-            txadmin: 40125,
-        });
+        w.ports = Some(WirePorts { game: 30125, txadmin: 40125 });
         let r = build_request(&w).unwrap();
         let cmd = install_command(&r).join(" ");
         assert!(!cmd.contains("SECRET") && !cmd.contains("hunter2"), "{cmd}");
-        assert!(
-            cmd.contains("--service")
-                && cmd.contains("--game-port 30125")
-                && cmd.contains("--db-admin-user root"),
-            "{cmd}"
-        );
+        assert!(cmd.contains("--service") && cmd.contains("--game-port 30125") && cmd.contains("--db-admin-user root"), "{cmd}");
         let m = elevation_message(&r, &["register the server as a system service".into()]);
-        assert!(
-            m.contains("CFX_LICENSE_KEY")
-                && m.contains("KORA_DB_ADMIN_PASSWORD")
-                && !m.contains("hunter2")
-        );
+        assert!(m.contains("CFX_LICENSE_KEY") && m.contains("KORA_DB_ADMIN_PASSWORD") && !m.contains("hunter2"));
     }
 
     #[test]
@@ -1061,16 +852,10 @@ mod tests {
         w.dir = "relative/dir".into();
         assert!(build_request(&w).is_err());
         let mut w = wire("ok");
-        w.ports = Some(WirePorts {
-            game: 30120,
-            txadmin: 30120,
-        });
+        w.ports = Some(WirePorts { game: 30120, txadmin: 30120 });
         assert!(build_request(&w).is_err());
         let mut w = wire("ok");
-        w.ports = Some(WirePorts {
-            game: 80,
-            txadmin: 40120,
-        });
+        w.ports = Some(WirePorts { game: 80, txadmin: 40120 });
         assert!(build_request(&w).is_err());
         let mut w = wire("ok");
         w.artifact_url = Some("https://evil.example/server.zip".into());
@@ -1109,19 +894,8 @@ mod tests {
     fn saved_answers_json_has_no_secrets() {
         let mut w = wire("Alpha");
         w.license_key = Some("cfxk_SECRETKEYSECRETKEY".into());
-        w.db_admin = Some(WireDbAdmin {
-            host: "h".into(),
-            port: Some(1),
-            user: "u".into(),
-            password: Some("pw".into()),
-        });
+        w.db_admin = Some(WireDbAdmin { host: "h".into(), port: Some(1), user: "u".into(), password: Some("pw".into()) });
         let v = request_json(&build_request(&w).unwrap()).to_string();
-        assert!(
-            !v.contains("SECRET")
-                && !v.contains("\"pw\"")
-                && !v.contains("\"license_key\"")
-                && !v.contains("db_admin"),
-            "{v}"
-        );
+        assert!(!v.contains("SECRET") && !v.contains("\"pw\"") && !v.contains("\"license_key\"") && !v.contains("db_admin"), "{v}");
     }
 }

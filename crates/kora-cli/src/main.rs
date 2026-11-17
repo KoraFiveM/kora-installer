@@ -6,11 +6,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use kora_core::elevate;
 use kora_core::firewall::ports::{self, PortProber, SystemProber};
+use kora_core::installer::{self, gitops, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection, RollbackOptions, StepStatus};
 use kora_core::launch;
-use kora_core::installer::{
-    self, gitops, host, registry, DbAdmin, DbChoice, InstallRequest, Mode, Ports, ProgressEvent, ProgressSink, ResourceSelection,
-    RollbackOptions, StepStatus,
-};
 
 #[derive(Parser)]
 #[command(name = "kora", version, about = "Kora installer and server manager")]
@@ -423,7 +420,9 @@ enum Command {
     /// Add compatibility, bridge or creator resources (or any catalog resource) to an installed server.
     AddResources(AddResourcesArgs),
     /// Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal.
-    #[command(after_help = "Download the assets you bought from https://portal.cfx.re/assets/granted-assets (Assets → Granted Assets), signed in with the same Cfx.re account that owns this server's licence key, then pass the .zip files here as they are.")]
+    #[command(
+        after_help = "Download the assets you bought from https://portal.cfx.re/assets/granted-assets (Assets → Granted Assets), signed in with the same Cfx.re account that owns this server's licence key, then pass the .zip files here as they are."
+    )]
     AddAsset(AddAssetArgs),
     /// Show registered servers.
     Status,
@@ -606,9 +605,7 @@ fn helper_validate_for(verb: &str, args: &[String], check_dir: &dyn Fn(&std::pat
         }
         // Going back to an older release (which may have known problems) is not something the
         // panel's user may do as root on their own: they run it themselves with sudo.
-        Some(Command::SelfUpdate { version: Some(v), .. })
-            if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) =>
-        {
+        Some(Command::SelfUpdate { version: Some(v), .. }) if verb == "self-update" && kora_core::app_install::compare_versions(&v, env!("CARGO_PKG_VERSION")) != Some(std::cmp::Ordering::Greater) => {
             Err(format!("The helper only updates Kora to a newer version. To go back to {v}, run `sudo kora self-update --version {v}` yourself."))
         }
         Some(Command::SelfUpdate { .. }) if verb == "self-update" => Ok(()),
@@ -1219,7 +1216,11 @@ fn install(args: InstallArgs) -> i32 {
         Err(e) => {
             eprintln!("\nerror: {e}");
             if !dry && req.dir.join(".kora").is_dir() {
-                eprintln!("The install state is saved in {}: run the same command again to resume, or `kora delete {}` to remove what was created.", req.dir.join(".kora").display(), req.dir.display());
+                eprintln!(
+                    "The install state is saved in {}: run the same command again to resume, or `kora delete {}` to remove what was created.",
+                    req.dir.join(".kora").display(),
+                    req.dir.display()
+                );
             }
             1
         }
@@ -1318,7 +1319,11 @@ fn start_and_report(server: &str, past: &str) -> i32 {
     match launch::start_named(server, &mut progress) {
         Ok(r) => {
             if r.running() {
-                println!("{} '{server}': txAdmin is up{}.", if r.method == launch::Method::AlreadyRunning { "Already running" } else { past }, if r.game_listening { ", the game port is listening" } else { ", the game port is not listening yet" });
+                println!(
+                    "{} '{server}': txAdmin is up{}.",
+                    if r.method == launch::Method::AlreadyRunning { "Already running" } else { past },
+                    if r.game_listening { ", the game port is listening" } else { ", the game port is not listening yet" }
+                );
                 0
             } else {
                 eprintln!("error: '{server}' did not start properly: {}", r.message);
@@ -1477,11 +1482,7 @@ fn update(a: UpdateArgs) -> i32 {
         return 0;
     }
     if let Some(id) = &a.rollback {
-        let warn = if a.force {
-            " Changes of your own in those resources are thrown away."
-        } else {
-            ""
-        };
+        let warn = if a.force { " Changes of your own in those resources are thrown away." } else { "" };
         if !a.yes && !confirm(&format!("Put '{}' back the way snapshot {id} saved it? The server restarts if it is running.{warn}", server.name)) {
             println!("Nothing changed.");
             return 0;
@@ -1537,10 +1538,7 @@ fn update(a: UpdateArgs) -> i32 {
     };
     let mut snapshot = None;
     // Exactly what was just shown, even if something new was published while you read it.
-    let opts = m::ApplyOpts {
-        targets: Some(m::planned_targets(&pre)),
-        ..m::ApplyOpts::new(restart)
-    };
+    let opts = m::ApplyOpts { targets: Some(m::planned_targets(&pre)), ..m::ApplyOpts::new(restart) };
     let res = m::apply(&server, scope, opts, &mut |e| match e {
         m::UpdateEvent::Snapshot(id) => {
             println!("Saved snapshot {id}.");
@@ -1719,7 +1717,15 @@ fn add_resources(a: AddResourcesArgs) -> i32 {
     }
     println!("Will add ({} mode):", if server.mode == Mode::Development { "development" } else { "production" });
     for i in &plan.items {
-        let how = if i.third_party { "pinned, never forked" } else if i.fork { "your fork" } else if i.commit.is_some() { "pinned" } else { "branch head" };
+        let how = if i.third_party {
+            "pinned, never forked"
+        } else if i.fork {
+            "your fork"
+        } else if i.commit.is_some() {
+            "pinned"
+        } else {
+            "branch head"
+        };
         println!("  {}{}  ->  resources/{}  ({how})", i.id, if i.dependency { " (needed by another)" } else { "" }, i.rel);
     }
     println!("server.cfg gets `ensure` lines for: {}", plan.ensure.join(", "));
@@ -1776,7 +1782,11 @@ fn delete(server: &str, keep_files: bool, keep_db: bool, yes: bool) -> i32 {
         return 1;
     }
     if !yes {
-        println!("This removes: {}{}; the registry entry. GitHub forks are never deleted.", if keep_files { "(files kept)" } else { "the server folder and everything in it" }, if keep_db { "" } else { "; the database and its user" });
+        println!(
+            "This removes: {}{}; the registry entry. GitHub forks are never deleted.",
+            if keep_files { "(files kept)" } else { "the server folder and everything in it" },
+            if keep_db { "" } else { "; the database and its user" }
+        );
         println!("Type the server name ({name}) to confirm:");
         let mut line = String::new();
         let _ = std::io::stdin().read_line(&mut line);
@@ -1850,11 +1860,8 @@ fn uninstall(server: Option<String>, dry_run: bool, yes: bool, delete_files: boo
         installer::rollback(dir, o, &mut Printer { last: None })
     };
     let mut save = |r: &registry::Registry| r.save_or_clean_to(&registry::registry_path());
-    let summary = if yes {
-        un::run(&mut reg, &opts, &env, &mut un::Defaults, &mut say, &mut delete, &mut save)
-    } else {
-        un::run(&mut reg, &opts, &env, &mut Terminal, &mut say, &mut delete, &mut save)
-    };
+    let summary =
+        if yes { un::run(&mut reg, &opts, &env, &mut un::Defaults, &mut say, &mut delete, &mut save) } else { un::run(&mut reg, &opts, &env, &mut Terminal, &mut say, &mut delete, &mut save) };
     let mut summary = summary;
     {
         let base = installer::windows_db::base_dir();
@@ -2069,7 +2076,10 @@ fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
     // A saved token (made by --install-service) keeps the sign-in link the same every time.
     let token = svc::load_token(&home).unwrap_or_else(kora_web::security::random_hex);
     if !a.bind.is_loopback() {
-        println!("This panel runs in this window only and stops when you close it.{}", if a.tailscale { "" } else { " With Tailscale, `kora panel --tailscale` keeps one running in the background instead." });
+        println!(
+            "This panel runs in this window only and stops when you close it.{}",
+            if a.tailscale { "" } else { " With Tailscale, `kora panel --tailscale` keeps one running in the background instead." }
+        );
     }
     let opts = kora_web::PanelOptions {
         bind: a.bind,
@@ -2161,20 +2171,12 @@ impl Running {
 /// `kora panel` window (whose process must still exist).
 fn running_panel(home: &std::path::Path, ports: &dyn kora_web::launch::PortCheck, platform: kora_core::service::Platform) -> Option<Running> {
     use kora_core::monitor::panel_service as svc;
-    find_running(
-        svc::service_installed(platform).then(|| svc::link(home).ok().zip(svc::saved_port(home))).flatten(),
-        svc::load_running(home).filter(|r| process_alive(r.pid)),
-        ports,
-    )
+    find_running(svc::service_installed(platform).then(|| svc::link(home).ok().zip(svc::saved_port(home))).flatten(), svc::load_running(home).filter(|r| process_alive(r.pid)), ports)
 }
 
 /// The decision behind [`running_panel`], without the disk: `service` is the installed service's
 /// (link, port), `window` the recorded `kora panel` window.
-fn find_running(
-    service: Option<(String, u16)>,
-    window: Option<kora_core::monitor::panel_service::RunningPanel>,
-    ports: &dyn kora_web::launch::PortCheck,
-) -> Option<Running> {
+fn find_running(service: Option<(String, u16)>, window: Option<kora_core::monitor::panel_service::RunningPanel>, ports: &dyn kora_web::launch::PortCheck) -> Option<Running> {
     if let Some((link, port)) = service {
         if ports.is_kora_panel(port) {
             return Some(Running::Background { port, link });
@@ -2273,11 +2275,7 @@ fn install_background_panel(a: &PanelArgs, home: &std::path::Path) -> i32 {
     match start_background_service(home, port, svc_tailscale(home)) {
         Ok(link) => {
             let ports = kora_web::launch::SystemPorts;
-            let link = if kora_web::launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), &ports) {
-                one_time_link(&link, port)
-            } else {
-                link
-            };
+            let link = if kora_web::launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), &ports) { one_time_link(&link, port) } else { link };
             println!("The Kora Panel now runs in the background (starts at sign-in) and keeps watching your servers.");
             println!("Sign in with: {link}");
             if headless_session() {
@@ -2425,7 +2423,9 @@ fn panel_setup(a: &PanelArgs, home: &std::path::Path) -> i32 {
         Some(r) => {
             match r {
                 Running::Background { .. } => println!("Kora Panel is already running in the background."),
-                Running::Window { .. } => println!("Kora Panel is already running in another window (it stops when that window closes; `kora panel --install-service` keeps one running in the background)."),
+                Running::Window { .. } => {
+                    println!("Kora Panel is already running in another window (it stops when that window closes; `kora panel --install-service` keeps one running in the background).")
+                }
             }
             let (p, l) = r.port_and_link();
             (p, l.to_string())
@@ -2577,7 +2577,19 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Schedule { .. }) => K::Restart,
         Some(Command::Delete { .. }) => K::Delete,
         // The panel runs as the user; privileged actions report the command to run instead.
-        Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Tools { .. } | Command::Check { .. } | Command::Keys { .. } | Command::Profile { .. } | Command::Branch { .. } | Command::Pr { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        Some(
+            Command::ServiceHost { .. }
+            | Command::Github { .. }
+            | Command::Tools { .. }
+            | Command::Check { .. }
+            | Command::Keys { .. }
+            | Command::Profile { .. }
+            | Command::Branch { .. }
+            | Command::Pr { .. }
+            | Command::Webhook { .. }
+            | Command::SelfUpdate { .. }
+            | Command::Panel(_),
+        ) => K::Other,
         // Already elevated (the worker) or run by it: never relaunched.
         Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
@@ -2609,12 +2621,10 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
             }
             a.as_ref().clone().into_request().map(|r| elevate::admin_reasons(&r)).unwrap_or_default()
         }
-        Some(Command::Start { server } | Command::Stop { server } | Command::Restart { server }) => {
-            match host::service_state(server) {
-                Ok(ServiceState::NotInstalled) | Err(_) => vec![],
-                Ok(_) => one("control the server's background service"),
-            }
-        }
+        Some(Command::Start { server } | Command::Stop { server } | Command::Restart { server }) => match host::service_state(server) {
+            Ok(ServiceState::NotInstalled) | Err(_) => vec![],
+            Ok(_) => one("control the server's background service"),
+        },
         Some(Command::Delete { server, .. }) => {
             let reg = registry::Registry::load().unwrap_or_default();
             let dir = reg.find(server).map(|e| e.dir.clone()).unwrap_or_else(|| PathBuf::from(server));
@@ -2673,8 +2683,7 @@ static NO_PAUSE_ON_SUCCESS: std::sync::atomic::AtomicBool = std::sync::atomic::A
 
 fn finish(code: i32) -> ! {
     let (si, so) = (std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
-    if !NO_PAUSE_ON_SUCCESS.load(std::sync::atomic::Ordering::Relaxed)
-        && elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
+    if !NO_PAUSE_ON_SUCCESS.load(std::sync::atomic::Ordering::Relaxed) && elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
         println!("\nPress Enter to close this window.");
         let mut line = String::new();
         let _ = std::io::stdin().read_line(&mut line);
@@ -2710,7 +2719,9 @@ fn main() {
     // An elevated child of the Windows worker or helper: drop every override variable first.
     kora_core::helper::worker::scrub_overrides();
     if std::env::args_os().any(|a| a == "--license-key" || a.to_string_lossy().starts_with("--license-key=")) {
-        eprintln!("Note: a licence key on the command line is visible to other programs on this computer (process list) and stays in your shell history. Prefer the CFX_LICENSE_KEY environment variable.");
+        eprintln!(
+            "Note: a licence key on the command line is visible to other programs on this computer (process list) and stays in your shell history. Prefer the CFX_LICENSE_KEY environment variable."
+        );
     }
     // Before parsing: `--version`/`--help` exit inside the parser and must clean up too.
     kora_core::self_update::startup_cleanup();
@@ -2720,7 +2731,18 @@ fn main() {
     elevate_if_needed(&cli, &cli.command);
     let command = cli.command;
     // "New version available": background check, interactive runs only (never CI, pipes, services).
-    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_) | Command::Update(UpdateArgs { auto: true, .. })));
+    let quiet = matches!(
+        command,
+        Some(
+            Command::ServiceHost { .. }
+                | Command::SelfUpdate { .. }
+                | Command::Helper { .. }
+                | Command::AdminWorker(_)
+                | Command::AdminStep(_)
+                | Command::AdminDb(_)
+                | Command::Update(UpdateArgs { auto: true, .. })
+        )
+    );
     // The worker has a hidden window and its step children no terminal: never wait for a key.
     match &command {
         Some(Command::AdminWorker(a)) => std::process::exit(admin_worker::admin_worker(a)),
@@ -2794,8 +2816,8 @@ fn main() {
 
 mod admin_worker;
 mod bare;
-mod keys_cmd;
 mod branch;
+mod keys_cmd;
 mod panel_tailscale;
 mod toolchain;
 
@@ -3291,7 +3313,10 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
 
         assert!(remote_actions_message(RemoteActionsCmd::On, true).starts_with("Administrators who sign in with a token from another computer can now delete and unregister servers"));
-        assert!(remote_actions_message(RemoteActionsCmd::Status, false).contains("can install and manage servers") && remote_actions_message(RemoteActionsCmd::Status, false).contains("Tailscale administrators are not held back"));
+        assert!(
+            remote_actions_message(RemoteActionsCmd::Status, false).contains("can install and manage servers")
+                && remote_actions_message(RemoteActionsCmd::Status, false).contains("Tailscale administrators are not held back")
+        );
         assert!(remote_actions_message(RemoteActionsCmd::Off, false).starts_with("Remote actions are turned off."));
         assert!(remote_actions_message(RemoteActionsCmd::Status, true).contains("kora panel remote-actions off"));
         assert!(remote_actions_message(RemoteActionsCmd::Status, false).contains("kora panel remote-actions on"));
@@ -3380,8 +3405,12 @@ mod tests {
         assert_eq!(background_port(&args(None), home.path(), &Ports(vec![47130])), Ok(47130), "our own running panel keeps its port");
         struct Other;
         impl kora_web::launch::PortCheck for Other {
-            fn is_free(&self, p: u16) -> bool { p != 47130 }
-            fn is_kora_panel(&self, _: u16) -> bool { false }
+            fn is_free(&self, p: u16) -> bool {
+                p != 47130
+            }
+            fn is_kora_panel(&self, _: u16) -> bool {
+                false
+            }
         }
         assert_eq!(background_port(&args(None), home.path(), &Other), Ok(47120), "someone else's program on the saved port");
     }

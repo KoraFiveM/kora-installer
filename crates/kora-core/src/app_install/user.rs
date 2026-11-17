@@ -14,10 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{
-    desktop_exec_arg, plan_uninstall, same_path, Action, AppError, CopyKind, EnvGet, Layout, Plan, RealSys, Result, ShortcutSpec, Sys,
-    DESKTOP_MARKER, LOGO_PNG,
-};
+use super::{desktop_exec_arg, plan_uninstall, same_path, Action, AppError, CopyKind, EnvGet, Layout, Plan, RealSys, Result, ShortcutSpec, Sys, DESKTOP_MARKER, LOGO_PNG};
 
 /// Where the per-user shortcuts and (if needed) a per-user copy of the program go.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,10 +51,7 @@ impl UserLayout {
                 None => wjoin(profile.as_deref().ok_or_else(|| need("APPDATA"))?, &["AppData", "Roaming"]),
             };
             // A OneDrive-backed Desktop is the one people actually see.
-            let desktop_dir = var("OneDrive")
-                .map(|o| wjoin(&o, &["Desktop"]))
-                .filter(|d| is_dir(d))
-                .or_else(|| profile.as_deref().map(|p| wjoin(p, &["Desktop"])));
+            let desktop_dir = var("OneDrive").map(|o| wjoin(&o, &["Desktop"])).filter(|d| is_dir(d)).or_else(|| profile.as_deref().map(|p| wjoin(p, &["Desktop"])));
             let lnk = format!("{}.lnk", super::APP_NAME);
             return Ok(UserLayout {
                 windows,
@@ -71,8 +65,8 @@ impl UserLayout {
         }
         let home = var("HOME").filter(|h| h.is_absolute()).ok_or_else(|| AppError("HOME is not set, so Kora cannot find your user folders".into()))?;
         let data = var("XDG_DATA_HOME").filter(|d| d.is_absolute()).unwrap_or_else(|| home.join(".local").join("share"));
-        let session = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"].iter().any(|k| var(k).is_some())
-            || var("XDG_SESSION_TYPE").is_some_and(|t| t == Path::new("x11") || t == Path::new("wayland"));
+        let session =
+            ["DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"].iter().any(|k| var(k).is_some()) || var("XDG_SESSION_TYPE").is_some_and(|t| t == Path::new("x11") || t == Path::new("wayland"));
         Ok(UserLayout {
             windows,
             program: home.join(".local").join("bin").join("kora"),
@@ -192,9 +186,7 @@ pub fn plan_user_install(sys: &dyn Sys, ul: &UserLayout, run_exe: &Path, legacy_
             let content = desktop_entry_text(&exe, icon);
             match sys.read(path) {
                 Some(cur) if cur == content.as_bytes() => {}
-                Some(cur) if !String::from_utf8_lossy(&cur).contains(DESKTOP_MARKER) => {
-                    plan.notes.push(format!("{} exists and was not made by Kora; left alone.", path.display()))
-                }
+                Some(cur) if !String::from_utf8_lossy(&cur).contains(DESKTOP_MARKER) => plan.notes.push(format!("{} exists and was not made by Kora; left alone.", path.display())),
                 _ => {
                     if sys.read(icon).as_deref() != Some(LOGO_PNG) {
                         plan.actions.push(Action::WriteLogo(icon.clone()));

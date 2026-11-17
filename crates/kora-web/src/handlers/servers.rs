@@ -76,10 +76,7 @@ pub async fn servers_list(State(st): State<AppState>) -> Result<Json<Value>, Api
     blocking(move || list_json(&mut *st.backend()).map(Json)).await
 }
 
-pub async fn server_get(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn server_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let mut b = st.backend();
@@ -100,20 +97,12 @@ pub struct ControlBody {
     action: String,
 }
 
-pub async fn server_control(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Json(body): Json<ControlBody>,
-) -> Result<Response, ApiError> {
+pub async fn server_control(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<ControlBody>) -> Result<Response, ApiError> {
     let action = match body.action.as_str() {
         "start" => ControlAction::Start,
         "stop" => ControlAction::Stop,
         "restart" => ControlAction::Restart,
-        _ => {
-            return Err(ApiError::bad_request(
-                "The action must be start, stop or restart.",
-            ))
-        }
+        _ => return Err(ApiError::bad_request("The action must be start, stop or restart.")),
     };
     let st2 = st.clone();
     let e = blocking(move || st2.entry(&s)).await?;
@@ -124,9 +113,7 @@ pub async fn server_control(
     .await?
         == Status::Missing
     {
-        return Err(ApiError::conflict(
-            "The folder for this server is missing, so it cannot be changed.",
-        ));
+        return Err(ApiError::conflict("The folder for this server is missing, so it cannot be changed."));
     }
     let name = e.name.clone();
     let stc = st.clone();
@@ -170,14 +157,10 @@ pub async fn server_delete(
     })
     .await?;
     if body.confirm_name != e.name {
-        return Err(ApiError::bad_request(
-            "The name you typed does not match this server.",
-        ));
+        return Err(ApiError::bad_request("The name you typed does not match this server."));
     }
     if !is_managed(&e) {
-        return Err(ApiError::bad_request(
-            "This server was added from an existing folder, so Kora can only remove it from the list.",
-        ));
+        return Err(ApiError::bad_request("This server was added from an existing folder, so Kora can only remove it from the list."));
     }
     if running {
         return Err(ApiError::conflict("Stop the server first, then delete it."));
@@ -209,10 +192,7 @@ pub async fn server_delete(
     let stc = st.clone();
     st.spawn_job(Op::ServerDelete, Some(name), move |h| {
         h.event(json!({"type": "status", "message": "Deleting the server"}));
-        let notes = stc
-            .backend()
-            .delete_with_admin(&e, body.keep_files, body.keep_db, body.db_admin_password.as_deref(), admin)
-            .map_err(delete_error)?;
+        let notes = stc.backend().delete_with_admin(&e, body.keep_files, body.keep_db, body.db_admin_password.as_deref(), admin).map_err(delete_error)?;
         Ok(json!({"notes": notes}))
     })
 }
@@ -232,16 +212,11 @@ fn delete_error(e: String) -> String {
     e
 }
 
-pub async fn server_unregister(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Response, ApiError> {
+pub async fn server_unregister(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         if is_managed(&e) {
-            return Err(ApiError::bad_request(
-                "Kora installed this server, so use Delete server instead.",
-            ));
+            return Err(ApiError::bad_request("Kora installed this server, so use Delete server instead."));
         }
         st.backend().unregister(&e).map_err(ApiError::core)?;
         Ok(StatusCode::NO_CONTENT.into_response())
@@ -256,10 +231,7 @@ pub async fn servers_scan(State(st): State<AppState>) -> Result<Response, ApiErr
         let roots = b.scan_roots();
         let known: Vec<PathBuf> = b.list()?.into_iter().map(|e| e.dir).collect();
         let found = adopt::scan(&roots, 3, &known);
-        let candidates: Vec<Value> = found
-            .iter()
-            .map(|c| json!({"name": c.name, "dir": c.dir, "mode": c.mode, "kind": c.kind, "ports": c.ports}))
-            .collect();
+        let candidates: Vec<Value> = found.iter().map(|c| json!({"name": c.name, "dir": c.dir, "mode": c.mode, "kind": c.kind, "ports": c.ports})).collect();
         Ok(json!({ "candidates": candidates }))
     })
 }
@@ -269,10 +241,7 @@ pub struct AdoptBody {
     dir: String,
 }
 
-pub async fn servers_adopt(
-    State(st): State<AppState>,
-    Json(body): Json<AdoptBody>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn servers_adopt(State(st): State<AppState>, Json(body): Json<AdoptBody>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let p = PathBuf::from(body.dir.trim());
         if !p.is_absolute() {
@@ -287,9 +256,7 @@ pub async fn servers_adopt(
             return Err(ApiError::bad_request("That server is already in the list."));
         }
         let Some(c) = adopt::classify(&p) else {
-            return Err(ApiError::bad_request(
-                "That folder doesn't look like an FXServer or Kora server (no server.cfg + txData, FXServer program, artifacts or .kora folder).",
-            ));
+            return Err(ApiError::bad_request("That folder doesn't look like an FXServer or Kora server (no server.cfg + txData, FXServer program, artifacts or .kora folder)."));
         };
         let taken: Vec<String> = list.iter().map(|e| e.name.clone()).collect();
         let entry = adopt::to_entry(&c, &taken);
@@ -306,40 +273,20 @@ static OPENER: Mutex<Option<Opener>> = Mutex::new(None);
 
 /// Tests only: replace the program that opens a folder (`None` = the real one).
 pub fn set_opener(f: Option<Opener>) {
-    *OPENER
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = f;
+    *OPENER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = f;
 }
 
 fn open_real(dir: &FsPath) -> Result<(), String> {
     use std::process::{Command, Stdio};
-    let prog = if cfg!(windows) {
-        "explorer.exe"
-    } else {
-        "xdg-open"
-    };
-    Command::new(prog)
-        .arg(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|_| "Could not open the folder on this computer.".to_string())
+    let prog = if cfg!(windows) { "explorer.exe" } else { "xdg-open" };
+    Command::new(prog).arg(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ()).map_err(|_| "Could not open the folder on this computer.".to_string())
 }
 
-pub async fn server_open_folder(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Response, ApiError> {
+pub async fn server_open_folder(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         if super::system::headless() {
-            return Err(ApiError::bad_request(
-                "This computer has no desktop, so the folder can't be opened here. The server's folder is " .to_string()
-                    + &e.dir.display().to_string()
-                    + ".",
-            ));
+            return Err(ApiError::bad_request("This computer has no desktop, so the folder can't be opened here. The server's folder is ".to_string() + &e.dir.display().to_string() + "."));
         }
         if !e.dir.is_dir() {
             return Err(ApiError::conflict("The folder for this server is missing."));
@@ -357,21 +304,14 @@ pub async fn server_open_folder(
 
 // ---------------------------------------------------------------- logs
 
-pub async fn logs_list(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn logs_list(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let files: Vec<Value> = logs::discover(&e.dir)
             .into_iter()
             .map(|l| {
                 let m = std::fs::metadata(&l.path).ok();
-                let modified = m
-                    .as_ref()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map_or(0, |d| d.as_secs());
+                let modified = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
                 json!({"name": l.name, "size": m.map_or(0, |m| m.len()), "modified_unix": modified})
             })
             .collect();
@@ -385,20 +325,13 @@ pub struct TailQuery {
     lines: Option<usize>,
 }
 
-pub async fn logs_tail(
-    State(st): State<AppState>,
-    Path((s, file)): Path<(String, String)>,
-    Query(q): Query<TailQuery>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn logs_tail(State(st): State<AppState>, Path((s, file)): Path<(String, String)>, Query(q): Query<TailQuery>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         if file.contains('/') || file.contains('\\') || file.contains("..") {
             return Err(ApiError::bad_request("That is not a log file name."));
         }
-        let src = logs::discover(&e.dir)
-            .into_iter()
-            .find(|l| l.name == file)
-            .ok_or_else(|| ApiError::not_found("That log file does not exist."))?;
+        let src = logs::discover(&e.dir).into_iter().find(|l| l.name == file).ok_or_else(|| ApiError::not_found("That log file does not exist."))?;
         let n = q.lines.unwrap_or(300).clamp(1, logs::MAX_LINES);
         let lines = logs::tail(&src.path, n).map_err(ApiError::internal)?;
         Ok(Json(json!({"file": file, "lines": lines})))

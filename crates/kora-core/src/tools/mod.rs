@@ -277,10 +277,13 @@ pub struct HttpFetcher(pub crate::installer::http::HttpClient);
 impl Fetcher for HttpFetcher {
     fn fetch(&self, url: &str, dest: &Path, sha256: &str, progress: &mut dyn FnMut(u64, Option<u64>)) -> Result<(), FetchFailure> {
         let cfg = crate::installer::http::FetchConfig::default();
-        self.0
-            .download_verified(&[url.to_string()], dest, sha256, &cfg, &mut |p| progress(p.bytes, p.total), &mut |_| {})
-            .map(|_| ())
-            .map_err(|e| if e.contains("SHA-256") { FetchFailure::Checksum } else { FetchFailure::Network(e) })
+        self.0.download_verified(&[url.to_string()], dest, sha256, &cfg, &mut |p| progress(p.bytes, p.total), &mut |_| {}).map(|_| ()).map_err(|e| {
+            if e.contains("SHA-256") {
+                FetchFailure::Checksum
+            } else {
+                FetchFailure::Network(e)
+            }
+        })
     }
 }
 
@@ -306,10 +309,7 @@ fn download_failed(tool: Tool, why: &str) -> Problem {
     } else {
         format!("Kora could not download {}. Check your internet connection (or proxy) and try again.", tool.label())
     };
-    Problem::new(codes::TOOLS_DOWNLOAD_FAILED, message)
-        .with_details(why)
-        .with_action(Action::Retry)
-        .with_action(Action::open_link(manual_url(tool)))
+    Problem::new(codes::TOOLS_DOWNLOAD_FAILED, message).with_details(why).with_action(Action::Retry).with_action(Action::open_link(manual_url(tool)))
 }
 
 fn failed(tool: Tool, what: &str, why: impl std::fmt::Display) -> Problem {

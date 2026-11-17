@@ -16,9 +16,7 @@ pub struct Account {
 /// Work out who is installing. `sudo_uid` = `$SUDO_UID`; `lookup` = passwd lookup by uid.
 /// Refuses root: the helper serves a normal user account.
 pub fn resolve_user(sudo_uid: Option<&str>, kora_home: Option<String>, lookup: &dyn Fn(u32) -> Option<Account>) -> Result<HelperConfig, String> {
-    let uid: u32 = sudo_uid
-        .and_then(|s| s.trim().parse().ok())
-        .ok_or("run this from your own account with sudo (`sudo kora helper install`), so Kora knows which user the helper is for")?;
+    let uid: u32 = sudo_uid.and_then(|s| s.trim().parse().ok()).ok_or("run this from your own account with sudo (`sudo kora helper install`), so Kora knows which user the helper is for")?;
     if uid == 0 {
         return Err("the helper is for a normal user account, not root; run `sudo kora helper install` from your own account".into());
     }

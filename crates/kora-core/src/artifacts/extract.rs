@@ -47,10 +47,7 @@ fn clean_name(name: &str) -> Result<Option<PathBuf>> {
 /// runtime. Accept absolute targets only there, and never with `..`. Links are created after all
 /// files are written, and never beneath another link, so nothing can be written through one.
 fn rootfs_absolute_link_ok(link: &Path, target: &str) -> bool {
-    link.starts_with("alpine")
-        && target.starts_with('/')
-        && !target.contains(['\\', '\0'])
-        && !Path::new(target).components().any(|c| matches!(c, Component::ParentDir))
+    link.starts_with("alpine") && target.starts_with('/') && !target.contains(['\\', '\0']) && !Path::new(target).components().any(|c| matches!(c, Component::ParentDir))
 }
 
 /// A relative symlink target is acceptable only if it stays inside the extraction root. `links`

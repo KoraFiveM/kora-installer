@@ -41,14 +41,9 @@ fn skip_text(r: &SkipReason) -> String {
     match r {
         SkipReason::LocalCommits => "It has changes of your own, so it was left alone.".into(),
         SkipReason::Dirty => "It has files you changed, so it was not touched.".into(),
-        SkipReason::Diverged => {
-            "It has changes of your own and upstream has new ones, so it was not touched.".into()
-        }
+        SkipReason::Diverged => "It has changes of your own and upstream has new ones, so it was not touched.".into(),
         SkipReason::Error(e) => e.clone(),
-        SkipReason::OtherBranch(b) => format!(
-            "It is {}, so it was not updated. Go back to the normal version to update it again.",
-            crate::git::branches::describe_other(b)
-        ),
+        SkipReason::OtherBranch(b) => format!("It is {}, so it was not updated. Go back to the normal version to update it again.", crate::git::branches::describe_other(b)),
     }
 }
 
@@ -135,12 +130,7 @@ mod tests {
 
     #[test]
     fn report_reasons_become_text() {
-        let r = UpdateReport {
-            server: "s".into(),
-            skipped: vec![("a".into(), SkipReason::Dirty)],
-            deferred: vec![("b".into(), DeferReason::PlayersOnline(2))],
-            ..UpdateReport::default()
-        };
+        let r = UpdateReport { server: "s".into(), skipped: vec![("a".into(), SkipReason::Dirty)], deferred: vec![("b".into(), DeferReason::PlayersOnline(2))], ..UpdateReport::default() };
         let v = report_json(&r);
         assert_eq!(v["skipped"][0][0], "a");
         assert!(v["skipped"][0][1].is_string());
@@ -154,8 +144,6 @@ mod tests {
         assert!(v["schema_version"].is_number());
         let list = v["resources"].as_array().unwrap();
         assert!(!list.is_empty());
-        assert!(list.iter().all(|r| r["kind"] != "internal"
-            && r.get("dependsOn").is_none()
-            && r["depends_on"].is_array()));
+        assert!(list.iter().all(|r| r["kind"] != "internal" && r.get("dependsOn").is_none() && r["depends_on"].is_array()));
     }
 }

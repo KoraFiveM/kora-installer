@@ -15,9 +15,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::{Extension, Json};
-use kora_core::api::install::{
-    self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall,
-};
+use kora_core::api::install::{self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall};
 use kora_core::api::Op;
 use kora_core::installer::paused::PausedStore;
 use kora_core::installer::{slug, InstallRequest, Mode};
@@ -41,36 +39,22 @@ pub fn set_env(e: Option<Arc<dyn InstallEnv>>) {
 
 /// The machine seam in use.
 pub fn env() -> Arc<dyn InstallEnv> {
-    ENV.read()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone()
-        .unwrap_or_else(|| Arc::new(SystemInstallEnv))
+    ENV.read().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_else(|| Arc::new(SystemInstallEnv))
 }
 
 fn parse<T: for<'de> serde::Deserialize<'de>>(v: Value) -> Result<T, ApiError> {
-    serde_json::from_value(v).map_err(|_| {
-        ApiError::bad_request("That request was not understood. Reload the page and try again.")
-    })
+    serde_json::from_value(v).map_err(|_| ApiError::bad_request("That request was not understood. Reload the page and try again."))
 }
 
 fn port_of(v: &Value, key: &str, label: &str) -> Result<u16, ApiError> {
-    v.get(key)
-        .and_then(Value::as_u64)
-        .and_then(|n| u16::try_from(n).ok())
-        .ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "The {label} port must be a number between 1024 and 65535."
-            ))
-        })
+    v.get(key).and_then(Value::as_u64).and_then(|n| u16::try_from(n).ok()).ok_or_else(|| ApiError::bad_request(format!("The {label} port must be a number between 1024 and 65535.")))
 }
 
 /// `GET /artifacts` → `{recommended, items: [{build, url}]}` (builds known to be broken are left out).
 pub async fn artifacts_list() -> Result<Json<Value>, ApiError> {
     let e = env();
     let list = blocking(move || {
-        e.artifacts().map_err(|m| {
-            ApiError::new(StatusCode::BAD_GATEWAY, "internal", format!("Could not read the list of FiveM server builds ({m}). Check your internet connection and try again."))
-        })
+        e.artifacts().map_err(|m| ApiError::new(StatusCode::BAD_GATEWAY, "internal", format!("Could not read the list of FiveM server builds ({m}). Check your internet connection and try again.")))
     })
     .await?;
     Ok(Json(core::artifacts_json(&list)))
@@ -112,14 +96,8 @@ pub async fn install_saved_clear() -> Result<StatusCode, ApiError> {
 }
 
 /// `POST /checks/ports` `{game, txadmin}` → `{game: {port, ok, text, suggestion}, txadmin: {...}}`.
-pub async fn check_ports(
-    State(st): State<AppState>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
-    let (game, tx) = (
-        port_of(&body, "game", "game")?,
-        port_of(&body, "txadmin", "txAdmin")?,
-    );
+pub async fn check_ports(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let (game, tx) = (port_of(&body, "game", "game")?, port_of(&body, "txadmin", "txAdmin")?);
     let e = env();
     let v = blocking(move || {
         let servers = st.backend().list().map_err(ApiError::internal)?;
@@ -132,21 +110,12 @@ pub async fn check_ports(
 
 /// `POST /checks/disk` `{dir}` → `{ok, free_bytes, needed_bytes, message}`.
 pub async fn check_disk(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
-    let dir = body
-        .get("dir")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_string();
+    let dir = body.get("dir").and_then(Value::as_str).map(str::trim).unwrap_or_default().to_string();
     if dir.is_empty() {
-        return Err(ApiError::bad_request(
-            "Choose a folder for the server first.",
-        ));
+        return Err(ApiError::bad_request("Choose a folder for the server first."));
     }
     let e = env();
-    let v =
-        blocking(move || Ok(core::disk_check(e.disk(), std::path::Path::new(&dir), None).json()))
-            .await?;
+    let v = blocking(move || Ok(core::disk_check(e.disk(), std::path::Path::new(&dir), None).json())).await?;
     Ok(Json(v))
 }
 
@@ -158,9 +127,7 @@ pub async fn check_db_login(Json(body): Json<Value>) -> Result<Json<Value>, ApiE
         Some(a) => Some(parse::<WireDbAdmin>(a.clone())?.to_admin()),
     };
     if let Some(a) = &admin {
-        kora_core::db::validate_host(&a.host).map_err(|_| {
-            ApiError::bad_request("That database server address does not look right.")
-        })?;
+        kora_core::db::validate_host(&a.host).map_err(|_| ApiError::bad_request("That database server address does not look right."))?;
     }
     let e = env();
     let automatic = admin.is_none();
@@ -194,9 +161,10 @@ pub async fn check_cfx(Json(body): Json<Value>) -> Result<Json<Value>, ApiError>
             Ok(a) => {
                 ProfileStore::default().remember_cfx(&a.username, &a.identifier());
                 json!({
-                "ok": true, "id": a.id, "username": a.username, "identifier": a.identifier(),
-                "message": format!("Found {} (fivem:{}). This account will be the txAdmin admin.", a.username, a.id),
-            })},
+                    "ok": true, "id": a.id, "username": a.username, "identifier": a.identifier(),
+                    "message": format!("Found {} (fivem:{}). This account will be the txAdmin admin.", a.username, a.id),
+                })
+            }
             Err(m) => json!({"ok": false, "id": null, "username": null, "identifier": null, "message": m}),
         })
     })
@@ -206,10 +174,7 @@ pub async fn check_cfx(Json(body): Json<Value>) -> Result<Json<Value>, ApiError>
 
 /// `POST /installs/plan`: the same checks as starting, nothing changed, no secrets in the answer.
 /// → `{summary, steps, needs_admin, elevated, disk, warnings, notes}`.
-pub async fn install_plan(
-    State(st): State<AppState>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn install_plan(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let wire: WireInstall = parse(body)?;
     let e = env();
     let v = blocking(move || {
@@ -298,10 +263,7 @@ fn log_push(job: &str, line: String) {
 
 fn log_finish(job: &str, path: Option<PathBuf>) {
     // The file also holds the error text, so prefer it once it exists.
-    let from_file = path
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|t| t.lines().map(String::from).collect::<Vec<_>>());
+    let from_file = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.lines().map(String::from).collect::<Vec<_>>());
     with_logs(|l| {
         if let Some(e) = l.by_job.get_mut(job) {
             e.path = path;
@@ -313,11 +275,7 @@ fn log_finish(job: &str, path: Option<PathBuf>) {
 }
 
 /// `GET /installs/{job}/log` → `{path, lines}` (the end of the log; `path` is empty until the log is written).
-pub async fn install_log(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(job): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn install_log(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(job): Path<String>) -> Result<Json<Value>, ApiError> {
     // The log belongs to the install job: a remote caller needs the role that job needs.
     if caller.remote {
         crate::jobs::may_read(&caller, st.jobs.op(&job))?;
@@ -415,10 +373,7 @@ fn finished_events(events: &[Value]) -> Vec<Value> {
         last.retain(|(s, _)| s != step);
         last.push((step.to_string(), ev.clone()));
     }
-    last.into_iter()
-        .filter(|(_, ev)| matches!(ev.get("status").and_then(Value::as_str), Some("done" | "skipped")))
-        .map(|(_, ev)| ev)
-        .collect()
+    last.into_iter().filter(|(_, ev)| matches!(ev.get("status").and_then(Value::as_str), Some("done" | "skipped"))).map(|(_, ev)| ev).collect()
 }
 
 /// The job error of a stopped install: the Problem (`code`, `message`, `details`, `actions`) plus
@@ -511,7 +466,10 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
             AdminMode::Worker { ask, eager } => {
                 let wa = WorkerAdmin::new(ask, admin_context(&req, &e.admin_reasons(&req)));
                 if eager {
-                    h.event(admin_event("running", "Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on. If you do not see the prompt, look for a flashing shield icon in the taskbar."));
+                    h.event(admin_event(
+                        "running",
+                        "Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on. If you do not see the prompt, look for a flashing shield icon in the taskbar.",
+                    ));
                     log_push(&id, "Asking Windows for administrator permission".into());
                     if let Err(p) = wa.open() {
                         h.event(admin_event("failed", &p.message));
@@ -558,12 +516,7 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
 /// Problem's fields (`code`, `message`, `details`, `actions`) plus `kept`, `log_path`,
 /// `failed_step` and `resume` (see [`install_resume`]). Without administrator rights for what the
 /// install needs: `needs_elevation` with the `kora install ...` command (no secrets on it).
-pub async fn install_start(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Response, ApiError> {
+pub async fn install_start(State(st): State<AppState>, Extension(caller): Extension<Caller>, headers: HeaderMap, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let ask = AdminAsk::of(&caller, &headers);
     let wire: WireInstall = parse(body)?;
     // Pasting a new key (or saving one) is for admins; every role that may install can pick a saved key.
@@ -596,8 +549,7 @@ pub async fn install_start(
         }
         let servers = st2.backend().list().map_err(ApiError::internal)?;
         if servers.iter().any(|s| slug(&s.name) == slug(&req.name) || s.dir == req.dir) {
-            return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name))
-                .with_action(Action::change_answers("name")));
+            return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name)).with_action(Action::change_answers("name")));
         }
         if req.mode == Mode::Development {
             let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|m| {
@@ -612,8 +564,7 @@ pub async fn install_start(
         }
         if !core::already_installed(&req) {
             let avoid = core::avoid_ports(&servers, &req.name, Some(&req.dir));
-            core::settle_ports(&mut req, false, e2.prober(), &avoid)
-                .map_err(|m| ApiError::conflict(format!("{m} Go back and pick other ports.")).with_action(Action::change_answers("ports")))?;
+            core::settle_ports(&mut req, false, e2.prober(), &avoid).map_err(|m| ApiError::conflict(format!("{m} Go back and pick other ports.")).with_action(Action::change_answers("ports")))?;
         }
         // The person chose to save a pasted key: it is kept under that name (an already saved key is just
         // reused, saying nothing twice). From here on the install can be written down without the key.
@@ -653,13 +604,7 @@ pub async fn install_start(
 /// [`Paused`]). Without `skip` the failed step runs again; with it, that step is skipped first
 /// (only steps that are safe to skip, see `kora_core::installer::SKIPPABLE`). Answers `202 {job}`:
 /// a new job, which first replays the steps that had finished.
-pub async fn install_resume(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-    Path(job): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Response, ApiError> {
+pub async fn install_resume(State(st): State<AppState>, Extension(caller): Extension<Caller>, headers: HeaderMap, Path(job): Path<String>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let ask = AdminAsk::of(&caller, &headers);
     let without_admin = match body.get("without_admin") {
         None | Some(Value::Null) => false,
@@ -718,12 +663,13 @@ pub async fn install_resume(
         }
         if let Some(step) = &skip {
             let refused = if paused.via_helper {
-                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "This install ran with administrator rights, so its steps cannot be skipped from here. Try it again, or change your answers.")
-                    .with_action(Action::Retry)
-                    .with_action(Action::ChangeAnswers { section: None }))
+                Some(
+                    Problem::new(codes::INSTALL_CANNOT_RESUME, "This install ran with administrator rights, so its steps cannot be skipped from here. Try it again, or change your answers.")
+                        .with_action(Action::Retry)
+                        .with_action(Action::ChangeAnswers { section: None }),
+                )
             } else if paused.failed_step.as_deref() != Some(step.as_str()) {
-                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "Only the step that failed can be skipped. Try it again, or change your answers.")
-                    .with_action(Action::ChangeAnswers { section: None }))
+                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "Only the step that failed can be skipped. Try it again, or change your answers.").with_action(Action::ChangeAnswers { section: None }))
             } else {
                 e.skip_step(&paused.req, step).err()
             };

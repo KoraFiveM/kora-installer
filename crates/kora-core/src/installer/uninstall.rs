@@ -74,15 +74,7 @@ fn describe(i: &Item) -> String {
 }
 
 /// Run (or, with `dry_run`, preview) the uninstall for every registered server.
-pub fn run(
-    reg: &mut Registry,
-    opts: &Options,
-    env: &Env,
-    ask: &mut dyn Asker,
-    say: &mut dyn FnMut(&str),
-    delete: Deleter,
-    save: &mut dyn FnMut(&Registry) -> std::io::Result<()>,
-) -> Summary {
+pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, say: &mut dyn FnMut(&str), delete: Deleter, save: &mut dyn FnMut(&Registry) -> std::io::Result<()>) -> Summary {
     let mut sum = Summary::default();
     let names: Vec<(String, std::path::PathBuf, super::registry::PortsRecord)> = reg
         .servers
@@ -180,7 +172,10 @@ pub fn run(
             }
         }
         if opts.dry_run {
-            say(&format!("  {verb} KEEP the server folder and database{}.", if opts.delete_files || opts.delete_databases { " except what --delete-files / --delete-databases name" } else { " (add --delete-files / --delete-databases to include them)" }));
+            say(&format!(
+                "  {verb} KEEP the server folder and database{}.",
+                if opts.delete_files || opts.delete_databases { " except what --delete-files / --delete-databases name" } else { " (add --delete-files / --delete-databases to include them)" }
+            ));
             say(&format!("  {verb} remove '{name}' from the server list{}.", if opts.delete_files || opts.delete_databases { " when its files or database are deleted" } else { " if you agree" }));
             continue;
         }
@@ -192,7 +187,19 @@ pub fn run(
                         say(&format!("  note: {n}"));
                     }
                     reg.remove(&name);
-                    sum.removed.push(format!("{name}: {}{}", if del_files { "server folder" } else { "" }, if del_db { if del_files { " + database" } else { "database" } } else { "" }));
+                    sum.removed.push(format!(
+                        "{name}: {}{}",
+                        if del_files { "server folder" } else { "" },
+                        if del_db {
+                            if del_files {
+                                " + database"
+                            } else {
+                                "database"
+                            }
+                        } else {
+                            ""
+                        }
+                    ));
                 }
                 Err(e) => {
                     sum.failed.push(format!("{name}: {e}"));
@@ -526,7 +533,13 @@ mod tests {
     }
 
     fn rec() -> super::super::windows_db::Record {
-        super::super::windows_db::Record { service: "KoraMariaDB_ab12".into(), version: "11.4.13".into(), port: 3307, root: PathBuf::from("C:\\PD\\Kora\\mariadb\\11.4.13"), client: PathBuf::from("c.exe") }
+        super::super::windows_db::Record {
+            service: "KoraMariaDB_ab12".into(),
+            version: "11.4.13".into(),
+            port: 3307,
+            root: PathBuf::from("C:\\PD\\Kora\\mariadb\\11.4.13"),
+            client: PathBuf::from("c.exe"),
+        }
     }
 
     #[test]
@@ -538,7 +551,19 @@ mod tests {
         let run = |opts: Options, admin: bool, ans: bool| {
             let mut sum = Summary::default();
             let mut said = Vec::new();
-            mariadb_cleanup(&reg, &opts, admin, Some((rec(), base.clone())), &mut Script(vec![("Remove the MariaDB", ans)], vec![]), &mut |s| said.push(s.to_string()), &mut |r, _| { removed.borrow_mut().push(r.service.clone()); Ok(()) }, &mut sum);
+            mariadb_cleanup(
+                &reg,
+                &opts,
+                admin,
+                Some((rec(), base.clone())),
+                &mut Script(vec![("Remove the MariaDB", ans)], vec![]),
+                &mut |s| said.push(s.to_string()),
+                &mut |r, _| {
+                    removed.borrow_mut().push(r.service.clone());
+                    Ok(())
+                },
+                &mut sum,
+            );
             sum
         };
         let s = run(Options::default(), true, true);
@@ -564,7 +589,16 @@ mod tests {
         std::fs::write(e.dir.join(".kora/db-provision.json"), b"{}").unwrap();
         let reg = Registry { servers: vec![e] };
         let mut sum = Summary::default();
-        mariadb_cleanup(&reg, &Options { delete_databases: true, ..Options::default() }, true, Some((rec(), t.path().to_path_buf())), &mut Defaults, &mut |_| {}, &mut |_, _| panic!("must not remove"), &mut sum);
+        mariadb_cleanup(
+            &reg,
+            &Options { delete_databases: true, ..Options::default() },
+            true,
+            Some((rec(), t.path().to_path_buf())),
+            &mut Defaults,
+            &mut |_| {},
+            &mut |_, _| panic!("must not remove"),
+            &mut sum,
+        );
         assert!(sum.removed.is_empty() && sum.kept.iter().any(|k| k.contains("in use")));
     }
 }

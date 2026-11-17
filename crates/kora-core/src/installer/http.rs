@@ -32,12 +32,7 @@ fn agent() -> ureq::Agent {
 /// Agent for big downloads: no overall cap (the caller enforces a size-scaled deadline) and `stall` as the
 /// longest silence tolerated on the connection.
 fn download_agent(stall: Duration) -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .redirects(0)
-        .timeout_connect(Duration::from_secs(20))
-        .timeout_read(stall)
-        .user_agent("kora-installer")
-        .build()
+    ureq::AgentBuilder::new().redirects(0).timeout_connect(Duration::from_secs(20)).timeout_read(stall).user_agent("kora-installer").build()
 }
 
 /// Most redirects followed (GitHub release assets and runtime.fivem.net need one or two).
@@ -112,10 +107,7 @@ impl CatalogSource for HttpClient {
 
 impl ArtifactSource for HttpClient {
     fn fetch_text(&self, url: &str) -> Result<String, ArtifactError> {
-        self.get(url)
-            .map_err(ArtifactError::Network)?
-            .into_string()
-            .map_err(|e| ArtifactError::Network(e.to_string()))
+        self.get(url).map_err(ArtifactError::Network)?.into_string().map_err(|e| ArtifactError::Network(e.to_string()))
     }
 
     fn download(&self, url: &str, out: &mut dyn Write) -> Result<(), ArtifactError> {
@@ -232,12 +224,7 @@ impl HttpClient {
         if total.is_some_and(|t| t > MAX_DOWNLOAD) {
             return Err("the file is larger than the allowed size".into());
         }
-        let mut f = if append {
-            std::fs::OpenOptions::new().append(true).open(dest)
-        } else {
-            std::fs::File::create(dest)
-        }
-        .map_err(|e| format!("cannot write {}: {e}", dest.display()))?;
+        let mut f = if append { std::fs::OpenOptions::new().append(true).open(dest) } else { std::fs::File::create(dest) }.map_err(|e| format!("cannot write {}: {e}", dest.display()))?;
         let start = Instant::now();
         let start_bytes = written;
         let deadline = total.map(|t| start + (Duration::from_secs(t / cfg.min_rate.max(1))).max(cfg.min_deadline));
@@ -287,7 +274,15 @@ impl HttpClient {
     /// `dest` and accept it ONLY if its SHA-256 equals `sha256`. A wrong hash deletes the file and aborts (it is
     /// not retried: a different file is not a transient fault). Returns the URL that delivered the file.
     /// Redirects may lead to any host; trust comes from the hash. Every hop must still be HTTPS.
-    pub fn download_verified(&self, sources: &[String], dest: &std::path::Path, sha256: &str, cfg: &FetchConfig, progress: &mut dyn FnMut(&FetchProgress), note: &mut dyn FnMut(&str)) -> Result<String, String> {
+    pub fn download_verified(
+        &self,
+        sources: &[String],
+        dest: &std::path::Path,
+        sha256: &str,
+        cfg: &FetchConfig,
+        progress: &mut dyn FnMut(&FetchProgress),
+        note: &mut dyn FnMut(&str),
+    ) -> Result<String, String> {
         let want = sha256.to_ascii_lowercase();
         let mut problems = Vec::new();
         let _ = std::fs::remove_file(dest);

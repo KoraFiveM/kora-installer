@@ -85,12 +85,9 @@ fn result_lines_are_recognised() {
 #[test]
 fn every_failure_to_ask_offers_a_way_on() {
     let ctx = Context { what: "install the server".into(), command: vec!["kora".into(), "install".into()], can_skip_admin: true };
-    for (e, code) in [
-        (OpenError::Declined, codes::ADMIN_DECLINED),
-        (OpenError::TimedOut, codes::ADMIN_TIMED_OUT),
-        (OpenError::Busy, codes::ADMIN_BUSY),
-        (OpenError::Failed("x".into()), codes::ADMIN_LOST),
-    ] {
+    for (e, code) in
+        [(OpenError::Declined, codes::ADMIN_DECLINED), (OpenError::TimedOut, codes::ADMIN_TIMED_OUT), (OpenError::Busy, codes::ADMIN_BUSY), (OpenError::Failed("x".into()), codes::ADMIN_LOST)]
+    {
         let p = open_problem(&e, &ctx);
         assert_eq!(p.code, code);
         assert_eq!(p.actions[0], Action::RequestAdmin, "{code}: ask again first");
@@ -112,7 +109,6 @@ fn every_failure_to_ask_offers_a_way_on() {
 mod stream {
     use super::*;
     use std::sync::{Arc, Mutex};
-
 
     type Call = (Vec<String>, Vec<(String, String)>);
 

@@ -11,8 +11,7 @@ pub use pick::{PickError, Picker, Section};
 
 /// Public catalog location: the catalog file itself in the docs repository (read straight from
 /// GitHub, so a change is live as soon as it is merged, without waiting for the docs site to deploy).
-pub const CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/KoraFiveM/kora_docs_next/main/catalog/resources.json";
+pub const CATALOG_URL: &str = "https://raw.githubusercontent.com/KoraFiveM/kora_docs_next/main/catalog/resources.json";
 
 /// Snapshot of the catalog embedded in the binary (refreshed by CI).
 pub const EMBEDDED_SNAPSHOT: &str = include_str!("../../assets/resources.json");
@@ -173,10 +172,7 @@ pub enum ResolvedVersion {
 impl Resource {
     /// The release named by `latest`, falling back to the highest listed (first) entry.
     pub fn latest_release(&self) -> Option<&Release> {
-        self.latest
-            .as_ref()
-            .and_then(|l| self.versions.iter().find(|v| &v.version == l))
-            .or_else(|| self.versions.first())
+        self.latest.as_ref().and_then(|l| self.versions.iter().find(|v| &v.version == l)).or_else(|| self.versions.first())
     }
 
     /// Bridge and creator resources are other people's repositories: always a pinned clone at the
@@ -216,11 +212,7 @@ impl Resource {
     pub fn resolve(&self, mode: Mode) -> ResolvedVersion {
         let mode = if self.is_pinned_copy() { Mode::Prod } else { mode };
         match (mode, self.latest_release()) {
-            (Mode::Prod, Some(r)) => ResolvedVersion::Pinned {
-                version: r.version.clone(),
-                tag: r.tag.clone(),
-                commit: r.commit.clone(),
-            },
+            (Mode::Prod, Some(r)) => ResolvedVersion::Pinned { version: r.version.clone(), tag: r.tag.clone(), commit: r.commit.clone() },
             _ => ResolvedVersion::BranchHead { branch: self.branch.clone() },
         }
     }
@@ -265,9 +257,7 @@ pub fn is_valid_repo_url(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://github.com/") else { return false };
     let Some(rest) = rest.strip_suffix(".git") else { return false };
     let mut parts = rest.split('/');
-    let ok = |s: &str| {
-        !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
-    };
+    let ok = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'));
     matches!((parts.next(), parts.next(), parts.next()), (Some(a), Some(b), None) if ok(a) && ok(b))
 }
 
@@ -288,16 +278,10 @@ impl Catalog {
         let v: serde_json::Value = serde_json::from_str(json).ok()?;
         for r in v.get("resources")?.as_array()? {
             let id = r.get("id").and_then(|x| x.as_str()).unwrap_or("?");
-            for (field, known) in [
-                ("kind", &["kora", "dependency", "optional", "internal"][..]),
-                ("type", &["compat", "bridge", "creator"][..]),
-            ] {
+            for (field, known) in [("kind", &["kora", "dependency", "optional", "internal"][..]), ("type", &["compat", "bridge", "creator"][..])] {
                 if let Some(val) = r.get(field).and_then(|x| x.as_str()) {
                     if !known.contains(&val) {
-                        return Some(CatalogError::Unrecognised(format!(
-                            "resource '{id}' has an unrecognised {field} '{val}' (known: {}); update the Kora installer",
-                            known.join(", ")
-                        )));
+                        return Some(CatalogError::Unrecognised(format!("resource '{id}' has an unrecognised {field} '{val}' (known: {}); update the Kora installer", known.join(", "))));
                     }
                 }
             }
@@ -335,9 +319,7 @@ impl Catalog {
         for r in &self.resources {
             match (r.res_type, &r.creator) {
                 (Some(ResType::Creator), None) => errs.push(format!("{}: type creator needs a creator id", r.id)),
-                (Some(ResType::Creator), Some(c)) if !creator_ids.contains(c.as_str()) => {
-                    errs.push(format!("{}: unknown creator '{c}'", r.id))
-                }
+                (Some(ResType::Creator), Some(c)) if !creator_ids.contains(c.as_str()) => errs.push(format!("{}: unknown creator '{c}'", r.id)),
                 (Some(ResType::Creator), Some(_)) => {}
                 (_, Some(_)) => errs.push(format!("{}: creator is only valid with type creator", r.id)),
                 _ => {}
@@ -388,14 +370,16 @@ impl Catalog {
                 match self.find_normalized(d) {
                     None => errs.push(format!("{}: dependsOn '{d}' is not in the catalog", r.id)),
                     Some(t) if t.id == r.id => errs.push(format!("{}: depends on itself", r.id)),
-                    Some(t) if t.is_internal() && !r.is_internal() => {
-                        errs.push(format!("{}: public resource depends on internal '{}'", r.id, t.id))
-                    }
+                    Some(t) if t.is_internal() && !r.is_internal() => errs.push(format!("{}: public resource depends on internal '{}'", r.id, t.id)),
                     Some(_) => {}
                 }
             }
         }
-        if errs.is_empty() { Ok(()) } else { Err(CatalogError::Invalid(errs)) }
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(CatalogError::Invalid(errs))
+        }
     }
 
     pub fn find(&self, id: &str) -> Option<&Resource> {
@@ -464,10 +448,7 @@ pub enum CatalogOrigin {
 
 /// Load from `url`; on any fetch/parse/validation failure use the embedded snapshot.
 pub fn load(source: &dyn CatalogSource, url: &str) -> Result<(Catalog, CatalogOrigin), CatalogError> {
-    let remote = source
-        .fetch(url)
-        .map_err(CatalogError::Fetch)
-        .and_then(|t| Catalog::parse_validated(&t));
+    let remote = source.fetch(url).map_err(CatalogError::Fetch).and_then(|t| Catalog::parse_validated(&t));
     match remote {
         Ok(c) => Ok((c, CatalogOrigin::Remote)),
         Err(e) => Ok((Catalog::embedded()?, CatalogOrigin::Embedded(e.to_string()))),
@@ -522,11 +503,11 @@ mod tests {
     #[test]
     fn group_is_tolerant_but_kind_and_type_are_strict() {
         let base = |g: &str, k: &str, t: &str| {
-            format!(
-                r#"{{"schemaVersion":3,"resources":[{{"id":"x","repository":"https://github.com/o/x.git","path":"x","group":"{g}","kind":"{k}","branch":"main"{t}}}]}}"#
-            )
+            format!(r#"{{"schemaVersion":3,"resources":[{{"id":"x","repository":"https://github.com/o/x.git","path":"x","group":"{g}","kind":"{k}","branch":"main"{t}}}]}}"#)
         };
-        for (g, want) in [("other", Group::Other), ("brand-new-group", Group::Other), ("bridges", Group::Bridges), ("creators", Group::Creators), ("kora", Group::Kora), ("cfx-default", Group::CfxDefault)] {
+        for (g, want) in
+            [("other", Group::Other), ("brand-new-group", Group::Other), ("bridges", Group::Bridges), ("creators", Group::Creators), ("kora", Group::Kora), ("cfx-default", Group::CfxDefault)]
+        {
             assert_eq!(Catalog::parse(&base(g, "kora", "")).unwrap().resources[0].group, want, "{g}");
         }
         for (g, s) in [(Group::Bridges, "\"bridges\""), (Group::CfxDefault, "\"cfx-default\""), (Group::Other, "\"other\"")] {
@@ -595,14 +576,7 @@ mod tests {
     fn version_resolution() {
         let c = Catalog::embedded().unwrap();
         let lib = c.find("kora-lib").unwrap();
-        assert_eq!(
-            lib.resolve(Mode::Prod),
-            ResolvedVersion::Pinned {
-                version: "0.2.1".into(),
-                tag: "v0.2.1".into(),
-                commit: "6e5dd02ce6dab6cf7380336d7e6a91b1ed2fd126".into()
-            }
-        );
+        assert_eq!(lib.resolve(Mode::Prod), ResolvedVersion::Pinned { version: "0.2.1".into(), tag: "v0.2.1".into(), commit: "6e5dd02ce6dab6cf7380336d7e6a91b1ed2fd126".into() });
         assert_eq!(lib.resolve(Mode::Dev), ResolvedVersion::BranchHead { branch: "dev".into() });
         let dep = c.resources.iter().find(|r| r.versions.is_empty()).unwrap();
         assert!(matches!(dep.resolve(Mode::Prod), ResolvedVersion::BranchHead { .. }));
@@ -645,11 +619,8 @@ mod tests {
     #[test]
     fn v3_validation() {
         let rel = r#""latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"0123456789012345678901234567890123456789"}]"#;
-        let creator_res = |creator: &str| {
-            format!(
-                r#",{{"id":"bridge-b","repository":"https://github.com/o/b.git","path":"b","group":"other","kind":"optional","branch":"main","type":"creator"{creator},{rel}}}"#
-            )
-        };
+        let creator_res =
+            |creator: &str| format!(r#",{{"id":"bridge-b","repository":"https://github.com/o/b.git","path":"b","group":"other","kind":"optional","branch":"main","type":"creator"{creator},{rel}}}"#);
         let bad = |json: String| match Catalog::parse_validated(&json) {
             Err(CatalogError::Invalid(e)) => e.join("; "),
             other => panic!("expected invalid, got {other:?}"),

@@ -66,12 +66,7 @@ pub fn verify_pinned_copy(dest: &Path, copy: &Path) -> std::io::Result<()> {
 /// Copy `src` to `dest` unless it is already there.
 pub fn install_plan(src: &str, dest: &Path) -> Plan {
     let d = dest.to_string_lossy();
-    Plan::new(vec![SystemStep::copy(
-        format!("Put a root-owned copy of the kora program at {d} (the background service runs it from there, not from your home folder)"),
-        src,
-        &d,
-        0o755,
-    )])
+    Plan::new(vec![SystemStep::copy(format!("Put a root-owned copy of the kora program at {d} (the background service runs it from there, not from your home folder)"), src, &d, 0o755)])
 }
 
 /// Remove a copy made by [`install_plan`] and its (then empty) folders.
@@ -93,10 +88,7 @@ pub fn is_pinned_copy_path(path: &Path, root: &Path, platform: Platform) -> bool
     let name = if platform == Platform::Windows { "kora.exe" } else { "kora" };
     let plain = path.components().all(|c| !matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir));
     let same = |a: &Path, b: &Path| if platform == Platform::Windows { a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()) } else { a == b };
-    plain
-        && path.file_name().is_some_and(|n| n == name)
-        && pinned_sha12(path).is_some()
-        && path.parent().and_then(Path::parent).is_some_and(|r| same(r, root))
+    plain && path.file_name().is_some_and(|n| n == name) && pinned_sha12(path).is_some() && path.parent().and_then(Path::parent).is_some_and(|r| same(r, root))
 }
 
 /// Which kora program a job that runs as root / SYSTEM (the update timer or scheduled task) runs.
@@ -176,17 +168,7 @@ pub fn root_exe(recorded: Option<&str>) -> Result<RootExe, String> {
     let root = default_root(platform);
     let r2 = root.clone();
     let cur = current.clone();
-    choose_root_exe(
-        recorded,
-        &ExeFacts {
-            platform,
-            root,
-            current,
-            is_safe: &|p| root_safe(p, platform, r2.as_deref()),
-            current_sha256: &|| file_sha256(&cur),
-            version: env!("CARGO_PKG_VERSION"),
-        },
-    )
+    choose_root_exe(recorded, &ExeFacts { platform, root, current, is_safe: &|p| root_safe(p, platform, r2.as_deref()), current_sha256: &|| file_sha256(&cur), version: env!("CARGO_PKG_VERSION") })
 }
 
 /// Owner and permission bits of one path component (Unix).
@@ -219,9 +201,7 @@ fn entries_down_to(path: &Path) -> Vec<(PathBuf, Entry)> {
     use std::os::unix::fs::MetadataExt;
     let mut anc: Vec<PathBuf> = path.ancestors().map(Path::to_path_buf).collect();
     anc.reverse();
-    anc.into_iter()
-        .filter_map(|p| std::fs::metadata(&p).ok().map(|m| (p, Entry { uid: m.uid(), mode: m.mode() })))
-        .collect()
+    anc.into_iter().filter_map(|p| std::fs::metadata(&p).ok().map(|m| (p, Entry { uid: m.uid(), mode: m.mode() }))).collect()
 }
 
 /// Is `exe` somewhere a root-run service may execute it from (see [`chain_is_service_safe`])?
@@ -344,7 +324,9 @@ mod tests {
         // Only the real pinned copy (and only while it is root-owned) is believed.
         let safe = |p: &Path| p.starts_with("/opt/kora") || p == Path::new("/usr/local/bin/kora");
         let f = facts(&safe, Platform::Linux);
-        for forged in ["/tmp/evil", "/home/me/srv/.kora/kora", "/opt/kora/../../tmp/x/0.1.0-0123456789ab/kora", "/opt/kora/0.1.0-0123456789ab/sh", "/opt/kora/x/kora", "/opt/kora/a/0.1.0-0123456789ab/kora"] {
+        for forged in
+            ["/tmp/evil", "/home/me/srv/.kora/kora", "/opt/kora/../../tmp/x/0.1.0-0123456789ab/kora", "/opt/kora/0.1.0-0123456789ab/sh", "/opt/kora/x/kora", "/opt/kora/a/0.1.0-0123456789ab/kora"]
+        {
             let got = choose_root_exe(Some(forged), &f).unwrap();
             assert_ne!(got.path(), Path::new(forged), "{forged}");
             assert_eq!(got, RootExe::Ready(PathBuf::from("/opt/kora/0.5.0-0123456789ab/kora")), "{forged}");

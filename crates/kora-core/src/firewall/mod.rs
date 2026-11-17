@@ -27,16 +27,12 @@ pub struct PortRequest {
 
 impl PortRequest {
     pub fn validate(&self) -> ServiceResult<()> {
-        if self.server.is_empty()
-            || !self.server.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
-        {
+        if self.server.is_empty() || !self.server.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_') {
             return Err(ServiceError::Invalid("server name has unsupported characters".into()));
         }
         for (label, p) in [("game", self.game_port), ("txAdmin", self.txadmin_port)] {
             if p < 1024 {
-                return Err(ServiceError::Invalid(format!(
-                    "{label} port {p} is not allowed: choose a port between 1024 and 65535"
-                )));
+                return Err(ServiceError::Invalid(format!("{label} port {p} is not allowed: choose a port between 1024 and 65535")));
             }
         }
         if self.game_port == self.txadmin_port {
@@ -70,25 +66,18 @@ fn plan_for(req: &PortRequest, kind: FirewallKind, open: bool, rules: Vec<(&'sta
     for (label, port, proto) in rules {
         let what = format!("{verb} {proto_u} port {port} ({label}) for '{}'", req.server, proto_u = proto.to_uppercase());
         let step = match kind {
-            FirewallKind::Ufw if open => SystemStep::run(
-                format!("{what} in the Ubuntu/Debian firewall (ufw)"),
-                "ufw",
-                &["allow", &format!("{port}/{proto}"), "comment", &format!("Kora {} {label}", req.server)],
-            ),
-            FirewallKind::Ufw => SystemStep::run(
-                format!("{what} in the Ubuntu/Debian firewall (ufw)"),
-                "ufw",
-                &["delete", "allow", &format!("{port}/{proto}")],
-            )
-            .tolerant(),
+            FirewallKind::Ufw if open => {
+                SystemStep::run(format!("{what} in the Ubuntu/Debian firewall (ufw)"), "ufw", &["allow", &format!("{port}/{proto}"), "comment", &format!("Kora {} {label}", req.server)])
+            }
+            FirewallKind::Ufw => SystemStep::run(format!("{what} in the Ubuntu/Debian firewall (ufw)"), "ufw", &["delete", "allow", &format!("{port}/{proto}")]).tolerant(),
             FirewallKind::Firewalld => {
                 let flag = if open { "--add-port" } else { "--remove-port" };
-                let s = SystemStep::run(
-                    format!("{what} in firewalld"),
-                    "firewall-cmd",
-                    &["--permanent", &format!("{flag}={port}/{proto}")],
-                );
-                if open { s } else { s.tolerant() }
+                let s = SystemStep::run(format!("{what} in firewalld"), "firewall-cmd", &["--permanent", &format!("{flag}={port}/{proto}")]);
+                if open {
+                    s
+                } else {
+                    s.tolerant()
+                }
             }
             FirewallKind::WindowsFirewall => {
                 let name = rule_name(&req.server, label, port, proto);
@@ -97,18 +86,20 @@ fn plan_for(req: &PortRequest, kind: FirewallKind, open: bool, rules: Vec<(&'sta
                         format!("{what} in Windows Firewall"),
                         "netsh",
                         vec![
-                            "advfirewall".into(), "firewall".into(), "add".into(), "rule".into(),
-                            format!("name={name}"), "dir=in".into(), "action=allow".into(),
-                            format!("protocol={}", proto.to_uppercase()), format!("localport={port}"),
+                            "advfirewall".into(),
+                            "firewall".into(),
+                            "add".into(),
+                            "rule".into(),
+                            format!("name={name}"),
+                            "dir=in".into(),
+                            "action=allow".into(),
+                            format!("protocol={}", proto.to_uppercase()),
+                            format!("localport={port}"),
                         ],
                     )
                 } else {
-                    SystemStep::run_owned(
-                        format!("{what} in Windows Firewall"),
-                        "netsh",
-                        vec!["advfirewall".into(), "firewall".into(), "delete".into(), "rule".into(), format!("name={name}")],
-                    )
-                    .tolerant()
+                    SystemStep::run_owned(format!("{what} in Windows Firewall"), "netsh", vec!["advfirewall".into(), "firewall".into(), "delete".into(), "rule".into(), format!("name={name}")])
+                        .tolerant()
                 }
             }
         };
@@ -166,7 +157,10 @@ pub fn close_plan_checked(req: &PortRequest, kind: FirewallKind, runner: &dyn Co
     let mut all = req.clone();
     all.expose_txadmin = true;
     if let Some(p) = [all.game_port, all.txadmin_port].into_iter().find(|p| ssh.contains(p)) {
-        return Ok((Plan::default(), Some(format!("Port {p} is this machine's SSH port, so Kora will not close it (the server's records may have been changed). Nothing was changed in the firewall."))));
+        return Ok((
+            Plan::default(),
+            Some(format!("Port {p} is this machine's SSH port, so Kora will not close it (the server's records may have been changed). Nothing was changed in the firewall.")),
+        ));
     }
     if kind != FirewallKind::Ufw {
         // firewalld rules carry no comment; Windows rules are removed by their Kora-only names.
@@ -254,15 +248,9 @@ pub fn router_note(req: &PortRequest) -> String {
         req.game_port
     );
     if req.expose_txadmin {
-        s.push_str(&format!(
-            " You chose to expose txAdmin: also forward TCP port {}. Anyone who can reach it can try to log in, so keep it off the internet unless you need it.",
-            req.txadmin_port
-        ));
+        s.push_str(&format!(" You chose to expose txAdmin: also forward TCP port {}. Anyone who can reach it can try to log in, so keep it off the internet unless you need it.", req.txadmin_port));
     } else {
-        s.push_str(&format!(
-            " Do not forward port {}: it is the txAdmin web panel and is meant for this computer or your local network only.",
-            req.txadmin_port
-        ));
+        s.push_str(&format!(" Do not forward port {}: it is the txAdmin web panel and is meant for this computer or your local network only.", req.txadmin_port));
     }
     s
 }
@@ -318,14 +306,7 @@ mod tests {
     #[test]
     fn firewalld_plan() {
         let p = open_plan(&req(false), FirewallKind::Firewalld).unwrap();
-        assert_eq!(
-            lines(&p),
-            vec![
-                "firewall-cmd --permanent --add-port=30120/tcp",
-                "firewall-cmd --permanent --add-port=30120/udp",
-                "firewall-cmd --reload"
-            ]
-        );
+        assert_eq!(lines(&p), vec!["firewall-cmd --permanent --add-port=30120/tcp", "firewall-cmd --permanent --add-port=30120/udp", "firewall-cmd --reload"]);
         assert!(lines(&close_plan(&req(false), FirewallKind::Firewalld).unwrap())[0].contains("--remove-port=30120/tcp"));
     }
 
@@ -334,10 +315,7 @@ mod tests {
         let p = open_plan(&req(false), FirewallKind::WindowsFirewall).unwrap();
         let Action::Run { program, args } = &p.steps[0].action else { panic!() };
         assert_eq!(program, "netsh");
-        assert_eq!(
-            args,
-            &["advfirewall", "firewall", "add", "rule", "name=Kora main game 30120 TCP", "dir=in", "action=allow", "protocol=TCP", "localport=30120"]
-        );
+        assert_eq!(args, &["advfirewall", "firewall", "add", "rule", "name=Kora main game 30120 TCP", "dir=in", "action=allow", "protocol=TCP", "localport=30120"]);
         let c = close_plan(&req(false), FirewallKind::WindowsFirewall).unwrap();
         assert!(lines(&c)[1].contains("delete rule name=Kora main game 30120 UDP"));
     }

@@ -38,10 +38,7 @@ pub fn build_command(name_or_dir: &str) -> Result<Command> {
     let dir = resolve_dir(name_or_dir)?;
     let sf = ServerFile::load(&dir).map_err(|e| InstallError(format!("cannot read kora-server.json: {e}")))?;
     let store = ArtifactStore::new(dir.join("artifacts"));
-    let build_dir: PathBuf = store
-        .current_dir()
-        .map_err(|e| InstallError(e.to_string()))?
-        .ok_or_else(|| InstallError("this server has no FXServer build installed".into()))?;
+    let build_dir: PathBuf = store.current_dir().map_err(|e| InstallError(e.to_string()))?.ok_or_else(|| InstallError("this server has no FXServer build installed".into()))?;
     let exe = build_dir.join(Platform::current().executable());
     if !exe.is_file() {
         return Err(InstallError(format!("{} is missing", exe.display())));
@@ -344,18 +341,14 @@ fn service_for(name: &str) -> Result<crate::service::ManagedServer> {
 pub fn service_state(name: &str) -> Result<crate::service::ServiceState> {
     let server = service_for(name)?;
     let rn = crate::service::SystemRunner;
-    crate::service::ServiceManager::new(crate::service::Platform::current(), &rn)
-        .status(&server)
-        .map_err(|e| InstallError(e.to_string()))
+    crate::service::ServiceManager::new(crate::service::Platform::current(), &rn).status(&server).map_err(|e| InstallError(e.to_string()))
 }
 
 /// start / stop / restart the server's OS service.
 pub fn service_control(name: &str, action: crate::service::ControlAction) -> Result<()> {
     use crate::service::ServiceState;
     if service_state(name)? == ServiceState::NotInstalled {
-        return Err(InstallError(format!(
-            "'{name}' has no background service. Install with --service (as administrator), or run `kora service-host {name}` in a terminal."
-        )));
+        return Err(InstallError(format!("'{name}' has no background service. Install with --service (as administrator), or run `kora service-host {name}` in a terminal.")));
     }
     let server = service_for(name)?;
     let rn = crate::service::SystemRunner;

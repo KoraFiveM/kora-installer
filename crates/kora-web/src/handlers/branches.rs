@@ -42,10 +42,7 @@ fn fail(m: String) -> ApiError {
 fn dev(st: &AppState, name: &str) -> Result<ServerEntry, ApiError> {
     let e = st.entry(name)?;
     if e.mode != Mode::Development {
-        let p = Problem::new(
-            codes::NOT_DEV,
-            "Changing branches is only for Development servers. A Production server stays on its tested releases.",
-        );
+        let p = Problem::new(codes::NOT_DEV, "Changing branches is only for Development servers. A Production server stays on its tested releases.");
         return Err(ApiError::problem(StatusCode::CONFLICT, p));
     }
     Ok(e)
@@ -62,8 +59,7 @@ fn resource(name: &str) -> Result<(), ApiError> {
 fn changes_of(v: &Value) -> Result<Changes, ApiError> {
     match v.get("changes").filter(|c| !c.is_null()) {
         None => Ok(Changes::Ask),
-        Some(c) => serde_json::from_value(c.clone())
-            .map_err(|_| ApiError::bad_request("What to do with changes must be \"ask\", \"stash\" or \"discard\".")),
+        Some(c) => serde_json::from_value(c.clone()).map_err(|_| ApiError::bad_request("What to do with changes must be \"ask\", \"stash\" or \"discard\".")),
     }
 }
 
@@ -121,11 +117,7 @@ pub async fn branches_list(State(st): State<AppState>, Path(s): Path<String>) ->
 }
 
 /// `GET /servers/{s}/resources/{name}/branches?refresh=1` → branches, kept-aside changes, current state.
-pub async fn branch_choices(
-    State(st): State<AppState>,
-    Path((s, name)): Path<(String, String)>,
-    Query(q): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn branch_choices(State(st): State<AppState>, Path((s, name)): Path<(String, String)>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
     resource(&name)?;
     let refresh = q.get("refresh").is_some_and(|v| v == "1" || v == "true");
     let st2 = st.clone();
@@ -143,11 +135,7 @@ pub async fn pr_list(State(st): State<AppState>, Path((s, name)): Path<(String, 
 
 /// `POST /servers/{s}/resources/{name}/branch` `{action, branch?, remote?, pr?, source?, changes?}` → the outcome.
 /// `status` is `switched`, `already` or `needs_choice` (uncommitted changes and no choice given: nothing was touched).
-pub async fn branch_switch(
-    State(st): State<AppState>,
-    Path((s, name)): Path<(String, String)>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn branch_switch(State(st): State<AppState>, Path((s, name)): Path<(String, String)>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     resource(&name)?;
     let target = target_of(&body)?;
     let changes = changes_of(&body)?;
@@ -157,18 +145,10 @@ pub async fn branch_switch(
 }
 
 /// `POST /servers/{s}/resources/{name}/stash/restore` `{index}` → the outcome. The kept-aside changes stay in the list.
-pub async fn stash_restore(
-    State(st): State<AppState>,
-    Path((s, name)): Path<(String, String)>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn stash_restore(State(st): State<AppState>, Path((s, name)): Path<(String, String)>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     resource(&name)?;
-    let index = body
-        .get("index")
-        .and_then(Value::as_u64)
-        .and_then(|i| u32::try_from(i).ok())
-        .filter(|i| *i < 1000)
-        .ok_or_else(|| ApiError::bad_request("Say which kept-aside changes to bring back."))?;
+    let index =
+        body.get("index").and_then(Value::as_u64).and_then(|i| u32::try_from(i).ok()).filter(|i| *i < 1000).ok_or_else(|| ApiError::bad_request("Say which kept-aside changes to bring back."))?;
     let st2 = st.clone();
     let e = blocking(move || dev(&st2, &s)).await?;
     Ok(Json(ask(&st, e, Request::RestoreStash { resource: name, index }).await?.json()))

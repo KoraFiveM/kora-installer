@@ -80,10 +80,7 @@ fn tracked(sf: &ServerFile, rec: &ResourceRecord) -> Result<PathBuf, &'static st
 
 fn find<'a>(sf: &'a ServerFile, name: &str) -> PResult<&'a ResourceRecord> {
     let n = normalize_id(name);
-    sf.resources
-        .iter()
-        .find(|r| normalize_id(&r.id) == n || r.path == name)
-        .ok_or_else(|| Problem::generic(format!("This server has no resource called '{name}'.")))
+    sf.resources.iter().find(|r| normalize_id(&r.id) == n || r.path == name).ok_or_else(|| Problem::generic(format!("This server has no resource called '{name}'.")))
 }
 
 fn lock_for(sf: &ServerFile) -> PResult<lock::UpdateLock> {
@@ -434,14 +431,7 @@ pub struct BulkResult {
 
 /// Switch every resource that has `target` (a branch) to it, or every resource back to its normal branch (`Target::Default`).
 /// `only` limits it to some resources. One resource failing never stops the others. Holds the update lock for the whole run.
-pub fn bulk_apply(
-    r: &dyn CommandRunner,
-    sf: &ServerFile,
-    target: &Target,
-    only: Option<&[String]>,
-    changes: Changes,
-    progress: &mut dyn FnMut(usize, usize, &str),
-) -> PResult<BulkResult> {
+pub fn bulk_apply(r: &dyn CommandRunner, sf: &ServerFile, target: &Target, only: Option<&[String]>, changes: Changes, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<BulkResult> {
     ensure_dev(sf)?;
     let branch = match target {
         Target::Branch { name, .. } => {

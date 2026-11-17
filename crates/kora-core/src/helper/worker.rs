@@ -269,7 +269,15 @@ pub fn log_label(verb: &str, args: &[String]) -> String {
 }
 
 /// [`serve`] with [`ServeOptions`].
-pub fn serve_with(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn Validator, executor: &dyn Executor, base_env: &[(String, String)], touch: &dyn Fn(bool), opts: &ServeOptions) -> io::Result<()> {
+pub fn serve_with(
+    reader: &mut dyn BufRead,
+    writer: &mut dyn Write,
+    validator: &dyn Validator,
+    executor: &dyn Executor,
+    base_env: &[(String, String)],
+    touch: &dyn Fn(bool),
+    opts: &ServeOptions,
+) -> io::Result<()> {
     if !send(writer, &Message::Hello { version: env!("CARGO_PKG_VERSION").into(), pid: std::process::id() }) {
         return Err(io::Error::new(io::ErrorKind::BrokenPipe, "the panel went away"));
     }
@@ -448,7 +456,15 @@ pub fn worker_env_changes(sys: &SystemDirs) -> (Vec<&'static str>, Vec<(&'static
     let mut set = Vec::new();
     if !sys.system_root.is_empty() {
         let root = sys.system_root.trim_end_matches(['\\', '/']);
-        for (k, v) in [("SystemRoot", root.to_string()), ("windir", root.to_string()), ("SystemDrive", root.chars().take(2).collect()), ("ProgramFiles", sys.program_files.clone()), ("ProgramData", sys.program_data.clone()), ("TEMP", format!("{root}\\Temp")), ("TMP", format!("{root}\\Temp"))] {
+        for (k, v) in [
+            ("SystemRoot", root.to_string()),
+            ("windir", root.to_string()),
+            ("SystemDrive", root.chars().take(2).collect()),
+            ("ProgramFiles", sys.program_files.clone()),
+            ("ProgramData", sys.program_data.clone()),
+            ("TEMP", format!("{root}\\Temp")),
+            ("TMP", format!("{root}\\Temp")),
+        ] {
             if !v.is_empty() {
                 set.push((k, v));
             }
@@ -746,24 +762,14 @@ fn with_choices(mut p: Problem, ctx: &Context) -> Problem {
 pub fn open_problem(e: &OpenError, ctx: &Context) -> Problem {
     let what = if ctx.what.is_empty() { "do this".to_string() } else { ctx.what.clone() };
     let p = match e {
-        OpenError::Declined => Problem::new(
-            codes::ADMIN_DECLINED,
-            format!("Windows did not get permission to {what}, so nothing that needs administrator rights was changed."),
-        )
-        .with_details("The Windows permission prompt was answered with No (or closed)."),
-        OpenError::TimedOut => Problem::new(
-            codes::ADMIN_TIMED_OUT,
-            format!("Nobody answered the Windows permission prompt in time, so Kora could not {what}. Nothing that needs administrator rights was changed."),
-        )
-        .with_details("The prompt appears on the computer that runs Kora. If you did not see it, look for a flashing shield icon in the taskbar there."),
-        OpenError::InUse => Problem::new(
-            codes::ADMIN_BUSY,
-            "Kora is already doing administrator work for something else (an install or another change). Try again when that has finished.",
-        ),
-        OpenError::Busy => Problem::new(
-            codes::ADMIN_BUSY,
-            "Windows is still showing an earlier permission prompt from Kora. Answer it on the computer that runs Kora (No is fine), then try again.",
-        ),
+        OpenError::Declined => Problem::new(codes::ADMIN_DECLINED, format!("Windows did not get permission to {what}, so nothing that needs administrator rights was changed."))
+            .with_details("The Windows permission prompt was answered with No (or closed)."),
+        OpenError::TimedOut => {
+            Problem::new(codes::ADMIN_TIMED_OUT, format!("Nobody answered the Windows permission prompt in time, so Kora could not {what}. Nothing that needs administrator rights was changed."))
+                .with_details("The prompt appears on the computer that runs Kora. If you did not see it, look for a flashing shield icon in the taskbar there.")
+        }
+        OpenError::InUse => Problem::new(codes::ADMIN_BUSY, "Kora is already doing administrator work for something else (an install or another change). Try again when that has finished."),
+        OpenError::Busy => Problem::new(codes::ADMIN_BUSY, "Windows is still showing an earlier permission prompt from Kora. Answer it on the computer that runs Kora (No is fine), then try again."),
         OpenError::Unsupported => Problem::new(codes::NEEDS_ELEVATION, format!("Kora cannot ask for administrator permission here, so it cannot {what} itself.")),
         OpenError::Failed(m) => Problem::new(codes::ADMIN_LOST, format!("Kora could not get administrator permission to {what}.")).with_details(m.clone()),
     };

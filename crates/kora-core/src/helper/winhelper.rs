@@ -111,11 +111,7 @@ pub const DOES: &[&str] = &[
     "Keep itself up to date with Kora (official releases only)",
 ];
 /// What still asks for permission at the computer.
-pub const DOES_NOT: &[&str] = &[
-    "Automatic update schedules",
-    "Updating or removing Kora itself",
-    "Turning the helper on or off",
-];
+pub const DOES_NOT: &[&str] = &["Automatic update schedules", "Updating or removing Kora itself", "Turning the helper on or off"];
 
 /// Recorded at install time (`helper.json` next to the program copy; admin-only folder, no secrets).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,14 +217,7 @@ pub fn bin_path(exe: &Path) -> Result<String, String> {
 
 /// `icacls` arguments that make the helper folder administrators-only (users may read and run).
 pub fn folder_acl_args(dir: &Path) -> Vec<String> {
-    vec![
-        dir.to_string_lossy().into_owned(),
-        "/inheritance:r".into(),
-        "/grant:r".into(),
-        "*S-1-5-18:(OI)(CI)F".into(),
-        "*S-1-5-32-544:(OI)(CI)F".into(),
-        "*S-1-5-32-545:(OI)(CI)RX".into(),
-    ]
+    vec![dir.to_string_lossy().into_owned(), "/inheritance:r".into(), "/grant:r".into(), "*S-1-5-18:(OI)(CI)F".into(), "*S-1-5-32-544:(OI)(CI)F".into(), "*S-1-5-32-545:(OI)(CI)RX".into()]
 }
 
 /// Steps to turn the helper on (run elevated), in two parts: up to the program copy, and the rest.
@@ -252,14 +241,26 @@ pub fn install_plan(program_files: &Path, src_exe: &str, cfg: &ServiceConfig) ->
             "Add the helper service (starts with Windows, runs as the system account)",
             "sc.exe",
             vec![
-                "create".into(), SERVICE_NAME.into(), "binPath=".into(), bin_path(&exe)?, "start=".into(), "auto".into(),
-                "obj=".into(), "LocalSystem".into(), "DisplayName=".into(), DISPLAY_NAME.into(),
+                "create".into(),
+                SERVICE_NAME.into(),
+                "binPath=".into(),
+                bin_path(&exe)?,
+                "start=".into(),
+                "auto".into(),
+                "obj=".into(),
+                "LocalSystem".into(),
+                "DisplayName=".into(),
+                DISPLAY_NAME.into(),
             ],
         ),
         SystemStep::run_owned(
             "Describe the helper service",
             "sc.exe",
-            vec!["description".into(), SERVICE_NAME.into(), format!("Does a few administrator jobs for Kora Panel for {}\\{} only. Turn it off in Kora's Settings or with 'kora helper uninstall'.", cfg.domain, cfg.user)],
+            vec![
+                "description".into(),
+                SERVICE_NAME.into(),
+                format!("Does a few administrator jobs for Kora Panel for {}\\{} only. Turn it off in Kora's Settings or with 'kora helper uninstall'.", cfg.domain, cfg.user),
+            ],
         ),
         SystemStep::run_owned(
             "Restart the helper if it stops unexpectedly",

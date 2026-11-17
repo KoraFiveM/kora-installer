@@ -267,11 +267,7 @@ pub fn server_cfg(c: &ServerConfig) -> Result<String> {
 pub fn secrets_cfg(c: &ServerConfig) -> Result<String> {
     c.validate()?;
     let conn = c.db.connection_string()?;
-    Ok(format!(
-        "# Kora secrets. Restricted permissions, git-ignored, never share.\nsv_licenseKey \"{}\"\nset mysql_connection_string \"{}\"\n",
-        c.license_key.expose(),
-        conn
-    ))
+    Ok(format!("# Kora secrets. Restricted permissions, git-ignored, never share.\nsv_licenseKey \"{}\"\nset mysql_connection_string \"{}\"\n", c.license_key.expose(), conn))
 }
 
 /// `permissions.cfg`: the recipe's ACEs plus the master admin principals.
@@ -316,11 +312,7 @@ pub const GITIGNORE_ENTRIES: &[&str] = &["secrets.cfg", "database.json", "txData
 
 /// Environment for the txAdmin/FXServer process (non-secret).
 pub fn txadmin_env(data_dir: &Path, txadmin_port: u16) -> Vec<(String, String)> {
-    vec![
-        ("TXHOST_DATA_PATH".into(), data_dir.display().to_string()),
-        ("TXHOST_TXA_PORT".into(), txadmin_port.to_string()),
-        ("TXHOST_GAME_NAME".into(), "fivem".into()),
-    ]
+    vec![("TXHOST_DATA_PATH".into(), data_dir.display().to_string()), ("TXHOST_TXA_PORT".into(), txadmin_port.to_string()), ("TXHOST_GAME_NAME".into(), "fivem".into())]
 }
 
 /// Write `contents` atomically (temp + rename); `secret` files are created 0600 on unix and, on
@@ -359,14 +351,7 @@ pub fn write_file(path: &Path, contents: &str, secret: bool) -> Result<()> {
 /// `icacls` arguments that leave `path` to `user`, Administrators and SYSTEM (well-known SIDs, so any
 /// Windows language works) and drop the permissions inherited from the folder (which include `Users`).
 pub fn secret_acl_args(path: &Path, user: &str) -> Vec<String> {
-    vec![
-        path.to_string_lossy().into_owned(),
-        "/inheritance:r".into(),
-        "/grant:r".into(),
-        format!("{user}:(F)"),
-        "*S-1-5-18:(F)".into(),
-        "*S-1-5-32-544:(F)".into(),
-    ]
+    vec![path.to_string_lossy().into_owned(), "/inheritance:r".into(), "/grant:r".into(), format!("{user}:(F)"), "*S-1-5-18:(F)".into(), "*S-1-5-32-544:(F)".into()]
 }
 
 /// The signed-in account as `DOMAIN\name` (what icacls accepts).

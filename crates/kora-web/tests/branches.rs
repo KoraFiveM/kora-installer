@@ -72,7 +72,14 @@ fn row(id: &str) -> ResourceBranch {
 fn switched(status: Status) -> Reply {
     Reply::Switched(Box::new(SwitchResult {
         resource: "kora_hud".into(),
-        outcome: Outcome { status, now: where_(Kind::Branch, "feature"), stashed: Some(Stash { index: 0, message: "kept aside".into(), branch: "dev".into() }), saved_branch: None, title: None, message: "Now on branch feature.".into() },
+        outcome: Outcome {
+            status,
+            now: where_(Kind::Branch, "feature"),
+            stashed: Some(Stash { index: 0, message: "kept aside".into(), branch: "dev".into() }),
+            saved_branch: None,
+            title: None,
+            message: "Now on branch feature.".into(),
+        },
         needs_restart: status == Status::Switched,
         restart_note: Some("restart".into()),
     }))

@@ -89,11 +89,7 @@ pub async fn tool_install(State(st): State<AppState>, Path(tool): Path<String>) 
 /// administrator rights: Linux through the helper when it is installed (else `needs_elevation` with the
 /// command), Windows answers `needs_elevation` with the `request_admin` action (the elevated worker builds
 /// that part: this handler only raises the Problem).
-pub async fn db_start(
-    State(st): State<AppState>,
-    axum::Extension(caller): axum::Extension<crate::remote::Caller>,
-    headers: axum::http::HeaderMap,
-) -> Result<axum::response::Response, ApiError> {
+pub async fn db_start(State(st): State<AppState>, axum::Extension(caller): axum::Extension<crate::remote::Caller>, headers: axum::http::HeaderMap) -> Result<axum::response::Response, ApiError> {
     let ask = crate::elevated::AdminAsk::of(&caller, &headers);
     let e = env();
     let (db, admin) = {
@@ -119,7 +115,13 @@ pub async fn db_start(
         crate::elevated::precheck(ask, &kora_core::helper::worker::Context { what: what.into(), command: command.clone(), can_skip_admin: false }, &msg)?;
         return st.spawn_job(Op::DbStart, None, move |h| {
             h.event(json!({"type": "status", "message": "Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on."}));
-            let out = crate::elevated::privileged_as(ask, what, &msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| if e.actions().is_empty() { e.message } else { e.to_problem().encode() })?;
+            let out = crate::elevated::privileged_as(ask, what, &msg, command, vec![], &mut |m| h.event(json!({"type": "status", "message": m}))).map_err(|e| {
+                if e.actions().is_empty() {
+                    e.message
+                } else {
+                    e.to_problem().encode()
+                }
+            })?;
             Ok(json!({"output": out["output"]}))
         });
     }

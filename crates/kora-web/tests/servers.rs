@@ -18,19 +18,11 @@ const TOKEN: &str = "testtoken";
 
 fn app(fake: &FakeBackend) -> axum::Router {
     let f = fake.clone();
-    router(
-        AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap())
-            .with_backend(Arc::new(move || Box::new(f.clone()))),
-    )
+    router(AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone()))))
 }
 
 async fn call(app: &axum::Router, method: &str, uri: &str, body: Option<Value>) -> Response<Body> {
-    let mut b = Request::builder()
-        .method(method)
-        .uri(format!("/api/v1{uri}"))
-        .header(header::HOST, ADDR)
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
-        .header("x-kora", "1");
+    let mut b = Request::builder().method(method).uri(format!("/api/v1{uri}")).header(header::HOST, ADDR).header(header::AUTHORIZATION, format!("Bearer {TOKEN}")).header("x-kora", "1");
     let body = match body {
         Some(v) => {
             b = b.header(header::CONTENT_TYPE, "application/json");
@@ -113,75 +105,24 @@ async fn list_and_get() {
 async fn control_runs_a_job_and_reports_the_status() {
     let f = FakeBackend::sample();
     let a = app(&f);
-    let r = call(
-        &a,
-        "POST",
-        "/servers/dev/control",
-        Some(json!({"action": "start"})),
-    )
-    .await;
+    let r = call(&a, "POST", "/servers/dev/control", Some(json!({"action": "start"}))).await;
     let j = job(&a, r).await;
     assert_eq!(j["state"], "done");
     assert_eq!(j["result"], json!({"status": "running"}));
     assert!(f.calls().contains(&"Start dev".to_string()));
-    let r = call(
-        &a,
-        "POST",
-        "/servers/prod/control",
-        Some(json!({"action": "stop"})),
-    )
-    .await;
+    let r = call(&a, "POST", "/servers/prod/control", Some(json!({"action": "stop"}))).await;
     assert_eq!(job(&a, r).await["result"], json!({"status": "stopped"}));
-    assert_eq!(
-        call(
-            &a,
-            "POST",
-            "/servers/nope/control",
-            Some(json!({"action": "start"}))
-        )
-        .await
-        .status(),
-        404
-    );
-    assert_eq!(
-        call(
-            &a,
-            "POST",
-            "/servers/dev/control",
-            Some(json!({"action": "explode"}))
-        )
-        .await
-        .status(),
-        400
-    );
+    assert_eq!(call(&a, "POST", "/servers/nope/control", Some(json!({"action": "start"}))).await.status(), 404);
+    assert_eq!(call(&a, "POST", "/servers/dev/control", Some(json!({"action": "explode"}))).await.status(), 400);
     f.state().control_error = Some("Port 30130 is in use.".into());
-    let r = call(
-        &a,
-        "POST",
-        "/servers/dev/control",
-        Some(json!({"action": "restart"})),
-    )
-    .await;
+    let r = call(&a, "POST", "/servers/dev/control", Some(json!({"action": "restart"}))).await;
     let j = job(&a, r).await;
     assert_eq!(j["state"], "failed");
     // The job record carries the message as a plain string (the registry's format).
-    let msg = j["error"]
-        .as_str()
-        .or_else(|| j["error"]["message"].as_str())
-        .unwrap();
+    let msg = j["error"].as_str().or_else(|| j["error"]["message"].as_str()).unwrap();
     assert!(msg.contains("Port 30130"), "{j}");
     f.state().status.insert("dev".into(), Status::Missing);
-    assert_eq!(
-        call(
-            &a,
-            "POST",
-            "/servers/dev/control",
-            Some(json!({"action": "start"}))
-        )
-        .await
-        .status(),
-        409
-    );
+    assert_eq!(call(&a, "POST", "/servers/dev/control", Some(json!({"action": "start"}))).await.status(), 409);
 }
 
 #[tokio::test]
@@ -191,40 +132,18 @@ async fn delete_checks_name_managed_and_running() {
     managed_server(&f, "mine", Mode::Development, &d.path().join("mine"));
     let a = app(&f);
     let body = |n: &str| Some(json!({"confirm_name": n, "keep_files": true, "keep_db": false}));
-    assert_eq!(
-        call(&a, "DELETE", "/servers/mine", body("wrong"))
-            .await
-            .status(),
-        400
-    );
+    assert_eq!(call(&a, "DELETE", "/servers/mine", body("wrong")).await.status(), 400);
     // Adopted (no install record): only removal from the list.
-    assert_eq!(
-        call(&a, "DELETE", "/servers/dev", body("dev"))
-            .await
-            .status(),
-        400
-    );
+    assert_eq!(call(&a, "DELETE", "/servers/dev", body("dev")).await.status(), 400);
     f.state().status.insert("mine".into(), Status::Running);
-    assert_eq!(
-        call(&a, "DELETE", "/servers/mine", body("mine"))
-            .await
-            .status(),
-        409
-    );
+    assert_eq!(call(&a, "DELETE", "/servers/mine", body("mine")).await.status(), 409);
     f.state().status.insert("mine".into(), Status::Stopped);
-    assert_eq!(
-        call(&a, "DELETE", "/servers/nope", body("nope"))
-            .await
-            .status(),
-        404
-    );
+    assert_eq!(call(&a, "DELETE", "/servers/nope", body("nope")).await.status(), 404);
     let r = call(&a, "DELETE", "/servers/mine", body("mine")).await;
     let j = job(&a, r).await;
     assert_eq!(j["state"], "done");
     assert_eq!(j["result"], json!({"notes": ["Deleted."]}));
-    assert!(f
-        .calls()
-        .contains(&"delete mine keep_files=true keep_db=false".to_string()));
+    assert!(f.calls().contains(&"delete mine keep_files=true keep_db=false".to_string()));
 }
 
 #[tokio::test]
@@ -259,24 +178,9 @@ async fn unregister_only_for_adopted_servers() {
     let f = FakeBackend::sample();
     managed_server(&f, "mine", Mode::Production, d.path());
     let a = app(&f);
-    assert_eq!(
-        call(&a, "DELETE", "/servers/mine/registration", None)
-            .await
-            .status(),
-        400
-    );
-    assert_eq!(
-        call(&a, "DELETE", "/servers/dev/registration", None)
-            .await
-            .status(),
-        204
-    );
-    assert_eq!(
-        call(&a, "DELETE", "/servers/dev/registration", None)
-            .await
-            .status(),
-        404
-    );
+    assert_eq!(call(&a, "DELETE", "/servers/mine/registration", None).await.status(), 400);
+    assert_eq!(call(&a, "DELETE", "/servers/dev/registration", None).await.status(), 204);
+    assert_eq!(call(&a, "DELETE", "/servers/dev/registration", None).await.status(), 404);
     assert!(f.calls().contains(&"unregister dev".to_string()));
 }
 
@@ -300,48 +204,17 @@ async fn scan_and_adopt() {
     let r = call(&a, "POST", "/servers/adopt", Some(json!({"dir": dir}))).await;
     assert_eq!(r.status(), 200);
     let s = json_of(r).await;
-    assert_eq!(
-        (s["name"].as_str().unwrap(), s["managed"].clone()),
-        ("found", json!(false))
-    );
+    assert_eq!((s["name"].as_str().unwrap(), s["managed"].clone()), ("found", json!(false)));
     assert_eq!(f.state().servers.len(), 3);
     // Again: already registered.
     let r = call(&a, "POST", "/servers/adopt", Some(json!({"dir": dir}))).await;
     assert_eq!(r.status(), 400);
-    assert!(json_of(r).await["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("already"));
+    assert!(json_of(r).await["error"]["message"].as_str().unwrap().contains("already"));
     // Not a server, not a folder, not absolute.
     let plain = d.path().join("games/plain");
-    assert_eq!(
-        call(&a, "POST", "/servers/adopt", Some(json!({"dir": plain})))
-            .await
-            .status(),
-        400
-    );
-    assert_eq!(
-        call(
-            &a,
-            "POST",
-            "/servers/adopt",
-            Some(json!({"dir": "/no/such/dir"}))
-        )
-        .await
-        .status(),
-        400
-    );
-    assert_eq!(
-        call(
-            &a,
-            "POST",
-            "/servers/adopt",
-            Some(json!({"dir": "relative"}))
-        )
-        .await
-        .status(),
-        400
-    );
+    assert_eq!(call(&a, "POST", "/servers/adopt", Some(json!({"dir": plain}))).await.status(), 400);
+    assert_eq!(call(&a, "POST", "/servers/adopt", Some(json!({"dir": "/no/such/dir"}))).await.status(), 400);
+    assert_eq!(call(&a, "POST", "/servers/adopt", Some(json!({"dir": "relative"}))).await.status(), 400);
 }
 
 #[tokio::test]
@@ -385,31 +258,11 @@ async fn open_folder_uses_the_servers_own_folder_and_refuses_when_headless() {
     assert!(msg.contains(&d.path().display().to_string()), "{msg}");
     assert!(opened.lock().unwrap().is_empty());
     set_headless(Some(false));
-    assert_eq!(
-        call(
-            &a,
-            "POST",
-            "/servers/mine/open-folder",
-            Some(json!({"dir": "/etc"}))
-        )
-        .await
-        .status(),
-        204
-    );
+    assert_eq!(call(&a, "POST", "/servers/mine/open-folder", Some(json!({"dir": "/etc"}))).await.status(), 204);
     assert_eq!(*opened.lock().unwrap(), vec![d.path().to_path_buf()]);
-    assert_eq!(
-        call(&a, "POST", "/servers/nope/open-folder", None)
-            .await
-            .status(),
-        404
-    );
+    assert_eq!(call(&a, "POST", "/servers/nope/open-folder", None).await.status(), 404);
     // "prod" is registered with a folder that does not exist.
-    assert_eq!(
-        call(&a, "POST", "/servers/prod/open-folder", None)
-            .await
-            .status(),
-        409
-    );
+    assert_eq!(call(&a, "POST", "/servers/prod/open-folder", None).await.status(), 409);
     set_headless(None);
     set_opener(None);
 }
@@ -419,9 +272,7 @@ async fn logs_list_and_tail_only_known_files() {
     let d = tempfile::tempdir().unwrap();
     let f = FakeBackend::sample();
     managed_server(&f, "mine", Mode::Production, d.path());
-    let body: String = (0..10)
-        .map(|i| format!("\u{1b}[31mline {i}\u{1b}[0m\n"))
-        .collect();
+    let body: String = (0..10).map(|i| format!("\u{1b}[31mline {i}\u{1b}[0m\n")).collect();
     std::fs::write(d.path().join(".kora/server.log"), body).unwrap();
     std::fs::write(d.path().join("secret.txt"), "top secret\n").unwrap();
     let a = app(&f);
@@ -433,32 +284,12 @@ async fn logs_list_and_tail_only_known_files() {
     let j = json_of(call(&a, "GET", "/servers/mine/logs/server.log?lines=3", None).await).await;
     assert_eq!(j["file"], "server.log");
     // Colour codes are kept for the panel to show; the text itself is unchanged.
-    assert_eq!(
-        j["lines"],
-        json!([
-            "\u{1b}[31mline 7\u{1b}[0m",
-            "\u{1b}[31mline 8\u{1b}[0m",
-            "\u{1b}[31mline 9\u{1b}[0m"
-        ])
-    );
-    for bad in [
-        "secret.txt",
-        "..%2Fsecret.txt",
-        "%2Fetc%2Fpasswd",
-        "..%5Csecret.txt",
-        "update.log",
-    ] {
+    assert_eq!(j["lines"], json!(["\u{1b}[31mline 7\u{1b}[0m", "\u{1b}[31mline 8\u{1b}[0m", "\u{1b}[31mline 9\u{1b}[0m"]));
+    for bad in ["secret.txt", "..%2Fsecret.txt", "%2Fetc%2Fpasswd", "..%5Csecret.txt", "update.log"] {
         let r = call(&a, "GET", &format!("/servers/mine/logs/{bad}"), None).await;
-        assert!(
-            matches!(r.status().as_u16(), 400 | 404),
-            "{bad}: {}",
-            r.status()
-        );
+        assert!(matches!(r.status().as_u16(), 400 | 404), "{bad}: {}", r.status());
     }
-    assert_eq!(
-        call(&a, "GET", "/servers/nope/logs", None).await.status(),
-        404
-    );
+    assert_eq!(call(&a, "GET", "/servers/nope/logs", None).await.status(), 404);
 }
 
 #[tokio::test]
@@ -467,14 +298,7 @@ async fn console_enable_then_send() {
     let f = FakeBackend::sample();
     managed_server(&f, "mine", Mode::Production, d.path());
     let a = app(&f);
-    let send = |c: &str| {
-        call(
-            &a,
-            "POST",
-            "/servers/mine/console",
-            Some(json!({"command": c})),
-        )
-    };
+    let send = |c: &str| call(&a, "POST", "/servers/mine/console", Some(json!({"command": c})));
     // Validation first.
     assert_eq!(send("").await.status(), 400);
     assert_eq!(send("say a\nsay b").await.status(), 400);
@@ -482,62 +306,24 @@ async fn console_enable_then_send() {
     // Not running.
     let r = send("status").await;
     assert_eq!(r.status(), 409);
-    assert!(json_of(r).await["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("not running"));
+    assert!(json_of(r).await["error"]["message"].as_str().unwrap().contains("not running"));
     f.state().status.insert("mine".into(), Status::Running);
     // Running, but no helper yet.
     let r = send("status").await;
     assert_eq!(r.status(), 409);
-    assert!(json_of(r).await["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("live console"));
-    assert_eq!(
-        call(
-            &a,
-            "PUT",
-            "/servers/mine/console/enabled",
-            Some(json!({"enabled": true}))
-        )
-        .await
-        .status(),
-        204
-    );
-    assert_eq!(
-        call(
-            &a,
-            "PUT",
-            "/servers/mine/console/enabled",
-            Some(json!({"enabled": true}))
-        )
-        .await
-        .status(),
-        204
-    );
+    assert!(json_of(r).await["error"]["message"].as_str().unwrap().contains("live console"));
+    assert_eq!(call(&a, "PUT", "/servers/mine/console/enabled", Some(json!({"enabled": true}))).await.status(), 204);
+    assert_eq!(call(&a, "PUT", "/servers/mine/console/enabled", Some(json!({"enabled": true}))).await.status(), 204);
     let g = json_of(call(&a, "GET", "/servers/mine", None).await).await;
     assert_eq!(g["console_enabled"], true);
     assert_eq!(send("  say hi ").await.status(), 204);
-    assert_eq!(
-        std::fs::read_to_string(d.path().join(".kora/console.in")).unwrap(),
-        "say hi\n"
-    );
-    assert_eq!(
-        call(&a, "PUT", "/servers/nope/console/enabled", None)
-            .await
-            .status(),
-        404
-    );
+    assert_eq!(std::fs::read_to_string(d.path().join(".kora/console.in")).unwrap(), "say hi\n");
+    assert_eq!(call(&a, "PUT", "/servers/nope/console/enabled", None).await.status(), 404);
 }
 
 async fn next_chunk(body: &mut axum::body::BodyDataStream) -> String {
     use tokio_stream::StreamExt;
-    let c = tokio::time::timeout(Duration::from_secs(5), body.next())
-        .await
-        .expect("timed out")
-        .unwrap()
-        .unwrap();
+    let c = tokio::time::timeout(Duration::from_secs(5), body.next()).await.expect("timed out").unwrap().unwrap();
     String::from_utf8_lossy(&c).into_owned()
 }
 
@@ -570,10 +356,7 @@ async fn resource_control_queues_a_fixed_command() {
         assert!(json_of(r).await["message"].as_str().unwrap().contains(action));
     }
     // Restart is `ensure`: it also starts a resource that was not running.
-    assert_eq!(
-        std::fs::read_to_string(d.path().join(".kora/console.in")).unwrap(),
-        "start kora_core\nstop kora_core\nensure kora_core\n"
-    );
+    assert_eq!(std::fs::read_to_string(d.path().join(".kora/console.in")).unwrap(), "start kora_core\nstop kora_core\nensure kora_core\n");
     assert_eq!(ctl("kora_console", "restart").await.status(), 200);
     assert_eq!(call(&a, "POST", "/servers/nope/resources/x/control", Some(json!({"action": "start"}))).await.status(), 404);
 }
@@ -618,16 +401,10 @@ async fn commands_are_refused_until_the_new_console_helper_is_loaded() {
     std::thread::sleep(Duration::from_millis(30));
     let log = d.path().join(".kora/console.log");
     std::fs::write(&log, "still the old process\n").unwrap();
-    for (path, body) in [
-        ("/servers/mine/console", json!({"command": "status"})),
-        ("/servers/mine/resources/kora_core/control", json!({"action": "restart"})),
-    ] {
+    for (path, body) in [("/servers/mine/console", json!({"command": "status"})), ("/servers/mine/resources/kora_core/control", json!({"action": "restart"}))] {
         let r = call(&a, "POST", path, Some(body)).await;
         assert_eq!(r.status(), 409, "{path}");
-        assert_eq!(
-            json_of(r).await["error"]["message"],
-            "The live console starts working after the server's next restart. Restart the server, then try again."
-        );
+        assert_eq!(json_of(r).await["error"]["message"], "The live console starts working after the server's next restart. Restart the server, then try again.");
     }
     assert!(!d.path().join(".kora/console.in").exists(), "nothing was queued");
     // After the restart the helper says it is there.
@@ -647,19 +424,13 @@ async fn console_stream_replays_then_follows() {
     let a = app(&f);
     let r = call(&a, "GET", "/servers/mine/console/stream", None).await;
     assert_eq!(r.status(), 200);
-    assert!(r.headers()[header::CONTENT_TYPE]
-        .to_str()
-        .unwrap()
-        .starts_with("text/event-stream"));
+    assert!(r.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/event-stream"));
     let mut body = r.into_body().into_data_stream();
     let mut got = String::new();
     while !got.contains("two") {
         got += &next_chunk(&mut body).await;
     }
-    assert!(
-        got.contains("event: line") && got.contains(r#"{"line":"one"}"#),
-        "{got}"
-    );
+    assert!(got.contains("event: line") && got.contains(r#"{"line":"one"}"#), "{got}");
     use std::io::Write;
     let mut fh = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
     write!(fh, "three\npart").unwrap();
@@ -667,21 +438,13 @@ async fn console_stream_replays_then_follows() {
     while !got.contains("three") {
         got += &next_chunk(&mut body).await;
     }
-    assert!(
-        !got.contains("part"),
-        "a half-written line waits for its end"
-    );
+    assert!(!got.contains("part"), "a half-written line waits for its end");
     writeln!(fh, "ial").unwrap();
     let mut got = String::new();
     while !got.contains("partial") {
         got += &next_chunk(&mut body).await;
     }
-    assert_eq!(
-        call(&a, "GET", "/servers/nope/console/stream", None)
-            .await
-            .status(),
-        404
-    );
+    assert_eq!(call(&a, "GET", "/servers/nope/console/stream", None).await.status(), 404);
 }
 
 #[tokio::test]

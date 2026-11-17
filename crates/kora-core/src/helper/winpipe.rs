@@ -156,7 +156,16 @@ mod imp {
         fn GetTokenInformation(token: Handle, class: u32, info: *mut c_void, len: u32, ret: *mut u32) -> i32;
         fn LookupAccountSidW(system: *const u16, sid: *mut c_void, name: *mut u16, name_len: *mut u32, domain: *mut u16, domain_len: *mut u32, sid_use: *mut u32) -> i32;
         fn RegGetValueW(key: isize, sub: *const u16, value: *const u16, flags: u32, kind: *mut u32, data: *mut c_void, len: *mut u32) -> i32;
-        fn GetNamedSecurityInfoW(name: *const u16, object_type: u32, info: u32, owner: *mut *mut c_void, group: *mut *mut c_void, dacl: *mut *mut c_void, sacl: *mut *mut c_void, sd: *mut *mut c_void) -> u32;
+        fn GetNamedSecurityInfoW(
+            name: *const u16,
+            object_type: u32,
+            info: u32,
+            owner: *mut *mut c_void,
+            group: *mut *mut c_void,
+            dacl: *mut *mut c_void,
+            sacl: *mut *mut c_void,
+            sd: *mut *mut c_void,
+        ) -> u32;
     }
 
     #[link(name = "shell32")]
@@ -524,7 +533,9 @@ mod imp {
             return Err("ping was not answered".into());
         }
         say("ok: ping answered");
-        for (verb, args) in [("install", vec!["--name", "x"]), ("delete", vec!["x", "--yes"]), ("cmd.exe", vec!["/c", "whoami"]), ("admin-step", vec!["run", "--step", "system.firewall", "--dir", r"C:\Windows"])] {
+        for (verb, args) in
+            [("install", vec!["--name", "x"]), ("delete", vec!["x", "--yes"]), ("cmd.exe", vec!["/c", "whoami"]), ("admin-step", vec!["run", "--step", "system.firewall", "--dir", r"C:\Windows"])]
+        {
             let a: Vec<String> = args.iter().map(|x| x.to_string()).collect();
             match s.run(verb, &a, &[], &mut |_| {}) {
                 Err(HelperError::Rejected(m)) => say(&format!("ok: refused {verb} {}: {m}", args.join(" "))),

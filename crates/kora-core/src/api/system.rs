@@ -22,11 +22,11 @@ use crate::launch;
 use crate::paidassets;
 use crate::service::{ControlAction, ServiceState};
 
+use super::backend::{Backend, Res, Status, StatusDetail, UpdateBadge};
 use crate::notify::{self, NotifyConfig};
 use crate::service::{self as schedule, ScheduleConfig};
 use crate::update::manual::{self, ApplyOpts, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
 use crate::update::UpdateReport;
-use super::backend::{Backend, Res, Status, StatusDetail, UpdateBadge};
 
 #[derive(Default)]
 pub struct SystemBackend;
@@ -35,18 +35,19 @@ pub struct SystemBackend;
 /// `..` (or any all-dots name) and a leading `-` (read as an option by git and other tools) are refused.
 pub fn valid_resource_name(v: &str) -> bool {
     let core = v.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(v);
-    !core.is_empty()
-        && v.len() <= 100
-        && !core.starts_with('-')
-        && !core.bytes().all(|b| b == b'.')
-        && core.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+    !core.is_empty() && v.len() <= 100 && !core.starts_with('-') && !core.bytes().all(|b| b == b'.') && core.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
 }
 
 /// `cfg` with `ensure <name>` added at the end, or `None` when it is already ensured.
 pub fn with_ensure(cfg: &str, name: &str) -> Option<String> {
     let already = cfg.lines().any(|l| {
         let mut w = l.split_whitespace();
-        w.next() == Some("ensure") && w.next() == Some(name) && match w.next() { None => true, Some(x) => x.starts_with('#') }
+        w.next() == Some("ensure")
+            && w.next() == Some(name)
+            && match w.next() {
+                None => true,
+                Some(x) => x.starts_with('#'),
+            }
     });
     if already {
         return None;
@@ -286,13 +287,7 @@ impl Backend for SystemBackend {
         manual::preview_events(&record(e)?, scope, on).map_err(err)
     }
 
-    fn apply(
-        &mut self,
-        e: &ServerEntry,
-        scope: Scope,
-        o: ApplyOpts,
-        on: &mut dyn FnMut(UpdateEvent),
-    ) -> Res<UpdateReport> {
+    fn apply(&mut self, e: &ServerEntry, scope: Scope, o: ApplyOpts, on: &mut dyn FnMut(UpdateEvent)) -> Res<UpdateReport> {
         // `manual::apply` sends the Discord notification itself: not a second time here.
         manual::apply(&record(e)?, scope, o, on).map_err(err)
     }
@@ -489,22 +484,10 @@ mod tests {
         use crate::update::status::{write, UpdateStatus};
         let d = tempfile::tempdir().unwrap();
         write(d.path(), &UpdateStatus::new(1_700_000_000, 0, 2, None)).unwrap();
-        assert_eq!(
-            read_badge(d.path()),
-            Some(UpdateBadge::NeedsAttention),
-            "attention is a count"
-        );
-        write(
-            d.path(),
-            &UpdateStatus::new(1_700_000_000, 3, 0, Some("1.4.0".into())),
-        )
-        .unwrap();
+        assert_eq!(read_badge(d.path()), Some(UpdateBadge::NeedsAttention), "attention is a count");
+        write(d.path(), &UpdateStatus::new(1_700_000_000, 3, 0, Some("1.4.0".into()))).unwrap();
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::Updates(3)));
-        write(
-            d.path(),
-            &UpdateStatus::new(1_700_000_000, 0, 0, Some("1.4.0".into())),
-        )
-        .unwrap();
+        write(d.path(), &UpdateStatus::new(1_700_000_000, 0, 0, Some("1.4.0".into()))).unwrap();
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::NewRelease));
         write(d.path(), &UpdateStatus::new(1_700_000_000, 0, 0, None)).unwrap();
         assert_eq!(read_badge(d.path()), Some(UpdateBadge::UpToDate));

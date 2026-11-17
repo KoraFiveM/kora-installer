@@ -65,31 +65,18 @@ pub struct OpenerCommand {
 /// real person) the browser belongs to that person's desktop, so the opener runs as them with their
 /// display settings.
 pub fn opener_command(os: Os, url: &str, env: EnvFn<'_>, as_root: bool) -> OpenerCommand {
-    let cmd = |p: &str, a: Vec<String>| OpenerCommand {
-        program: p.into(),
-        args: a,
-    };
+    let cmd = |p: &str, a: Vec<String>| OpenerCommand { program: p.into(), args: a };
     match os {
-        Os::Windows => cmd(
-            "rundll32",
-            vec!["url.dll,FileProtocolHandler".into(), url.into()],
-        ),
+        Os::Windows => cmd("rundll32", vec!["url.dll,FileProtocolHandler".into(), url.into()]),
         Os::MacOs => cmd("open", vec![url.into()]),
         Os::Linux => match env("SUDO_USER").filter(|u| as_root && u != "root") {
             Some(user) => {
                 let mut args = vec!["-u".into(), user, "--".into(), "env".into()];
                 let uid = env("SUDO_UID").filter(|u| u.bytes().all(|b| b.is_ascii_digit()));
-                for key in [
-                    "DISPLAY",
-                    "WAYLAND_DISPLAY",
-                    "XDG_RUNTIME_DIR",
-                    "DBUS_SESSION_BUS_ADDRESS",
-                ] {
+                for key in ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
                     let value = env(key).or_else(|| match (key, &uid) {
                         ("XDG_RUNTIME_DIR", Some(u)) => Some(format!("/run/user/{u}")),
-                        ("DBUS_SESSION_BUS_ADDRESS", Some(u)) => {
-                            Some(format!("unix:path=/run/user/{u}/bus"))
-                        }
+                        ("DBUS_SESSION_BUS_ADDRESS", Some(u)) => Some(format!("unix:path=/run/user/{u}/bus")),
                         _ => None,
                     });
                     if let Some(v) = value {
@@ -126,12 +113,7 @@ pub fn opener_result(r: std::io::Result<OpenerExit>, program: &str) -> Result<()
 
 /// Run `cmd` with no input or output and wait up to `wait` for it to finish.
 pub fn run_and_wait(cmd: &OpenerCommand, wait: Duration) -> std::io::Result<OpenerExit> {
-    let mut child = Command::new(&cmd.program)
-        .args(&cmd.args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+    let mut child = Command::new(&cmd.program).args(&cmd.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
     let start = Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
@@ -167,14 +149,8 @@ pub fn current_uid() -> Option<u32> {
 /// The command to run on your own computer to reach a panel on a server with no screen. The server
 /// address comes from `SSH_CONNECTION` when we are in an SSH session.
 pub fn ssh_hint(port: u16, env: EnvFn<'_>) -> String {
-    let user = env("SUDO_USER")
-        .filter(|u| u != "root")
-        .or_else(|| env("USER"))
-        .or_else(|| env("LOGNAME"))
-        .unwrap_or_else(|| "you".into());
-    let host = env("SSH_CONNECTION")
-        .and_then(|c| c.split_whitespace().nth(2).map(str::to_string))
-        .unwrap_or_else(|| "your-server".into());
+    let user = env("SUDO_USER").filter(|u| u != "root").or_else(|| env("USER")).or_else(|| env("LOGNAME")).unwrap_or_else(|| "you".into());
+    let host = env("SSH_CONNECTION").and_then(|c| c.split_whitespace().nth(2).map(str::to_string)).unwrap_or_else(|| "your-server".into());
     format!("ssh -L {port}:127.0.0.1:{port} {user}@{host}")
 }
 
@@ -245,19 +221,11 @@ pub fn fresh_link(port: u16, token: &str) -> String {
 }
 
 /// What to print once the panel is up. `opened` is the browser result (`None`: not tried).
-pub fn ready_message(
-    link: &str,
-    port: u16,
-    headless: bool,
-    opened: Option<&Result<(), String>>,
-    env: EnvFn<'_>,
-) -> Vec<String> {
+pub fn ready_message(link: &str, port: u16, headless: bool, opened: Option<&Result<(), String>>, env: EnvFn<'_>) -> Vec<String> {
     let mut out = Vec::new();
     match opened {
         Some(Ok(())) => out.push("Kora Panel is open in your browser.".to_string()),
-        Some(Err(e)) => out.push(format!(
-            "Could not open a browser ({e}). Open the link below yourself."
-        )),
+        Some(Err(e)) => out.push(format!("Could not open a browser ({e}). Open the link below yourself.")),
         None => {}
     }
     out.push(String::new());
@@ -265,10 +233,7 @@ pub fn ready_message(
     out.push(format!("  {link}"));
     out.push(String::new());
     if headless {
-        out.push(
-            "This computer has no screen. On your own computer, run this first and keep it open:"
-                .into(),
-        );
+        out.push("This computer has no screen. On your own computer, run this first and keep it open:".into());
         out.push(format!("  {}", ssh_hint(port, env)));
         out.push("then open the link above in your browser there.".into());
     }
@@ -294,8 +259,7 @@ impl PortCheck for SystemPorts {
     fn is_free(&self, port: u16) -> bool {
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         // Windows lets two programs share a port in some cases, so "someone answers" also means taken.
-        TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_err()
-            && TcpListener::bind(addr).is_ok()
+        TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_err() && TcpListener::bind(addr).is_ok()
     }
     fn is_kora_panel(&self, port: u16) -> bool {
         probe_meta(port).is_some_and(|r| looks_like_kora_meta(&r))
@@ -307,9 +271,7 @@ fn probe_meta(port: u16) -> Option<String> {
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
     s.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
-    let req = format!(
-        "GET /api/v1/meta HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
-    );
+    let req = format!("GET /api/v1/meta HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n");
     s.write_all(req.as_bytes()).ok()?;
     let mut buf = Vec::new();
     let _ = s.take(64 * 1024).read_to_end(&mut buf);
@@ -346,18 +308,11 @@ pub fn candidate_ports(preferred: u16, explicit: bool) -> Vec<u16> {
 
 /// The first free port of [`candidate_ports`], or `None` when all are taken.
 pub fn pick_port(preferred: u16, explicit: bool, ports: &dyn PortCheck) -> Option<u16> {
-    candidate_ports(preferred, explicit)
-        .into_iter()
-        .find(|p| ports.is_free(*p))
+    candidate_ports(preferred, explicit).into_iter().find(|p| ports.is_free(*p))
 }
 
 /// Wait until a Kora Panel answers on `port`, checking every `every`, for at most `timeout`.
-pub fn wait_for_panel(
-    port: u16,
-    timeout: Duration,
-    every: Duration,
-    ports: &dyn PortCheck,
-) -> bool {
+pub fn wait_for_panel(port: u16, timeout: Duration, every: Duration, ports: &dyn PortCheck) -> bool {
     let start = Instant::now();
     loop {
         if ports.is_kora_panel(port) {
@@ -388,10 +343,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let m: HashMap<String, String> = pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let m: HashMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         move |k: &str| m.get(k).cloned().filter(|v| !v.is_empty())
     }
 
@@ -399,24 +351,12 @@ mod tests {
     fn headless_means_ssh_or_linux_without_a_display() {
         assert!(headless_with(Os::Linux, &env_of(&[])));
         assert!(!headless_with(Os::Linux, &env_of(&[("DISPLAY", ":0")])));
-        assert!(!headless_with(
-            Os::Linux,
-            &env_of(&[("WAYLAND_DISPLAY", "wayland-0")])
-        ));
-        assert!(headless_with(
-            Os::Linux,
-            &env_of(&[("DISPLAY", "localhost:10"), ("SSH_CONNECTION", "1 2 3 4")])
-        ));
+        assert!(!headless_with(Os::Linux, &env_of(&[("WAYLAND_DISPLAY", "wayland-0")])));
+        assert!(headless_with(Os::Linux, &env_of(&[("DISPLAY", "localhost:10"), ("SSH_CONNECTION", "1 2 3 4")])));
         assert!(!headless_with(Os::Windows, &env_of(&[])));
         assert!(!headless_with(Os::MacOs, &env_of(&[])));
-        assert!(headless_with(
-            Os::Windows,
-            &env_of(&[("SSH_CONNECTION", "1 2 3 4")])
-        ));
-        assert!(
-            headless_with(Os::Linux, &env_of(&[("DISPLAY", "")])),
-            "empty is unset"
-        );
+        assert!(headless_with(Os::Windows, &env_of(&[("SSH_CONNECTION", "1 2 3 4")])));
+        assert!(headless_with(Os::Linux, &env_of(&[("DISPLAY", "")])), "empty is unset");
     }
 
     #[test]
@@ -427,15 +367,9 @@ mod tests {
         assert_eq!(c.program, "rundll32");
         assert_eq!(c.args, vec!["url.dll,FileProtocolHandler", url]);
         let c = opener_command(Os::MacOs, url, &none, false);
-        assert_eq!(
-            (c.program.as_str(), c.args),
-            ("open", vec![url.to_string()])
-        );
+        assert_eq!((c.program.as_str(), c.args), ("open", vec![url.to_string()]));
         let c = opener_command(Os::Linux, url, &none, false);
-        assert_eq!(
-            (c.program.as_str(), c.args),
-            ("xdg-open", vec![url.to_string()])
-        );
+        assert_eq!((c.program.as_str(), c.args), ("xdg-open", vec![url.to_string()]));
         // Root without sudo (signed in as root on a desktop): plain xdg-open.
         let c = opener_command(Os::Linux, url, &none, true);
         assert_eq!(c.program, "xdg-open");
@@ -450,118 +384,48 @@ mod tests {
     #[test]
     fn under_sudo_the_browser_opens_as_the_person_with_their_desktop() {
         let url = "http://127.0.0.1:47120/";
-        let env = env_of(&[
-            ("SUDO_USER", "sam"),
-            ("SUDO_UID", "1000"),
-            ("DISPLAY", ":0"),
-        ]);
+        let env = env_of(&[("SUDO_USER", "sam"), ("SUDO_UID", "1000"), ("DISPLAY", ":0")]);
         let c = opener_command(Os::Linux, url, &env, true);
         assert_eq!(c.program, "runuser");
-        assert_eq!(
-            c.args,
-            vec![
-                "-u",
-                "sam",
-                "--",
-                "env",
-                "DISPLAY=:0",
-                "XDG_RUNTIME_DIR=/run/user/1000",
-                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
-                "xdg-open",
-                url
-            ]
-        );
+        assert_eq!(c.args, vec!["-u", "sam", "--", "env", "DISPLAY=:0", "XDG_RUNTIME_DIR=/run/user/1000", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "xdg-open", url]);
         // Values that sudo kept are passed on as they are; a strange SUDO_UID is ignored.
-        let env = env_of(&[
-            ("SUDO_USER", "sam"),
-            ("SUDO_UID", "1000; rm"),
-            ("WAYLAND_DISPLAY", "wayland-0"),
-            ("XDG_RUNTIME_DIR", "/run/user/1000"),
-        ]);
+        let env = env_of(&[("SUDO_USER", "sam"), ("SUDO_UID", "1000; rm"), ("WAYLAND_DISPLAY", "wayland-0"), ("XDG_RUNTIME_DIR", "/run/user/1000")]);
         let c = opener_command(Os::Linux, url, &env, true);
-        assert_eq!(
-            c.args[4..],
-            [
-                "WAYLAND_DISPLAY=wayland-0",
-                "XDG_RUNTIME_DIR=/run/user/1000",
-                "xdg-open",
-                url
-            ]
-        );
+        assert_eq!(c.args[4..], ["WAYLAND_DISPLAY=wayland-0", "XDG_RUNTIME_DIR=/run/user/1000", "xdg-open", url]);
     }
 
     #[test]
     fn a_failing_opener_is_reported() {
         assert!(opener_result(Ok(OpenerExit::Exited(Some(0))), "xdg-open").is_ok());
-        assert!(
-            opener_result(Ok(OpenerExit::StillRunning), "xdg-open").is_ok(),
-            "the browser itself"
-        );
+        assert!(opener_result(Ok(OpenerExit::StillRunning), "xdg-open").is_ok(), "the browser itself");
         let e = opener_result(Ok(OpenerExit::Exited(Some(3))), "xdg-open").unwrap_err();
         assert!(e.contains("xdg-open") && e.contains('3'), "{e}");
         assert!(opener_result(Ok(OpenerExit::Exited(None)), "open").is_err());
-        let e = opener_result(
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "no such file",
-            )),
-            "xdg-open",
-        )
-        .unwrap_err();
+        let e = opener_result(Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no such file")), "xdg-open").unwrap_err();
         assert!(e.contains("could not run xdg-open"), "{e}");
     }
 
     #[cfg(unix)]
     #[test]
     fn the_exit_status_is_waited_for() {
-        let sh = |script: &str| OpenerCommand {
-            program: "sh".into(),
-            args: vec!["-c".into(), script.into()],
-        };
+        let sh = |script: &str| OpenerCommand { program: "sh".into(), args: vec!["-c".into(), script.into()] };
         let wait = Duration::from_secs(5);
-        assert_eq!(
-            run_and_wait(&sh("exit 0"), wait).unwrap(),
-            OpenerExit::Exited(Some(0))
-        );
-        assert_eq!(
-            run_and_wait(&sh("exit 4"), wait).unwrap(),
-            OpenerExit::Exited(Some(4))
-        );
-        assert_eq!(
-            run_and_wait(&sh("sleep 2"), Duration::from_millis(100)).unwrap(),
-            OpenerExit::StillRunning
-        );
-        let missing = OpenerCommand {
-            program: "/nonexistent/kora-opener".into(),
-            args: vec![],
-        };
+        assert_eq!(run_and_wait(&sh("exit 0"), wait).unwrap(), OpenerExit::Exited(Some(0)));
+        assert_eq!(run_and_wait(&sh("exit 4"), wait).unwrap(), OpenerExit::Exited(Some(4)));
+        assert_eq!(run_and_wait(&sh("sleep 2"), Duration::from_millis(100)).unwrap(), OpenerExit::StillRunning);
+        let missing = OpenerCommand { program: "/nonexistent/kora-opener".into(), args: vec![] };
         assert!(run_and_wait(&missing, wait).is_err());
     }
 
     #[test]
     fn the_tunnel_hint_names_this_server_when_it_can() {
-        let env = env_of(&[
-            ("SSH_CONNECTION", "203.0.113.9 51000 198.51.100.7 22"),
-            ("USER", "sam"),
-        ]);
-        assert_eq!(
-            ssh_hint(47121, &env),
-            "ssh -L 47121:127.0.0.1:47121 sam@198.51.100.7"
-        );
+        let env = env_of(&[("SSH_CONNECTION", "203.0.113.9 51000 198.51.100.7 22"), ("USER", "sam")]);
+        assert_eq!(ssh_hint(47121, &env), "ssh -L 47121:127.0.0.1:47121 sam@198.51.100.7");
         // Under sudo the person who signed in is SUDO_USER, not root.
         let env = env_of(&[("SUDO_USER", "sam"), ("USER", "root")]);
-        assert_eq!(
-            ssh_hint(47120, &env),
-            "ssh -L 47120:127.0.0.1:47120 sam@your-server"
-        );
-        assert_eq!(
-            ssh_hint(1, &env_of(&[("LOGNAME", "kim")])),
-            "ssh -L 1:127.0.0.1:1 kim@your-server"
-        );
-        assert_eq!(
-            ssh_hint(1, &env_of(&[])),
-            "ssh -L 1:127.0.0.1:1 you@your-server"
-        );
+        assert_eq!(ssh_hint(47120, &env), "ssh -L 47120:127.0.0.1:47120 sam@your-server");
+        assert_eq!(ssh_hint(1, &env_of(&[("LOGNAME", "kim")])), "ssh -L 1:127.0.0.1:1 kim@your-server");
+        assert_eq!(ssh_hint(1, &env_of(&[])), "ssh -L 1:127.0.0.1:1 you@your-server");
     }
 
     #[test]
@@ -571,25 +435,14 @@ mod tests {
         let env = env_of(&[("SSH_CONNECTION", "a b 10.0.0.5 22"), ("USER", "sam")]);
         let text = ready_message(&link, 47120, true, None, &env).join("\n");
         assert!(text.contains(&link), "{text}");
-        assert!(
-            text.contains("ssh -L 47120:127.0.0.1:47120 sam@10.0.0.5"),
-            "{text}"
-        );
+        assert!(text.contains("ssh -L 47120:127.0.0.1:47120 sam@10.0.0.5"), "{text}");
         let once = ready_message(&code_link(47120, "c0de"), 47120, true, None, &env).join("\n");
         assert!(once.contains("works once") && !once.contains("contains your sign-in token"), "{once}");
         let text = ready_message(&link, 47120, false, Some(&Ok(())), &env).join("\n");
-        assert!(
-            text.contains("open in your browser")
-                && text.contains(&link)
-                && !text.contains("ssh -L"),
-            "{text}"
-        );
+        assert!(text.contains("open in your browser") && text.contains(&link) && !text.contains("ssh -L"), "{text}");
         let failed = Err("xdg-open failed (exit code 3)".to_string());
         let text = ready_message(&link, 47120, false, Some(&failed), &env).join("\n");
-        assert!(
-            text.contains("Could not open a browser") && text.contains(&link),
-            "{text}"
-        );
+        assert!(text.contains("Could not open a browser") && text.contains(&link), "{text}");
     }
 
     #[test]
@@ -639,27 +492,14 @@ mod tests {
 
     #[test]
     fn the_next_free_port_is_used_unless_one_was_asked_for() {
-        let f = Fake {
-            taken: vec![47120, 47121],
-            ours: vec![],
-        };
+        let f = Fake { taken: vec![47120, 47121], ours: vec![] };
         assert_eq!(pick_port(47120, false, &f), Some(47122));
-        assert_eq!(
-            pick_port(47120, true, &f),
-            None,
-            "an explicit port is never changed"
-        );
+        assert_eq!(pick_port(47120, true, &f), None, "an explicit port is never changed");
         assert_eq!(pick_port(47200, true, &f), Some(47200));
         // A saved port that is now taken falls back to the default, then the range.
-        let f = Fake {
-            taken: vec![47300],
-            ours: vec![],
-        };
+        let f = Fake { taken: vec![47300], ours: vec![] };
         assert_eq!(pick_port(47300, false, &f), Some(47120));
-        let all = Fake {
-            taken: candidate_ports(47120, false),
-            ours: vec![],
-        };
+        let all = Fake { taken: candidate_ports(47120, false), ours: vec![] };
         assert_eq!(pick_port(47120, false, &all), None);
         assert_eq!(candidate_ports(47120, false).len(), 21);
         assert_eq!(candidate_ports(47125, false)[..3], [47125, 47120, 47121]);
@@ -667,10 +507,7 @@ mod tests {
 
     #[test]
     fn waiting_for_the_panel_stops_when_it_answers_or_times_out() {
-        let f = Fake {
-            taken: vec![],
-            ours: vec![47120],
-        };
+        let f = Fake { taken: vec![], ours: vec![47120] };
         let t = Duration::from_millis(30);
         assert!(wait_for_panel(47120, t, Duration::from_millis(5), &f));
         assert!(!wait_for_panel(47121, t, Duration::from_millis(5), &f));
@@ -680,12 +517,8 @@ mod tests {
     fn only_a_kora_meta_answer_counts_as_our_panel() {
         let ok = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"version\":\"0.4.3\",\"api\":1,\"platform\":\"linux\",\"ops\":[]}";
         assert!(looks_like_kora_meta(ok));
-        assert!(!looks_like_kora_meta(
-            "HTTP/1.1 404 Not Found\r\n\r\n{\"api\":1,\"ops\":[],\"version\":\"x\"}"
-        ));
-        assert!(!looks_like_kora_meta(
-            "HTTP/1.1 200 OK\r\n\r\n<html>someone else</html>"
-        ));
+        assert!(!looks_like_kora_meta("HTTP/1.1 404 Not Found\r\n\r\n{\"api\":1,\"ops\":[],\"version\":\"x\"}"));
+        assert!(!looks_like_kora_meta("HTTP/1.1 200 OK\r\n\r\n<html>someone else</html>"));
         assert!(!looks_like_kora_meta("HTTP/1.1 200 OK\r\n\r\n{\"api\":2}"));
         assert!(!looks_like_kora_meta(""));
     }

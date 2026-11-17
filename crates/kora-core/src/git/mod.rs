@@ -83,11 +83,7 @@ impl CommandRunner for SystemRunner {
             c.env(k, v);
         }
         let o = c.output()?;
-        Ok(Output {
-            code: o.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
-        })
+        Ok(Output { code: o.status.code().unwrap_or(-1), stdout: String::from_utf8_lossy(&o.stdout).into_owned(), stderr: String::from_utf8_lossy(&o.stderr).into_owned() })
     }
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
@@ -159,12 +155,7 @@ pub fn sudo_invocation(
         "gh" if args.len() == 4 && args[0] == "repo" && args[1] == "clone" && valid_repo(args[2]) => {
             let mut env = Vec::new();
             helper(&mut env);
-            Invocation {
-                program: "git".into(),
-                args: vec!["clone".into(), "--".into(), format!("https://github.com/{}.git", args[2]), args[3].to_string()],
-                cwd: cwd.map(Path::to_path_buf),
-                env,
-            }
+            Invocation { program: "git".into(), args: vec!["clone".into(), "--".into(), format!("https://github.com/{}.git", args[2]), args[3].to_string()], cwd: cwd.map(Path::to_path_buf), env }
         }
         "gh" => {
             let mut a = vec!["-u".to_string(), u.name.clone(), "--".to_string(), crate::tools::program_for("gh")];
@@ -249,7 +240,9 @@ pub fn harden_for_root(mut inv: Invocation, root: Option<bool>, user: Option<&cr
     }
     inv.env.retain(|(k, _)| !k.starts_with("GIT_CONFIG_"));
     let cred = match (user, runuser) {
-        (Some(u), Some(ru)) if u.uid != 0 && crate::userhome::valid_user_name(&u.name) => Some(format!("!{} -u {} -- {} auth git-credential", ru.to_string_lossy(), u.name, crate::tools::program_for("gh"))),
+        (Some(u), Some(ru)) if u.uid != 0 && crate::userhome::valid_user_name(&u.name) => {
+            Some(format!("!{} -u {} -- {} auth git-credential", ru.to_string_lossy(), u.name, crate::tools::program_for("gh")))
+        }
         _ => None,
     };
     inv.env.extend(root_git_env(isolate, cred.as_deref()));
@@ -355,8 +348,7 @@ pub fn windows_git_env(windows: bool, existing_count: Option<&str>) -> Vec<(&'st
 }
 
 fn run(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output> {
-    r.run(prog, args, cwd)
-        .map_err(|e| GitError::Spawn(format!("{prog} {}", args.join(" ")), e.to_string()))
+    r.run(prog, args, cwd).map_err(|e| GitError::Spawn(format!("{prog} {}", args.join(" ")), e.to_string()))
 }
 
 fn run_ok(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output> {
@@ -364,11 +356,7 @@ fn run_ok(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) 
     if o.ok() {
         Ok(o)
     } else {
-        Err(GitError::Command {
-            cmd: format!("{prog} {}", args.join(" ")),
-            code: o.code,
-            stderr: o.stderr.trim().to_string(),
-        })
+        Err(GitError::Command { cmd: format!("{prog} {}", args.join(" ")), code: o.code, stderr: o.stderr.trim().to_string() })
     }
 }
 
@@ -377,9 +365,7 @@ fn run_ok(r: &dyn CommandRunner, prog: &str, args: &[&str], cwd: Option<&Path>) 
 // ---------------------------------------------------------------------------------------------
 
 fn valid_name(s: &str) -> bool {
-    !s.is_empty()
-        && !s.starts_with('-')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    !s.is_empty() && !s.starts_with('-') && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// `owner/name`, both parts safe.
@@ -395,9 +381,7 @@ fn valid_repo(s: &str) -> bool {
 }
 
 fn valid_ref(s: &str) -> bool {
-    !s.is_empty()
-        && !s.starts_with('-')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+    !s.is_empty() && !s.starts_with('-') && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
 }
 
 fn valid_commit(s: &str) -> bool {
@@ -430,8 +414,7 @@ pub struct Tools {
 }
 
 fn locate(r: &dyn CommandRunner, tool: &str) -> Option<PathBuf> {
-    let (prog, args): (&str, [&str; 1]) =
-        if cfg!(windows) { ("where", [tool]) } else { ("which", [tool]) };
+    let (prog, args): (&str, [&str; 1]) = if cfg!(windows) { ("where", [tool]) } else { ("which", [tool]) };
     let o = r.run(prog, &args, None).ok()?;
     if !o.ok() {
         return None;
@@ -452,11 +435,7 @@ fn detect_tool(r: &dyn CommandRunner, tool: &str) -> Option<ToolInfo> {
 /// First token that starts with a digit on the first line:
 /// `git version 2.43.0` -> `2.43.0`, `gh version 2.40.1 (2024-01-01)` -> `2.40.1`.
 pub fn parse_version(out: &str) -> Option<String> {
-    out.lines()
-        .next()?
-        .split_whitespace()
-        .find(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit()))
-        .map(str::to_string)
+    out.lines().next()?.split_whitespace().find(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit())).map(str::to_string)
 }
 
 /// Where winget puts Git for Windows and the GitHub CLI. A program installed a moment ago is not on
@@ -547,12 +526,7 @@ pub struct PlanStep {
 }
 
 fn step(desc: &str, admin: bool, program: &str, args: &[&str]) -> PlanStep {
-    PlanStep {
-        description: desc.to_string(),
-        needs_admin: admin,
-        program: program.to_string(),
-        args: args.iter().map(|s| s.to_string()).collect(),
-    }
+    PlanStep { description: desc.to_string(), needs_admin: admin, program: program.to_string(), args: args.iter().map(|s| s.to_string()).collect() }
 }
 
 /// Plan what the system package manager has to do for a missing tool. Empty when nothing is missing or when
@@ -570,9 +544,7 @@ pub fn plan_bootstrap(os: Os, tools: &Tools) -> Result<Vec<PlanStep>> {
             steps.push(step("Install git", true, "apt-get", &["install", "-y", "git"]));
         }
         Os::Windows => {}
-        Os::Unsupported => {
-            return Err(GitError::Invalid("operating system (not supported yet)", format!("{os:?}")))
-        }
+        Os::Unsupported => return Err(GitError::Invalid("operating system (not supported yet)", format!("{os:?}"))),
     }
     Ok(steps)
 }
@@ -599,11 +571,7 @@ pub fn required_scopes(admin_org: bool) -> Vec<&'static str> {
 pub fn parse_scopes(text: &str) -> Vec<String> {
     for line in text.lines() {
         if let Some((_, rest)) = line.split_once("Token scopes:") {
-            return rest
-                .split(',')
-                .map(|s| s.trim().trim_matches('\'').trim_matches('"').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            return rest.split(',').map(|s| s.trim().trim_matches('\'').trim_matches('"').to_string()).filter(|s| !s.is_empty()).collect();
         }
     }
     Vec::new()
@@ -611,18 +579,13 @@ pub fn parse_scopes(text: &str) -> Vec<String> {
 
 /// GitHub scope hierarchy: `admin:org` > `write:org` > `read:org` (a parent grants its children).
 fn scope_satisfies(have: &str, need: &str) -> bool {
-    have == need
-        || matches!((have, need), ("admin:org", "read:org" | "write:org") | ("write:org", "read:org"))
+    have == need || matches!((have, need), ("admin:org", "read:org" | "write:org") | ("write:org", "read:org"))
 }
 
 impl AuthStatus {
     /// Required scopes that the current token lacks.
     pub fn missing_scopes(&self, admin_org: bool) -> Vec<String> {
-        required_scopes(admin_org)
-            .into_iter()
-            .filter(|s| !self.scopes.iter().any(|h| scope_satisfies(h, s)))
-            .map(str::to_string)
-            .collect()
+        required_scopes(admin_org).into_iter().filter(|s| !self.scopes.iter().any(|h| scope_satisfies(h, s))).map(str::to_string).collect()
     }
 }
 
@@ -650,9 +613,7 @@ pub fn is_signed_in(r: &dyn CommandRunner) -> bool {
 pub fn auth_login_interactive() -> Result<()> {
     let args = login_args(false);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let st = system_command("gh", &args, None)
-        .status()
-        .map_err(|e| GitError::Spawn("gh auth login".into(), e.to_string()))?;
+    let st = system_command("gh", &args, None).status().map_err(|e| GitError::Spawn("gh auth login".into(), e.to_string()))?;
     if !st.success() {
         return Err(GitError::Command { cmd: "gh auth login".into(), code: st.code().unwrap_or(-1), stderr: "login was not completed".into() });
     }
@@ -680,11 +641,7 @@ pub fn org_exists(r: &dyn CommandRunner, name: &str) -> Result<bool> {
     if o.stderr.contains("404") || o.stderr.contains("Not Found") {
         return Ok(false);
     }
-    Err(GitError::Command {
-        cmd: format!("gh api {path}"),
-        code: o.code,
-        stderr: o.stderr.trim().to_string(),
-    })
+    Err(GitError::Command { cmd: format!("gh api {path}"), code: o.code, stderr: o.stderr.trim().to_string() })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -694,10 +651,7 @@ pub fn org_exists(r: &dyn CommandRunner, name: &str) -> Result<bool> {
 /// True for GitHub primary/secondary rate limiting as reported by gh on stderr (HTTP 403/429).
 pub fn is_rate_limited(stderr: &str) -> bool {
     let s = stderr.to_ascii_lowercase();
-    s.contains("429")
-        || s.contains("secondary rate limit")
-        || s.contains("abuse detection")
-        || (s.contains("403") && (s.contains("rate limit") || s.contains("retry") || s.contains("abuse")))
+    s.contains("429") || s.contains("secondary rate limit") || s.contains("abuse detection") || (s.contains("403") && (s.contains("rate limit") || s.contains("retry") || s.contains("abuse")))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -715,7 +669,10 @@ pub enum ForkSync {
     /// The fork has `n` commits of its own and upstream has nothing new: leave untouched.
     Ahead(u32),
     /// Both sides have commits the other lacks.
-    Diverged { ahead: u32, behind: u32 },
+    Diverged {
+        ahead: u32,
+        behind: u32,
+    },
     /// Could not tell (reason). Never acted on.
     Unknown(String),
 }
@@ -746,11 +703,18 @@ pub fn classify_compare(json: &str) -> ForkSync {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SyncOutcome {
     /// Fast-forwarded on GitHub by this many commits.
-    Synced { commits: u32 },
+    Synced {
+        commits: u32,
+    },
     UpToDate,
-    Ahead { ahead: u32 },
+    Ahead {
+        ahead: u32,
+    },
     /// `ahead` is 0 when GitHub refused the fast-forward without telling how many own commits exist.
-    Diverged { ahead: u32, behind: u32 },
+    Diverged {
+        ahead: u32,
+        behind: u32,
+    },
     Unknown(String),
 }
 
@@ -790,9 +754,9 @@ pub fn left_alone_line(rec: &SyncRecord, fork: &str, path: &str) -> Option<Strin
     let b = &rec.branch;
     let fix = format!("Safe fix: cd {path} && git fetch upstream && git merge upstream/{b} (or git rebase upstream/{b}, which needs a force-push you decide on yourself), then git push. Nothing was changed on this fork.");
     match &rec.outcome {
-        SyncOutcome::Ahead { ahead } => Some(format!(
-            "{fork} ({b}): your fork has {ahead} commit(s) of its own and upstream has nothing new, so it was left as it is. Nothing was changed on this fork."
-        )),
+        SyncOutcome::Ahead { ahead } => {
+            Some(format!("{fork} ({b}): your fork has {ahead} commit(s) of its own and upstream has nothing new, so it was left as it is. Nothing was changed on this fork."))
+        }
         SyncOutcome::Diverged { ahead, behind } => {
             let own = if *ahead == 0 { "commits of its own".to_string() } else { format!("{ahead} commit(s) of its own") };
             Some(format!("{fork} ({b}): your fork has {own} and upstream has {behind} new commit(s), so GitHub cannot fast-forward it. It was not touched. {fix}"))
@@ -1112,22 +1076,14 @@ pub struct SyncJob {
 /// Paced sync of many forks (same batches and pauses as forking). Stops at a persistent rate limit:
 /// the remaining jobs are reported as `Unknown("rate limited ...")` and left untouched.
 /// `progress(done, total)` is called after each fork.
-pub fn sync_forks_paced(
-    r: &dyn CommandRunner,
-    jobs: &[SyncJob],
-    cfg: &ForkConfig,
-    progress: &mut dyn FnMut(usize, usize),
-) -> Vec<(String, SyncOutcome)> {
+pub fn sync_forks_paced(r: &dyn CommandRunner, jobs: &[SyncJob], cfg: &ForkConfig, progress: &mut dyn FnMut(usize, usize)) -> Vec<(String, SyncOutcome)> {
     let counter = CountingRunner::new(r);
     let mut out = Vec::new();
     let mut in_batch = 0usize;
     let mut limited = false;
     for (i, j) in jobs.iter().enumerate() {
         if limited {
-            out.push((
-                j.id.clone(),
-                SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into()),
-            ));
+            out.push((j.id.clone(), SyncOutcome::Unknown("GitHub rate limit reached; will be checked next time".into())));
             progress(i + 1, jobs.len());
             continue;
         }
@@ -1155,12 +1111,7 @@ pub fn sync_forks_paced(
 /// persist `state`. Never forks a repo already in `done` or one the owner already has a fork of,
 /// whatever that fork is called: existing forks are found by their upstream (see [`forkfind`]),
 /// and the real fork of every repo is recorded in `state.forks`.
-pub fn run_forks(
-    r: &dyn CommandRunner,
-    state: &mut ForkState,
-    cfg: &ForkConfig,
-    on_progress: &mut dyn FnMut(&ForkState),
-) -> Result<ForkOutcome> {
+pub fn run_forks(r: &dyn CommandRunner, state: &mut ForkState, cfg: &ForkConfig, on_progress: &mut dyn FnMut(&ForkState)) -> Result<ForkOutcome> {
     check("target owner", valid_name(&state.target_owner), &state.target_owner)?;
     let mut finder = forkfind::ForkFinder::new(&state.target_owner, cfg.cache_path.as_deref());
     let out = run_forks_with(r, state, cfg, &mut finder, on_progress);
@@ -1168,13 +1119,7 @@ pub fn run_forks(
     out
 }
 
-fn run_forks_with(
-    r: &dyn CommandRunner,
-    state: &mut ForkState,
-    cfg: &ForkConfig,
-    finder: &mut forkfind::ForkFinder,
-    on_progress: &mut dyn FnMut(&ForkState),
-) -> Result<ForkOutcome> {
+fn run_forks_with(r: &dyn CommandRunner, state: &mut ForkState, cfg: &ForkConfig, finder: &mut forkfind::ForkFinder, on_progress: &mut dyn FnMut(&ForkState)) -> Result<ForkOutcome> {
     use forkfind::Found;
     let counter = CountingRunner::new(r);
     let r: &dyn CommandRunner = &counter;
@@ -1300,13 +1245,7 @@ fn run_forks_with(
 // ---------------------------------------------------------------------------------------------
 
 /// Clone `<fork_owner>/<name>` into `dest` and set `upstream` to the original repo.
-pub fn clone_from_fork(
-    r: &dyn CommandRunner,
-    fork: &str,
-    upstream: &str,
-    dest: &Path,
-    branch: Option<&str>,
-) -> Result<()> {
+pub fn clone_from_fork(r: &dyn CommandRunner, fork: &str, upstream: &str, dest: &Path, branch: Option<&str>) -> Result<()> {
     check("fork repo", valid_repo(fork), fork)?;
     check("upstream repo", valid_repo(upstream), upstream)?;
     let d = dest.to_string_lossy();
@@ -1326,11 +1265,18 @@ pub fn clone_from_fork(
 pub enum RepoState {
     UpToDate,
     /// Clean, no local commits, upstream is ahead: safe to fast-forward.
-    FastForwardable { behind: u32 },
+    FastForwardable {
+        behind: u32,
+    },
     /// Both sides have new commits.
-    Diverged { ahead: u32, behind: u32 },
+    Diverged {
+        ahead: u32,
+        behind: u32,
+    },
     /// Local commits only (nothing to pull).
-    LocalAhead { ahead: u32 },
+    LocalAhead {
+        ahead: u32,
+    },
     /// Uncommitted changes (takes priority over everything else).
     Dirty,
 }
@@ -1370,7 +1316,10 @@ pub fn check_state(r: &dyn CommandRunner, repo: &Path, branch: &str) -> Result<R
 pub enum UpdateResult {
     UpToDate,
     /// `previous` is the rollback point (persist it in the server's snapshots).
-    Updated { previous: String, current: String },
+    Updated {
+        previous: String,
+        current: String,
+    },
     /// Not touched; flag "needs attention".
     Skipped(RepoState),
 }
@@ -1408,13 +1357,7 @@ fn clean_text(what: &'static str, v: &str, max: usize, allow_newlines: bool) -> 
 
 /// The first `https://github.com/...` line of gh's output.
 fn url_from(out: &Output, cmd: &str) -> Result<String> {
-    out.stdout
-        .lines()
-        .map(str::trim)
-        .rev()
-        .find(|l| l.starts_with("https://github.com/"))
-        .map(str::to_string)
-        .ok_or_else(|| GitError::Parse(cmd.to_string(), out.stdout.chars().take(200).collect()))
+    out.stdout.lines().map(str::trim).rev().find(|l| l.starts_with("https://github.com/")).map(str::to_string).ok_or_else(|| GitError::Parse(cmd.to_string(), out.stdout.chars().take(200).collect()))
 }
 
 /// `gh issue create` in `repo` (`owner/name`). Returns the issue's address. Title and body are
@@ -1523,13 +1466,7 @@ pub fn clone_default_head(r: &dyn CommandRunner, repo: &str, dest: &Path) -> Res
 pub fn move_pinned(r: &dyn CommandRunner, repo: &Path, commit: &str) -> Result<String> {
     check("commit", valid_commit(commit), commit)?;
     let previous = head_commit(r, repo)?;
-    let present = run(
-        r,
-        "git",
-        &["cat-file", "-e", &format!("{commit}^{{commit}}")],
-        Some(repo),
-    )?
-    .ok();
+    let present = run(r, "git", &["cat-file", "-e", &format!("{commit}^{{commit}}")], Some(repo))?.ok();
     if !present {
         run_ok(r, "git", &["fetch", "origin"], Some(repo))?;
     }
@@ -1660,7 +1597,11 @@ mod tests {
             if c.starts_with("gh repo fork") {
                 return ok("https://github.com/me/new\n");
             }
-            if c.starts_with("gh api repos/me/") { fail("HTTP 404") } else { ok("") }
+            if c.starts_with("gh api repos/me/") {
+                fail("HTTP 404")
+            } else {
+                ok("")
+            }
         });
         let mut c = cfg();
         c.ready_timeout = Duration::from_secs(30);
@@ -1673,13 +1614,7 @@ mod tests {
     #[test]
     fn failed_existence_check_never_forks() {
         // A network/auth/server error on the lookup must not be read as "repo missing".
-        let f = Fake::new(|c| {
-            if c.starts_with("gh api repos/me/") {
-                fail("error connecting to api.github.com")
-            } else {
-                ok("")
-            }
-        });
+        let f = Fake::new(|c| if c.starts_with("gh api repos/me/") { fail("error connecting to api.github.com") } else { ok("") });
         let mut st = ForkState::new("me", false, &repos(&["a/mine"]));
         run_forks(&f, &mut st, &cfg(), &mut |_| {}).unwrap();
         assert_eq!(f.count("gh repo fork"), 0, "must not fork a repo whose existence is unknown");
@@ -1790,7 +1725,7 @@ mod tests {
         assert_eq!(st.failed.len(), 1);
         assert_eq!(st.failed[0].repo, "a/bad");
         assert_eq!(f.count("--org"), 0); // user target
-        // batch_size 2 with 3 repos: exactly one batch pause.
+                                         // batch_size 2 with 3 repos: exactly one batch pause.
         assert_eq!(*f.sleeps.borrow(), vec![Duration::from_secs(10)]);
         st.requeue_failed();
         assert_eq!(st.pending, repos(&["a/bad"]));
@@ -2173,27 +2108,12 @@ mod tests {
 
     #[test]
     fn paced_job_sync_stops_at_a_persistent_rate_limit() {
-        let f = Fake::new(|c| {
-            if c.contains("/compare/") {
-                fail("HTTP 429")
-            } else {
-                ok("")
-            }
-        });
-        let job = |i: &str| SyncJob {
-            id: i.into(),
-            fork: format!("me/{i}"),
-            upstream: format!("up/{i}"),
-            branch: "dev".into(),
-        };
+        let f = Fake::new(|c| if c.contains("/compare/") { fail("HTTP 429") } else { ok("") });
+        let job = |i: &str| SyncJob { id: i.into(), fork: format!("me/{i}"), upstream: format!("up/{i}"), branch: "dev".into() };
         let mut seen = vec![];
-        let out = sync_forks_paced(&f, &[job("a"), job("b")], &sync_cfg(), &mut |d, t| {
-            seen.push((d, t))
-        });
+        let out = sync_forks_paced(&f, &[job("a"), job("b")], &sync_cfg(), &mut |d, t| seen.push((d, t)));
         assert_eq!(seen, vec![(1, 2), (2, 2)], "progress after each fork");
-        assert!(out
-            .iter()
-            .all(|(_, o)| matches!(o, SyncOutcome::Unknown(w) if w.contains("rate limit"))));
+        assert!(out.iter().all(|(_, o)| matches!(o, SyncOutcome::Unknown(w) if w.contains("rate limit"))));
         assert_eq!(f.count("/compare/"), 5); // 1 + 4 retries, then b is not even tried
     }
 
@@ -2217,17 +2137,11 @@ mod tests {
     fn diverged_dirty_and_ahead_are_skipped_never_merged() {
         let p = Path::new("/x");
         let f = git_fake("", "2\t3\n");
-        assert_eq!(
-            update_ff_only(&f, p, "dev").unwrap(),
-            UpdateResult::Skipped(RepoState::Diverged { ahead: 2, behind: 3 })
-        );
+        assert_eq!(update_ff_only(&f, p, "dev").unwrap(), UpdateResult::Skipped(RepoState::Diverged { ahead: 2, behind: 3 }));
         let f2 = git_fake(" M file.lua\n", "0\t3\n");
         assert_eq!(update_ff_only(&f2, p, "dev").unwrap(), UpdateResult::Skipped(RepoState::Dirty));
         let f3 = git_fake("", "1\t0\n");
-        assert_eq!(
-            update_ff_only(&f3, p, "dev").unwrap(),
-            UpdateResult::Skipped(RepoState::LocalAhead { ahead: 1 })
-        );
+        assert_eq!(update_ff_only(&f3, p, "dev").unwrap(), UpdateResult::Skipped(RepoState::LocalAhead { ahead: 1 }));
         for fk in [&f, &f2, &f3] {
             assert_eq!(fk.count("merge"), 0);
             assert_eq!(fk.count("git fetch upstream"), 1);
@@ -2296,9 +2210,7 @@ mod tests {
             "git --version" => ok("git version 2.43.0\n"),
             "gh --version" => fail("not found"),
             c if c.starts_with("which") => ok("/usr/bin/git\n"),
-            c if c.starts_with("gh auth status") => {
-                Output { code: 0, stdout: String::new(), stderr: "  - Token scopes: 'read:org', 'repo'\n".into() }
-            }
+            c if c.starts_with("gh auth status") => Output { code: 0, stdout: String::new(), stderr: "  - Token scopes: 'read:org', 'repo'\n".into() },
             "gh api orgs/nope" => fail("gh: Not Found (HTTP 404)"),
             "gh api orgs/yes" => ok("{}"),
             "gh api orgs/boom" => fail("HTTP 500"),
@@ -2323,10 +2235,7 @@ mod tests {
     #[test]
     fn bootstrap_plans() {
         let none = Tools { git: None, gh: None };
-        let both = Tools {
-            git: Some(ToolInfo { version: "2".into(), path: None }),
-            gh: Some(ToolInfo { version: "2".into(), path: None }),
-        };
+        let both = Tools { git: Some(ToolInfo { version: "2".into(), path: None }), gh: Some(ToolInfo { version: "2".into(), path: None }) };
         assert!(plan_bootstrap(Os::DebianLike, &both).unwrap().is_empty());
         let deb = plan_bootstrap(Os::DebianLike, &none).unwrap();
         assert!(deb.iter().all(|s| s.needs_admin && !s.description.is_empty()));
@@ -2356,7 +2265,8 @@ mod tests {
 
     #[test]
     fn issue_and_pr_commands_are_built_safely() {
-        let f = Fake::new(|l| if l.contains("issue create") { ok("Creating issue...\nhttps://github.com/KoraFiveM/kora_lib/issues/7\n") } else { ok("https://github.com/KoraFiveM/kora_lib/pull/9\n") });
+        let f =
+            Fake::new(|l| if l.contains("issue create") { ok("Creating issue...\nhttps://github.com/KoraFiveM/kora_lib/issues/7\n") } else { ok("https://github.com/KoraFiveM/kora_lib/pull/9\n") });
         let url = create_issue(&f, "KoraFiveM/kora_lib", "It breaks; \"quoted\" $(x)", "line1\nline2").unwrap();
         assert_eq!(url, "https://github.com/KoraFiveM/kora_lib/issues/7");
         assert_eq!(f.calls.borrow()[0], "gh issue create --repo KoraFiveM/kora_lib --title It breaks; \"quoted\" $(x) --body line1\nline2");
@@ -2482,23 +2392,11 @@ mod tests {
     #[test]
     fn move_pinned_fetches_only_when_the_commit_is_missing() {
         let sha = "0123456789abcdef0123456789abcdef01234567";
-        let here = Fake::new(|l| {
-            if l.starts_with("git rev-parse HEAD") {
-                ok("aaa\n")
-            } else {
-                ok("")
-            }
-        });
+        let here = Fake::new(|l| if l.starts_with("git rev-parse HEAD") { ok("aaa\n") } else { ok("") });
         assert_eq!(move_pinned(&here, Path::new("/r"), sha).unwrap(), "aaa");
         assert_eq!(here.count("fetch"), 0, "{:?}", here.calls.borrow());
         assert_eq!(here.count("checkout --detach"), 1);
-        let missing = Fake::new(|l| {
-            if l.starts_with("git cat-file") {
-                fail("fatal: Not a valid object name")
-            } else {
-                ok("")
-            }
-        });
+        let missing = Fake::new(|l| if l.starts_with("git cat-file") { fail("fatal: Not a valid object name") } else { ok("") });
         move_pinned(&missing, Path::new("/r"), sha).unwrap();
         assert_eq!(missing.count("git fetch origin"), 1);
     }

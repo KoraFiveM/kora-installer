@@ -128,11 +128,7 @@ pub struct Request {
 
 impl std::fmt::Debug for Request {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Request")
-            .field("verb", &self.verb)
-            .field("args", &self.args)
-            .field("env", &self.env.keys().collect::<Vec<_>>())
-            .finish()
+        f.debug_struct("Request").field("verb", &self.verb).field("args", &self.args).field("env", &self.env.keys().collect::<Vec<_>>()).finish()
     }
 }
 
@@ -140,7 +136,10 @@ impl std::fmt::Debug for Request {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
-    Progress { stream: String, line: String },
+    Progress {
+        stream: String,
+        line: String,
+    },
     Result {
         ok: bool,
         code: i32,
@@ -152,9 +151,14 @@ pub enum Message {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         data: Option<serde_json::Value>,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
     /// First line of a Windows worker session (see [`worker`]); the Linux helper never sends it.
-    Hello { version: String, pid: u32 },
+    Hello {
+        version: String,
+        pid: u32,
+    },
 }
 
 /// Why a request was refused (plain language; shown to the user).

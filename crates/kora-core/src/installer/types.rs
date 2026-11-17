@@ -56,12 +56,7 @@ pub struct DbAdmin {
 
 impl std::fmt::Debug for DbAdmin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DbAdmin")
-            .field("host", &self.host)
-            .field("port", &self.port)
-            .field("user", &self.user)
-            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .finish()
+        f.debug_struct("DbAdmin").field("host", &self.host).field("port", &self.port).field("user", &self.user).field("password", &self.password.as_ref().map(|_| "<redacted>")).finish()
     }
 }
 

@@ -142,12 +142,7 @@ pub async fn key_remove(Extension(c): Extension<Caller>, Path(name): Path<String
 /// `{server, last4, key_name, running, restart_needed, message}`. Writes the key where the server's
 /// configuration keeps it. A running server only reads it when it starts: `restart_needed` says so and
 /// the panel offers the restart (`POST /servers/{s}/control`).
-pub async fn server_key_set(
-    State(st): State<AppState>,
-    Extension(c): Extension<Caller>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn server_key_set(State(st): State<AppState>, Extension(c): Extension<Caller>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let (name, pasted, save_as) = (text(&body, "name"), text(&body, "license_key"), text(&body, "save_as").filter(|n| !n.trim().is_empty()));
     if pasted.is_some() || save_as.is_some() {
         require_manage(&c)?;
@@ -235,9 +230,7 @@ pub async fn profile_set(Json(body): Json<Value>) -> Result<Json<Value>, ApiErro
     })?;
     let owner = field(&body, "github_owner", kora_core::git::owners::check_login_syntax)?;
     blocking(move || {
-        let p = ProfileStore::default()
-            .update(name, ident, owner)
-            .map_err(|e| ApiError::internal(format!("Kora could not save this ({e}).")))?;
+        let p = ProfileStore::default().update(name, ident, owner).map_err(|e| ApiError::internal(format!("Kora could not save this ({e}).")))?;
         Ok(Json(profile_json(&p)))
     })
     .await

@@ -95,10 +95,7 @@ pub enum Decision {
 /// pre-release. With `want` (`--version`): exactly that release, any direction, pre-releases too.
 pub fn decide(current: &Version, releases: &[Release], want: Option<&str>) -> Result<Decision, SelfUpdateError> {
     if let Some(w) = want {
-        return pick_tag(releases, w)
-            .cloned()
-            .map(Decision::Update)
-            .ok_or_else(|| SelfUpdateError::Release(format!("there is no published release {w}")));
+        return pick_tag(releases, w).cloned().map(Decision::Update).ok_or_else(|| SelfUpdateError::Release(format!("there is no published release {w}")));
     }
     let newest = pick_newest(releases, current).ok_or_else(|| SelfUpdateError::Release("no published release was found".into()))?;
     let v = newest.version().expect("picked releases have versions");

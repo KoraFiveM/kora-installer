@@ -26,9 +26,7 @@ pub enum UserStatus {
 
 /// `id -u <name>` through the runner.
 pub fn user_status(runner: &dyn CommandRunner, name: &str) -> ServiceResult<UserStatus> {
-    let o = runner
-        .run("id", &["-u".into(), name.into()])
-        .map_err(|e| ServiceError::Command { command: format!("id -u {name}"), detail: e.to_string() })?;
+    let o = runner.run("id", &["-u".into(), name.into()]).map_err(|e| ServiceError::Command { command: format!("id -u {name}"), detail: e.to_string() })?;
     if !o.success() {
         return Ok(UserStatus::Missing);
     }

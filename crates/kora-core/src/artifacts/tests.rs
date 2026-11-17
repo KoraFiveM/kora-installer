@@ -31,11 +31,7 @@ fn url_validation() {
 
 #[test]
 fn jg_parse_golden() {
-    let json = format!(
-        r#"{{"recommendedArtifact":"38621","windowsDownloadLink":"{}","linuxDownloadLink":"{}","brokenArtifacts":{{"38000":"bad"}}}}"#,
-        win(38621),
-        lin(38621)
-    );
+    let json = format!(r#"{{"recommendedArtifact":"38621","windowsDownloadLink":"{}","linuxDownloadLink":"{}","brokenArtifacts":{{"38000":"bad"}}}}"#, win(38621), lin(38621));
     let l = parse_jg(&json, Platform::Linux).unwrap();
     assert_eq!(l.recommended.as_ref().unwrap().build, 38621);
     assert_eq!(l.pick(Channel::Recommended).unwrap().url, lin(38621));

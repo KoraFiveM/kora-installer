@@ -98,7 +98,6 @@ pub fn secret_env(license_key: Option<&str>, db_admin_password: Option<&str>) ->
 // shown depends on who asks ([`AdminAsk`]): someone at this computer, yes; a remote session only when
 // the person asked for it, because nobody may be at the computer to answer it.
 
-
 /// Header a page sends when the person chose "Ask for administrator permission" (`ask`).
 pub const ASK_HEADER: &str = "x-kora-admin";
 

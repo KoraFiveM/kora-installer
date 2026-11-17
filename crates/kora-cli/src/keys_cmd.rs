@@ -25,14 +25,9 @@ pub enum KeysCmd {
         name: String,
     },
     /// Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key.
-    Replace {
-        name: String,
-    },
+    Replace { name: String },
     /// Give a saved key another name.
-    Rename {
-        name: String,
-        new_name: String,
-    },
+    Rename { name: String, new_name: String },
     /// Forget a saved key. Servers installed with it keep working: they have their own copy.
     Remove {
         name: String,

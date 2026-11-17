@@ -5,9 +5,7 @@ use std::cell::RefCell;
 const SHA: &str = "0123456789012345678901234567890123456789";
 
 fn catalog() -> Catalog {
-    let rel = format!(
-        r#""latest":"1.0.0","versions":[{{"version":"1.0.0","tag":"v1.0.0","commit":"{SHA}"}}]"#
-    );
+    let rel = format!(r#""latest":"1.0.0","versions":[{{"version":"1.0.0","tag":"v1.0.0","commit":"{SHA}"}}]"#);
     let json = format!(
         r#"{{"schemaVersion":3,"creators":[{{"id":"acme","name":"Acme"}}],"resources":[
         {{"id":"kora-core","repository":"https://github.com/KoraFiveM/kora_core.git","path":"[kora]/kora_core","group":"kora","kind":"kora","branch":"dev","order":1,{rel}}},
@@ -26,10 +24,7 @@ fn server(dir: &Path, mode: Mode, owner: Option<&str>) -> ServerFile {
         name: "s".into(),
         mode,
         dir: dir.to_path_buf(),
-        ports: PortsRecord {
-            game: 30120,
-            txadmin: 40120,
-        },
+        ports: PortsRecord { game: 30120, txadmin: 40120 },
         game_build: 1,
         artifact_build: 1,
         database: None,
@@ -56,35 +51,19 @@ struct Fake {
 }
 
 impl Cloner for Fake {
-    fn prepare_forks(
-        &self,
-        owner: &str,
-        repos: &[String],
-    ) -> std::result::Result<git::ForkState, String> {
-        self.forked
-            .borrow_mut()
-            .extend(repos.iter().map(|r| format!("{owner}<-{r}")));
+    fn prepare_forks(&self, owner: &str, repos: &[String]) -> std::result::Result<git::ForkState, String> {
+        self.forked.borrow_mut().extend(repos.iter().map(|r| format!("{owner}<-{r}")));
         let mut st = git::ForkState::new(owner, false, &[]);
         st.done = repos.to_vec();
         Ok(st)
     }
-    fn clone_item(
-        &self,
-        item: &PlanItem,
-        fork: Option<&str>,
-        partial: &Path,
-    ) -> std::result::Result<(), String> {
+    fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), String> {
         let fork_owner = fork.map(|f| f.split('/').next().unwrap());
         if self.fail == Some(item.id.as_str()) {
             std::fs::create_dir_all(partial).unwrap(); // a half-made clone must be cleaned up
             return Err("network down".into());
         }
-        self.cloned.borrow_mut().push(format!(
-            "{} commit={:?} fork={:?}",
-            item.id,
-            item.commit,
-            fork_owner.filter(|_| item.fork)
-        ));
+        self.cloned.borrow_mut().push(format!("{} commit={:?} fork={:?}", item.id, item.commit, fork_owner.filter(|_| item.fork)));
         std::fs::create_dir_all(partial.join(".git")).unwrap();
         if let Some(sub) = &item.subpath {
             std::fs::create_dir_all(partial.join(sub)).unwrap();
@@ -106,23 +85,9 @@ fn plan_pins_bridges_and_creators_and_adds_dependencies() {
     let d = setup("");
     let sf = server(d.path(), Mode::Production, None);
     let p = plan(&catalog(), &sf, &["acme-r".into()]).unwrap();
-    let got: Vec<(&str, &str, bool)> = p
-        .items
-        .iter()
-        .map(|i| (i.id.as_str(), i.rel.as_str(), i.dependency))
-        .collect();
-    assert_eq!(
-        got,
-        [
-            ("compat-a", "[compat]/a", true),
-            ("bridge-q", "[bridges]/q", true),
-            ("acme-r", "[creators]/[acme]/r", false)
-        ]
-    );
-    assert!(p
-        .items
-        .iter()
-        .all(|i| i.commit.as_deref() == Some(SHA) && !i.fork));
+    let got: Vec<(&str, &str, bool)> = p.items.iter().map(|i| (i.id.as_str(), i.rel.as_str(), i.dependency)).collect();
+    assert_eq!(got, [("compat-a", "[compat]/a", true), ("bridge-q", "[bridges]/q", true), ("acme-r", "[creators]/[acme]/r", false)]);
+    assert!(p.items.iter().all(|i| i.commit.as_deref() == Some(SHA) && !i.fork));
     assert_eq!(p.ensure, ["[compat]", "[bridges]", "[creators]"]);
 }
 
@@ -147,48 +112,22 @@ fn installs_into_new_folders_and_appends_ensures_on_an_old_layout() {
     let out = execute(&f, &mut sf, &p, &mut |_| {}).unwrap();
     assert!(out.ok(), "{out:?}");
     assert_eq!(out.installed, ["compat-a", "bridge-q"]);
-    assert!(
-        d.path().join("resources/[compat]/a/.git").is_dir()
-            && d.path().join("resources/[bridges]/q/.git").is_dir()
-    );
-    assert!(
-        d.path().join("resources/[kora]/kora_core/.git").is_dir(),
-        "existing resources are left alone"
-    );
-    assert_eq!(
-        std::fs::read_to_string(d.path().join("server.cfg")).unwrap(),
-        format!("{cfg}ensure [compat]\nensure [bridges]\n")
-    );
+    assert!(d.path().join("resources/[compat]/a/.git").is_dir() && d.path().join("resources/[bridges]/q/.git").is_dir());
+    assert!(d.path().join("resources/[kora]/kora_core/.git").is_dir(), "existing resources are left alone");
+    assert_eq!(std::fs::read_to_string(d.path().join("server.cfg")).unwrap(), format!("{cfg}ensure [compat]\nensure [bridges]\n"));
     assert_eq!(out.ensured, ["[compat]", "[bridges]"]);
     assert!(f.cloned.borrow()[0].contains(SHA));
     // recorded, including the third-party flag; the file on disk agrees
     let saved = ServerFile::load(d.path()).unwrap();
     assert_eq!(saved.resources.len(), 3);
-    assert!(
-        saved
-            .resources
-            .iter()
-            .find(|r| r.id == "bridge-q")
-            .unwrap()
-            .third_party
-    );
-    assert!(
-        !saved
-            .resources
-            .iter()
-            .find(|r| r.id == "kora-core")
-            .unwrap()
-            .third_party
-    );
+    assert!(saved.resources.iter().find(|r| r.id == "bridge-q").unwrap().third_party);
+    assert!(!saved.resources.iter().find(|r| r.id == "kora-core").unwrap().third_party);
     // running it again changes nothing
     let p2 = plan(&catalog(), &saved, &["bridge-q".into()]).unwrap();
     assert!(p2.is_empty());
     let out2 = execute(&f, &mut sf, &p2, &mut |_| {}).unwrap();
     assert!(out2.installed.is_empty() && out2.ensured.is_empty());
-    assert_eq!(
-        std::fs::read_to_string(d.path().join("server.cfg")).unwrap(),
-        format!("{cfg}ensure [compat]\nensure [bridges]\n")
-    );
+    assert_eq!(std::fs::read_to_string(d.path().join("server.cfg")).unwrap(), format!("{cfg}ensure [compat]\nensure [bridges]\n"));
 }
 
 #[test]
@@ -197,10 +136,7 @@ fn existing_ensure_lines_are_not_duplicated() {
     let mut sf = server(d.path(), Mode::Production, None);
     let p = plan(&catalog(), &sf, &["acme-r".into()]).unwrap();
     execute(&Fake::default(), &mut sf, &p, &mut |_| {}).unwrap();
-    assert_eq!(
-        std::fs::read_to_string(d.path().join("server.cfg")).unwrap(),
-        "ensure [kora]\nensure [compat]\nensure [bridges]\nensure [creators]\n"
-    );
+    assert_eq!(std::fs::read_to_string(d.path().join("server.cfg")).unwrap(), "ensure [kora]\nensure [compat]\nensure [bridges]\nensure [creators]\n");
 }
 
 #[test]
@@ -211,45 +147,15 @@ fn development_forks_kora_resources_but_never_third_party() {
     let f = Fake::default();
     let out = execute(&f, &mut sf, &p, &mut |_| {}).unwrap();
     assert!(out.ok(), "{out:?}");
-    assert_eq!(
-        *f.forked.borrow(),
-        ["my-org<-KoraFiveM/kora_new", "my-org<-o/ca"]
-    );
+    assert_eq!(*f.forked.borrow(), ["my-org<-KoraFiveM/kora_new", "my-org<-o/ca"]);
     let cloned = f.cloned.borrow();
     let get = |id: &str| cloned.iter().find(|c| c.starts_with(id)).unwrap().clone();
-    assert!(
-        get("kora-new").contains("commit=None")
-            && get("kora-new").contains("fork=Some(\"my-org\")")
-    );
-    assert!(
-        get("compat-a").contains("fork=Some"),
-        "compat is Kora's own, so it follows the dev rules"
-    );
-    assert!(
-        get("bridge-q").contains(&format!("commit=Some(\"{SHA}\")"))
-            && get("bridge-q").contains("fork=None"),
-        "pinned, never forked, even in dev mode"
-    );
+    assert!(get("kora-new").contains("commit=None") && get("kora-new").contains("fork=Some(\"my-org\")"));
+    assert!(get("compat-a").contains("fork=Some"), "compat is Kora's own, so it follows the dev rules");
+    assert!(get("bridge-q").contains(&format!("commit=Some(\"{SHA}\")")) && get("bridge-q").contains("fork=None"), "pinned, never forked, even in dev mode");
     let saved = ServerFile::load(d.path()).unwrap();
-    assert_eq!(
-        saved
-            .resources
-            .iter()
-            .find(|r| r.id == "bridge-q")
-            .unwrap()
-            .commit
-            .as_deref(),
-        Some(SHA)
-    );
-    assert_eq!(
-        saved
-            .resources
-            .iter()
-            .find(|r| r.id == "kora-new")
-            .unwrap()
-            .commit,
-        None
-    );
+    assert_eq!(saved.resources.iter().find(|r| r.id == "bridge-q").unwrap().commit.as_deref(), Some(SHA));
+    assert_eq!(saved.resources.iter().find(|r| r.id == "kora-new").unwrap().commit, None);
 }
 
 /// Fake `gh`/`git`: records every command and answers like GitHub would for a user `me` whose
@@ -260,17 +166,9 @@ impl CommandRunner for Gh {
     fn run(&self, p: &str, a: &[&str], _cwd: Option<&Path>) -> std::io::Result<git::Output> {
         let line = format!("{p} {}", a.join(" "));
         self.0.borrow_mut().push(line.clone());
-        let ok = |s: &str| git::Output {
-            code: 0,
-            stdout: s.into(),
-            stderr: String::new(),
-        };
+        let ok = |s: &str| git::Output { code: 0, stdout: s.into(), stderr: String::new() };
         Ok(if line.starts_with("gh api orgs/") {
-            git::Output {
-                code: 1,
-                stdout: String::new(),
-                stderr: "HTTP 404".into(),
-            }
+            git::Output { code: 1, stdout: String::new(), stderr: "HTTP 404".into() }
         } else if line.starts_with("gh api graphql") {
             ok(
                 r#"{"data":{"repositoryOwner":{"repositories":{"nodes":[{"nameWithOwner":"me/kora_new-1","defaultBranchRef":{"name":"dev"},"parent":{"nameWithOwner":"KoraFiveM/kora_new"}}],"pageInfo":{"hasNextPage":false}}}}}"#,
@@ -283,11 +181,7 @@ impl CommandRunner for Gh {
             std::fs::create_dir_all(Path::new(a[3]).join(".git")).unwrap();
             ok("")
         } else if line.contains("get-url") {
-            git::Output {
-                code: 2,
-                stdout: String::new(),
-                stderr: "no such remote".into(),
-            }
+            git::Output { code: 2, stdout: String::new(), stderr: "no such remote".into() }
         } else {
             ok("")
         })
@@ -302,65 +196,27 @@ fn development_add_reuses_an_existing_fork_and_clones_it_under_its_real_name() {
     let p = plan(&catalog(), &sf, &["kora-new".into()]).unwrap();
     let gh = Gh(RefCell::new(vec![]));
     let cloner = GitCloner(&gh);
-    let st = cloner
-        .forks_with(
-            "me",
-            &["KoraFiveM/kora_new".into(), "o/ca".into()],
-            &git::ForkConfig {
-                ready_timeout: std::time::Duration::ZERO,
-                ..Default::default()
-            },
-        )
-        .unwrap();
+    let st = cloner.forks_with("me", &["KoraFiveM/kora_new".into(), "o/ca".into()], &git::ForkConfig { ready_timeout: std::time::Duration::ZERO, ..Default::default() }).unwrap();
     assert_eq!(st.fork_of("KoraFiveM/kora_new"), "me/kora_new-1");
     assert_eq!(st.counts_text(), "created 1 fork, reused 1 you already had");
     // execute() with a cloner that hands back this state and clones through the fake gh
     struct Prepared<'a>(GitCloner<'a>, git::ForkState);
     impl Cloner for Prepared<'_> {
-        fn prepare_forks(
-            &self,
-            _o: &str,
-            _r: &[String],
-        ) -> std::result::Result<git::ForkState, String> {
+        fn prepare_forks(&self, _o: &str, _r: &[String]) -> std::result::Result<git::ForkState, String> {
             Ok(self.1.clone())
         }
-        fn clone_item(
-            &self,
-            item: &PlanItem,
-            fork: Option<&str>,
-            partial: &Path,
-        ) -> std::result::Result<(), String> {
+        fn clone_item(&self, item: &PlanItem, fork: Option<&str>, partial: &Path) -> std::result::Result<(), String> {
             self.0.clone_item(item, fork, partial)
         }
     }
     let mut said = vec![];
-    let out = execute(&Prepared(GitCloner(&gh), st), &mut sf, &p, &mut |m| {
-        said.push(m.to_string())
-    })
-    .unwrap();
+    let out = execute(&Prepared(GitCloner(&gh), st), &mut sf, &p, &mut |m| said.push(m.to_string())).unwrap();
     assert!(out.ok(), "{out:?}");
     let calls = gh.0.borrow();
-    assert_eq!(
-        calls
-            .iter()
-            .filter(|c| c.starts_with("gh repo fork"))
-            .count(),
-        1,
-        "{calls:?}"
-    );
-    assert!(!calls
-        .iter()
-        .any(|c| c.starts_with("gh repo fork KoraFiveM/kora_new")));
-    assert!(
-        calls
-            .iter()
-            .any(|c| c.starts_with("gh repo clone me/kora_new-1 ")),
-        "{calls:?}"
-    );
-    assert!(
-        said.iter().any(|m| m.contains("reused 1 you already had")),
-        "{said:?}"
-    );
+    assert_eq!(calls.iter().filter(|c| c.starts_with("gh repo fork")).count(), 1, "{calls:?}");
+    assert!(!calls.iter().any(|c| c.starts_with("gh repo fork KoraFiveM/kora_new")));
+    assert!(calls.iter().any(|c| c.starts_with("gh repo clone me/kora_new-1 ")), "{calls:?}");
+    assert!(said.iter().any(|m| m.contains("reused 1 you already had")), "{said:?}");
     assert!(!said.iter().any(|m| m.starts_with("Forking")));
 }
 
@@ -381,28 +237,14 @@ fn a_failed_clone_is_reported_cleaned_up_and_not_ensured() {
     let d = setup("ensure [kora]\n");
     let mut sf = server(d.path(), Mode::Production, None);
     let p = plan(&catalog(), &sf, &["bridge-q".into()]).unwrap();
-    let f = Fake {
-        fail: Some("bridge-q"),
-        ..Default::default()
-    };
+    let f = Fake { fail: Some("bridge-q"), ..Default::default() };
     let out = execute(&f, &mut sf, &p, &mut |_| {}).unwrap();
     assert_eq!(out.failed.len(), 1);
     assert_eq!(out.failed[0].0, "bridge-q");
     assert_eq!(out.installed, ["compat-a"]);
-    assert!(
-        !d.path().join("resources/[bridges]/q").exists()
-            && !d.path().join("resources/[bridges]/q.kora-partial").exists()
-    );
-    assert_eq!(
-        std::fs::read_to_string(d.path().join("server.cfg")).unwrap(),
-        "ensure [kora]\nensure [compat]\n",
-        "only folders that got something"
-    );
-    assert!(!ServerFile::load(d.path())
-        .unwrap()
-        .resources
-        .iter()
-        .any(|r| r.id == "bridge-q"));
+    assert!(!d.path().join("resources/[bridges]/q").exists() && !d.path().join("resources/[bridges]/q.kora-partial").exists());
+    assert_eq!(std::fs::read_to_string(d.path().join("server.cfg")).unwrap(), "ensure [kora]\nensure [compat]\n", "only folders that got something");
+    assert!(!ServerFile::load(d.path()).unwrap().resources.iter().any(|r| r.id == "bridge-q"));
 }
 
 #[test]
@@ -430,9 +272,7 @@ fn a_subpath_resource_is_a_pinned_copy_of_one_folder_even_in_dev_mode() {
     let mut sf = server(d.path(), Mode::Development, Some("my-org"));
     let p = plan(&catalog(), &sf, &["ox-lib".into()]).unwrap();
     assert_eq!(p.items.len(), 1);
-    assert!(
-        !p.items[0].fork && p.items[0].commit.as_deref() == Some(SHA) && p.items[0].third_party
-    );
+    assert!(!p.items[0].fork && p.items[0].commit.as_deref() == Some(SHA) && p.items[0].third_party);
     let f = Fake::default();
     let out = execute(&f, &mut sf, &p, &mut |_| {}).unwrap();
     assert!(out.ok(), "{out:?}");
@@ -440,13 +280,8 @@ fn a_subpath_resource_is_a_pinned_copy_of_one_folder_even_in_dev_mode() {
     let dest = d.path().join("resources/[compat]/ox_lib");
     assert!(dest.join("fxmanifest.lua").is_file() && !dest.join(".git").exists());
     assert!(crate::installer::pinned::marker_matches(&dest, SHA));
-    assert_eq!(
-        std::fs::read_to_string(d.path().join("server.cfg")).unwrap(),
-        "ensure [kora]\nensure [compat]\n"
-    );
+    assert_eq!(std::fs::read_to_string(d.path().join("server.cfg")).unwrap(), "ensure [kora]\nensure [compat]\n");
     // already there: nothing to do the second time
     let saved = ServerFile::load(d.path()).unwrap();
-    assert!(plan(&catalog(), &saved, &["ox-lib".into()])
-        .unwrap()
-        .is_empty());
+    assert!(plan(&catalog(), &saved, &["ox-lib".into()]).unwrap().is_empty());
 }

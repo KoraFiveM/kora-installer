@@ -35,25 +35,14 @@ pub struct UreqTransport;
 
 impl Transport for UreqTransport {
     fn send(&self, req: &HttpRequest) -> Result<HttpResponse, String> {
-        let agent = ureq::AgentBuilder::new()
-            .redirects(0)
-            .timeout_connect(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
-            .user_agent("kora-hub")
-            .build();
-        let mut r = agent
-            .request(req.method, &req.url)
-            .set("Accept", "application/json");
+        let agent = ureq::AgentBuilder::new().redirects(0).timeout_connect(CONNECT_TIMEOUT).timeout(REQUEST_TIMEOUT).user_agent("kora-hub").build();
+        let mut r = agent.request(req.method, &req.url).set("Accept", "application/json");
         if let Some(t) = &req.token {
             r = r.set("Authorization", &format!("Bearer {t}"));
         }
         let out = match &req.body {
-            Some(b) => r
-                .set("Content-Type", "application/json")
-                .send_string(&b.to_string()),
-            None if req.method == "POST" || req.method == "PUT" => {
-                r.set("Content-Type", "application/json").send_string("{}")
-            }
+            Some(b) => r.set("Content-Type", "application/json").send_string(&b.to_string()),
+            None if req.method == "POST" || req.method == "PUT" => r.set("Content-Type", "application/json").send_string("{}"),
             None => r.call(),
         };
         let resp = match out {
@@ -63,15 +52,8 @@ impl Transport for UreqTransport {
         };
         let status = resp.status();
         let mut text = String::new();
-        std::io::Read::read_to_string(
-            &mut std::io::Read::take(resp.into_reader(), MAX_BODY),
-            &mut text,
-        )
-        .map_err(|e| format!("The node's answer could not be read ({e})."))?;
-        Ok(HttpResponse {
-            status,
-            body: serde_json::from_str(&text).unwrap_or(Value::Null),
-        })
+        std::io::Read::read_to_string(&mut std::io::Read::take(resp.into_reader(), MAX_BODY), &mut text).map_err(|e| format!("The node's answer could not be read ({e})."))?;
+        Ok(HttpResponse { status, body: serde_json::from_str(&text).unwrap_or(Value::Null) })
     }
 }
 

@@ -82,25 +82,13 @@ pub fn admin_reasons_with(req: &InstallRequest, windows: bool, db_missing: bool,
         v.push("create the new database in Kora's own database server (its administrator login is kept for administrators only)".to_string());
     }
     if db_missing {
-        v.push(if windows {
-            "install the database server (MariaDB) as a Windows service".to_string()
-        } else {
-            "install the database server (MariaDB)".to_string()
-        });
+        v.push(if windows { "install the database server (MariaDB) as a Windows service".to_string() } else { "install the database server (MariaDB)".to_string() });
     }
     if req.service {
-        v.push(if windows {
-            "register the server as a Windows service".to_string()
-        } else {
-            "register the server as a system service (systemd)".to_string()
-        });
+        v.push(if windows { "register the server as a Windows service".to_string() } else { "register the server as a system service (systemd)".to_string() });
     }
     if req.firewall {
-        v.push(if req.txadmin_public {
-            "open the game and txAdmin ports in the firewall".to_string()
-        } else {
-            "open the game port in the firewall".to_string()
-        });
+        v.push(if req.txadmin_public { "open the game and txAdmin ports in the firewall".to_string() } else { "open the game port in the firewall".to_string() });
     }
     if req.service && req.mode == Mode::Development {
         v.push("set up the daily automatic update task".to_string());
@@ -279,13 +267,19 @@ impl Elevator for SystemElevator {
 /// What kind of command is being run (drives the Windows "always elevated" rule).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdKind {
-    Install { dry_run: bool },
+    Install {
+        dry_run: bool,
+    },
     Delete,
-    Uninstall { dry_run: bool },
+    Uninstall {
+        dry_run: bool,
+    },
     Start,
     Stop,
     Restart,
-    Update { auto: bool },
+    Update {
+        auto: bool,
+    },
     Status,
     /// `--version`, `--help`, the Windows service host, anything read-only.
     Other,
@@ -527,12 +521,11 @@ mod tests {
 
     #[test]
     fn quoted_arguments_round_trip() {
-        let args: Vec<OsString> = [
-            "install", "--name", "My \"Best\" Server", "--dir", "C:\\Users\\Jo Smith\\kora\\", "--license-key", "a&b|c^d%PATH%", "--x", "", "ünï 日本語 🎮", "back\\\\slash", "end\\\\", "q\\\"x",
-        ]
-        .iter()
-        .map(OsString::from)
-        .collect();
+        let args: Vec<OsString> =
+            ["install", "--name", "My \"Best\" Server", "--dir", "C:\\Users\\Jo Smith\\kora\\", "--license-key", "a&b|c^d%PATH%", "--x", "", "ünï 日本語 🎮", "back\\\\slash", "end\\\\", "q\\\"x"]
+                .iter()
+                .map(OsString::from)
+                .collect();
         let line = join_windows_args(&args);
         let back = parse(&line);
         let want: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
@@ -732,10 +725,7 @@ mod tests {
             }
         }
         let privileged: Vec<CmdKind> = ALL.into_iter().filter(|k| k.privileged()).collect();
-        assert_eq!(
-            privileged,
-            [CmdKind::Install { dry_run: false }, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]
-        );
+        assert_eq!(privileged, [CmdKind::Install { dry_run: false }, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]);
         assert!(CmdKind::Stop.privileged() && CmdKind::Restart.privileged());
         assert!(!CmdKind::Status.privileged() && !CmdKind::Other.privileged(), "--version/--help/status stay unelevated");
     }

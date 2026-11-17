@@ -103,8 +103,7 @@ pub fn windows_acl_plan(server: &ServerRecord, windows_user: &str) -> Result<db:
 
 // ------------------------------------------------------------- validation
 
-const HOSTS: [&str; 6] =
-    ["discord.com", "ptb.discord.com", "canary.discord.com", "discordapp.com", "ptb.discordapp.com", "canary.discordapp.com"];
+const HOSTS: [&str; 6] = ["discord.com", "ptb.discord.com", "canary.discord.com", "discordapp.com", "ptb.discordapp.com", "canary.discordapp.com"];
 
 /// `(host, id, token)` of a well-formed Discord webhook URL.
 fn parse(url: &str) -> Result<(String, &str, &str), NotifyError> {
@@ -176,13 +175,7 @@ fn limit_lines(value: &str) -> String {
 /// problems (messages may carry paths) and no mentions.
 pub fn build_payload(report: &UpdateReport) -> serde_json::Value {
     let mut p = report.discord_payload();
-    let counts = format!(
-        "{} updated · {} skipped · {} rolled back · {} need attention",
-        report.updated.len(),
-        report.skipped.len(),
-        report.rolled_back.len(),
-        report.needs_attention.len()
-    );
+    let counts = format!("{} updated · {} skipped · {} rolled back · {} need attention", report.updated.len(), report.skipped.len(), report.rolled_back.len(), report.needs_attention.len());
     let ids = |v: Vec<&String>| v.into_iter().cloned().collect::<Vec<_>>().join("\n");
     let rolled = ids(report.rolled_back.iter().map(|(i, _)| i).collect());
     let attention = ids(report.needs_attention.iter().map(|(i, _)| i).collect());
@@ -415,15 +408,7 @@ mod tests {
         assert!(!redact("https://evil.net/secret-token").contains("secret"));
         let cfg = NotifyConfig { discord_webhook: Some(GOOD.into()) };
         assert!(!format!("{cfg:?}").contains("abc_DEF"));
-        for e in [
-            NotifyError::InvalidUrl("x"),
-            NotifyError::Http(500),
-            NotifyError::RateLimited,
-            NotifyError::Timeout,
-            NotifyError::Network,
-            NotifyError::TooLarge,
-            NotifyError::Redirected,
-        ] {
+        for e in [NotifyError::InvalidUrl("x"), NotifyError::Http(500), NotifyError::RateLimited, NotifyError::Timeout, NotifyError::Network, NotifyError::TooLarge, NotifyError::Redirected] {
             assert!(!e.to_string().contains("abc_DEF"));
         }
     }
@@ -554,13 +539,7 @@ mod tests {
 
     #[test]
     fn rate_limit_is_retried_then_succeeds() {
-        let (url, _, count) = mock(Box::new(|i, _| {
-            if i < 2 {
-                http("429 Too Many Requests", "", "{\"retry_after\": 0.01}")
-            } else {
-                http("204 No Content", "", "")
-            }
-        }));
+        let (url, _, count) = mock(Box::new(|i, _| if i < 2 { http("429 Too Many Requests", "", "{\"retry_after\": 0.01}") } else { http("204 No Content", "", "") }));
         post(&url, &serde_json::json!({"a": 1}), &fast()).unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 3);
     }

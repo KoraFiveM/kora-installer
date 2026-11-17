@@ -111,4 +111,3 @@ pub fn run(o: &Options) -> i32 {
         Err(e) => fail(format!("{e}")),
     }
 }
-

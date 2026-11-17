@@ -18,12 +18,7 @@ pub struct NodeConfig {
 // Never print the token, even in a debug dump or a failed assertion.
 impl std::fmt::Debug for NodeConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeConfig")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("url", &self.url)
-            .field("token", &"<hidden>")
-            .finish()
+        f.debug_struct("NodeConfig").field("id", &self.id).field("name", &self.name).field("url", &self.url).field("token", &"<hidden>").finish()
     }
 }
 
@@ -47,17 +42,11 @@ fn is_private(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v) => {
             let o = v.octets();
-            v.is_loopback()
-                || v.is_private()
-                || v.is_link_local()
-                || (o[0] == 100 && (64..128).contains(&o[1]))
+            v.is_loopback() || v.is_private() || v.is_link_local() || (o[0] == 100 && (64..128).contains(&o[1]))
         }
         IpAddr::V6(v) => {
             let s = v.segments();
-            v.is_loopback()
-                || (s[0] & 0xfe00) == 0xfc00
-                || (s[0] & 0xffc0) == 0xfe80
-                || is_tailscale_v6(v)
+            v.is_loopback() || (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80 || is_tailscale_v6(v)
         }
     }
 }
@@ -75,12 +64,7 @@ fn host_is_private(host: &str) -> bool {
     }
     let l = h.to_ascii_lowercase();
     // Names that stay on the machine, the LAN or the tailnet; a name without dots is a LAN name.
-    l == "localhost"
-        || l.ends_with(".localhost")
-        || l.ends_with(".local")
-        || l.ends_with(".lan")
-        || l.ends_with(".ts.net")
-        || !l.contains('.')
+    l == "localhost" || l.ends_with(".localhost") || l.ends_with(".local") || l.ends_with(".lan") || l.ends_with(".ts.net") || !l.contains('.')
 }
 
 /// Accept only `http://` or `https://` addresses with a host, no login part, query or fragment.
@@ -101,16 +85,9 @@ pub fn check_url(raw: &str) -> Result<UrlCheck, String> {
         return Err("The address has no host name.".into());
     }
     if authority.contains('@') {
-        return Err(
-            "Leave user names and passwords out of the address; the token is entered separately."
-                .into(),
-        );
+        return Err("Leave user names and passwords out of the address; the token is entered separately.".into());
     }
-    if path.contains('?')
-        || path.contains('#')
-        || authority.contains(' ')
-        || raw.chars().any(|c| c.is_control() || c.is_whitespace())
-    {
+    if path.contains('?') || path.contains('#') || authority.contains(' ') || raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err("The address must be just the panel's web address, for example http://192.168.1.20:47120.".into());
     }
     // Host and optional port.
@@ -132,14 +109,8 @@ pub fn check_url(raw: &str) -> Result<UrlCheck, String> {
         }
     }
     let path = path.trim_end_matches('/');
-    let url = format!(
-        "{}://{authority}{path}",
-        if https { "https" } else { "http" }
-    );
-    Ok(UrlCheck {
-        url,
-        insecure: !https && !host_is_private(host),
-    })
+    let url = format!("{}://{authority}{path}", if https { "https" } else { "http" });
+    Ok(UrlCheck { url, insecure: !https && !host_is_private(host) })
 }
 
 /// Where the nodes live and how they are read and written. Cheap to construct.
@@ -163,31 +134,20 @@ impl NodeStore {
     pub fn load(&self) -> Result<Vec<NodeConfig>, String> {
         match fs::read_to_string(&self.path) {
             Ok(s) if s.trim().is_empty() => Ok(vec![]),
-            Ok(s) => serde_json::from_str::<File>(&s)
-                .map(|f| f.nodes)
-                .map_err(|_| {
-                    "The nodes file (hub.json) could not be read; fix or delete it.".to_string()
-                }),
+            Ok(s) => serde_json::from_str::<File>(&s).map(|f| f.nodes).map_err(|_| "The nodes file (hub.json) could not be read; fix or delete it.".to_string()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
             Err(e) => Err(format!("The nodes file could not be read ({e}).")),
         }
     }
 
     pub fn save(&self, nodes: &[NodeConfig]) -> Result<(), String> {
-        let text = serde_json::to_string_pretty(&File {
-            nodes: nodes.to_vec(),
-        })
-        .map_err(|e| e.to_string())?;
+        let text = serde_json::to_string_pretty(&File { nodes: nodes.to_vec() }).map_err(|e| e.to_string())?;
         if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir)
-                .map_err(|e| format!("The nodes file could not be saved ({e})."))?;
+            fs::create_dir_all(dir).map_err(|e| format!("The nodes file could not be saved ({e})."))?;
         }
         let tmp = self.path.with_extension("json.tmp");
-        let mut f =
-            open_private(&tmp).map_err(|e| format!("The nodes file could not be saved ({e})."))?;
-        f.write_all(text.as_bytes())
-            .and_then(|_| f.sync_all())
-            .map_err(|e| format!("The nodes file could not be saved ({e})."))?;
+        let mut f = open_private(&tmp).map_err(|e| format!("The nodes file could not be saved ({e})."))?;
+        f.write_all(text.as_bytes()).and_then(|_| f.sync_all()).map_err(|e| format!("The nodes file could not be saved ({e})."))?;
         drop(f);
         fs::rename(&tmp, &self.path).map_err(|e| {
             let _ = fs::remove_file(&tmp);
@@ -204,12 +164,7 @@ impl NodeStore {
         if nodes.iter().any(|n| n.url == url) {
             return Err("That node is already in the list.".into());
         }
-        let node = NodeConfig {
-            id: new_id(&nodes),
-            name: name.into(),
-            url: url.into(),
-            token: token.into(),
-        };
+        let node = NodeConfig { id: new_id(&nodes), name: name.into(), url: url.into(), token: token.into() };
         nodes.push(node.clone());
         self.save(&nodes)?;
         Ok(node)
@@ -250,21 +205,13 @@ fn new_id(existing: &[NodeConfig]) -> String {
 fn open_private(p: &Path) -> std::io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     let _ = fs::remove_file(p);
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(p)
+    fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(p)
 }
 
 // Windows: the file lives in the user's own profile folder, which other accounts cannot read by default.
 #[cfg(not(unix))]
 fn open_private(p: &Path) -> std::io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(p)
+    fs::OpenOptions::new().write(true).create(true).truncate(true).open(p)
 }
 
 #[cfg(test)]
@@ -273,37 +220,16 @@ mod tests {
 
     #[test]
     fn urls() {
-        assert_eq!(
-            check_url("http://192.168.1.5:47120/").unwrap(),
-            UrlCheck {
-                url: "http://192.168.1.5:47120".into(),
-                insecure: false
-            }
-        );
+        assert_eq!(check_url("http://192.168.1.5:47120/").unwrap(), UrlCheck { url: "http://192.168.1.5:47120".into(), insecure: false });
         assert!(!check_url("http://100.101.1.2:1").unwrap().insecure);
-        assert!(
-            !check_url("http://box.tail1234.ts.net:47120")
-                .unwrap()
-                .insecure
-        );
+        assert!(!check_url("http://box.tail1234.ts.net:47120").unwrap().insecure);
         assert!(!check_url("http://localhost:1").unwrap().insecure);
         assert!(!check_url("http://[::1]:1").unwrap().insecure);
         assert!(check_url("http://8.8.8.8:47120").unwrap().insecure);
         assert!(check_url("http://100.128.0.1").unwrap().insecure);
         assert!(check_url("http://panel.example.com").unwrap().insecure);
         assert!(!check_url("https://panel.example.com").unwrap().insecure);
-        for bad in [
-            "ftp://x",
-            "panel",
-            "http://",
-            "http://u:p@host",
-            "http://h/?a=1",
-            "http://h:99999",
-            "http://h:0",
-            "https://",
-            "javascript:alert(1)",
-            "http://a b",
-        ] {
+        for bad in ["ftp://x", "panel", "http://", "http://u:p@host", "http://h/?a=1", "http://h:99999", "http://h:0", "https://", "javascript:alert(1)", "http://a b"] {
             assert!(check_url(bad).is_err(), "{bad}");
         }
     }
@@ -321,10 +247,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(s.path()).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
+            assert_eq!(fs::metadata(s.path()).unwrap().permissions().mode() & 0o777, 0o600);
         }
         assert!(s.remove(&n.id).unwrap());
         assert!(!s.remove(&n.id).unwrap());

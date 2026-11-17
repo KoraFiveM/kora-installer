@@ -15,9 +15,7 @@ use crate::{blocking, ApiError, AppState};
 
 fn local_only(c: &Caller) -> Result<(), ApiError> {
     if c.remote {
-        Err(ApiError::forbidden(
-            "This can only be done on the computer that runs Kora, not over remote access.",
-        ))
+        Err(ApiError::forbidden("This can only be done on the computer that runs Kora, not over remote access."))
     } else {
         Ok(())
     }
@@ -44,10 +42,7 @@ fn view(st: &AppState) -> Value {
 
 /// `GET /remote`: `{enabled, enabled_by_flag, bind, port, tailnet_url, tailscale, tailscale_users: {login: role},
 /// allowed_hosts, allow_remote_destructive, users: [{name, role, created}], saved_to}`.
-pub async fn remote_get(
-    State(st): State<AppState>,
-    Extension(c): Extension<Caller>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn remote_get(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<Value>, ApiError> {
     local_only(&c)?;
     blocking(move || Ok(Json(view(&st)))).await
 }
@@ -64,11 +59,7 @@ pub struct RemoteSet {
 
 /// `PUT /remote`: any of `enabled`, `tailscale`, `tailscale_users`, `allowed_hosts`,
 /// `allow_remote_destructive` (what is left out stays as it is). Answers like `GET /remote`.
-pub async fn remote_set(
-    State(st): State<AppState>,
-    Extension(c): Extension<Caller>,
-    Json(body): Json<RemoteSet>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn remote_set(State(st): State<AppState>, Extension(c): Extension<Caller>, Json(body): Json<RemoteSet>) -> Result<Json<Value>, ApiError> {
     local_only(&c)?;
     if let Some(hosts) = &body.allowed_hosts {
         for h in hosts {
@@ -76,13 +67,8 @@ pub async fn remote_set(
         }
     }
     if let Some(users) = &body.tailscale_users {
-        if users
-            .keys()
-            .any(|k| k.trim().is_empty() || k.contains(char::is_whitespace))
-        {
-            return Err(ApiError::bad_request(
-                "A Tailscale login looks like name@example.com.",
-            ));
+        if users.keys().any(|k| k.trim().is_empty() || k.contains(char::is_whitespace)) {
+            return Err(ApiError::bad_request("A Tailscale login looks like name@example.com."));
         }
     }
     blocking(move || {
@@ -95,10 +81,7 @@ pub async fn remote_set(
                     cfg.tailscale = v;
                 }
                 if let Some(v) = body.tailscale_users {
-                    cfg.tailscale_users = v
-                        .into_iter()
-                        .map(|(k, r)| (k.trim().to_ascii_lowercase(), r))
-                        .collect();
+                    cfg.tailscale_users = v.into_iter().map(|(k, r)| (k.trim().to_ascii_lowercase(), r)).collect();
                 }
                 if let Some(v) = body.allowed_hosts {
                     let mut hosts: Vec<String> = Vec::new();
@@ -121,19 +104,10 @@ pub async fn remote_set(
 }
 
 /// `GET /users`: `{users: [{name, role, created}]}`.
-pub async fn users_list(
-    State(st): State<AppState>,
-    Extension(c): Extension<Caller>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn users_list(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<Value>, ApiError> {
     local_only(&c)?;
     blocking(move || {
-        let users: Vec<Value> = st
-            .remote
-            .config()
-            .users
-            .iter()
-            .map(|u| json!({"name": u.name, "role": u.role, "created": u.created}))
-            .collect();
+        let users: Vec<Value> = st.remote.config().users.iter().map(|u| json!({"name": u.name, "role": u.role, "created": u.created})).collect();
         Ok(Json(json!({ "users": users })))
     })
     .await
@@ -147,53 +121,27 @@ pub struct UserAdd {
 }
 
 /// `POST /users` `{name, role}` → 201 `{name, role, token}`. The token is shown this once.
-pub async fn user_add(
-    State(st): State<AppState>,
-    Extension(c): Extension<Caller>,
-    Json(body): Json<UserAdd>,
-) -> Result<Response, ApiError> {
+pub async fn user_add(State(st): State<AppState>, Extension(c): Extension<Caller>, Json(body): Json<UserAdd>) -> Result<Response, ApiError> {
     local_only(&c)?;
     valid_user_name(body.name.trim()).map_err(ApiError::bad_request)?;
     blocking(move || {
         let name = body.name.trim().to_string();
         let role = body.role;
-        let token = st
-            .remote
-            .update(|cfg| cfg.add_user(&name, role))
-            .map_err(|m| {
-                if m.starts_with("There is already") {
-                    ApiError::conflict(m)
-                } else {
-                    ApiError::internal(m)
-                }
-            })?;
-        Ok((
-            StatusCode::CREATED,
-            Json(json!({"name": name, "role": role, "token": token})),
-        )
-            .into_response())
+        let token = st.remote.update(|cfg| cfg.add_user(&name, role)).map_err(|m| if m.starts_with("There is already") { ApiError::conflict(m) } else { ApiError::internal(m) })?;
+        Ok((StatusCode::CREATED, Json(json!({"name": name, "role": role, "token": token}))).into_response())
     })
     .await
 }
 
 /// `DELETE /users/{name}` → 204. Their sessions stop working at once.
-pub async fn user_remove(
-    State(st): State<AppState>,
-    Extension(c): Extension<Caller>,
-    Path(name): Path<String>,
-) -> Result<Response, ApiError> {
+pub async fn user_remove(State(st): State<AppState>, Extension(c): Extension<Caller>, Path(name): Path<String>) -> Result<Response, ApiError> {
     local_only(&c)?;
     blocking(move || {
-        let removed = st
-            .remote
-            .update(|cfg| Ok(cfg.remove_user(&name)))
-            .map_err(ApiError::internal)?;
+        let removed = st.remote.update(|cfg| Ok(cfg.remove_user(&name))).map_err(ApiError::internal)?;
         if removed {
             Ok(StatusCode::NO_CONTENT.into_response())
         } else {
-            Err(ApiError::not_found(format!(
-                "There is no user named '{name}'."
-            )))
+            Err(ApiError::not_found(format!("There is no user named '{name}'.")))
         }
     })
     .await

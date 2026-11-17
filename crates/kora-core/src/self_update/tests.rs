@@ -257,10 +257,7 @@ fn a_stable_release_behind_many_pre_releases_is_still_found() {
 #[test]
 fn fetches_and_picks_from_the_releases_endpoint() {
     let m = Mock::start();
-    m.put(
-        "/repos/KoraFiveM/kora-installer/releases?per_page=30",
-        br#"[{"tag_name":"v0.2.2-rc1","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.2.1","assets":[]}]"#,
-    );
+    m.put("/repos/KoraFiveM/kora-installer/releases?per_page=30", br#"[{"tag_name":"v0.2.2-rc1","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.2.1","assets":[]}]"#);
     let r = fetch_releases(&m.src()).unwrap();
     assert!(matches!(decide(&v("0.2.0"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.1"));
     assert!(matches!(decide(&v("0.2.1-beta"), &r, None).unwrap(), Decision::Update(x) if x.tag_name == "v0.2.2-rc1"));
@@ -322,10 +319,7 @@ fn write_probe() {
 fn refresh_writes_the_cache_and_notice_follows() {
     let m = Mock::start();
     // This build is stable, so the release candidate listed first is not offered.
-    m.put(
-        "/repos/KoraFiveM/kora-installer/releases?per_page=30",
-        br#"[{"tag_name":"v7.0.0-rc1","prerelease":true,"assets":[]},{"tag_name":"v6.0.0","assets":[]}]"#,
-    );
+    m.put("/repos/KoraFiveM/kora-installer/releases?per_page=30", br#"[{"tag_name":"v7.0.0-rc1","prerelease":true,"assets":[]},{"tag_name":"v6.0.0","assets":[]}]"#);
     let d = tempfile::tempdir().unwrap();
     let cache = d.path().join("c").join("update-check.json");
     let src = m.src();

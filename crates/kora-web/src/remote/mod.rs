@@ -52,11 +52,7 @@ pub struct Identity {
 
 impl Identity {
     pub fn local() -> Self {
-        Self {
-            name: "local".into(),
-            provider: Provider::Local,
-            role: Role::Admin,
-        }
+        Self { name: "local".into(), provider: Provider::Local, role: Role::Admin }
     }
 }
 
@@ -73,11 +69,7 @@ pub struct Caller {
 
 impl Caller {
     pub fn local() -> Self {
-        Self {
-            remote: false,
-            peer: None,
-            identity: Some(Identity::local()),
-        }
+        Self { remote: false, peer: None, identity: Some(Identity::local()) }
     }
 }
 
@@ -155,10 +147,7 @@ impl Remote {
     }
 
     fn lock(&self) -> MutexGuard<'_, Store> {
-        let mut g = self
-            .store
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut g = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(p) = g.path.clone() {
             let now = stamp_of(&p);
             if now != g.stamp {
@@ -180,11 +169,7 @@ impl Remote {
     }
 
     pub fn path(&self) -> Option<PathBuf> {
-        self.store
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .path
-            .clone()
+        self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).path.clone()
     }
 
     pub fn enabled(&self) -> bool {
@@ -192,10 +177,7 @@ impl Remote {
     }
 
     /// Change the settings and save them (when there is a file). The change is not kept if saving fails.
-    pub fn update<R>(
-        &self,
-        f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>,
-    ) -> Result<R, String> {
+    pub fn update<R>(&self, f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>) -> Result<R, String> {
         let mut g = self.lock();
         let mut next = g.cfg.clone();
         let r = f(&mut next)?;
@@ -220,10 +202,7 @@ impl Remote {
     /// own Tailscale addresses (see [`is_self_ip`](Self::is_self_ip)).
     pub fn learn_self_names(&self) {
         let names = self.whois.self_names();
-        *self
-            .dynamic_hosts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = names;
+        *self.dynamic_hosts.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = names;
         if let Some(s) = self.whois.status() {
             self.set_self_ips(s.ips);
         }
@@ -231,18 +210,14 @@ impl Remote {
 
     /// This machine's own Tailscale addresses (kept up to date while the panel listens on Tailscale).
     pub fn set_self_ips(&self, ips: Vec<IpAddr>) {
-        *self.self_ips.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            ips.into_iter().map(|i| i.to_canonical()).collect();
+        *self.self_ips.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = ips.into_iter().map(|i| i.to_canonical()).collect();
     }
 
     /// Is `ip` one of this machine's own Tailscale addresses? Such a caller is a program on this computer
     /// (any account, a game server resource), not one of the owner's devices.
     pub fn is_self_ip(&self, ip: IpAddr) -> bool {
         let ip = ip.to_canonical();
-        self.self_ips
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(&ip)
+        self.self_ips.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&ip)
     }
 
     /// The panel now listens on Tailscale; `url` is what to open there.
@@ -255,22 +230,13 @@ impl Remote {
     }
 
     pub fn set_dynamic_hosts(&self, names: Vec<String>) {
-        *self
-            .dynamic_hosts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = names;
+        *self.dynamic_hosts.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = names;
     }
 
     /// Names allowed in the `Host` header besides the bound address: from the settings and tailscale.
     pub fn extra_hosts(&self) -> Vec<String> {
         let mut v = self.lock().cfg.allowed_hosts.clone();
-        v.extend(
-            self.dynamic_hosts
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .iter()
-                .cloned(),
-        );
+        v.extend(self.dynamic_hosts.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().cloned());
         v
     }
 
@@ -282,11 +248,7 @@ impl Remote {
             Provider::Token => {
                 let g = self.lock();
                 let u = g.cfg.user(name)?;
-                Some(Identity {
-                    name: u.name.clone(),
-                    provider,
-                    role: u.role,
-                })
+                Some(Identity { name: u.name.clone(), provider, role: u.role })
             }
             Provider::Tailscale => {
                 let g = self.lock();
@@ -294,11 +256,7 @@ impl Remote {
                     return None;
                 }
                 let role = g.cfg.tailscale_role(name)?;
-                Some(Identity {
-                    name: name.to_string(),
-                    provider,
-                    role,
-                })
+                Some(Identity { name: name.to_string(), provider, role })
             }
         }
     }
@@ -306,11 +264,7 @@ impl Remote {
     pub fn identity_for_token(&self, token: &str) -> Option<Identity> {
         let g = self.lock();
         let u = g.cfg.user_for_token(token)?;
-        Some(Identity {
-            name: u.name.clone(),
-            provider: Provider::Token,
-            role: u.role,
-        })
+        Some(Identity { name: u.name.clone(), provider: Provider::Token, role: u.role })
     }
 
     pub fn identity_for_tailscale(&self, login: &str) -> Option<Identity> {
@@ -353,8 +307,7 @@ pub fn extra_host_allowed(host: &str, names: &[String], port: u16) -> bool {
     })
 }
 
-pub const PLAIN_HTTP_WARNING: &str =
-    "Warning: remote access is on. Traffic to this panel is plain HTTP (not encrypted). \
+pub const PLAIN_HTTP_WARNING: &str = "Warning: remote access is on. Traffic to this panel is plain HTTP (not encrypted). \
 Only use it over a private network such as Tailscale or WireGuard, or through an SSH tunnel.";
 
 /// An address only a private network can reach: a private LAN range (`10/8`, `172.16/12`,
@@ -373,13 +326,7 @@ pub fn is_private_address(ip: IpAddr) -> bool {
 /// refused unless `allow_public` (`--allow-public`): the panel is plain HTTP, so on the internet the
 /// sign-in tokens could be read on the way. "All interfaces" also needs the names people will use,
 /// because the `Host` check cannot guess them.
-pub fn bind_plan(
-    bind: IpAddr,
-    remote_enabled: bool,
-    allow_public: bool,
-    cfg: &RemoteConfig,
-    learned_names: &[String],
-) -> Result<Vec<String>, String> {
+pub fn bind_plan(bind: IpAddr, remote_enabled: bool, allow_public: bool, cfg: &RemoteConfig, learned_names: &[String]) -> Result<Vec<String>, String> {
     if bind.to_canonical().is_loopback() {
         return Ok(Vec::new());
     }
@@ -423,11 +370,7 @@ mod tests {
             Err("no".into())
         }
         fn status(&self) -> Option<TsSelf> {
-            Some(TsSelf {
-                running: true,
-                ips: vec!["100.64.0.5".parse().unwrap()],
-                ..TsSelf::default()
-            })
+            Some(TsSelf { running: true, ips: vec!["100.64.0.5".parse().unwrap()], ..TsSelf::default() })
         }
     }
 
@@ -449,12 +392,8 @@ mod tests {
     #[test]
     fn loopback_binds_need_nothing() {
         let c = RemoteConfig::default();
-        assert!(bind_plan("127.0.0.1".parse().unwrap(), false, false, &c, &[])
-            .unwrap()
-            .is_empty());
-        assert!(bind_plan("::1".parse().unwrap(), false, false, &c, &[])
-            .unwrap()
-            .is_empty());
+        assert!(bind_plan("127.0.0.1".parse().unwrap(), false, false, &c, &[]).unwrap().is_empty());
+        assert!(bind_plan("::1".parse().unwrap(), false, false, &c, &[]).unwrap().is_empty());
     }
 
     #[test]
@@ -464,20 +403,12 @@ mod tests {
         assert!(e.contains("--remote"), "{e}");
         let w = bind_plan("100.64.0.5".parse().unwrap(), true, false, &c, &[]).unwrap();
         assert!(w[0].contains("plain HTTP") && w[0].contains("Tailscale"));
-        assert_eq!(
-            w.len(),
-            1,
-            "a user exists, so no 'nobody can sign in' warning"
-        );
+        assert_eq!(w.len(), 1, "a user exists, so no 'nobody can sign in' warning");
     }
 
     #[test]
     fn warns_when_nobody_can_sign_in() {
-        let w = bind_plan("100.64.0.5".parse().unwrap(), true, false,
-            &RemoteConfig::default(),
-            &[],
-        )
-        .unwrap();
+        let w = bind_plan("100.64.0.5".parse().unwrap(), true, false, &RemoteConfig::default(), &[]).unwrap();
         assert!(w.iter().any(|m| m.contains("kora panel user add")));
     }
 
@@ -515,11 +446,7 @@ mod tests {
 
     #[test]
     fn extra_hosts_need_the_panel_port() {
-        let names = vec![
-            "box.tail.ts.net".to_string(),
-            "100.64.0.9:47120".to_string(),
-            "fd7a::1".to_string(),
-        ];
+        let names = vec!["box.tail.ts.net".to_string(), "100.64.0.9:47120".to_string(), "fd7a::1".to_string()];
         assert!(extra_host_allowed("box.tail.ts.net:47120", &names, 47120));
         assert!(extra_host_allowed("BOX.tail.ts.net:47120", &names, 47120));
         assert!(!extra_host_allowed("box.tail.ts.net:9999", &names, 47120));

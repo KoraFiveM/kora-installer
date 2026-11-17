@@ -23,16 +23,11 @@ static CURRENT: Mutex<Option<Monitor>> = Mutex::new(None);
 
 /// Make `m` the monitor the handlers read (`None` removes it). Tests install one with fake probes.
 pub fn install(m: Option<Monitor>) {
-    *CURRENT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = m;
+    *CURRENT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = m;
 }
 
 fn current() -> Option<Monitor> {
-    CURRENT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+    CURRENT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 /// Start the real sampler (every 15 s) and install it. Returns the handle so the caller can stop it.
@@ -48,24 +43,15 @@ pub struct MetricsQuery {
     range: Option<String>,
 }
 
-pub async fn metrics_get(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Query(q): Query<MetricsQuery>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn metrics_get(State(st): State<AppState>, Path(s): Path<String>, Query(q): Query<MetricsQuery>) -> Result<Json<Value>, ApiError> {
     let range = match q.range.as_deref() {
         None => Range::Hour,
-        Some(r) => Range::parse(r)
-            .ok_or_else(|| ApiError::bad_request("The range must be 1h, 6h or 24h."))?,
+        Some(r) => Range::parse(r).ok_or_else(|| ApiError::bad_request("The range must be 1h, 6h or 24h."))?,
     };
     blocking(move || {
         let e = st.entry(&s)?;
-        let view = current()
-            .map(|m| m.metrics(&e, range, monitor::now_unix()))
-            .unwrap_or_default();
-        Ok(Json(
-            json!({"samples": view.samples, "latest": view.latest}),
-        ))
+        let view = current().map(|m| m.metrics(&e, range, monitor::now_unix())).unwrap_or_default();
+        Ok(Json(json!({"samples": view.samples, "latest": view.latest})))
     })
     .await
 }
@@ -76,19 +62,14 @@ pub async fn alerts_list() -> Json<Value> {
 }
 
 pub async fn alerts_ack(Path(id): Path<String>) -> Result<Response, ApiError> {
-    let id: u64 = id
-        .parse()
-        .map_err(|_| ApiError::bad_request("That is not an alert number."))?;
+    let id: u64 = id.parse().map_err(|_| ApiError::bad_request("That is not an alert number."))?;
     match current() {
         Some(m) if m.ack(id) => Ok(StatusCode::NO_CONTENT.into_response()),
         _ => Err(ApiError::not_found("There is no alert with that number.")),
     }
 }
 
-pub async fn alert_settings_get(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn alert_settings_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         Ok(Json(alerts::settings_view(&alerts::load_settings(&e.dir))))
@@ -96,12 +77,7 @@ pub async fn alert_settings_get(
     .await
 }
 
-pub async fn alert_settings_set(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn alert_settings_set(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let cur = alerts::load_settings(&e.dir);
@@ -112,10 +88,7 @@ pub async fn alert_settings_set(
             // (the flag makes every send check the address again).
             next.webhook_set_remotely = caller.remote && next.webhook_url.is_some();
             if next.webhook_set_remotely {
-                alerts::public_webhook(next.webhook_url.as_deref().unwrap_or(""), &|h, p| {
-                    (h, p).to_socket_addrs().map(Iterator::collect)
-                })
-                .map_err(ApiError::bad_request)?;
+                alerts::public_webhook(next.webhook_url.as_deref().unwrap_or(""), &|h, p| (h, p).to_socket_addrs().map(Iterator::collect)).map_err(ApiError::bad_request)?;
             }
         }
         alerts::save_settings(&e.dir, &next).map_err(ApiError::internal)?;

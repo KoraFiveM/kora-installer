@@ -116,8 +116,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::BranchBulkPreview => on_op(op, handlers::branches::bulk_preview),
         Op::BranchBulkApply => on_op(op, handlers::branches::bulk_apply),
         // The zip is the request body: streamed to a file, so the panel-wide 1 MiB limit does not apply.
-        Op::AssetInspect => on_op(op, handlers::assets::asset_inspect)
-            .layer(DefaultBodyLimit::max(handlers::assets::UPLOAD_LIMIT as usize)),
+        Op::AssetInspect => on_op(op, handlers::assets::asset_inspect).layer(DefaultBodyLimit::max(handlers::assets::UPLOAD_LIMIT as usize)),
         Op::AssetImport => on_op(op, handlers::assets::asset_import),
         Op::AssetRemove => on_op(op, handlers::assets::asset_remove),
         Op::AssetDownloads => on_op(op, handlers::assets::asset_downloads),
