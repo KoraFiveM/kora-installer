@@ -40,7 +40,7 @@ async function defaultBody(): Promise<InstallRequest> {
   return {
     mode: 'production', name: d.name, dir: d.dir, hostname: d.hostname, license_key: KEY, ports: d.ports, txadmin_public: false,
     artifact_url: null, game_build: null, resources: 'all', db: 'install_if_missing', service: true, firewall: true, github_owner: null,
-    dry_run: false, db_admin: null, start: true, cfx_identifier: null, app: { desktop_shortcut: true },
+    dry_run: false, db_admin: null, start: true, cfx_identifier: null,
   }
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# basics: --version, friendly no-TTY error, dry-run plan, port handling, github owners without gh login.
+# basics: --version, the removed --code flag, dry-run plan, port handling, github owners without gh login.
 . "$(dirname "$0")/common.sh"
 rm -rf "$SMOKE_ROOT"; mkdir -p "$SMOKE_ROOT"
 
@@ -8,10 +8,10 @@ kora --version
 assert_eq "exit 0" 0 "$CODE"
 assert_matches "prints 'kora X.Y.Z'" "$OUT" '^kora [0-9]+\.[0-9]+\.[0-9]+'
 
-step "2. kora install with no terminal: friendly error, exit 2"
-kora install
+step "2. kora install --code: removed, friendly error, exit 2"
+kora install --code KORA-0000-0000
 assert_eq "exit 2" 2 "$CODE"
-assert_contains "explains that a terminal is needed" "$OUT" "needs an interactive terminal"
+assert_contains "explains that setup codes are gone" "$OUT" "setup codes were removed"
 
 step "3. kora status with nothing registered"
 kora status

@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::app_install::AppChoice;
 use crate::artifacts::{self, Platform};
 use crate::firewall::ports::{self, PortProber, SystemProber};
 use crate::firewall::PortRequest;
@@ -125,6 +124,7 @@ pub struct WireDbAdmin {
     pub password: Option<String>,
 }
 
+/// Retired in 0.7.0: still accepted from an old client, never used.
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct WireApp {
     #[serde(default)]
@@ -342,14 +342,8 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         dry_run: w.dry_run,
         db_admin,
         start: w.start,
-        // Like the CLI: a dry run lists nothing it would not change anyway.
-        app: if w.dry_run {
-            None
-        } else {
-            w.app.map(|a| AppChoice {
-                desktop_shortcut: a.desktop_shortcut,
-            })
-        },
+        // Retired in 0.7.0: an old client may still send `app`; it is ignored.
+        app: None,
     })
 }
 
@@ -377,7 +371,6 @@ pub fn request_json(r: &InstallRequest) -> Value {
         "firewall": r.firewall,
         "github_owner": r.github_owner,
         "start": r.start,
-        "app": r.app.map(|a| json!({"desktop_shortcut": a.desktop_shortcut})),
     })
 }
 
@@ -730,11 +723,6 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
         v.extend(["--github-owner".to_string(), o.clone()]);
     }
     v.push(if req.start { "--start" } else { "--no-start" }.into());
-    match req.app {
-        None => v.push("--no-app".into()),
-        Some(a) if !a.desktop_shortcut => v.push("--no-desktop-shortcut".into()),
-        Some(_) => {}
-    }
     v.push("--yes".into());
     v
 }

@@ -207,7 +207,7 @@ fn install_body(dir: &str) -> Value {
         "artifact_url": null, "game_build": null, "resources": "all", "db": "use_existing",
         "service": true, "firewall": false, "github_owner": null, "dry_run": false,
         "db_admin": {"host": "127.0.0.1", "port": 3306, "user": "root", "password": DBPASS},
-        "start": false, "app": null
+        "start": false
     })
 }
 
@@ -219,10 +219,12 @@ async fn without_a_helper_everything_still_answers_needs_elevation() {
     let (s, j) = r.call("GET", "/system", None).await;
     assert_eq!((s, &j["helper_installed"]), (200, &json!(false)));
 
-    let (s, j) = r.call("PUT", "/app", Some(json!({"desktop_shortcut": false, "force": true}))).await;
+    // "Tidy up old shortcuts": the per-user half is done, the old copy needs the command.
+    r.maint.app.lock().unwrap().legacy = true;
+    let (s, j) = r.call("PUT", "/app", Some(json!({"desktop_shortcut": false}))).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
-    assert_eq!(j["error"]["command"], json!(["kora", "app", "install", "--yes", "--no-desktop-shortcut", "--force"]));
-    assert!(j["error"]["message"].as_str().unwrap().contains("Installing the Kora app"));
+    assert_eq!(j["error"]["command"], json!(["kora", "app", "uninstall", "--yes"]));
+    assert!(j["error"]["message"].as_str().unwrap().contains("old copy of Kora"));
 
     let (s, j) = r.call("DELETE", "/app", None).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
@@ -241,7 +243,7 @@ async fn without_a_helper_everything_still_answers_needs_elevation() {
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
     assert!(!j.to_string().contains("SECRETLICENCE") && !j.to_string().contains(DBPASS));
     assert_eq!(*r.env.runs.lock().unwrap(), 0);
-    assert!(r.maint.calls().is_empty());
+    assert_eq!(r.maint.calls(), ["app_install shortcut=false force=false dry=false"], "only the per-user shortcuts, which need no rights");
     set_helper_override(None);
 }
 
@@ -259,15 +261,16 @@ async fn system_reports_the_helper() {
 async fn app_install_and_removal_run_through_the_helper() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h.clone())).await;
+    r.maint.app.lock().unwrap().legacy = true;
     let (s, j) = r.call("PUT", "/app", Some(json!({"desktop_shortcut": false}))).await;
     assert_eq!(s, 200, "{j}");
-    assert!(j["message"].as_str().unwrap().contains("installed"));
+    assert!(j["message"].as_str().unwrap().contains("old copy"));
     let (s, j) = r.call("DELETE", "/app", None).await;
     assert_eq!(s, 200, "{j}");
     let calls = h.calls();
-    assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("app", vec!["install".to_string(), "--yes".into(), "--no-desktop-shortcut".into()]));
+    assert_eq!((calls[0].0.as_str(), calls[0].1.clone()), ("app", vec!["uninstall".to_string(), "--yes".into()]));
     assert_eq!((calls[1].0.as_str(), calls[1].1.clone()), ("uninstall", vec!["--app".to_string(), "--yes".into()]));
-    assert!(r.maint.calls().is_empty(), "the panel itself changed nothing");
+    assert_eq!(r.maint.calls(), ["app_install shortcut=false force=false dry=false"], "the panel only made the per-user shortcuts; the helper removed the old copy");
     set_helper_override(None);
 }
 
@@ -322,6 +325,7 @@ async fn the_schedule_is_changed_by_the_helper_not_the_panel() {
 async fn a_failing_helper_run_is_an_error_not_a_success() {
     let h = FakeHelper::new(7);
     let r = rig(Some(h)).await;
+    r.maint.app.lock().unwrap().legacy = true;
     let (s, j) = r.call("PUT", "/app", Some(json!({}))).await;
     assert_eq!(s, 422, "{j}");
     let m = j["error"]["message"].as_str().unwrap();
@@ -334,6 +338,7 @@ async fn a_helper_that_vanishes_falls_back_to_the_command() {
     let mut h = FakeHelper::new(0);
     Arc::get_mut(&mut h).unwrap().vanish = true;
     let r = rig(Some(h)).await;
+    r.maint.app.lock().unwrap().legacy = true;
     let (s, j) = r.call("PUT", "/app", Some(json!({}))).await;
     assert_eq!((s, j["error"]["code"].as_str()), (403, Some("needs_elevation")));
     set_helper_override(None);

@@ -22,7 +22,7 @@ reasonable time to release a fix before you disclose publicly.
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
   `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - Licence keys, database passwords and webhook addresses are accepted but never returned.
-- The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). Privileged actions are a command shown to you, or a
+- The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, or a
   helper (`kora helper`, Linux) that accepts only Kora's fixed list of privileged actions and checks the calling user.
 - Remote access (`--bind <ip> --remote`) is off by default and uses plain HTTP: use Tailscale, WireGuard or an SSH tunnel, never
   the open internet. Roles are viewer / operator / admin. Delete, uninstall and console input are disabled for remote sessions unless

@@ -27,8 +27,6 @@ export interface WizardForm {
   firewall: boolean
   txPublic: boolean
   service: boolean
-  app: boolean
-  desktopShortcut: boolean
   license: string
   githubOwner: string
   /** What the person typed in the Cfx.re step. */
@@ -83,7 +81,7 @@ export function initialForm(d: InstallDefaults): WizardForm {
     resourcesAll: true, resourceIds: [],
     // Works on a clean machine: uses a database server that is already there, installs MariaDB only when none is found.
     db: 'install_if_missing', dbCustom: false, dbUser: '', dbPass: '', dbPass2: '', dbHost: '127.0.0.1', dbPort: '3306',
-    firewall: true, txPublic: false, service: true, app: true, desktopShortcut: true,
+    firewall: true, txPublic: false, service: true,
     license: '', githubOwner: '', cfxUsername: '', cfxFound: null,
   }
 }
@@ -114,7 +112,7 @@ export function folderFor(base: string, name: string): string {
   return joinPath(base, slug(name) || 'my-server')
 }
 
-export function buildRequest(f: WizardForm, opts: { appSupported?: boolean; artifactUrl?: string | null } = {}): InstallRequest {
+export function buildRequest(f: WizardForm, opts: { artifactUrl?: string | null } = {}): InstallRequest {
   const gb = f.gameBuild.trim()
   return {
     mode: f.mode,
@@ -135,7 +133,6 @@ export function buildRequest(f: WizardForm, opts: { appSupported?: boolean; arti
     db_admin: f.db !== 'skip' && f.dbCustom ? { host: f.dbHost.trim(), port: Number(f.dbPort), user: f.dbUser.trim(), password: f.dbPass } : null,
     start: true,
     cfx_identifier: f.cfxFound?.identifier ?? null,
-    app: opts.appSupported && f.app ? { desktop_shortcut: f.desktopShortcut } : null,
   }
 }
 

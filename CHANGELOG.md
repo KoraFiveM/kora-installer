@@ -5,6 +5,20 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **The web panel is the only interface.** Running `kora` (typed, double-clicked or from a shortcut) makes sure the background panel runs and opens your browser at it, and never asks for administrator rights. On a computer with no screen (SSH) it prints the sign-in link, a ready-to-paste `ssh -L` command and the Tailscale option instead. If the panel is already running it is just opened; if the port is taken the next free one is used; if no background service is possible it runs in that window. Started with `sudo` (Linux) it runs again as the person who typed `sudo`; from an administrator window or a root shell it opens a running panel or explains what to do.
+- `kora manager` and `kora install` with no options are now the same as `kora` (`kora install` opens the install page). `kora install` with options is unchanged: the scriptable installer.
+- With no servers yet, the panel opens straight into the install wizard (once per browser tab; "Servers" still shows the empty list with "Add an existing server").
+- The headless install's default folder on Windows is `C:\Kora\<name>`, the same as in the panel (it used to be `%USERPROFILE%\kora\<name>`).
+- The install scripts make per-user shortcuts that open the panel: Start Menu and Desktop on Windows (no administrator rights, not "Run as administrator"), a launcher in the applications menu on Linux desktops (no terminal window). `KORA_NO_SHORTCUTS=1` / `-NoShortcuts` skips them. `kora app install` makes the same shortcuts.
+- The server install no longer adds the machine-wide "Kora app" in `%ProgramFiles%` / `/opt/kora`, and the install options for it are gone from the wizard (`--no-app` and `--no-desktop-shortcut` are still accepted and ignored).
+
+### Added
+- **Tidy up old shortcuts.** When an earlier Kora left its machine-wide app and administrator shortcuts behind, Settings (and a notice on the servers screen) offers one click to make the new shortcuts first and then remove the old copy. Removing it needs administrator rights, so the panel shows the command to run (`kora app uninstall --yes`) or uses the helper. `kora app status` shows what is found.
+
+### Removed
+- The terminal screens (the `kora-tui` crate: install wizard and server manager). Everything they did is in the panel or the command line.
+
 ## [0.6.5] - 2026-11-17
 
 ### Added

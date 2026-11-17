@@ -271,7 +271,8 @@ export const api = {
   },
   app: {
     status: () => get<T.AppStatus>('/app'),
-    install: (body: { desktop_shortcut: boolean; force: boolean; dry_run: boolean }) => put<{ message: string }>('/app', body),
+    /** Make the per-user shortcuts, then remove the old machine-wide copy ("Tidy up old shortcuts"). */
+    install: (body: { desktop_shortcut: boolean; dry_run: boolean }) => put<{ message: string }>('/app', body),
     uninstall: (dryRun = false) => del<{ message: string }>('/app', { dry_run: dryRun }),
   },
   uninstall: {

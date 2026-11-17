@@ -1,7 +1,8 @@
 # Kora Installer
 
-Kora Installer (`kora`) sets up and runs a [Kora](https://koraframe.work) FiveM server for you on Windows or Linux. One
-guided wizard installs the server files, database, resources and services, and starts the server.
+Kora Installer (`kora`) sets up and runs a [Kora](https://koraframe.work) FiveM server for you on Windows or Linux. Its
+web panel opens in your browser and walks you through installing the server files, database, resources and services,
+then starts the server and lets you manage it.
 
 Documentation: <https://docs.koraframe.work/guides/installer/overview>
 
@@ -9,14 +10,25 @@ Documentation: <https://docs.koraframe.work/guides/installer/overview>
 
 ## Kora Panel
 
-New in 0.4.0: run `kora panel` and manage your servers in the browser. It installs servers (the same wizard as
-`kora install`), starts, stops and updates them, shows the console and logs, and handles resources, schedules and
-notifications. It listens on `127.0.0.1` only (port 47120, or the next free one up to 47140 when something else uses it; `--port` changes it) and signs you in with a one-time link.
-On a server without a screen, `kora panel --tailscale` opens it to your own devices over [Tailscale](https://tailscale.com)
-(you sign in with your Tailscale account: no link or tunnel); without Tailscale, `kora panel --no-open` prints the link
-and an `ssh -L` tunnel command.
+The panel is Kora's only interface, and it is what "the Kora app" is: a page in your browser, plus a Start Menu / desktop
+shortcut (a launcher in the applications menu on Linux) that opens it. Run `kora` (or double-click the shortcut): Kora
+makes sure the panel is running in the background and opens your browser at it. With no servers yet it opens straight into
+the install wizard. Nothing asks for administrator rights; `kora` never elevates, and the panel runs as you. When an
+action does need them (services, firewall rules, installing MariaDB) the panel shows the exact command to run as
+administrator.
 
-Guide: [docs/panel.md](docs/panel.md). The terminal wizard (`kora install`) and manager (`kora manager`) are unchanged.
+The panel installs servers, starts, stops and updates them, shows the console and logs, and handles resources, schedules
+and notifications. It listens on `127.0.0.1` only (port 47120, or the next free one up to 47140; `--port` changes it) and
+signs you in with a one-time link.
+On a server without a screen (over SSH), `kora` prints the sign-in link and an `ssh -L` tunnel command to run on your own
+computer first. `kora panel --tailscale` instead opens it to your own devices over [Tailscale](https://tailscale.com)
+(you sign in with your Tailscale account: no link or tunnel).
+
+`kora manager` and `kora install` (with no options) are the same as `kora`; `kora install` opens the install page.
+`kora install` with options stays the scriptable, non-interactive installer. The terminal screens (TUI) of earlier
+versions are gone: everything they did is in the panel.
+
+Guide: [docs/panel.md](docs/panel.md).
 
 ## Install
 
@@ -32,16 +44,17 @@ Windows 10/11 or Server 2019+ (PowerShell):
 irm https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.ps1 | iex
 ```
 
-When the script finishes, Kora Panel starts by itself and opens in your browser. It runs in the background
+The script also makes a Start Menu and Desktop shortcut on Windows (a launcher in the applications menu on Linux
+desktops); they are yours only, no administrator rights, and open the panel. `KORA_NO_SHORTCUTS=1` (or `-NoShortcuts`)
+skips them. When the script finishes, Kora Panel starts by itself and opens in your browser. It runs in the background
 (a systemd user service on Linux, a sign-in entry on Windows), so it keeps watching your servers and comes back after
 a restart. The sign-in link is always printed too. On a server with no screen (over SSH) nothing opens. If Tailscale runs there, the script
 offers to open the panel to your own Tailscale devices (`KORA_TAILSCALE=1` says yes in advance); otherwise it prints
 the link and an `ssh -L` command to run on your own computer first. Show the link again with
 `kora panel --print-link`; restart the background panel with `kora panel restart`; stop and remove it with `kora panel --remove-service`. If the panel
 cannot start (for example under `sudo` without a user session), the install still finishes and tells you to run
-`kora panel` yourself. To only install the program, set `KORA_NO_LAUNCH=1` (Linux: `curl ... | KORA_NO_LAUNCH=1 sh`;
-Windows: `$env:KORA_NO_LAUNCH=1` before `irm ... | iex`, or `-NoLaunch`). Prefer the terminal? `kora install` is the
-terminal wizard.
+`kora` yourself. To only install the program, set `KORA_NO_LAUNCH=1` (Linux: `curl ... | KORA_NO_LAUNCH=1 sh`;
+Windows: `$env:KORA_NO_LAUNCH=1` before `irm ... | iex`, or `-NoLaunch`). Open Kora again any time with `kora` or the shortcut.
 
 The scripts download over https only, check the download's SHA-256, install `kora` for your user (no administrator rights
 needed for this step) and keep the previous version as `kora.previous`. They install the newest stable release (never a
@@ -49,9 +62,9 @@ pre-release or a draft); see the [Releases page](https://github.com/KoraFiveM/ko
 `KORA_VERSION=vX.Y.Z` (or `-Version` on Windows) picks a release, pre-releases included; `KORA_PRERELEASE=1`
 (or `-Prerelease`) takes the newest release even if it is a pre-release; `KORA_RELEASE_BASE` changes the download address.
 
-## What the wizard does
+## What the install wizard does
 
-1. **Welcome:** choose the guided or advanced questions, then production or development.
+1. **Welcome:** choose the short guided questions or every step, then production or development.
 2. **Choices:** server name and folder, your Cfx.re licence key, ports, which resources to install.
 3. **Checks:** free disk space and port conflicts (with next-free-port suggestions) before anything is changed.
 4. **Install:** downloads and verifies FXServer, sets up the database, clones/installs resources, creates the service and firewall rules.
@@ -116,12 +129,11 @@ built with the UI. See [web/README.md](web/README.md) for UI development (a mock
 | Crate | Purpose |
 |---|---|
 | `crates/kora-core` | the engine: step runner, installer, catalog, git, database, artifacts, txAdmin, services, firewall, updates |
-| `crates/kora-tui` | the ratatui wizard and screens |
 | `crates/kora-web` | the Kora Panel web server (axum) and the embedded UI |
 | `crates/kora-cli` | the `kora` binary (command line) |
 | `web/` | the panel's browser UI (Vite, React, TypeScript, Tailwind); built in CI and embedded |
 
-The CLI, the terminal screens and the panel all reach the engine through one shared interface (`kora_core::api`), so they cannot drift apart.
+The CLI and the panel both reach the engine through one shared interface (`kora_core::api`), so they cannot drift apart.
 
 ```sh
 cargo test --workspace --locked

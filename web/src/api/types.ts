@@ -181,7 +181,6 @@ export interface InstallRequest {
   dry_run: boolean
   db_admin: DbAdmin | null
   start: boolean
-  app: { desktop_shortcut: boolean } | null
   /** Cfx.re account that becomes the txAdmin admin, e.g. `fivem:4465268`. Null = a generated local admin. */
   cfx_identifier: string | null
 }
@@ -458,12 +457,18 @@ export interface SelfUpdateInfo {
   versions: string[]
 }
 export interface AppStatus {
+  /** The OLD machine-wide Kora app (Program Files, /opt/kora) is installed. */
   installed: boolean
   version: string | null
   path: string | null
   desktop_shortcut: boolean
-  /** The Kora app only exists on Windows. */
   supported: boolean
+  /** The old app, or an old administrator shortcut, is still here: offer "Tidy up old shortcuts". */
+  legacy: boolean
+  /** What tidying up would remove, one plain sentence each. */
+  legacy_items: string[]
+  /** The per-user shortcut that opens the panel is in place. */
+  shortcuts: boolean
 }
 
 export type UninstallItemKind = 'system' | 'folder' | 'database' | 'app'

@@ -4,8 +4,8 @@ Kora installer and server manager
 Usage: kora [OPTIONS] [COMMAND]
 
 Commands:
-  install        Install a new Kora server (interactive TUI, or headless with options)
-  manager        Open the multi-server manager
+  install        Install a new Kora server. With no options this opens the panel's install page in your browser; with options it installs without asking (for scripts)
+  manager        Open Kora Panel in your browser (the same as running `kora` with nothing after it)
   panel          Open the Kora Panel: install, manage and monitor servers in your web browser (this computer only unless remote access is set up)
   update         Update a server: preview, snapshot, apply and roll back (`--auto` is for schedulers)
   add-resources  Add compatibility, bridge or creator resources (or any catalog resource) to an installed server
@@ -15,7 +15,7 @@ Commands:
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
-  app            The Kora app: the `kora` command / Start Menu shortcut that reopens the manager
+  app            The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
   github         GitHub helpers for development mode
   start          Start a server's background service
   stop           Stop a server's background service
@@ -34,7 +34,7 @@ Options:
           Print version
 
 ===== kora install =====
-Install a new Kora server (interactive TUI, or headless with options)
+Install a new Kora server. With no options this opens the panel's install page in your browser; with options it installs without asking (for scripts)
 
 Usage: kora install [OPTIONS]
 
@@ -43,7 +43,7 @@ Options:
           Server name (display + registry name)
 
       --dir <DIR>
-          Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: %USERPROFILE%\kora\<name>)
+          Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: C:\Kora\<name>, the same as in the panel)
 
       --mode <MODE>
           prod = pinned release clones, dev = forks on your GitHub account
@@ -111,12 +111,6 @@ Options:
       --dry-run
           Show the full plan and change nothing
 
-      --no-app
-          Do not install the Kora app (the `kora` command and Start Menu shortcut) next to the server
-
-      --no-desktop-shortcut
-          With the Kora app: no desktop shortcut (Windows)
-
       --auto-ports
           If a port is in use, silently use the next free one and say what changed
 
@@ -136,7 +130,7 @@ Options:
           Print help
 
 ===== kora manager =====
-Open the multi-server manager
+Open Kora Panel in your browser (the same as running `kora` with nothing after it)
 
 Usage: kora manager [OPTIONS]
 
@@ -748,14 +742,14 @@ Options:
           Print help
 
 ===== kora app =====
-The Kora app: the `kora` command / Start Menu shortcut that reopens the manager
+The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
 
 Usage: kora app [OPTIONS] <COMMAND>
 
 Commands:
-  install    Install or update the Kora app (idempotent)
-  status     Show whether the Kora app is installed (`key: value` lines)
-  uninstall  Remove the Kora app. Servers and databases are never touched
+  install    Make the Kora shortcuts that open the panel (per user, no administrator rights; idempotent)
+  status     Show the shortcuts and whether the old machine-wide app is still here (`key: value` lines)
+  uninstall  Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights only when there is something to remove. Servers and databases are never touched
 
 Options:
       --no-elevate
@@ -765,19 +759,16 @@ Options:
           Print help
 
 ===== kora app install =====
-Install or update the Kora app (idempotent)
+Make the Kora shortcuts that open the panel (per user, no administrator rights; idempotent)
 
 Usage: kora app install [OPTIONS]
 
 Options:
   -y, --yes
-          Do not ask (nothing is asked today; accepted for scripts)
+          Do not ask (nothing is asked; accepted for scripts)
 
       --no-desktop-shortcut
           No desktop shortcut (Windows)
-
-      --force
-          Replace a newer installed copy with this program
 
       --dry-run
           List every change and make none
@@ -789,7 +780,7 @@ Options:
           Print help
 
 ===== kora app status =====
-Show whether the Kora app is installed (`key: value` lines)
+Show the shortcuts and whether the old machine-wide app is still here (`key: value` lines)
 
 Usage: kora app status [OPTIONS]
 
@@ -801,7 +792,7 @@ Options:
           Print help
 
 ===== kora app uninstall =====
-Remove the Kora app. Servers and databases are never touched
+Remove the OLD machine-wide Kora app (and its administrator shortcuts). Needs administrator rights only when there is something to remove. Servers and databases are never touched
 
 Usage: kora app uninstall [OPTIONS]
 

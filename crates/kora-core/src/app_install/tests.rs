@@ -253,7 +253,7 @@ fn uninstall_removes_only_what_the_app_made() {
     f.files.insert(PathBuf::from(r"C:\Program Files\Kora\bin\0.2.0-abc\kora.exe"), b"service copy".to_vec());
     f.files.insert(PathBuf::from(r"D:\servers\alpha\server.cfg"), b"cfg".to_vec());
     let other = PathBuf::from(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Other.lnk");
-    f.shortcuts.insert(other.clone(), ShortcutSpec { path: other.clone(), target: r"C:\other.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false });
+    f.shortcuts.insert(other.clone(), ShortcutSpec { path: other.clone(), target: r"C:\other.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
     f.path = Some(format!("{};C:\\Program Files\\Kora Tools", f.path.unwrap()));
 
     let out = uninstall_app_with(&mut f, &l, false).unwrap();
@@ -273,7 +273,7 @@ fn uninstall_leaves_a_foreign_shortcut_named_kora() {
     let l = win_layout();
     let mut f = Fake { path: Some(String::new()), ..Fake::default() };
     let p = l.start_menu.clone().unwrap();
-    f.shortcuts.insert(p.clone(), ShortcutSpec { path: p.clone(), target: r"C:\games\kora-game.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false });
+    f.shortcuts.insert(p.clone(), ShortcutSpec { path: p.clone(), target: r"C:\games\kora-game.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
     let out = uninstall_app_with(&mut f, &l, false).unwrap();
     assert!(f.shortcuts.contains_key(&p));
     assert!(out.iter().any(|s| s.contains("left alone")));
@@ -474,4 +474,193 @@ fn a_leftover_temp_file_gets_the_requested_mode() {
     RealSys::new().write(&p, b"{}", 0o600).unwrap();
     assert_eq!(std::fs::read(&p).unwrap(), b"{}");
     assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Per-user shortcuts (0.7.0) and finding the old machine-wide app
+// ---------------------------------------------------------------------------------------------
+
+mod per_user {
+    use super::*;
+    use crate::app_install::user::*;
+
+    fn win_user() -> UserLayout {
+        let env = |k: &str| -> Option<OsString> {
+            Some(match k {
+                "LOCALAPPDATA" => r"C:\Users\Sam\AppData\Local".into(),
+                "APPDATA" => r"C:\Users\Sam\AppData\Roaming".into(),
+                "USERPROFILE" => r"C:\Users\Sam".into(),
+                _ => return None,
+            })
+        };
+        UserLayout::resolve(true, &env, &|_| false).unwrap()
+    }
+
+    const EXE: &str = r"C:\Users\Sam\AppData\Local\Kora\bin\kora.exe";
+
+    fn fake_with(exe: &str) -> Fake {
+        let mut f = Fake { path: Some(r"C:\Windows".into()), ..Fake::default() };
+        f.files.insert(PathBuf::from(exe), b"program".to_vec());
+        f
+    }
+
+    #[test]
+    fn windows_layout_is_per_user_and_follows_a_onedrive_desktop() {
+        let ul = win_user();
+        assert_eq!(ul.start_menu.as_deref(), Some(Path::new(r"C:\Users\Sam\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Kora.lnk")));
+        assert_eq!(ul.desktop.as_deref(), Some(Path::new(r"C:\Users\Sam\Desktop\Kora.lnk")));
+        assert_eq!(ul.program, PathBuf::from(EXE));
+        let env = |k: &str| -> Option<OsString> {
+            Some(match k {
+                "USERPROFILE" => r"C:\Users\Sam".into(),
+                "OneDrive" => r"C:\Users\Sam\OneDrive".into(),
+                _ => return None,
+            })
+        };
+        let od = UserLayout::resolve(true, &env, &|p| p == Path::new(r"C:\Users\Sam\OneDrive\Desktop")).unwrap();
+        assert_eq!(od.desktop.as_deref(), Some(Path::new(r"C:\Users\Sam\OneDrive\Desktop\Kora.lnk")));
+        assert_eq!(od.start_menu.as_deref(), Some(Path::new(r"C:\Users\Sam\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Kora.lnk")), "falls back to the profile");
+        let none = |_: &str| -> Option<OsString> { None };
+        assert!(UserLayout::resolve(true, &none, &|_| false).is_err());
+    }
+
+    #[test]
+    fn the_windows_shortcuts_open_the_panel_without_asking_for_administrator_rights() {
+        let ul = win_user();
+        let mut f = fake_with(EXE);
+        let out = install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        assert_eq!(out.changes.len(), 2, "{:?}", out.changes);
+        for p in [ul.start_menu.as_ref().unwrap(), ul.desktop.as_ref().unwrap()] {
+            let s = &f.shortcuts[p];
+            assert_eq!(s.target, PathBuf::from(EXE));
+            assert_eq!(s.args, "", "a bare `kora`, not `manager`");
+            assert!(!s.run_as_admin, "never 'Run as administrator'");
+            assert!(s.minimized, "no console window flashing");
+        }
+        assert!(!f.files.keys().any(|k| k.to_string_lossy().contains("Program Files")), "nothing machine-wide");
+        // again: nothing to do
+        let again = install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        assert!(again.changes.is_empty(), "{:?}", again.changes);
+    }
+
+    #[test]
+    fn no_desktop_shortcut_and_dry_run() {
+        let ul = win_user();
+        let mut f = fake_with(EXE);
+        let dry = install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions { desktop_shortcut: true, dry_run: true }).unwrap();
+        assert_eq!(dry.changes.len(), 2);
+        assert!(f.shortcuts.is_empty(), "a dry run changes nothing");
+        install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions { desktop_shortcut: false, dry_run: false }).unwrap();
+        assert!(f.shortcuts.contains_key(ul.start_menu.as_ref().unwrap()) && !f.shortcuts.contains_key(ul.desktop.as_ref().unwrap()));
+    }
+
+    #[test]
+    fn a_program_running_from_the_old_folder_gets_a_per_user_copy_first() {
+        let (ul, old) = (win_user(), win_layout());
+        let mut f = fake_with(r"C:\Program Files\Kora\kora.exe");
+        let out = install_user_with(&mut f, &ul, &old.exe, Some(&old.dir), &UserOptions::default()).unwrap();
+        assert_eq!(out.exe, PathBuf::from(EXE));
+        assert_eq!(f.files[&PathBuf::from(EXE)], b"program".to_vec(), "copied");
+        assert!(f.shortcuts.values().all(|s| s.target.as_path() == Path::new(EXE)), "the shortcuts must not point at the folder that is about to go");
+        assert!(out.changes.iter().any(|c| c.contains("your PATH")), "{:?}", out.changes);
+        assert!(!out.changes.iter().any(|c| c.contains("machine PATH")));
+        // a per-user copy that is already there is kept as it is
+        let mut g = fake_with(r"C:\Program Files\Kora\kora.exe");
+        g.files.insert(PathBuf::from(EXE), b"newer".to_vec());
+        install_user_with(&mut g, &ul, &old.exe, Some(&old.dir), &UserOptions::default()).unwrap();
+        assert_eq!(g.files[&PathBuf::from(EXE)], b"newer".to_vec());
+    }
+
+    #[cfg(unix)]
+    fn linux_user(session: bool) -> UserLayout {
+        let env = |k: &str| -> Option<OsString> {
+            match k {
+                "HOME" => Some("/home/sam".into()),
+                "DISPLAY" if session => Some(":0".into()),
+                _ => None,
+            }
+        };
+        UserLayout::resolve(false, &env, &|_| false).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_launcher_starts_the_panel_without_a_terminal() {
+        let ul = linux_user(true);
+        let exe = "/home/sam/.local/bin/kora";
+        let mut f = Fake::default();
+        f.files.insert(PathBuf::from(exe), b"program".to_vec());
+        let out = install_user_with(&mut f, &ul, Path::new(exe), None, &UserOptions::default()).unwrap();
+        assert_eq!(out.changes.len(), 2, "logo and launcher: {:?}", out.changes);
+        let text = String::from_utf8(f.files[ul.desktop_entry.as_ref().unwrap()].clone()).unwrap();
+        assert!(text.contains(&format!("Exec={exe}\n")), "{text}");
+        assert!(text.contains("Terminal=false") && !text.contains("manager") && text.contains(DESKTOP_MARKER), "{text}");
+        assert!(ul.desktop_entry.as_ref().unwrap().starts_with("/home/sam/.local/share/applications"));
+        assert!(install_user_with(&mut f, &ul, Path::new(exe), None, &UserOptions::default()).unwrap().changes.is_empty());
+        // someone else's launcher is never overwritten
+        let mut g = Fake::default();
+        g.files.insert(ul.desktop_entry.clone().unwrap(), b"[Desktop Entry]\nName=Mine\n".to_vec());
+        let out = install_user_with(&mut g, &ul, Path::new(exe), None, &UserOptions::default()).unwrap();
+        assert!(out.changes.is_empty() && out.notes.iter().any(|n| n.contains("not made by Kora")), "{out:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_computer_with_no_desktop_gets_no_launcher_and_a_plain_note() {
+        let ul = linux_user(false);
+        let mut f = Fake::default();
+        let out = install_user_with(&mut f, &ul, Path::new("/home/sam/.local/bin/kora"), None, &UserOptions::default()).unwrap();
+        assert!(out.changes.is_empty() && out.notes.iter().any(|n| n.contains("no desktop")), "{out:?}");
+    }
+
+    #[test]
+    fn status_says_whether_the_way_in_is_there() {
+        let ul = win_user();
+        let mut f = fake_with(EXE);
+        assert!(!user_status_with(&f, &ul).in_place());
+        install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        let st = user_status_with(&f, &ul);
+        assert_eq!((st.start_menu, st.desktop, st.in_place()), (Some(true), Some(true), true));
+    }
+
+    #[test]
+    fn the_old_app_is_found_by_what_it_left_and_a_clean_machine_has_none() {
+        let old = win_layout();
+        let (r, c) = running("0.6.5", b"old-program", r"C:\x\kora.exe");
+        let mut f = machine_with(&r, c);
+        assert!(!detect_legacy(&f, &old).present(), "nothing installed");
+        install_app_with(&mut f, &old, &r, &OPTS).unwrap();
+        let legacy = detect_legacy(&f, &old);
+        assert!(legacy.present());
+        let text = legacy.items.join("\n");
+        for want in ["Delete C:\\Program Files\\Kora\\kora.exe", "shortcut", "machine PATH", "Apps & features"] {
+            assert!(text.contains(want), "missing {want:?} in:\n{text}");
+        }
+        // removing it (what the privileged half of "Tidy up" runs) leaves nothing
+        uninstall_app_with(&mut f, &old, false).unwrap();
+        assert!(!detect_legacy(&f, &old).present());
+    }
+
+    #[test]
+    fn a_shortcut_that_is_not_ours_is_not_an_old_app() {
+        let old = win_layout();
+        let mut f = Fake::default();
+        let p = old.start_menu.clone().unwrap();
+        f.shortcuts.insert(p.clone(), ShortcutSpec { path: p, target: r"C:\games\other.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
+        assert!(!detect_legacy(&f, &old).present());
+    }
+
+    #[test]
+    fn the_background_panel_is_pointed_at_the_new_program() {
+        let vbs = "CreateObject(\"WScript.Shell\").Run \"\"\"C:\\Program Files\\Kora\\kora.exe\"\" panel --no-open --foreground --port 47120\", 0, False\r\n";
+        let fixed = repoint_text(vbs, Path::new(r"C:\Program Files\Kora\kora.exe"), Path::new(EXE)).unwrap();
+        assert!(fixed.contains(EXE) && !fixed.contains("Program Files"), "{fixed}");
+        assert!(fixed.contains("panel --no-open --foreground --port 47120"));
+        let loud = vbs.to_uppercase().replace("WSCRIPT.SHELL", "WScript.Shell");
+        assert!(repoint_text(&loud, Path::new(r"C:\Program Files\Kora\kora.exe"), Path::new(EXE)).is_some(), "Windows paths ignore case");
+        assert_eq!(repoint_text(vbs, Path::new(r"C:\Other\kora.exe"), Path::new(EXE)), None, "not ours: untouched");
+        let unit = "ExecStart=\"/opt/kora/bin/kora\" panel --no-open\n";
+        let fixed = repoint_text(unit, Path::new("/opt/kora/bin/kora"), Path::new("/home/sam/.local/bin/kora")).unwrap();
+        assert_eq!(fixed, "ExecStart=\"/home/sam/.local/bin/kora\" panel --no-open\n");
+    }
 }

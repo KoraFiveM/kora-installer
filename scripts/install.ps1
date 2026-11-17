@@ -7,6 +7,9 @@
   %LOCALAPPDATA%\Kora\bin and adds that folder to your user PATH. An existing kora.exe is only
   replaced when it really is an earlier kora (the old one is kept as kora.exe.previous).
 
+  It also makes a "Kora" shortcut in your Start Menu and on your Desktop (yours only, no administrator
+  rights). They open Kora Panel in your browser.
+
   Then it starts Kora Panel in the background (it also starts at every sign-in) with
   `kora panel --setup`, opens it in your browser and prints the sign-in link. If that step fails
   the install still counts as done and the manual next step is printed.
@@ -19,6 +22,7 @@
     -Prerelease / KORA_PRERELEASE=1   Without -Version: take the newest release even if it is a pre-release.
     -Force                      Replace an existing kora.exe even if it is not a kora program.
     -NoLaunch / KORA_NO_LAUNCH=1   Only install the program: do not start Kora Panel or open a browser.
+    -NoShortcuts / KORA_NO_SHORTCUTS=1   Do not make the Start Menu and Desktop shortcuts.
 
   Downloads use https only: a download that was redirected to plain http is refused.
 
@@ -32,6 +36,7 @@ param(
     [string]$Version = $env:KORA_VERSION,
     [switch]$Force,
     [switch]$NoLaunch,
+    [switch]$NoShortcuts,
     [switch]$Prerelease
 )
 
@@ -157,6 +162,18 @@ finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# The shortcuts that open the panel (per user, no admin). A failure here does not undo the install.
+if (-not ($NoShortcuts -or $env:KORA_NO_SHORTCUTS -eq '1')) {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $dest app install --yes
+        if ($LASTEXITCODE -ne 0) { Write-Host 'The Start Menu shortcut could not be made. You can still open Kora by running   kora' }
+    }
+    catch { Write-Host "Could not make the shortcuts: $($_.Exception.Message)" }
+    finally { $ErrorActionPreference = $previousPreference }
+}
+
 Write-Host ''
 if ($NoLaunch -or $env:KORA_NO_LAUNCH -eq '1') {
     Write-Host 'Next step: run   kora panel   (opens Kora Panel in your browser)'
@@ -181,4 +198,4 @@ else {
         $global:LASTEXITCODE = 0  # the install itself worked
     }
 }
-Write-Host 'Prefer the terminal? Run   kora install   instead.'
+Write-Host 'Open Kora again any time from the Start Menu or the Desktop shortcut, or run   kora   in a terminal.'

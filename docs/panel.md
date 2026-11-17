@@ -1,8 +1,8 @@
 # Kora Panel user guide
 
-Kora Panel is the web page that comes with Kora Installer 0.4.0. It lets you install, manage and (in later sections of
-this guide) monitor FiveM servers from your browser instead of the terminal. Everything the command line and the terminal
-manager can do is also in the panel, with one exception: setup codes no longer exist (see [Setup codes](#setup-codes-are-gone)).
+Kora Panel is the web page that comes with Kora Installer. It is Kora's only interface (since 0.7.0 there is no terminal
+manager or wizard): install, manage and monitor FiveM servers from your browser. Everything the command line can do is
+also in the panel, with one exception: setup codes no longer exist (see [Setup codes](#setup-codes-are-gone)).
 
 The panel is a program on your own computer, not a website. By default it can only be reached from the computer it runs
 on, and nothing you do in it is sent to Kora or anyone else.
@@ -28,13 +28,29 @@ the hub); you can skip them. Everything else describes the base panel.
 
 ## 1. Starting the panel
 
-Run this on the computer that hosts your servers (Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+):
+Run this on the computer that hosts your servers (Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+), or
+double-click the Kora shortcut in your Start Menu / on your desktop (a launcher in the applications menu on Linux):
 
 ```sh
-kora panel
+kora
 ```
 
-Kora starts a small web server, prints a line like `Kora Panel: http://127.0.0.1:47120/#code=...` and opens your
+Kora makes sure the panel runs in the background (so monitoring and alerts keep working), then opens your browser at it.
+It never asks for administrator rights. With no servers yet the panel opens straight into the install wizard.
+`kora manager` does the same, and `kora install` (with no options) opens the install page.
+
+What `kora` does when things are not simple:
+
+| Situation | What happens |
+|---|---|
+| The panel is already running | It is opened; nothing is started twice. |
+| Port 47120 is taken by another program | The next free port up to 47140 is used (the link shows it). |
+| No background service is possible (for example a container with no user session) | The panel runs in that window instead; closing the window stops it. |
+| A server with no screen (SSH) | Nothing opens. Kora prints the sign-in link, a ready-to-paste `ssh -L` command to run on your own computer first, and the Tailscale option (`kora panel --tailscale`). |
+| Typed with `sudo` (Linux) | Kora runs again as the person who typed `sudo` (the panel never runs as root). |
+| Typed as root with no `sudo` user (Linux), or in an "administrator" window (Windows) | A running panel is opened. Otherwise Kora explains what to do (log in as a normal user / open Kora from the Start menu or a normal PowerShell window). Nothing is changed. |
+
+For a window that stays open and runs the panel in front, use `kora panel` (below). Kora starts a small web server, prints a line like `Kora Panel: http://127.0.0.1:47120/#code=...` and opens your
 browser at that address. The panel keeps running in that terminal; press Ctrl+C to stop it. Closing the terminal also
 stops it (servers you started are not affected: they run as services).
 
@@ -144,7 +160,7 @@ If a server's folder has gone missing, the list says so rather than hiding it.
 
 ## 5. Installing a server (the wizard)
 
-"Install a server" walks through the same steps as `kora install`:
+"Install a server" walks through the install steps (`kora install` with options does the same without asking):
 
 1. **Mode:** production (pinned releases) or development (forks on your GitHub account or organisation).
 2. **Name and folder:** the server name, and where it lives. A suggested name and folder are filled in.
@@ -154,7 +170,7 @@ If a server's folder has gone missing, the list says so rather than hiding it.
 5. **Resources:** pick what to install. Dependencies and the core resources are always included.
 6. **Database:** use the MariaDB already on the machine, let Kora install it, or skip it. "Test login" checks the admin
    password before anything starts.
-7. **Options:** start the server when finished, service, firewall rule, the Kora app and desktop shortcut.
+7. **Options:** the background service and the firewall rule (the server is started when the install finishes).
 8. **Licence key:** your Cfx.re licence key. It is sent to Kora on this computer only and is never shown again.
 9. **Your Cfx.re account:** type your Cfx.re username and press "Check". Kora asks forum.cfx.re (only the username is sent)
    which account owns it, and that account becomes the txAdmin admin, so you sign in to txAdmin with Cfx.re. Leave it
@@ -168,7 +184,12 @@ where you left off" the next time. The wizard also checks free disk space before
 ## 6. Settings
 
 - **Kora version:** check for a newer Kora and update it (same as `kora self-update`), or install a specific version.
-- **Kora app:** install or remove the `kora` command and Start Menu shortcut (same as `kora app`).
+- **Kora shortcuts:** the Start Menu / desktop shortcut that opens the panel (yours only, no administrator rights; same
+  as `kora app install`). If the panel finds the old machine-wide Kora app from earlier versions (a copy in Program
+  Files or /opt/kora, and shortcuts that ask for administrator rights) it offers **Tidy up old shortcuts**, also as a
+  notice on the servers screen. That makes the new shortcuts first, so the old ones keep working until the end, then removes
+  the old copy. Removing the old copy needs administrator rights: the panel shows the command to run
+  (`kora app uninstall --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
   and databases are kept unless you tick them.
@@ -177,7 +198,7 @@ where you left off" the next time. The wizard also checks free disk space before
 ## 7. Actions that need administrator rights
 
 The panel runs as you, not as an administrator. A few things need more rights: creating or changing services, firewall
-rules, update timers and scheduled tasks, installing MariaDB, and installing or removing the Kora app.
+rules, update timers and scheduled tasks, installing MariaDB, and removing the old machine-wide Kora app.
 
 When you ask for one of these, the panel does one of two things:
 
@@ -233,7 +254,7 @@ Linux; on Windows they show a dash for now.
 
 **Alerts** tell you when something goes wrong: a banner in the panel, a Discord webhook, or a generic webhook (a URL that
 receives a JSON message). Webhook addresses are stored but never shown back. Alerts are raised once per problem until it
-clears: a server stopping unexpectedly (a stop from Kora, the CLI or the TUI does not count), coming back up, low disk
+clears: a server stopping unexpectedly (a stop from Kora or the CLI does not count), coming back up, low disk
 space, high memory, and updates that need attention. The banner checks every 10 seconds. Alerts are kept in memory, so
 they are lost when the panel restarts (the charts keep their history). Email alerts are not available yet.
 

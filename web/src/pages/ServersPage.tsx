@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderPlus, Plus, RefreshCw } from 'lucide-react'
@@ -15,6 +15,10 @@ import { useServerControl } from '@/hooks/useServerControl'
 import { usePanelAlerts } from '@/hooks/usePanelAlerts'
 import { Badge } from '@/components/ui/badge'
 import { useInstallBlock } from './install/access'
+import { TidyUpBanner } from '@/components/Shortcuts'
+
+/** Asked once per browser tab: a first visit with no servers goes straight to the install wizard. */
+const FIRST_RUN_KEY = 'kora.firstRunShown'
 
 function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
   const ctl = useServerControl(s.name)
@@ -41,6 +45,15 @@ export default function ServersPage() {
   const [adding, setAdding] = useState(false)
   const q = useQuery({ queryKey: ['servers'], queryFn: api.servers.list })
   const servers = q.data ?? []
+  const empty = q.isSuccess && servers.length === 0
+  useEffect(() => {
+    if (!empty || installBlock) return
+    try {
+      if (sessionStorage.getItem(FIRST_RUN_KEY)) return
+      sessionStorage.setItem(FIRST_RUN_KEY, '1')
+    } catch { /* storage blocked: still go to the wizard once per load */ }
+    nav('/install', { replace: true })
+  }, [empty, installBlock, nav])
   const { open: openAlerts } = usePanelAlerts()
   const running = servers.filter((x) => x.status === 'running').length
   const stopped = servers.filter((x) => x.status === 'stopped').length
@@ -53,6 +66,7 @@ export default function ServersPage() {
           <Button onClick={() => setAdding(true)}><FolderPlus /> Add an existing server</Button>
         </div>
       </div>
+      <TidyUpBanner />
       {q.isError && <ErrorNotice error={q.error} />}
       {q.isLoading && <Skeleton className="h-40" />}
       {q.isSuccess && servers.length === 0 && (
