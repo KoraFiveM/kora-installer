@@ -1,7 +1,8 @@
 //! `kora helper`: the optional Linux privileged helper and its allow-list of commands.
 
 use crate::cmd::app::AppCmd;
-use crate::{Cli, Command, ScheduleCmd, ToolsCmd};
+use crate::cmd::schedule::ScheduleCmd;
+use crate::{Cli, Command, ToolsCmd};
 use clap::{Parser, Subcommand};
 use kora_core::elevate;
 use kora_core::installer::host;
