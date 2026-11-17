@@ -2,6 +2,7 @@
 
 pub mod assets;
 pub mod branches;
+pub mod collab;
 pub mod console;
 pub mod github;
 pub mod hub;

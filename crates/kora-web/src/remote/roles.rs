@@ -57,6 +57,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::ServerGet
         | Op::ResourcesList
         | Op::ResourceGet
+        | Op::ResourceLog
         | Op::BranchesList
         | Op::SnapshotsList
         | Op::CatalogForServer
@@ -88,6 +89,10 @@ pub fn min_role(op: Op) -> Role {
         // Branch lists, pull request lists and the "who has this branch" check only read (they may ask GitHub).
         | Op::BranchChoices
         | Op::PrList
+        | Op::ResourceChanges
+        | Op::PrView
+        | Op::IssuesList
+        | Op::ResourceReleases
         | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
@@ -172,7 +177,16 @@ pub fn min_role(op: Op) -> Role {
         // Moving a resource onto another branch or a pull request changes the code the server runs.
         | Op::BranchSwitch
         | Op::StashRestore
-        | Op::BranchBulkApply => Admin,
+        | Op::BranchBulkApply
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssueComment
+        | Op::ResourcesFork
+        | Op::VersionsSet => Admin,
     }
 }
 
@@ -192,7 +206,9 @@ pub fn destructive(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::SelfUpdateApply
         | Op::ScheduleSet
-        | Op::ScheduleRemove => true,
+        | Op::ScheduleRemove
+        | Op::ResourcePush
+        | Op::PrMerge => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -216,6 +232,18 @@ pub fn destructive(op: Op) -> bool {
         | Op::StashRestore
         | Op::BranchSwitch
         | Op::BranchBulkApply
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
@@ -406,6 +434,20 @@ pub fn installs(op: Op) -> bool {
         | Op::BranchSwitch
         | Op::StashRestore
         | Op::BranchBulkPreview
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::BranchBulkApply => false,
     }
 }
@@ -486,6 +528,20 @@ pub fn local_only(op: Op) -> bool {
         | Op::BranchBulkPreview
         | Op::BranchSwitch
         | Op::BranchBulkApply
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto
@@ -647,7 +703,8 @@ mod tests {
 
     #[test]
     fn the_listed_destructive_ops() {
-        let want = [Op::ServerDelete, Op::ServerUnregister, Op::UninstallRun, Op::AppUninstall, Op::ConsoleSend, Op::SelfUpdateApply, Op::ScheduleSet, Op::ScheduleRemove];
+        let want =
+            [Op::ServerDelete, Op::ServerUnregister, Op::UninstallRun, Op::AppUninstall, Op::ConsoleSend, Op::SelfUpdateApply, Op::ScheduleSet, Op::ScheduleRemove, Op::ResourcePush, Op::PrMerge];
         for op in Op::ALL {
             assert_eq!(destructive(*op), want.contains(op), "{op:?}");
         }

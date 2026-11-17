@@ -23,7 +23,8 @@ use serde_json::Value;
 use crate::branches::{find, folder, lock_for};
 use crate::git::branches::{self as gb, codes, problem_of, valid_branch};
 use crate::git::{run, run_ok, CommandRunner, GitError};
-use crate::installer::registry::ServerFile;
+use crate::installer::registry::{Registry, ServerEntry, ServerFile};
+use crate::installer::{Source, Versions};
 use crate::problem::{Action, Problem};
 
 type PResult<T> = Result<T, Problem>;
@@ -296,13 +297,19 @@ pub fn push(r: &dyn CommandRunner, dir: &Path, default_branch: &str) -> PResult<
     if !o.ok() {
         let low = o.stderr.to_ascii_lowercase();
         if low.contains("permission") || low.contains("403") || low.contains("denied") || low.contains("not allowed") {
-            return Err(Problem::new(NO_PUSH_RIGHTS, format!("Your GitHub account is not allowed to push to {fork}. Ask the owner of that repository to give you write access, or push to your own copy."))
-                .with_details(cut(&o.stderr, 400))
-                .with_action(Action::open_link(&format!("https://github.com/{fork}/settings/access"))));
+            return Err(Problem::new(
+                NO_PUSH_RIGHTS,
+                format!("Your GitHub account is not allowed to push to {fork}. Ask the owner of that repository to give you write access, or push to your own copy."),
+            )
+            .with_details(cut(&o.stderr, 400))
+            .with_action(Action::open_link(&format!("https://github.com/{fork}/settings/access"))));
         }
         if low.contains("non-fast-forward") || low.contains("rejected") || low.contains("fetch first") {
-            return Err(Problem::new(codes::BRANCH_GONE, "GitHub has commits on this branch that you do not have, so Kora will not push over them (it never forces a push). Get them first, or push under a new branch name.")
-                .with_details(cut(&o.stderr, 400)));
+            return Err(Problem::new(
+                codes::BRANCH_GONE,
+                "GitHub has commits on this branch that you do not have, so Kora will not push over them (it never forces a push). Get them first, or push under a new branch name.",
+            )
+            .with_details(cut(&o.stderr, 400)));
         }
         return Err(problem_of(&GitError::Command { cmd: "git push".into(), code: o.code, stderr: o.stderr }));
     }
@@ -658,7 +665,11 @@ pub fn merge(r: &dyn CommandRunner, dir: &Path, default_branch: &str, number: u3
         return Err(Problem::new(MERGE_REFUSED, format!("Pull request #{number} is {}, so it cannot be merged.", v.state.to_ascii_lowercase())).with_action(Action::open_link(&v.url)));
     }
     if !v.can_merge {
-        return Err(Problem::new(MERGE_REFUSED, format!("Your GitHub account ({}) is not allowed to merge into {}. Ask someone with write access.", v.acting_as.as_deref().unwrap_or("not known"), v.repo)).with_action(Action::open_link(&v.url)));
+        return Err(Problem::new(
+            MERGE_REFUSED,
+            format!("Your GitHub account ({}) is not allowed to merge into {}. Ask someone with write access.", v.acting_as.as_deref().unwrap_or("not known"), v.repo),
+        )
+        .with_action(Action::open_link(&v.url)));
     }
     let chosen = match method {
         Some(m) if ["merge", "squash", "rebase"].contains(&m) => {
@@ -674,7 +685,9 @@ pub fn merge(r: &dyn CommandRunner, dir: &Path, default_branch: &str, number: u3
     let flag = format!("--{chosen}");
     let o = pr(run(r, "gh", &["pr", "merge", &n, "--repo", &v.repo, &flag], None))?;
     if !o.ok() {
-        return Err(Problem::new(MERGE_REFUSED, "GitHub refused the merge. A required check or review may be missing, or there may be a conflict.").with_details(cut(&o.stderr, 400)).with_action(Action::open_link(&v.url)));
+        return Err(Problem::new(MERGE_REFUSED, "GitHub refused the merge. A required check or review may be missing, or there may be a conflict.")
+            .with_details(cut(&o.stderr, 400))
+            .with_action(Action::open_link(&v.url)));
     }
     Ok(acted(r, &format!("Pull request #{number} was merged ({chosen})."), Some(v.url)))
 }
@@ -839,6 +852,125 @@ pub fn make_fork_with(r: &dyn CommandRunner, dir: &Path, id: &str, owner: &str, 
     Ok(Forked { resource: id.to_string(), fork: fork.clone(), message: format!("{id} now has your own copy ({fork}).") })
 }
 
+/// Where the copies go: the signed-in account (`None` or its own login) or an organisation the account may create
+/// repositories in. `(login, is_org)`.
+pub fn resolve_fork_owner(r: &dyn CommandRunner, requested: Option<&str>) -> PResult<(String, bool)> {
+    use crate::git::owners::{check_org, gh_auth, GhAuth};
+    use crate::problem::{codes as pc, known};
+    let login = match gh_auth(r) {
+        GhAuth::LoggedIn { login } => login,
+        GhAuth::Missing => return Err(known::gh_missing()),
+        GhAuth::LoggedOut => return Err(known::github_signed_out()),
+    };
+    match requested.map(str::trim).filter(|o| !o.is_empty()) {
+        None => Ok((login, false)),
+        Some(o) if o.eq_ignore_ascii_case(&login) => Ok((login, false)),
+        Some(o) => {
+            crate::git::owners::check_login_syntax(o).map_err(|e| Problem::new(codes::BAD_NAME, e))?;
+            let org = check_org(r, o);
+            if org.can_fork {
+                Ok((org.login, true))
+            } else {
+                Err(Problem::new(pc::GH_OWNER_INVALID, format!("You cannot make copies in '{o}': {}. Choose another GitHub account.", org.reason.as_deref().unwrap_or("not allowed"))))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ForkFailure {
+    pub resource: String,
+    pub problem: Problem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ForkOutcome {
+    /// Where the copies are (login or organisation).
+    pub owner: String,
+    pub forked: Vec<Forked>,
+    /// Resources that were not plain clones of a repository (paid assets, copies of someone else's resource).
+    pub skipped: Vec<String>,
+    pub failed: Vec<ForkFailure>,
+    /// Every resource of the server is now your own copy, so the server follows "your own copies".
+    pub server_is_fork: bool,
+}
+
+/// Make your own copy of every resource that is a plain clone (or of `only` those). Takes the update lock. When nothing is
+/// left that is a plain clone, the server is recorded as using your own copies.
+pub fn fork_resources(r: &dyn CommandRunner, sf: &ServerFile, owner: Option<&str>, only: Option<&[String]>, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<ForkOutcome> {
+    let (login, is_org) = resolve_fork_owner(r, owner)?;
+    let _lock = lock_for(sf)?;
+    let wanted: Option<Vec<String>> = only.map(|o| o.iter().map(|n| crate::catalog::normalize_id(n)).collect());
+    let mut out = ForkOutcome { owner: login.clone(), forked: vec![], skipped: vec![], failed: vec![], server_is_fork: false };
+    let todo: Vec<&crate::installer::registry::ResourceRecord> = sf.resources.iter().filter(|rec| wanted.as_ref().is_none_or(|w| w.contains(&crate::catalog::normalize_id(&rec.id)))).collect();
+    let total = todo.len();
+    progress(0, total, "");
+    for (n, rec) in todo.iter().enumerate() {
+        match folder(sf, rec) {
+            Err(p) => out.skipped.push(format!("{}: {}", rec.id, p.message)),
+            Ok(dir) => match make_fork(r, &dir, &rec.id, &login, is_org) {
+                Ok(f) => out.forked.push(f),
+                Err(p) => out.failed.push(ForkFailure { resource: rec.id.clone(), problem: p }),
+            },
+        }
+        progress(n + 1, total, &rec.id);
+    }
+    // Everything that can have a copy has one: the server now uses your own copies.
+    let all_done =
+        out.failed.is_empty() && sf.resources.iter().all(|rec| folder(sf, rec).ok().is_none_or(|d| !d.join(".git").exists() || repos(r, &d).ok().is_some_and(|x| x.fork.is_some()) || rec.third_party));
+    if all_done && sf.source() != Source::Fork {
+        let mut next = sf.clone();
+        next.source = Some(Source::Fork);
+        next.versions = Some(sf.versions());
+        next.github_owner = Some(login.clone());
+        if next.save().is_ok() {
+            sync_entry(&next);
+            out.server_is_fork = true;
+        }
+    } else if sf.source() == Source::Fork {
+        out.server_is_fork = true;
+    }
+    Ok(out)
+}
+
+/// Keep the registry entry (what the servers list reads) in step with the server file.
+fn sync_entry(sf: &ServerFile) {
+    if let Ok(mut reg) = Registry::load() {
+        if let Some(e) = reg.servers.iter().find(|e| e.name == sf.name || e.dir == sf.dir).cloned() {
+            reg.upsert(ServerEntry { source: Some(sf.source()), versions: Some(sf.versions()), mode: crate::installer::compat_mode(sf.versions()), ..e });
+            let _ = reg.save();
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct VersionsSet {
+    pub source: Source,
+    pub versions: Versions,
+    /// What to do next, in words.
+    pub message: String,
+}
+
+/// Change "Which versions" of a server. Nothing on disk moves: the next check for updates shows what would change
+/// (to latest: each resource follows its branch; to released: each moves forward to a release that contains what it has,
+/// and one that is ahead of its release is shown as needing attention rather than moved back).
+pub fn set_versions(sf: &ServerFile, versions: Versions) -> PResult<VersionsSet> {
+    let _lock = lock_for(sf)?;
+    let mut next = sf.clone();
+    next.source = Some(sf.source());
+    next.versions = Some(versions);
+    next.save().map_err(|e| Problem::generic(format!("Could not save the server's settings: {e}")))?;
+    sync_entry(&next);
+    let message = match versions {
+        Versions::Released => "This server now follows released versions. Check for updates to see which resources move to a release; nothing has changed yet.",
+        Versions::Latest => "This server now follows the latest changes. Check for updates to see what is new; nothing has changed yet.",
+    };
+    Ok(VersionsSet { source: next.source(), versions, message: message.into() })
+}
+
 // ---------------------------------------------------------------------------------------------
 // On a server
 // ---------------------------------------------------------------------------------------------
@@ -846,17 +978,64 @@ pub fn make_fork_with(r: &dyn CommandRunner, dir: &Path, id: &str, owner: &str, 
 /// What a front end asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
-    Changes { resource: String },
-    Log { resource: String },
-    Commit { resource: String, message: String },
-    Push { resource: String },
-    NewBranch { resource: String, name: String },
-    PrView { resource: String, number: u32, source: Option<String> },
-    Comment { resource: String, kind: String, number: u32, body: String, source: Option<String> },
-    Review { resource: String, number: u32, action: String, body: String, source: Option<String> },
-    Merge { resource: String, number: u32, method: Option<String>, source: Option<String> },
-    Issues { resource: String },
-    Releases { resource: String },
+    Changes {
+        resource: String,
+    },
+    Log {
+        resource: String,
+    },
+    Commit {
+        resource: String,
+        message: String,
+    },
+    Push {
+        resource: String,
+    },
+    NewBranch {
+        resource: String,
+        name: String,
+    },
+    PrView {
+        resource: String,
+        number: u32,
+        source: Option<String>,
+    },
+    Comment {
+        resource: String,
+        kind: String,
+        number: u32,
+        body: String,
+        source: Option<String>,
+    },
+    Review {
+        resource: String,
+        number: u32,
+        action: String,
+        body: String,
+        source: Option<String>,
+    },
+    Merge {
+        resource: String,
+        number: u32,
+        method: Option<String>,
+        source: Option<String>,
+    },
+    Issues {
+        resource: String,
+    },
+    Releases {
+        resource: String,
+    },
+    /// Make your own copy of these resources (`None` = every resource that is a plain clone). `owner`: a login or
+    /// organisation; `None` = the signed-in account.
+    Fork {
+        owner: Option<String>,
+        only: Option<Vec<String>>,
+    },
+    /// Follow released versions, or the latest changes.
+    SetVersions {
+        versions: Versions,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -870,10 +1049,12 @@ pub enum Reply {
     Acted(Acted),
     Issues(Issues),
     Releases(Releases),
+    Forked(Box<ForkOutcome>),
+    Versions(VersionsSet),
 }
 
 /// Do one [`Request`] on a server's resource. Writes take the server's update lock (never in the middle of an update).
-pub fn run_on(r: &dyn CommandRunner, sf: &ServerFile, req: &Request) -> PResult<Reply> {
+pub fn run_on(r: &dyn CommandRunner, sf: &ServerFile, req: &Request, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<Reply> {
     let rec = |name: &str| find(sf, name);
     let dir_of = |name: &str| -> PResult<(PathBuf, String)> {
         let rec = rec(name)?;
@@ -930,7 +1111,15 @@ pub fn run_on(r: &dyn CommandRunner, sf: &ServerFile, req: &Request) -> PResult<
             let d = folder(sf, rec)?;
             Reply::Releases(releases(r, &d, rec.commit.as_deref())?)
         }
+        Request::Fork { owner, only } => Reply::Forked(Box::new(fork_resources(r, sf, owner.as_deref(), only.as_deref(), progress)?)),
+        Request::SetVersions { versions } => Reply::Versions(set_versions(sf, *versions)?),
     })
+}
+
+/// [`run_on`] on a registered server (name or folder) with the right git for who owns its folder. For the command line.
+pub fn run_for(server: &str, req: &Request, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<Reply> {
+    let sf = crate::update::manual::load_server(server).map_err(|e| Problem::generic(e.to_string()))?;
+    crate::installer::gitops::with_runner(&sf.dir, |r| run_on(r, &sf, req, progress))
 }
 
 impl Reply {
@@ -946,6 +1135,8 @@ impl Reply {
             Reply::Acted(x) => v(x),
             Reply::Issues(x) => v(x),
             Reply::Releases(x) => v(x),
+            Reply::Forked(x) => v(&**x),
+            Reply::Versions(x) => v(x),
         }
     }
 }

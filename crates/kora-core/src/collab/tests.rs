@@ -5,15 +5,8 @@ use std::process::Command;
 use std::time::Duration;
 
 fn sh(dir: &Path, args: &[&str]) {
-    let o = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@t")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@t")
-        .output()
-        .unwrap();
+    let o =
+        Command::new("git").args(args).current_dir(dir).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap();
     assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
 }
 
@@ -144,7 +137,9 @@ fn releases_mark_the_pinned_one_and_what_is_newer() {
 
 #[test]
 fn issues_are_read_with_labels() {
-    let i = parse_issues(r#"[{"number":4,"title":"Crash","author":{"login":"a"},"url":"https://github.com/x/y/issues/4","comments":[{},{}],"createdAt":"2026-01-01","labels":[{"name":"bug"}]},{"title":"no number"}]"#);
+    let i = parse_issues(
+        r#"[{"number":4,"title":"Crash","author":{"login":"a"},"url":"https://github.com/x/y/issues/4","comments":[{},{}],"createdAt":"2026-01-01","labels":[{"name":"bug"}]},{"title":"no number"}]"#,
+    );
     assert_eq!(i.len(), 1);
     assert_eq!((i[0].number, i[0].comments, i[0].labels.clone()), (4, 2, vec!["bug".to_string()]));
 }
@@ -281,7 +276,11 @@ fn a_pull_request_view_adds_rights_identity_and_how_far_behind_the_tried_one_is(
 #[test]
 fn comments_and_reviews_go_through_gh_with_checked_input_and_say_who_acted() {
     let t = repo();
-    let r = Fake::new().gh("pr comment 12", 0, "https://github.com/KoraFiveM/res/pull/12#issuecomment-1\n", "").gh("pr review 12", 0, "", "").gh("issue comment 5", 0, "", "").gh("api user", 0, "sam\n", "");
+    let r = Fake::new()
+        .gh("pr comment 12", 0, "https://github.com/KoraFiveM/res/pull/12#issuecomment-1\n", "")
+        .gh("pr review 12", 0, "", "")
+        .gh("issue comment 5", 0, "", "")
+        .gh("api user", 0, "sam\n", "");
     let a = comment(&r, &t.dir, "pr", 12, "Looks good", None).unwrap();
     assert_eq!((a.acting_as.as_deref(), a.url.is_some()), (Some("sam"), true));
     assert!(r.ran("pr comment 12 --repo KoraFiveM/res --body Looks good"));
@@ -376,4 +375,42 @@ fn making_your_own_copy_keeps_the_folder_and_re_points_the_remotes() {
 
 fn make_fork_for_test(r: &dyn CommandRunner, dir: &Path) -> Forked {
     make_fork_with(r, dir, "res", "me", false, std::time::Duration::ZERO).unwrap()
+}
+
+#[test]
+fn the_fork_owner_is_you_or_an_organisation_you_may_create_repositories_in() {
+    let auth = r#"{"hosts":{"github.com":[{"state":"success","active":true,"login":"sam"}]}}"#;
+    let r = Fake::new().gh("auth status", 0, "Logged in to github.com account sam\n", "").gh("api user", 0, auth, "");
+    // Not signed in: the usual guided problem.
+    let out = Fake::new().gh("auth status", 1, "", "You are not logged into any GitHub hosts. To log in, run: gh auth login");
+    assert_eq!(resolve_fork_owner(&out, None).unwrap_err().code, crate::problem::codes::GH_SIGNED_OUT);
+    // Bad names never reach a command line.
+    assert!(resolve_fork_owner(&r, Some("--org")).is_err() || r.ran("auth status"));
+    assert!(!r.ran("--org"));
+}
+
+#[test]
+fn changing_the_versions_writes_both_spellings_and_moves_nothing() {
+    use crate::installer::registry::PortsRecord;
+    let d = tempfile::tempdir().unwrap();
+    let sf = ServerFile {
+        name: "s".into(),
+        mode: crate::installer::Mode::Production,
+        source: None,
+        versions: None,
+        dir: d.path().to_path_buf(),
+        ports: PortsRecord { game: 1, txadmin: 2 },
+        game_build: 1,
+        artifact_build: 1,
+        database: None,
+        github_owner: None,
+        created_unix: 0,
+        kora_version: "0".into(),
+        resources: vec![],
+    };
+    let v = set_versions(&sf, Versions::Latest).unwrap();
+    assert_eq!((v.source, v.versions), (Source::Clone, Versions::Latest));
+    let back = ServerFile::load(d.path()).unwrap();
+    assert_eq!((back.source(), back.versions(), back.mode), (Source::Clone, Versions::Latest, crate::installer::Mode::Development));
+    assert!(v.message.contains("nothing has changed yet"));
 }

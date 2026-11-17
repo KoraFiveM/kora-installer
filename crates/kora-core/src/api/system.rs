@@ -403,6 +403,11 @@ impl Backend for SystemBackend {
         paidassets::remove(&e.dir, name)
     }
 
+    fn collab(&mut self, e: &ServerEntry, req: &crate::collab::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::collab::Reply> {
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
+        crate::installer::gitops::with_runner(&e.dir, |r| crate::collab::run_on(r, &sf, req, say)).map_err(String::from)
+    }
+
     fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
         let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
         crate::installer::gitops::with_runner(&e.dir, |r| crate::branches::run(r, &sf, req, say)).map_err(String::from)

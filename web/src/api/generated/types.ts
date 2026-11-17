@@ -6,6 +6,12 @@
 /** Not described by the Rust side yet: the shape is unknown, so check it before use. */
 export type Untyped = unknown
 
+export type Acted = {
+  message: string,
+  acting_as: string | null,
+  url: string | null,
+};
+
 /**
  * Something the user can do about a [`Problem`]. Plain data: the front end decides what each
  * one does (the panel's handler registry; a terminal prints a hint). Never put secrets in here.
@@ -62,6 +68,10 @@ export type Action =
   }
   | {
     "kind": "start_database"
+  }
+  | {
+    "kind": "make_fork",
+    resource?: string,
   }
   | {
     "kind": "unknown"
@@ -560,7 +570,21 @@ export type CfxRequest = {
 
 export type ChangeStatus = "up_to_date" | "clean" | "dirty" | "diverged" | "other_branch";
 
+export type ChangedFile = {
+  path: string,
+  /**
+   * `modified`, `added`, `deleted`, `renamed` or `new` (not yet known to git).
+   */
+  status: string,
+};
+
 export type ChangesChoice = "ask" | "stash" | "discard";
+
+export type Check = {
+  name: string,
+  state: ChecksState,
+  url?: string,
+};
 
 /**
  * One line of the System check.
@@ -580,6 +604,29 @@ export type CheckItem = {
 };
 
 export type CheckState = "ok" | "problem" | "info";
+
+export type ChecksState = "passing" | "failing" | "pending" | "none";
+
+/**
+ * `POST .../prs/{number}/comment` and `POST .../issues/{number}/comment`.
+ */
+export type CommentRequest = {
+  body: string,
+  source?: string,
+};
+
+/**
+ * `POST /servers/{s}/resources/{name}/commit`.
+ */
+export type CommitRequest = {
+  message: string,
+};
+
+export type Committed = {
+  commit: string,
+  files: number,
+  branch: string | null,
+};
 
 /**
  * `POST /servers/{s}/console`.
@@ -797,6 +844,58 @@ export type FleetServer = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+};
+
+/**
+ * Progress of making copies, one event per resource.
+ */
+export type ForkEvent = {
+  "type": "forked",
+  done: number,
+  total: number,
+  id: string,
+};
+
+export type ForkFailure = {
+  resource: string,
+  problem: Problem,
+};
+
+export type ForkOutcome = {
+  /**
+   * Where the copies are (login or organisation).
+   */
+  owner: string,
+  forked: Array<Forked>,
+  /**
+   * Resources that were not plain clones of a repository (paid assets, copies of someone else's resource).
+   */
+  skipped: Array<string>,
+  failed: Array<ForkFailure>,
+  /**
+   * Every resource of the server is now your own copy, so the server follows "your own copies".
+   */
+  server_is_fork: boolean,
+};
+
+/**
+ * `POST /servers/{s}/fork`: make your own copy of some resources (left out = every plain clone).
+ */
+export type ForkRequest = {
+  /**
+   * A GitHub login or organisation; left out = the signed-in account.
+   */
+  owner?: string,
+  resources?: Array<string>,
+};
+
+export type Forked = {
+  resource: string,
+  /**
+   * `owner/name` of the new copy.
+   */
+  fork: string,
+  message: string,
 };
 
 /**
@@ -1102,6 +1201,16 @@ export type InstallRequest = {
   cfx_identifier: string | null,
 };
 
+export type IssueItem = {
+  number: number,
+  title: string,
+  author: string,
+  url: string,
+  comments: number,
+  created: string,
+  labels: Array<string>,
+};
+
 /**
  * `POST /servers/{s}/issues`.
  */
@@ -1109,6 +1218,12 @@ export type IssueRequest = {
   resource: string,
   title: string,
   text: string,
+};
+
+export type Issues = {
+  repo: string,
+  issues: Array<IssueItem>,
+  new_issue_url: string,
 };
 
 /**
@@ -1217,6 +1332,41 @@ export type KeyUpdateRequest = {
 
 export type Kind = "kora" | "dependency" | "optional" | "internal";
 
+export type LocalChanges = {
+  branch: string | null,
+  files: Array<ChangedFile>,
+  /**
+   * The real number of changed files (`files` stops at 200).
+   */
+  count: number,
+  /**
+   * A readable diff (read-only), cut at about 60 000 characters.
+   */
+  diff: string,
+  diff_truncated: boolean,
+  /**
+   * Commits on this branch that are not on its remote yet, and the other way round. `None` = no remote branch.
+   */
+  ahead: number | null,
+  behind: number | null,
+  repos: Repos,
+};
+
+export type Log = {
+  branch: string | null,
+  commits: Array<LogEntry>,
+};
+
+export type LogEntry = {
+  sha: string,
+  subject: string,
+  author: string,
+  /**
+   * Unix time of the commit.
+   */
+  when: number,
+};
+
 export type LogFile = {
   name: string,
   size: number,
@@ -1240,6 +1390,14 @@ export type LogTailQuery = {
  */
 export type LogsList = {
   files: Array<LogFile>,
+};
+
+/**
+ * `POST .../prs/{number}/merge`: `merge`, `squash` or `rebase`; left out = the first the repository allows.
+ */
+export type MergeRequest = {
+  method?: string,
+  source?: string,
 };
 
 /**
@@ -1324,6 +1482,13 @@ export type MetricsQuery = {
 };
 
 export type Mode = "production" | "development";
+
+/**
+ * `POST /servers/{s}/resources/{name}/new-branch`.
+ */
+export type NewBranchRequest = {
+  name: string,
+};
 
 /**
  * `POST /users` answer: the token is shown this once.
@@ -1518,6 +1683,22 @@ export type PrChoices = {
   notes: Array<string>,
 };
 
+export type PrComment = {
+  author: string,
+  body: string,
+  created: string,
+  /**
+   * `comment`, or a review: `approved`, `changes_requested`, `commented`.
+   */
+  kind: string,
+};
+
+export type PrFile = {
+  path: string,
+  additions: number,
+  deletions: number,
+};
+
 /**
  * `POST /servers/{s}/pr`: the plan is worked out again on the server and must be exactly what was sent.
  */
@@ -1555,7 +1736,60 @@ export type PrPlanRequest = {
  */
 export type PrRef = number | string;
 
+/**
+ * Which side a pull request or issue is on: the original (default) or the person's own copy.
+ */
+export type PrSideQuery = {
+  source?: string,
+};
+
 export type PrSource = "upstream" | "fork";
+
+export type PrView = {
+  number: number,
+  title: string,
+  body: string,
+  author: string,
+  /**
+   * `OPEN`, `MERGED` or `CLOSED`.
+   */
+  state: string,
+  draft: boolean,
+  url: string,
+  /**
+   * `owner/name` it is on.
+   */
+  repo: string,
+  base: string,
+  head: string,
+  created: string,
+  updated: string,
+  /**
+   * `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED` or empty (no reviews needed).
+   */
+  review: string,
+  checks: ChecksState,
+  check_list: Array<Check>,
+  /**
+   * `MERGEABLE`, `CONFLICTING` or `UNKNOWN`.
+   */
+  mergeable: string,
+  files: Array<PrFile>,
+  comments: Array<PrComment>,
+  /**
+   * Which ways of merging the repository allows: `merge`, `squash`, `rebase`.
+   */
+  merge_methods: Array<string>,
+  /**
+   * Whether the signed-in account may merge here (`ADMIN`, `MAINTAIN` or `WRITE` on the repository).
+   */
+  can_merge: boolean,
+  acting_as: string | null,
+  /**
+   * Set when this pull request is the one checked out in the resource.
+   */
+  trying?: Trying,
+};
 
 export type Preset = "daily" | "weekly" | "custom";
 
@@ -1648,6 +1882,19 @@ export type PullRequest = {
   updated: string,
 };
 
+export type Pushed = {
+  branch: string,
+  /**
+   * `owner/name` it went to.
+   */
+  to: string,
+  /**
+   * The branch did not exist on GitHub before.
+   */
+  new_branch: boolean,
+  acting_as: string | null,
+};
+
 /**
  * `GET /assets/downloads`.
  */
@@ -1655,6 +1902,32 @@ export type RecentDownloads = {
   found: boolean,
   folder?: string,
   zips: Array<DownloadZip>,
+};
+
+export type ReleaseItem = {
+  tag: string,
+  name: string,
+  published: string,
+  prerelease: boolean,
+  url: string,
+  notes: string,
+  /**
+   * This is the release the server is pinned to.
+   */
+  pinned: boolean,
+  /**
+   * This is newer than the release the server is pinned to.
+   */
+  newer: boolean,
+};
+
+export type Releases = {
+  repo: string,
+  /**
+   * The pinned release of this resource (a commit), when the server follows released versions.
+   */
+  pinned_commit: string | null,
+  releases: Array<ReleaseItem>,
 };
 
 export type Remote = "origin" | "upstream";
@@ -1695,6 +1968,20 @@ export type RemoteSettingsUpdate = {
   },
   allowed_hosts?: Array<string>,
   allow_remote_destructive?: boolean,
+};
+
+/**
+ * The repositories of a resource: the original, and the person's own copy when there is one.
+ */
+export type Repos = {
+  /**
+   * `owner/name` of the original repository.
+   */
+  original: string | null,
+  /**
+   * `owner/name` of the person's own copy (fork), when there is one.
+   */
+  fork: string | null,
 };
 
 export type ResourceBranch = {
@@ -1861,6 +2148,15 @@ export type ResumeRequest = {
    * Carry on without the parts that need administrator rights.
    */
   without_admin?: boolean,
+};
+
+/**
+ * `POST .../prs/{number}/review`: `approve`, `request_changes` (with a reason) or `comment`.
+ */
+export type ReviewRequest = {
+  action: string,
+  body?: string,
+  source?: string,
 };
 
 /**
@@ -2436,6 +2732,21 @@ export type ToolsList = {
   tools: Array<ToolStatus>,
 };
 
+/**
+ * A pull request that is checked out here: how it stands against its newest commit on GitHub.
+ */
+export type Trying = {
+  branch: string,
+  /**
+   * Commits GitHub has that this folder does not (`None` = the folder has not downloaded its newest commit: get the latest).
+   */
+  behind: number | null,
+  /**
+   * Commits made here on top of it.
+   */
+  ahead: number,
+};
+
 export type UninstallAnswer = {
   item: string,
   remove: boolean,
@@ -2611,6 +2922,22 @@ export type UsersList = {
  * Which versions of the resources a server follows. A separate setting from [`Source`].
  */
 export type Versions = "released" | "latest";
+
+/**
+ * `PUT /servers/{s}/versions`.
+ */
+export type VersionsRequest = {
+  versions: Versions,
+};
+
+export type VersionsSet = {
+  source: Source,
+  versions: Versions,
+  /**
+   * What to do next, in words.
+   */
+  message: string,
+};
 
 /**
  * `PUT /servers/{s}/webhook`.

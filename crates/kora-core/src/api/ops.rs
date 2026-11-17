@@ -151,6 +151,34 @@ pub enum Op {
     BranchBulkPreview,
     /// Development: switch every resource that has a branch, or all back to normal.
     BranchBulkApply,
+    /// A resource's local changes and a read-only diff.
+    ResourceChanges,
+    /// Recent commits of the branch a resource is on.
+    ResourceLog,
+    /// Commit a resource's changes with a message (admins).
+    ResourceCommit,
+    /// Push the checked-out branch to your own copy on GitHub (admins; never forced).
+    ResourcePush,
+    /// Make a new branch from where a resource is (admins).
+    ResourceNewBranch,
+    /// A pull request in full: checks, reviews, files, conversation.
+    PrView,
+    /// Comment on a pull request as the signed-in GitHub account (admins).
+    PrComment,
+    /// Approve, ask for changes or comment on a pull request (admins).
+    PrReview,
+    /// Merge a pull request, if the GitHub account may (admins).
+    PrMerge,
+    /// Open issues of a resource's repository.
+    IssuesList,
+    /// Comment on an issue as the signed-in GitHub account (admins).
+    IssueComment,
+    /// Releases of a resource's repository and which one the server is pinned to.
+    ResourceReleases,
+    /// Make your own copy (fork) of resources that are plain clones (a job; admins).
+    ResourcesFork,
+    /// Follow released versions or the latest changes (admins).
+    VersionsSet,
 }
 
 impl Op {
@@ -261,6 +289,20 @@ impl Op {
         Op::StashRestore,
         Op::BranchBulkPreview,
         Op::BranchBulkApply,
+        Op::ResourceChanges,
+        Op::ResourceLog,
+        Op::ResourceCommit,
+        Op::ResourcePush,
+        Op::ResourceNewBranch,
+        Op::PrView,
+        Op::PrComment,
+        Op::PrReview,
+        Op::PrMerge,
+        Op::IssuesList,
+        Op::IssueComment,
+        Op::ResourceReleases,
+        Op::ResourcesFork,
+        Op::VersionsSet,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -372,6 +414,20 @@ impl Op {
             Op::StashRestore => "stash_restore",
             Op::BranchBulkPreview => "branch_bulk_preview",
             Op::BranchBulkApply => "branch_bulk_apply",
+            Op::ResourceChanges => "resource_changes",
+            Op::ResourceLog => "resource_log",
+            Op::ResourceCommit => "resource_commit",
+            Op::ResourcePush => "resource_push",
+            Op::ResourceNewBranch => "resource_new_branch",
+            Op::PrView => "pr_view",
+            Op::PrComment => "pr_comment",
+            Op::PrReview => "pr_review",
+            Op::PrMerge => "pr_merge",
+            Op::IssuesList => "issues_list",
+            Op::IssueComment => "issue_comment",
+            Op::ResourceReleases => "resource_releases",
+            Op::ResourcesFork => "resources_fork",
+            Op::VersionsSet => "versions_set",
         }
     }
 
@@ -486,6 +542,20 @@ impl Op {
             Op::StashRestore => (Method::Post, "/servers/{s}/resources/{name}/stash/restore"),
             Op::BranchBulkPreview => (Method::Post, "/servers/{s}/branches/preview"),
             Op::BranchBulkApply => (Method::Post, "/servers/{s}/branches/apply"),
+            Op::ResourceChanges => (Method::Get, "/servers/{s}/resources/{name}/changes"),
+            Op::ResourceLog => (Method::Get, "/servers/{s}/resources/{name}/log"),
+            Op::ResourceCommit => (Method::Post, "/servers/{s}/resources/{name}/commit"),
+            Op::ResourcePush => (Method::Post, "/servers/{s}/resources/{name}/push"),
+            Op::ResourceNewBranch => (Method::Post, "/servers/{s}/resources/{name}/new-branch"),
+            Op::PrView => (Method::Get, "/servers/{s}/resources/{name}/prs/{number}"),
+            Op::PrComment => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/comment"),
+            Op::PrReview => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/review"),
+            Op::PrMerge => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/merge"),
+            Op::IssuesList => (Method::Get, "/servers/{s}/resources/{name}/issues"),
+            Op::IssueComment => (Method::Post, "/servers/{s}/resources/{name}/issues/{number}/comment"),
+            Op::ResourceReleases => (Method::Get, "/servers/{s}/resources/{name}/releases"),
+            Op::ResourcesFork => (Method::Post, "/servers/{s}/fork"),
+            Op::VersionsSet => (Method::Put, "/servers/{s}/versions"),
         }
     }
 
@@ -512,6 +582,7 @@ impl Op {
                 | Op::DbStart
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::ResourcesFork
         )
     }
 
@@ -576,6 +647,20 @@ impl Op {
                 | Op::StashRestore
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::ResourceChanges
+                | Op::ResourceLog
+                | Op::ResourceCommit
+                | Op::ResourcePush
+                | Op::ResourceNewBranch
+                | Op::PrView
+                | Op::PrComment
+                | Op::PrReview
+                | Op::PrMerge
+                | Op::IssuesList
+                | Op::IssueComment
+                | Op::ResourceReleases
+                | Op::ResourcesFork
+                | Op::VersionsSet
         )
     }
 }
@@ -693,13 +778,27 @@ mod tests {
             | Op::BranchSwitch
             | Op::StashRestore
             | Op::BranchBulkPreview
-            | Op::BranchBulkApply => Op::ALL.contains(&op),
+            | Op::BranchBulkApply
+            | Op::ResourceChanges
+            | Op::ResourceLog
+            | Op::ResourceCommit
+            | Op::ResourcePush
+            | Op::ResourceNewBranch
+            | Op::PrView
+            | Op::PrComment
+            | Op::PrReview
+            | Op::PrMerge
+            | Op::IssuesList
+            | Op::IssueComment
+            | Op::ResourceReleases
+            | Op::ResourcesFork
+            | Op::VersionsSet => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 106);
+        assert_eq!(Op::ALL.len(), 120);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }
