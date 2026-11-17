@@ -357,3 +357,15 @@ fn the_worker_forgets_override_variables_at_start() {
     let (_, none) = worker_env_changes(&SystemDirs::default());
     assert!(none.is_empty(), "nothing invented when Windows did not answer");
 }
+
+#[test]
+fn only_one_session_at_a_time_and_the_slot_comes_back() {
+    static SLOT: SessionSlot = SessionSlot::new();
+    let first = SLOT.try_take().expect("free at first");
+    assert!(SLOT.try_take().is_none(), "a second session waits");
+    drop(first);
+    assert!(SLOT.try_take().is_some(), "free again once the first ended");
+    let p = open_problem(&OpenError::InUse, &Context::default());
+    assert_eq!(p.code, codes::ADMIN_BUSY);
+    assert!(p.message.contains("already doing administrator work"), "{}", p.message);
+}

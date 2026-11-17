@@ -661,9 +661,42 @@ impl Session {
 // Asking: outcomes and what the person reads
 // ---------------------------------------------------------------------------------------------
 
+/// At most one worker session per panel: taken before the prompt, given back when the session
+/// (or the failed attempt) ends.
+pub struct SessionSlot(std::sync::atomic::AtomicBool);
+
+/// Holding it = the panel's one session; dropping it frees the slot.
+pub struct SlotGuard(&'static SessionSlot);
+
+impl SessionSlot {
+    pub const fn new() -> Self {
+        SessionSlot(std::sync::atomic::AtomicBool::new(false))
+    }
+    pub fn try_take(&'static self) -> Option<SlotGuard> {
+        (!self.0.swap(true, std::sync::atomic::Ordering::SeqCst)).then_some(SlotGuard(self))
+    }
+}
+
+impl Default for SessionSlot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.0 .0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The panel's slot.
+pub static SESSION_SLOT: SessionSlot = SessionSlot::new();
+
 /// Why no session could be opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenError {
+    /// Another session (an install's, or another change's) is still open.
+    InUse,
     /// "No" at the prompt.
     Declined,
     /// Nobody answered within [`PROMPT_LIMIT`].
@@ -723,6 +756,10 @@ pub fn open_problem(e: &OpenError, ctx: &Context) -> Problem {
             format!("Nobody answered the Windows permission prompt in time, so Kora could not {what}. Nothing that needs administrator rights was changed."),
         )
         .with_details("The prompt appears on the computer that runs Kora. If you did not see it, look for a flashing shield icon in the taskbar there."),
+        OpenError::InUse => Problem::new(
+            codes::ADMIN_BUSY,
+            "Kora is already doing administrator work for something else (an install or another change). Try again when that has finished.",
+        ),
         OpenError::Busy => Problem::new(
             codes::ADMIN_BUSY,
             "Windows is still showing an earlier permission prompt from Kora. Answer it on the computer that runs Kora (No is fine), then try again.",

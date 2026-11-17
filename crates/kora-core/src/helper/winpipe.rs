@@ -416,6 +416,8 @@ mod imp {
     }
 
     fn open_with(kora_home: Option<&str>, limit: Duration, launch: Launch) -> Result<(Session, Launched), OpenError> {
+        // One session at a time: kept until the session ends (or this attempt fails).
+        let slot = worker::SESSION_SLOT.try_take().ok_or(OpenError::InUse)?;
         if PROMPT_OPEN.swap(true, Ordering::SeqCst) {
             return Err(OpenError::Busy);
         }
@@ -501,7 +503,7 @@ mod imp {
         std::mem::forget(pipe);
         let reader = file.try_clone().map_err(|e| OpenError::Failed(e.to_string()))?;
         let mut s = Session::begin(Box::new(BufReader::new(reader)), Box::new(file), kora_home).map_err(|e| OpenError::Failed(e.to_string()))?;
-        s.hold(Box::new(lock));
+        s.hold(Box::new((lock, slot)));
         Ok((s, process))
     }
 
