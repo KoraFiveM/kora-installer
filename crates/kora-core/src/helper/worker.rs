@@ -237,6 +237,39 @@ fn read_line_capped(r: &mut dyn BufRead) -> io::Result<Option<String>> {
 /// `bye` or the end of the pipe. `base_env` = what every child gets (the panel user's name, ...);
 /// `touch` is called around every request (`true` = busy) so a watchdog can see idleness.
 pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn Validator, executor: &dyn Executor, base_env: &[(String, String)], touch: &dyn Fn(bool)) -> io::Result<()> {
+    serve_with(reader, writer, validator, executor, base_env, touch, &ServeOptions::default())
+}
+
+/// How one served connection differs between the worker and the persistent helper.
+pub struct ServeOptions<'a> {
+    /// The verbs at all (the worker's [`WORKER_VERBS`], the helper's `winhelper::SERVICE_VERBS`).
+    pub verbs: &'a [&'a str],
+    /// The helper: the only Kora folder a `session` may name (recorded at install time).
+    pub fixed_home: Option<&'a str>,
+    /// Called after every request that ran: (verb, step or sub-command, ok). For the log (never
+    /// arguments or environment values) and for the helper's restart after updating itself.
+    pub on_done: &'a dyn Fn(&str, &str, bool),
+}
+
+impl Default for ServeOptions<'_> {
+    fn default() -> Self {
+        ServeOptions { verbs: WORKER_VERBS, fixed_home: None, on_done: &|_, _, _| {} }
+    }
+}
+
+/// What a request is about, for the log: the `--step` of an `admin-step`, else the first argument
+/// when it is a plain word (`start`, `refresh`), else nothing. Never a path or a value.
+pub fn log_label(verb: &str, args: &[String]) -> String {
+    if verb == "admin-step" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        let step = args.iter().position(|a| a == "--step").and_then(|i| args.get(i + 1)).map(String::as_str).unwrap_or("");
+        return format!("{action} {step}").trim().to_string();
+    }
+    args.first().filter(|a| !a.is_empty() && a.len() <= 24 && a.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')).cloned().unwrap_or_default()
+}
+
+/// [`serve`] with [`ServeOptions`].
+pub fn serve_with(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn Validator, executor: &dyn Executor, base_env: &[(String, String)], touch: &dyn Fn(bool), opts: &ServeOptions) -> io::Result<()> {
     if !send(writer, &Message::Hello { version: env!("CARGO_PKG_VERSION").into(), pid: std::process::id() }) {
         return Err(io::Error::new(io::ErrorKind::BrokenPipe, "the panel went away"));
     }
@@ -266,8 +299,12 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
         }
         if req.verb == SESSION {
             match parse_session(&req.args) {
+                Ok(home) if req.env.is_empty() && opts.fixed_home.is_some_and(|f| !super::winhelper::session_home_ok(home.as_deref(), f)) => {
+                    send(writer, &Message::Error { message: "Kora's helper works only with the Kora folder it was turned on for.".into() });
+                }
                 Ok(home) if req.env.is_empty() => {
-                    if let Some(h) = home {
+                    // The helper's children get the recorded folder from their base environment.
+                    if let (Some(h), None) = (home, opts.fixed_home) {
                         session_env.insert("KORA_HOME".into(), h);
                     }
                     send(writer, &Message::Result { ok: true, code: 0, message: None, version: None, data: None });
@@ -281,7 +318,7 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
             }
             continue;
         }
-        let argv = match check_request_in(&req, WORKER_VERBS, &|v, a| validator.validate(v, a)) {
+        let argv = match check_request_in(&req, opts.verbs, &|v, a| validator.validate(v, a)) {
             Ok(a) => a,
             Err(r) => {
                 send(writer, &Message::Error { message: r.0 });
@@ -309,6 +346,7 @@ pub fn serve(reader: &mut dyn BufRead, writer: &mut dyn Write, validator: &dyn V
                 }
             }
         });
+        (opts.on_done)(&req.verb, &log_label(&req.verb, &req.args), matches!(res, Ok(0)));
         let sent = match res {
             Ok(code) => send(writer, &Message::Result { ok: code == 0, code, message: None, version: None, data }),
             Err(e) => send(writer, &Message::Error { message: format!("The administrator helper could not start Kora: {e}") }),

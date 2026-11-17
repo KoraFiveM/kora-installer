@@ -1,3 +1,8 @@
+//! **Not wired up in v0.7.0** (moved to a follow-up release): nothing in the panel or the CLI
+//! starts or talks to this service yet. What IS used now: the ownership [`Ledger`] and
+//! [`port_allowed`] (by the worker's elevated steps), and [`in_service`] (always false until the
+//! service exists).
+//!
 //! The opt-in persistent Windows helper: a Windows service (`KoraHelper`, LocalSystem) that does a
 //! SHORT list of administrator steps for ONE Windows account without a permission prompt, so Kora
 //! Panel can install and remove servers when nobody is at the desktop (remote sessions).
