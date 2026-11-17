@@ -67,6 +67,25 @@ export type Action =
     "kind": "unknown"
   };
 
+export type AddOutcome = {
+  installed: Array<string>,
+  failed: Array<[string, string]>,
+  ensured: Array<string>,
+  notes: Array<string>,
+};
+
+export type AddPlan = {
+  items: Array<PlanItem>,
+  /**
+   * Ids that were asked for and are already installed.
+   */
+  already: Array<string>,
+  /**
+   * Folders `server.cfg` must ensure afterwards (only the ones these items live in).
+   */
+  ensure: Array<string>,
+};
+
 /**
  * `POST /servers/adopt`.
  */
@@ -76,6 +95,235 @@ export type AdoptRequest = {
    */
   dir: string,
 };
+
+export type AlertEmail = {
+  supported: boolean,
+};
+
+export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention";
+
+export type AlertRules = {
+  stopped: boolean,
+  recovered: boolean,
+  disk: boolean,
+  ram: boolean,
+  updates: boolean,
+};
+
+/**
+ * Any of the rules; what is left out stays as it is.
+ */
+export type AlertRulesUpdate = {
+  stopped?: boolean,
+  recovered?: boolean,
+  disk?: boolean,
+  ram?: boolean,
+  updates?: boolean,
+};
+
+/**
+ * `GET /servers/{s}/alerts`: the address of the generic webhook is never returned.
+ */
+export type AlertSettings = {
+  enabled: boolean,
+  rules: AlertRules,
+  disk_min_gb: number,
+  disk_min_percent: number,
+  ram_max_percent: number,
+  /**
+   * Also post to the server's Discord webhook (Notifications tab).
+   */
+  discord: boolean,
+  webhook: AlertWebhook,
+  email: AlertEmail,
+};
+
+/**
+ * `PUT /servers/{s}/alerts`: what is left out stays as it is.
+ */
+export type AlertSettingsUpdate = {
+  enabled?: boolean,
+  rules?: AlertRulesUpdate,
+  disk_min_gb?: number,
+  disk_min_percent?: number,
+  ram_max_percent?: number,
+  discord?: boolean,
+  /**
+   * Omit to keep the address; `""` removes it.
+   */
+  webhook_url?: string,
+};
+
+export type AlertTone = "danger" | "warning" | "success";
+
+export type AlertWebhook = {
+  configured: boolean,
+  redacted: string | null,
+};
+
+/**
+ * `GET /alerts`.
+ */
+export type AlertsList = {
+  alerts: Array<PanelAlert>,
+};
+
+/**
+ * `PUT /app`.
+ */
+export type AppInstallRequest = {
+  desktop_shortcut: boolean,
+  dry_run: boolean,
+};
+
+/**
+ * `GET /app`.
+ */
+export type AppStatus = {
+  /**
+   * The OLD machine-wide Kora app (Program Files, /opt/kora) is installed.
+   */
+  installed: boolean,
+  version: string | null,
+  path: string | null,
+  desktop_shortcut: boolean,
+  supported: boolean,
+  /**
+   * The old app, or an old administrator shortcut, is still here: offer "Tidy up old shortcuts".
+   */
+  legacy: boolean,
+  /**
+   * What tidying up would remove, one plain sentence each.
+   */
+  legacy_items: Array<string>,
+  /**
+   * The per-user shortcut that opens the panel is in place.
+   */
+  shortcuts: boolean,
+};
+
+/**
+ * `DELETE /app`.
+ */
+export type AppUninstallRequest = {
+  dry_run: boolean,
+};
+
+export type Artifact = {
+  build: number,
+  url: string,
+};
+
+/**
+ * `GET /artifacts`: builds that are not known to be broken, newest first.
+ */
+export type ArtifactList = {
+  recommended: number | null,
+  items: Array<Artifact>,
+};
+
+export type AssetHint = {
+  kind: AssetHintKind,
+  /**
+   * The asset, when the line names it.
+   */
+  resource: string | null,
+  /**
+   * The console line it was found in (cleaned).
+   */
+  line: string,
+  /**
+   * What to do about it.
+   */
+  fix: string,
+};
+
+export type AssetHintKind = "entitlement" | "verify_failed" | "download_failed";
+
+/**
+ * What an import job reports.
+ */
+export type AssetImportEvent =
+  | {
+    "type": "status",
+    message: string,
+  }
+  | {
+    "type": "asset",
+    name: string,
+    state: string,
+  };
+
+export type AssetImportReport = {
+  zip_name: string,
+  imported: Array<ImportedAsset>,
+  /**
+   * Names `ensure` lines were added for.
+   */
+  ensured: Array<string>,
+  /**
+   * Warnings from the plan and anything else worth saying.
+   */
+  notes: Array<string>,
+};
+
+/**
+ * `POST /servers/{s}/assets`: import an inspected zip.
+ */
+export type AssetImportRequest = {
+  upload?: string,
+  download?: string,
+  replace: boolean,
+};
+
+/**
+ * `POST /servers/{s}/assets/inspect` with a JSON body: a zip from the Downloads folder.
+ */
+export type AssetInspectRequest = {
+  download: string,
+};
+
+/**
+ * What importing a zip would do. `upload`: the id of an uploaded zip kept for the import (null when
+ * refused); `download`: the name of the zip from the Downloads folder.
+ */
+export type AssetInspectResult = {
+  plan: AssetPlan,
+  upload?: string | null,
+  download?: string,
+};
+
+/**
+ * What importing a zip would do. Nothing is written to make it.
+ */
+export type AssetPlan = {
+  /**
+   * The zip's file name.
+   */
+  zip_name: string,
+  resources: Array<FoundAsset>,
+  problems: Array<AssetProblem>,
+  /**
+   * Unpacked size of everything that would be imported.
+   */
+  total_size: number,
+  can_import: boolean,
+};
+
+export type AssetProblem = {
+  kind: AssetProblemKind,
+  /**
+   * The resource it is about, when there is one.
+   */
+  resource: string | null,
+  message: string,
+  blocking: boolean,
+};
+
+/**
+ * What a problem is about. `blocking` problems stop the import.
+ */
+export type AssetProblemKind = "not_a_zip" | "no_resources" | "no_fxmanifest" | "missing_fxap" | "unsafe_path" | "skipped_entry" | "too_big" | "zip_bomb" | "encrypted" | "name_taken" | "bad_name" | "duplicate" | "no_folder";
 
 /**
  * The small update badge of a server (`None` on the server = not known yet).
@@ -89,6 +337,249 @@ export type Badge = {
 };
 
 export type BadgeKind = "up_to_date" | "updates" | "needs_attention" | "new_release";
+
+export type BranchChoices = {
+  resource: ResourceBranch,
+  branches: BranchLists,
+  /**
+   * Changes Kora kept aside here, newest first.
+   */
+  stashes: Array<BranchStash>,
+  /**
+   * Plain notes (e.g. "could not refresh: showing what Kora already has").
+   */
+  notes: Array<string>,
+};
+
+/**
+ * `?refresh=1` of `GET /servers/{s}/resources/{name}/branches`: download the newest lists from GitHub first.
+ */
+export type BranchChoicesQuery = {
+  refresh?: string,
+};
+
+export type BranchLists = {
+  current: string | null,
+  default_branch: string,
+  /**
+   * Branches that exist in the folder.
+   */
+  local: Array<string>,
+  /**
+   * Branches on the person's fork (`origin`).
+   */
+  fork: Array<string>,
+  /**
+   * Branches on the original repository (`upstream`).
+   */
+  upstream: Array<string>,
+};
+
+/**
+ * A kept-aside set of changes.
+ */
+export type BranchStash = {
+  /**
+   * Position in git's stash list (`stash@{index}`).
+   */
+  index: number,
+  /**
+   * Plain description, e.g. "kept aside before leaving dev (to branch fix-hud)".
+   */
+  message: string,
+  /**
+   * The branch the changes were made on.
+   */
+  branch: string,
+};
+
+export type BranchState = "default" | "branch" | "pr" | "detached" | "pinned" | "unavailable";
+
+/**
+ * `GET /servers/{s}/branches`.
+ */
+export type BranchesList = {
+  resources: Array<ResourceBranch>,
+};
+
+/**
+ * `POST /servers/{s}/branches/apply`: every resource that has the branch, or all back to the normal version.
+ */
+export type BulkApplyRequest =
+  | {
+    "action": "branch",
+    branch: string,
+    resources?: Array<string>,
+    changes?: ChangesChoice,
+  }
+  | {
+    "action": "default",
+    resources?: Array<string>,
+    changes?: ChangesChoice,
+  };
+
+/**
+ * What a bulk-preview job reports: one more resource looked at.
+ */
+export type BulkEvent =
+  | {
+    "type": "checked",
+    done: number,
+    total: number,
+    id: string,
+  }
+  | {
+    "type": "switched",
+    done: number,
+    total: number,
+    id: string,
+  };
+
+export type BulkItem = {
+  id: string,
+  status: BulkStatus,
+  message: string,
+  stashed?: BranchStash,
+  /**
+   * Files with changes (for `needs_choice`).
+   */
+  files?: Array<string>,
+  /**
+   * For `failed`: what to do about it.
+   */
+  problem?: Problem,
+};
+
+export type BulkPreview = {
+  branch: string,
+  rows: Array<BulkRow>,
+  have: number,
+  missing: number,
+  notes: Array<string>,
+};
+
+/**
+ * `POST /servers/{s}/branches/preview`.
+ */
+export type BulkPreviewRequest = {
+  branch: string,
+  /**
+   * Download the newest branch lists first (default true).
+   */
+  fetch: boolean,
+};
+
+export type BulkResult = {
+  items: Array<BulkItem>,
+  switched: number,
+  needs_choice: number,
+  failed: number,
+  skipped: number,
+  needs_restart: boolean,
+  restart_note?: string,
+};
+
+export type BulkRow = {
+  id: string,
+  /**
+   * The resource has this branch (here, on the fork or on the original).
+   */
+  has: boolean,
+  /**
+   * Where Kora would take it from when the folder does not have it yet (`origin` / `upstream`).
+   */
+  from?: string,
+  /**
+   * Already on it.
+   */
+  already: boolean,
+  /**
+   * Where the resource is now, in words.
+   */
+  now: string,
+  changed_count: number,
+  /**
+   * Why it cannot be looked at, if so.
+   */
+  note?: string,
+};
+
+export type BulkStatus = "switched" | "already" | "needs_choice" | "skipped" | "failed";
+
+/**
+ * `GET /catalog`.
+ */
+export type Catalog = {
+  schema_version: number,
+  resources: Array<CatalogResource>,
+  creators: Array<Creator>,
+};
+
+export type CatalogRelease = {
+  version: string,
+  tag: string,
+  commit: string,
+};
+
+export type CatalogResource = {
+  id: string,
+  title?: string,
+  /**
+   * One sentence about what it is.
+   */
+  description?: string,
+  repository: string,
+  path: string,
+  group: Group,
+  kind: Kind,
+  branch: string,
+  latest?: string,
+  versions: Array<CatalogRelease>,
+  depends_on: Array<string>,
+  creator?: string,
+  dev_only?: boolean,
+};
+
+/**
+ * Answer of `POST /checks/cfx` (HTTP 200 whether or not the account was found).
+ */
+export type CfxCheck = {
+  ok: boolean,
+  id: number | null,
+  username: string | null,
+  identifier: string | null,
+  message: string,
+};
+
+/**
+ * `POST /checks/cfx` `{username}`.
+ */
+export type CfxRequest = {
+  username: string,
+};
+
+export type ChangeStatus = "up_to_date" | "clean" | "dirty" | "diverged" | "other_branch";
+
+export type ChangesChoice = "ask" | "stash" | "discard";
+
+/**
+ * One line of the System check.
+ */
+export type CheckItem = {
+  /**
+   * `git`, `gh`, `github`, `database`, `admin` or `service`.
+   */
+  id: string,
+  label: string,
+  state: CheckState,
+  summary: string,
+  /**
+   * What to do about it, with the fix buttons (null when fine).
+   */
+  problem: Problem | null,
+};
+
+export type CheckState = "ok" | "problem" | "info";
 
 /**
  * `POST /servers/{s}/console`.
@@ -124,6 +615,59 @@ export type ControlResult = {
 };
 
 /**
+ * `{url}` of the issue or pull request that was made.
+ */
+export type CreatedUrl = {
+  url: string,
+};
+
+/**
+ * A third-party creator whose resources the catalog lists (schema v3 `creators`).
+ */
+export type Creator = {
+  id: string,
+  name: string,
+  url?: string,
+  description?: string,
+};
+
+/**
+ * The database administrator login, used once for the install. Never stored or returned.
+ */
+export type DbAdmin = {
+  host: string,
+  port: number,
+  user: string,
+  password?: string,
+};
+
+export type DbChoice = "use_existing" | "install_if_missing" | "skip";
+
+export type DbLoginCheck = {
+  ok: boolean,
+  message: string,
+  /**
+   * Only on a failure: a login that failed on a database that is installed but stopped carries the "Start it for me" button.
+   */
+  problem?: Problem,
+};
+
+/**
+ * `POST /checks/db-login` `{admin}`; `null` = let Kora log in by itself.
+ */
+export type DbLoginRequest = {
+  admin: DbAdmin | null,
+};
+
+/**
+ * Result of the start-the-database job: a plain sentence, or what the administrator helper printed.
+ */
+export type DbStartResult = {
+  message?: string,
+  output?: JsonValue,
+};
+
+/**
  * `DELETE /servers/{s}`.
  */
 export type DeleteRequest = {
@@ -137,6 +681,29 @@ export type DeleteRequest = {
    * Only when dropping the database needs a login the install did not keep. Used once, never stored or returned.
    */
   db_admin_password?: string,
+};
+
+/**
+ * `POST /checks/disk` `{dir}`.
+ */
+export type DirRequest = {
+  dir: string,
+};
+
+export type DiskCheck = {
+  ok: boolean,
+  free_bytes: number,
+  needed_bytes: number,
+  message: string,
+};
+
+/**
+ * A zip in the Downloads folder.
+ */
+export type DownloadZip = {
+  name: string,
+  size: number,
+  modified_unix: number,
 };
 
 /**
@@ -182,12 +749,343 @@ export type ErrorEnvelope = {
 };
 
 /**
+ * `GET /fleet`.
+ */
+export type Fleet = {
+  servers: Array<FleetServer>,
+  nodes: Array<HubNode>,
+  /**
+   * True when some node could not be reached.
+   */
+  partial: boolean,
+};
+
+/**
+ * A server in the combined list: `node_id` is null for this panel's own servers.
+ */
+export type FleetServer = {
+  node_id: string | null,
+  node_name: string,
+  /**
+   * Only what the node supports; empty when it is too old to be controlled from here.
+   */
+  actions: Array<ControlAction>,
+  name: string,
+  dir: string,
+  mode: Mode,
+  ports: Ports,
+  created_unix: number,
+  status: Status,
+  badge: Badge | null,
+  /**
+   * false = adopted (an existing server Kora did not install).
+   */
+  managed: boolean,
+  /**
+   * `<this computer's network address>:<game port>`: what players on the same network type to join. `null` when
+   * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
+   */
+  connect: string | null,
+};
+
+/**
+ * One resource folder found in a zip.
+ */
+export type FoundAsset = {
+  /**
+   * The folder name (kept exactly; it is what `ensure` uses).
+   */
+  name: string,
+  /**
+   * The folder inside the zip (`""` when the zip itself is the resource).
+   */
+  zip_path: string,
+  has_fxmanifest: boolean,
+  has_fxap: boolean,
+  /**
+   * Looks escrowed: has a `.fxap`, mentions `escrow_ignore`, or holds encrypted Lua files.
+   */
+  escrowed: boolean,
+  /**
+   * Unpacked size in bytes.
+   */
+  size: number,
+  files: number,
+  /**
+   * From `fxmanifest.lua` (`version '1.2.3'`), when present.
+   */
+  version: string | null,
+  /**
+   * A paid asset with this name is already imported: importing replaces it (a backup is kept).
+   */
+  replaces: boolean,
+};
+
+/**
+ * Result of the sign-in job.
+ */
+export type GithubLoginResult = {
+  user: string | null,
+};
+
+/**
+ * `POST /github/login` answer: the sign-in job, and the one-time code to type at `url`.
+ */
+export type GithubLoginStart = {
+  job: string,
+  code: string,
+  url: string,
+};
+
+export type GithubOwner = {
+  login: string,
+  kind: OwnerKind,
+  can_fork: boolean,
+  reason: string | null,
+};
+
+/**
+ * `GET /github/owners`.
+ */
+export type GithubOwners = {
+  owners: Array<GithubOwner>,
+};
+
+/**
+ * Where GitHub stands for Kora, so the panel can offer the right fix.
+ */
+export type GithubState = "ready" | "gh_missing" | "signed_out" | "missing_scopes";
+
+/**
+ * `GET /github/status`.
+ */
+export type GithubStatus = {
+  signed_in: boolean,
+  user: string | null,
+  state: GithubState,
+  missing_scopes: Array<string>,
+  /**
+   * What to do when GitHub is not ready (null when it is).
+   */
+  problem: Problem | null,
+};
+
+export type Group = "pre" | "kora" | "standalone" | "cfx-default" | "default-maps" | "compat" | "props" | "bridges" | "creators" | "other";
+
+/**
+ * Another panel this one can see.
+ */
+export type HubNode = {
+  id: string,
+  name: string,
+  url: string,
+  /**
+   * The token is never returned.
+   */
+  token_set: boolean,
+  /**
+   * Plain http:// to a non-private, non-Tailscale address.
+   */
+  insecure: boolean,
+  warning: string | null,
+  reachable: boolean,
+  version: string | null,
+  api: number | null,
+  platform: string | null,
+  ops: Array<string>,
+  server_count: number | null,
+  can_control: boolean,
+  last_error: string | null,
+};
+
+/**
  * Who is signed in.
  */
 export type Identity = {
   name: string,
   provider: Provider,
   role: Role,
+};
+
+/**
+ * `POST /servers/{s}/resources/plan` and `POST /servers/{s}/resources`.
+ */
+export type IdsRequest = {
+  ids: Array<string>,
+};
+
+export type ImportedAsset = {
+  name: string,
+  version: string | null,
+  /**
+   * An older copy was replaced; it was kept in the backups.
+   */
+  replaced: boolean,
+  /**
+   * The backup folder (relative to the server folder) of the replaced copy.
+   */
+  backup: string | null,
+};
+
+/**
+ * `GET /installs/defaults`.
+ */
+export type InstallDefaults = {
+  name: string,
+  dir: string,
+  hostname: string,
+  ports: Ports,
+  /**
+   * Answers saved from an install that stopped part-way (never contains secrets).
+   */
+  saved: SavedInstall | null,
+  /**
+   * What Kora remembers between installs (nothing secret).
+   */
+  profile: Profile,
+  /**
+   * The saved answers name a saved licence key that no longer exists (its old name).
+   */
+  saved_key_missing?: string,
+  resumable: Array<Resumable>,
+};
+
+/**
+ * What an install job reports: a step changed, or (an install run by the Linux helper) a line of its output.
+ */
+export type InstallEvent = ProgressEvent | StatusEvent;
+
+/**
+ * `GET /installs/{job}/log`.
+ */
+export type InstallLog = {
+  /**
+   * Where the log file is (null until it is written).
+   */
+  path: string | null,
+  /**
+   * The end of the log.
+   */
+  lines: Array<string>,
+};
+
+/**
+ * Result summary shown on the Launch screen.
+ */
+export type InstallOutcome = {
+  dir: string,
+  connect: string,
+  txadmin_url: string,
+  notes: Array<string>,
+  /**
+   * Registered server name (for Start / Stop).
+   */
+  name: string,
+  /**
+   * The `launch` step ran (the request asked for a start).
+   */
+  start_attempted: boolean,
+  /**
+   * Started and answering (txAdmin up, no problem).
+   */
+  running: boolean,
+  /**
+   * txAdmin answered on its port (true even when the game server was refused, e.g. a bad licence).
+   */
+  txadmin_up: boolean,
+  game_listening: boolean,
+  /**
+   * Plain-language reason it is not running (rejected licence, crash, port clash, timeout...).
+   */
+  launch_problem: string | null,
+  /**
+   * Last log lines for a failed start.
+   */
+  log_tail: Array<string>,
+  /**
+   * Generated local txAdmin admin (no Cfx identity was linked).
+   */
+  admin_user: string | null,
+  /**
+   * File holding that admin's password; the password itself is never put in the outcome or logs.
+   */
+  admin_password_file: string | null,
+};
+
+/**
+ * `POST /installs/plan`: what the install would do. Nothing is changed and no secret is returned.
+ */
+export type InstallPlan = {
+  /**
+   * The answers in plain words.
+   */
+  summary: string,
+  steps: Array<PlanStep>,
+  /**
+   * Plain-language list of what needs administrator rights.
+   */
+  needs_admin: Array<string>,
+  /**
+   * Kora already runs with administrator rights.
+   */
+  elevated: boolean,
+  disk: DiskCheck,
+  warnings: Array<string>,
+  /**
+   * The same list as `warnings` (older name).
+   */
+  notes: Array<string>,
+  /**
+   * Windows: these parts are done after ONE permission prompt when the install starts.
+   */
+  admin_prompt: boolean,
+};
+
+/**
+ * `POST /installs` and `POST /installs/plan`.
+ */
+export type InstallRequest = {
+  mode: Mode,
+  name: string,
+  dir: string,
+  hostname: string,
+  /**
+   * A pasted licence key (never stored in the install record; see `license_key_name`).
+   */
+  license_key: string | null,
+  /**
+   * Use the saved licence key with this name instead of carrying a key (the key is looked up by Kora).
+   */
+  license_key_name?: string,
+  /**
+   * With a pasted `license_key`: save it under this name for the next install.
+   */
+  save_license_key_as?: string,
+  ports: Ports,
+  txadmin_public: boolean,
+  artifact_url: string | null,
+  game_build: number | null,
+  resources: ResourceSelection,
+  db: DbChoice,
+  service: boolean,
+  firewall: boolean,
+  github_owner: string | null,
+  dry_run: boolean,
+  db_admin: DbAdmin | null,
+  start: boolean,
+  /**
+   * Cfx.re account that becomes the txAdmin admin, e.g. `fivem:4465268`. Null = a generated local admin.
+   */
+  cfx_identifier: string | null,
+};
+
+/**
+ * `POST /servers/{s}/issues`.
+ */
+export type IssueRequest = {
+  resource: string,
+  title: string,
+  text: string,
 };
 
 /**
@@ -258,6 +1156,44 @@ export type JsonValue = number
   }
   | null;
 
+/**
+ * `POST /keys`.
+ */
+export type KeyAddRequest = {
+  name: string,
+  license_key: string,
+};
+
+/**
+ * `POST /keys` answer.
+ */
+export type KeyAdded = {
+  key: SavedKeyInfo,
+};
+
+export type KeyChange = {
+  key: SavedKeyInfo,
+  notes: Array<string>,
+};
+
+/**
+ * `DELETE /keys/{name}`.
+ */
+export type KeyRemoved = {
+  removed: boolean,
+  notes: Array<string>,
+};
+
+/**
+ * `PUT /keys/{name}`: rename, put a new key under the name, or both.
+ */
+export type KeyUpdateRequest = {
+  new_name?: string,
+  license_key?: string,
+};
+
+export type Kind = "kora" | "dependency" | "optional" | "internal";
+
 export type LogFile = {
   name: string,
   size: number,
@@ -316,6 +1252,54 @@ export type Meta = {
   allow_remote_destructive: boolean,
 };
 
+/**
+ * One look at one server. Absent fields were not measurable.
+ */
+export type MetricSample = {
+  /**
+   * Unix seconds.
+   */
+  t: number,
+  /**
+   * The server is running.
+   */
+  up: boolean,
+  players?: number,
+  max_players?: number,
+  /**
+   * Percent of the whole machine's CPU used by the server and what it started.
+   */
+  cpu?: number,
+  /**
+   * Megabytes of RAM used by the server and what it started.
+   */
+  ram_mb?: number,
+  /**
+   * Percent of this machine's RAM in use.
+   */
+  sys_ram_pct?: number,
+  disk_free_mb?: number,
+  disk_free_pct?: number,
+  game_up: boolean,
+  txadmin_up: boolean,
+  badge?: SampleBadge,
+};
+
+/**
+ * `GET /servers/{s}/metrics`.
+ */
+export type Metrics = {
+  samples: Array<MetricSample>,
+  latest: MetricSample | null,
+};
+
+/**
+ * `?range=` of `GET /servers/{s}/metrics`: `1h`, `6h` or `24h` (default `1h`).
+ */
+export type MetricsQuery = {
+  range?: string,
+};
+
 export type Mode = "production" | "development";
 
 /**
@@ -328,10 +1312,98 @@ export type NewUser = {
 };
 
 /**
+ * A job that reports no events (an empty type: there is never a value of it).
+ */
+export type NoEvents = never;
+
+/**
+ * `POST /nodes`.
+ */
+export type NodeAddRequest = {
+  name: string,
+  url: string,
+  token: string,
+};
+
+/**
+ * `POST /nodes` answer.
+ */
+export type NodeAdded = {
+  node: HubNode,
+};
+
+/**
+ * `GET /nodes/{id}/servers`.
+ */
+export type NodeServers = {
+  servers: Array<FleetServer>,
+};
+
+/**
+ * `GET /nodes`.
+ */
+export type NodesList = {
+  nodes: Array<HubNode>,
+};
+
+/**
  * Result of a job that changed things and has notes to show.
  */
 export type Notes = {
   notes: Array<string>,
+};
+
+/**
+ * An empty job result (`{}`).
+ */
+export type Nothing = Record<symbol, never>;
+
+export type OwnerKind = "user" | "org";
+
+/**
+ * An imported paid asset, as listed for a server.
+ */
+export type PaidAsset = {
+  name: string,
+  /**
+   * Relative to `resources/`.
+   */
+  path: string,
+  version: string | null,
+  imported_unix: number | null,
+  /**
+   * Its folder is there.
+   */
+  present: boolean,
+  /**
+   * Its `.fxap` file is there.
+   */
+  has_fxap: boolean,
+  backups: number,
+};
+
+/**
+ * `GET /servers/{s}/assets`.
+ */
+export type PaidAssets = {
+  assets: Array<PaidAsset>,
+  hints: Array<AssetHint>,
+  portal_url: string,
+};
+
+export type PanelAlert = {
+  id: number,
+  server: string,
+  kind: AlertKind,
+  tone: AlertTone,
+  title: string,
+  message: string,
+  raised: number,
+  /**
+   * When the problem went away; null while it is still there.
+   */
+  resolved: number | null,
+  acked: boolean,
 };
 
 /**
@@ -353,12 +1425,111 @@ export type PanelUser = {
   created: number,
 };
 
+export type PlanItem =
+  | {
+    id: string,
+    /**
+     * Relative to `<server>/resources/`.
+     */
+    rel: string,
+    /**
+     * `owner/name` of the catalog repository.
+     */
+    repo: string,
+    branch: string,
+    /**
+     * Pinned commit, or `None` for "fork / branch head".
+     */
+    commit: string | null,
+    /**
+     * Come from the user's fork (development server, Kora's own resource).
+     */
+    fork: boolean,
+    third_party: boolean,
+    /**
+     * Install only this subfolder of the repository (a pinned copy with no `.git`).
+     */
+    subpath: string | null,
+    /**
+     * Pulled in by something else rather than asked for.
+     */
+    dependency: boolean,
+    repository: string,
+  };
+
+export type PlanStep = {
+  id: string,
+  title: string,
+};
+
 export type PlatformName = "windows" | "linux";
+
+/**
+ * One port box of the wizard.
+ */
+export type PortLine = {
+  port: number,
+  ok: boolean,
+  text: string,
+  /**
+   * The next free port when this one is taken.
+   */
+  suggestion: number | null,
+};
 
 export type Ports = {
   game: number,
   txadmin: number,
 };
+
+/**
+ * `POST /checks/ports`.
+ */
+export type PortsCheck = {
+  game: PortLine,
+  txadmin: PortLine,
+};
+
+export type PrChoices = {
+  prs: Array<PullRequest>,
+  notes: Array<string>,
+};
+
+/**
+ * `POST /servers/{s}/pr`: the plan is worked out again on the server and must be exactly what was sent.
+ */
+export type PrOpenRequest = {
+  plan: PrPlan,
+  title: string,
+  text: string,
+};
+
+/**
+ * What a pull request would contain; shown to the user before anything is sent.
+ */
+export type PrPlan = {
+  resource: string,
+  /**
+   * `owner/name` of the upstream (catalog) repository.
+   */
+  upstream: string,
+  base: string,
+  head_owner: string,
+  head_branch: string,
+  ahead: number,
+  dir: string,
+};
+
+/**
+ * `POST /servers/{s}/pr/plan`.
+ */
+export type PrPlanRequest = {
+  resource: string,
+};
+
+export type PrSource = "upstream" | "fork";
+
+export type Preset = "daily" | "weekly" | "custom";
 
 /**
  * An error a person can act on. See the module documentation.
@@ -385,9 +1556,80 @@ export type Problem = {
 };
 
 /**
+ * What Kora remembers between installs (nothing secret). `null` forgets a field.
+ */
+export type Profile = {
+  cfx_username: string | null,
+  cfx_identifier: string | null,
+  github_owner: string | null,
+};
+
+/**
+ * `PUT /profile`: a field left out stays as it is; `null` forgets it.
+ */
+export type ProfileUpdate = {
+  cfx_username?: string | null,
+  cfx_identifier?: string | null,
+  github_owner?: string | null,
+};
+
+/**
+ * A step of the install changed (an install job event).
+ */
+export type ProgressEvent = {
+  /**
+   * Stable step id, e.g. `prepare.git`, `build.clone`; `admin` for the Windows permission prompt.
+   */
+  step: string,
+  title: string,
+  status: StepStatus,
+  /**
+   * Live detail line ("Cloning kora_core (12/55)").
+   */
+  detail: string,
+  /**
+   * 0..=100 overall progress.
+   */
+  percent: number,
+};
+
+/**
  * How a session proved who it is: the launch link, Tailscale, or a user token.
  */
 export type Provider = "local" | "tailscale" | "token";
+
+export type PullRequest = {
+  number: number,
+  title: string,
+  author: string,
+  source: PrSource,
+  /**
+   * `owner/name` the pull request is on.
+   */
+  repo: string,
+  /**
+   * The branch it comes from.
+   */
+  branch: string,
+  /**
+   * `owner/name` the branch is in; `None` = that repository was deleted.
+   */
+  from: string | null,
+  draft: boolean,
+  url: string,
+  updated: string,
+};
+
+/**
+ * `GET /assets/downloads`.
+ */
+export type RecentDownloads = {
+  found: boolean,
+  folder?: string,
+  zips: Array<DownloadZip>,
+};
+
+export type Remote = "origin" | "upstream";
 
 /**
  * `GET /remote` (local sessions only). Token hashes are never sent.
@@ -427,6 +1669,55 @@ export type RemoteSettingsUpdate = {
   allow_remote_destructive?: boolean,
 };
 
+export type ResourceBranch = {
+  id: string,
+  /**
+   * The folder, relative to `resources/`.
+   */
+  folder: string,
+  state: BranchState,
+  /**
+   * Local branch name.
+   */
+  branch?: string,
+  pr?: number,
+  /**
+   * The normal branch (`dev`).
+   */
+  default_branch: string,
+  /**
+   * Plain words for where it is: "the normal version (dev)", "pull request #12".
+   */
+  label: string,
+  changed_count: number,
+  /**
+   * Sets of changes Kora kept aside in this folder.
+   */
+  stashes: number,
+  note?: string,
+  /**
+   * For `unavailable`: what to do about it.
+   */
+  problem?: Problem,
+};
+
+export type ResourceChange = {
+  id: string,
+  from: string,
+  to: string,
+  behind: number,
+  /**
+   * Commit subjects between old and new, newest first, at most ~20.
+   */
+  changelog: Array<string>,
+  needs_restart: boolean,
+  status: ChangeStatus,
+  /**
+   * Plain sentence about this resource when it is not a normal update ("trying pull request #12; not updated").
+   */
+  note?: string,
+};
+
 /**
  * `POST /servers/{s}/resources/{name}/control`: the same actions as a server.
  */
@@ -435,16 +1726,149 @@ export type ResourceControlRequest = {
 };
 
 /**
+ * What an add-resources job reports: a resource is queued, then installed.
+ */
+export type ResourceEvent = {
+  "type": "resource",
+  id: string,
+  state: string,
+};
+
+/**
+ * `"all"` or `{"only": [ids]}`.
+ */
+export type ResourceSelection = "all"
+  | {
+    "only": Array<string>
+  };
+
+/**
  * `GET /servers/{s}/resources`.
  */
 export type ResourcesList = {
   resources: Array<string>,
 };
 
+export type RestartPolicy = "none" | "ensure" | "full_restart" | "when_quiet";
+
+/**
+ * A stopped install that can carry on (also after the panel was restarted).
+ */
+export type Resumable = {
+  job: string,
+  name: string,
+  failed_step: string | null,
+};
+
+/**
+ * `POST /installs/{job}/resume`.
+ */
+export type ResumeRequest = {
+  /**
+   * Skip this step first (only steps that are safe to skip).
+   */
+  skip?: string,
+  /**
+   * Carry on without the parts that need administrator rights.
+   */
+  without_admin?: boolean,
+};
+
 /**
  * Lowest to highest (`kora_web::remote::Role`).
  */
 export type Role = "viewer" | "operator" | "admin";
+
+/**
+ * `POST /servers/{s}/snapshots/{id}/rollback`.
+ */
+export type RollbackRequest = {
+  /**
+   * Roll back even resources with uncommitted changes (they are thrown away).
+   */
+  force?: boolean,
+};
+
+export type RunAs = "installing_user" | "system";
+
+/**
+ * What is known about updates, shown as a small badge. Absent = not known yet.
+ */
+export type SampleBadge = "up_to_date"
+  | {
+    "updates": number
+  }
+  | "needs_attention"
+  | "new_release";
+
+/**
+ * The answers of an install that stopped part-way, as saved: never a licence key or a database login.
+ */
+export type SavedInstall = {
+  mode: Mode,
+  name: string,
+  dir: string,
+  hostname: string,
+  ports: Ports,
+  txadmin_public: boolean,
+  artifact_url: string | null,
+  game_build: number | null,
+  resources: ResourceSelection,
+  db: DbChoice,
+  service: boolean,
+  firewall: boolean,
+  github_owner: string | null,
+  start: boolean,
+  /**
+   * The saved licence key to use, by name.
+   */
+  license_key_name: string | null,
+  /**
+   * The Cfx.re account that becomes the txAdmin admin (not a secret).
+   */
+  cfx_identifier: string | null,
+};
+
+export type SavedKey = {
+  name: string,
+  last4: string,
+  added: number,
+  /**
+   * Servers whose configuration holds exactly this key.
+   */
+  servers: Array<string>,
+  /**
+   * Unfinished installs (and saved answers) that use it.
+   */
+  stopped_installs: number,
+};
+
+/**
+ * A saved key as the panel shows it: the name and the last four characters, never the key.
+ */
+export type SavedKeyInfo = {
+  name: string,
+  last4: string,
+  /**
+   * Unix seconds (0 = unknown).
+   */
+  added: number,
+};
+
+/**
+ * `GET /keys`.
+ */
+export type SavedKeys = {
+  keys: Array<SavedKey>,
+  /**
+   * false: this sign-in can only pick from the saved names (admins and this computer manage them).
+   */
+  can_manage: boolean,
+  /**
+   * Where the file is (only told to the computer that runs Kora).
+   */
+  path: string | null,
+};
 
 /**
  * A server folder found by "Look for servers".
@@ -464,6 +1888,78 @@ export type ScanKind = "kora" | "old_kora" | "fx_server";
  */
 export type ScanResult = {
   candidates: Array<ScanCandidate>,
+};
+
+export type ScheduleConfig = {
+  preset: Preset,
+  /**
+   * `HH:MM`, 24 hours, server local time.
+   */
+  time: string,
+  /**
+   * 0 = Monday .. 6 = Sunday (Weekly / Custom).
+   */
+  weekday: number | null,
+  run_as: RunAs,
+  enabled: boolean,
+};
+
+export type ScheduleState = {
+  schedule: ScheduleConfig | null,
+  /**
+   * A sentence about the schedule.
+   */
+  description: string | null,
+  /**
+   * Plain-language trade-off text for the "run as" choice.
+   */
+  run_as_help: string,
+};
+
+export type Scope = "all"
+  | {
+    "resources": Array<string>
+  };
+
+/**
+ * `GET /self-update`.
+ */
+export type SelfUpdateInfo = {
+  current: string,
+  latest: string | null,
+  available: boolean,
+  /**
+   * Same as `available` (the older name).
+   */
+  update_available: boolean,
+  /**
+   * Published versions, newest first.
+   */
+  versions: Array<string>,
+};
+
+/**
+ * `POST /self-update`.
+ */
+export type SelfUpdateRequest = {
+  version?: string,
+};
+
+/**
+ * Result of the self-update job. `output` is what the administrator helper printed, when it ran the update.
+ */
+export type SelfUpdateResult = {
+  version: string,
+  output?: JsonValue,
+};
+
+/**
+ * `GET /servers/{s}/catalog`.
+ */
+export type ServerCatalog = {
+  catalog: Catalog,
+  installed: Array<string>,
+  note: string | null,
 };
 
 /**
@@ -495,6 +1991,30 @@ export type ServerDetail = {
    */
   connect: string | null,
 };
+
+export type ServerKeyChanged = {
+  server: string,
+  last4: string,
+  /**
+   * The saved key it was set from (null: a pasted key that was not saved).
+   */
+  key_name: string | null,
+  running: boolean,
+  restart_needed: boolean,
+  message: string,
+};
+
+/**
+ * `PUT /servers/{s}/licence-key`: a saved key by name, or a new one (optionally saved).
+ */
+export type ServerKeyRequest =
+  | {
+    name: string,
+  }
+  | {
+    license_key: string,
+    save_as?: string,
+  };
 
 /**
  * One server in the list (`GET /servers`, the `servers` event, `POST /servers/adopt`).
@@ -559,6 +2079,26 @@ export type SessionRequest = {
   code?: string,
 };
 
+export type SnapshotInfo = {
+  id: string,
+  created_unix: number,
+  resources: Array<string>,
+};
+
+/**
+ * `GET /servers/{s}/snapshots`.
+ */
+export type SnapshotsList = {
+  snapshots: Array<SnapshotInfo>,
+};
+
+/**
+ * `POST /servers/{s}/resources/{name}/stash/restore`.
+ */
+export type StashRestoreRequest = {
+  index: number,
+};
+
 /**
  * Live state of a server.
  */
@@ -579,6 +2119,98 @@ export type StatusDetail = {
 export type StatusEvent = {
   "type": "status",
   message: string,
+};
+
+export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
+
+/**
+ * What is checked out.
+ */
+export type SwitchKind = "default" | "branch" | "pr" | "detached";
+
+export type SwitchNow = {
+  kind: SwitchKind,
+  /**
+   * Local branch name; `None` when detached.
+   */
+  branch: string | null,
+  /**
+   * The pull request number when `kind` is `pr`.
+   */
+  pr?: number,
+  /**
+   * Files with uncommitted changes (at most [`MAX_FILES`]) and the real count.
+   */
+  changed_files: Array<string>,
+  changed_count: number,
+};
+
+/**
+ * `POST /servers/{s}/resources/{name}/branch`: another branch, a pull request, or back to the normal version.
+ * `changes`: what to do with changes of the person's own that are in the way (`ask` = do nothing, say which files).
+ */
+export type SwitchRequest =
+  | {
+    "action": "default",
+    changes?: ChangesChoice,
+  }
+  | {
+    "action": "branch",
+    branch: string,
+    remote?: Remote,
+    changes?: ChangesChoice,
+  }
+  | {
+    "action": "pr",
+    /**
+     * A pull request number or its address.
+     */
+    pr: string,
+    source?: PrSource,
+    changes?: ChangesChoice,
+  };
+
+export type SwitchResult = {
+  resource: string,
+  /**
+   * True when files changed: the running server still has the old version until it is restarted.
+   */
+  needs_restart: boolean,
+  restart_note?: string,
+  status: SwitchStatus,
+  /**
+   * Where the checkout is now.
+   */
+  now: SwitchNow,
+  /**
+   * When changes were kept aside.
+   */
+  stashed?: BranchStash,
+  /**
+   * When commits that belonged to no branch were saved on a branch of this name.
+   */
+  saved_branch?: string,
+  /**
+   * For pull requests: its title.
+   */
+  title?: string,
+  /**
+   * Plain sentence about what happened.
+   */
+  message: string,
+};
+
+export type SwitchStatus = "switched" | "already" | "needs_choice";
+
+/**
+ * `GET /system/check`.
+ */
+export type SystemCheck = {
+  items: Array<CheckItem>,
+  /**
+   * No line needs fixing.
+   */
+  ok: boolean,
 };
 
 /**
@@ -618,6 +2250,215 @@ export type SystemInfo = {
 export type Tool = "git" | "gh" | "mariadb" | "unknown";
 
 /**
+ * What an install-tool job reports (`message`, `fraction` 0..1 for a download).
+ */
+export type ToolInstallEvent =
+  | {
+    "type": "status",
+    message: string,
+  }
+  | {
+    "type": "progress",
+    message: string,
+    fraction?: number,
+  };
+
+/**
+ * Result of an install-tool job: Kora's own copy (`version`, `path`, `source`), or the system package run by
+ * the administrator helper (`output`).
+ */
+export type ToolInstallResult = {
+  tool: string,
+  version?: string,
+  path?: string,
+  source?: ToolSource,
+  output?: JsonValue,
+};
+
+export type ToolSource = "system" | "private";
+
+/**
+ * One tool of `GET /tools`: Git or the GitHub CLI, from this computer or Kora's own private copy.
+ */
+export type ToolStatus = {
+  tool: Tool,
+  name: string,
+  label: string,
+  installed: boolean,
+  version: string | null,
+  source: ToolSource | null,
+  path: string | null,
+  /**
+   * Found, but it did not run.
+   */
+  broken: boolean,
+  /**
+   * Kora can download its own copy on this computer.
+   */
+  can_install: boolean,
+};
+
+export type ToolsList = {
+  tools: Array<ToolStatus>,
+};
+
+export type UninstallAnswer = {
+  item: string,
+  remove: boolean,
+};
+
+export type UninstallItem = {
+  /**
+   * `<server>/service|firewall|timer|account|program|registry|folder|database`, or `app`.
+   */
+  item: string,
+  description: string,
+  kind: UninstallItemKind,
+  remove: boolean,
+};
+
+export type UninstallItemKind = "system" | "folder" | "database" | "app";
+
+/**
+ * `POST /uninstall/plan`.
+ */
+export type UninstallPlan = {
+  items: Array<UninstallItem>,
+};
+
+/**
+ * `POST /uninstall`.
+ */
+export type UninstallRequest = {
+  answers: Array<UninstallAnswer>,
+  delete_files: boolean,
+  delete_databases: boolean,
+  /**
+   * Only these servers (empty: everything).
+   */
+  only: Array<string>,
+};
+
+/**
+ * Result of the uninstall job.
+ */
+export type UninstallResult = {
+  removed?: Array<string>,
+  kept?: Array<string>,
+  notes: Array<string>,
+  /**
+   * What the administrator helper printed, when it ran the removal.
+   */
+  output?: JsonValue,
+};
+
+/**
+ * `POST /servers/{s}/update/apply`.
+ */
+export type UpdateApplyRequest = {
+  scope: Scope,
+  restart: RestartPolicy,
+  /**
+   * Resource ids to leave alone.
+   */
+  skip: Array<string>,
+  /**
+   * The preview's planned commit per resource, so exactly what was shown is applied.
+   */
+  targets?: {
+    [key in string]: string
+  },
+};
+
+/**
+ * What an update job reports while it runs.
+ */
+export type UpdateEvent =
+  | {
+    "type": "resource",
+    id: string,
+    state: string,
+  }
+  | {
+    "type": "snapshot",
+    id: string,
+  }
+  | {
+    "type": "health",
+    message: string,
+  }
+  | {
+    "type": "progress",
+    message: string,
+  }
+  | {
+    "type": "checked",
+    done: number,
+    total: number,
+    id: string,
+  }
+  | {
+    "type": "planned",
+    ids: Array<string>,
+  }
+  | {
+    "type": "done"
+  };
+
+/**
+ * `POST /servers/{s}/update/preview`.
+ */
+export type UpdatePreviewRequest = {
+  scope: Scope,
+};
+
+/**
+ * Result of the preview job: the engine's preview and the badge it implies.
+ */
+export type UpdatePreviewResult = {
+  badge: Badge | null,
+  resources: Array<ResourceChange>,
+  /**
+   * Production: the newest release version the catalog offers, when it is newer than what is installed.
+   */
+  new_release: string | null,
+  /**
+   * Warnings about the check as a whole: the built-in release list was used, resources no longer in the catalog.
+   */
+  notes: Array<string>,
+};
+
+/**
+ * Result of an update job. Reasons are plain sentences (`[id, sentence]`).
+ */
+export type UpdateReport = {
+  server: string,
+  updated: Array<UpdatedResource>,
+  skipped: Array<[string, string]>,
+  deferred: Array<[string, string]>,
+  rolled_back: Array<[string, string]>,
+  sql_flagged: Array<string>,
+  needs_attention: Array<[string, string]>,
+  forks_synced: Array<string>,
+  forks_left_alone: Array<[string, string]>,
+  /**
+   * Resources the run never got to because an earlier one failed (nothing changed in them).
+   */
+  not_attempted: Array<string>,
+  /**
+   * Automatic updates: versions held back because they were rolled back before.
+   */
+  held: Array<[string, string]>,
+  notes: Array<string>,
+};
+
+export type UpdatedResource = {
+  id: string,
+  from: string,
+  to: string,
+};
+
+/**
  * `POST /users`.
  */
 export type UserAddRequest = {
@@ -630,4 +2471,26 @@ export type UserAddRequest = {
  */
 export type UsersList = {
   users: Array<PanelUser>,
+};
+
+/**
+ * `PUT /servers/{s}/webhook`.
+ */
+export type WebhookSetRequest = {
+  url: string,
+};
+
+/**
+ * `GET /servers/{s}/webhook`: never the address itself.
+ */
+export type WebhookState = {
+  configured: boolean,
+  /**
+   * Same as `configured` (the core's name for it).
+   */
+  set: boolean,
+  /**
+   * `discord.com/api/webhooks/<id>/***`
+   */
+  redacted: string | null,
 };

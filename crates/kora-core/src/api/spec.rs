@@ -24,6 +24,7 @@ use ts_rs::TS;
 use super::tsgen::Collector;
 use super::wire as w;
 use super::Op;
+use crate::installer::Ports;
 
 /// A Rust type that appears in the API, as seen by the generator and the contract test.
 #[derive(Clone)]
@@ -33,11 +34,18 @@ pub struct Ty {
     pub(crate) collect: fn(&mut Collector),
     /// `Ok` when the JSON reads as the type and writes back unchanged.
     pub(crate) check: fn(&Value) -> Result<(), String>,
+    /// `Ok` when the JSON reads as the type (for a request body: it may leave out what has a default).
+    pub(crate) reads: fn(&Value) -> Result<(), String>,
 }
 
 impl Ty {
     pub fn of<T: TS + Serialize + DeserializeOwned + 'static>() -> Ty {
-        Ty { name: T::name(&super::tsgen::config()), collect: |c| c.add::<T>(), check: check_roundtrip::<T> }
+        Ty { name: T::name(&super::tsgen::config()), collect: |c| c.add::<T>(), check: check_roundtrip::<T>, reads: check_reads::<T> }
+    }
+
+    /// Does `json` read as this type (a request body only needs to be understood)?
+    pub fn check_reads(&self, json: &Value) -> Result<(), String> {
+        (self.reads)(json)
     }
 
     /// Does `json` read as this type and write back as the same JSON?
@@ -50,6 +58,10 @@ impl std::fmt::Debug for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.name)
     }
+}
+
+fn check_reads<T: DeserializeOwned>(json: &Value) -> Result<(), String> {
+    serde_json::from_value::<T>(json.clone()).map(|_| ()).map_err(|e| format!("does not read as {}: {e}", std::any::type_name::<T>()))
 }
 
 fn check_roundtrip<T: Serialize + DeserializeOwned>(json: &Value) -> Result<(), String> {
@@ -70,6 +82,8 @@ pub enum Body {
     Json(Ty),
     /// The file itself, with this content type (asset upload).
     Raw(&'static str),
+    /// Either this JSON or the file itself with that content type.
+    Either(Ty, &'static str),
     /// Not described yet: the generated client says `Untyped`.
     Untyped,
 }
@@ -144,6 +158,13 @@ impl OpSpec {
         self.body = Body::Json(Ty::of::<B>());
         self
     }
+    /// The body may also be the file itself (a zip), with this content type.
+    pub fn or_raw(mut self, content_type: &'static str) -> Self {
+        if let Body::Json(t) = &self.body {
+            self.body = Body::Either(t.clone(), content_type);
+        }
+        self
+    }
     pub fn with_query<Q: TS + Serialize + DeserializeOwned + 'static>(mut self) -> Self {
         self.query = Some(Ty::of::<Q>());
         self
@@ -178,7 +199,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::ServerControl => OpSpec::start_job_with::<w::ControlRequest>().events::<w::StatusEvent>().result::<w::ControlResult>(),
         Op::ServerDelete => OpSpec::start_job_with::<w::DeleteRequest>().events::<w::StatusEvent>().result::<w::Notes>(),
         Op::ServerUnregister => OpSpec::nothing(),
-        Op::ServersScan => OpSpec::start_job().result::<w::ScanResult>(),
+        Op::ServersScan => OpSpec::start_job().events::<w::NoEvents>().result::<w::ScanResult>(),
         Op::ServersAdopt => OpSpec::call::<w::AdoptRequest, w::ServerSummary>(),
         Op::ServerOpenFolder => OpSpec::nothing(),
         Op::LogsList => OpSpec::get::<w::LogsList>(),
@@ -189,60 +210,60 @@ pub fn spec(op: Op) -> OpSpec {
         Op::ResourcesList => OpSpec::get::<w::ResourcesList>(),
         Op::ResourceEnsure => OpSpec::call::<w::EnsureRequest, w::Message>(),
         Op::ResourceControl => OpSpec::call::<w::ResourceControlRequest, w::Message>(),
-        Op::UpdatePreview => OpSpec::untyped_job(),
-        Op::UpdateApply => OpSpec::untyped_job(),
-        Op::UpdateAuto => OpSpec::untyped_job(),
-        Op::SnapshotsList => OpSpec::untyped(),
-        Op::SnapshotRollback => OpSpec::untyped_job(),
-        Op::CatalogForServer => OpSpec::untyped(),
-        Op::ResourcesPlan => OpSpec::untyped(),
-        Op::ResourcesAdd => OpSpec::untyped_job(),
-        Op::WebhookGet => OpSpec::untyped(),
-        Op::WebhookSet => OpSpec::untyped(),
-        Op::WebhookRemove => OpSpec::untyped(),
-        Op::WebhookTest => OpSpec::untyped(),
-        Op::ScheduleGet => OpSpec::untyped(),
-        Op::ScheduleSet => OpSpec::untyped(),
-        Op::ScheduleRemove => OpSpec::untyped(),
-        Op::PortsSet => OpSpec::untyped(),
-        Op::IssueReport => OpSpec::untyped(),
-        Op::PrPlan => OpSpec::untyped(),
-        Op::PrOpen => OpSpec::untyped(),
-        Op::GithubStatus => OpSpec::untyped(),
-        Op::GithubLogin => OpSpec::untyped_job(),
-        Op::GithubOwners => OpSpec::untyped(),
-        Op::CatalogGet => OpSpec::untyped(),
-        Op::ArtifactsList => OpSpec::untyped(),
-        Op::InstallDefaults => OpSpec::untyped(),
-        Op::InstallSavedClear => OpSpec::untyped(),
-        Op::CheckPorts => OpSpec::untyped(),
-        Op::CheckDisk => OpSpec::untyped(),
-        Op::CheckDbLogin => OpSpec::untyped(),
-        Op::InstallPlan => OpSpec::untyped(),
-        Op::InstallStart => OpSpec::untyped_job(),
-        Op::InstallResume => OpSpec::untyped_job(),
-        Op::InstallLog => OpSpec::untyped(),
-        Op::SelfUpdateCheck => OpSpec::untyped(),
-        Op::SelfUpdateApply => OpSpec::untyped_job(),
-        Op::AppStatus => OpSpec::untyped(),
-        Op::AppInstall => OpSpec::untyped(),
-        Op::AppUninstall => OpSpec::untyped(),
-        Op::UninstallPlan => OpSpec::untyped(),
-        Op::UninstallRun => OpSpec::untyped_job(),
-        Op::JobsGet => OpSpec::untyped(),
-        Op::JobEvents => OpSpec::untyped(),
-        Op::Events => OpSpec::untyped(),
-        Op::MetricsGet => OpSpec::untyped(),
-        Op::AlertsList => OpSpec::untyped(),
-        Op::AlertsAck => OpSpec::untyped(),
-        Op::AlertSettingsGet => OpSpec::untyped(),
-        Op::AlertSettingsSet => OpSpec::untyped(),
-        Op::NodesList => OpSpec::untyped(),
-        Op::NodeAdd => OpSpec::untyped(),
-        Op::NodeRemove => OpSpec::untyped(),
-        Op::NodeServers => OpSpec::untyped(),
+        Op::UpdatePreview => OpSpec::start_job_with::<w::UpdatePreviewRequest>().events::<w::UpdateEvent>().result::<w::UpdatePreviewResult>(),
+        Op::UpdateApply => OpSpec::start_job_with::<w::UpdateApplyRequest>().events::<w::UpdateEvent>().result::<w::UpdateReport>(),
+        Op::UpdateAuto => OpSpec::start_job().events::<w::NoEvents>().result::<w::UpdateReport>(),
+        Op::SnapshotsList => OpSpec::get::<w::SnapshotsList>(),
+        Op::SnapshotRollback => OpSpec::start_job_with::<w::RollbackRequest>().events::<w::UpdateEvent>().result::<w::Nothing>(),
+        Op::CatalogForServer => OpSpec::get::<w::ServerCatalog>(),
+        Op::ResourcesPlan => OpSpec::call::<w::IdsRequest, crate::addresources::AddPlan>(),
+        Op::ResourcesAdd => OpSpec::start_job_with::<w::IdsRequest>().events::<w::ResourceEvent>().result::<crate::addresources::AddOutcome>(),
+        Op::WebhookGet => OpSpec::get::<w::WebhookState>(),
+        Op::WebhookSet => OpSpec::call::<w::WebhookSetRequest, w::WebhookState>(),
+        Op::WebhookRemove => OpSpec::nothing(),
+        Op::WebhookTest => OpSpec::nothing(),
+        Op::ScheduleGet => OpSpec::get::<w::ScheduleState>(),
+        Op::ScheduleSet => OpSpec::call::<crate::service::ScheduleConfig, w::ScheduleState>(),
+        Op::ScheduleRemove => OpSpec::nothing(),
+        Op::PortsSet => OpSpec::call::<Ports, w::Notes>(),
+        Op::IssueReport => OpSpec::call::<w::IssueRequest, w::CreatedUrl>(),
+        Op::PrPlan => OpSpec::call::<w::PrPlanRequest, crate::feedback::PrPlan>(),
+        Op::PrOpen => OpSpec::call::<w::PrOpenRequest, w::CreatedUrl>(),
+        Op::GithubStatus => OpSpec::get::<w::GithubStatus>(),
+        Op::GithubLogin => OpSpec::get::<w::GithubLoginStart>().events::<w::NoEvents>().result::<w::GithubLoginResult>(),
+        Op::GithubOwners => OpSpec::get::<w::GithubOwners>(),
+        Op::CatalogGet => OpSpec::get::<w::Catalog>(),
+        Op::ArtifactsList => OpSpec::get::<w::ArtifactList>(),
+        Op::InstallDefaults => OpSpec::get::<w::InstallDefaults>(),
+        Op::InstallSavedClear => OpSpec::nothing(),
+        Op::CheckPorts => OpSpec::call::<Ports, w::PortsCheck>(),
+        Op::CheckDisk => OpSpec::call::<w::DirRequest, w::DiskCheck>(),
+        Op::CheckDbLogin => OpSpec::call::<w::DbLoginRequest, w::DbLoginCheck>(),
+        Op::InstallPlan => OpSpec::call::<w::InstallRequest, w::InstallPlan>(),
+        Op::InstallStart => OpSpec::start_job_with::<w::InstallRequest>().events::<w::InstallEvent>().result::<crate::installer::InstallOutcome>(),
+        Op::InstallResume => OpSpec::start_job_with::<w::ResumeRequest>().events::<w::InstallEvent>().result::<crate::installer::InstallOutcome>(),
+        Op::InstallLog => OpSpec::get::<w::InstallLog>(),
+        Op::SelfUpdateCheck => OpSpec::get::<w::SelfUpdateInfo>(),
+        Op::SelfUpdateApply => OpSpec::start_job_with::<w::SelfUpdateRequest>().events::<w::StatusEvent>().result::<w::SelfUpdateResult>(),
+        Op::AppStatus => OpSpec::get::<w::AppStatus>(),
+        Op::AppInstall => OpSpec::call::<w::AppInstallRequest, w::Message>(),
+        Op::AppUninstall => OpSpec::call::<w::AppUninstallRequest, w::Message>(),
+        Op::UninstallPlan => OpSpec::get::<w::UninstallPlan>(),
+        Op::UninstallRun => OpSpec::start_job_with::<w::UninstallRequest>().events::<w::StatusEvent>().result::<w::UninstallResult>(),
+        Op::JobsGet => OpSpec::get::<w::JobRecord>(),
+        Op::JobEvents => OpSpec::stream::<w::JobFailedData>("failed"),
+        Op::Events => OpSpec::stream::<w::ServersList>("servers"),
+        Op::MetricsGet => OpSpec::get::<w::Metrics>().with_query::<w::MetricsQuery>(),
+        Op::AlertsList => OpSpec::get::<w::AlertsList>(),
+        Op::AlertsAck => OpSpec::nothing(),
+        Op::AlertSettingsGet => OpSpec::get::<w::AlertSettings>(),
+        Op::AlertSettingsSet => OpSpec::call::<w::AlertSettingsUpdate, w::AlertSettings>(),
+        Op::NodesList => OpSpec::get::<w::NodesList>(),
+        Op::NodeAdd => OpSpec::call::<w::NodeAddRequest, w::NodeAdded>(),
+        Op::NodeRemove => OpSpec::nothing(),
+        Op::NodeServers => OpSpec::get::<w::NodeServers>(),
         Op::NodeServerControl => OpSpec::start_job_with::<w::ControlRequest>().events::<w::StatusEvent>().result::<w::ControlResult>(),
-        Op::Fleet => OpSpec::untyped(),
+        Op::Fleet => OpSpec::get::<w::Fleet>(),
         Op::RemoteGet => OpSpec::get::<w::RemoteSettings>(),
         Op::RemoteSet => OpSpec::call::<w::RemoteSettingsUpdate, w::RemoteSettings>(),
         Op::UsersList => OpSpec::get::<w::UsersList>(),
@@ -251,29 +272,29 @@ pub fn spec(op: Op) -> OpSpec {
         Op::SessionLogout => OpSpec::nothing(),
         Op::SessionLink => OpSpec::get::<w::SessionLink>(),
         Op::PanelRestart => OpSpec::get::<w::PanelRestarting>(),
-        Op::CheckCfx => OpSpec::untyped(),
-        Op::AssetsList => OpSpec::untyped(),
-        Op::AssetInspect => OpSpec::untyped(),
-        Op::AssetImport => OpSpec::untyped_job(),
-        Op::AssetRemove => OpSpec::untyped(),
-        Op::AssetDownloads => OpSpec::untyped(),
-        Op::ToolsStatus => OpSpec::untyped(),
-        Op::ToolInstall => OpSpec::untyped_job(),
-        Op::SystemCheck => OpSpec::untyped(),
-        Op::DbStart => OpSpec::untyped_job(),
-        Op::KeysList => OpSpec::untyped(),
-        Op::KeyAdd => OpSpec::untyped(),
-        Op::KeyUpdate => OpSpec::untyped(),
-        Op::KeyRemove => OpSpec::untyped(),
-        Op::ServerKeySet => OpSpec::untyped(),
-        Op::ProfileGet => OpSpec::untyped(),
-        Op::ProfileSet => OpSpec::untyped(),
-        Op::BranchesList => OpSpec::untyped(),
-        Op::BranchChoices => OpSpec::untyped(),
-        Op::PrList => OpSpec::untyped(),
-        Op::BranchSwitch => OpSpec::untyped(),
-        Op::StashRestore => OpSpec::untyped(),
-        Op::BranchBulkPreview => OpSpec::untyped_job(),
-        Op::BranchBulkApply => OpSpec::untyped_job(),
+        Op::CheckCfx => OpSpec::call::<w::CfxRequest, w::CfxCheck>(),
+        Op::AssetsList => OpSpec::get::<w::PaidAssets>(),
+        Op::AssetInspect => OpSpec::call::<w::AssetInspectRequest, w::AssetInspectResult>().or_raw("application/zip"),
+        Op::AssetImport => OpSpec::start_job_with::<w::AssetImportRequest>().events::<w::AssetImportEvent>().result::<crate::paidassets::ImportReport>(),
+        Op::AssetRemove => OpSpec::get::<w::Notes>(),
+        Op::AssetDownloads => OpSpec::get::<w::RecentDownloads>(),
+        Op::ToolsStatus => OpSpec::get::<w::ToolsList>(),
+        Op::ToolInstall => OpSpec::start_job().events::<w::ToolInstallEvent>().result::<w::ToolInstallResult>(),
+        Op::SystemCheck => OpSpec::get::<w::SystemCheck>(),
+        Op::DbStart => OpSpec::start_job().events::<w::StatusEvent>().result::<w::DbStartResult>(),
+        Op::KeysList => OpSpec::get::<w::SavedKeys>(),
+        Op::KeyAdd => OpSpec::call::<w::KeyAddRequest, w::KeyAdded>(),
+        Op::KeyUpdate => OpSpec::call::<w::KeyUpdateRequest, w::KeyChange>(),
+        Op::KeyRemove => OpSpec::get::<w::KeyRemoved>(),
+        Op::ServerKeySet => OpSpec::call::<w::ServerKeyRequest, w::ServerKeyChanged>(),
+        Op::ProfileGet => OpSpec::get::<w::Profile>(),
+        Op::ProfileSet => OpSpec::call::<w::ProfileUpdate, w::Profile>(),
+        Op::BranchesList => OpSpec::get::<w::BranchesList>(),
+        Op::BranchChoices => OpSpec::get::<crate::branches::Choices>().with_query::<w::BranchChoicesQuery>(),
+        Op::PrList => OpSpec::get::<crate::branches::PrChoices>(),
+        Op::BranchSwitch => OpSpec::call::<w::SwitchRequest, crate::branches::SwitchResult>(),
+        Op::StashRestore => OpSpec::call::<w::StashRestoreRequest, crate::branches::SwitchResult>(),
+        Op::BranchBulkPreview => OpSpec::start_job_with::<w::BulkPreviewRequest>().events::<w::BulkEvent>().result::<crate::branches::BulkPreview>(),
+        Op::BranchBulkApply => OpSpec::start_job_with::<w::BulkApplyRequest>().events::<w::BulkEvent>().result::<crate::branches::BulkResult>(),
     }
 }

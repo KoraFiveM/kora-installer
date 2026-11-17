@@ -37,6 +37,7 @@ pub enum Status {
 
 /// What is known about updates, shown as a small badge. Absent = not known yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SampleBadge"))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateBadge {
     UpToDate,

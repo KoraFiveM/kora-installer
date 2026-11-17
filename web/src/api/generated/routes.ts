@@ -3,7 +3,7 @@
 //   KORA_UPDATE_TS=1 cargo test -p kora-web --test api_ts
 // CI fails when this file is out of date.
 
-import type { Untyped, AdoptRequest, ConsoleCommand, ConsoleLine, ControlRequest, ControlResult, DeleteRequest, EnsureRequest, JobStarted, LogTail, LogTailQuery, LogsList, Message, Meta, NewUser, Notes, PanelRestarting, RemoteSettings, RemoteSettingsUpdate, ResourceControlRequest, ResourcesList, ScanResult, ServerDetail, ServerSummary, ServersList, SessionCreated, SessionLink, SessionRequest, StatusEvent, SystemInfo, UserAddRequest, UsersList } from './types'
+import type { Untyped, AddOutcome, AddPlan, AdoptRequest, AlertSettings, AlertSettingsUpdate, AlertsList, AppInstallRequest, AppStatus, AppUninstallRequest, ArtifactList, AssetImportEvent, AssetImportReport, AssetImportRequest, AssetInspectRequest, AssetInspectResult, BranchChoices, BranchChoicesQuery, BranchesList, BulkApplyRequest, BulkEvent, BulkPreview, BulkPreviewRequest, BulkResult, Catalog, CfxCheck, CfxRequest, ConsoleCommand, ConsoleLine, ControlRequest, ControlResult, CreatedUrl, DbLoginCheck, DbLoginRequest, DbStartResult, DeleteRequest, DirRequest, DiskCheck, EnsureRequest, Fleet, GithubLoginResult, GithubLoginStart, GithubOwners, GithubStatus, IdsRequest, InstallDefaults, InstallEvent, InstallLog, InstallOutcome, InstallPlan, InstallRequest, IssueRequest, JobFailedData, JobRecord, JobStarted, JsonValue, KeyAddRequest, KeyAdded, KeyChange, KeyRemoved, KeyUpdateRequest, LogTail, LogTailQuery, LogsList, Message, Meta, Metrics, MetricsQuery, NewUser, NoEvents, NodeAddRequest, NodeAdded, NodeServers, NodesList, Notes, Nothing, PaidAssets, PanelRestarting, Ports, PortsCheck, PrChoices, PrOpenRequest, PrPlan, PrPlanRequest, Profile, ProfileUpdate, RecentDownloads, RemoteSettings, RemoteSettingsUpdate, ResourceControlRequest, ResourceEvent, ResourcesList, ResumeRequest, RollbackRequest, SavedKeys, ScanResult, ScheduleConfig, ScheduleState, SelfUpdateInfo, SelfUpdateRequest, SelfUpdateResult, ServerCatalog, ServerDetail, ServerKeyChanged, ServerKeyRequest, ServerSummary, ServersList, SessionCreated, SessionLink, SessionRequest, SnapshotsList, StashRestoreRequest, StatusEvent, SwitchRequest, SwitchResult, SystemCheck, SystemInfo, ToolInstallEvent, ToolInstallResult, ToolsList, UninstallPlan, UninstallRequest, UninstallResult, UpdateApplyRequest, UpdateEvent, UpdatePreviewRequest, UpdatePreviewResult, UpdateReport, UserAddRequest, UsersList, WebhookSetRequest, WebhookState } from './types'
 
 /** One entry per operation: what goes in and what comes out. `Untyped` = not described by the Rust side yet. */
 export interface OpTypes {
@@ -15,7 +15,7 @@ export interface OpTypes {
   server_control: { method: 'POST'; path: '/servers/{s}/control'; params: { s: string }; query: undefined; body: ControlRequest; response: JobStarted; events: StatusEvent; result: ControlResult }
   server_delete: { method: 'DELETE'; path: '/servers/{s}'; params: { s: string }; query: undefined; body: DeleteRequest; response: JobStarted; events: StatusEvent; result: Notes }
   server_unregister: { method: 'DELETE'; path: '/servers/{s}/registration'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
-  servers_scan: { method: 'POST'; path: '/servers/scan'; params: Record<string, never>; query: undefined; body: undefined; response: JobStarted; events: Untyped; result: ScanResult }
+  servers_scan: { method: 'POST'; path: '/servers/scan'; params: Record<string, never>; query: undefined; body: undefined; response: JobStarted; events: NoEvents; result: ScanResult }
   servers_adopt: { method: 'POST'; path: '/servers/adopt'; params: Record<string, never>; query: undefined; body: AdoptRequest; response: ServerSummary; events: undefined; result: undefined }
   server_open_folder: { method: 'POST'; path: '/servers/{s}/open-folder'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
   logs_list: { method: 'GET'; path: '/servers/{s}/logs'; params: { s: string }; query: undefined; body: undefined; response: LogsList; events: undefined; result: undefined }
@@ -26,60 +26,60 @@ export interface OpTypes {
   resources_list: { method: 'GET'; path: '/servers/{s}/resources'; params: { s: string }; query: undefined; body: undefined; response: ResourcesList; events: undefined; result: undefined }
   resource_ensure: { method: 'POST'; path: '/servers/{s}/ensure'; params: { s: string }; query: undefined; body: EnsureRequest; response: Message; events: undefined; result: undefined }
   resource_control: { method: 'POST'; path: '/servers/{s}/resources/{name}/control'; params: { s: string; name: string }; query: undefined; body: ResourceControlRequest; response: Message; events: undefined; result: undefined }
-  update_preview: { method: 'POST'; path: '/servers/{s}/update/preview'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  update_apply: { method: 'POST'; path: '/servers/{s}/update/apply'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  update_auto: { method: 'POST'; path: '/servers/{s}/update/auto'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  snapshots_list: { method: 'GET'; path: '/servers/{s}/snapshots'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  snapshot_rollback: { method: 'POST'; path: '/servers/{s}/snapshots/{id}/rollback'; params: { s: string; id: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  catalog_for_server: { method: 'GET'; path: '/servers/{s}/catalog'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  resources_plan: { method: 'POST'; path: '/servers/{s}/resources/plan'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  resources_add: { method: 'POST'; path: '/servers/{s}/resources'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  webhook_get: { method: 'GET'; path: '/servers/{s}/webhook'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  webhook_set: { method: 'PUT'; path: '/servers/{s}/webhook'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  webhook_remove: { method: 'DELETE'; path: '/servers/{s}/webhook'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  webhook_test: { method: 'POST'; path: '/servers/{s}/webhook/test'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  schedule_get: { method: 'GET'; path: '/servers/{s}/schedule'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  schedule_set: { method: 'PUT'; path: '/servers/{s}/schedule'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  schedule_remove: { method: 'DELETE'; path: '/servers/{s}/schedule'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  ports_set: { method: 'PUT'; path: '/servers/{s}/ports'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  issue_report: { method: 'POST'; path: '/servers/{s}/issues'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  pr_plan: { method: 'POST'; path: '/servers/{s}/pr/plan'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  pr_open: { method: 'POST'; path: '/servers/{s}/pr'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  github_status: { method: 'GET'; path: '/github/status'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  github_login: { method: 'POST'; path: '/github/login'; params: Record<string, never>; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  github_owners: { method: 'GET'; path: '/github/owners'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  catalog_get: { method: 'GET'; path: '/catalog'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  artifacts_list: { method: 'GET'; path: '/artifacts'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  install_defaults: { method: 'GET'; path: '/installs/defaults'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  install_saved_clear: { method: 'DELETE'; path: '/installs/saved'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  check_ports: { method: 'POST'; path: '/checks/ports'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  check_disk: { method: 'POST'; path: '/checks/disk'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  check_db_login: { method: 'POST'; path: '/checks/db-login'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  install_plan: { method: 'POST'; path: '/installs/plan'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  install_start: { method: 'POST'; path: '/installs'; params: Record<string, never>; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  install_resume: { method: 'POST'; path: '/installs/{job}/resume'; params: { job: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  install_log: { method: 'GET'; path: '/installs/{job}/log'; params: { job: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  self_update_check: { method: 'GET'; path: '/self-update'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  self_update_apply: { method: 'POST'; path: '/self-update'; params: Record<string, never>; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  app_status: { method: 'GET'; path: '/app'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  app_install: { method: 'PUT'; path: '/app'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  app_uninstall: { method: 'DELETE'; path: '/app'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  uninstall_plan: { method: 'POST'; path: '/uninstall/plan'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  uninstall_run: { method: 'POST'; path: '/uninstall'; params: Record<string, never>; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  jobs_get: { method: 'GET'; path: '/jobs/{id}'; params: { id: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  job_events: { method: 'GET'; path: '/jobs/{id}/events'; params: { id: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  events: { method: 'GET'; path: '/events'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  metrics_get: { method: 'GET'; path: '/servers/{s}/metrics'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  alerts_list: { method: 'GET'; path: '/alerts'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  alerts_ack: { method: 'POST'; path: '/alerts/{id}/ack'; params: { id: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  alert_settings_get: { method: 'GET'; path: '/servers/{s}/alerts'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  alert_settings_set: { method: 'PUT'; path: '/servers/{s}/alerts'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  nodes_list: { method: 'GET'; path: '/nodes'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  node_add: { method: 'POST'; path: '/nodes'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  node_remove: { method: 'DELETE'; path: '/nodes/{id}'; params: { id: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  node_servers: { method: 'GET'; path: '/nodes/{id}/servers'; params: { id: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
+  update_preview: { method: 'POST'; path: '/servers/{s}/update/preview'; params: { s: string }; query: undefined; body: UpdatePreviewRequest; response: JobStarted; events: UpdateEvent; result: UpdatePreviewResult }
+  update_apply: { method: 'POST'; path: '/servers/{s}/update/apply'; params: { s: string }; query: undefined; body: UpdateApplyRequest; response: JobStarted; events: UpdateEvent; result: UpdateReport }
+  update_auto: { method: 'POST'; path: '/servers/{s}/update/auto'; params: { s: string }; query: undefined; body: undefined; response: JobStarted; events: NoEvents; result: UpdateReport }
+  snapshots_list: { method: 'GET'; path: '/servers/{s}/snapshots'; params: { s: string }; query: undefined; body: undefined; response: SnapshotsList; events: undefined; result: undefined }
+  snapshot_rollback: { method: 'POST'; path: '/servers/{s}/snapshots/{id}/rollback'; params: { s: string; id: string }; query: undefined; body: RollbackRequest; response: JobStarted; events: UpdateEvent; result: Nothing }
+  catalog_for_server: { method: 'GET'; path: '/servers/{s}/catalog'; params: { s: string }; query: undefined; body: undefined; response: ServerCatalog; events: undefined; result: undefined }
+  resources_plan: { method: 'POST'; path: '/servers/{s}/resources/plan'; params: { s: string }; query: undefined; body: IdsRequest; response: AddPlan; events: undefined; result: undefined }
+  resources_add: { method: 'POST'; path: '/servers/{s}/resources'; params: { s: string }; query: undefined; body: IdsRequest; response: JobStarted; events: ResourceEvent; result: AddOutcome }
+  webhook_get: { method: 'GET'; path: '/servers/{s}/webhook'; params: { s: string }; query: undefined; body: undefined; response: WebhookState; events: undefined; result: undefined }
+  webhook_set: { method: 'PUT'; path: '/servers/{s}/webhook'; params: { s: string }; query: undefined; body: WebhookSetRequest; response: WebhookState; events: undefined; result: undefined }
+  webhook_remove: { method: 'DELETE'; path: '/servers/{s}/webhook'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  webhook_test: { method: 'POST'; path: '/servers/{s}/webhook/test'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  schedule_get: { method: 'GET'; path: '/servers/{s}/schedule'; params: { s: string }; query: undefined; body: undefined; response: ScheduleState; events: undefined; result: undefined }
+  schedule_set: { method: 'PUT'; path: '/servers/{s}/schedule'; params: { s: string }; query: undefined; body: ScheduleConfig; response: ScheduleState; events: undefined; result: undefined }
+  schedule_remove: { method: 'DELETE'; path: '/servers/{s}/schedule'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  ports_set: { method: 'PUT'; path: '/servers/{s}/ports'; params: { s: string }; query: undefined; body: Ports; response: Notes; events: undefined; result: undefined }
+  issue_report: { method: 'POST'; path: '/servers/{s}/issues'; params: { s: string }; query: undefined; body: IssueRequest; response: CreatedUrl; events: undefined; result: undefined }
+  pr_plan: { method: 'POST'; path: '/servers/{s}/pr/plan'; params: { s: string }; query: undefined; body: PrPlanRequest; response: PrPlan; events: undefined; result: undefined }
+  pr_open: { method: 'POST'; path: '/servers/{s}/pr'; params: { s: string }; query: undefined; body: PrOpenRequest; response: CreatedUrl; events: undefined; result: undefined }
+  github_status: { method: 'GET'; path: '/github/status'; params: Record<string, never>; query: undefined; body: undefined; response: GithubStatus; events: undefined; result: undefined }
+  github_login: { method: 'POST'; path: '/github/login'; params: Record<string, never>; query: undefined; body: undefined; response: GithubLoginStart; events: NoEvents; result: GithubLoginResult }
+  github_owners: { method: 'GET'; path: '/github/owners'; params: Record<string, never>; query: undefined; body: undefined; response: GithubOwners; events: undefined; result: undefined }
+  catalog_get: { method: 'GET'; path: '/catalog'; params: Record<string, never>; query: undefined; body: undefined; response: Catalog; events: undefined; result: undefined }
+  artifacts_list: { method: 'GET'; path: '/artifacts'; params: Record<string, never>; query: undefined; body: undefined; response: ArtifactList; events: undefined; result: undefined }
+  install_defaults: { method: 'GET'; path: '/installs/defaults'; params: Record<string, never>; query: undefined; body: undefined; response: InstallDefaults; events: undefined; result: undefined }
+  install_saved_clear: { method: 'DELETE'; path: '/installs/saved'; params: Record<string, never>; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  check_ports: { method: 'POST'; path: '/checks/ports'; params: Record<string, never>; query: undefined; body: Ports; response: PortsCheck; events: undefined; result: undefined }
+  check_disk: { method: 'POST'; path: '/checks/disk'; params: Record<string, never>; query: undefined; body: DirRequest; response: DiskCheck; events: undefined; result: undefined }
+  check_db_login: { method: 'POST'; path: '/checks/db-login'; params: Record<string, never>; query: undefined; body: DbLoginRequest; response: DbLoginCheck; events: undefined; result: undefined }
+  install_plan: { method: 'POST'; path: '/installs/plan'; params: Record<string, never>; query: undefined; body: InstallRequest; response: InstallPlan; events: undefined; result: undefined }
+  install_start: { method: 'POST'; path: '/installs'; params: Record<string, never>; query: undefined; body: InstallRequest; response: JobStarted; events: InstallEvent; result: InstallOutcome }
+  install_resume: { method: 'POST'; path: '/installs/{job}/resume'; params: { job: string }; query: undefined; body: ResumeRequest; response: JobStarted; events: InstallEvent; result: InstallOutcome }
+  install_log: { method: 'GET'; path: '/installs/{job}/log'; params: { job: string }; query: undefined; body: undefined; response: InstallLog; events: undefined; result: undefined }
+  self_update_check: { method: 'GET'; path: '/self-update'; params: Record<string, never>; query: undefined; body: undefined; response: SelfUpdateInfo; events: undefined; result: undefined }
+  self_update_apply: { method: 'POST'; path: '/self-update'; params: Record<string, never>; query: undefined; body: SelfUpdateRequest; response: JobStarted; events: StatusEvent; result: SelfUpdateResult }
+  app_status: { method: 'GET'; path: '/app'; params: Record<string, never>; query: undefined; body: undefined; response: AppStatus; events: undefined; result: undefined }
+  app_install: { method: 'PUT'; path: '/app'; params: Record<string, never>; query: undefined; body: AppInstallRequest; response: Message; events: undefined; result: undefined }
+  app_uninstall: { method: 'DELETE'; path: '/app'; params: Record<string, never>; query: undefined; body: AppUninstallRequest; response: Message; events: undefined; result: undefined }
+  uninstall_plan: { method: 'POST'; path: '/uninstall/plan'; params: Record<string, never>; query: undefined; body: undefined; response: UninstallPlan; events: undefined; result: undefined }
+  uninstall_run: { method: 'POST'; path: '/uninstall'; params: Record<string, never>; query: undefined; body: UninstallRequest; response: JobStarted; events: StatusEvent; result: UninstallResult }
+  jobs_get: { method: 'GET'; path: '/jobs/{id}'; params: { id: string }; query: undefined; body: undefined; response: JobRecord<JsonValue, JsonValue>; events: undefined; result: undefined }
+  job_events: { method: 'GET'; path: '/jobs/{id}/events'; params: { id: string }; query: undefined; body: undefined; response: JobFailedData; events: undefined; result: undefined }
+  events: { method: 'GET'; path: '/events'; params: Record<string, never>; query: undefined; body: undefined; response: ServersList; events: undefined; result: undefined }
+  metrics_get: { method: 'GET'; path: '/servers/{s}/metrics'; params: { s: string }; query: MetricsQuery; body: undefined; response: Metrics; events: undefined; result: undefined }
+  alerts_list: { method: 'GET'; path: '/alerts'; params: Record<string, never>; query: undefined; body: undefined; response: AlertsList; events: undefined; result: undefined }
+  alerts_ack: { method: 'POST'; path: '/alerts/{id}/ack'; params: { id: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  alert_settings_get: { method: 'GET'; path: '/servers/{s}/alerts'; params: { s: string }; query: undefined; body: undefined; response: AlertSettings; events: undefined; result: undefined }
+  alert_settings_set: { method: 'PUT'; path: '/servers/{s}/alerts'; params: { s: string }; query: undefined; body: AlertSettingsUpdate; response: AlertSettings; events: undefined; result: undefined }
+  nodes_list: { method: 'GET'; path: '/nodes'; params: Record<string, never>; query: undefined; body: undefined; response: NodesList; events: undefined; result: undefined }
+  node_add: { method: 'POST'; path: '/nodes'; params: Record<string, never>; query: undefined; body: NodeAddRequest; response: NodeAdded; events: undefined; result: undefined }
+  node_remove: { method: 'DELETE'; path: '/nodes/{id}'; params: { id: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  node_servers: { method: 'GET'; path: '/nodes/{id}/servers'; params: { id: string }; query: undefined; body: undefined; response: NodeServers; events: undefined; result: undefined }
   node_server_control: { method: 'POST'; path: '/nodes/{id}/servers/{s}/control'; params: { id: string; s: string }; query: undefined; body: ControlRequest; response: JobStarted; events: StatusEvent; result: ControlResult }
-  fleet: { method: 'GET'; path: '/fleet'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
+  fleet: { method: 'GET'; path: '/fleet'; params: Record<string, never>; query: undefined; body: undefined; response: Fleet; events: undefined; result: undefined }
   remote_get: { method: 'GET'; path: '/remote'; params: Record<string, never>; query: undefined; body: undefined; response: RemoteSettings; events: undefined; result: undefined }
   remote_set: { method: 'PUT'; path: '/remote'; params: Record<string, never>; query: undefined; body: RemoteSettingsUpdate; response: RemoteSettings; events: undefined; result: undefined }
   users_list: { method: 'GET'; path: '/users'; params: Record<string, never>; query: undefined; body: undefined; response: UsersList; events: undefined; result: undefined }
@@ -88,30 +88,30 @@ export interface OpTypes {
   session_logout: { method: 'POST'; path: '/session/logout'; params: Record<string, never>; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
   session_link: { method: 'POST'; path: '/session/link'; params: Record<string, never>; query: undefined; body: undefined; response: SessionLink; events: undefined; result: undefined }
   panel_restart: { method: 'POST'; path: '/panel/restart'; params: Record<string, never>; query: undefined; body: undefined; response: PanelRestarting; events: undefined; result: undefined }
-  check_cfx: { method: 'POST'; path: '/checks/cfx'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  assets_list: { method: 'GET'; path: '/servers/{s}/assets'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  asset_inspect: { method: 'POST'; path: '/servers/{s}/assets/inspect'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  asset_import: { method: 'POST'; path: '/servers/{s}/assets'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  asset_remove: { method: 'DELETE'; path: '/servers/{s}/assets/{name}'; params: { s: string; name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  asset_downloads: { method: 'GET'; path: '/assets/downloads'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  tools_status: { method: 'GET'; path: '/tools'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  tool_install: { method: 'POST'; path: '/tools/{tool}/install'; params: { tool: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  system_check: { method: 'GET'; path: '/system/check'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  db_start: { method: 'POST'; path: '/system/database/start'; params: Record<string, never>; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  keys_list: { method: 'GET'; path: '/keys'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  key_add: { method: 'POST'; path: '/keys'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  key_update: { method: 'PUT'; path: '/keys/{name}'; params: { name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  key_remove: { method: 'DELETE'; path: '/keys/{name}'; params: { name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  server_key_set: { method: 'PUT'; path: '/servers/{s}/licence-key'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  profile_get: { method: 'GET'; path: '/profile'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  profile_set: { method: 'PUT'; path: '/profile'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  branches_list: { method: 'GET'; path: '/servers/{s}/branches'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  branch_choices: { method: 'GET'; path: '/servers/{s}/resources/{name}/branches'; params: { s: string; name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  pr_list: { method: 'GET'; path: '/servers/{s}/resources/{name}/prs'; params: { s: string; name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  branch_switch: { method: 'POST'; path: '/servers/{s}/resources/{name}/branch'; params: { s: string; name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  stash_restore: { method: 'POST'; path: '/servers/{s}/resources/{name}/stash/restore'; params: { s: string; name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  branch_bulk_preview: { method: 'POST'; path: '/servers/{s}/branches/preview'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  branch_bulk_apply: { method: 'POST'; path: '/servers/{s}/branches/apply'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
+  check_cfx: { method: 'POST'; path: '/checks/cfx'; params: Record<string, never>; query: undefined; body: CfxRequest; response: CfxCheck; events: undefined; result: undefined }
+  assets_list: { method: 'GET'; path: '/servers/{s}/assets'; params: { s: string }; query: undefined; body: undefined; response: PaidAssets; events: undefined; result: undefined }
+  asset_inspect: { method: 'POST'; path: '/servers/{s}/assets/inspect'; params: { s: string }; query: undefined; body: AssetInspectRequest | Blob; response: AssetInspectResult; events: undefined; result: undefined }
+  asset_import: { method: 'POST'; path: '/servers/{s}/assets'; params: { s: string }; query: undefined; body: AssetImportRequest; response: JobStarted; events: AssetImportEvent; result: AssetImportReport }
+  asset_remove: { method: 'DELETE'; path: '/servers/{s}/assets/{name}'; params: { s: string; name: string }; query: undefined; body: undefined; response: Notes; events: undefined; result: undefined }
+  asset_downloads: { method: 'GET'; path: '/assets/downloads'; params: Record<string, never>; query: undefined; body: undefined; response: RecentDownloads; events: undefined; result: undefined }
+  tools_status: { method: 'GET'; path: '/tools'; params: Record<string, never>; query: undefined; body: undefined; response: ToolsList; events: undefined; result: undefined }
+  tool_install: { method: 'POST'; path: '/tools/{tool}/install'; params: { tool: string }; query: undefined; body: undefined; response: JobStarted; events: ToolInstallEvent; result: ToolInstallResult }
+  system_check: { method: 'GET'; path: '/system/check'; params: Record<string, never>; query: undefined; body: undefined; response: SystemCheck; events: undefined; result: undefined }
+  db_start: { method: 'POST'; path: '/system/database/start'; params: Record<string, never>; query: undefined; body: undefined; response: JobStarted; events: StatusEvent; result: DbStartResult }
+  keys_list: { method: 'GET'; path: '/keys'; params: Record<string, never>; query: undefined; body: undefined; response: SavedKeys; events: undefined; result: undefined }
+  key_add: { method: 'POST'; path: '/keys'; params: Record<string, never>; query: undefined; body: KeyAddRequest; response: KeyAdded; events: undefined; result: undefined }
+  key_update: { method: 'PUT'; path: '/keys/{name}'; params: { name: string }; query: undefined; body: KeyUpdateRequest; response: KeyChange; events: undefined; result: undefined }
+  key_remove: { method: 'DELETE'; path: '/keys/{name}'; params: { name: string }; query: undefined; body: undefined; response: KeyRemoved; events: undefined; result: undefined }
+  server_key_set: { method: 'PUT'; path: '/servers/{s}/licence-key'; params: { s: string }; query: undefined; body: ServerKeyRequest; response: ServerKeyChanged; events: undefined; result: undefined }
+  profile_get: { method: 'GET'; path: '/profile'; params: Record<string, never>; query: undefined; body: undefined; response: Profile; events: undefined; result: undefined }
+  profile_set: { method: 'PUT'; path: '/profile'; params: Record<string, never>; query: undefined; body: ProfileUpdate; response: Profile; events: undefined; result: undefined }
+  branches_list: { method: 'GET'; path: '/servers/{s}/branches'; params: { s: string }; query: undefined; body: undefined; response: BranchesList; events: undefined; result: undefined }
+  branch_choices: { method: 'GET'; path: '/servers/{s}/resources/{name}/branches'; params: { s: string; name: string }; query: BranchChoicesQuery; body: undefined; response: BranchChoices; events: undefined; result: undefined }
+  pr_list: { method: 'GET'; path: '/servers/{s}/resources/{name}/prs'; params: { s: string; name: string }; query: undefined; body: undefined; response: PrChoices; events: undefined; result: undefined }
+  branch_switch: { method: 'POST'; path: '/servers/{s}/resources/{name}/branch'; params: { s: string; name: string }; query: undefined; body: SwitchRequest; response: SwitchResult; events: undefined; result: undefined }
+  stash_restore: { method: 'POST'; path: '/servers/{s}/resources/{name}/stash/restore'; params: { s: string; name: string }; query: undefined; body: StashRestoreRequest; response: SwitchResult; events: undefined; result: undefined }
+  branch_bulk_preview: { method: 'POST'; path: '/servers/{s}/branches/preview'; params: { s: string }; query: undefined; body: BulkPreviewRequest; response: JobStarted; events: BulkEvent; result: BulkPreview }
+  branch_bulk_apply: { method: 'POST'; path: '/servers/{s}/branches/apply'; params: { s: string }; query: undefined; body: BulkApplyRequest; response: JobStarted; events: BulkEvent; result: BulkResult }
 }
 
 export type OpName = keyof OpTypes
@@ -190,8 +190,8 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   uninstall_plan: { method: 'POST', path: '/uninstall/plan', job: false, stream: false, raw: null },
   uninstall_run: { method: 'POST', path: '/uninstall', job: true, stream: false, raw: null },
   jobs_get: { method: 'GET', path: '/jobs/{id}', job: false, stream: false, raw: null },
-  job_events: { method: 'GET', path: '/jobs/{id}/events', job: false, stream: false, raw: null },
-  events: { method: 'GET', path: '/events', job: false, stream: false, raw: null },
+  job_events: { method: 'GET', path: '/jobs/{id}/events', job: false, stream: true, raw: null },
+  events: { method: 'GET', path: '/events', job: false, stream: true, raw: null },
   metrics_get: { method: 'GET', path: '/servers/{s}/metrics', job: false, stream: false, raw: null },
   alerts_list: { method: 'GET', path: '/alerts', job: false, stream: false, raw: null },
   alerts_ack: { method: 'POST', path: '/alerts/{id}/ack', job: false, stream: false, raw: null },
@@ -213,7 +213,7 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   panel_restart: { method: 'POST', path: '/panel/restart', job: false, stream: false, raw: null },
   check_cfx: { method: 'POST', path: '/checks/cfx', job: false, stream: false, raw: null },
   assets_list: { method: 'GET', path: '/servers/{s}/assets', job: false, stream: false, raw: null },
-  asset_inspect: { method: 'POST', path: '/servers/{s}/assets/inspect', job: false, stream: false, raw: null },
+  asset_inspect: { method: 'POST', path: '/servers/{s}/assets/inspect', job: false, stream: false, raw: 'application/zip' },
   asset_import: { method: 'POST', path: '/servers/{s}/assets', job: true, stream: false, raw: null },
   asset_remove: { method: 'DELETE', path: '/servers/{s}/assets/{name}', job: false, stream: false, raw: null },
   asset_downloads: { method: 'GET', path: '/assets/downloads', job: false, stream: false, raw: null },
@@ -239,82 +239,4 @@ export const ROUTES: Record<OpName, RouteInfo> = {
 
 /** Operations that still have an `Untyped` request, response or job type (a list to shrink). */
 export const UNTYPED_OPS: readonly string[] = [
-  'servers_scan: job events',
-  'update_preview: request, job events, job result',
-  'update_apply: request, job events, job result',
-  'update_auto: request, job events, job result',
-  'snapshots_list: request, response',
-  'snapshot_rollback: request, job events, job result',
-  'catalog_for_server: request, response',
-  'resources_plan: request, response',
-  'resources_add: request, job events, job result',
-  'webhook_get: request, response',
-  'webhook_set: request, response',
-  'webhook_remove: request, response',
-  'webhook_test: request, response',
-  'schedule_get: request, response',
-  'schedule_set: request, response',
-  'schedule_remove: request, response',
-  'ports_set: request, response',
-  'issue_report: request, response',
-  'pr_plan: request, response',
-  'pr_open: request, response',
-  'github_status: request, response',
-  'github_login: request, job events, job result',
-  'github_owners: request, response',
-  'catalog_get: request, response',
-  'artifacts_list: request, response',
-  'install_defaults: request, response',
-  'install_saved_clear: request, response',
-  'check_ports: request, response',
-  'check_disk: request, response',
-  'check_db_login: request, response',
-  'install_plan: request, response',
-  'install_start: request, job events, job result',
-  'install_resume: request, job events, job result',
-  'install_log: request, response',
-  'self_update_check: request, response',
-  'self_update_apply: request, job events, job result',
-  'app_status: request, response',
-  'app_install: request, response',
-  'app_uninstall: request, response',
-  'uninstall_plan: request, response',
-  'uninstall_run: request, job events, job result',
-  'jobs_get: request, response',
-  'job_events: request, response',
-  'events: request, response',
-  'metrics_get: request, response',
-  'alerts_list: request, response',
-  'alerts_ack: request, response',
-  'alert_settings_get: request, response',
-  'alert_settings_set: request, response',
-  'nodes_list: request, response',
-  'node_add: request, response',
-  'node_remove: request, response',
-  'node_servers: request, response',
-  'fleet: request, response',
-  'check_cfx: request, response',
-  'assets_list: request, response',
-  'asset_inspect: request, response',
-  'asset_import: request, job events, job result',
-  'asset_remove: request, response',
-  'asset_downloads: request, response',
-  'tools_status: request, response',
-  'tool_install: request, job events, job result',
-  'system_check: request, response',
-  'db_start: request, job events, job result',
-  'keys_list: request, response',
-  'key_add: request, response',
-  'key_update: request, response',
-  'key_remove: request, response',
-  'server_key_set: request, response',
-  'profile_get: request, response',
-  'profile_set: request, response',
-  'branches_list: request, response',
-  'branch_choices: request, response',
-  'pr_list: request, response',
-  'branch_switch: request, response',
-  'stash_restore: request, response',
-  'branch_bulk_preview: request, job events, job result',
-  'branch_bulk_apply: request, job events, job result',
 ]

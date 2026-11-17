@@ -71,6 +71,7 @@ pub fn report_issue(r: &dyn CommandRunner, server: &ServerFile, resource_id: &st
 
 /// What a pull request would contain; shown to the user before anything is sent.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PrPlan {
     pub resource: String,
     /// `owner/name` of the upstream (catalog) repository.

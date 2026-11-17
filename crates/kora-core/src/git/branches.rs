@@ -50,6 +50,7 @@ const FETCH: [&str; 4] = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedT
 
 /// What is checked out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchKind"))]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// The resource's normal branch.
@@ -63,12 +64,14 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchNow"))]
 pub struct Where {
     pub kind: Kind,
     /// Local branch name; `None` when detached.
     pub branch: Option<String>,
     /// The pull request number when `kind` is `pr`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub pr: Option<u32>,
     /// Files with uncommitted changes (at most [`MAX_FILES`]) and the real count.
     pub changed_files: Vec<String>,
@@ -109,6 +112,7 @@ pub fn describe_other(current: &str) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "BranchLists"))]
 pub struct Branches {
     pub current: Option<String>,
     pub default_branch: String,
@@ -122,6 +126,7 @@ pub struct Branches {
 
 /// A kept-aside set of changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "BranchStash"))]
 pub struct Stash {
     /// Position in git's stash list (`stash@{index}`).
     pub index: u32,
@@ -132,6 +137,7 @@ pub struct Stash {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "ChangesChoice"))]
 #[serde(rename_all = "snake_case")]
 pub enum Changes {
     /// Do nothing and say which files have changes.
@@ -144,6 +150,7 @@ pub enum Changes {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchStatus"))]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Switched,
@@ -154,24 +161,29 @@ pub enum Status {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchOutcome"))]
 pub struct Outcome {
     pub status: Status,
     /// Where the checkout is now.
     pub now: Where,
     /// When changes were kept aside.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub stashed: Option<Stash>,
     /// When commits that belonged to no branch were saved on a branch of this name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub saved_branch: Option<String>,
     /// For pull requests: its title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub title: Option<String>,
     /// Plain sentence about what happened.
     pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum PrSource {
     /// On the original repository.
@@ -181,6 +193,7 @@ pub enum PrSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PullRequest {
     pub number: u32,
     pub title: String,

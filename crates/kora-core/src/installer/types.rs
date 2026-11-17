@@ -155,6 +155,7 @@ pub trait ProgressSink: Send {
 
 /// Result summary shown on the Launch screen.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct InstallOutcome {
     pub dir: PathBuf,
     pub connect: String,

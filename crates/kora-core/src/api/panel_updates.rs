@@ -88,6 +88,9 @@ fn resource_json(r: &Resource) -> Value {
     if let Some(t) = &r.title {
         v["title"] = json!(t);
     }
+    if let Some(d) = &r.description {
+        v["description"] = json!(d);
+    }
     if let Some(l) = &r.latest {
         v["latest"] = json!(l);
     }

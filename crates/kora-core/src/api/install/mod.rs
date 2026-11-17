@@ -340,6 +340,8 @@ pub fn request_json(r: &InstallRequest) -> Value {
         "github_owner": r.github_owner,
         "start": r.start,
         "license_key_name": r.license_key_name,
+        // Not a secret; the wizard puts it back so a resumed install keeps the same txAdmin admin.
+        "cfx_identifier": r.cfx_identifier,
     })
 }
 

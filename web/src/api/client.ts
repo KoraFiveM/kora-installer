@@ -278,20 +278,20 @@ export const api = {
     ensure: (name: string, body: { name: string; restart: boolean }) => call('resource_ensure', { params: { s: name }, body }),
     /** Start, stop or restart one resource on a running server. */
     control: (name: string, resource: string, action: T.ControlAction) => call('resource_control', { params: { s: name, name: resource }, body: { action } }),
-    plan: (name: string, ids: string[]) => L<T.AddPlan>()('resources_plan', { params: { s: name }, body: { ids } }),
+    plan: (name: string, ids: string[]) => call('resources_plan', { params: { s: name }, body: { ids } }),
     add: (name: string, ids: string[]) => call('resources_add', { params: { s: name }, body: { ids } }),
-    catalog: (name: string) => L<T.ServerCatalog>()('catalog_for_server', { params: { s: name } }),
+    catalog: (name: string) => call('catalog_for_server', { params: { s: name } }),
   },
   assets: {
-    list: (name: string) => L<T.PaidAssets>()('assets_list', { params: { s: name } }),
+    list: (name: string) => call('assets_list', { params: { s: name } }),
     /** Upload a zip (the file itself is the body) and get what importing it would do. */
     inspectUpload: (name: string, file: Blob, fileName: string) =>
-      L<T.AssetInspectResult>()('asset_inspect', { params: { s: name } }, { raw: { body: file, type: 'application/zip', headers: { 'X-File-Name': enc(fileName) } } }),
+      call('asset_inspect', { params: { s: name } }, { raw: { body: file, type: 'application/zip', headers: { 'X-File-Name': enc(fileName) } } }),
     /** A recent zip from the Downloads folder of the computer that runs Kora (local sessions only). */
-    inspectDownload: (name: string, download: string) => L<T.AssetInspectResult>()('asset_inspect', { params: { s: name }, body: { download } }),
+    inspectDownload: (name: string, download: string) => call('asset_inspect', { params: { s: name }, body: { download } }),
     import: (name: string, source: T.AssetSource, replace = true) => call('asset_import', { params: { s: name }, body: { ...source, replace } }),
-    remove: (name: string, asset: string) => L<{ notes: string[] }>()('asset_remove', { params: { s: name, name: asset } }),
-    downloads: () => L<T.RecentDownloads>()('asset_downloads', {}),
+    remove: (name: string, asset: string) => call('asset_remove', { params: { s: name, name: asset } }),
+    downloads: () => call('asset_downloads', {}),
   },
   update: {
     preview: (name: string, scope: T.Scope = 'all') => call('update_preview', { params: { s: name }, body: { scope } }),
@@ -300,40 +300,40 @@ export const api = {
     auto: (name: string) => call('update_auto', { params: { s: name } }),
   },
   snapshots: {
-    list: (name: string) => L<{ snapshots: T.SnapshotInfo[] }>()('snapshots_list', { params: { s: name } }).then((r) => r.snapshots),
+    list: (name: string) => call('snapshots_list', { params: { s: name } }).then((r) => r.snapshots),
     /** `force`: roll back even resources with uncommitted changes (they are thrown away). */
     rollback: (name: string, id: string, force = false) => call('snapshot_rollback', { params: { s: name, id }, body: force ? { force: true } : undefined }),
   },
   webhook: {
-    get: (name: string) => L<T.WebhookState>()('webhook_get', { params: { s: name } }),
-    set: (name: string, url: string) => L<T.WebhookState>()('webhook_set', { params: { s: name }, body: { url } }),
-    remove: (name: string) => L<void>()('webhook_remove', { params: { s: name } }),
-    test: (name: string) => L<void>()('webhook_test', { params: { s: name } }),
+    get: (name: string) => call('webhook_get', { params: { s: name } }),
+    set: (name: string, url: string) => call('webhook_set', { params: { s: name }, body: { url } }),
+    remove: (name: string) => call('webhook_remove', { params: { s: name } }),
+    test: (name: string) => call('webhook_test', { params: { s: name } }),
   },
   schedule: {
-    get: (name: string) => L<T.ScheduleState>()('schedule_get', { params: { s: name } }),
-    set: (name: string, cfg: T.ScheduleConfig) => L<T.ScheduleState>()('schedule_set', { params: { s: name }, body: cfg }),
-    remove: (name: string) => L<void>()('schedule_remove', { params: { s: name } }),
+    get: (name: string) => call('schedule_get', { params: { s: name } }),
+    set: (name: string, cfg: T.ScheduleConfig) => call('schedule_set', { params: { s: name }, body: cfg }),
+    remove: (name: string) => call('schedule_remove', { params: { s: name } }),
   },
   ports: {
-    set: (name: string, ports: T.Ports) => L<{ notes: string[] }>()('ports_set', { params: { s: name }, body: ports }),
+    set: (name: string, ports: T.Ports) => call('ports_set', { params: { s: name }, body: ports }),
   },
   feedback: {
-    report: (name: string, body: { resource: string; title: string; text: string }) => L<{ url: string }>()('issue_report', { params: { s: name }, body }),
-    prPlan: (name: string, resource: string) => L<T.PrPlan>()('pr_plan', { params: { s: name }, body: { resource } }),
-    prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => L<{ url: string }>()('pr_open', { params: { s: name }, body }),
+    report: (name: string, body: { resource: string; title: string; text: string }) => call('issue_report', { params: { s: name }, body }),
+    prPlan: (name: string, resource: string) => call('pr_plan', { params: { s: name }, body: { resource } }),
+    prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => call('pr_open', { params: { s: name }, body }),
   },
   branches: {
     /** Where each resource is (nothing is downloaded). Development servers only. */
-    list: (name: string) => L<{ resources: T.ResourceBranch[] }>()('branches_list', { params: { s: name } }).then((r) => r.resources),
+    list: (name: string) => call('branches_list', { params: { s: name } }).then((r) => r.resources),
     /** Branches and kept-aside changes of one resource; `refresh` downloads the newest lists from GitHub first. */
-    choices: (name: string, resource: string, refresh = false) => L<T.BranchChoices>()('branch_choices', { params: { s: name, name: resource }, query: refresh ? { refresh: 1 } : undefined } as never),
+    choices: (name: string, resource: string, refresh = false) => call('branch_choices', { params: { s: name, name: resource }, query: refresh ? { refresh: 1 } : undefined } as never),
     /** Open pull requests of the original repository and of the person's fork. */
-    prs: (name: string, resource: string) => L<T.PrChoices>()('pr_list', { params: { s: name, name: resource } }),
+    prs: (name: string, resource: string) => call('pr_list', { params: { s: name, name: resource } }),
     /** Switch one resource: another branch, a pull request, or back to the normal version. */
-    switch: (name: string, resource: string, body: T.SwitchRequest) => L<T.SwitchResult>()('branch_switch', { params: { s: name, name: resource }, body }),
+    switch: (name: string, resource: string, body: T.SwitchRequest) => call('branch_switch', { params: { s: name, name: resource }, body }),
     /** Bring kept-aside changes back. */
-    restore: (name: string, resource: string, index: number) => L<T.SwitchResult>()('stash_restore', { params: { s: name, name: resource }, body: { index } }),
+    restore: (name: string, resource: string, index: number) => call('stash_restore', { params: { s: name, name: resource }, body: { index } }),
     /** Which resources have a branch (a job; result is a `BulkPreview`). */
     bulkPreview: (name: string, branch: string, fetch = true) => call('branch_bulk_preview', { params: { s: name }, body: { branch, fetch } }),
     /** Switch every resource that has the branch, or all back to the normal version (a job; result is a `BulkResult`). */
@@ -341,46 +341,46 @@ export const api = {
       call('branch_bulk_apply', { params: { s: name }, body }),
   },
   github: {
-    status: () => L<T.GithubStatus>()('github_status', {}),
+    status: () => call('github_status', {}),
     login: () => call('github_login', {}) as unknown as Promise<T.GithubLoginStart>,
-    owners: () => L<{ owners: T.GithubOwner[] }>()('github_owners', {}).then((r) => r.owners),
+    owners: () => call('github_owners', {}).then((r) => r.owners),
   },
   /** Git and the GitHub CLI, the System check, and starting the database. */
   tools: {
-    status: () => L<{ tools: T.ToolStatus[] }>()('tools_status', {}).then((r) => r.tools),
+    status: () => call('tools_status', {}).then((r) => r.tools),
     /** Download and set up Kora's own copy (a job; `git` on Linux is the system package and needs administrator rights). */
     install: (tool: 'git' | 'gh') => call('tool_install', { params: { tool } }),
   },
   systemCheck: {
-    get: () => L<T.SystemCheck>()('system_check', {}),
+    get: () => call('system_check', {}),
     startDatabase: () => call('db_start', {}),
   },
   keys: {
-    list: () => L<T.SavedKeys>()('keys_list', {}),
-    add: (name: string, license_key: string) => L<{ key: T.SavedKeyInfo }>()('key_add', { body: { name, license_key } }),
+    list: () => call('keys_list', {}),
+    add: (name: string, license_key: string) => call('key_add', { body: { name, license_key } }),
     /** Rename, put a new key under the name, or both. */
-    update: (name: string, body: { new_name?: string; license_key?: string }) => L<T.KeyChange>()('key_update', { params: { name }, body }),
-    remove: (name: string) => L<{ removed: boolean; notes: string[] }>()('key_remove', { params: { name } }),
+    update: (name: string, body: { new_name?: string; license_key?: string }) => call('key_update', { params: { name }, body }),
+    remove: (name: string) => call('key_remove', { params: { name } }),
     /** Change the licence key of an installed server: a saved key by name, or a new one (optionally saved). */
-    setForServer: (server: string, body: { name: string } | { license_key: string; save_as?: string }) => L<T.ServerKeyChanged>()('server_key_set', { params: { s: server }, body }),
+    setForServer: (server: string, body: { name: string } | { license_key: string; save_as?: string }) => call('server_key_set', { params: { s: server }, body }),
   },
   profile: {
-    get: () => L<T.Profile>()('profile_get', {}),
+    get: () => call('profile_get', {}),
     /** `null` forgets a field; a field left out stays as it is. */
-    set: (body: Partial<T.Profile>) => L<T.Profile>()('profile_set', { body }),
+    set: (body: Partial<T.Profile>) => call('profile_set', { body }),
   },
   checks: {
-    cfx: (username: string) => L<T.CfxCheck>()('check_cfx', { body: { username } }),
+    cfx: (username: string) => call('check_cfx', { body: { username } }),
   },
-  catalog: () => L<T.Catalog>()('catalog_get', {}),
-  artifacts: () => L<T.ArtifactList>()('artifacts_list', {}),
+  catalog: () => call('catalog_get', {}),
+  artifacts: () => call('artifacts_list', {}),
   installs: {
-    defaults: () => L<T.InstallDefaults>()('install_defaults', {}),
-    clearSaved: () => L<void>()('install_saved_clear', {}),
-    checkPorts: (ports: T.Ports) => L<T.PortsCheck>()('check_ports', { body: ports }),
-    checkDisk: (dir: string) => L<T.DiskCheck>()('check_disk', { body: { dir } }),
-    checkDbLogin: (admin: T.DbAdmin | null) => L<T.DbLoginCheck>()('check_db_login', { body: { admin } }),
-    plan: (req: T.InstallRequest) => L<T.InstallPlan>()('install_plan', { body: req }),
+    defaults: () => call('install_defaults', {}),
+    clearSaved: () => call('install_saved_clear', {}),
+    checkPorts: (ports: T.Ports) => call('check_ports', { body: ports }),
+    checkDisk: (dir: string) => call('check_disk', { body: { dir } }),
+    checkDbLogin: (admin: T.DbAdmin | null) => call('check_db_login', { body: { admin } }),
+    plan: (req: T.InstallRequest) => call('install_plan', { body: req }),
     /** `askAdmin`: the person chose "Ask for administrator permission" (Windows may show its prompt). */
     start: (req: T.InstallRequest, opts: { askAdmin?: boolean } = {}) => call('install_start', { body: req }, { askAdmin: opts.askAdmin }),
     /**
@@ -389,43 +389,43 @@ export const api = {
      */
     resume: (job: string, skip?: string, opts: { askAdmin?: boolean; withoutAdmin?: boolean } = {}) =>
       call('install_resume', { params: { job }, body: { ...(skip ? { skip } : {}), ...(opts.withoutAdmin ? { without_admin: true } : {}) } }, { askAdmin: opts.askAdmin }),
-    log: (job: string) => L<{ lines: string[] }>()('install_log', { params: { job } }).then((r) => r.lines),
+    log: (job: string) => call('install_log', { params: { job } }).then((r) => r.lines),
   },
   selfUpdate: {
-    check: () => L<T.SelfUpdateInfo>()('self_update_check', {}),
+    check: () => call('self_update_check', {}),
     apply: (version?: string) => call('self_update_apply', { body: version ? { version } : {} }),
   },
   app: {
-    status: () => L<T.AppStatus>()('app_status', {}),
+    status: () => call('app_status', {}),
     /** Make the per-user shortcuts, then remove the old machine-wide copy ("Tidy up old shortcuts"). */
-    install: (body: { desktop_shortcut: boolean; dry_run: boolean }) => L<{ message: string }>()('app_install', { body }),
-    uninstall: (dryRun = false) => L<{ message: string }>()('app_uninstall', { body: { dry_run: dryRun } }),
+    install: (body: { desktop_shortcut: boolean; dry_run: boolean }) => call('app_install', { body }),
+    uninstall: (dryRun = false) => call('app_uninstall', { body: { dry_run: dryRun } }),
   },
   uninstall: {
-    plan: () => L<T.UninstallPlan>()('uninstall_plan', {}),
+    plan: () => call('uninstall_plan', {}),
     run: (body: { answers: { item: string; remove: boolean }[]; delete_files: boolean; delete_databases: boolean; only: string[] }) => call('uninstall_run', { body }),
   },
   jobs: {
-    get: <R = unknown, E = unknown>(id: string) => L<T.Job<R, E>>()('jobs_get', { params: { id } }),
+    get: <R = unknown, E = unknown>(id: string) => call('jobs_get', { params: { id } }),
     eventsUrl: (id: string) => streamOf('job_events', { id }),
   },
   eventsUrl: () => streamOf('events'),
   metrics: {
-    get: (name: string, range: T.MetricsRange) => L<T.Metrics>()('metrics_get', { params: { s: name }, query: { range } } as never),
+    get: (name: string, range: T.MetricsRange) => call('metrics_get', { params: { s: name }, query: { range } } as never),
   },
   alerts: {
-    list: () => L<{ alerts: T.PanelAlert[] }>()('alerts_list', {}).then((r) => r.alerts),
-    ack: (id: number) => L<void>()('alerts_ack', { params: { id: String(id) } }),
-    settings: (name: string) => L<T.AlertSettings>()('alert_settings_get', { params: { s: name } }),
-    setSettings: (name: string, body: T.AlertSettingsUpdate) => L<T.AlertSettings>()('alert_settings_set', { params: { s: name }, body }),
+    list: () => call('alerts_list', {}).then((r) => r.alerts),
+    ack: (id: number) => call('alerts_ack', { params: { id: String(id) } }),
+    settings: (name: string) => call('alert_settings_get', { params: { s: name } }),
+    setSettings: (name: string, body: T.AlertSettingsUpdate) => call('alert_settings_set', { params: { s: name }, body }),
   },
   hub: {
-    nodes: () => L<{ nodes: T.HubNode[] }>()('nodes_list', {}).then((r) => r.nodes),
-    addNode: (body: { name: string; url: string; token: string }) => L<{ node: T.HubNode }>()('node_add', { body }).then((r) => r.node),
-    removeNode: (id: string) => L<void>()('node_remove', { params: { id } }),
-    nodeServers: (id: string) => L<{ servers: T.FleetServer[] }>()('node_servers', { params: { id } }).then((r) => r.servers),
+    nodes: () => call('nodes_list', {}).then((r) => r.nodes),
+    addNode: (body: { name: string; url: string; token: string }) => call('node_add', { body }).then((r) => r.node),
+    removeNode: (id: string) => call('node_remove', { params: { id } }),
+    nodeServers: (id: string) => call('node_servers', { params: { id } }).then((r) => r.servers),
     nodeControl: (id: string, server: string, action: T.ControlAction) => call('node_server_control', { params: { id, s: server }, body: { action } }),
-    fleet: () => L<T.Fleet>()('fleet', {}),
+    fleet: () => call('fleet', {}),
   },
 }
 

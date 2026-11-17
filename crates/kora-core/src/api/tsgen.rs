@@ -267,6 +267,10 @@ pub fn generate() -> Generated {
                 ty_name(t)
             }
             Body::Raw(_) => "Blob".to_string(),
+            Body::Either(t, _) => {
+                (t.collect)(&mut c);
+                format!("{} | Blob", ty_name(t))
+            }
             Body::Untyped => "Untyped".to_string(),
         };
         let resp_ts = match &sp.response {
@@ -315,7 +319,7 @@ pub fn generate() -> Generated {
         }
         let stream = matches!(sp.response, Resp::Stream(..));
         let raw = match &sp.body {
-            Body::Raw(t) => ts_str(t),
+            Body::Raw(t) | Body::Either(_, t) => ts_str(t),
             _ => "null".into(),
         };
         let _ = writeln!(
