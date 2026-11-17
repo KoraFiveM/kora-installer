@@ -152,9 +152,11 @@ pub fn create_container(m: &Manager, creds: &Credentials, progress: &mut dyn FnM
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::container::lifecycle::tests::server_dir;
     use crate::container::record::tests::sample;
     use crate::db::SystemRunner;
+    #[cfg(unix)]
     use crate::service::testing::FakeRunner;
     use std::cell::RefCell;
 
