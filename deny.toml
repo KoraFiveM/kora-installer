@@ -9,8 +9,30 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-# No advisory exceptions: sevenz-rust -> sevenz-rust2 removed the previous ones (the terminal UI crates are gone too).
-ignore = []
+# Every exception below is narrow (one advisory id, one crate), says why it does not apply to Kora, and says what ends it.
+# None of them is a vulnerability that Kora's own use can reach.
+ignore = [
+  # UNMAINTAINED notice only, no vulnerability. basic-toml is a BUILD-TIME dependency of age's translation macros
+  # (age -> i18n-embed-fl -> i18n-config, a proc-macro that reads age's own bundled .ftl files while compiling); no
+  # shipped code runs it. Ends when age drops or updates i18n-config.
+  { id = "RUSTSEC-2026-0374", reason = "build-time only (age's i18n proc-macros), unmaintained notice, no vulnerability" },
+  # crypto-bigint 0.5.5 reaches us through p256, which age/hpke use for age's public-key recipient types. Kora encrypts
+  # backups with a PASSPHRASE only (age::scrypt, crates/kora-core/src/backup/crypt.rs): no p256 key is ever generated,
+  # read or used, so no secret integer goes through the affected operations. Cannot be removed with age 0.12 (the hpke
+  # dependency is not optional). Ends when age moves to crypto-bigint >= 0.7.6.
+  { id = "RUSTSEC-2026-0387", reason = "only reachable through age's public-key recipients; Kora uses age passphrase (scrypt) encryption only" },
+  # rsa 0.10.0-rc.19 (a pre-release, so it sorts below the fixed 0.10.0) comes with webauthn-rs 0.6 (crypto-glue). The
+  # Marvin attack needs an RSA PRIVATE-key operation (decryption or signing) observed over the network. The panel only
+  # VERIFIES passkey signatures with the public key a person's authenticator gave it; it holds no RSA private key and
+  # never decrypts with RSA. Ends when webauthn-rs depends on a final rsa 0.10.
+  { id = "RUSTSEC-2023-0071", reason = "webauthn-rs only verifies RSA signatures with public keys; no private-key operation exists in Kora" },
+  # zbus_names, zvariant, zvariant_derive: UNMAINTAINED notices (merged into zbus 6), no vulnerability. They come with
+  # secret-service 5.2 (the Linux keychain, crates/kora-core/src/store/keychain). The only newer secret-service is a
+  # 6.0.0 release candidate, which is not a better thing to depend on. Ends when secret-service 6 is released.
+  { id = "RUSTSEC-2026-0370", reason = "unmaintained notice (merged into zbus 6); secret-service 6 is still a release candidate" },
+  { id = "RUSTSEC-2026-0371", reason = "unmaintained notice (merged into zbus 6); secret-service 6 is still a release candidate" },
+  { id = "RUSTSEC-2026-0372", reason = "unmaintained notice (merged into zbus 6); secret-service 6 is still a release candidate" },
+]
 
 [licenses]
 version = 2
