@@ -308,11 +308,8 @@ mod tests {
 /// `reg query HKCU\Environment /v Path` output -> (type, value).
 pub fn parse_reg_query(out: &str) -> Option<(String, String)> {
     let line = out.lines().find(|l| l.trim_start().to_ascii_lowercase().starts_with("path") && l.contains("REG_"))?;
-    let mut it = line.trim().splitn(3, char::is_whitespace).filter(|p| !p.is_empty());
-    it.next()?;
-    let rest = line.trim().splitn(2, "REG_").nth(1)?;
+    let (_, rest) = line.trim().split_once("REG_")?;
     let (kind, value) = rest.split_once(char::is_whitespace)?;
-    let _ = it;
     Some((format!("REG_{kind}"), value.trim().to_string()))
 }
 

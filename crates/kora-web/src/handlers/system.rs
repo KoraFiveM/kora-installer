@@ -253,41 +253,6 @@ pub async fn events(State(st): State<AppState>, Extension(caller): Extension<Cal
     Ok(Sse::new(Limited::new(ReceiverStream::new(rx), permit)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    #[tokio::test]
-    async fn one_poller_for_every_stream_and_it_stops_when_they_go() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let c = calls.clone();
-        let fake = kora_core::api::fake::FakeBackend::sample();
-        let make: BackendFactory = Arc::new(move || {
-            c.fetch_add(1, Ordering::SeqCst);
-            Box::new(fake.clone())
-        });
-        let hub = Arc::new(EventsHub::new(Duration::from_millis(200)));
-        let (_, mut a) = hub.subscribe(make.clone());
-        let first = a.recv().await.unwrap();
-        let (latest, b) = hub.subscribe(make.clone());
-        assert_eq!(latest.as_ref(), Some(&first), "a new stream gets the current list at once");
-        let (_, c2) = hub.subscribe(make.clone());
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let n = calls.load(Ordering::SeqCst);
-        assert!((2..=4).contains(&n), "one read per poll for three streams, got {n}");
-        drop((a, b, c2));
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(!hub.running(), "stopped with nobody listening");
-        let after = calls.load(Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert_eq!(calls.load(Ordering::SeqCst), after);
-        // And it starts again for the next stream.
-        let (_, mut d) = hub.subscribe(make);
-        assert!(d.recv().await.is_ok());
-    }
-}
-
 /// `POST /system/admin-service/install` → `202 {job}` on Windows, where the installer is launched and
 /// asks an administrator for approval on the computer that runs Kora (the one place a prompt remains: it
 /// is the install of the service itself). Elsewhere `403 needs_elevation` with the command to run in
@@ -335,4 +300,39 @@ pub async fn admin_service_install(State(st): State<AppState>) -> Result<axum::r
         }
         Ok(json!({"installed": crate::elevated::service_ready()}))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn one_poller_for_every_stream_and_it_stops_when_they_go() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let fake = kora_core::api::fake::FakeBackend::sample();
+        let make: BackendFactory = Arc::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            Box::new(fake.clone())
+        });
+        let hub = Arc::new(EventsHub::new(Duration::from_millis(200)));
+        let (_, mut a) = hub.subscribe(make.clone());
+        let first = a.recv().await.unwrap();
+        let (latest, b) = hub.subscribe(make.clone());
+        assert_eq!(latest.as_ref(), Some(&first), "a new stream gets the current list at once");
+        let (_, c2) = hub.subscribe(make.clone());
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let n = calls.load(Ordering::SeqCst);
+        assert!((2..=4).contains(&n), "one read per poll for three streams, got {n}");
+        drop((a, b, c2));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!hub.running(), "stopped with nobody listening");
+        let after = calls.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), after);
+        // And it starts again for the next stream.
+        let (_, mut d) = hub.subscribe(make);
+        assert!(d.recv().await.is_ok());
+    }
 }
