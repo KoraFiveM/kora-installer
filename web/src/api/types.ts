@@ -1,188 +1,31 @@
 // TypeScript mirror of the Kora Panel API (docs/panel-plan.md section 2). JSON is snake_case and
 // enums are snake_case strings. Where the plan was ambiguous, the assumption is noted in web/README.md.
 
-export type Mode = 'production' | 'development'
-export type ServerStatus = 'running' | 'stopped' | 'missing'
 
-export type Role = 'viewer' | 'operator' | 'admin'
 
-/** Who is signed in. `provider` is how they proved it: the launch link (`local`), Tailscale, or a user token. */
-export interface Identity {
-  name: string
-  provider: 'local' | 'tailscale' | 'token'
-  role: Role
-}
 
-/** `POST /session`: the cookie is set; `secret` must come back with every request (`X-Kora-Session`). */
-export interface SessionCreated {
-  ok: boolean
-  identity: Identity
-  secret: string
-}
 
-export interface Meta {
-  version: string
-  api: number
-  platform: 'windows' | 'linux'
-  ops: string[]
-  node: string
-  /** null when not signed in; absent on older servers (treated as a local admin). */
-  identity?: Identity | null
-  /** The request came from another computer. */
-  remote?: boolean
-  /** Remote sessions may use the destructive actions (delete, uninstall, console input, install, ...). */
-  allow_remote_destructive?: boolean
-}
 
-export interface PanelUser {
-  name: string
-  role: Role
-  created: number
-}
 
-/** `GET /remote` (local sessions only). Token hashes are never sent. */
-export interface RemoteSettings {
-  enabled: boolean
-  enabled_by_flag: boolean
-  bind: string
-  port: number
-  /** Where Tailscale devices open the panel, while it also listens there (`kora panel --tailscale`). */
-  tailnet_url: string | null
-  tailscale: boolean
-  tailscale_users: Record<string, Role>
-  allowed_hosts: string[]
-  allow_remote_destructive: boolean
-  users: PanelUser[]
-  saved_to: string | null
-}
 
-export type RemoteSettingsUpdate = Partial<Pick<RemoteSettings, 'enabled' | 'tailscale' | 'tailscale_users' | 'allowed_hosts' | 'allow_remote_destructive'>>
 
-/** `POST /users` answer: the token is shown this once. */
-export interface NewUser {
-  name: string
-  role: Role
-  token: string
-}
 
-export interface SystemInfo {
-  admin: boolean
-  platform: 'windows' | 'linux'
-  helper_installed: boolean
-  headless: boolean
-  version: string
-  /** True when the browser is on the same machine as Kora (enables "Open folder"). */
-  local?: boolean
-  /** Same as `admin` (the backend sends both). */
-  elevated?: boolean
-  kora_home?: string
-  /** True when the panel can restart itself ("Restart now" after a self-update). */
-  can_restart?: boolean
-  /** Windows: the panel asks Windows for administrator permission itself (one prompt per install or action). */
-  admin_prompt?: boolean
-}
 
-export interface Ports {
-  game: number
-  txadmin: number
-}
 
-export type BadgeKind = 'up_to_date' | 'updates' | 'needs_attention' | 'new_release'
-export interface Badge {
-  kind: BadgeKind
-  count?: number
-}
 
-export interface ServerSummary {
-  name: string
-  dir: string
-  mode: Mode
-  ports: Ports
-  created_unix: number
-  status: ServerStatus
-  badge: Badge | null
-  /** false = adopted (an existing server Kora did not install). */
-  managed: boolean
-  /**
-   * `<this computer's network address>:<game port>`: what players on the same network type to join. Null when
-   * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
-   */
-  connect?: string | null
-}
 
-export interface ServerDetail extends ServerSummary {
-  running: boolean
-  game_listening: boolean
-  txadmin_up: boolean
-  console_enabled: boolean
-}
 
-export type ControlAction = 'start' | 'stop' | 'restart'
 
 // ---- jobs -----------------------------------------------------------------------------------
 
-export type JobState = 'running' | 'done' | 'failed'
 
 // ---- problems -------------------------------------------------------------------------------
 
-/**
- * Something the user can do about a problem (`kora_core::problem::Action`). Data only: what each
- * kind does is decided by the page (see `lib/problemActions.ts`). A kind this page does not know
- * is not shown.
- */
-export type ProblemAction =
-  | { kind: 'retry' }
-  | { kind: 'retry_step'; step: string }
-  | { kind: 'skip_step'; step: string }
-  | { kind: 'change_answers'; section?: string }
-  | { kind: 'sign_in_github'; scopes?: string[] }
-  | { kind: 'install_tool'; tool: 'git' | 'gh' | 'mariadb' | 'unknown' }
-  | { kind: 'request_admin' }
-  | { kind: 'continue_without_admin' }
-  | { kind: 'show_command'; command: string[]; elevated?: boolean }
-  | { kind: 'open_link'; url: string }
-  | { kind: 'open_log'; job?: string; path?: string }
-  | { kind: 'copy_details' }
-  | { kind: 'start_database' }
 
-export type ProblemActionKind = ProblemAction['kind']
 
-/** An error a person can act on (`kora_core::problem::Problem`): what API and job errors carry. */
-export interface Problem {
-  /** Stable machine code, e.g. `github.gh_missing`, `install.step_failed`, `failed`. */
-  code: string
-  message: string
-  /** Technical details for "Show details". */
-  details?: string
-  /** What the user can do, best first. Empty or missing: the page's generic choices. */
-  actions?: ProblemAction[]
-}
 
-export interface JobError extends Partial<Omit<Problem, 'message'>> {
-  message: string
-  command?: string[]
-  /** Install failures: what was kept on disk. */
-  kept?: string[]
-  log_path?: string
-  /** Install failures: the step that failed (absent: it stopped before the first step). */
-  failed_step?: string
-  /** Install failures: `POST /installs/{job}/resume` can carry on with the same answers. */
-  resume?: boolean
-}
 
-export interface Job<R = unknown, E = unknown> {
-  id: string
-  op: string
-  server: string | null
-  state: JobState
-  events: E[]
-  result: R | null
-  error: JobError | null
-}
 
-export interface JobStarted {
-  job: string
-}
 
 // ---- install --------------------------------------------------------------------------------
 
@@ -498,19 +341,7 @@ export interface PrPlan {
 
 // ---- logs / console / misc ------------------------------------------------------------------
 
-export interface LogFile {
-  name: string
-  size: number
-  modified_unix: number
-}
 
-export interface ScanCandidate {
-  name: string
-  dir: string
-  mode: Mode
-  kind?: string
-  ports?: Ports
-}
 
 export interface SelfUpdateInfo {
   current: string
@@ -976,3 +807,49 @@ export interface BulkResult {
   needs_restart: boolean
   restart_note?: string
 }
+
+// ---- generated from the Rust side (`./generated/types.ts`): re-exported so existing imports keep working ----
+
+import type { Mode, Ports, ServerSummary, ControlAction, Badge, Problem as GeneratedProblem, JobState as GeneratedJobState } from './generated/types'
+export type {
+  Role,
+  Identity,
+  SessionCreated,
+  Meta,
+  PanelUser,
+  RemoteSettings,
+  RemoteSettingsUpdate,
+  NewUser,
+  SystemInfo,
+  Ports,
+  Mode,
+  Badge,
+  BadgeKind,
+  ServerSummary,
+  ServerDetail,
+  ControlAction,
+  JobError,
+  JobStarted,
+  LogFile,
+  ScanCandidate,
+  ErrorBody,
+  Untyped,
+} from './generated/types'
+import type { Action, JobRecord, Status } from './generated/types'
+export type JobState = GeneratedJobState
+/**
+ * An error a person can act on (`kora_core::problem::Problem`). `actions` may be missing: an API error answer
+ * leaves it out when empty, and the page then offers its generic choices.
+ */
+export type Problem = Omit<GeneratedProblem, 'actions'> & { actions?: Action[] }
+/** `running`, `stopped` or `missing` (the folder is gone). */
+export type ServerStatus = Status
+/**
+ * Something the user can do about a problem (`kora_core::problem::Action`). Data only: what each kind does is
+ * decided by the page (`lib/problemActions.tsx`). A newer server may send a kind this page does not know
+ * (the Rust `Action::Unknown`, or any other string): such an action is not shown.
+ */
+export type ProblemAction = Action
+export type ProblemActionKind = ProblemAction['kind']
+/** `GET /jobs/{id}`; `R` is the job's result type and `E` its event type. */
+export type Job<R = unknown, E = unknown> = JobRecord<R, E>

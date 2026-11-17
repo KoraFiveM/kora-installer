@@ -156,6 +156,7 @@ const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, sta
 const detail = (s: T.ServerSummary): T.ServerDetail => ({
   ...s,
   connect: `192.168.1.20:${s.ports.game}`,
+  status_detail: { running: s.status === 'running', game_listening: s.status === 'running', txadmin_up: s.status === 'running' },
   running: s.status === 'running',
   game_listening: s.status === 'running',
   txadmin_up: s.status === 'running',
@@ -355,7 +356,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
   }
   prefs.savedInstall = null
-  servers.push({ name: req.name, dir: req.dir, mode: req.mode, ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true })
+  servers.push({ name: req.name, dir: req.dir, mode: req.mode, ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null })
   installed[req.name] = ['oxmysql', 'ox_lib', 'kora_core']
   return {
     dir: req.dir,
@@ -427,7 +428,7 @@ route('POST', '/session/link', () => {
 })
 route('GET', '/system', () => (beh.windows
   ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
-  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
+  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true, admin_prompt: false }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -442,7 +443,7 @@ route('POST', '/servers/adopt', (_m, b) => {
   if (dir.includes('nothing')) throw new Fail(400, 'bad_request', 'That folder does not look like a FiveM server (no server.cfg or resources folder).')
   if (servers.some((s) => s.dir === dir)) throw new Fail(409, 'conflict', 'That server is already in your list.')
   const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? 'adopted'
-  const s: T.ServerSummary = { name, dir, mode: 'production', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false }
+  const s: T.ServerSummary = { name, dir, mode: 'production', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false, connect: null }
   servers.push(s)
   installed[name] = ['chat']
   snapshots[name] = []

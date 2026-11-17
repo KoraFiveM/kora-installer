@@ -1,4 +1,5 @@
 import type * as T from './types'
+import { ROUTES, type OpName, type OpTypes } from './generated/routes'
 
 export interface ApiErrorBody {
   code: string
@@ -167,22 +168,70 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   return (text ? JSON.parse(text) : undefined) as R
 }
 
-const get = <R>(path: string, query?: RequestOptions['query']) => request<R>(path, { query })
+// ---- calls by operation name: paths, methods and shapes come from the generated route map -----------
 
-const post = <R>(path: string, body?: unknown) => request<R>(path, { method: 'POST', body })
-const put = <R>(path: string, body?: unknown) => request<R>(path, { method: 'PUT', body })
-const del = <R>(path: string, body?: unknown) => request<R>(path, { method: 'DELETE', body })
+/** An `Untyped` (unknown) type: the Rust side has not described it yet. */
+type IsUntyped<X> = unknown extends X ? true : false
+type Params<K extends OpName> = OpTypes[K]['params']
+type Query<K extends OpName> = OpTypes[K]['query']
+type BodyOf<K extends OpName> = OpTypes[K]['body']
 
-const s = (name: string) => `/servers/${enc(name)}`
+/** What a call needs: the path parameters, the query and the body the operation declares. */
+export type CallInput<K extends OpName> = (Params<K> extends Record<string, never> ? { params?: undefined } : { params: Params<K> }) &
+  (Query<K> extends undefined ? { query?: undefined } : { query?: Query<K> }) &
+  (BodyOf<K> extends undefined ? { body?: undefined } : IsUntyped<BodyOf<K>> extends true ? { body?: unknown } : { body?: BodyOf<K> })
 
-async function signInWith(body: { token?: string; code?: string }): Promise<void> {
-  const r = await request<T.SessionCreated | undefined>('/session', { method: 'POST', body, quiet401: true })
-  setSessionSecret(r?.secret)
+/** Operations whose response the Rust side has not described yet. Shrinks as they are typed. */
+export type UntypedResponseOps = { [K in OpName]: IsUntyped<OpTypes[K]['response']> extends true ? K : never }[OpName]
+
+export interface CallOptions {
+  signal?: AbortSignal
+  quiet401?: boolean
+  raw?: RequestOptions['raw']
+  askAdmin?: boolean
 }
 
-/** One function per row of the route table in docs/panel-plan.md section 2.1. */
+/** `/servers/{s}/logs/{file}` with its parameters filled in (and escaped). */
+export function routePath<K extends OpName>(op: K, params?: Params<K>): string {
+  const p = (params ?? {}) as Record<string, string>
+  return ROUTES[op].path.replace(/\{(\w+)\}/g, (_, k: string) => enc(p[k] ?? ''))
+}
+
+function send(op: OpName, input: CallInput<OpName>, opts: CallOptions): Promise<unknown> {
+  const r = ROUTES[op]
+  return request(routePath(op, input.params as never), { method: r.method, body: input.body, query: input.query as RequestOptions['query'], ...opts })
+}
+
+/** Call an operation; the answer has the type the Rust side declares for it. */
+export function call<K extends OpName>(op: K, input: CallInput<K>, opts: CallOptions = {}): Promise<OpTypes[K]['response']> {
+  return send(op, input as CallInput<OpName>, opts) as Promise<OpTypes[K]['response']>
+}
+
+/**
+ * Call an operation whose answer is still `Untyped` on the Rust side, with a hand-written type `R`:
+ * `legacy<T.Meta>()('meta', {})`. It stops compiling the day the operation is typed in Rust (use
+ * `call` then). Every use is a TODO of the api-codegen work (see `UNTYPED_OPS` in `generated/routes.ts`).
+ */
+export const legacy =
+  <R>() =>
+  <K extends UntypedResponseOps>(op: K, input: CallInput<K>, opts: CallOptions = {}): Promise<R> =>
+    send(op, input as CallInput<OpName>, opts) as Promise<R>
+
+/** The URL of a stream operation (`?ks=` carries the session secret: EventSource cannot send headers). */
+export function streamOf<K extends OpName>(op: K, params?: Params<K>): string {
+  return streamUrl(routePath(op, params))
+}
+
+async function signInWith(body: { token?: string; code?: string }): Promise<void> {
+  const r = await call('session_create', { body } as never, { quiet401: true })
+  setSessionSecret((r as T.SessionCreated | undefined)?.secret)
+}
+
+const L = legacy
+
+/** One function per operation (the route table is generated: `generated/routes.ts`). */
 export const api = {
-  meta: () => get<T.Meta>('/meta'),
+  meta: () => call('meta', {}),
   session: {
     /** Sign in with a pasted token (the launch token here, a user token from another computer). */
     create: (token: string) => signInWith({ token }),
@@ -190,192 +239,193 @@ export const api = {
     createByCode: (code: string) => signInWith({ code }),
     /** Sign in with no token: a Tailscale identity, when the panel is set up for it. */
     createByIdentity: () => signInWith({}),
-    logout: () => post<void>('/session/logout').finally(() => setSessionSecret(null)),
+    logout: () => call('session_logout', {}).finally(() => setSessionSecret(null)),
   },
   remote: {
-    get: () => get<T.RemoteSettings>('/remote'),
-    set: (body: T.RemoteSettingsUpdate) => put<T.RemoteSettings>('/remote', body),
+    get: () => call('remote_get', {}),
+    set: (body: T.RemoteSettingsUpdate) => call('remote_set', { body }),
   },
   users: {
-    list: () => get<{ users: T.PanelUser[] }>('/users').then((r) => r.users),
-    add: (name: string, role: T.Role) => post<T.NewUser>('/users', { name, role }),
-    remove: (name: string) => del<void>(`/users/${enc(name)}`),
+    list: () => call('users_list', {}).then((r) => r.users),
+    add: (name: string, role: T.Role) => call('user_add', { body: { name, role } }),
+    remove: (name: string) => call('user_remove', { params: { name } }),
   },
-  system: () => get<T.SystemInfo>('/system'),
+  system: () => call('system_info', {}),
   panel: {
-    restart: () => post<{ restarting: boolean }>('/panel/restart'),
+    restart: () => call('panel_restart', {}),
   },
   servers: {
-    list: () => get<{ servers: T.ServerSummary[] }>('/servers').then((r) => r.servers),
-    get: (name: string) => get<T.ServerDetail>(s(name)),
-    control: (name: string, action: T.ControlAction) => post<T.JobStarted>(`${s(name)}/control`, { action }),
-    delete: (name: string, body: { confirm_name: string; keep_files: boolean; keep_db: boolean; db_admin_password?: string }) => del<T.JobStarted>(s(name), body),
-    unregister: (name: string) => del<void>(`${s(name)}/registration`),
-    scan: () => post<T.JobStarted>('/servers/scan'),
-    adopt: (dir: string) => post<T.ServerSummary>('/servers/adopt', { dir }),
-    openFolder: (name: string) => post<void>(`${s(name)}/open-folder`),
+    list: () => call('servers_list', {}).then((r) => r.servers),
+    get: (name: string) => call('server_get', { params: { s: name } }),
+    control: (name: string, action: T.ControlAction) => call('server_control', { params: { s: name }, body: { action } }),
+    delete: (name: string, body: { confirm_name: string; keep_files: boolean; keep_db: boolean; db_admin_password?: string }) => call('server_delete', { params: { s: name }, body }),
+    unregister: (name: string) => call('server_unregister', { params: { s: name } }),
+    scan: () => call('servers_scan', {}),
+    adopt: (dir: string) => call('servers_adopt', { body: { dir } }),
+    openFolder: (name: string) => call('server_open_folder', { params: { s: name } }),
   },
   logs: {
-    list: (name: string) => get<{ files: T.LogFile[] }>(`${s(name)}/logs`).then((r) => r.files),
-    tail: (name: string, file: string, lines = 300) => get<{ file: string; lines: string[] }>(`${s(name)}/logs/${enc(file)}`, { lines }),
+    list: (name: string) => call('logs_list', { params: { s: name } }).then((r) => r.files),
+    tail: (name: string, file: string, lines = 300) => call('logs_tail', { params: { s: name, file }, query: { lines } }),
   },
   console: {
-    streamUrl: (name: string) => streamUrl(`${s(name)}/console/stream`),
-    send: (name: string, command: string) => post<void>(`${s(name)}/console`, { command }),
-    enable: (name: string) => put<void>(`${s(name)}/console/enabled`, { enabled: true }),
+    streamUrl: (name: string) => streamOf('console_stream', { s: name }),
+    send: (name: string, command: string) => call('console_send', { params: { s: name }, body: { command } }),
+    enable: (name: string) => call('console_enable', { params: { s: name } }),
   },
   resources: {
-    list: (name: string) => get<{ resources: string[] }>(`${s(name)}/resources`).then((r) => r.resources),
-    ensure: (name: string, body: { name: string; restart: boolean }) => post<{ message: string }>(`${s(name)}/ensure`, body),
+    list: (name: string) => call('resources_list', { params: { s: name } }).then((r) => r.resources),
+    ensure: (name: string, body: { name: string; restart: boolean }) => call('resource_ensure', { params: { s: name }, body }),
     /** Start, stop or restart one resource on a running server. */
-    control: (name: string, resource: string, action: T.ControlAction) => post<{ message: string }>(`${s(name)}/resources/${encodeURIComponent(resource)}/control`, { action }),
-    plan: (name: string, ids: string[]) => post<T.AddPlan>(`${s(name)}/resources/plan`, { ids }),
-    add: (name: string, ids: string[]) => post<T.JobStarted>(`${s(name)}/resources`, { ids }),
-    catalog: (name: string) => get<T.ServerCatalog>(`${s(name)}/catalog`),
+    control: (name: string, resource: string, action: T.ControlAction) => call('resource_control', { params: { s: name, name: resource }, body: { action } }),
+    plan: (name: string, ids: string[]) => L<T.AddPlan>()('resources_plan', { params: { s: name }, body: { ids } }),
+    add: (name: string, ids: string[]) => call('resources_add', { params: { s: name }, body: { ids } }),
+    catalog: (name: string) => L<T.ServerCatalog>()('catalog_for_server', { params: { s: name } }),
   },
   assets: {
-    list: (name: string) => get<T.PaidAssets>(`${s(name)}/assets`),
+    list: (name: string) => L<T.PaidAssets>()('assets_list', { params: { s: name } }),
     /** Upload a zip (the file itself is the body) and get what importing it would do. */
     inspectUpload: (name: string, file: Blob, fileName: string) =>
-      request<T.AssetInspectResult>(`${s(name)}/assets/inspect`, { method: 'POST', raw: { body: file, type: 'application/zip', headers: { 'X-File-Name': enc(fileName) } } }),
+      L<T.AssetInspectResult>()('asset_inspect', { params: { s: name } }, { raw: { body: file, type: 'application/zip', headers: { 'X-File-Name': enc(fileName) } } }),
     /** A recent zip from the Downloads folder of the computer that runs Kora (local sessions only). */
-    inspectDownload: (name: string, download: string) => post<T.AssetInspectResult>(`${s(name)}/assets/inspect`, { download }),
-    import: (name: string, source: T.AssetSource, replace = true) => post<T.JobStarted>(`${s(name)}/assets`, { ...source, replace }),
-    remove: (name: string, asset: string) => del<{ notes: string[] }>(`${s(name)}/assets/${enc(asset)}`),
-    downloads: () => get<T.RecentDownloads>('/assets/downloads'),
+    inspectDownload: (name: string, download: string) => L<T.AssetInspectResult>()('asset_inspect', { params: { s: name }, body: { download } }),
+    import: (name: string, source: T.AssetSource, replace = true) => call('asset_import', { params: { s: name }, body: { ...source, replace } }),
+    remove: (name: string, asset: string) => L<{ notes: string[] }>()('asset_remove', { params: { s: name, name: asset } }),
+    downloads: () => L<T.RecentDownloads>()('asset_downloads', {}),
   },
   update: {
-    preview: (name: string, scope: T.Scope = 'all') => post<T.JobStarted>(`${s(name)}/update/preview`, { scope }),
+    preview: (name: string, scope: T.Scope = 'all') => call('update_preview', { params: { s: name }, body: { scope } }),
     /** `targets`: the preview's planned commit per resource, so exactly what was shown is applied. */
-    apply: (name: string, body: { scope: T.Scope; restart: T.RestartPolicy; skip: string[]; targets?: Record<string, string> }) => post<T.JobStarted>(`${s(name)}/update/apply`, body),
-    auto: (name: string) => post<T.JobStarted>(`${s(name)}/update/auto`),
+    apply: (name: string, body: { scope: T.Scope; restart: T.RestartPolicy; skip: string[]; targets?: Record<string, string> }) => call('update_apply', { params: { s: name }, body }),
+    auto: (name: string) => call('update_auto', { params: { s: name } }),
   },
   snapshots: {
-    list: (name: string) => get<{ snapshots: T.SnapshotInfo[] }>(`${s(name)}/snapshots`).then((r) => r.snapshots),
+    list: (name: string) => L<{ snapshots: T.SnapshotInfo[] }>()('snapshots_list', { params: { s: name } }).then((r) => r.snapshots),
     /** `force`: roll back even resources with uncommitted changes (they are thrown away). */
-    rollback: (name: string, id: string, force = false) => post<T.JobStarted>(`${s(name)}/snapshots/${enc(id)}/rollback`, force ? { force: true } : undefined),
+    rollback: (name: string, id: string, force = false) => call('snapshot_rollback', { params: { s: name, id }, body: force ? { force: true } : undefined }),
   },
   webhook: {
-    get: (name: string) => get<T.WebhookState>(`${s(name)}/webhook`),
-    set: (name: string, url: string) => put<T.WebhookState>(`${s(name)}/webhook`, { url }),
-    remove: (name: string) => del<void>(`${s(name)}/webhook`),
-    test: (name: string) => post<void>(`${s(name)}/webhook/test`),
+    get: (name: string) => L<T.WebhookState>()('webhook_get', { params: { s: name } }),
+    set: (name: string, url: string) => L<T.WebhookState>()('webhook_set', { params: { s: name }, body: { url } }),
+    remove: (name: string) => L<void>()('webhook_remove', { params: { s: name } }),
+    test: (name: string) => L<void>()('webhook_test', { params: { s: name } }),
   },
   schedule: {
-    get: (name: string) => get<T.ScheduleState>(`${s(name)}/schedule`),
-    set: (name: string, cfg: T.ScheduleConfig) => put<T.ScheduleState>(`${s(name)}/schedule`, cfg),
-    remove: (name: string) => del<void>(`${s(name)}/schedule`),
+    get: (name: string) => L<T.ScheduleState>()('schedule_get', { params: { s: name } }),
+    set: (name: string, cfg: T.ScheduleConfig) => L<T.ScheduleState>()('schedule_set', { params: { s: name }, body: cfg }),
+    remove: (name: string) => L<void>()('schedule_remove', { params: { s: name } }),
   },
   ports: {
-    set: (name: string, ports: T.Ports) => put<{ notes: string[] }>(`${s(name)}/ports`, ports),
+    set: (name: string, ports: T.Ports) => L<{ notes: string[] }>()('ports_set', { params: { s: name }, body: ports }),
   },
   feedback: {
-    report: (name: string, body: { resource: string; title: string; text: string }) => post<{ url: string }>(`${s(name)}/issues`, body),
-    prPlan: (name: string, resource: string) => post<T.PrPlan>(`${s(name)}/pr/plan`, { resource }),
-    prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => post<{ url: string }>(`${s(name)}/pr`, body),
+    report: (name: string, body: { resource: string; title: string; text: string }) => L<{ url: string }>()('issue_report', { params: { s: name }, body }),
+    prPlan: (name: string, resource: string) => L<T.PrPlan>()('pr_plan', { params: { s: name }, body: { resource } }),
+    prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => L<{ url: string }>()('pr_open', { params: { s: name }, body }),
   },
   branches: {
     /** Where each resource is (nothing is downloaded). Development servers only. */
-    list: (name: string) => get<{ resources: T.ResourceBranch[] }>(`${s(name)}/branches`).then((r) => r.resources),
+    list: (name: string) => L<{ resources: T.ResourceBranch[] }>()('branches_list', { params: { s: name } }).then((r) => r.resources),
     /** Branches and kept-aside changes of one resource; `refresh` downloads the newest lists from GitHub first. */
-    choices: (name: string, resource: string, refresh = false) => get<T.BranchChoices>(`${s(name)}/resources/${enc(resource)}/branches${refresh ? '?refresh=1' : ''}`),
+    choices: (name: string, resource: string, refresh = false) => L<T.BranchChoices>()('branch_choices', { params: { s: name, name: resource }, query: refresh ? { refresh: 1 } : undefined } as never),
     /** Open pull requests of the original repository and of the person's fork. */
-    prs: (name: string, resource: string) => get<T.PrChoices>(`${s(name)}/resources/${enc(resource)}/prs`),
+    prs: (name: string, resource: string) => L<T.PrChoices>()('pr_list', { params: { s: name, name: resource } }),
     /** Switch one resource: another branch, a pull request, or back to the normal version. */
-    switch: (name: string, resource: string, body: T.SwitchRequest) => post<T.SwitchResult>(`${s(name)}/resources/${enc(resource)}/branch`, body),
+    switch: (name: string, resource: string, body: T.SwitchRequest) => L<T.SwitchResult>()('branch_switch', { params: { s: name, name: resource }, body }),
     /** Bring kept-aside changes back. */
-    restore: (name: string, resource: string, index: number) => post<T.SwitchResult>(`${s(name)}/resources/${enc(resource)}/stash/restore`, { index }),
+    restore: (name: string, resource: string, index: number) => L<T.SwitchResult>()('stash_restore', { params: { s: name, name: resource }, body: { index } }),
     /** Which resources have a branch (a job; result is a `BulkPreview`). */
-    bulkPreview: (name: string, branch: string, fetch = true) => post<T.JobStarted>(`${s(name)}/branches/preview`, { branch, fetch }),
+    bulkPreview: (name: string, branch: string, fetch = true) => call('branch_bulk_preview', { params: { s: name }, body: { branch, fetch } }),
     /** Switch every resource that has the branch, or all back to the normal version (a job; result is a `BulkResult`). */
-    bulkApply: (name: string, body: { action: 'branch'; branch: string; resources?: string[]; changes?: T.ChangesChoice } | { action: 'default'; resources?: string[]; changes?: T.ChangesChoice }) => post<T.JobStarted>(`${s(name)}/branches/apply`, body),
+    bulkApply: (name: string, body: { action: 'branch'; branch: string; resources?: string[]; changes?: T.ChangesChoice } | { action: 'default'; resources?: string[]; changes?: T.ChangesChoice }) =>
+      call('branch_bulk_apply', { params: { s: name }, body }),
   },
   github: {
-    status: () => get<T.GithubStatus>('/github/status'),
-    login: () => post<T.GithubLoginStart>('/github/login'),
-    owners: () => get<{ owners: T.GithubOwner[] }>('/github/owners').then((r) => r.owners),
+    status: () => L<T.GithubStatus>()('github_status', {}),
+    login: () => call('github_login', {}) as unknown as Promise<T.GithubLoginStart>,
+    owners: () => L<{ owners: T.GithubOwner[] }>()('github_owners', {}).then((r) => r.owners),
   },
   /** Git and the GitHub CLI, the System check, and starting the database. */
   tools: {
-    status: () => get<{ tools: T.ToolStatus[] }>('/tools').then((r) => r.tools),
+    status: () => L<{ tools: T.ToolStatus[] }>()('tools_status', {}).then((r) => r.tools),
     /** Download and set up Kora's own copy (a job; `git` on Linux is the system package and needs administrator rights). */
-    install: (tool: 'git' | 'gh') => post<T.JobStarted>(`/tools/${enc(tool)}/install`),
+    install: (tool: 'git' | 'gh') => call('tool_install', { params: { tool } }),
   },
   systemCheck: {
-    get: () => get<T.SystemCheck>('/system/check'),
-    startDatabase: () => post<T.JobStarted>('/system/database/start'),
+    get: () => L<T.SystemCheck>()('system_check', {}),
+    startDatabase: () => call('db_start', {}),
   },
   keys: {
-    list: () => get<T.SavedKeys>('/keys'),
-    add: (name: string, license_key: string) => post<{ key: T.SavedKeyInfo }>('/keys', { name, license_key }),
+    list: () => L<T.SavedKeys>()('keys_list', {}),
+    add: (name: string, license_key: string) => L<{ key: T.SavedKeyInfo }>()('key_add', { body: { name, license_key } }),
     /** Rename, put a new key under the name, or both. */
-    update: (name: string, body: { new_name?: string; license_key?: string }) => put<T.KeyChange>(`/keys/${enc(name)}`, body),
-    remove: (name: string) => del<{ removed: boolean; notes: string[] }>(`/keys/${enc(name)}`),
+    update: (name: string, body: { new_name?: string; license_key?: string }) => L<T.KeyChange>()('key_update', { params: { name }, body }),
+    remove: (name: string) => L<{ removed: boolean; notes: string[] }>()('key_remove', { params: { name } }),
     /** Change the licence key of an installed server: a saved key by name, or a new one (optionally saved). */
-    setForServer: (server: string, body: { name: string } | { license_key: string; save_as?: string }) => put<T.ServerKeyChanged>(`/servers/${enc(server)}/licence-key`, body),
+    setForServer: (server: string, body: { name: string } | { license_key: string; save_as?: string }) => L<T.ServerKeyChanged>()('server_key_set', { params: { s: server }, body }),
   },
   profile: {
-    get: () => get<T.Profile>('/profile'),
+    get: () => L<T.Profile>()('profile_get', {}),
     /** `null` forgets a field; a field left out stays as it is. */
-    set: (body: Partial<T.Profile>) => put<T.Profile>('/profile', body),
+    set: (body: Partial<T.Profile>) => L<T.Profile>()('profile_set', { body }),
   },
   checks: {
-    cfx: (username: string) => post<T.CfxCheck>('/checks/cfx', { username }),
+    cfx: (username: string) => L<T.CfxCheck>()('check_cfx', { body: { username } }),
   },
-  catalog: () => get<T.Catalog>('/catalog'),
-  artifacts: () => get<T.ArtifactList>('/artifacts'),
+  catalog: () => L<T.Catalog>()('catalog_get', {}),
+  artifacts: () => L<T.ArtifactList>()('artifacts_list', {}),
   installs: {
-    defaults: () => get<T.InstallDefaults>('/installs/defaults'),
-    clearSaved: () => del<void>('/installs/saved'),
-    checkPorts: (ports: T.Ports) => post<T.PortsCheck>('/checks/ports', ports),
-    checkDisk: (dir: string) => post<T.DiskCheck>('/checks/disk', { dir }),
-    checkDbLogin: (admin: T.DbAdmin | null) => post<T.DbLoginCheck>('/checks/db-login', { admin }),
-    plan: (req: T.InstallRequest) => post<T.InstallPlan>('/installs/plan', req),
+    defaults: () => L<T.InstallDefaults>()('install_defaults', {}),
+    clearSaved: () => L<void>()('install_saved_clear', {}),
+    checkPorts: (ports: T.Ports) => L<T.PortsCheck>()('check_ports', { body: ports }),
+    checkDisk: (dir: string) => L<T.DiskCheck>()('check_disk', { body: { dir } }),
+    checkDbLogin: (admin: T.DbAdmin | null) => L<T.DbLoginCheck>()('check_db_login', { body: { admin } }),
+    plan: (req: T.InstallRequest) => L<T.InstallPlan>()('install_plan', { body: req }),
     /** `askAdmin`: the person chose "Ask for administrator permission" (Windows may show its prompt). */
-    start: (req: T.InstallRequest, opts: { askAdmin?: boolean } = {}) => request<T.JobStarted>('/installs', { method: 'POST', body: req, askAdmin: opts.askAdmin }),
+    start: (req: T.InstallRequest, opts: { askAdmin?: boolean } = {}) => call('install_start', { body: req }, { askAdmin: opts.askAdmin }),
     /**
      * Carry on with a stopped install (its job error has `resume: true`): retry the failed step, or skip it.
      * `withoutAdmin`: "Continue without the administrator parts"; `askAdmin`: ask Windows for permission again.
      */
     resume: (job: string, skip?: string, opts: { askAdmin?: boolean; withoutAdmin?: boolean } = {}) =>
-      request<T.JobStarted>(`/installs/${enc(job)}/resume`, { method: 'POST', body: { ...(skip ? { skip } : {}), ...(opts.withoutAdmin ? { without_admin: true } : {}) }, askAdmin: opts.askAdmin }),
-    log: (job: string) => get<{ lines: string[] }>(`/installs/${enc(job)}/log`).then((r) => r.lines),
+      call('install_resume', { params: { job }, body: { ...(skip ? { skip } : {}), ...(opts.withoutAdmin ? { without_admin: true } : {}) } }, { askAdmin: opts.askAdmin }),
+    log: (job: string) => L<{ lines: string[] }>()('install_log', { params: { job } }).then((r) => r.lines),
   },
   selfUpdate: {
-    check: () => get<T.SelfUpdateInfo>('/self-update'),
-    apply: (version?: string) => post<T.JobStarted>('/self-update', version ? { version } : {}),
+    check: () => L<T.SelfUpdateInfo>()('self_update_check', {}),
+    apply: (version?: string) => call('self_update_apply', { body: version ? { version } : {} }),
   },
   app: {
-    status: () => get<T.AppStatus>('/app'),
+    status: () => L<T.AppStatus>()('app_status', {}),
     /** Make the per-user shortcuts, then remove the old machine-wide copy ("Tidy up old shortcuts"). */
-    install: (body: { desktop_shortcut: boolean; dry_run: boolean }) => put<{ message: string }>('/app', body),
-    uninstall: (dryRun = false) => del<{ message: string }>('/app', { dry_run: dryRun }),
+    install: (body: { desktop_shortcut: boolean; dry_run: boolean }) => L<{ message: string }>()('app_install', { body }),
+    uninstall: (dryRun = false) => L<{ message: string }>()('app_uninstall', { body: { dry_run: dryRun } }),
   },
   uninstall: {
-    plan: () => post<T.UninstallPlan>('/uninstall/plan'),
-    run: (body: { answers: { item: string; remove: boolean }[]; delete_files: boolean; delete_databases: boolean; only: string[] }) => post<T.JobStarted>('/uninstall', body),
+    plan: () => L<T.UninstallPlan>()('uninstall_plan', {}),
+    run: (body: { answers: { item: string; remove: boolean }[]; delete_files: boolean; delete_databases: boolean; only: string[] }) => call('uninstall_run', { body }),
   },
   jobs: {
-    get: <R = unknown, E = unknown>(id: string) => get<T.Job<R, E>>(`/jobs/${enc(id)}`),
-    eventsUrl: (id: string) => streamUrl(`/jobs/${enc(id)}/events`),
+    get: <R = unknown, E = unknown>(id: string) => L<T.Job<R, E>>()('jobs_get', { params: { id } }),
+    eventsUrl: (id: string) => streamOf('job_events', { id }),
   },
-  eventsUrl: () => streamUrl('/events'),
+  eventsUrl: () => streamOf('events'),
   metrics: {
-    get: (name: string, range: T.MetricsRange) => get<T.Metrics>(`${s(name)}/metrics`, { range }),
+    get: (name: string, range: T.MetricsRange) => L<T.Metrics>()('metrics_get', { params: { s: name }, query: { range } } as never),
   },
   alerts: {
-    list: () => get<{ alerts: T.PanelAlert[] }>('/alerts').then((r) => r.alerts),
-    ack: (id: number) => post<void>(`/alerts/${id}/ack`),
-    settings: (name: string) => get<T.AlertSettings>(`${s(name)}/alerts`),
-    setSettings: (name: string, body: T.AlertSettingsUpdate) => put<T.AlertSettings>(`${s(name)}/alerts`, body),
+    list: () => L<{ alerts: T.PanelAlert[] }>()('alerts_list', {}).then((r) => r.alerts),
+    ack: (id: number) => L<void>()('alerts_ack', { params: { id: String(id) } }),
+    settings: (name: string) => L<T.AlertSettings>()('alert_settings_get', { params: { s: name } }),
+    setSettings: (name: string, body: T.AlertSettingsUpdate) => L<T.AlertSettings>()('alert_settings_set', { params: { s: name }, body }),
   },
   hub: {
-    nodes: () => get<{ nodes: T.HubNode[] }>('/nodes').then((r) => r.nodes),
-    addNode: (body: { name: string; url: string; token: string }) => post<{ node: T.HubNode }>('/nodes', body).then((r) => r.node),
-    removeNode: (id: string) => del<void>(`/nodes/${enc(id)}`),
-    nodeServers: (id: string) => get<{ servers: T.FleetServer[] }>(`/nodes/${enc(id)}/servers`).then((r) => r.servers),
-    nodeControl: (id: string, server: string, action: T.ControlAction) => post<T.JobStarted>(`/nodes/${enc(id)}/servers/${enc(server)}/control`, { action }),
-    fleet: () => get<T.Fleet>('/fleet'),
+    nodes: () => L<{ nodes: T.HubNode[] }>()('nodes_list', {}).then((r) => r.nodes),
+    addNode: (body: { name: string; url: string; token: string }) => L<{ node: T.HubNode }>()('node_add', { body }).then((r) => r.node),
+    removeNode: (id: string) => L<void>()('node_remove', { params: { id } }),
+    nodeServers: (id: string) => L<{ servers: T.FleetServer[] }>()('node_servers', { params: { id } }).then((r) => r.servers),
+    nodeControl: (id: string, server: string, action: T.ControlAction) => call('node_server_control', { params: { id, s: server }, body: { action } }),
+    fleet: () => L<T.Fleet>()('fleet', {}),
   },
 }
 

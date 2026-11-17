@@ -26,6 +26,7 @@ pub type Res<T> = Result<T, String>;
 
 /// Live state of a server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Running,
@@ -46,6 +47,7 @@ pub enum UpdateBadge {
 
 /// Detail for `server_get`: what the launcher can see right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct StatusDetail {
     pub running: bool,
     pub game_listening: bool,

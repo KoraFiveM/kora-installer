@@ -18,7 +18,7 @@ sevenz-rust2 = "0.25"
 sha2 = "0.11.1"
 tar = "0.4.46"
 # Build-time only: TypeScript for the API types (feature `ts`, enabled by the web crate's tests, never in a release build).
-ts-rs = { version = "12", optional = true, features = ["serde-json-impl"] }
+ts-rs = { version = "12", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 thiserror.workspace = true
 ureq = "2"
 url = "2"

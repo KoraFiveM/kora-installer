@@ -1,13 +1,10 @@
 //! Remote access settings and users (local sessions only; the guard refuses remote callers, and each
 //! handler checks again). Token hashes are never returned; a new token is shown once, when it is made.
-use std::collections::BTreeMap;
-
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use serde::Deserialize;
-use serde_json::{json, Value};
+use kora_core::api::wire;
 
 use crate::remote::config::{valid_host, valid_user_name};
 use crate::remote::{Caller, Role};
@@ -21,45 +18,41 @@ fn local_only(c: &Caller) -> Result<(), ApiError> {
     }
 }
 
-fn view(st: &AppState) -> Value {
+fn panel_users(c: &crate::remote::config::RemoteConfig) -> Vec<wire::PanelUser> {
+    c.users.iter().map(|u| wire::PanelUser { name: u.name.clone(), role: u.role.into(), created: u.created }).collect()
+}
+
+fn view(st: &AppState) -> wire::RemoteSettings {
     let c = st.remote.config();
-    json!({
-        "enabled": c.enabled,
+    wire::RemoteSettings {
+        enabled: c.enabled,
         // On for this run because of `--remote`, whatever the saved setting says.
-        "enabled_by_flag": st.remote.is_forced() && !c.enabled,
-        "bind": st.addr.ip().to_string(),
-        "port": st.addr.port(),
+        enabled_by_flag: st.remote.is_forced() && !c.enabled,
+        bind: st.addr.ip().to_string(),
+        port: st.addr.port(),
         // Set while the panel also listens on Tailscale (`kora panel --tailscale`): where to open it there.
-        "tailnet_url": st.remote.tailnet_url(),
-        "tailscale": c.tailscale,
-        "tailscale_users": c.tailscale_users,
-        "allowed_hosts": c.allowed_hosts,
-        "allow_remote_destructive": c.allow_remote_destructive,
-        "users": c.users.iter().map(|u| json!({"name": u.name, "role": u.role, "created": u.created})).collect::<Vec<_>>(),
-        "saved_to": st.remote.path().map(|p| p.display().to_string()),
-    })
+        tailnet_url: st.remote.tailnet_url(),
+        tailscale: c.tailscale,
+        tailscale_users: c.tailscale_users.iter().map(|(k, r)| (k.clone(), (*r).into())).collect(),
+        allowed_hosts: c.allowed_hosts.clone(),
+        allow_remote_destructive: c.allow_remote_destructive,
+        users: panel_users(&c),
+        saved_to: st.remote.path().map(|p| p.display().to_string()),
+    }
 }
 
 /// `GET /remote`: `{enabled, enabled_by_flag, bind, port, tailnet_url, tailscale, tailscale_users: {login: role},
 /// allowed_hosts, allow_remote_destructive, users: [{name, role, created}], saved_to}`.
-pub async fn remote_get(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<Value>, ApiError> {
+pub async fn remote_get(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<wire::RemoteSettings>, ApiError> {
     local_only(&c)?;
     blocking(move || Ok(Json(view(&st)))).await
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RemoteSet {
-    enabled: Option<bool>,
-    tailscale: Option<bool>,
-    tailscale_users: Option<BTreeMap<String, Role>>,
-    allowed_hosts: Option<Vec<String>>,
-    allow_remote_destructive: Option<bool>,
-}
+use wire::RemoteSettingsUpdate as RemoteSet;
 
 /// `PUT /remote`: any of `enabled`, `tailscale`, `tailscale_users`, `allowed_hosts`,
 /// `allow_remote_destructive` (what is left out stays as it is). Answers like `GET /remote`.
-pub async fn remote_set(State(st): State<AppState>, Extension(c): Extension<Caller>, Json(body): Json<RemoteSet>) -> Result<Json<Value>, ApiError> {
+pub async fn remote_set(State(st): State<AppState>, Extension(c): Extension<Caller>, Json(body): Json<RemoteSet>) -> Result<Json<wire::RemoteSettings>, ApiError> {
     local_only(&c)?;
     if let Some(hosts) = &body.allowed_hosts {
         for h in hosts {
@@ -81,7 +74,7 @@ pub async fn remote_set(State(st): State<AppState>, Extension(c): Extension<Call
                     cfg.tailscale = v;
                 }
                 if let Some(v) = body.tailscale_users {
-                    cfg.tailscale_users = v.into_iter().map(|(k, r)| (k.trim().to_ascii_lowercase(), r)).collect();
+                    cfg.tailscale_users = v.into_iter().map(|(k, r)| (k.trim().to_ascii_lowercase(), Role::from(r))).collect();
                 }
                 if let Some(v) = body.allowed_hosts {
                     let mut hosts: Vec<String> = Vec::new();
@@ -104,21 +97,12 @@ pub async fn remote_set(State(st): State<AppState>, Extension(c): Extension<Call
 }
 
 /// `GET /users`: `{users: [{name, role, created}]}`.
-pub async fn users_list(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<Value>, ApiError> {
+pub async fn users_list(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<wire::UsersList>, ApiError> {
     local_only(&c)?;
-    blocking(move || {
-        let users: Vec<Value> = st.remote.config().users.iter().map(|u| json!({"name": u.name, "role": u.role, "created": u.created})).collect();
-        Ok(Json(json!({ "users": users })))
-    })
-    .await
+    blocking(move || Ok(Json(wire::UsersList { users: panel_users(&st.remote.config()) }))).await
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UserAdd {
-    name: String,
-    role: Role,
-}
+use wire::UserAddRequest as UserAdd;
 
 /// `POST /users` `{name, role}` → 201 `{name, role, token}`. The token is shown this once.
 pub async fn user_add(State(st): State<AppState>, Extension(c): Extension<Caller>, Json(body): Json<UserAdd>) -> Result<Response, ApiError> {
@@ -126,9 +110,9 @@ pub async fn user_add(State(st): State<AppState>, Extension(c): Extension<Caller
     valid_user_name(body.name.trim()).map_err(ApiError::bad_request)?;
     blocking(move || {
         let name = body.name.trim().to_string();
-        let role = body.role;
+        let role = Role::from(body.role);
         let token = st.remote.update(|cfg| cfg.add_user(&name, role)).map_err(|m| if m.starts_with("There is already") { ApiError::conflict(m) } else { ApiError::internal(m) })?;
-        Ok((StatusCode::CREATED, Json(json!({"name": name, "role": role, "token": token}))).into_response())
+        Ok((StatusCode::CREATED, Json(wire::NewUser { name, role: role.into(), token })).into_response())
     })
     .await
 }

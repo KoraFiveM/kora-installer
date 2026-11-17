@@ -203,6 +203,7 @@ pub enum Action {
     /// `mode`, `name`, `ports`, `database`, `options`, `github`, ...), `None` = the summary.
     ChangeAnswers {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         section: Option<String>,
     },
     /// Sign in to GitHub (again). `scopes`: the permissions that are missing (empty = a plain sign-in).
@@ -228,8 +229,10 @@ pub enum Action {
     /// Show the log: of a panel job (`job`) or a file on this computer (`path`).
     OpenLog {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         job: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         path: Option<String>,
     },
     /// Copy the message and details (for a bug report).
@@ -281,6 +284,7 @@ pub struct Problem {
     pub message: String,
     /// Technical details (command output, error text) for the "Show details" box.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub details: Option<String>,
     /// What the user can do, best first. Empty: the front end offers its generic choices.
     #[serde(default)]

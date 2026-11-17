@@ -20,7 +20,7 @@ beforeEach(() => {
 async function server(status: 'running' | 'stopped'): Promise<ServerDetail> {
   const list = await api.servers.list()
   const s = list.find((x) => x.status === status) ?? list[0]
-  return { ...s, status, running: status === 'running', game_listening: false, txadmin_up: false, console_enabled: false }
+  return { ...s, status, running: status === 'running', game_listening: false, txadmin_up: false, status_detail: { running: status === 'running', game_listening: false, txadmin_up: false }, console_enabled: false }
 }
 
 describe('Change licence key (server Overview)', () => {

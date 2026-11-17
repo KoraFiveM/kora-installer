@@ -11,7 +11,7 @@ const fetchMock = vi.fn()
 beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock) })
 afterEach(() => vi.unstubAllGlobals())
 
-const server = { name: 'prod', dir: '/srv/prod', mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: 0, status: 'running', badge: null, managed: true, running: true, game_listening: true, txadmin_up: true, console_enabled: false } satisfies ServerDetail
+const server = { name: 'prod', dir: '/srv/prod', mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: 0, status: 'running', badge: null, managed: true, running: true, game_listening: true, txadmin_up: true, status_detail: { running: true, game_listening: true, txadmin_up: true }, connect: null, console_enabled: false } satisfies ServerDetail
 
 const up = (t: number, players: number): MetricSample => ({ t, up: true, players, max_players: 48, cpu: 12.5, ram_mb: 2048, sys_ram_pct: 55, disk_free_mb: 51200, disk_free_pct: 25, game_up: true, txadmin_up: true })
 const settings: AlertSettings = {

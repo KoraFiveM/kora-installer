@@ -49,8 +49,9 @@ impl Collector {
             }
             decl.push_str("export ");
             decl.push_str(&pretty(&T::decl(&self.cfg)));
-            if let Some((other, _)) = self.decls.get(&name) {
-                assert_eq!(*other, TypeId::of::<T>(), "two different Rust types are both called `{name}` in TypeScript: rename one");
+            if let Some((other, text)) = self.decls.get(&name) {
+                // The same declaration reached through two paths (generic instantiations) is fine.
+                assert!(*other == TypeId::of::<T>() || *text == decl, "two different Rust types are both called `{name}` in TypeScript: rename one");
             }
             self.decls.insert(name, (TypeId::of::<T>(), decl));
         }
@@ -240,8 +241,13 @@ fn ty_name(t: &Ty) -> String {
 
 pub fn generate() -> Generated {
     let mut c = Collector::new();
+    // Shapes that no single operation names: the error envelope and the job record.
     c.add::<crate::problem::Problem>();
+    c.add::<super::wire::ErrorEnvelope>();
     c.add::<super::wire::JobStarted>();
+    c.add::<super::wire::JobRecord>();
+    c.add::<super::wire::JobError>();
+    c.add::<super::wire::JobFailedData>();
     let mut untyped = Vec::new();
     let mut ops = String::new();
     let mut routes = String::new();
@@ -265,7 +271,7 @@ pub fn generate() -> Generated {
         };
         let resp_ts = match &sp.response {
             Resp::NoContent => "undefined".to_string(),
-            Resp::Json(t) | Resp::Stream(t) => {
+            Resp::Json(t) | Resp::Stream(_, t) => {
                 (t.collect)(&mut c);
                 ty_name(t)
             }
@@ -307,7 +313,7 @@ pub fn generate() -> Generated {
         if !gaps.is_empty() {
             untyped.push(format!("{}: {}", op.name(), gaps.join(", ")));
         }
-        let stream = matches!(sp.response, Resp::Stream(_));
+        let stream = matches!(sp.response, Resp::Stream(..));
         let raw = match &sp.body {
             Body::Raw(t) => ts_str(t),
             _ => "null".into(),
@@ -332,10 +338,12 @@ pub fn generate() -> Generated {
         types_ts.pop();
     }
 
-    let mut used: Vec<&String> = c.decls.keys().collect();
-    used.sort();
+    // Only the types the table itself names (the rest are reached through them).
+    let words: HashSet<&str> = ops.split(|ch: char| !(ch.is_alphanumeric() || ch == '_')).collect();
+    let used: Vec<&String> = c.decls.keys().filter(|k| words.contains(k.as_str())).collect();
     let mut routes_ts = String::from(HEADER);
-    let _ = writeln!(routes_ts, "\nimport type {{ Untyped, {} }} from './types'\n", used.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+    let names: Vec<&str> = std::iter::once("Untyped").chain(used.iter().map(|s| s.as_str())).collect();
+    let _ = writeln!(routes_ts, "\nimport type {{ {} }} from './types'\n", names.join(", "));
     routes_ts.push_str("/** One entry per operation: what goes in and what comes out. `Untyped` = not described by the Rust side yet. */\nexport interface OpTypes {\n");
     routes_ts.push_str(&ops);
     routes_ts.push_str("}\n\nexport type OpName = keyof OpTypes\n\n");

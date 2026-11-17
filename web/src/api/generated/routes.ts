@@ -3,29 +3,29 @@
 //   KORA_UPDATE_TS=1 cargo test -p kora-web --test api_ts
 // CI fails when this file is out of date.
 
-import type { Untyped, Action, JobStarted, Problem, Tool } from './types'
+import type { Untyped, AdoptRequest, ConsoleCommand, ConsoleLine, ControlRequest, ControlResult, DeleteRequest, EnsureRequest, JobStarted, LogTail, LogTailQuery, LogsList, Message, Meta, NewUser, Notes, PanelRestarting, RemoteSettings, RemoteSettingsUpdate, ResourceControlRequest, ResourcesList, ScanResult, ServerDetail, ServerSummary, ServersList, SessionCreated, SessionLink, SessionRequest, StatusEvent, SystemInfo, UserAddRequest, UsersList } from './types'
 
 /** One entry per operation: what goes in and what comes out. `Untyped` = not described by the Rust side yet. */
 export interface OpTypes {
-  meta: { method: 'GET'; path: '/meta'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  session_create: { method: 'POST'; path: '/session'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  system_info: { method: 'GET'; path: '/system'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  servers_list: { method: 'GET'; path: '/servers'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  server_get: { method: 'GET'; path: '/servers/{s}'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  server_control: { method: 'POST'; path: '/servers/{s}/control'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  server_delete: { method: 'DELETE'; path: '/servers/{s}'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  server_unregister: { method: 'DELETE'; path: '/servers/{s}/registration'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  servers_scan: { method: 'POST'; path: '/servers/scan'; params: Record<string, never>; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
-  servers_adopt: { method: 'POST'; path: '/servers/adopt'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  server_open_folder: { method: 'POST'; path: '/servers/{s}/open-folder'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  logs_list: { method: 'GET'; path: '/servers/{s}/logs'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  logs_tail: { method: 'GET'; path: '/servers/{s}/logs/{file}'; params: { s: string; file: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  console_stream: { method: 'GET'; path: '/servers/{s}/console/stream'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  console_send: { method: 'POST'; path: '/servers/{s}/console'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  console_enable: { method: 'PUT'; path: '/servers/{s}/console/enabled'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  resources_list: { method: 'GET'; path: '/servers/{s}/resources'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  resource_ensure: { method: 'POST'; path: '/servers/{s}/ensure'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  resource_control: { method: 'POST'; path: '/servers/{s}/resources/{name}/control'; params: { s: string; name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
+  meta: { method: 'GET'; path: '/meta'; params: Record<string, never>; query: undefined; body: undefined; response: Meta; events: undefined; result: undefined }
+  session_create: { method: 'POST'; path: '/session'; params: Record<string, never>; query: undefined; body: SessionRequest; response: SessionCreated; events: undefined; result: undefined }
+  system_info: { method: 'GET'; path: '/system'; params: Record<string, never>; query: undefined; body: undefined; response: SystemInfo; events: undefined; result: undefined }
+  servers_list: { method: 'GET'; path: '/servers'; params: Record<string, never>; query: undefined; body: undefined; response: ServersList; events: undefined; result: undefined }
+  server_get: { method: 'GET'; path: '/servers/{s}'; params: { s: string }; query: undefined; body: undefined; response: ServerDetail; events: undefined; result: undefined }
+  server_control: { method: 'POST'; path: '/servers/{s}/control'; params: { s: string }; query: undefined; body: ControlRequest; response: JobStarted; events: StatusEvent; result: ControlResult }
+  server_delete: { method: 'DELETE'; path: '/servers/{s}'; params: { s: string }; query: undefined; body: DeleteRequest; response: JobStarted; events: StatusEvent; result: Notes }
+  server_unregister: { method: 'DELETE'; path: '/servers/{s}/registration'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  servers_scan: { method: 'POST'; path: '/servers/scan'; params: Record<string, never>; query: undefined; body: undefined; response: JobStarted; events: Untyped; result: ScanResult }
+  servers_adopt: { method: 'POST'; path: '/servers/adopt'; params: Record<string, never>; query: undefined; body: AdoptRequest; response: ServerSummary; events: undefined; result: undefined }
+  server_open_folder: { method: 'POST'; path: '/servers/{s}/open-folder'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  logs_list: { method: 'GET'; path: '/servers/{s}/logs'; params: { s: string }; query: undefined; body: undefined; response: LogsList; events: undefined; result: undefined }
+  logs_tail: { method: 'GET'; path: '/servers/{s}/logs/{file}'; params: { s: string; file: string }; query: LogTailQuery; body: undefined; response: LogTail; events: undefined; result: undefined }
+  console_stream: { method: 'GET'; path: '/servers/{s}/console/stream'; params: { s: string }; query: undefined; body: undefined; response: ConsoleLine; events: undefined; result: undefined }
+  console_send: { method: 'POST'; path: '/servers/{s}/console'; params: { s: string }; query: undefined; body: ConsoleCommand; response: undefined; events: undefined; result: undefined }
+  console_enable: { method: 'PUT'; path: '/servers/{s}/console/enabled'; params: { s: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  resources_list: { method: 'GET'; path: '/servers/{s}/resources'; params: { s: string }; query: undefined; body: undefined; response: ResourcesList; events: undefined; result: undefined }
+  resource_ensure: { method: 'POST'; path: '/servers/{s}/ensure'; params: { s: string }; query: undefined; body: EnsureRequest; response: Message; events: undefined; result: undefined }
+  resource_control: { method: 'POST'; path: '/servers/{s}/resources/{name}/control'; params: { s: string; name: string }; query: undefined; body: ResourceControlRequest; response: Message; events: undefined; result: undefined }
   update_preview: { method: 'POST'; path: '/servers/{s}/update/preview'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
   update_apply: { method: 'POST'; path: '/servers/{s}/update/apply'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
   update_auto: { method: 'POST'; path: '/servers/{s}/update/auto'; params: { s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
@@ -78,16 +78,16 @@ export interface OpTypes {
   node_add: { method: 'POST'; path: '/nodes'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
   node_remove: { method: 'DELETE'; path: '/nodes/{id}'; params: { id: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
   node_servers: { method: 'GET'; path: '/nodes/{id}/servers'; params: { id: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  node_server_control: { method: 'POST'; path: '/nodes/{id}/servers/{s}/control'; params: { id: string; s: string }; query: undefined; body: Untyped; response: JobStarted; events: Untyped; result: Untyped }
+  node_server_control: { method: 'POST'; path: '/nodes/{id}/servers/{s}/control'; params: { id: string; s: string }; query: undefined; body: ControlRequest; response: JobStarted; events: StatusEvent; result: ControlResult }
   fleet: { method: 'GET'; path: '/fleet'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  remote_get: { method: 'GET'; path: '/remote'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  remote_set: { method: 'PUT'; path: '/remote'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  users_list: { method: 'GET'; path: '/users'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  user_add: { method: 'POST'; path: '/users'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  user_remove: { method: 'DELETE'; path: '/users/{name}'; params: { name: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  session_logout: { method: 'POST'; path: '/session/logout'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  session_link: { method: 'POST'; path: '/session/link'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
-  panel_restart: { method: 'POST'; path: '/panel/restart'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
+  remote_get: { method: 'GET'; path: '/remote'; params: Record<string, never>; query: undefined; body: undefined; response: RemoteSettings; events: undefined; result: undefined }
+  remote_set: { method: 'PUT'; path: '/remote'; params: Record<string, never>; query: undefined; body: RemoteSettingsUpdate; response: RemoteSettings; events: undefined; result: undefined }
+  users_list: { method: 'GET'; path: '/users'; params: Record<string, never>; query: undefined; body: undefined; response: UsersList; events: undefined; result: undefined }
+  user_add: { method: 'POST'; path: '/users'; params: Record<string, never>; query: undefined; body: UserAddRequest; response: NewUser; events: undefined; result: undefined }
+  user_remove: { method: 'DELETE'; path: '/users/{name}'; params: { name: string }; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  session_logout: { method: 'POST'; path: '/session/logout'; params: Record<string, never>; query: undefined; body: undefined; response: undefined; events: undefined; result: undefined }
+  session_link: { method: 'POST'; path: '/session/link'; params: Record<string, never>; query: undefined; body: undefined; response: SessionLink; events: undefined; result: undefined }
+  panel_restart: { method: 'POST'; path: '/panel/restart'; params: Record<string, never>; query: undefined; body: undefined; response: PanelRestarting; events: undefined; result: undefined }
   check_cfx: { method: 'POST'; path: '/checks/cfx'; params: Record<string, never>; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
   assets_list: { method: 'GET'; path: '/servers/{s}/assets'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
   asset_inspect: { method: 'POST'; path: '/servers/{s}/assets/inspect'; params: { s: string }; query: undefined; body: Untyped; response: Untyped; events: undefined; result: undefined }
@@ -143,7 +143,7 @@ export const ROUTES: Record<OpName, RouteInfo> = {
   server_open_folder: { method: 'POST', path: '/servers/{s}/open-folder', job: false, stream: false, raw: null },
   logs_list: { method: 'GET', path: '/servers/{s}/logs', job: false, stream: false, raw: null },
   logs_tail: { method: 'GET', path: '/servers/{s}/logs/{file}', job: false, stream: false, raw: null },
-  console_stream: { method: 'GET', path: '/servers/{s}/console/stream', job: false, stream: false, raw: null },
+  console_stream: { method: 'GET', path: '/servers/{s}/console/stream', job: false, stream: true, raw: null },
   console_send: { method: 'POST', path: '/servers/{s}/console', job: false, stream: false, raw: null },
   console_enable: { method: 'PUT', path: '/servers/{s}/console/enabled', job: false, stream: false, raw: null },
   resources_list: { method: 'GET', path: '/servers/{s}/resources', job: false, stream: false, raw: null },
@@ -239,25 +239,7 @@ export const ROUTES: Record<OpName, RouteInfo> = {
 
 /** Operations that still have an `Untyped` request, response or job type (a list to shrink). */
 export const UNTYPED_OPS: readonly string[] = [
-  'meta: request, response',
-  'session_create: request, response',
-  'system_info: request, response',
-  'servers_list: request, response',
-  'server_get: request, response',
-  'server_control: request, job events, job result',
-  'server_delete: request, job events, job result',
-  'server_unregister: request, response',
-  'servers_scan: request, job events, job result',
-  'servers_adopt: request, response',
-  'server_open_folder: request, response',
-  'logs_list: request, response',
-  'logs_tail: request, response',
-  'console_stream: request, response',
-  'console_send: request, response',
-  'console_enable: request, response',
-  'resources_list: request, response',
-  'resource_ensure: request, response',
-  'resource_control: request, response',
+  'servers_scan: job events',
   'update_preview: request, job events, job result',
   'update_apply: request, job events, job result',
   'update_auto: request, job events, job result',
@@ -310,16 +292,7 @@ export const UNTYPED_OPS: readonly string[] = [
   'node_add: request, response',
   'node_remove: request, response',
   'node_servers: request, response',
-  'node_server_control: request, job events, job result',
   'fleet: request, response',
-  'remote_get: request, response',
-  'remote_set: request, response',
-  'users_list: request, response',
-  'user_add: request, response',
-  'user_remove: request, response',
-  'session_logout: request, response',
-  'session_link: request, response',
-  'panel_restart: request, response',
   'check_cfx: request, response',
   'assets_list: request, response',
   'asset_inspect: request, response',

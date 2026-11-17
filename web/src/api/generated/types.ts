@@ -27,7 +27,7 @@ export type Action =
   }
   | {
     "kind": "change_answers",
-    section?: string | null,
+    section?: string,
   }
   | {
     "kind": "sign_in_github",
@@ -54,8 +54,8 @@ export type Action =
   }
   | {
     "kind": "open_log",
-    job?: string | null,
-    path?: string | null,
+    job?: string,
+    path?: string,
   }
   | {
     "kind": "copy_details"
@@ -68,10 +68,296 @@ export type Action =
   };
 
 /**
+ * `POST /servers/adopt`.
+ */
+export type AdoptRequest = {
+  /**
+   * The full folder path.
+   */
+  dir: string,
+};
+
+/**
+ * The small update badge of a server (`None` on the server = not known yet).
+ */
+export type Badge = {
+  kind: BadgeKind,
+  /**
+   * How many updates (`kind: updates` only).
+   */
+  count?: number,
+};
+
+export type BadgeKind = "up_to_date" | "updates" | "needs_attention" | "new_release";
+
+/**
+ * `POST /servers/{s}/console`.
+ */
+export type ConsoleCommand = {
+  command: string,
+};
+
+/**
+ * Data of the `line` event of `GET /servers/{s}/console/stream`.
+ */
+export type ConsoleLine = {
+  line: string,
+};
+
+/**
+ * start/stop/restart verbs.
+ */
+export type ControlAction = "start" | "stop" | "restart";
+
+/**
+ * `POST /servers/{s}/control`, `POST /nodes/{id}/servers/{s}/control`.
+ */
+export type ControlRequest = {
+  action: ControlAction,
+};
+
+/**
+ * Result of a control job.
+ */
+export type ControlResult = {
+  status: Status,
+};
+
+/**
+ * `DELETE /servers/{s}`.
+ */
+export type DeleteRequest = {
+  /**
+   * The server's name, typed again to confirm.
+   */
+  confirm_name: string,
+  keep_files: boolean,
+  keep_db: boolean,
+  /**
+   * Only when dropping the database needs a login the install did not keep. Used once, never stored or returned.
+   */
+  db_admin_password?: string,
+};
+
+/**
+ * `POST /servers/{s}/ensure`.
+ */
+export type EnsureRequest = {
+  name: string,
+  restart: boolean,
+};
+
+/**
+ * What a failed job (or a failed request) carries: a [`Problem`] plus the extra fields some failures add.
+ * On the wire a [`Problem`] and these fields are one flat object.
+ */
+export type ErrorBody = {
+  /**
+   * Stable machine code (`failed`, `needs_elevation`, `github.signed_out`, ...), see `problem::codes`.
+   */
+  code: string,
+  /**
+   * What happened, in plain words, for anyone.
+   */
+  message: string,
+  /**
+   * Technical details for "Show details".
+   */
+  details?: string,
+  /**
+   * What the user can do, best first. An action kind this page does not know is not shown.
+   */
+  actions?: Array<Action>,
+  /**
+   * `needs_elevation`: the command to run as administrator.
+   */
+  command?: Array<string>,
+};
+
+/**
+ * Every error answer of the API: `{"error": {...}}`.
+ */
+export type ErrorEnvelope = {
+  error: ErrorBody,
+};
+
+/**
+ * Who is signed in.
+ */
+export type Identity = {
+  name: string,
+  provider: Provider,
+  role: Role,
+};
+
+/**
+ * The error of a failed job: an [`ErrorBody`] plus what installs add.
+ */
+export type JobError = {
+  code: string,
+  message: string,
+  details?: string,
+  actions?: Array<Action>,
+  command?: Array<string>,
+  /**
+   * Install failures: what was kept on disk.
+   */
+  kept?: Array<string>,
+  log_path?: string,
+  /**
+   * Install failures: the step that failed (absent: it stopped before the first step).
+   */
+  failed_step?: string,
+  /**
+   * Install failures: `POST /installs/{job}/resume` can carry on with the same answers.
+   */
+  resume?: boolean,
+};
+
+/**
+ * Data of the `failed` event of `GET /jobs/{id}/events`.
+ */
+export type JobFailedData = {
+  /**
+   * A plain message, or a packed problem as JSON text.
+   */
+  error: string,
+};
+
+/**
+ * `GET /jobs/{id}`. `E` is the type of the job's events and `R` of its result (see the operation's entry in `OpTypes`).
+ */
+export type JobRecord<R = JsonValue, E = JsonValue> = {
+  id: string,
+  /**
+   * The operation that started it (`Op::name`).
+   */
+  op: string,
+  server: string | null,
+  state: JobState,
+  events: Array<E>,
+  result: R | null,
+  error: JobError | null,
+};
+
+/**
  * `202` answer of every job operation.
  */
 export type JobStarted = {
   job: string,
+};
+
+export type JobState = "running" | "done" | "failed";
+
+export type JsonValue = number
+  | string
+  | boolean
+  | Array<JsonValue>
+  | {
+    [key in string]: JsonValue
+  }
+  | null;
+
+export type LogFile = {
+  name: string,
+  size: number,
+  modified_unix: number,
+};
+
+export type LogTail = {
+  file: string,
+  lines: Array<string>,
+};
+
+/**
+ * `?lines=` of `GET /servers/{s}/logs/{file}` (default 300).
+ */
+export type LogTailQuery = {
+  lines?: number,
+};
+
+/**
+ * `GET /servers/{s}/logs`.
+ */
+export type LogsList = {
+  files: Array<LogFile>,
+};
+
+/**
+ * One plain sentence about what was done.
+ */
+export type Message = {
+  message: string,
+};
+
+/**
+ * `GET /meta`. `identity` is `null` unless the request carries a valid session or token.
+ */
+export type Meta = {
+  version: string,
+  api: number,
+  platform: PlatformName,
+  /**
+   * The names of the operations this panel serves (`Op::name`).
+   */
+  ops: Array<string>,
+  /**
+   * This computer's name.
+   */
+  node: string,
+  identity: Identity | null,
+  /**
+   * The request came from another computer.
+   */
+  remote: boolean,
+  /**
+   * Remote sessions may use the destructive actions (delete, uninstall, console input, ...).
+   */
+  allow_remote_destructive: boolean,
+};
+
+export type Mode = "production" | "development";
+
+/**
+ * `POST /users` answer: the token is shown this once.
+ */
+export type NewUser = {
+  name: string,
+  role: Role,
+  token: string,
+};
+
+/**
+ * Result of a job that changed things and has notes to show.
+ */
+export type Notes = {
+  notes: Array<string>,
+};
+
+/**
+ * `POST /panel/restart`.
+ */
+export type PanelRestarting = {
+  restarting: boolean,
+};
+
+/**
+ * A person who can sign in from another computer.
+ */
+export type PanelUser = {
+  name: string,
+  role: Role,
+  /**
+   * Unix seconds.
+   */
+  created: number,
+};
+
+export type PlatformName = "windows" | "linux";
+
+export type Ports = {
+  game: number,
+  txadmin: number,
 };
 
 /**
@@ -91,7 +377,7 @@ export type Problem = {
   /**
    * Technical details (command output, error text) for the "Show details" box.
    */
-  details?: string | null,
+  details?: string,
   /**
    * What the user can do, best first. Empty: the front end offers its generic choices.
    */
@@ -99,6 +385,249 @@ export type Problem = {
 };
 
 /**
+ * How a session proved who it is: the launch link, Tailscale, or a user token.
+ */
+export type Provider = "local" | "tailscale" | "token";
+
+/**
+ * `GET /remote` (local sessions only). Token hashes are never sent.
+ */
+export type RemoteSettings = {
+  enabled: boolean,
+  /**
+   * On for this run because of `--remote`, whatever the saved setting says.
+   */
+  enabled_by_flag: boolean,
+  bind: string,
+  port: number,
+  /**
+   * Where Tailscale devices open the panel, while it also listens there (`kora panel --tailscale`).
+   */
+  tailnet_url: string | null,
+  tailscale: boolean,
+  tailscale_users: {
+    [key in string]: Role
+  },
+  allowed_hosts: Array<string>,
+  allow_remote_destructive: boolean,
+  users: Array<PanelUser>,
+  saved_to: string | null,
+};
+
+/**
+ * `PUT /remote`: what is left out stays as it is.
+ */
+export type RemoteSettingsUpdate = {
+  enabled?: boolean,
+  tailscale?: boolean,
+  tailscale_users?: {
+    [key in string]: Role
+  },
+  allowed_hosts?: Array<string>,
+  allow_remote_destructive?: boolean,
+};
+
+/**
+ * `POST /servers/{s}/resources/{name}/control`: the same actions as a server.
+ */
+export type ResourceControlRequest = {
+  action: ControlAction,
+};
+
+/**
+ * `GET /servers/{s}/resources`.
+ */
+export type ResourcesList = {
+  resources: Array<string>,
+};
+
+/**
+ * Lowest to highest (`kora_web::remote::Role`).
+ */
+export type Role = "viewer" | "operator" | "admin";
+
+/**
+ * A server folder found by "Look for servers".
+ */
+export type ScanCandidate = {
+  name: string,
+  dir: string,
+  mode: Mode,
+  kind: ScanKind,
+  ports: Ports,
+};
+
+export type ScanKind = "kora" | "old_kora" | "fx_server";
+
+/**
+ * Result of the scan job.
+ */
+export type ScanResult = {
+  candidates: Array<ScanCandidate>,
+};
+
+/**
+ * `GET /servers/{s}`: the summary and what the launcher can see right now.
+ */
+export type ServerDetail = {
+  running: boolean,
+  game_listening: boolean,
+  txadmin_up: boolean,
+  /**
+   * The same three facts as one object.
+   */
+  status_detail: StatusDetail,
+  console_enabled: boolean,
+  name: string,
+  dir: string,
+  mode: Mode,
+  ports: Ports,
+  created_unix: number,
+  status: Status,
+  badge: Badge | null,
+  /**
+   * false = adopted (an existing server Kora did not install).
+   */
+  managed: boolean,
+  /**
+   * `<this computer's network address>:<game port>`: what players on the same network type to join. `null` when
+   * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
+   */
+  connect: string | null,
+};
+
+/**
+ * One server in the list (`GET /servers`, the `servers` event, `POST /servers/adopt`).
+ */
+export type ServerSummary = {
+  name: string,
+  dir: string,
+  mode: Mode,
+  ports: Ports,
+  created_unix: number,
+  status: Status,
+  badge: Badge | null,
+  /**
+   * false = adopted (an existing server Kora did not install).
+   */
+  managed: boolean,
+  /**
+   * `<this computer's network address>:<game port>`: what players on the same network type to join. `null` when
+   * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
+   */
+  connect: string | null,
+};
+
+/**
+ * `GET /servers` and the data of the `servers` event of `GET /events`.
+ */
+export type ServersList = {
+  servers: Array<ServerSummary>,
+};
+
+/**
+ * `POST /session`: the cookie is set; `secret` must come back with every request (`X-Kora-Session`).
+ */
+export type SessionCreated = {
+  ok: boolean,
+  identity: Identity,
+  secret: string,
+};
+
+/**
+ * `POST /session/link`: a one-time sign-in code.
+ */
+export type SessionLink = {
+  code: string,
+  /**
+   * Seconds.
+   */
+  expires_in: number,
+};
+
+/**
+ * `POST /session`: local `{token}` or `{code}`; remote `{token}` or `{}` (Tailscale).
+ */
+export type SessionRequest = {
+  /**
+   * The launch token, a sign-in code as pasted, or (remote) a user token.
+   */
+  token?: string,
+  /**
+   * Local only: a one-time code from a sign-in link (`/#code=...`).
+   */
+  code?: string,
+};
+
+/**
+ * Live state of a server.
+ */
+export type Status = "running" | "stopped" | "missing";
+
+/**
+ * Detail for `server_get`: what the launcher can see right now.
+ */
+export type StatusDetail = {
+  running: boolean,
+  game_listening: boolean,
+  txadmin_up: boolean,
+};
+
+/**
+ * What a job reports while it runs: a line of text (`status`).
+ */
+export type StatusEvent = {
+  "type": "status",
+  message: string,
+};
+
+/**
+ * `GET /system`.
+ */
+export type SystemInfo = {
+  version: string,
+  platform: PlatformName,
+  /**
+   * Kora runs with administrator rights (root).
+   */
+  elevated: boolean,
+  /**
+   * Same as `elevated` (the panel reads this name).
+   */
+  admin: boolean,
+  helper_installed: boolean,
+  /**
+   * Windows: the panel asks Windows for administrator permission itself (one prompt per install or action).
+   */
+  admin_prompt: boolean,
+  headless: boolean,
+  /**
+   * The browser is on the same machine as Kora (enables "Open folder").
+   */
+  local: boolean,
+  kora_home: string,
+  /**
+   * The panel can restart itself ("Restart now" after a self-update).
+   */
+  can_restart: boolean,
+};
+
+/**
  * A tool Kora can install or point to. `#[non_exhaustive]`: new tools may be added.
  */
 export type Tool = "git" | "gh" | "mariadb" | "unknown";
+
+/**
+ * `POST /users`.
+ */
+export type UserAddRequest = {
+  name: string,
+  role: Role,
+};
+
+/**
+ * `GET /users`.
+ */
+export type UsersList = {
+  users: Array<PanelUser>,
+};

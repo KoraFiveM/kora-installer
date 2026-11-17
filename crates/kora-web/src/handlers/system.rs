@@ -11,6 +11,7 @@ use std::time::Duration;
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{Extension, Json};
+use kora_core::api::wire;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::ReceiverStream;
@@ -122,26 +123,26 @@ fn restart_now(port: u16) {
     }
 }
 
-pub async fn system_info(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
+pub async fn system_info(State(st): State<AppState>) -> Result<Json<wire::SystemInfo>, ApiError> {
     let port = st.addr.port();
     let loopback = st.allowed_hosts.iter().any(|h| h.starts_with("127.") || h.starts_with("localhost:") || h.starts_with("[::1]"));
     blocking(move || {
         let elevated = kora_core::elevate::is_elevated();
         let headless = headless();
-        Ok(Json(json!({
-            "version": env!("CARGO_PKG_VERSION"),
-            "platform": if cfg!(windows) { "windows" } else { "linux" },
-            "elevated": elevated,
+        Ok(Json(wire::SystemInfo {
+            version: env!("CARGO_PKG_VERSION").into(),
+            platform: if cfg!(windows) { wire::PlatformName::Windows } else { wire::PlatformName::Linux },
+            elevated,
             // The UI reads `admin`; `elevated` is the same answer under the plan's name.
-            "admin": elevated,
-            "helper_installed": crate::elevated::helper_installed(),
+            admin: elevated,
+            helper_installed: crate::elevated::helper_installed(),
             // Windows: the panel asks Windows for permission itself (one prompt per install or action).
-            "admin_prompt": crate::elevated::worker_supported() && !elevated,
-            "headless": headless,
-            "local": loopback && !headless,
-            "kora_home": kora_core::installer::registry::kora_home(),
-            "can_restart": can_restart(port),
-        })))
+            admin_prompt: crate::elevated::worker_supported() && !elevated,
+            headless,
+            local: loopback && !headless,
+            kora_home: kora_core::installer::registry::kora_home().display().to_string(),
+            can_restart: can_restart(port),
+        }))
     })
     .await
 }

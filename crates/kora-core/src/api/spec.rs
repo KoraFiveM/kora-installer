@@ -22,6 +22,7 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use super::tsgen::Collector;
+use super::wire as w;
 use super::Op;
 
 /// A Rust type that appears in the API, as seen by the generator and the contract test.
@@ -81,8 +82,8 @@ pub enum Resp {
     Json(Ty),
     /// `202 {"job": id}`: see [`OpSpec::job`].
     Job,
-    /// `text/event-stream` whose `data:` lines are JSON of this type.
-    Stream(Ty),
+    /// `text/event-stream`: SSE event name and the JSON type of its data.
+    Stream(&'static str, Ty),
     /// Not described yet: the generated client says `Untyped`.
     Untyped,
 }
@@ -118,6 +119,10 @@ impl OpSpec {
     /// JSON in, JSON out.
     pub fn call<B: TS + Serialize + DeserializeOwned + 'static, R: TS + Serialize + DeserializeOwned + 'static>() -> Self {
         OpSpec { query: None, body: Body::Json(Ty::of::<B>()), response: Resp::Json(Ty::of::<R>()), job: None }
+    }
+    /// A server-sent-events stream; `event` is the SSE event name whose data is JSON of type `E`.
+    pub fn stream<E: TS + Serialize + DeserializeOwned + 'static>(event: &'static str) -> Self {
+        OpSpec { query: None, body: Body::None, response: Resp::Stream(event, Ty::of::<E>()), job: None }
     }
     /// JSON in, nothing out.
     pub fn send<B: TS + Serialize + DeserializeOwned + 'static>() -> Self {
@@ -165,25 +170,25 @@ impl OpSpec {
 /// The types of `op`. No wildcard arm: every operation is listed.
 pub fn spec(op: Op) -> OpSpec {
     match op {
-        Op::Meta => OpSpec::untyped(),
-        Op::SessionCreate => OpSpec::untyped(),
-        Op::SystemInfo => OpSpec::untyped(),
-        Op::ServersList => OpSpec::untyped(),
-        Op::ServerGet => OpSpec::untyped(),
-        Op::ServerControl => OpSpec::untyped_job(),
-        Op::ServerDelete => OpSpec::untyped_job(),
-        Op::ServerUnregister => OpSpec::untyped(),
-        Op::ServersScan => OpSpec::untyped_job(),
-        Op::ServersAdopt => OpSpec::untyped(),
-        Op::ServerOpenFolder => OpSpec::untyped(),
-        Op::LogsList => OpSpec::untyped(),
-        Op::LogsTail => OpSpec::untyped(),
-        Op::ConsoleStream => OpSpec::untyped(),
-        Op::ConsoleSend => OpSpec::untyped(),
-        Op::ConsoleEnable => OpSpec::untyped(),
-        Op::ResourcesList => OpSpec::untyped(),
-        Op::ResourceEnsure => OpSpec::untyped(),
-        Op::ResourceControl => OpSpec::untyped(),
+        Op::Meta => OpSpec::get::<w::Meta>(),
+        Op::SessionCreate => OpSpec::call::<w::SessionRequest, w::SessionCreated>(),
+        Op::SystemInfo => OpSpec::get::<w::SystemInfo>(),
+        Op::ServersList => OpSpec::get::<w::ServersList>(),
+        Op::ServerGet => OpSpec::get::<w::ServerDetail>(),
+        Op::ServerControl => OpSpec::start_job_with::<w::ControlRequest>().events::<w::StatusEvent>().result::<w::ControlResult>(),
+        Op::ServerDelete => OpSpec::start_job_with::<w::DeleteRequest>().events::<w::StatusEvent>().result::<w::Notes>(),
+        Op::ServerUnregister => OpSpec::nothing(),
+        Op::ServersScan => OpSpec::start_job().result::<w::ScanResult>(),
+        Op::ServersAdopt => OpSpec::call::<w::AdoptRequest, w::ServerSummary>(),
+        Op::ServerOpenFolder => OpSpec::nothing(),
+        Op::LogsList => OpSpec::get::<w::LogsList>(),
+        Op::LogsTail => OpSpec::get::<w::LogTail>().with_query::<w::LogTailQuery>(),
+        Op::ConsoleStream => OpSpec::stream::<w::ConsoleLine>("line"),
+        Op::ConsoleSend => OpSpec::send::<w::ConsoleCommand>(),
+        Op::ConsoleEnable => OpSpec::nothing(),
+        Op::ResourcesList => OpSpec::get::<w::ResourcesList>(),
+        Op::ResourceEnsure => OpSpec::call::<w::EnsureRequest, w::Message>(),
+        Op::ResourceControl => OpSpec::call::<w::ResourceControlRequest, w::Message>(),
         Op::UpdatePreview => OpSpec::untyped_job(),
         Op::UpdateApply => OpSpec::untyped_job(),
         Op::UpdateAuto => OpSpec::untyped_job(),
@@ -236,16 +241,16 @@ pub fn spec(op: Op) -> OpSpec {
         Op::NodeAdd => OpSpec::untyped(),
         Op::NodeRemove => OpSpec::untyped(),
         Op::NodeServers => OpSpec::untyped(),
-        Op::NodeServerControl => OpSpec::untyped_job(),
+        Op::NodeServerControl => OpSpec::start_job_with::<w::ControlRequest>().events::<w::StatusEvent>().result::<w::ControlResult>(),
         Op::Fleet => OpSpec::untyped(),
-        Op::RemoteGet => OpSpec::untyped(),
-        Op::RemoteSet => OpSpec::untyped(),
-        Op::UsersList => OpSpec::untyped(),
-        Op::UserAdd => OpSpec::untyped(),
-        Op::UserRemove => OpSpec::untyped(),
-        Op::SessionLogout => OpSpec::untyped(),
-        Op::SessionLink => OpSpec::untyped(),
-        Op::PanelRestart => OpSpec::untyped(),
+        Op::RemoteGet => OpSpec::get::<w::RemoteSettings>(),
+        Op::RemoteSet => OpSpec::call::<w::RemoteSettingsUpdate, w::RemoteSettings>(),
+        Op::UsersList => OpSpec::get::<w::UsersList>(),
+        Op::UserAdd => OpSpec::call::<w::UserAddRequest, w::NewUser>(),
+        Op::UserRemove => OpSpec::nothing(),
+        Op::SessionLogout => OpSpec::nothing(),
+        Op::SessionLink => OpSpec::get::<w::SessionLink>(),
+        Op::PanelRestart => OpSpec::get::<w::PanelRestarting>(),
         Op::CheckCfx => OpSpec::untyped(),
         Op::AssetsList => OpSpec::untyped(),
         Op::AssetInspect => OpSpec::untyped(),
