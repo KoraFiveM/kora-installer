@@ -134,7 +134,7 @@ function SettingsForm({ name, cur }: { name: string; cur: AlertSettings }) {
         </div>
         <p className="text-xs text-muted-foreground">Email alerts are not available yet.</p>
       </div>
-      {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
+      {problem && <p role="alert" className="text-sm text-danger-text">{problem}</p>}
       <Button type="submit" variant="default" disabled={!!problem || save.isPending}>Save alert settings</Button>
       {save.isSuccess && <Alert tone="success">Alert settings saved.</Alert>}
       <ErrorNotice error={save.error} />

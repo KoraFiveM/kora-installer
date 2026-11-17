@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
-import type { JobSummary } from '@/api/store'
+import type { JobSummary } from '@/api/types'
 import { jsonResponse, renderApp } from '@/test/utils'
 import { JobHistoryCard } from './JobHistory'
 
@@ -8,7 +8,7 @@ const fetchMock = vi.fn()
 beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock) })
 afterEach(() => vi.unstubAllGlobals())
 
-const job = (id: string, over: Partial<JobSummary> = {}): JobSummary => ({ id, op: 'update_apply', server: 'live', state: 'done', started: 1_700_000_000, ended: 1_700_000_050, result: {}, error: null, ...over })
+const job = (id: string, over: Partial<JobSummary> = {}): JobSummary => ({ id, op: 'update_apply', server: 'live', state: 'done', events: [], started: 1_700_000_000, ended: 1_700_000_050, result: {}, error: null, ...over })
 
 describe('JobHistoryCard', () => {
   it('shows jobs from before a restart, with what to do for one that was interrupted', async () => {

@@ -70,7 +70,7 @@ describe('Settings: licence keys', () => {
     await user.click(within(dlg).getByRole('button', { name: 'Rename' }))
     expect(await screen.findByText('Renamed to "Live".')).toBeInTheDocument()
 
-    await user.click(await screen.findByRole('button', { name: 'Replace the key of Live' }))
+    await user.click(await screen.findByRole('button', { name: 'Replace key of Live' }))
     const rep = await screen.findByRole('dialog')
     await user.type(within(rep).getByLabelText('New licence key'), TEST)
     await user.click(within(rep).getByRole('button', { name: 'Replace key' }))

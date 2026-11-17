@@ -1,64 +1,6 @@
-// Types and calls for the job history and the audit log (the store workstream).
-// Kept in their own file for now: `types.ts` and `client.ts` are being replaced by generated code, and these
-// two endpoints (`GET /jobs`, `GET /audit`) will come from that generator once it knows them.
-import { request } from './client'
-import type { JobError } from './types'
-
-export type AuditResult = 'ok' | 'failed' | 'refused' | 'started'
-
-export interface AuditRow {
-  id: number
-  /** Unix seconds. */
-  at: number
-  /** The operation's name (`server_control`, `key_add`, ...). */
-  op: string
-  server: string | null
-  /** `local` (the person on this computer), `remote` (signed in from another device) or `cli` (a `kora` command). */
-  actor_kind: 'local' | 'remote' | 'cli'
-  actor_name: string | null
-  /** For remote: `token` or `tailscale`. */
-  provider: string | null
-  role: string | null
-  result: AuditResult
-  /** A short note Kora wrote (a job id, an error code). Never a secret. */
-  detail: string | null
-}
-
-export interface AuditPage {
-  entries: AuditRow[]
-  more: boolean
-  retention_days: number
-}
-
-export interface AuditQuery {
-  limit?: number
-  /** Only rows older than this id (to show more). */
-  before?: number
-  server?: string
-  op?: string
-  actor?: string
-  result?: string
-}
-
-/** A job as the history lists it. `interrupted`: the panel stopped while it was running. */
-export type HistoryState = 'running' | 'done' | 'failed' | 'interrupted'
-
-export interface JobSummary {
-  id: string
-  op: string
-  server: string | null
-  state: HistoryState
-  /** Unix seconds. */
-  started: number
-  ended: number | null
-  result: unknown
-  error: JobError | null
-}
-
-export const storeApi = {
-  audit: (q: AuditQuery = {}) => request<AuditPage>('/audit', { query: { limit: q.limit, before: q.before, server: q.server || undefined, op: q.op || undefined, actor: q.actor || undefined, result: q.result || undefined } }),
-  jobs: (limit = 50) => request<{ jobs: JobSummary[] }>('/jobs', { query: { limit } }),
-}
+// Plain words for the job history and the audit log. The types (`JobSummary`, `AuditRow`, ...) are generated from
+// the Rust side (`crates/kora-core/src/api/wire/`); the calls are `api.jobs.list` and `api.audit.list`.
+import type { AuditRow } from './types'
 
 /** Plain words for an operation name; anything unknown reads as its name with spaces. */
 const LABELS: Record<string, string> = {

@@ -172,21 +172,21 @@ pub fn configure(admin_flag: Option<&str>) -> Result<Ready, String> {
     enable(&mut cfg, &admin);
     cfg.save(&path)?;
     println!("Tailscale sign-in is on. Admin: {admin} ({}).", source.why());
-    if super::launch_uid_is_root() {
+    if crate::cmd::panel::launch_uid_is_root() {
         println!("Note: Kora Panel runs as root on this computer (you are signed in as root), so a panel admin can change anything here. Only make people you fully trust admin; give others the operator or viewer role.");
     }
     Ok(Ready { status, admin })
 }
 
 /// Start (or restart) the background panel listening on Tailscale too, wait for it, and say where to go.
-pub fn start_background(a: &super::PanelArgs, home: &Path, ready: &Ready) -> i32 {
-    if cfg!(target_os = "linux") && !super::user_services_available() {
+pub fn start_background(a: &crate::cmd::panel::PanelArgs, home: &Path, ready: &Ready) -> i32 {
+    if cfg!(target_os = "linux") && !crate::cmd::panel_background::user_services_available() {
         eprintln!("Kora Panel cannot run in the background from this session (common after sudo or su, or in a container).");
         eprintln!("Run it in a window instead (it stops when the window closes):  kora panel --tailscale --foreground");
         return 1;
     }
     let ports = kora_web::launch::SystemPorts;
-    let port = match super::background_port(a, home, &ports) {
+    let port = match crate::cmd::panel_running::background_port(a, home, &ports) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -194,12 +194,12 @@ pub fn start_background(a: &super::PanelArgs, home: &Path, ready: &Ready) -> i32
         }
     };
     println!("Starting Kora Panel in the background, on this computer and on Tailscale ...");
-    if let Err(e) = super::start_background_service(home, port, true) {
+    if let Err(e) = crate::cmd::panel_background::start_background_service(home, port, true) {
         eprintln!("error: could not set up the background panel: {e}");
         return 1;
     }
-    if !kora_web::launch::wait_for_panel(port, super::SETUP_WAIT, Duration::from_millis(250), &ports) {
-        eprintln!("Kora Panel did not answer within {} seconds.", super::SETUP_WAIT.as_secs());
+    if !kora_web::launch::wait_for_panel(port, crate::cmd::panel_background::SETUP_WAIT, Duration::from_millis(250), &ports) {
+        eprintln!("Kora Panel did not answer within {} seconds.", crate::cmd::panel_background::SETUP_WAIT.as_secs());
         if cfg!(target_os = "linux") {
             eprintln!("See what happened with:  systemctl --user status kora-panel");
         }
@@ -234,7 +234,7 @@ pub fn start_background(a: &super::PanelArgs, home: &Path, ready: &Ready) -> i32
 /// After `kora panel --setup` (the install scripts): use Tailscale when it is here.
 /// Already set up: print the address. Otherwise, on a server with no screen, ask (on the terminal,
 /// even under `curl | sh`); `KORA_TAILSCALE=1` says yes without asking, `KORA_TAILSCALE=0` never asks.
-pub fn after_setup(a: &super::PanelArgs, home: &Path, headless: bool) {
+pub fn after_setup(a: &crate::cmd::panel::PanelArgs, home: &Path, headless: bool) {
     if tailnet_on(home) {
         if let Some(port) = svc::saved_port(home) {
             print_tailnet_address(home, port);
@@ -332,7 +332,7 @@ pub fn command(cmd: &TailscaleCmd, home: &Path) -> i32 {
                 cfg.save(&path)?;
                 let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
                 if svc::saved_tailscale(home) {
-                    super::start_background_service(home, port, false)?;
+                    crate::cmd::panel_background::start_background_service(home, port, false)?;
                     close_firewall(port);
                 }
                 println!("Tailscale access is off: nobody can sign in with Tailscale, and the background panel listens on this computer only.");
@@ -359,7 +359,7 @@ pub fn new_token(home: &Path) -> i32 {
     let platform = kora_core::service::Platform::current();
     if svc::service_installed(platform) {
         let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
-        if let Err(e) = super::start_background_service(home, port, svc::saved_tailscale(home)) {
+        if let Err(e) = crate::cmd::panel_background::start_background_service(home, port, svc::saved_tailscale(home)) {
             eprintln!("error: the new token is saved, but the background panel could not be restarted: {e}");
             return 1;
         }
@@ -408,7 +408,7 @@ fn open_firewall(port: u16) {
         return;
     }
     let rule = ufw_rule(port);
-    if super::launch_uid_is_root() {
+    if crate::cmd::panel::launch_uid_is_root() {
         let ok = std::process::Command::new("ufw").args(&rule).stdin(std::process::Stdio::null()).output().is_ok_and(|o| o.status.success());
         if ok {
             println!("The firewall (ufw) now lets Tailscale devices reach port {port} (on the Tailscale interface only).");
@@ -426,7 +426,7 @@ fn close_firewall(port: u16) {
     }
     let mut rule = vec!["delete".to_string()];
     rule.extend(ufw_rule(port).into_iter().take(10)); // without the comment: ufw matches the rule itself
-    if super::launch_uid_is_root() && std::process::Command::new("ufw").args(&rule).stdin(std::process::Stdio::null()).output().is_ok_and(|o| o.status.success()) {
+    if crate::cmd::panel::launch_uid_is_root() && std::process::Command::new("ufw").args(&rule).stdin(std::process::Stdio::null()).output().is_ok_and(|o| o.status.success()) {
         println!("The firewall rule for the panel on the Tailscale interface was removed.");
     } else {
         println!("If you added the firewall rule for the panel, remove it with:  sudo ufw {}", rule.join(" "));

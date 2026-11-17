@@ -9,7 +9,7 @@ function Icon({ status }: { status: StepStatus }) {
   const c = 'size-4 shrink-0'
   if (status === 'done') return <CheckCircle2 className={cn(c, 'text-success')} aria-hidden />
   if (status === 'running') return <Loader2 className={cn(c, 'animate-spin text-info')} aria-hidden />
-  if (status === 'failed') return <XCircle className={cn(c, 'text-destructive')} aria-hidden />
+  if (status === 'failed') return <XCircle className={cn(c, 'text-danger-text')} aria-hidden />
   if (status === 'skipped') return <MinusCircle className={cn(c, 'text-steel')} aria-hidden />
   return <Circle className={cn(c, 'text-steel')} aria-hidden />
 }

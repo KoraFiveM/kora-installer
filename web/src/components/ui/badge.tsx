@@ -8,7 +8,7 @@ const badgeVariants = cva('inline-flex items-center gap-1.5 rounded-full border 
       neutral: 'border-steel/40 text-steel bg-steel/10',
       success: 'border-success/40 text-success bg-success/10',
       amber: 'border-amber/40 text-amber bg-amber/10',
-      danger: 'border-destructive/40 text-destructive bg-destructive/10',
+      danger: 'border-destructive/40 text-danger-text bg-destructive/10',
       info: 'border-info/40 text-info bg-info/10',
       orange: 'border-orange/40 text-orange bg-orange/10',
       plain: 'border-border text-muted-foreground',

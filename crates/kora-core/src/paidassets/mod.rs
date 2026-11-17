@@ -51,6 +51,7 @@ pub type Res<T> = Result<T, String>;
 
 /// What a problem is about. `blocking` problems stop the import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetProblemKind"))]
 #[serde(rename_all = "snake_case")]
 pub enum ProblemKind {
     NotAZip,
@@ -69,6 +70,7 @@ pub enum ProblemKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetProblem"))]
 pub struct Problem {
     pub kind: ProblemKind,
     /// The resource it is about, when there is one.
@@ -79,6 +81,7 @@ pub struct Problem {
 
 /// One resource folder found in a zip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "FoundAsset"))]
 pub struct FoundResource {
     /// The folder name (kept exactly; it is what `ensure` uses).
     pub name: String,
@@ -99,6 +102,7 @@ pub struct FoundResource {
 
 /// What importing a zip would do. Nothing is written to make it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetPlan"))]
 pub struct ImportPlan {
     /// The zip's file name.
     pub zip_name: String,
@@ -124,6 +128,7 @@ impl ImportPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ImportedAsset {
     pub name: String,
     pub version: Option<String>,
@@ -134,6 +139,7 @@ pub struct ImportedAsset {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetImportReport"))]
 pub struct ImportReport {
     pub zip_name: String,
     pub imported: Vec<ImportedAsset>,
@@ -157,6 +163,7 @@ impl Default for ImportOpts {
 
 /// An imported paid asset, as listed for a server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PaidAsset {
     pub name: String,
     /// Relative to `resources/`.
@@ -184,6 +191,7 @@ pub fn view(dir: &Path) -> Res<AssetsView> {
 
 /// A zip in the Downloads folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DownloadZip {
     pub name: String,
     pub size: u64,

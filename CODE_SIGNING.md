@@ -40,3 +40,5 @@ cannot), and a CI check fails if one is not.
 
 Kora changes your system (services, scheduled tasks, firewall rules, registry entry). The installer lists every change
 before it happens, and `kora uninstall` removes them. No packers (e.g. UPX) are used.
+
+Maintainers: how Windows signing will be switched on (SignPath, the alternatives, the owner's steps) is in [docs/release-signing.md](docs/release-signing.md).

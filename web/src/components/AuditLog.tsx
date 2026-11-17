@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { storeApi, opLabel, whoLabel, type AuditRow } from '@/api/store'
+import { api } from '@/api/client'
+import type { AuditRow } from '@/api/types'
+import { opLabel, whoLabel } from '@/api/store'
 import { Badge, type Tone } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -37,7 +39,7 @@ export function AuditLogCard() {
   const [result, setResult] = useState('')
   const q = useInfiniteQuery({
     queryKey: ['audit', server, actor, result],
-    queryFn: ({ pageParam }) => storeApi.audit({ limit: 50, before: pageParam, server, actor, result }),
+    queryFn: ({ pageParam }) => api.audit.list({ limit: 50, before: pageParam, server, actor, result }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => (last.more && last.entries.length ? last.entries[last.entries.length - 1].id : undefined),
     enabled: role.can('admin'),

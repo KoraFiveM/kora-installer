@@ -37,10 +37,11 @@ export function seedFleet(): ServerSummary[] {
           status,
           badge: b,
           managed: true,
+          connect: null,
         })
         i++
       }
-  out.push({ name: 'adopted-existing-server', dir: '/home/sam/games/adopted-existing-server', mode: 'production', ports: { game: 30190, txadmin: 40190 }, created_unix: FIXED_NOW - 400 * DAY, status: 'stopped', badge: null, managed: false })
+  out.push({ name: 'adopted-existing-server', dir: '/home/sam/games/adopted-existing-server', mode: 'production', ports: { game: 30190, txadmin: 40190 }, created_unix: FIXED_NOW - 400 * DAY, status: 'stopped', badge: null, managed: false, connect: null })
   return out
 }
 
@@ -48,9 +49,9 @@ export function seedServers(scenario: ScenarioName = 'default'): ServerSummary[]
   if (scenario === 'empty') return []
   if (scenario === 'fleet') return seedFleet()
   return [
-    { name: 'kora-live', dir: '/srv/fivem/kora-live', mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: now - 40 * DAY, status: 'running', badge: { kind: 'up_to_date' }, managed: true },
-    { name: 'kora-dev', dir: '/srv/fivem/kora-dev', mode: 'development', ports: { game: 30121, txadmin: 40121 }, created_unix: now - 12 * DAY, status: 'stopped', badge: { kind: 'updates', count: 2 }, managed: true },
-    { name: 'kora-old', dir: '/srv/fivem/kora-old', mode: 'production', ports: { game: 30122, txadmin: 40122 }, created_unix: now - 200 * DAY, status: 'missing', badge: null, managed: true },
+    { name: 'kora-live', dir: '/srv/fivem/kora-live', mode: 'production', ports: { game: 30120, txadmin: 40120 }, created_unix: now - 40 * DAY, status: 'running', badge: { kind: 'up_to_date' }, managed: true, connect: null },
+    { name: 'kora-dev', dir: '/srv/fivem/kora-dev', mode: 'development', ports: { game: 30121, txadmin: 40121 }, created_unix: now - 12 * DAY, status: 'stopped', badge: { kind: 'updates', count: 2 }, managed: true, connect: null },
+    { name: 'kora-old', dir: '/srv/fivem/kora-old', mode: 'production', ports: { game: 30122, txadmin: 40122 }, created_unix: now - 200 * DAY, status: 'missing', badge: null, managed: true, connect: null },
   ]
 }
 

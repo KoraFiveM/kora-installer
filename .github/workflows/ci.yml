@@ -29,6 +29,11 @@ jobs:
       # --no-fail-fast: one failing crate must not hide failures in the others.
       - run: cargo test --workspace --locked --no-fail-fast
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Generated TypeScript API files are up to date
+        if: runner.os == 'Linux'
+        run: |
+          KORA_UPDATE_TS=1 cargo test -p kora-web --locked --test api_ts
+          git diff --exit-code -- web/src/api/generated || { echo "::error::web/src/api/generated is out of date. Run: KORA_UPDATE_TS=1 cargo test -p kora-web --test api_ts, and commit the result."; exit 1; }
       - name: install.sh (shellcheck + tests against a local fake release)
         if: runner.os == 'Linux'
         run: |
@@ -68,3 +73,5 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      # First-load size within budget, and the mock backend is not in the production bundle.
+      - run: npm run size

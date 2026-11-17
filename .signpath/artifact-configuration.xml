@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for Kora's Windows files (docs/release-signing.md).
+
+  SignPath keeps the artifact configuration in its own web interface: after the application is approved, paste this
+  file into  Project > Artifact configurations > Add  (slug: default, or set the repository variable
+  SIGNPATH_ARTIFACT_CONFIG_SLUG). It lives here so changes are reviewed like code and the two cannot drift.
+
+  The artifact is a ZIP of the files to sign (.github/workflows/sign-windows.yml uploads it). Both elements are
+  optional (min-matches="0") so one configuration serves the exe step and the MSI step of a release.
+  The MSI is built from the ALREADY SIGNED kora exe, so no deep signing of the MSI's contents is needed.
+
+  Metadata restriction (a SignPath Foundation condition: "all signed binaries must have metadata attributes set and
+  enforced"): product name = the project's name, product version identical in each build. The values are what
+  crates/kora-cli/build.rs writes (ProductName "Kora", ProductVersion = the Cargo version). The version is passed in
+  by the workflow, read from the exe itself.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="kora*.exe" min-matches="0" max-matches="unbounded" product-name="Kora" product-version="${version}">
+      <authenticode-sign hash-algorithm="sha256" description="Kora" description-url="https://github.com/KoraFiveM/kora-installer" />
+    </pe-file>
+    <!-- TODO(installer workstream): add subject="..." author="..." here to match what the MSI build sets
+         (WiX: Package Name -> Subject, Manufacturer -> Author), as the OSS conditions ask for metadata
+         restrictions on every signed binary. -->
+    <msi-file path="*.msi" min-matches="0" max-matches="unbounded">
+      <authenticode-sign hash-algorithm="sha256" description="Kora" description-url="https://github.com/KoraFiveM/kora-installer" />
+    </msi-file>
+  </zip-file>
+</artifact-configuration>

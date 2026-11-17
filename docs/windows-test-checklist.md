@@ -203,6 +203,8 @@ Do steps 16 and 18 first (the tools and the GitHub sign-in).
 
 ## Administrator prompt (UAC)
 
+Part of this is now checked by CI (`windows-uac.yml`; see [windows-uac-ci.md](windows-uac-ci.md) for which steps and what only a self-hosted VM can do). The list below stays the owner's pass.
+
 Do these on a normal administrator account unless a step says otherwise. The prompt can appear as a flashing shield in
 the taskbar instead of on screen: note where it showed.
 
