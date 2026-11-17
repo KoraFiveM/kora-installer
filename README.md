@@ -106,13 +106,13 @@ Most things are in the panel (`kora`); these are the same operations for scripts
 | Command | What it does |
 |---|---|
 | `kora` (also `kora manager`, `kora install` with no options) | Make sure the panel runs in the background and open it (the install page for `kora install`). |
-| `kora panel` | The panel in this window, or set up and manage it: `--tailscale`, `--setup`, `--print-link`, `--new-token`, `--remove-service`, `restart`, `remote-actions on\|off\|status`, `user ...` (remote users), `tailscale allow\|remove\|list\|off`. |
+| `kora panel` | The panel in this window, or set up and manage it: `--tailscale`, `--setup`, `--print-link`, `--new-token`, `--remove-service`, `restart`, `remote-actions on\|off\|status`, `user invite\|reset\|credentials\|list\|remove\|api-token ...` (remote users: passkeys and one-time codes), `tls status\|set\|self-signed\|tailscale\|off\|renew\|export-ca` (HTTPS), `proxy trust\|forget\|status` (a reverse proxy), `tailscale allow\|remove\|list\|off`. |
 | `kora install --name ... --mode prod\|dev ...` | Install a server without asking (`--dry-run` to preview, `--license-key-name` to use a saved key). |
 | `kora status`, `kora start\|stop\|restart <server>` | List servers; control a server's background service. |
 | `kora update <server>` | Preview, apply and roll back updates (`--auto` is for schedulers). `kora schedule show\|set\|off <server>` sets when a Development server updates itself. |
 | `kora add-resources`, `kora add-asset <server> <zip>...` | Add catalogue resources, or paid assets downloaded from the Cfx.re Portal. |
 | `kora branch list\|show\|switch\|default\|all\|restore <server> ...`, `kora pr list\|checkout <server> <resource> ...` | Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone. |
-| `kora keys list\|add\|replace\|rename\|remove\|use`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line) and the remembered Cfx.re name and GitHub owner. |
+| `kora keys list\|add\|replace\|rename\|remove\|use\|keychain status\|on\|off`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line; kept in the system keychain when there is one: Windows DPAPI, Linux Secret Service) and the remembered Cfx.re name and GitHub owner. |
 | `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers for Development mode. |
 | `kora webhook ...` | Discord notifications for update reports. |
 | `kora app install\|status\|uninstall` | Kora's per-user shortcuts (Start Menu / Desktop, applications menu). `kora uninstall --app` removes the OLD machine-wide app of earlier versions. |

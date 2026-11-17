@@ -163,3 +163,13 @@ Open a PR against `main` and fill in the template. A maintainer reviews every ch
 your work is licensed under the Apache License 2.0.
 
 See also the [Code of Conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md).
+
+## Testing code that touches the system keychain or passkeys
+
+- Saved licence keys use the real keyring or DPAPI only in the real `kora` program (`store::keychain::enable_system_keychain()` in `main`):
+  no test ever touches a developer's keychain. A test that needs a keychain installs the fakes of `store::keychain::fake` for its own thread
+  with `set_backends_for_tests` (see `store/keychain/tests.rs`).
+- Passkey ceremonies are tested with a software passkey (`webauthn-authenticator-rs`, dev-dependency) in Rust and with Chromium's virtual
+  authenticator (CDP `WebAuthn.*`) in `web/e2e/mock/signin.spec.ts` and, against a real panel over HTTPS, `web/e2e/real/remote-signin.spec.ts`
+  (needs a non-loopback address on the machine; the test skips itself without one).
+
