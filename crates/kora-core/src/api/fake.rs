@@ -70,7 +70,7 @@ pub struct FakeBackend(pub Arc<Mutex<FakeState>>);
 
 /// A registry entry for tests.
 pub fn entry(name: &str, mode: Mode, game: u16, txadmin: u16) -> ServerEntry {
-    ServerEntry { name: name.into(), dir: PathBuf::from(format!("/srv/{name}")), mode, ports: PortsRecord { game, txadmin }, created_unix: 0 }
+    ServerEntry { source: None, versions: None, name: name.into(), dir: PathBuf::from(format!("/srv/{name}")), mode, ports: PortsRecord { game, txadmin }, created_unix: 0 }
 }
 
 impl FakeBackend {

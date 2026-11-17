@@ -36,6 +36,8 @@ fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> 
         name: e.name.clone(),
         dir: e.dir.clone(),
         mode: e.mode,
+        source: e.source(),
+        versions: e.versions(),
         ports: kora_core::installer::Ports { game: e.ports.game, txadmin: e.ports.txadmin },
         created_unix: e.created_unix,
         status,

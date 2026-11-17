@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::types::{Mode, Ports};
+use super::types::{Mode, Ports, Source, Versions};
 
 /// Directory holding the registry. `KORA_HOME` overrides (tests, portable installs).
 pub fn kora_home() -> PathBuf {
@@ -48,7 +48,14 @@ pub fn registry_path() -> PathBuf {
 pub struct ServerEntry {
     pub name: String,
     pub dir: PathBuf,
+    /// The old spelling, still written for older versions of Kora (see [`super::style`]).
     pub mode: Mode,
+    /// Clone or fork. Missing in records made before 0.8: then it follows `mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    /// Released versions or the latest changes. Missing in records made before 0.8: then it follows `mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub versions: Option<Versions>,
     pub ports: PortsRecord,
     pub created_unix: u64,
 }
@@ -175,7 +182,14 @@ impl ResourceRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerFile {
     pub name: String,
+    /// The old spelling, still written for older versions of Kora (see [`super::style`]).
     pub mode: Mode,
+    /// Clone or fork. Missing in files made before 0.8: then it follows `mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    /// Released versions or the latest changes. Missing in files made before 0.8: then it follows `mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub versions: Option<Versions>,
     pub dir: PathBuf,
     pub ports: PortsRecord,
     pub game_build: u32,
@@ -191,14 +205,34 @@ pub fn server_file_path(dir: &Path) -> PathBuf {
     dir.join("kora-server.json")
 }
 
+impl ServerEntry {
+    pub fn source(&self) -> Source {
+        super::style(self.mode, self.source, self.versions).0
+    }
+    pub fn versions(&self) -> Versions {
+        super::style(self.mode, self.source, self.versions).1
+    }
+}
+
 impl ServerFile {
+    pub fn source(&self) -> Source {
+        super::style(self.mode, self.source, self.versions).0
+    }
+    pub fn versions(&self) -> Versions {
+        super::style(self.mode, self.source, self.versions).1
+    }
     pub fn load(dir: &Path) -> std::io::Result<Self> {
         serde_json::from_slice(&fs::read(server_file_path(dir))?).map_err(std::io::Error::other)
     }
     pub fn save(&self) -> std::io::Result<()> {
         let p = server_file_path(&self.dir);
         let tmp = p.with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
+        // Both spellings are written; the old one follows the new (see `style`).
+        let mut out = self.clone();
+        if out.versions.is_some() {
+            out.mode = super::compat_mode(out.versions());
+        }
+        fs::write(&tmp, serde_json::to_vec_pretty(&out).map_err(std::io::Error::other)?)?;
         fs::rename(tmp, p)
     }
 }
@@ -217,7 +251,7 @@ mod tests {
         let p = d.path().join("sub/servers.json");
         let mut r = Registry::load_from(&p).unwrap();
         assert!(r.servers.is_empty());
-        let e = ServerEntry { name: "a".into(), dir: "/x".into(), mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
+        let e = ServerEntry { source: None, versions: None, name: "a".into(), dir: "/x".into(), mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
         r.upsert(e.clone());
         r.upsert(ServerEntry { created_unix: 2, ..e });
         r.save_to(&p).unwrap();

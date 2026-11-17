@@ -434,6 +434,8 @@ mod tests {
         use crate::installer::registry::{PortsRecord, ResourceRecord};
         let rec = |id: &str, path: &str| ResourceRecord { id: id.into(), path: path.into(), ..Default::default() };
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "a".into(),
             mode: installer::Mode::Production,
             dir: PathBuf::from("/srv/a"),

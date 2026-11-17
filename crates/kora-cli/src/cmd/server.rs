@@ -3,7 +3,7 @@
 use crate::cmd::install::Printer;
 use std::path::PathBuf;
 
-use kora_core::installer::{self, host, registry, Mode, RollbackOptions};
+use kora_core::installer::{self, host, registry, RollbackOptions, Source, Versions};
 use kora_core::launch;
 
 pub(crate) fn status() -> i32 {
@@ -18,7 +18,7 @@ pub(crate) fn status() -> i32 {
         println!("No Kora servers registered ({}). Install one with `kora install`.", registry::registry_path().display());
         return 0;
     }
-    println!("{:<20} {:<5} {:<7} {:<7} {:<9} {:<26} folder", "NAME", "MODE", "GAME", "TXADMIN", "STATE", "PORTS");
+    println!("{:<20} {:<15} {:<7} {:<7} {:<9} {:<26} folder", "NAME", "COPIES, VERSIONS", "GAME", "TXADMIN", "STATE", "PORTS");
     for s in &reg.servers {
         let spec = launch::Spec { name: s.name.clone(), dir: s.dir.clone(), game_port: s.ports.game, txadmin_port: s.ports.txadmin };
         let st = launch::status_of(&launch::SystemEnv::default(), &spec);
@@ -30,8 +30,8 @@ pub(crate) fn status() -> i32 {
             "stopped"
         };
         let ports = format!("game {}, txAdmin {}", if st.game_listening { "listening" } else { "closed" }, if st.txadmin_up { "up" } else { "down" });
-        let mode = if s.mode == Mode::Production { "prod" } else { "dev" };
-        println!("{:<20} {:<5} {:<7} {:<7} {:<9} {:<26} {}", s.name, mode, s.ports.game, s.ports.txadmin, state, ports, s.dir.display());
+        let style = format!("{}, {}", if s.source() == Source::Clone { "clone" } else { "fork" }, if s.versions() == Versions::Released { "released" } else { "latest" });
+        println!("{:<20} {:<15} {:<7} {:<7} {:<9} {:<26} {}", s.name, style, s.ports.game, s.ports.txadmin, state, ports, s.dir.display());
         if s.dir.is_dir() {
             for l in crate::cmd::resource::attention_lines(&s.name, st.running) {
                 println!("    {l}");

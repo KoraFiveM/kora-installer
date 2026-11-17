@@ -1,6 +1,8 @@
 use super::*;
 use crate::installer::gitops::GitCli;
 use crate::installer::registry::{PortsRecord, ResourceRecord};
+#[allow(unused_imports)]
+use crate::installer::{Mode, Source, Versions};
 use crate::update::HealthOutcome;
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -65,6 +67,8 @@ impl Env {
 
 fn server(mode: Mode, resources: Vec<ResourceRecord>, t: tempfile::TempDir, dir: PathBuf) -> Env {
     let sf = ServerFile {
+        source: None,
+        versions: None,
         name: "t".into(),
         mode,
         dir,

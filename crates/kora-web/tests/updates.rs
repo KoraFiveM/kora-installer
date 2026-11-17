@@ -188,7 +188,7 @@ async fn snapshots_list_and_rollback() {
     let app = app(&fake);
     let (s, v) = call(&app, "GET", "/servers/dev/snapshots", None).await;
     assert_eq!(s, 200);
-    assert_eq!(v["snapshots"][0], json!({"id": "snap1", "created_unix": 1700000000u64, "resources": ["kora_core"]}));
+    assert_eq!(v["snapshots"][0], json!({"id": "snap1", "created_unix": 1700000000u64, "resources": ["kora_core"], "on_other_branch": []}));
     let j = run_job(&app, "POST", "/servers/dev/snapshots/snap1/rollback", None).await;
     assert_eq!(j["state"], "done", "{j}");
     assert!(fake.calls().contains(&"rollback dev snap1".to_string()));
@@ -341,7 +341,7 @@ async fn schedule_validation() {
     let fake = FakeBackend::sample();
     let app = app(&fake);
     let (s, _) = call(&app, "PUT", "/servers/prod/schedule", Some(daily())).await;
-    assert_eq!(s, 400, "production servers have no schedule");
+    assert_ne!(s, 400, "every server can have an automatic update now, whatever it follows");
     let mut bad = daily();
     bad["time"] = json!("4pm");
     let (s, _) = call(&app, "PUT", "/servers/dev/schedule", Some(bad)).await;
@@ -351,7 +351,8 @@ async fn schedule_validation() {
     assert_eq!(s, 400);
     let (s, _) = call(&app, "PUT", "/servers/dev/schedule", Some(json!({"preset": "hourly"}))).await;
     assert_eq!(s, 400);
-    assert!(!fake.calls().iter().any(|c| c.starts_with("schedule_set")));
+    // Only the valid request for the server on released versions got through; none of the bad ones did.
+    assert_eq!(fake.calls().iter().filter(|c| c.starts_with("schedule_set")).count(), 1);
 }
 
 #[tokio::test]

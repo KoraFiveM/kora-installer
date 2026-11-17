@@ -674,6 +674,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("secrets.cfg"), format!("sv_licenseKey \"{K1}\"\n")).unwrap();
         let mk = |name: &str, dir: &Path| ServerEntry {
+            source: None,
+            versions: None,
             name: name.into(),
             dir: dir.to_path_buf(),
             mode: crate::installer::Mode::Production,

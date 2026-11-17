@@ -22,7 +22,7 @@ use crate::catalog::normalize_id;
 use crate::git::branches::{self as gb, codes, Branches, Kind, Outcome, PullRequest, Stash, Status};
 use crate::git::CommandRunner;
 use crate::installer::registry::{ResourceRecord, ServerFile};
-use crate::installer::types::Mode;
+use crate::installer::types::Versions;
 use crate::problem::{Action, Problem};
 use crate::update::{lock, par_map, FETCH_PARALLEL};
 
@@ -36,14 +36,6 @@ pub const RESTART_NOTE: &str = "The files changed, but a running server still ha
 // ---------------------------------------------------------------------------------------------
 // Which resources, and where
 // ---------------------------------------------------------------------------------------------
-
-fn ensure_dev(sf: &ServerFile) -> PResult<()> {
-    if sf.mode == Mode::Development {
-        Ok(())
-    } else {
-        Err(Problem::new(codes::NOT_DEV, "Changing branches is only for Development servers. A Production server stays on its tested releases, so it cannot be moved onto another branch."))
-    }
-}
 
 /// The folder of a resource, only ever inside `<server>/resources`.
 fn folder_of(sf: &ServerFile, rec: &ResourceRecord) -> PResult<PathBuf> {
@@ -76,6 +68,11 @@ fn tracked(sf: &ServerFile, rec: &ResourceRecord) -> Result<PathBuf, &'static st
         return Err("A copy of one folder of a repository: there is no branch to switch.");
     }
     Ok(path)
+}
+
+/// A server on released versions has each resource pinned to a commit: that is its normal version, not a branch.
+fn release_pin<'a>(sf: &ServerFile, rec: &'a ResourceRecord) -> Option<&'a str> {
+    (sf.versions() == Versions::Released && !rec.third_party).then_some(rec.commit.as_deref()).flatten()
 }
 
 fn find<'a>(sf: &'a ServerFile, name: &str) -> PResult<&'a ResourceRecord> {
@@ -181,6 +178,17 @@ fn row_of(r: &dyn CommandRunner, sf: &ServerFile, rec: &ResourceRecord) -> Resou
                 Kind::Detached => State::Detached,
             };
             row.label = w.label(&rec.branch);
+            if let Some(pin) = release_pin(sf, rec) {
+                // Released versions: the pinned commit is the normal version; the branch with the latest changes is not.
+                let head = gb::head_commit(r, &dir).unwrap_or_default();
+                if w.kind == Kind::Detached && !head.is_empty() && (head.starts_with(pin) || pin.starts_with(&head)) {
+                    row.state = State::Default;
+                    row.label = format!("the released version ({})", &pin[..pin.len().min(7)]);
+                } else if w.kind == Kind::Default {
+                    row.state = State::Branch;
+                    row.label = format!("branch {} (the latest changes)", rec.branch);
+                }
+            }
             row.changed_count = w.changed_count;
             row.stashes = gb::stashes(r, &dir).map(|s| s.len()).unwrap_or(0);
             row.branch = w.branch;
@@ -197,7 +205,6 @@ fn row_of(r: &dyn CommandRunner, sf: &ServerFile, rec: &ResourceRecord) -> Resou
 
 /// The branch of every resource (what is on disk; no network). Development servers only.
 pub fn overview(r: &dyn CommandRunner, sf: &ServerFile) -> PResult<Vec<ResourceBranch>> {
-    ensure_dev(sf)?;
     // One runner per worker when the runner can be copied; otherwise one by one.
     let mut jobs: Vec<(usize, Option<Box<dyn CommandRunner + Send>>)> = Vec::new();
     for i in 0..sf.resources.len() {
@@ -236,7 +243,6 @@ fn folder(sf: &ServerFile, rec: &ResourceRecord) -> PResult<PathBuf> {
 
 /// Branches, kept-aside changes and the current state of one resource. `refresh` downloads the branch lists first (network).
 pub fn choices(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, refresh: bool) -> PResult<Choices> {
-    ensure_dev(sf)?;
     let rec = find(sf, resource)?;
     let dir = folder(sf, rec)?;
     let mut notes = Vec::new();
@@ -297,7 +303,6 @@ pub struct PrChoices {
 
 /// Open pull requests of the original repository and of the person's fork (network, through `gh`).
 pub fn prs(r: &dyn CommandRunner, sf: &ServerFile, resource: &str) -> PResult<PrChoices> {
-    ensure_dev(sf)?;
     let rec = find(sf, resource)?;
     let dir = folder(sf, rec)?;
     let (prs, notes) = gb::list_prs(r, &dir)?;
@@ -328,21 +333,24 @@ pub struct SwitchResult {
     pub restart_note: Option<String>,
 }
 
-fn go(r: &dyn CommandRunner, dir: &Path, default_branch: &str, target: &Target, changes: Changes) -> PResult<Outcome> {
+fn go(r: &dyn CommandRunner, dir: &Path, default_branch: &str, pin: Option<&str>, target: &Target, changes: Changes) -> PResult<Outcome> {
     match target {
         Target::Branch { name, remote } => gb::switch_branch(r, dir, default_branch, name, remote.as_deref(), changes),
-        Target::Default => gb::back_to_default(r, dir, default_branch, changes),
+        // Released versions: "normal" is exactly the pinned release; otherwise the normal branch.
+        Target::Default => match pin {
+            Some(commit) => gb::back_to_release(r, dir, default_branch, commit, changes),
+            None => gb::back_to_default(r, dir, default_branch, changes),
+        },
         Target::Pr { input, source } => gb::checkout_pr(r, dir, default_branch, &parse_pr_input(input)?, *source, changes),
     }
 }
 
 /// Change one resource. Takes the server's update lock, so it never runs in the middle of an update.
 pub fn switch(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, target: &Target, changes: Changes) -> PResult<SwitchResult> {
-    ensure_dev(sf)?;
     let rec = find(sf, resource)?;
     let dir = folder(sf, rec)?;
     let _lock = lock_for(sf)?;
-    let outcome = go(r, &dir, &rec.branch, target, changes)?;
+    let outcome = go(r, &dir, &rec.branch, release_pin(sf, rec), target, changes)?;
     let moved = outcome.status == Status::Switched;
     if moved {
         crate::resourcestate::mark_changed(&sf.dir, std::slice::from_ref(&rec.id), &format!("moved to {}", outcome.now.label(&rec.branch)));
@@ -352,7 +360,6 @@ pub fn switch(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, target: &T
 
 /// Bring a set of kept-aside changes back (needs a clean folder; the set stays in the list).
 pub fn restore_stash(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, index: u32) -> PResult<SwitchResult> {
-    ensure_dev(sf)?;
     let rec = find(sf, resource)?;
     let dir = folder(sf, rec)?;
     let _lock = lock_for(sf)?;
@@ -398,7 +405,6 @@ pub struct BulkPreview {
 
 /// Which resources have `branch`. With `fetch` the lists are refreshed from GitHub first (slow; reports progress).
 pub fn bulk_preview(r: &dyn CommandRunner, sf: &ServerFile, branch: &str, fetch: bool, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<BulkPreview> {
-    ensure_dev(sf)?;
     if !valid_branch(branch) {
         return Err(Problem::new(codes::BAD_NAME, format!("'{}' is not a branch name Kora can use.", branch.chars().take(60).collect::<String>())));
     }
@@ -495,7 +501,6 @@ pub struct BulkResult {
 /// Switch every resource that has `target` (a branch) to it, or every resource back to its normal branch (`Target::Default`).
 /// `only` limits it to some resources. One resource failing never stops the others. Holds the update lock for the whole run.
 pub fn bulk_apply(r: &dyn CommandRunner, sf: &ServerFile, target: &Target, only: Option<&[String]>, changes: Changes, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<BulkResult> {
-    ensure_dev(sf)?;
     let branch = match target {
         Target::Branch { name, .. } => {
             if !valid_branch(name) {
@@ -548,7 +553,7 @@ fn bulk_one(r: &dyn CommandRunner, sf: &ServerFile, rec: &ResourceRecord, target
             _ => {}
         }
     }
-    match go(r, &dir, &rec.branch, target, changes) {
+    match go(r, &dir, &rec.branch, release_pin(sf, rec), target, changes) {
         Ok(o) => {
             let status = match o.status {
                 Status::Switched => BulkStatus::Switched,

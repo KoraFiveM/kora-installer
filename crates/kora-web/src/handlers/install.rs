@@ -18,7 +18,7 @@ use axum::{Extension, Json};
 use kora_core::api::install::{self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall};
 use kora_core::api::Op;
 use kora_core::installer::paused::PausedStore;
-use kora_core::installer::{slug, InstallRequest, Mode};
+use kora_core::installer::{slug, InstallRequest};
 use kora_core::keystore::KeyStore;
 use kora_core::problem::{codes, Action, Problem};
 use kora_core::profile::ProfileStore;
@@ -551,7 +551,7 @@ pub async fn install_start(State(st): State<AppState>, Extension(caller): Extens
         if servers.iter().any(|s| slug(&s.name) == slug(&req.name) || s.dir == req.dir) {
             return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name)).with_action(Action::change_answers("name")));
         }
-        if req.mode == Mode::Development {
+        if req.source() == kora_core::installer::Source::Fork {
             let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|m| {
                 if Problem::is_encoded(&m) {
                     ApiError::core(m)

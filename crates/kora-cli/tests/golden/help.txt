@@ -53,9 +53,19 @@ Options:
           Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: C:\Kora\<name>, the same as in the panel)
 
       --mode <MODE>
-          prod = pinned release clones, dev = forks on your GitHub account
+          The old spelling of --source and --versions: prod = clone + released, dev = fork + latest. Still works
           
           [possible values: prod, dev]
+
+      --source <SOURCE>
+          Where the resources come from: clone = plain clones of the originals (no GitHub account needed), fork = your own copies on GitHub
+          
+          [possible values: clone, fork]
+
+      --versions <VERSIONS>
+          Which versions the server follows: released = pinned to released versions (the default for clone), latest = the latest changes of the main branch (the default for fork)
+          
+          [possible values: released, latest]
 
       --license-key <LICENSE_KEY>
           Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable)
@@ -100,8 +110,8 @@ Options:
       --firewall
           Open the game port in the OS firewall (needs admin)
 
-      --github-owner <GITHUB_OWNER>
-          Dev mode: GitHub user or organisation to fork into (`list` shows the choices)
+      --fork-owner <LOGIN_OR_ORG>
+          With --source fork: the GitHub user or organisation to fork into (`list` shows the choices; default: your own account). The old name --github-owner still works
 
       --db-admin-user <DB_ADMIN_USER>
           Database admin user used once to create the new database + user (password: KORA_DB_ADMIN_PASSWORD)
@@ -124,14 +134,14 @@ Options:
       --auto-ports
           If a port is in use, silently use the next free one and say what changed
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
-
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::branches::ResourceBranch;
-use crate::installer::Mode;
+use crate::installer::{Mode, Source, Versions};
 use crate::resourcestate::RestartInfo;
 
 /// The server the resource is on, as far as the page needs it.
@@ -12,6 +12,8 @@ use crate::resourcestate::RestartInfo;
 pub struct ResourceServerState {
     pub name: String,
     pub mode: Mode,
+    pub source: Source,
+    pub versions: Versions,
     pub running: bool,
     pub console_enabled: bool,
     pub console_waiting_for_restart: bool,

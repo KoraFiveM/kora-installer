@@ -1,5 +1,7 @@
 use super::*;
 use crate::installer::registry::PortsRecord;
+#[allow(unused_imports)]
+use crate::installer::{Mode, Source, Versions};
 use std::cell::RefCell;
 
 const SHA: &str = "0123456789012345678901234567890123456789";
@@ -21,6 +23,8 @@ fn catalog() -> Catalog {
 
 fn server(dir: &Path, mode: Mode, owner: Option<&str>) -> ServerFile {
     ServerFile {
+        source: None,
+        versions: None,
         name: "s".into(),
         mode,
         dir: dir.to_path_buf(),

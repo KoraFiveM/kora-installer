@@ -1,6 +1,8 @@
 use super::*;
 use crate::git::SystemRunner;
 use crate::installer::registry::PortsRecord;
+#[allow(unused_imports)]
+use crate::installer::{Mode, Source, Versions};
 use std::process::Command;
 
 fn sh(dir: &Path, args: &[&str]) {
@@ -40,6 +42,8 @@ pub(crate) fn server(mode: Mode) -> Srv {
         records.push(ResourceRecord { id: id.into(), path, repository: "https://github.com/x/y.git".into(), branch: "dev".into(), ..Default::default() });
     }
     let sf = ServerFile {
+        source: None,
+        versions: None,
         name: "t".into(),
         mode,
         dir,
@@ -71,15 +75,11 @@ fn overview_shows_each_resources_branch() {
 }
 
 #[test]
-fn production_servers_get_none_of_it() {
-    let s = server(Mode::Production);
-    for e in [
-        overview(&SystemRunner, &s.sf).unwrap_err(),
-        switch(&SystemRunner, &s.sf, "kora-a", &Target::Default, Changes::Ask).unwrap_err(),
-        bulk_apply(&SystemRunner, &s.sf, &Target::Default, None, Changes::Ask, &mut |_, _, _| {}).unwrap_err(),
-        prs(&SystemRunner, &s.sf, "kora-a").unwrap_err(),
-    ] {
-        assert_eq!(e.code, codes::NOT_DEV);
+fn every_server_gets_branches_whatever_it_follows() {
+    for mode in [Mode::Production, Mode::Development] {
+        let s = server(mode);
+        assert_eq!(overview(&SystemRunner, &s.sf).unwrap().len(), 2);
+        assert!(choices(&SystemRunner, &s.sf, "kora-a", false).is_ok());
     }
 }
 
@@ -321,4 +321,39 @@ fn changing_the_files_is_remembered_until_a_restart() {
     assert!(!rs::info(&s.sf.dir, "kora-b", true).needed);
     rs::mark_server_restarted(&s.sf.dir);
     assert!(!rs::info(&s.sf.dir, "kora-a", true).needed);
+}
+
+#[test]
+fn on_released_versions_the_pinned_commit_is_the_normal_version() {
+    let mut s = server(Mode::Production);
+    let dir = path_of(&s, 0);
+    let head = String::from_utf8(Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&dir).output().unwrap().stdout).unwrap().trim().to_string();
+    sh(&dir, &["checkout", "-q", "--detach", &head]);
+    s.sf.resources[0].commit = Some(head.clone());
+    // Detached at the pin: normal.
+    let rows = overview(&SystemRunner, &s.sf).unwrap();
+    assert_eq!((rows[0].state, rows[0].label.as_str()), (State::Default, format!("the released version ({})", &head[..7]).as_str()));
+    // On a branch (even the dev branch): not normal.
+    let r = switch(&SystemRunner, &s.sf, "kora-a", &Target::Branch { name: "feature".into(), remote: None }, Changes::Ask).unwrap();
+    assert!(r.needs_restart);
+    assert_eq!(overview(&SystemRunner, &s.sf).unwrap()[0].state, State::Branch);
+    // One step back to exactly the pin, on no branch; again is a no-op.
+    let back = switch(&SystemRunner, &s.sf, "kora-a", &Target::Default, Changes::Ask).unwrap();
+    assert_eq!(back.outcome.status, Status::Switched, "{}", back.outcome.message);
+    assert_eq!(overview(&SystemRunner, &s.sf).unwrap()[0].state, State::Default);
+    let now = String::from_utf8(Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&dir).output().unwrap().stdout).unwrap().trim().to_string();
+    assert_eq!(now, head);
+    let again = switch(&SystemRunner, &s.sf, "kora-a", &Target::Default, Changes::Ask).unwrap();
+    assert_eq!(again.outcome.status, Status::Already);
+}
+
+#[test]
+fn a_clone_has_only_origin_and_that_is_the_original() {
+    // Only `origin`: it is reported as the original repository, not as "your fork".
+    let s = server(Mode::Production);
+    let dir = path_of(&s, 0);
+    sh(&dir, &["remote", "remove", "upstream"]);
+    sh(&dir, &["remote", "set-url", "origin", "https://github.com/KoraFiveM/kora_a.git"]);
+    let (up, fork) = crate::git::branches::slugs_for_test(&SystemRunner, &dir);
+    assert_eq!((up.as_deref(), fork), (Some("KoraFiveM/kora_a"), None));
 }

@@ -47,6 +47,8 @@ pub async fn resource_page(State(st): State<AppState>, Path((s, name)): Path<(St
             server: w::ResourceServerState {
                 name: e.name.clone(),
                 mode: e.mode,
+                source: e.source(),
+                versions: e.versions(),
                 running,
                 console_enabled: console::is_installed(&e.dir),
                 console_waiting_for_restart: console::waiting_for_restart(&e.dir),

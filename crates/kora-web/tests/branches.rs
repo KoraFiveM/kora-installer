@@ -86,25 +86,17 @@ fn switched(status: Status) -> Reply {
 }
 
 #[tokio::test]
-async fn the_overview_and_the_choices_are_served_for_development_servers_only() {
+async fn the_overview_and_the_choices_are_served_for_every_server() {
     let fake = FakeBackend::sample();
     fake.state().branches = Some(Ok(Reply::Overview(vec![row("kora_hud")])));
     let app = app(&fake);
     let (s, v) = call(&app, "GET", "/servers/dev/branches", None).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["resources"][0]["label"], "the normal version (dev)");
-    // Production: refused before anything runs, as a guided problem.
-    for (m, u, b) in [
-        ("GET", "/servers/prod/branches", None),
-        ("GET", "/servers/prod/resources/kora_hud/branches", None),
-        ("GET", "/servers/prod/resources/kora_hud/prs", None),
-        ("POST", "/servers/prod/resources/kora_hud/branch", Some(json!({"action": "default"}))),
-        ("POST", "/servers/prod/branches/apply", Some(json!({"action": "default"}))),
-    ] {
-        let (s, v) = call(&app, m, u, b).await;
-        assert_eq!((s, v["error"]["code"].as_str()), (409, Some(codes::NOT_DEV)), "{u}: {v}");
-    }
-    assert_eq!(fake.calls().iter().filter(|c| c.starts_with("branches prod")).count(), 0);
+    // A server that follows released versions gets the same operations (the panel warns when a resource leaves its release).
+    let (s, _) = call(&app, "GET", "/servers/prod/branches", None).await;
+    assert_eq!(s, 200);
+    assert_eq!(fake.calls().iter().filter(|c| c.starts_with("branches prod")).count(), 1);
 
     fake.state().branches = Some(Ok(Reply::Choices(Box::new(Choices {
         resource: row("kora_hud"),

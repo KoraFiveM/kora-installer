@@ -772,7 +772,18 @@ export type FleetServer = {
   actions: Array<ControlAction>,
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -1045,7 +1056,19 @@ export type InstallPlan = {
  * `POST /installs` and `POST /installs/plan`.
  */
 export type InstallRequest = {
-  mode: Mode,
+  /**
+   * The old spelling (`production` = clone + released, `development` = fork + latest). Optional: `source` and
+   * `versions` win when they are sent.
+   */
+  mode?: Mode,
+  /**
+   * Plain clones of the originals, or your own copies (forks).
+   */
+  source?: Source,
+  /**
+   * Released versions (pinned) or the latest changes (the main branch).
+   */
+  versions?: Versions,
   name: string,
   dir: string,
   hostname: string,
@@ -1782,6 +1805,8 @@ export type ResourceSelection = "all"
 export type ResourceServerState = {
   name: string,
   mode: Mode,
+  source: Source,
+  versions: Versions,
   running: boolean,
   console_enabled: boolean,
   console_waiting_for_restart: boolean,
@@ -1869,7 +1894,12 @@ export type SampleBadge = "up_to_date"
  * The answers of an install that stopped part-way, as saved: never a licence key or a database login.
  */
 export type SavedInstall = {
+  /**
+   * The old spelling, always sent.
+   */
   mode: Mode,
+  source?: Source,
+  versions?: Versions,
   name: string,
   dir: string,
   hostname: string,
@@ -2040,7 +2070,18 @@ export type ServerDetail = {
   console_enabled: boolean,
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -2086,7 +2127,18 @@ export type ServerKeyRequest =
 export type ServerSummary = {
   name: string,
   dir: string,
+  /**
+   * The old spelling, kept for older clients: `production` = released versions, `development` = latest changes.
+   */
   mode: Mode,
+  /**
+   * Plain clones of the originals, or the person's own copies (forks).
+   */
+  source: Source,
+  /**
+   * Released versions (pinned) or the latest changes.
+   */
+  versions: Versions,
   ports: Ports,
   created_unix: number,
   status: Status,
@@ -2167,6 +2219,12 @@ export type SnapshotInfo = {
 export type SnapshotsList = {
   snapshots: Array<SnapshotInfo>,
 };
+
+/**
+ * Where a server's resources come from. This is the whole difference between the old "Production" and "Development"
+ * as far as GitHub goes: nothing else about a server depends on it.
+ */
+export type Source = "clone" | "fork";
 
 /**
  * `POST /servers/{s}/resources/{name}/stash/restore`.
@@ -2548,6 +2606,11 @@ export type UserAddRequest = {
 export type UsersList = {
   users: Array<PanelUser>,
 };
+
+/**
+ * Which versions of the resources a server follows. A separate setting from [`Source`].
+ */
+export type Versions = "released" | "latest";
 
 /**
  * `PUT /servers/{s}/webhook`.
