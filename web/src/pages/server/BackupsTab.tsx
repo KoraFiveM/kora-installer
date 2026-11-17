@@ -19,6 +19,7 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { timeAgo } from '@/lib/ago'
 import { downloadFile } from '@/lib/download'
+import { browseForFolder, inShell } from '@/lib/shell'
 import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { fileSize } from './PaidAssetsTab'
 
@@ -311,6 +312,7 @@ function Settings({ server, view, canChange, why, onSaved }: { server: string; v
           <CopyField value={view.folder} label="Backups folder" />
           <p className="text-xs text-muted-foreground">{view.default_folder ? "This is Kora's own backups folder. It is outside the server's folder, so deleting the server does not delete its backups, but it is on the same disk as Kora. " : ''}For a backup that survives a dead disk, keep one on another disk or a mounted share.{view.free_bytes != null ? ` ${fileSize(view.free_bytes)} free.` : ''}</p>
           <Field label="Use another folder (full path; leave empty for Kora's own)"><Input value={s.folder} disabled={!canChange} placeholder="/mnt/backups or D:\Backups" onChange={(e) => setS({ ...s, folder: e.target.value })} /></Field>
+          {inShell() && <Button type="button" disabled={!canChange} onClick={async () => { const d = await browseForFolder('Choose a folder for backups'); if (d) setS({ ...s, folder: d }) }}>Browse...</Button>}
         </div>
         <fieldset className="space-y-2">
           <legend className="mb-1 text-sm font-semibold">Scheduled backups</legend>

@@ -68,7 +68,15 @@ impl Rig {
             ],
         };
         sf.save().unwrap();
-        let entry = ServerEntry { name, dir, mode: Mode::Production, source: Some(crate::installer::Source::Fork), versions: Some(crate::installer::Versions::Latest), ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 };
+        let entry = ServerEntry {
+            name,
+            dir,
+            mode: Mode::Production,
+            source: Some(crate::installer::Source::Fork),
+            versions: Some(crate::installer::Versions::Latest),
+            ports: PortsRecord { game: 30120, txadmin: 40120 },
+            created_unix: 1,
+        };
         Rig { tmp, entry, db: FakeDb::default() }
     }
 

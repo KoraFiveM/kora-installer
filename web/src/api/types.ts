@@ -365,4 +365,12 @@ export type {
   ImportResult,
   ImportSource,
   ImportUploaded,
+  ArchivedBackups,
+  ArchivedRef,
+  ArchivedServer,
+  DbLoginNote,
+  ForkChoice,
+  ForkNote,
+  VersionKind,
+  VersionState,
 } from './generated/types'

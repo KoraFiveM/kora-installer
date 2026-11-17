@@ -26,6 +26,8 @@ interface Per {
 export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailCtor, servers: () => T.ServerSummary[], sleep: (ms: number) => Promise<void>): BackupsMock {
   let per: Record<string, Per> = {}
   let dbStopped = false
+  let dbLoginOk = true
+  let adminGiven = false
   let n = 1
 
   const defaults = (): T.BackupSettings => ({ folder: '', retention: { keep_last: 7, keep_daily_days: 0 }, schedule: { enabled: false, cadence: 'daily', time: '03:30' }, resources: 'auto', stop_for_scheduled: false })
@@ -153,7 +155,7 @@ export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailC
       created_unix: bk.created_unix,
       encrypted: bk.encrypted,
       needs_passphrase: false,
-      server: { name, mode: 'production', game_port: 30120, txadmin_port: 40120, game_build: 3000, artifact_build: 1234, os: 'linux', dir: `/srv/${name}` },
+      server: { name, mode: 'development', source: 'fork', versions: 'latest', game_port: 30120, txadmin_port: 40120, game_build: 3000, artifact_build: 1234, os: 'linux', dir: `/srv/${name}` },
       database: { kind: 'dumped', name: 'kora_ab12cd', host: '127.0.0.1', port: 3306, dump_bytes: 9_000_000, note: '' },
       resources: [],
       stopped: bk.stopped,
@@ -209,23 +211,27 @@ export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailC
   const taken = () => servers().map((x) => x.name)
   const previewOf = (name: string, encrypted: boolean, pw: unknown): T.ImportPreview => {
     const base = { file_name: name, encrypted, created_unix: nowS() - 3600, by_reference: 38, in_full: 2, saved_keys: ['Main', 'Spare'], licence_note: 'Your licence key moves with the server, but it is yours, not Kora\'s: Cfx.re ties a key to your account and the address the server runs on. Kora cannot make Cfx.re accept it on a new computer. If the server refuses to start with a licence error, check the key at portal.cfx.re (Keymaster), change its server IP address there if it has one, or pick a different saved key.' }
-    if (encrypted && !pw) return { ...base, needs_passphrase: true, server: null, database: null, suggested: null, clashes: [], will_create: [], wont_carry: [], warnings: [] }
+    if (encrypted && !pw) return { ...base, needs_passphrase: true, server: null, database: null, suggested: null, clashes: [], will_create: [], wont_carry: [], warnings: [], fork: null, db_login: null }
     if (encrypted && pw !== PASSWORD) throw new Fail(422, 'backup.wrong_passphrase', 'That password does not open this backup. Check it and try again. (Kora does not keep passwords, so a lost one cannot be recovered.)')
+    void adminGiven
     const used = taken().includes('Old RP server')
     const clashes: T.Clash[] = used ? [{ kind: 'name', message: 'A server called "Old RP server" is already here.', suggestion: 'Old RP server 2' }] : []
     clashes.push({ kind: 'game_port', message: 'The game port 30120 is already used on this computer.', suggestion: '30121' })
     return {
       ...base,
       needs_passphrase: false,
-      server: { name: 'Old RP server', mode: 'production', game_port: 30120, txadmin_port: 40120, game_build: 3258, artifact_build: 17000, os: 'windows', dir: 'C:\\Servers\\old-rp' },
+      server: { name: 'Old RP server', mode: 'development', source: 'fork', versions: 'latest', game_port: 30120, txadmin_port: 40120, game_build: 3258, artifact_build: 17000, os: 'windows', dir: 'C:\\Servers\\old-rp', github_owner: 'old-owner' },
       database: { kind: 'dumped', name: 'kora_ab12', host: '127.0.0.1', port: 3306, dump_bytes: 9_000_000, note: '' },
       suggested: { name: used ? 'Old RP server 2' : 'Old RP server', dir: '/home/demo/kora/old-rp-server', game_port: 30121, txadmin_port: 40120 },
       clashes,
       will_create: ['A new server "Old RP server" in /home/demo/kora/old-rp-server', 'Its settings and txAdmin data, with the folders and line endings converted for this computer (the backup comes from Windows)', 'A NEW database and login on this computer\'s database server, filled from the backup (9.0 MB)', '38 resources fetched again from GitHub at the saved versions, 2 taken from the file', 'FXServer build 17000 (downloaded again)'],
       wont_carry: ['The operating-system service that starts the server with the computer (set it up again on this computer).', 'Firewall rules and port forwarding (open the ports again for the new computer).', 'The automatic-update timer and the backup schedule.', 'Your GitHub sign-in (sign in again on this computer if the resources need it).', 'The FXServer program itself: it is downloaded again.'],
+      fork: { owner: 'old-owner', usable: false, signed_in_as: 'demo', message: 'This server follows copies (forks) in the GitHub account old-owner, which the account signed in here (demo) cannot use. Choose what to do about them below.' },
+      db_login: dbLoginOk ? { ok: true, message: "Kora can log in to this computer's database server automatically." } : { ok: false, message: 'Kora could not log in to the database server as root (access denied).' },
       warnings: ['This server was made on a different operating system. Folders in its settings are rewritten, but a resource that runs a program only one system has (a Linux shell script, a Windows .exe) will not work here.'],
     }
   }
+  route('GET', '/backups/archived', () => ({ servers: [{ name: 'Old RP', deleted_unix: nowS() - 5 * DAY, backups: [info('Old RP', nowS() - 6 * DAY, { encrypted: true })] }] }) satisfies T.ArchivedBackups)
   route('POST', '/backups/import/upload', (_m, b) => {
     if (!(b.file instanceof Blob)) throw new Fail(400, 'bad_request', 'Send the backup file itself.')
     const id = `${'ab'.repeat(8)}${n++}`.slice(0, 20).padEnd(20, '0')
@@ -235,13 +241,15 @@ export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailC
   })
   route('POST', '/backups/import/inspect', (_m, b) => {
     const src = b.source as T.ImportSource
-    const name = src.upload ? uploads.get(src.upload) : src.path ? src.path.split(/[\\/]/).pop() : undefined
+    const name = src.archived ? `${src.archived.name}-${src.archived.backup}.tar.gz.age` : src.upload ? uploads.get(src.upload) : src.path ? src.path.split(/[\\/]/).pop() : undefined
     if (!name) throw new Fail(404, 'backup.not_found', 'That upload is gone. Upload the file again.')
     if (name.toLowerCase().includes('broken')) throw new Fail(422, 'backup.corrupt', 'This backup cannot be used: the backup file is damaged or incomplete.')
     return previewOf(name, name.endsWith('.age'), b.passphrase)
   })
   route('POST', '/backups/import', (_m, b) => {
     const req = b as unknown as T.ImportRequest
+    if (!dbLoginOk && !req.db_admin) throw new Fail(422, 'backup.db_stopped', 'Kora could not create the new database. Is the database server running? Kora uses the same database administrator login as an install: on Linux the root account\'s own login (run Kora as root for the import) or the KORA_DB_ADMIN_USER and KORA_DB_ADMIN_PASSWORD settings; on Windows the login of the MariaDB Kora set up.')
+    adminGiven = Boolean(req.db_admin)
     return startJob('backup_import_start', req.choices.name, async (emit) => {
       emit({ step: 'unpack', message: 'Unpacking and checking every file (nothing is placed yet)', percent: 6 })
       await sleep(400)
@@ -264,6 +272,8 @@ export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailC
       per = {}
       n = 1
       dbStopped = scenario === 'trouble'
+      dbLoginOk = scenario !== 'windows'
+      adminGiven = false
       const all = servers()
       const first = all[0]
       if (first && scenario !== 'empty') {

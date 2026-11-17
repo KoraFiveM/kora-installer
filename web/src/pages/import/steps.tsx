@@ -1,9 +1,13 @@
 // The steps of "Bring a server from a backup or another machine". Kept in their own module (the install wizard's
 // steps are another piece of work): file → password → what will happen → progress → done.
 import { useRef, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { FileArchive, Upload } from 'lucide-react'
-import type { BackupEvent, Clash, ImportChoices, ImportPreview, ImportResult, ImportSource, JobError } from '@/api/types'
+import type { ArchivedServer, BackupEvent, Clash, DbAdmin, ForkChoice, ImportChoices, ImportPreview, ImportResult, ImportSource, JobError } from '@/api/types'
+import { api } from '@/api/client'
+import { StyleChip } from '@/components/Status'
+import { browseForFile, inShell } from '@/lib/shell'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,7 +19,7 @@ import { Field } from '@/components/Field'
 
 export const FILE_HINT = 'A file made on the old computer with "Move this server" (it ends in .tar.gz.age), or any Kora server backup (.tar.gz or .tar.gz.age).'
 
-export function FileStep({ local, busy, error, onFile, onPath }: { local: boolean; busy: boolean; error: unknown; onFile: (f: File) => void; onPath: (p: string) => void }) {
+export function FileStep({ local, busy, error, archived, onFile, onPath, onArchived }: { local: boolean; busy: boolean; error: unknown; archived: ArchivedServer[]; onFile: (f: File) => void; onPath: (p: string) => void; onArchived: (s: ArchivedServer, id: string) => void }) {
   const input = useRef<HTMLInputElement>(null)
   const [path, setPath] = useState('')
   const [drag, setDrag] = useState(false)
@@ -43,8 +47,26 @@ export function FileStep({ local, busy, error, onFile, onPath }: { local: boolea
       {local && (
         <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (path.trim()) onPath(path.trim()) }}>
           <Field label="Or give the file's path on this computer" hint="For example /mnt/usb/old-server.tar.gz.age or D:\Moves\old-server.tar.gz.age. The file is read where it is."><Input value={path} placeholder="/path/to/file.tar.gz.age" onChange={(e) => setPath(e.target.value)} /></Field>
-          <Button type="submit" disabled={!path.trim() || busy}>Check this file</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={!path.trim() || busy}>Check this file</Button>
+            {inShell() && <Button type="button" disabled={busy} onClick={async () => { const f = await browseForFile('Choose the backup file', ['age', 'gz']); if (f) { setPath(f); onPath(f) } }}>Browse...</Button>}
+          </div>
         </form>
+      )}
+      {archived.length > 0 && (
+        <div role="group" className="space-y-2" aria-label="Backups of servers that no longer exist">
+          <p className="text-sm font-semibold">Backups of servers that no longer exist</p>
+          <p className="text-xs text-muted-foreground">Kora keeps the backups of a server you deleted. Restore one as a new server:</p>
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {archived.flatMap((a) => a.backups.map((b) => (
+              <li key={`${a.name}-${a.deleted_unix}-${b.id}`} className="flex flex-wrap items-center gap-2 p-2 text-sm">
+                <span className="font-medium">{a.name}</span>
+                <span className="text-xs text-muted-foreground">backup of {new Date(b.created_unix * 1000).toLocaleString()}{b.encrypted ? ' · password protected' : ''}</span>
+                <Button size="sm" className="ml-auto" disabled={busy} onClick={() => onArchived(a, b.id)}>Restore as a new server</Button>
+              </li>
+            )))}
+          </ul>
+        </div>
       )}
       <ErrorNotice error={error} />
     </div>
@@ -76,12 +98,16 @@ function ClashRow({ c, onUse }: { c: Clash; onUse: (c: Clash) => void }) {
   )
 }
 
-export function PreviewStep({ preview, choices, setChoices, key_, setKey, start, setStart, busy, onGo }: {
+export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkChoice, setForkChoice, admin, setAdmin, start, setStart, busy, onGo }: {
   preview: ImportPreview
   choices: ImportChoices
   setChoices: (c: ImportChoices) => void
   key_: string | null
   setKey: (k: string | null) => void
+  forkChoice: ForkChoice
+  setForkChoice: (c: ForkChoice) => void
+  admin: DbAdmin | null
+  setAdmin: (a: DbAdmin | null) => void
   start: boolean
   setStart: (b: boolean) => void
   busy: boolean
@@ -98,7 +124,7 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, start,
     <div className="space-y-5">
       {s && (
         <div className="space-y-1 text-sm">
-          <p><span className="font-semibold">{s.name}</span> <Badge tone="plain">made on {s.os === 'windows' ? 'Windows' : 'Linux'}</Badge> <Badge tone="plain">{s.mode}</Badge></p>
+          <p><span className="font-semibold">{s.name}</span> <Badge tone="plain">made on {s.os === 'windows' ? 'Windows' : 'Linux'}</Badge> <StyleChip source={s.source} versions={s.versions} /></p>
           <p className="text-muted-foreground">{preview.by_reference} resources will be fetched again, {preview.in_full} come from the file{preview.database ? ` · database: ${preview.database.kind === 'none' ? 'none' : 'included'}` : ''}.</p>
         </div>
       )}
@@ -117,6 +143,16 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, start,
         <p className="text-sm font-semibold">Kora will create:</p>
         <ul className="list-disc space-y-1 pl-5 text-sm">{preview.will_create.map((l, i) => <li key={i}>{l}</li>)}</ul>
       </div>
+      {preview.fork && !preview.fork.usable && (
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm font-semibold">Your copies on GitHub ({preview.fork.owner})</legend>
+          <Alert tone="warning">{preview.fork.message}</Alert>
+          <Radio name="fork" checked={forkChoice === 'keep'} onChange={() => setForkChoice('keep')} label="Keep the remotes as recorded" hint="Resources are fetched from the old owner's copies. Private ones may not be reachable from here." />
+          <Radio name="fork" checked={forkChoice === 'own_copies'} onChange={() => setForkChoice('own_copies')} disabled={!preview.fork.signed_in_as} label="Make my own copies here" hint={preview.fork.signed_in_as ? `Kora forks the original repositories into ${preview.fork.signed_in_as} on GitHub and the server follows those.` : 'Sign in to GitHub on this computer first (the System check page).'} />
+          <Radio name="fork" checked={forkChoice === 'originals'} onChange={() => setForkChoice('originals')} label="Use the originals" hint="Plain copies of the original repositories, no GitHub account needed. The server becomes a server of plain copies here." />
+        </fieldset>
+      )}
+      {preview.db_login && !preview.db_login.ok && <DbLoginForm note={preview.db_login.message} setAdmin={setAdmin} />}
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-semibold">Licence key</legend>
         <Alert tone="warning">{preview.licence_note}</Alert>
@@ -133,8 +169,31 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, start,
       </div>
       {preview.warnings.map((w, i) => <Alert key={i} tone="info">{w}</Alert>)}
       <Checkbox checked={start} onChange={(e) => setStart(e.target.checked)} label="Start the server when it is ready" />
-      <Button variant="default" disabled={busy || portBad || !choices.name.trim() || !choices.dir.trim()} onClick={onGo}>Bring the server in</Button>
+      <Button variant="default" disabled={busy || portBad || !choices.name.trim() || !choices.dir.trim() || (preview.db_login?.ok === false && !admin)} onClick={onGo}>Bring the server in</Button>
     </div>
+  )
+}
+
+/** The database administrator login, when the automatic one does not work: the same choice the install wizard's database step offers. Used once, never stored. */
+function DbLoginForm({ note, setAdmin }: { note: string; setAdmin: (a: DbAdmin | null) => void }) {
+  const [f, setF] = useState({ host: '127.0.0.1', port: 3306, user: 'root', password: '' })
+  const test = useMutation({ mutationFn: () => api.installs.checkDbLogin({ host: f.host, port: f.port, user: f.user, password: f.password }) })
+  return (
+    <fieldset className="space-y-3">
+      <legend className="mb-1 text-sm font-semibold">Database administrator login</legend>
+      <Alert tone="warning">{note} Kora needs an administrator login of this computer's database server once, to create the new database. It is used for this import only and never saved.</Alert>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Database server address"><Input value={f.host} onChange={(e) => { setF({ ...f, host: e.target.value }); setAdmin(null) }} /></Field>
+        <Field label="Port"><Input type="number" value={f.port} onChange={(e) => { setF({ ...f, port: Number(e.target.value) }); setAdmin(null) }} /></Field>
+        <Field label="Administrator user"><Input value={f.user} onChange={(e) => { setF({ ...f, user: e.target.value }); setAdmin(null) }} /></Field>
+        <Field label="Administrator password"><Input type="password" autoComplete="off" value={f.password} onChange={(e) => { setF({ ...f, password: e.target.value }); setAdmin(null) }} /></Field>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" disabled={test.isPending || !f.user} onClick={() => test.mutate(undefined, { onSuccess: (r) => setAdmin(r.ok ? { host: f.host, port: f.port, user: f.user, password: f.password } : null) })}>Test this login</Button>
+        {test.data && <span className={`text-sm ${test.data.ok ? 'text-success' : 'text-danger-text'}`} role="status">{test.data.message}</span>}
+      </div>
+      <ErrorNotice error={test.error} />
+    </fieldset>
   )
 }
 

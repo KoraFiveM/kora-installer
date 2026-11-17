@@ -52,6 +52,8 @@ pub(crate) enum BackupCmd {
         /// Server name or folder.
         server: String,
     },
+    /// List the backups Kora kept of servers that were deleted (restore one as a new server with `backup import`).
+    Archived,
     /// Check every file of a backup against its checksums.
     Verify {
         server: String,
@@ -111,6 +113,10 @@ pub(crate) enum BackupCmd {
         /// Use this saved licence key instead of the one in the file (see `kora keys`).
         #[arg(long, value_name = "NAME")]
         licence_key: Option<String>,
+        /// A fork server whose GitHub account cannot be used here: keep the remotes as recorded (keep), make your own copies
+        /// in the account signed in here (own), or use the original repositories (originals).
+        #[arg(long, value_parser = ["keep", "own", "originals"], default_value = "keep")]
+        fork_choice: String,
         /// Start the server when it is imported.
         #[arg(long)]
         start: bool,
@@ -273,6 +279,21 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 Err(m) => fail(plain_text(&m)),
             }
         }
+        BackupCmd::Archived => match b.backups_archived() {
+            Ok(a) if a.servers.is_empty() => {
+                println!("No backups of deleted servers are kept.");
+                0
+            }
+            Ok(a) => {
+                for s in a.servers {
+                    println!("{} (deleted {}):", s.name, kora_core::backup::clock::utc_text(s.deleted_unix));
+                    s.backups.iter().for_each(|x| println!("  {}", describe(x)));
+                }
+                println!("Restore one as a new server: kora backup import <file> (the files are in the backups folder).");
+                0
+            }
+            Err(m) => fail(plain_text(&m)),
+        },
         BackupCmd::Verify { server, id, pw } => {
             let e = match find(&server) {
                 Ok(e) => e,
@@ -391,13 +412,13 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 Err(m) => fail(plain_text(&m)),
             }
         }
-        BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, start, start_over, yes } => {
+        BackupCmd::Import { file, pw, name, dir, game_port, txadmin_port, licence_key, fork_choice, start, start_over, yes } => {
             use kora_core::backup::import::{ImportChoices, ImportRequest, ImportSource};
             let passphrase = match password(&pw, false) {
                 Ok(p) => p,
                 Err(m) => return fail(m),
             };
-            let source = ImportSource { path: Some(file.clone()), upload: None };
+            let source = ImportSource { path: Some(file.clone()), upload: None, archived: None };
             let mut preview = match b.import_inspect(&source, passphrase.as_deref(), true) {
                 Ok(p) => p,
                 Err(m) => return fail(plain_text(&m)),
@@ -416,6 +437,12 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             preview.will_create.iter().for_each(|l| println!("  will create: {l}"));
             preview.wont_carry.iter().for_each(|l| println!("  does not come along: {l}"));
             preview.warnings.iter().for_each(|l| println!("  note: {l}"));
+            if let Some(f) = &preview.fork {
+                println!("  fork: {}", f.message);
+            }
+            if let Some(d) = preview.db_login.as_ref().filter(|d| !d.ok) {
+                println!("  database: {} Set KORA_DB_ADMIN_USER and KORA_DB_ADMIN_PASSWORD (or run as root on Linux).", d.message);
+            }
             preview.clashes.iter().for_each(|c| println!("  in the way: {} (suggestion: {})", c.message, c.suggestion.as_deref().unwrap_or("choose another")));
             println!("{}", preview.licence_note);
             let choices =
@@ -425,7 +452,12 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
                 println!("Nothing was changed.");
                 return 0;
             }
-            let req = ImportRequest { source, passphrase, choices, licence_key_name: licence_key, start, start_over };
+            let fork_choice = match fork_choice.as_str() {
+                "own" => kora_core::backup::import::ForkChoice::OwnCopies,
+                "originals" => kora_core::backup::import::ForkChoice::Originals,
+                _ => kora_core::backup::import::ForkChoice::Keep,
+            };
+            let req = ImportRequest { source, passphrase, choices, licence_key_name: licence_key, db_admin: None, fork_choice, start, start_over };
             match b.import_run(&req, true, &mut |ev| show(&ev)) {
                 Ok(r) => {
                     println!("Done: \"{}\" is in {}.", r.name, r.dir);

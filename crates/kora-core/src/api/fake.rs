@@ -486,7 +486,9 @@ impl Backend for FakeBackend {
     }
     fn backups_archived(&mut self) -> Res<crate::api::wire::ArchivedBackups> {
         self.state().calls.push("backups_archived".into());
-        Ok(crate::api::wire::ArchivedBackups { servers: vec![crate::api::wire::ArchivedServer { name: "Old RP".into(), deleted_unix: 1_773_000_000, backups: vec![sample_backup("Old RP", "20260301-030000", false)] }] })
+        Ok(crate::api::wire::ArchivedBackups {
+            servers: vec![crate::api::wire::ArchivedServer { name: "Old RP".into(), deleted_unix: 1_773_000_000, backups: vec![sample_backup("Old RP", "20260301-030000", false)] }],
+        })
     }
     fn import_inspect(&mut self, src: &crate::backup::import::ImportSource, passphrase: Option<&str>, allow_path: bool) -> Res<crate::backup::import::ImportPreview> {
         self.state().calls.push(format!("import_inspect path={} upload={} password={} local={allow_path}", src.path.is_some(), src.upload.is_some(), passphrase.is_some()));
@@ -526,7 +528,12 @@ impl Backend for FakeBackend {
             saved_keys: vec!["Main".into()],
             licence_note: crate::backup::import::LICENCE_NOTE.into(),
             db_login: Some(crate::backup::import::DbLoginNote { ok: false, message: "Kora could not log in to the database as root.".into() }),
-            fork: Some(crate::backup::import::ForkNote { owner: "old-owner".into(), usable: false, signed_in_as: Some("me".into()), message: "This server follows copies (forks) in the GitHub account old-owner, which the account signed in here (me) cannot use. Choose what to do about them below.".into() }),
+            fork: Some(crate::backup::import::ForkNote {
+                owner: "old-owner".into(),
+                usable: false,
+                signed_in_as: Some("me".into()),
+                message: "This server follows copies (forks) in the GitHub account old-owner, which the account signed in here (me) cannot use. Choose what to do about them below.".into(),
+            }),
         })
     }
     fn import_run(&mut self, req: &crate::backup::import::ImportRequest, allow_path: bool, say: &mut dyn FnMut(crate::backup::BackupEvent)) -> Res<crate::backup::import::ImportResult> {

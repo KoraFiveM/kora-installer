@@ -121,7 +121,12 @@ pub fn archived() -> Vec<Archived> {
         .filter_map(|v| {
             let dir = std::path::PathBuf::from(v.get("dir")?.as_str()?);
             let backups = super::dest::LocalFolder::new(&dir).list();
-            (!backups.is_empty()).then(|| Archived { name: v.get("name").and_then(Value::as_str).unwrap_or_default().to_string(), deleted_unix: v.get("deleted_unix").and_then(Value::as_u64).unwrap_or(0), dir, backups })
+            (!backups.is_empty()).then(|| Archived {
+                name: v.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                deleted_unix: v.get("deleted_unix").and_then(Value::as_u64).unwrap_or(0),
+                dir,
+                backups,
+            })
         })
         .collect();
     out.sort_by(|a, b| b.deleted_unix.cmp(&a.deleted_unix));

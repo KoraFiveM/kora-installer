@@ -37,8 +37,8 @@ use super::dbdump;
 use super::restore::{archive_problem, write_into};
 use super::types::*;
 use super::{codes, create, BackupEvent, Tools};
-use crate::installer::Source;
 use crate::installer::registry::{now_unix, PortsRecord, Registry, ResourceRecord, ServerEntry, ServerFile};
+use crate::installer::Source;
 use crate::problem::{Action, Problem};
 
 // ----------------------------------------------------------------------------------------- shapes
@@ -228,7 +228,12 @@ pub struct ImportRequest {
 
 impl std::fmt::Debug for ImportRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ImportRequest").field("source", &self.source).field("choices", &self.choices).field("passphrase", &self.passphrase.as_ref().map(|_| "<redacted>")).field("db_admin", &self.db_admin.as_ref().map(|a| format!("{}@{}:{}", a.user, a.host, a.port))).finish_non_exhaustive()
+        f.debug_struct("ImportRequest")
+            .field("source", &self.source)
+            .field("choices", &self.choices)
+            .field("passphrase", &self.passphrase.as_ref().map(|_| "<redacted>"))
+            .field("db_admin", &self.db_admin.as_ref().map(|a| format!("{}@{}:{}", a.user, a.host, a.port)))
+            .finish_non_exhaustive()
     }
 }
 
@@ -325,7 +330,16 @@ fn free_name(base: &str, used: &[String]) -> String {
 }
 
 /// Look at a file. Reads only its start. `servers`: the servers already registered here.
-pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], saved_keys: &[String], ports: &dyn PortCheck, forks: &dyn ForkTools, db_check: &dyn Fn() -> Result<(), String>, default_dir: &dyn Fn(&str) -> String) -> Result<ImportPreview, Problem> {
+pub fn inspect(
+    file: &Path,
+    passphrase: Option<&str>,
+    servers: &[ServerEntry],
+    saved_keys: &[String],
+    ports: &dyn PortCheck,
+    forks: &dyn ForkTools,
+    db_check: &dyn Fn() -> Result<(), String>,
+    default_dir: &dyn Fn(&str) -> String,
+) -> Result<ImportPreview, Problem> {
     let file_name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut p = ImportPreview {
         file_name,
@@ -419,7 +433,9 @@ pub fn inspect(file: &Path, passphrase: Option<&str>, servers: &[ServerEntry], s
             } else {
                 match &me {
                     Some(m) => format!("This server follows copies (forks) in the GitHub account {owner}, which the account signed in here ({m}) cannot use. Choose what to do about them below."),
-                    None => format!("This server follows copies (forks) in the GitHub account {owner}, and you are not signed in to GitHub on this computer. Sign in, or choose what to do about them below."),
+                    None => format!(
+                        "This server follows copies (forks) in the GitHub account {owner}, and you are not signed in to GitHub on this computer. Sign in, or choose what to do about them below."
+                    ),
                 }
             };
             p.fork = Some(ForkNote { owner, usable, signed_in_as: me, message });
@@ -654,7 +670,8 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                     }
                     ForkChoice::OwnCopies => {
                         let Some(owner) = me else {
-                            return Err(Problem::new(codes::NOT_FOUND, "To make your own copies, sign in to GitHub on this computer first (the System check page helps), or choose another option.").with_action(Action::SignInGithub { scopes: vec![] }));
+                            return Err(Problem::new(codes::NOT_FOUND, "To make your own copies, sign in to GitHub on this computer first (the System check page helps), or choose another option.")
+                                .with_action(Action::SignInGithub { scopes: vec![] }));
                         };
                         for rb in resources_plan.iter_mut().filter(|r| !r.upstream.is_empty()) {
                             match env.forks.fork(&rb.upstream, &owner) {
@@ -855,7 +872,15 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             ..Default::default()
         };
         let _ = crate::installer::save_created_to(&dir, &created);
-        let entry = ServerEntry { name: c.name.clone(), dir: dir.clone(), mode: sf.mode, source: Some(new_source), versions: Some(m.server.versions), ports: PortsRecord { game: c.game_port, txadmin: c.txadmin_port }, created_unix: now_unix() };
+        let entry = ServerEntry {
+            name: c.name.clone(),
+            dir: dir.clone(),
+            mode: sf.mode,
+            source: Some(new_source),
+            versions: Some(m.server.versions),
+            ports: PortsRecord { game: c.game_port, txadmin: c.txadmin_port },
+            created_unix: now_unix(),
+        };
         Registry::update(|r| {
             r.upsert(entry.clone());
             Ok(())
@@ -991,7 +1016,7 @@ mod tests {
 
     fn request(file: &Path, pass: &str, dir: &Path, name: &str) -> ImportRequest {
         ImportRequest {
-            source: ImportSource { path: Some(file.display().to_string()), upload: None },
+            source: ImportSource { path: Some(file.display().to_string()), upload: None, archived: None },
             passphrase: Some(pass.into()),
             choices: ImportChoices { name: name.into(), dir: dir.display().to_string(), game_port: 31120, txadmin_port: 41120 },
             licence_key_name: None,
@@ -1011,11 +1036,24 @@ mod tests {
         let p = inspect(&path, None, &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| "/srv/new".into()).unwrap();
         assert!(p.needs_passphrase && p.server.is_none());
         // wrong password
-        assert_eq!(inspect(&path, Some("wrong wrong wrong"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| "/srv/new".into()).unwrap_err().code, codes::WRONG_PASSPHRASE);
+        assert_eq!(
+            inspect(&path, Some("wrong wrong wrong"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| "/srv/new".into()).unwrap_err().code,
+            codes::WRONG_PASSPHRASE
+        );
         // right: this machine already has a server with that name and those ports
-        let here =
-            vec![ServerEntry { name: rig.entry.name.clone(), dir: "/srv/other".into(), mode: crate::installer::Mode::Production, source: None, versions: None, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 1 }];
-        let p = inspect(&path, Some("a good passphrase"), &here, &["Main".into()], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|n| format!("/srv/{}", crate::installer::slug(n))).unwrap();
+        let here = vec![ServerEntry {
+            name: rig.entry.name.clone(),
+            dir: "/srv/other".into(),
+            mode: crate::installer::Mode::Production,
+            source: None,
+            versions: None,
+            ports: PortsRecord { game: 30120, txadmin: 40120 },
+            created_unix: 1,
+        }];
+        let p = inspect(&path, Some("a good passphrase"), &here, &["Main".into()], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|n| {
+            format!("/srv/{}", crate::installer::slug(n))
+        })
+        .unwrap();
         let kinds: Vec<&str> = p.clashes.iter().map(|c| c.kind.as_str()).collect();
         assert_eq!(kinds, ["name", "game_port", "txadmin_port"]);
         let s = p.suggested.unwrap();
@@ -1027,7 +1065,8 @@ mod tests {
         // a busy folder is a clash too
         let busy = tempfile::tempdir().unwrap();
         std::fs::write(busy.path().join("x"), b"1").unwrap();
-        let p = inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| busy.path().display().to_string()).unwrap();
+        let p =
+            inspect(&path, Some("a good passphrase"), &[], &[], &NoPorts, &FakeForks { me: Some("old-owner"), made: Default::default() }, &|| Ok(()), &|_| busy.path().display().to_string()).unwrap();
         assert!(p.clashes.iter().any(|c| c.kind == "folder"));
     }
 
@@ -1157,7 +1196,15 @@ mod tests {
         let new_db = FakeDbOnly::default();
         let tools = Tools { db: &new_db.0, git: &git, db_client: "mariadb".into(), dump_program: None, now: 1 };
         let fetch = FakeFetcher { calls: RefCell::new(vec![]) };
-        let here = vec![ServerEntry { name: "Taken".into(), dir: "/x".into(), mode: crate::installer::Mode::Production, source: None, versions: None, ports: PortsRecord { game: 31120, txadmin: 50000 }, created_unix: 1 }];
+        let here = vec![ServerEntry {
+            name: "Taken".into(),
+            dir: "/x".into(),
+            mode: crate::installer::Mode::Production,
+            source: None,
+            versions: None,
+            ports: PortsRecord { game: 31120, txadmin: 50000 },
+            created_unix: 1,
+        }];
         let env = Env { tools: &tools, fetcher: &fetch, provisioner: None, saved_key: &|_| None, ports: &NoPorts, forks: &SAMEFORKS, servers: here };
         let t = rig.tmp.path().join("t");
         assert!(run(&request(&path, "a good passphrase", &t, "Taken"), &path, &env, &mut |_| {}).unwrap_err().message.contains("already here"));
@@ -1240,9 +1287,9 @@ mod tests {
     #[test]
     fn only_a_local_session_may_name_a_path_and_an_upload_id_is_checked() {
         let _ = crate::installer::registry::use_test_home();
-        assert!(resolve_source(&ImportSource { path: Some("/etc/passwd".into()), upload: None }, false).is_err());
-        assert!(resolve_source(&ImportSource { upload: Some("../../etc".into()), path: None }, true).is_err());
+        assert!(resolve_source(&ImportSource { path: Some("/etc/passwd".into()), upload: None, archived: None }, false).is_err());
+        assert!(resolve_source(&ImportSource { upload: Some("../../etc".into()), path: None, archived: None }, true).is_err());
         assert!(resolve_source(&ImportSource::default(), true).is_err());
-        assert!(resolve_source(&ImportSource { path: Some("/definitely/not/here.tar.gz".into()), upload: None }, true).unwrap_err().message.contains("no file at"));
+        assert!(resolve_source(&ImportSource { path: Some("/definitely/not/here.tar.gz".into()), upload: None, archived: None }, true).unwrap_err().message.contains("no file at"));
     }
 }

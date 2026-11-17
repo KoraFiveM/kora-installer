@@ -617,6 +617,7 @@ Usage: kora backup [OPTIONS] <COMMAND>
 Commands:
   create    Make a backup of a server (database, settings, txAdmin data, resources)
   list      List the backups of a server
+  archived  List the backups Kora kept of servers that were deleted (restore one as a new server with `backup import`)
   verify    Check every file of a backup against its checksums
   restore   Put a backup back on the server (a safety copy of the server as it is now is made first)
   undo      Undo the last restore (puts the safety copy back)
@@ -674,6 +675,18 @@ Usage: kora backup list [OPTIONS] <SERVER>
 Arguments:
   <SERVER>
           Server name or folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup archived =====
+List the backups Kora kept of servers that were deleted (restore one as a new server with `backup import`)
+
+Usage: kora backup archived [OPTIONS]
 
 Options:
       --no-elevate
@@ -816,6 +829,12 @@ Options:
 
       --licence-key <NAME>
           Use this saved licence key instead of the one in the file (see `kora keys`)
+
+      --fork-choice <FORK_CHOICE>
+          A fork server whose GitHub account cannot be used here: keep the remotes as recorded (keep), make your own copies in the account signed in here (own), or use the original repositories (originals)
+          
+          [default: keep]
+          [possible values: keep, own, originals]
 
       --start
           Start the server when it is imported

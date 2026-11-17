@@ -349,6 +349,8 @@ export const api = {
   backups: {
     /** The last backup of every server (the servers list). */
     overview: () => call('backups_overview', {}),
+    /** Backups of servers that were deleted (kept; restore one as a new server through the import page). */
+    archived: () => call('backups_archived', {}),
     list: (name: string) => call('backups_list', { params: { s: name } }),
     create: (name: string, body: T.BackupCreateRequest) => call('backup_create', { params: { s: name }, body }),
     setSettings: (name: string, body: T.BackupSettings) => call('backup_settings_set', { params: { s: name }, body }),

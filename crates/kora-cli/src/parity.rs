@@ -135,6 +135,8 @@ const TABLE: &[(&str, Entry)] = &[
     ("backup import --txadmin-port", Route(Op::BackupImportStart)),
     ("backup import --licence-key", Route(Op::BackupImportStart)),
     ("backup import --start", Route(Op::BackupImportStart)),
+    ("backup import --fork-choice", Route(Op::BackupImportStart)),
+    ("backup archived", Route(Op::BackupsArchived)),
     ("backup import --start-over", Route(Op::BackupImportStart)),
     ("backup import --password-stdin", CliOnly("the panel takes the password in the request body, not from a terminal")),
     ("backup import --yes", CliOnly("the panel confirms in the UI")),
