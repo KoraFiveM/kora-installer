@@ -411,3 +411,30 @@ fn the_way_back_export_gives_the_old_files_again_with_every_field() {
     }
     assert_everything_imported_after_open(again.path());
 }
+
+#[test]
+fn an_extra_home_file_moves_in_as_a_document_and_comes_back_out() {
+    let h = tempfile::tempdir().unwrap();
+    let consent = serde_json::json!({"granted": true, "asked_at": 1700000000, "answer": {"who": "sam", "kept": [1, 2]}});
+    std::fs::write(h.path().join("reach-consent.json"), serde_json::to_vec_pretty(&consent).unwrap()).unwrap();
+    let s = Store::open(h.path()).unwrap();
+    assert_eq!(crate::store::documents::get(&s, "reach-consent").unwrap(), Some(consent.clone()));
+    assert!(!h.path().join("reach-consent.json").exists() && aside(h.path(), "reach-consent.json").is_file());
+    // read-modify-write in one transaction, and the way back
+    crate::store::documents::update(&s, "reach-consent", |d| {
+        d["granted"] = false.into();
+        Ok(())
+    })
+    .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    crate::store::export::export_json(&s, out.path()).unwrap();
+    let back: serde_json::Value = serde_json::from_slice(&std::fs::read(out.path().join("reach-consent.json")).unwrap()).unwrap();
+    assert_eq!(back["granted"], false);
+    // idempotent: a second open does nothing; a damaged file blocks only its own part and is left alone
+    drop(s);
+    std::fs::write(h.path().join("reach-consent.json"), "{ nope").unwrap();
+    let s = Store::open(h.path()).unwrap();
+    assert!(s.blocked("reach-consent").is_some());
+    assert_eq!(std::fs::read_to_string(h.path().join("reach-consent.json")).unwrap(), "{ nope");
+    assert!(crate::store::documents::valid_name("reach-consent") && !crate::store::documents::valid_name("Bad Name"));
+}

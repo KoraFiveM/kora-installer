@@ -48,6 +48,11 @@ pub enum StoreCmd {
         #[arg(long)]
         to: Option<PathBuf>,
     },
+    /// Put a backup of the data file back (Kora Panel must not be running). The current data file is backed up first, and the backup must open and be a version this Kora understands.
+    Restore {
+        /// The backup file (see `kora store status` for where they are).
+        backup: PathBuf,
+    },
     /// Write the old JSON files (the way back to Kora 0.7): everything changed since the upgrade comes with you.
     ExportJson {
         /// The folder to write them in (default: inside the private store folder).
@@ -151,6 +156,21 @@ pub fn store(cmd: StoreCmd) -> i32 {
                 Ok(p) => {
                     println!("Saved a copy of Kora's data file to {}.", p.display());
                     println!("It holds your saved licence keys: keep it as private as the original.");
+                    0
+                }
+                Err(p) => say(p),
+            }
+        }
+        StoreCmd::Restore { backup: file } => {
+            let ports = kora_web::launch::SystemPorts;
+            let running = crate::cmd::panel_running::running_panel(&home, &ports, kora_core::service::Platform::current()).is_some();
+            match backup::restore(&home, &file, running) {
+                Ok(before) => {
+                    println!("Restored Kora's data file from {}.", file.display());
+                    match before {
+                        Some(b) => println!("What was there before is kept as {}: `kora store restore` it to undo this.", b.display()),
+                        None => println!("There was no data file before, so there was nothing to keep."),
+                    }
                     0
                 }
                 Err(p) => say(p),

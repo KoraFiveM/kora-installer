@@ -23,14 +23,14 @@ CREATE TABLE meta (
 ) WITHOUT ROWID;
 
 -- servers.json
+-- The server entry is stored as JSON (`record`), exactly what servers.json held per server, so a new field on the
+-- entry needs NO migration (see `installer::registry`: "adding a field to the server entry"). Only what is looked up
+-- by is a column.
 CREATE TABLE servers (
-    name         TEXT PRIMARY KEY NOT NULL,
-    seq          INTEGER NOT NULL,
-    dir          TEXT NOT NULL,
-    mode         TEXT NOT NULL,
-    game_port    INTEGER NOT NULL,
-    txadmin_port INTEGER NOT NULL,
-    created_unix INTEGER NOT NULL
+    name   TEXT PRIMARY KEY NOT NULL,
+    seq    INTEGER NOT NULL,
+    dir    TEXT NOT NULL,
+    record TEXT NOT NULL
 ) WITHOUT ROWID;
 
 -- profile.json (one row per remembered field)
@@ -153,6 +153,19 @@ CREATE TRIGGER audit_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABO
 CREATE TRIGGER audit_delete_only_old BEFORE DELETE ON audit_log
 WHEN OLD.at >= CAST(COALESCE((SELECT value FROM meta WHERE key = 'audit_sweep_before'), '0') AS INTEGER)
 BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;
+"#,
+    },
+    Migration {
+        version: 4,
+        name: "documents: small Kora-home state files that move into the store",
+        sql: r#"
+-- One row per former `<kora home>/<name>.json` file, kept as the JSON it was (see `store::documents` and the
+-- `EXTRA_HOME_FILES` list in `store::legacy`): a state file with no table of its own needs no migration to move in.
+CREATE TABLE documents (
+    name    TEXT PRIMARY KEY NOT NULL,
+    json    TEXT NOT NULL,
+    updated INTEGER NOT NULL DEFAULT 0
+) WITHOUT ROWID;
 "#,
     },
 ];

@@ -81,7 +81,10 @@ Kora ... update Kora"), and nothing is changed.
 `--to` says. It holds your saved licence keys: keep it as private as the original. `kora store status` shows the version, what is in
 the file and the backups. (Backups of servers and their databases are separate and not part of this.)
 
-To restore one: stop Kora and the panel, move `store/kora.db` away, copy the backup to `store/kora.db` (delete `kora.db-wal` and `kora.db-shm` if they exist).
+To restore one: `kora store restore <backup>`. It refuses while Kora Panel is running (or a job of another Kora program is), checks that the
+backup opens, passes SQLite's integrity check and is a version this Kora understands (a newer one is refused), makes a backup
+of the current data file first (`kora-<time>-before-restore.db`, printed, so the restore itself can be undone with another
+`kora store restore`), then swaps the file in and brings an older backup up to date.
 
 ## Jobs
 
@@ -99,6 +102,15 @@ provider and role) and through `kora` commands: when, which operation, which ser
 see it in **Settings > Activity log**; on the command line `kora audit [--server S] [--actor A] [--result R] [--days N] [--json]`.
 Entries are kept 365 days (at most 100 000). It is a record for the person who runs Kora, not tamper-proof evidence: anyone who can open
 the (private) data file could change it.
+
+## Adding to the store (for developers of Kora)
+
+- **A new field on a server entry** needs no migration: the server list is stored as JSON per server. Add the field to `ServerEntry`
+  with `#[serde(default)]` (see its doc comment). Records written before it still read; a field a newer Kora added survives an older Kora saving the list.
+- **A new small state file in the Kora home** (like `reach-consent.json`): add a line to `EXTRA_HOME_FILES` in `store/legacy.rs` and read/write it
+  through `store::documents` (`get`, `put`, `update` = read-modify-write in one transaction). The file is imported once, checked, and moved to `before-sqlite/`.
+- **State inside a server folder** stays a file (see above).
+- **A new table or column** is a new numbered migration in `store/schema.rs`; never edit a released one.
 
 ## For developers
 

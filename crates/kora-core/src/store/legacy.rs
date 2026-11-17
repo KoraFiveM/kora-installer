@@ -43,9 +43,34 @@ pub const ASIDE_DIR: &str = "before-sqlite";
 const SINGLE_FILES: [&str; 6] = ["servers.json", "secrets.json", "profile.json", "last-install.json", "panel.json", "hub.json"];
 const PAUSED_DIR: &str = "paused-installs";
 
+/// A state file in the Kora home, beyond the ones above, that moves into the store as a JSON document
+/// ([`super::documents`]) the first time Kora opens the store after upgrading.
+///
+/// # Connecting another file
+/// Add one line to [`EXTRA_HOME_FILES`] (file name in the Kora home, the document name it becomes, and whether a file that
+/// cannot be read should block the part of Kora that needs it, like keys do) and make that code read and write the
+/// document through `documents::get/put/update` instead of the file. Everything else (one transaction, read-back check,
+/// move to `before-sqlite/`, idempotence, the way back through `kora store export-json`, the damaged-file guidance) is
+/// the same as for the files above. The document is the file's JSON as it was, whatever its shape.
+pub struct ExtraHomeFile {
+    /// The file in the Kora home, for example `reach-consent.json`.
+    pub file: &'static str,
+    /// The document name in the store (see `documents::valid_name`).
+    pub document: &'static str,
+    /// Unreadable: block the part of Kora that uses it (`Store::blocked(document)`) instead of treating it as lost typing.
+    pub critical: bool,
+}
+
+/// The extra files, in the order they are imported. The first (and so far only) entry is the reachability consent.
+pub const EXTRA_HOME_FILES: &[ExtraHomeFile] = &[
+    // The "may Kora check from the internet whether the game port is reachable" answer, written by the reachability check.
+    // Its branch is not merged yet: when it is, its consent store switches to `documents::get/put("reach-consent")`.
+    ExtraHomeFile { file: "reach-consent.json", document: "reach-consent", critical: true },
+];
+
 /// Is any old JSON state file (or the stopped-installs folder) in `home`?
 pub fn any_legacy_files(home: &Path) -> bool {
-    SINGLE_FILES.iter().chain([&PAUSED_DIR]).any(|n| std::fs::symlink_metadata(home.join(n)).is_ok())
+    SINGLE_FILES.iter().chain([&PAUSED_DIR]).chain(EXTRA_HOME_FILES.iter().map(|e| &e.file)).any(|n| std::fs::symlink_metadata(home.join(n)).is_ok())
 }
 
 pub fn aside_dir(home: &Path) -> PathBuf {
@@ -63,6 +88,8 @@ enum Parsed {
     Panel(Panel),
     Hub(Vec<(String, String, String, String)>),
     Paused(Box<Stored>),
+    /// An [`ExtraHomeFile`]: its document name and JSON.
+    Document(&'static str, Value),
 }
 
 /// `panel.json`, read loosely (its types live in kora-web).
@@ -244,7 +271,14 @@ fn read_old(path: &Path) -> Result<Option<Vec<u8>>, Bad> {
     Ok(Some(b))
 }
 
+fn as_document(bytes: &[u8]) -> Result<Value, Bad> {
+    serde_json::from_slice::<Value>(bytes).map_err(|e| bad("the file is damaged", position(&e)))
+}
+
 fn domain_of(name: &str) -> Option<&'static str> {
+    if let Some(e) = EXTRA_HOME_FILES.iter().find(|e| e.file == name) {
+        return e.critical.then_some(e.document);
+    }
     match name {
         "servers.json" => Some("servers"),
         "secrets.json" => Some("keys"),
@@ -307,6 +341,17 @@ fn scan(c: &Connection, home: &Path) -> Result<Scan, Problem> {
                 add(name.to_string(), path, bytes, parse, c, &mut out)?;
             }
             Err(b) => out.bad.push((name.to_string(), path, b)),
+        }
+    }
+    for e in EXTRA_HOME_FILES {
+        let path = home.join(e.file);
+        match read_old(&path) {
+            Ok(None) => {}
+            Ok(Some(bytes)) => {
+                let name = e.document;
+                add(e.file.to_string(), path, bytes, &move |b| as_document(b).map(|v| Parsed::Document(name, v)), c, &mut out)?
+            }
+            Err(b) => out.bad.push((e.file.to_string(), path, b)),
         }
     }
     let dir = home.join(PAUSED_DIR);
@@ -430,6 +475,13 @@ fn apply(c: &Connection, it: &Item) -> Result<(), Problem> {
             }
             Ok(())
         }
+        Parsed::Document(name, doc) => {
+            // An existing document wins over a first import (something already moved in); a replacement overwrites.
+            if it.replace || super::documents::read(c, name)?.is_none() {
+                super::documents::write(c, name, doc)?;
+            }
+            Ok(())
+        }
         Parsed::Paused(st) => {
             if crate::monitor::now_unix().saturating_sub(st.saved_at) > crate::installer::paused::KEEP_SECS {
                 return Ok(()); // too old to carry on: kept aside only
@@ -538,6 +590,12 @@ fn verify(c: &Connection, it: &Item) -> Result<(), Problem> {
         Parsed::Answers(_) => {
             if count("SELECT COUNT(*) FROM saved_answers")? != 1 {
                 return Err(wrong("the saved answers are missing"));
+            }
+        }
+        Parsed::Document(name, doc) => {
+            let have = super::documents::read(c, name)?;
+            if have.as_ref() != Some(doc) && (it.replace || have.is_none()) {
+                return Err(wrong("a stored document differs after copying"));
             }
         }
         Parsed::Paused(st) => {

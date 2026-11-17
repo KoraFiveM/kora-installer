@@ -68,6 +68,11 @@ pub fn export_json(s: &Store, dir: &Path) -> Result<Vec<PathBuf>, Problem> {
     if !nodes.is_empty() {
         put(dir, "hub.json", &json!({"nodes": nodes}), &mut out)?;
     }
+    for e in super::legacy::EXTRA_HOME_FILES {
+        if let Some(doc) = s.read(|c| super::documents::read(c, e.document))? {
+            put(dir, e.file, &doc, &mut out)?;
+        }
+    }
     let paused: Vec<Stored> = crate::installer::paused::PausedStore::list_in(s);
     for p in paused {
         put(dir, &format!("paused-installs/{}.json", p.job), &p, &mut out)?;

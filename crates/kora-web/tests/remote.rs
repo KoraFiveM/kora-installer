@@ -51,6 +51,7 @@ struct World {
 fn world_with(remote: Remote) -> World {
     let remote = Arc::new(remote);
     let fake = FakeBackend::sample();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(remote.clone());
     World { app: router(st), remote }
 }
@@ -787,6 +788,7 @@ fn timed_world() -> (World, Arc<Mutex<Duration>>, String) {
     let remote = Arc::new(Remote::new(None, cfg));
     let fake = FakeBackend::sample();
     let (clock, offset) = stepping_clock();
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
     let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(remote.clone()).with_session_clock(clock);
     (World { app: router(st), remote }, offset, tok)
 }

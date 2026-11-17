@@ -192,6 +192,8 @@ const TABLE: &[(&str, Entry)] = &[
     ("store status", CliOnly("Kora's own data file on this computer; the panel never opens or copies it")),
     ("store backup", CliOnly("copies Kora's data file, which holds the saved licence keys: only from a terminal on this computer")),
     ("store backup --to", CliOnly("copies Kora's data file, which holds the saved licence keys: only from a terminal on this computer")),
+    ("store restore", CliOnly("replaces Kora's data file, which holds the saved licence keys, and needs the panel stopped: only from a terminal on this computer")),
+    ("store restore <backup>", CliOnly("replaces Kora's data file, which holds the saved licence keys, and needs the panel stopped: only from a terminal on this computer")),
     ("store export-json", CliOnly("writes the saved licence keys out as files for going back to Kora 0.7: only from a terminal on this computer")),
     ("store export-json --to", CliOnly("writes the saved licence keys out as files for going back to Kora 0.7: only from a terminal on this computer")),
     ("branch", Route(Op::BranchesList)),
