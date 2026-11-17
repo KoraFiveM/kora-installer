@@ -19,14 +19,14 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::normalize_id;
-use crate::git::branches::{self as gb, codes, Branches, Changes, Kind, Outcome, PrSource, PullRequest, Stash, Status};
+use crate::git::branches::{self as gb, codes, Branches, Kind, Outcome, PullRequest, Stash, Status};
 use crate::git::CommandRunner;
 use crate::installer::registry::{ResourceRecord, ServerFile};
 use crate::installer::types::Mode;
 use crate::problem::{Action, Problem};
 use crate::update::{lock, par_map, FETCH_PARALLEL};
 
-pub use crate::git::branches::{parse_pr_input, valid_branch};
+pub use crate::git::branches::{parse_pr_input, valid_branch, Changes, PrSource};
 
 type PResult<T> = Result<T, Problem>;
 
@@ -506,5 +506,59 @@ fn bulk_one(r: &dyn CommandRunner, sf: &ServerFile, rec: &ResourceRecord, target
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// One entry point for the front ends
+// ---------------------------------------------------------------------------------------------
+
+/// What a front end asks for (the [`crate::api::Backend`] has one method for all of it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    Overview,
+    Choices { resource: String, refresh: bool },
+    Prs { resource: String },
+    Switch { resource: String, target: Target, changes: Changes },
+    RestoreStash { resource: String, index: u32 },
+    BulkPreview { branch: String, fetch: bool },
+    BulkApply { target: Target, only: Option<Vec<String>>, changes: Changes },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reply {
+    Overview(Vec<ResourceBranch>),
+    Choices(Box<Choices>),
+    Prs(PrChoices),
+    Switched(Box<SwitchResult>),
+    BulkPreview(BulkPreview),
+    BulkApply(BulkResult),
+}
+
+/// Do one [`Request`] on a server. `progress(done, total, resource)` is called by the bulk operations.
+pub fn run(r: &dyn CommandRunner, sf: &ServerFile, req: &Request, progress: &mut dyn FnMut(usize, usize, &str)) -> PResult<Reply> {
+    Ok(match req {
+        Request::Overview => Reply::Overview(overview(r, sf)?),
+        Request::Choices { resource, refresh } => Reply::Choices(Box::new(choices(r, sf, resource, *refresh)?)),
+        Request::Prs { resource } => Reply::Prs(prs(r, sf, resource)?),
+        Request::Switch { resource, target, changes } => Reply::Switched(Box::new(switch(r, sf, resource, target, *changes)?)),
+        Request::RestoreStash { resource, index } => Reply::Switched(Box::new(restore_stash(r, sf, resource, *index)?)),
+        Request::BulkPreview { branch, fetch } => Reply::BulkPreview(bulk_preview(r, sf, branch, *fetch, progress)?),
+        Request::BulkApply { target, only, changes } => Reply::BulkApply(bulk_apply(r, sf, target, only.as_deref(), *changes, progress)?),
+    })
+}
+
+impl Reply {
+    /// The JSON the panel sends.
+    pub fn json(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Reply::Overview(rows) => json!({"resources": rows}),
+            Reply::Choices(c) => serde_json::to_value(c).unwrap_or_default(),
+            Reply::Prs(p) => serde_json::to_value(p).unwrap_or_default(),
+            Reply::Switched(s) => serde_json::to_value(s).unwrap_or_default(),
+            Reply::BulkPreview(p) => serde_json::to_value(p).unwrap_or_default(),
+            Reply::BulkApply(a) => serde_json::to_value(a).unwrap_or_default(),
+        }
+    }
+}
+
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

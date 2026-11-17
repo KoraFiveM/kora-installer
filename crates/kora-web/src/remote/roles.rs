@@ -58,6 +58,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::ServersList
         | Op::ServerGet
         | Op::ResourcesList
+        | Op::BranchesList
         | Op::SnapshotsList
         | Op::CatalogForServer
         | Op::WebhookGet
@@ -85,6 +86,10 @@ pub fn min_role(op: Op) -> Role {
         | Op::ResourceEnsure
         // A fixed command for one installed resource (not free console text), like server control.
         | Op::ResourceControl
+        // Branch lists, pull request lists and the "who has this branch" check only read (they may ask GitHub).
+        | Op::BranchChoices
+        | Op::PrList
+        | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto
@@ -148,7 +153,11 @@ pub fn min_role(op: Op) -> Role {
         | Op::AssetInspect
         | Op::AssetImport
         | Op::AssetRemove
-        | Op::AssetDownloads => Admin,
+        | Op::AssetDownloads
+        // Moving a resource onto another branch or a pull request changes the code the server runs.
+        | Op::BranchSwitch
+        | Op::StashRestore
+        | Op::BranchBulkApply => Admin,
     }
 }
 
@@ -165,7 +174,10 @@ pub fn destructive(op: Op) -> bool {
         | Op::InstallResume
         | Op::SelfUpdateApply
         | Op::ScheduleSet
-        | Op::ScheduleRemove => true,
+        | Op::ScheduleRemove
+        // Runs someone else's code on the server (a pull request) or throws away a person's changes.
+        | Op::BranchSwitch
+        | Op::BranchBulkApply => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -182,6 +194,11 @@ pub fn destructive(op: Op) -> bool {
         | Op::ResourcesList
         | Op::ResourceEnsure
         | Op::ResourceControl
+        | Op::BranchesList
+        | Op::BranchChoices
+        | Op::PrList
+        | Op::StashRestore
+        | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto
@@ -290,6 +307,13 @@ pub fn local_only(op: Op) -> bool {
         | Op::ResourcesList
         | Op::ResourceEnsure
         | Op::ResourceControl
+        | Op::BranchesList
+        | Op::BranchChoices
+        | Op::PrList
+        | Op::StashRestore
+        | Op::BranchBulkPreview
+        | Op::BranchSwitch
+        | Op::BranchBulkApply
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto

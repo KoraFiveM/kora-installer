@@ -113,6 +113,20 @@ pub enum Op {
     AssetImport,
     AssetRemove,
     AssetDownloads,
+    /// Development: which branch each resource is on.
+    BranchesList,
+    /// Development: the branches (and kept-aside changes) of one resource.
+    BranchChoices,
+    /// Development: open pull requests of the original repository and the person's fork, for one resource.
+    PrList,
+    /// Development: change one resource's branch, try a pull request, or go back to the normal version.
+    BranchSwitch,
+    /// Development: bring kept-aside changes back.
+    StashRestore,
+    /// Development: which resources have a branch (to switch them all).
+    BranchBulkPreview,
+    /// Development: switch every resource that has a branch, or all back to normal.
+    BranchBulkApply,
 }
 
 impl Op {
@@ -204,6 +218,13 @@ impl Op {
         Op::AssetImport,
         Op::AssetRemove,
         Op::AssetDownloads,
+        Op::BranchesList,
+        Op::BranchChoices,
+        Op::PrList,
+        Op::BranchSwitch,
+        Op::StashRestore,
+        Op::BranchBulkPreview,
+        Op::BranchBulkApply,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -296,6 +317,13 @@ impl Op {
             Op::AssetImport => "asset_import",
             Op::AssetRemove => "asset_remove",
             Op::AssetDownloads => "asset_downloads",
+            Op::BranchesList => "branches_list",
+            Op::BranchChoices => "branch_choices",
+            Op::PrList => "pr_list",
+            Op::BranchSwitch => "branch_switch",
+            Op::StashRestore => "stash_restore",
+            Op::BranchBulkPreview => "branch_bulk_preview",
+            Op::BranchBulkApply => "branch_bulk_apply",
         }
     }
 
@@ -391,6 +419,13 @@ impl Op {
             Op::AssetImport => (Method::Post, "/servers/{s}/assets"),
             Op::AssetRemove => (Method::Delete, "/servers/{s}/assets/{name}"),
             Op::AssetDownloads => (Method::Get, "/assets/downloads"),
+            Op::BranchesList => (Method::Get, "/servers/{s}/branches"),
+            Op::BranchChoices => (Method::Get, "/servers/{s}/resources/{name}/branches"),
+            Op::PrList => (Method::Get, "/servers/{s}/resources/{name}/prs"),
+            Op::BranchSwitch => (Method::Post, "/servers/{s}/resources/{name}/branch"),
+            Op::StashRestore => (Method::Post, "/servers/{s}/resources/{name}/stash/restore"),
+            Op::BranchBulkPreview => (Method::Post, "/servers/{s}/branches/preview"),
+            Op::BranchBulkApply => (Method::Post, "/servers/{s}/branches/apply"),
         }
     }
 
@@ -413,12 +448,14 @@ impl Op {
                 | Op::UninstallRun
                 | Op::NodeServerControl
                 | Op::AssetImport
+                | Op::BranchBulkPreview
+                | Op::BranchBulkApply
         )
     }
 
     /// Jobs that only read: they may run next to a mutating job of the same server.
     pub fn is_read_only_job(self) -> bool {
-        matches!(self, Op::UpdatePreview | Op::ServersScan)
+        matches!(self, Op::UpdatePreview | Op::ServersScan | Op::BranchBulkPreview)
     }
 
     /// True when [`super::Backend`] (or the api helpers) can serve it today.
@@ -469,6 +506,13 @@ impl Op {
                 | Op::AssetImport
                 | Op::AssetRemove
                 | Op::AssetDownloads
+                | Op::BranchesList
+                | Op::BranchChoices
+                | Op::PrList
+                | Op::BranchSwitch
+                | Op::StashRestore
+                | Op::BranchBulkPreview
+                | Op::BranchBulkApply
         )
     }
 }
@@ -567,13 +611,21 @@ mod tests {
             | Op::AssetInspect
             | Op::AssetImport
             | Op::AssetRemove
-            | Op::AssetDownloads => Op::ALL.contains(&op),
+            | Op::AssetDownloads
+            | Op::BranchesList
+            | Op::BranchChoices
+            | Op::PrList
+            | Op::BranchSwitch
+            | Op::StashRestore
+            | Op::BranchBulkPreview
+            | Op::BranchBulkApply
+            => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 87);
+        assert_eq!(Op::ALL.len(), 94);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }
