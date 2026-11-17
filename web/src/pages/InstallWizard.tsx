@@ -206,6 +206,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const [carryErr, setCarryErr] = useState<unknown>(null)
   /** A failure offered "Sign in to GitHub": the sign-in is shown under it. */
   const [githubAsked, setGithubAsked] = useState(false)
+  /** A fix (installing a tool, signing in, starting the database) worked and the failed step was retried by itself. */
+  const [autoRetried, setAutoRetried] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
   const ports = usePortsCheck(f.game, f.tx)
   const run = useJob<InstallOutcome, ProgressEvent>(job, onServersChanged)
@@ -240,6 +242,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     try {
       const next = (await api.installs.resume(job, skip)).job
       setGithubAsked(false)
+      setAutoRetried(false)
       setJob(next)
     } catch (e) {
       setResumeErr(e)
@@ -253,6 +256,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
     setStep(steps.length - 1)
     setEditing(sectionStep(section, f.mode))
   }
+  /** A fix launched from the failed step worked: say so and retry that step (only when the install can carry on). */
+  const retryAfterFix = run.error?.resume ? async () => { await resume(); setAutoRetried(true) } : undefined
   /** What the buttons under an install error do (see lib/problemActions.tsx). */
   const installActions: ActionHandlers = {
     retry_step: () => resume(),
@@ -280,6 +285,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         <h1 className="font-heading text-2xl font-bold">{run.phase === 'done' ? 'All done' : run.phase === 'failed' ? 'The install stopped' : 'Installing your server'}</h1>
         <Card>
           <CardContent className="space-y-5 p-6">
+            {autoRetried && run.phase === 'running' && <Alert tone="success" title="Fixed. Trying the step again">That worked, so Kora tried the step that stopped again by itself. You do not need to do anything.</Alert>}
             {run.phase === 'running' && <p className="text-sm text-muted-foreground">This takes a few minutes. You can leave this page open; it keeps going.</p>}
             {(run.phase === 'idle' || run.phase === 'running') && run.events.length === 0 ? (
               <p role="status" className="flex items-center gap-2 text-sm">
@@ -291,11 +297,11 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
             {run.phase === 'done' && run.result && <Outcome o={run.result} ports={req.ports} cfx={req.cfx_identifier} />}
             {run.phase === 'failed' && (
               <div className="space-y-4">
-                <ErrorNotice error={run.error} title="The install could not finish" actions={installActions} />
+                <ErrorNotice error={run.error} title="The install could not finish" actions={installActions} onFixed={retryAfterFix} />
                 {githubAsked && (
                   <Alert tone="info" title="Sign in to GitHub">
-                    <p className="mb-2">When you are signed in, use &quot;Try this step again&quot; above. Your answers are kept.</p>
-                    <GithubSignIn onSignedIn={onGithubSignedIn} />
+                    <p className="mb-2">{retryAfterFix ? 'When you are signed in, Kora tries the step again by itself.' : 'When you are signed in, use "Try this step again" above.'} Your answers are kept.</p>
+                    <GithubSignIn onSignedIn={() => { onGithubSignedIn(); void retryAfterFix?.() }} />
                   </Alert>
                 )}
                 <ErrorNotice error={resumeErr} actions={installActions} />

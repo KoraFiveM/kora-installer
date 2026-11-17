@@ -20,7 +20,15 @@ import { ApiError } from '@/api/client'
 import type { JobError, Problem, ProblemAction, ProblemActionKind } from '@/api/types'
 
 export type ActionOf<K extends ProblemActionKind> = Extract<ProblemAction, { kind: K }>
-export type ActionHandlers = { [K in ProblemActionKind]?: (a: ActionOf<K>) => void | Promise<void> }
+/**
+ * Given to every handler. `afterFix` is what to do once a fix action (install a tool, sign in, start the
+ * database) has worked: the page that showed the error says how to carry on (retry the failed step, reload).
+ * Absent when the error sits on something that cannot simply be retried.
+ */
+export interface ActionContext {
+  afterFix?: () => void | Promise<void>
+}
+export type ActionHandlers = { [K in ProblemActionKind]?: (a: ActionOf<K>, ctx: ActionContext) => void | Promise<void> }
 
 /** Kinds ErrorNotice draws by itself (a copy field, a link, the log, a copy button). */
 export const BUILT_IN: readonly ProblemActionKind[] = ['show_command', 'open_link', 'open_log', 'copy_details']
@@ -127,9 +135,9 @@ export function useProblemHandlers(own?: ActionHandlers): ActionHandlers {
 }
 
 /** Run the handler of `a` (the caller checked that there is one). */
-export function runAction(handlers: ActionHandlers, a: ProblemAction): void | Promise<void> {
-  const h = handlers[a.kind] as ((x: ProblemAction) => void | Promise<void>) | undefined
-  return h?.(a)
+export function runAction(handlers: ActionHandlers, a: ProblemAction, ctx: ActionContext = {}): void | Promise<void> {
+  const h = handlers[a.kind] as ((x: ProblemAction, c: ActionContext) => void | Promise<void>) | undefined
+  return h?.(a, ctx)
 }
 
 /** The actions that become buttons: those with a handler, built-in ones excluded. */

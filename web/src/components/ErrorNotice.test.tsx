@@ -59,7 +59,7 @@ describe('ErrorNotice with a Problem', () => {
     // Only actions with a handler are buttons ("install the GitHub CLI" and "change answers" have none here).
     expect(within(alert).getAllByRole('button').map((b) => b.textContent)).toEqual(['Try this step again', 'Skip this step'])
     await user.click(screen.getByRole('button', { name: 'Skip this step' }))
-    expect(skip).toHaveBeenCalledWith({ kind: 'skip_step', step: 'build.artifact' })
+    expect(skip).toHaveBeenCalledWith({ kind: 'skip_step', step: 'build.artifact' }, expect.anything())
     expect(retry).not.toHaveBeenCalled()
   })
 
@@ -73,10 +73,26 @@ describe('ErrorNotice with a Problem', () => {
       </ProblemActions>,
     )
     await user.click(screen.getByRole('button', { name: 'Install the GitHub CLI for me' }))
-    expect(appWide).toHaveBeenCalledWith({ kind: 'install_tool', tool: 'gh' })
+    expect(appWide).toHaveBeenCalledWith({ kind: 'install_tool', tool: 'gh' }, expect.anything())
     await user.click(screen.getByRole('button', { name: 'Change the ports' }))
     expect(page).toHaveBeenCalledTimes(1)
     expect(appWide).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands the handler what to do once a fix worked: onFixed, or else onRetry', async () => {
+    const user = userEvent.setup()
+    const fix = vi.fn()
+    const fixed = vi.fn()
+    const retry = vi.fn()
+    const { rerender } = render(<ErrorNotice error={problem([{ kind: 'install_tool', tool: 'git' }])} actions={{ install_tool: fix }} onRetry={retry} />)
+    await user.click(screen.getByRole('button', { name: 'Install Git for me' }))
+    expect(fix.mock.calls[0][1].afterFix).toBe(retry)
+    rerender(<ErrorNotice error={problem([{ kind: 'install_tool', tool: 'git' }])} actions={{ install_tool: fix }} onRetry={retry} onFixed={fixed} />)
+    await user.click(screen.getByRole('button', { name: 'Install Git for me' }))
+    expect(fix.mock.calls[1][1].afterFix).toBe(fixed)
+    rerender(<ErrorNotice error={problem([{ kind: 'install_tool', tool: 'git' }])} actions={{ install_tool: fix }} />)
+    await user.click(screen.getByRole('button', { name: 'Install Git for me' }))
+    expect(fix.mock.calls[2][1].afterFix).toBeUndefined()
   })
 
   it('draws commands, https links and the log path without any handler', () => {

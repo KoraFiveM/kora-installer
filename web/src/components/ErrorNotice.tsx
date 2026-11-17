@@ -69,13 +69,18 @@ function isFailure(p: NoticeProblem): boolean {
  * here. Plain errors keep their wording; real failures without actions get "Try again" (when
  * `onRetry` is given) and "Copy details".
  */
-export function ErrorNotice({ error, title, actions, onRetry }: {
+export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   error: unknown
   title?: string
   /** Handlers for this page's actions (they win over the app-wide ones). */
   actions?: ActionHandlers
   /** The generic "Try again" when the error offers nothing more specific. */
   onRetry?: () => void
+  /**
+   * What to do once a fix button here (install Git, sign in to GitHub, start the database) has worked.
+   * Defaults to `onRetry`: whatever can simply be tried again is tried again by itself.
+   */
+  onFixed?: () => void | Promise<void>
 }) {
   const handlers = useProblemHandlers(actions)
   const [busy, setBusy] = useState<ProblemAction | null>(null)
@@ -97,7 +102,7 @@ export function ErrorNotice({ error, title, actions, onRetry }: {
   const run = async (a: ProblemAction) => {
     setBusy(a)
     try {
-      await runAction(handlers, a)
+      await runAction(handlers, a, { afterFix: onFixed ?? onRetry })
     } finally {
       setBusy(null)
     }

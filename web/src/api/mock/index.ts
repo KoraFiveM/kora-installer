@@ -3,7 +3,7 @@
 import type * as T from '../types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
-import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, resetToolchainMock } from './toolchain'
+import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
 import { installKeysMock } from './keys'
 import { installBranchesMock } from './branches'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
@@ -255,7 +255,9 @@ const SKIPPABLE = new Set(['build.firewall', 'launch'])
 /**
  * Stopped installs that can carry on (`POST /installs/{job}/resume`), with their answers. Demo names:
  * "fail..." stops at the database the first time (Try this step again then works); "skip..." stops at
- * starting the server, which may be skipped; "github..." stops because GitHub is not signed in.
+ * starting the server, which may be skipped; "github..." stops because GitHub is not signed in; "nogh..."
+ * stops because the GitHub CLI is missing ("Install it for me", then the step is retried by itself);
+ * "nodb..." stops because the database server is stopped ("Start it for me", then the same).
  */
 const paused = new Map<string, { req: T.InstallRequest; failed: string; attempt: number; done: string[]; skip: Set<string> }>()
 
@@ -270,7 +272,9 @@ interface InstallRun {
 
 async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, jobId: () => string, run: InstallRun = { attempt: 0, done: [], skip: new Set() }): Promise<T.InstallOutcome> {
   const lower = req.name.toLowerCase()
-  const failAt = lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
+  if (run.attempt === 0 && lower.startsWith('nogh')) setMockGhInstalled(false)
+  if (run.attempt === 0 && lower.startsWith('nodb')) stopMockDatabase()
+  const failAt = lower.startsWith('nogh') && !mockGhInstalled() ? 'prepare.git' : lower.startsWith('nodb') && mockDbStoppedProblem() ? 'build.db' : lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
   if (!req.service) skipped.add('build.service')
@@ -306,12 +310,20 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
         { kind: 'change_answers' },
         { kind: 'open_log', job: id, path: `${req.dir}/.kora/install.log` },
       ]
+      const dbStopped = mockDbStoppedProblem()
+      if (step === 'build.db' && dbStopped) {
+        throw new Fail(500, dbStopped.code, dbStopped.message, undefined, { ...common, actions: [...(dbStopped.actions ?? []), ...tail] })
+      }
       if (step === 'build.db') {
         throw new Fail(500, 'install.db_login_failed', "Could not log in to the database server as 'root'. Kora needs an administrator account to create a NEW database and user. Check the admin user, password, address and port you gave.", undefined, {
           ...common,
           details: "ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: YES)",
           actions: [{ kind: 'change_answers', section: 'database' }, ...tail],
         })
+      }
+      const ghGone = mockGhMissingProblem()
+      if (step === 'prepare.git' && ghGone) {
+        throw new Fail(500, ghGone.code, ghGone.message, undefined, { ...common, actions: [...(ghGone.actions ?? []), ...tail] })
       }
       if (step === 'prepare.git') {
         throw new Fail(500, 'github.signed_out', 'You are not signed in to GitHub.', undefined, { ...common, actions: [{ kind: 'sign_in_github' }, ...tail] })
