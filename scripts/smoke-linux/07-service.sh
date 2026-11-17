@@ -9,6 +9,7 @@ CLIENT="$HERE/svc_client.py"
 A=kora-smoke-a   # allowed
 B=kora-smoke-b   # on the machine, never allowed
 C=kora-smoke-c   # allowed, but not the owner of A's server
+D=kora-smoke-d   # used the OLD helper (v0.7.0), so it stays allowed after the upgrade
 WORK="$(mktemp -d)"
 DEB="$WORK/kora.deb"
 
@@ -20,14 +21,14 @@ diag() {
   sudo cat /etc/kora/service.json /var/lib/kora/owners.json 2>&1 || true
   sudo tail -n 30 /var/log/kora/audit.log 2>&1 || true
 }
-trap 'rc=$?; [ $rc -ne 0 ] && diag; sudo userdel -r "$A" 2>/dev/null; sudo userdel -r "$B" 2>/dev/null; sudo userdel -r "$C" 2>/dev/null; rm -rf "$WORK"; exit $rc' EXIT
+trap 'rc=$?; [ $rc -ne 0 ] && diag; sudo userdel -r "$A" 2>/dev/null; sudo userdel -r "$B" 2>/dev/null; sudo userdel -r "$C" 2>/dev/null; sudo userdel -r "$D" 2>/dev/null; sudo userdel kora-old 2>/dev/null; sudo systemctl disable --now kora-helper.service 2>/dev/null; sudo rm -f /etc/systemd/system/kora-helper.service /etc/systemd/system/kora-old.service; rm -rf "$WORK"; exit $rc' EXIT
 
 as_user() { local u="$1"; shift; sudo -u "$u" env -i HOME="/home/$u" PATH=/usr/bin:/bin "$@"; }
 # svc USER VERB ARGS...: ask the service as USER; sets OUT and CODE (never aborts)
 svc() { local u="$1"; shift; set +e; OUT="$(as_user "$u" python3 -I "$CLIENT" "$@" 2>&1)"; CODE=$?; set -e; printf -- '--- as %s: %s (exit %s) ---\n%s\n' "$u" "$*" "$CODE" "$OUT"; }
 
 step "accounts and the package"
-for u in $A $B $C; do sudo useradd -m -s /bin/bash "$u"; done
+for u in $A $B $C $D; do sudo useradd -m -s /bin/bash "$u"; done
 if [ -n "${KORA_DEB:-}" ]; then
   # the package a release shipped (release.yml runs this against its own artifact)
   cp "$KORA_DEB" "$DEB"
@@ -36,6 +37,38 @@ else
   "$REPO_ROOT/packaging/linux/build-deb.sh" "$KORA_BIN" "0.0.0-smoke" "$DEB"
 fi
 assert "dpkg accepts the package" dpkg-deb -I "$DEB"
+step "a v0.7.0 layout on the machine first: the old helper, and a server installed the old way (root-run, folder owned by its own account)"
+sudo mkdir -p /etc/kora /usr/local/libexec/kora
+sudo tee /etc/kora/helper.json >/dev/null <<JSON
+{"uid":$(id -u $D),"gid":$(id -g $D),"user":"$D","home":"/home/$D","version":"0.7.0"}
+JSON
+echo '#!/bin/sh' | sudo tee /usr/local/libexec/kora/kora >/dev/null; sudo chmod 755 /usr/local/libexec/kora/kora
+sudo tee /etc/systemd/system/kora-helper.service >/dev/null <<'UNIT'
+[Unit]
+Description=Kora privileged helper (the old one)
+[Service]
+ExecStart=/bin/sleep 100000
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload && sudo systemctl enable --now kora-helper.service
+assert "the old helper runs" systemctl is-active --quiet kora-helper.service
+sudo useradd -r -M -s /usr/sbin/nologin kora-old
+OLD="/home/$A/kora/old"
+sudo -u $A mkdir -p "$OLD/.kora" "/home/$A/.kora"
+sudo -u $A tee "$OLD/.kora/created.json" >/dev/null <<'JSON'
+{"created_dir":true,"resources":[],"artifacts":false,"files":[],"service_unit":"/etc/systemd/system/kora-old.service","update_timer":false,"firewall":false,"registered":true,"service_account":"kora-old","service_account_created":true}
+JSON
+sudo -u $A tee "/home/$A/.kora/servers.json" >/dev/null <<JSON
+{"servers":[{"name":"old","dir":"$OLD","mode":"production","ports":{"game":30121,"txadmin":40121},"created_unix":1}]}
+JSON
+sudo tee /etc/systemd/system/kora-old.service >/dev/null <<'UNIT'
+[Unit]
+Description=an old Kora server service
+[Service]
+ExecStart=/bin/true
+UNIT
+sudo chown -R kora-old:kora-old "$OLD"
 sudo env KORA_SERVICE_USERS="$A,$C" dpkg -i "$DEB"
 
 step "layout: a protected program, a root-owned socket, a settings file"
@@ -49,6 +82,18 @@ POLICY="$(cat /etc/kora/service.json)"
 assert_contains "$A is on the list" "$POLICY" "uid:$(id -u $A)"
 assert_contains "$C is on the list" "$POLICY" "uid:$(id -u $C)"
 assert_not_contains "$B is NOT on the list" "$POLICY" "uid:$(id -u $B)"
+
+step "the upgrade brought the v0.7.0 layout over without touching the server"
+assert "the old helper service is gone" bash -c '! systemctl is-active --quiet kora-helper.service && [ ! -e /etc/systemd/system/kora-helper.service ]'
+assert "the old helper's copy and settings are gone" bash -c '[ ! -e /usr/local/libexec/kora/kora ] && [ ! -e /etc/kora/helper.json ]'
+POLICY="$(cat /etc/kora/service.json)"
+assert_contains "the old helper's account ($D) is allowed in the new service" "$POLICY" "uid:$(id -u $D)"
+assert_contains "the old server's service is recorded as $A's" "$(sudo cat /var/lib/kora/owners.json)" "\"service:kora-old\": \"uid:$(id -u $A)\""
+assert "the old server's folder and files are untouched" test -s "$OLD/.kora/created.json"
+assert_eq "...still owned by its own account" "kora-old" "$(stat -c '%U' "$OLD")"
+svc $C admin-step undo --step system.service --dir "$OLD" --name old --game-port 30121 --txadmin-port 40121
+assert_eq "C cannot touch the old server" "3" "$CODE"
+sudo /usr/bin/kora service migrate --quiet && assert "running the migration again is harmless" test -s /var/lib/kora/owners.json
 
 step "status as each account (no elevation anywhere)"
 OUT="$(as_user $A /usr/bin/kora service status)"; echo "$OUT"
