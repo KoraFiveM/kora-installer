@@ -185,7 +185,22 @@ mod tests {
 
     #[test]
     fn txadmins_machine_authentication_and_proxy_claims_are_dropped() {
-        for n in ["X-TxAdmin-Token", "x-txadmin-identifiers", "x-txadmin-envtoken", "Cookie", "Authorization", "X-Forwarded-For", "Forwarded", "Tailscale-User-Login", "X-Kora-Session", "Connection", "Transfer-Encoding", "Upgrade", "TE", "Expect"] {
+        for n in [
+            "X-TxAdmin-Token",
+            "x-txadmin-identifiers",
+            "x-txadmin-envtoken",
+            "Cookie",
+            "Authorization",
+            "X-Forwarded-For",
+            "Forwarded",
+            "Tailscale-User-Login",
+            "X-Kora-Session",
+            "Connection",
+            "Transfer-Encoding",
+            "Upgrade",
+            "TE",
+            "Expect",
+        ] {
             assert!(request_header_dropped(n), "{n}");
         }
         // The web UI's own CSRF header and ordinary headers pass.

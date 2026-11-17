@@ -155,7 +155,16 @@ struct Session {
 async fn sign_in(app: &axum::Router) -> Session {
     let r = app
         .clone()
-        .oneshot(Request::builder().method("POST").uri("/api/v1/session").header(header::HOST, PANEL).header("x-kora", "1").header(header::CONTENT_TYPE, "application/json").body(Body::from(json!({"token": LAUNCH}).to_string())).unwrap())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/session")
+                .header(header::HOST, PANEL)
+                .header("x-kora", "1")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"token": LAUNCH}).to_string()))
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
@@ -334,14 +343,46 @@ async fn nothing_without_a_session_reaches_txadmin() {
 async fn the_ticket_needs_a_signed_in_browser_session_and_the_admin_role() {
     let w = world().await;
     // The panel's own guard: no session at all.
-    let r = w.app.clone().oneshot(Request::builder().method("POST").uri("/api/v1/servers/prod/txadmin/ticket").header(header::HOST, PANEL).header("x-kora", "1").body(Body::empty()).unwrap()).await.unwrap();
+    let r = w
+        .app
+        .clone()
+        .oneshot(Request::builder().method("POST").uri("/api/v1/servers/prod/txadmin/ticket").header(header::HOST, PANEL).header("x-kora", "1").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     assert_eq!(r.status(), 401);
     // A cookie without its secret header is no session either.
     let s = sign_in(&w.app).await;
-    let r = w.app.clone().oneshot(Request::builder().method("POST").uri("/api/v1/servers/prod/txadmin/ticket").header(header::HOST, PANEL).header(header::COOKIE, &s.cookie).header("x-kora", "1").body(Body::empty()).unwrap()).await.unwrap();
+    let r = w
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/servers/prod/txadmin/ticket")
+                .header(header::HOST, PANEL)
+                .header(header::COOKIE, &s.cookie)
+                .header("x-kora", "1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(r.status(), 401);
     // The launch token as a bearer is a valid caller but has no browser session to follow.
-    let r = w.app.clone().oneshot(Request::builder().method("POST").uri("/api/v1/servers/prod/txadmin/ticket").header(header::HOST, PANEL).header(header::AUTHORIZATION, format!("Bearer {LAUNCH}")).body(Body::empty()).unwrap()).await.unwrap();
+    let r = w
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/servers/prod/txadmin/ticket")
+                .header(header::HOST, PANEL)
+                .header(header::AUTHORIZATION, format!("Bearer {LAUNCH}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(r.status(), 403);
     // Unknown server.
     let (st, _) = ticket(&w, &s, "nope").await;
@@ -509,7 +550,22 @@ async fn websocket_echo_origin_check_and_sign_out() {
     }
 
     // Signing out of the panel closes the live connection and ends the access.
-    let r = w.app.clone().oneshot(Request::builder().method("POST").uri("/api/v1/session/logout").header(header::HOST, PANEL).header(header::COOKIE, &s.cookie).header("x-kora-session", &s.secret).header("x-kora", "1").body(Body::empty()).unwrap()).await.unwrap();
+    let r = w
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/session/logout")
+                .header(header::HOST, PANEL)
+                .header(header::COOKIE, &s.cookie)
+                .header("x-kora-session", &s.secret)
+                .header("x-kora", "1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(r.status(), 204);
     let n = tokio::time::timeout(Duration::from_secs(5), async {
         loop {

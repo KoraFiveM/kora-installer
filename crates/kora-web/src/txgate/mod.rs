@@ -287,7 +287,9 @@ impl Gate {
         if let Some(_h) = self.lock().listeners.get(&(ip, gateway)) {
             return Ok(gateway);
         }
-        let listener = tokio::net::TcpListener::bind(SocketAddr::new(ip, gateway)).await.map_err(|e| format!("Kora could not listen on {ip} port {gateway} for txAdmin ({e}). Is something else using that port?"))?;
+        let listener = tokio::net::TcpListener::bind(SocketAddr::new(ip, gateway))
+            .await
+            .map_err(|e| format!("Kora could not listen on {ip} port {gateway} for txAdmin ({e}). Is something else using that port?"))?;
         let actual = listener.local_addr().map_err(|e| e.to_string())?.port();
         let app = proxy::router(proxy::Ctx { st: st.clone(), port: actual });
         let handle = tokio::spawn(async move {
@@ -385,7 +387,8 @@ mod tests {
     #[test]
     fn gateway_ports_follow_a_fixed_rule() {
         assert_eq!(gateway_port(40120), Some(50120));
-        assert_eq!(gateway_port(55535), Some(45535));
+        assert_eq!(gateway_port(55535), Some(65535));
+        assert_eq!(gateway_port(55536), Some(45536));
         assert_eq!(gateway_port(65000), Some(55000));
         assert_eq!(gateway_port(1500), Some(11500));
         assert_eq!(gateway_port(1000), Some(11000));

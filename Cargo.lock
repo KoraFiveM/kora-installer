@@ -749,6 +749,7 @@ dependencies = [
  "clap",
  "kora-core",
  "kora-web",
+ "serde_json",
  "tempfile",
  "winresource",
 ]

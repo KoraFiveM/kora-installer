@@ -23,7 +23,9 @@ pub fn open_game_port(e: &ServerEntry) -> Result<Vec<String>, String> {
         // The command to run as administrator. (Seam: the privileged-service work can offer the
         // permission prompt / helper for this verb; until then the person runs it.)
         let command = vec!["kora".to_string(), "reach".into(), e.name.clone(), "--open-firewall".into()];
-        return Err(Problem::new(codes::NEEDS_ELEVATION, "Changing the firewall needs administrator rights. Run this command as administrator, then check again:").with_action(Action::ShowCommand { command, elevated: true }).into());
+        return Err(Problem::new(codes::NEEDS_ELEVATION, "Changing the firewall needs administrator rights. Run this command as administrator, then check again:")
+            .with_action(Action::ShowCommand { command, elevated: true })
+            .into());
     }
     // Recorded first (like the install does), so deleting the server removes these rules again.
     let mut created = crate::installer::load_created_from(&e.dir).unwrap_or_default();

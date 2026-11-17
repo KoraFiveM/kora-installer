@@ -518,12 +518,15 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         println!("Press Ctrl+C to stop.");
         // Sample the servers and raise alerts for as long as the panel runs.
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
+        // Forward the game port on the router for servers that have it switched on (and run without a service).
+        let port_keeper = kora_core::reach::forward::keeper::spawn_panel_keeper();
         let served = axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(async {
                 let _ = tokio::signal::ctrl_c().await;
             })
             .await;
         monitor.stop();
+        port_keeper.stop();
         served?;
         Ok(())
     })

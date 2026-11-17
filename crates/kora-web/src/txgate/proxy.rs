@@ -13,7 +13,9 @@ use axum::Router;
 use hyper_util::rt::TokioIo;
 use kora_core::api::Op;
 
-use super::rewrite::{self, connection_tokens, cookies_for_txadmin, gate_cookie_name, is_websocket_upgrade, location_for_browser, request_header_dropped, response_header_dropped, set_cookie_for_browser};
+use super::rewrite::{
+    self, connection_tokens, cookies_for_txadmin, gate_cookie_name, is_websocket_upgrade, location_for_browser, request_header_dropped, response_header_dropped, set_cookie_for_browser,
+};
 use super::{page, GateSession};
 use crate::remote::{self, roles};
 use crate::security::{self, cookie_values};
