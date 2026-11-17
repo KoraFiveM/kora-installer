@@ -350,7 +350,7 @@ pub fn branches(r: &dyn CommandRunner, repo: &Path, default_branch: &str) -> PRe
     }
     for v in [&mut local, &mut fork, &mut upstream] {
         v.retain(|b| b != "HEAD" && valid_branch(b));
-        v.sort_by(|a, b| (a != default_branch, a.to_lowercase()).cmp(&(b != default_branch, b.to_lowercase())));
+        v.sort_by_key(|a| (a != default_branch, a.to_lowercase()));
         v.dedup();
     }
     let current = pr(run(r, "git", &["symbolic-ref", "--short", "-q", "HEAD"], Some(repo)))?;

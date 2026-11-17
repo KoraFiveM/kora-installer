@@ -174,10 +174,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::InstallResume
         | Op::SelfUpdateApply
         | Op::ScheduleSet
-        | Op::ScheduleRemove
-        // Runs someone else's code on the server (a pull request) or throws away a person's changes.
-        | Op::BranchSwitch
-        | Op::BranchBulkApply => true,
+        | Op::ScheduleRemove => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -198,6 +195,8 @@ pub fn destructive(op: Op) -> bool {
         | Op::BranchChoices
         | Op::PrList
         | Op::StashRestore
+        | Op::BranchSwitch
+        | Op::BranchBulkApply
         | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply

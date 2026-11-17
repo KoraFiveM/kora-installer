@@ -172,7 +172,7 @@ On a Development server every resource is a clone of your own fork. The GitHub t
 
 What updates do with a switched resource: **they leave it alone.** The update check shows it as "Not updated: on another branch" with the reason ("on branch fix-hud", "trying pull request #12"), the scheduled daily update skips it with the same words, and neither counts it as a problem or reports it "up to date". Nothing is ever pulled into your branch. Going back to the normal version makes updates work for it again. Snapshots record each resource's branch; a rollback first returns the resource to the branch it was on when the snapshot was taken and only then resets it, so it never rewrites a branch you moved to afterwards. Switching waits while an update is running (and the other way round). Production servers have none of this: they stay on their pinned releases.
 
-Sign-in: listing and trying pull requests uses the GitHub CLI (`gh`); if you are not signed in, or `gh` is missing, the panel offers the usual sign-in and install buttons. Switching between branches that are already downloaded needs no GitHub sign-in. Switching branches needs the **admin** role, and from another computer the remote-actions switch, because it changes the code the server runs.
+Sign-in: listing and trying pull requests uses the GitHub CLI (`gh`); if you are not signed in, or `gh` is missing, the panel offers the usual sign-in and install buttons. Switching between branches that are already downloaded needs no GitHub sign-in. Switching branches needs the **admin** role, because it changes the code the server runs.
 
 ## 5. Installing a server (the wizard)
 

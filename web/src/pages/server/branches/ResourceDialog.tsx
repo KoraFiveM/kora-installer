@@ -38,7 +38,7 @@ export function ResourceDialog({ server: s, resource, onClose }: { server: Serve
   const qc = useQueryClient()
   const refreshLists = useRefreshBranches(s.name)
   const role = useRole()
-  const blocked = whyNot(role, 'admin', true)
+  const blocked = whyNot(role, 'admin')
   const id = resource.id
   const choices = useQuery({ queryKey: ['branch-choices', s.name, id], queryFn: () => api.branches.choices(s.name, id) })
   const [pick, setPick] = useState('')

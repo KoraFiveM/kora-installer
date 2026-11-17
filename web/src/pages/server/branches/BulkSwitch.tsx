@@ -28,7 +28,7 @@ const STATUS_TEXT: Record<BulkStatus, { text: string; tone: 'success' | 'plain' 
 /** Every resource at once: which ones have a branch, switch them, or put them all back to the normal version. */
 export function BulkSwitch({ server: s }: { server: ServerDetail }) {
   const role = useRole()
-  const blocked = whyNot(role, 'admin', true)
+  const blocked = whyNot(role, 'admin')
   const noOperator = whyNot(role, 'operator')
   const refresh = useRefreshBranches(s.name)
   const [branch, setBranch] = useState('')

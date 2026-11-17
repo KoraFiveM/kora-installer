@@ -306,3 +306,37 @@ pub fn pr(cmd: PrCmd) -> i32 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn parse(args: &[&str]) -> Result<crate::Cli, clap::Error> {
+        let mut v = vec!["kora"];
+        v.extend_from_slice(args);
+        crate::Cli::try_parse_from(v)
+    }
+
+    #[test]
+    fn keeping_changes_aside_and_throwing_them_away_cannot_be_asked_together() {
+        assert!(parse(&["branch", "switch", "s", "r", "feature", "--stash", "--discard"]).is_err());
+        assert!(parse(&["branch", "switch", "s", "r", "feature", "--stash"]).is_ok());
+        assert!(parse(&["branch", "default", "s", "--discard", "--yes"]).is_ok());
+        assert!(parse(&["pr", "checkout", "s", "r", "https://github.com/o/n/pull/1", "--source", "fork", "--stash"]).is_ok());
+    }
+
+    #[test]
+    fn the_choice_about_changes_defaults_to_asking() {
+        assert_eq!(changes_of(&ChangeArgs::default()), Some(Changes::Ask));
+        assert_eq!(changes_of(&ChangeArgs { stash: true, ..Default::default() }), Some(Changes::Stash));
+        // `--yes` skips the question (without it the person is asked on the terminal, which a test cannot answer).
+        assert_eq!(changes_of(&ChangeArgs { discard: true, yes: true, ..Default::default() }), Some(Changes::Discard));
+    }
+
+    #[test]
+    fn a_server_that_is_not_registered_is_a_plain_error_and_a_non_zero_exit() {
+        assert_eq!(branch(BranchCmd::List { server: "no-such-server".into() }), 1);
+        assert_eq!(pr(PrCmd::List { server: "no-such-server".into(), resource: "kora_hud".into() }), 1);
+    }
+}
