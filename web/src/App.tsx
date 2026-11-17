@@ -65,8 +65,8 @@ export function App({ boot }: { boot: BootResult }) {
   return (
     <QueryClientProvider client={client}>
       <AlertsProvider>
-        <ToolchainActions>
         <BrowserRouter>
+          <ToolchainActions>
           <Routes>
             {Styleguide && <Route path="styleguide" element={<Suspense fallback={null}><Styleguide /></Suspense>} />}
             <Route element={<AppShell />}>
@@ -79,8 +79,8 @@ export function App({ boot }: { boot: BootResult }) {
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
+          </ToolchainActions>
         </BrowserRouter>
-        </ToolchainActions>
       </AlertsProvider>
     </QueryClientProvider>
   )
