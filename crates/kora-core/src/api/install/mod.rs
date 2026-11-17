@@ -23,6 +23,7 @@ use crate::installer::{
     self, slug, DbAdmin, DbChoice, InstallOutcome, InstallRequest, Mode, Ports, ProgressEvent,
     ProgressSink, ResourceSelection, StepStatus,
 };
+use crate::problem::{codes, Action, Problem};
 use crate::space::{self, DiskInfo, SystemDisk};
 
 /// Everything the install routes need from the machine. [`SystemInstallEnv`] is the real one.
@@ -44,7 +45,13 @@ pub trait InstallEnv: Send + Sync {
     fn saved_load(&self) -> Option<InstallRequest>;
     fn saved_save(&self, req: &InstallRequest) -> bool;
     fn saved_clear(&self);
-    /// Run the installer (a dry run when `req.dry_run`).
+    /// Mark a failed step as skipped so the next [`InstallEnv::run`] goes on without it
+    /// (see [`installer::skip_step`]: only steps that are safe to skip).
+    fn skip_step(&self, req: &InstallRequest, step: &str) -> Result<(), Problem> {
+        installer::skip_step(req, step)
+    }
+    /// Run the installer (a dry run when `req.dry_run`). The error text may be a packed
+    /// [`Problem`] ([`Problem::decode`] reads both).
     fn run(
         &self,
         req: &InstallRequest,
@@ -89,7 +96,8 @@ impl InstallEnv for SystemInstallEnv {
         req: &InstallRequest,
         sink: &mut dyn ProgressSink,
     ) -> Result<InstallOutcome, String> {
-        installer::run(req, sink).map_err(|e| e.to_string())
+        // The raw text: it may be a packed Problem (see `installer::InstallError`).
+        installer::run(req, sink).map_err(|e| e.0)
     }
 }
 
@@ -800,13 +808,18 @@ impl<F: FnMut(&ProgressEvent) + Send> ProgressSink for FnSink<F> {
 
 /// How a finished run ended, ready for the job result / error.
 pub struct Finished {
-    /// The outcome, or the installer's plain message when it failed.
+    /// The outcome, or the installer's error text when it failed (may be a packed [`Problem`]).
     pub outcome: Result<InstallOutcome, String>,
     /// The log file (when one could be written).
     pub log_path: Option<PathBuf>,
     /// After a failure: what was kept on disk (folder, saved answers) and how to carry on.
     pub kept: Vec<String>,
+    /// After a failure: the terminal's "how to carry on" text (the panel shows buttons instead).
     pub next: String,
+    /// After a failure: the step that failed (`None` = it stopped before the first step).
+    pub failed_step: Option<String>,
+    /// After a failure: what to tell the user, with the actions that fit ([`failure_problem`]).
+    pub problem: Option<Problem>,
 }
 
 /// Run the install, calling `on_event` for every progress event, then write the log and keep or
@@ -817,11 +830,16 @@ pub fn run_install(
     mut on_event: impl FnMut(&ProgressEvent) + Send,
 ) -> Finished {
     let mut log: Vec<String> = Vec::new();
+    let mut failed_step: Option<String> = None;
     let result = {
         let log_ref = &mut log;
+        let failed_ref = &mut failed_step;
         let mut sink = FnSink {
             f: |ev: &ProgressEvent| {
                 log_ref.push(log_line(ev));
+                if ev.status == StepStatus::Failed {
+                    *failed_ref = Some(ev.step.clone());
+                }
                 on_event(ev);
             },
         };
@@ -832,6 +850,8 @@ pub fn run_install(
         log_path,
         kept: vec![],
         next: String::new(),
+        failed_step: None,
+        problem: None,
     };
     if req.dry_run {
         return done(result, None);
@@ -843,7 +863,7 @@ pub fn run_install(
             done(Ok(out), log_path)
         }
         Err(msg) => {
-            let log_path = write_install_log(req, &log, Some(&msg));
+            let log_path = write_install_log(req, &log, Some(&crate::problem::plain_text(&msg)));
             let saved = env.saved_save(req);
             let mut kept = Vec::new();
             if req.dir.join(".kora").is_dir() {
@@ -852,14 +872,42 @@ pub fn run_install(
             if saved {
                 kept.push("Your answers (not the licence key or database password)".to_string());
             }
+            let problem = failure_problem(req, &msg, failed_step.as_deref());
             Finished {
                 outcome: Err(msg),
                 log_path,
                 kept,
                 next: failure_next_steps(req, saved),
+                failed_step,
+                problem: Some(problem),
             }
         }
     }
+}
+
+/// The [`Problem`] the panel shows when an install stopped: the installer's own problem (or its
+/// text as a generic one) followed by the ways on: retry the failed step (or the whole install when
+/// it stopped before the first step), skip the step when it is safe to ([`installer::SKIPPABLE`]),
+/// and change the answers.
+pub fn failure_problem(req: &InstallRequest, error: &str, failed_step: Option<&str>) -> Problem {
+    let mut p = Problem::decode(error);
+    match failed_step {
+        Some(step) => {
+            if p.code == codes::FAILED {
+                p.code = codes::INSTALL_STEP_FAILED.to_string();
+            }
+            p.push_action(Action::RetryStep { step: step.to_string() });
+            let skippable = installer::plan_steps(req, false).iter().any(|s| s.id == step && s.skippable);
+            if skippable {
+                p.push_action(Action::SkipStep { step: step.to_string() });
+            }
+        }
+        None => p.push_action(Action::Retry),
+    }
+    if !p.actions.iter().any(|a| matches!(a, Action::ChangeAnswers { .. })) {
+        p.push_action(Action::ChangeAnswers { section: None });
+    }
+    p
 }
 
 /// What is kept after a failed install and how to carry on (the CLI's wording, for the panel).
@@ -987,6 +1035,28 @@ mod tests {
         let r = build_request(&wire("Fine Name")).unwrap();
         assert_eq!(r.hostname, "Fine Name");
         assert_eq!(r.ports, Ports::default());
+    }
+
+    #[test]
+    fn a_failed_install_offers_the_ways_on() {
+        let mut w = wire("Alpha");
+        w.firewall = true;
+        let req = build_request(&w).unwrap();
+        // A plain error in a step that must not be skipped: retry it, or change the answers.
+        let p = failure_problem(&req, "download failed", Some("build.artifact"));
+        assert_eq!((p.code.as_str(), p.message.as_str()), (codes::INSTALL_STEP_FAILED, "download failed"));
+        assert_eq!(p.actions, vec![Action::RetryStep { step: "build.artifact".into() }, Action::ChangeAnswers { section: None }]);
+        // A step that is safe to skip also offers that.
+        let p = failure_problem(&req, "no firewall", Some("system.firewall"));
+        assert!(p.actions.contains(&Action::SkipStep { step: "system.firewall".into() }));
+        // The step's own problem keeps its code and actions first; its own "change answers" is kept.
+        let own = Problem::new(codes::INSTALL_DB_LOGIN, "login refused").with_action(Action::change_answers("database"));
+        let p = failure_problem(&req, &own.encode(), Some("prepare.tools"));
+        assert_eq!(p.code, codes::INSTALL_DB_LOGIN);
+        assert_eq!(p.actions, vec![Action::change_answers("database"), Action::RetryStep { step: "prepare.tools".into() }]);
+        // Stopped before the first step: try the whole install again.
+        let p = failure_problem(&req, "ports taken", None);
+        assert_eq!((p.code.as_str(), p.actions[0].clone()), (codes::FAILED, Action::Retry));
     }
 
     #[test]

@@ -81,6 +81,36 @@ pub mod codes {
     pub const GH_UNAVAILABLE: &str = "github.unavailable";
 }
 
+/// Ready-made problems that several places raise (the installer and the panel's GitHub routes).
+pub mod known {
+    use super::{codes, Action, Problem, Tool};
+
+    /// Where the GitHub CLI can be downloaded by hand.
+    pub const GH_URL: &str = "https://cli.github.com";
+
+    /// `gh` is not installed.
+    pub fn gh_missing() -> Problem {
+        Problem::new(codes::GH_MISSING, "The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.")
+            .with_action(Action::InstallTool { tool: Tool::Gh })
+            .with_action(Action::open_link(GH_URL))
+    }
+
+    /// `gh` is installed but not signed in.
+    pub fn github_signed_out() -> Problem {
+        Problem::new(codes::GH_SIGNED_OUT, "You are not signed in to GitHub.").with_action(Action::SignInGithub { scopes: vec![] })
+    }
+
+    /// Signed in without the permissions Kora needs.
+    pub fn github_missing_scopes(missing: &[String]) -> Problem {
+        Problem::new(
+            codes::GH_MISSING_SCOPES,
+            "Your GitHub sign-in does not give Kora all the permissions it needs. Sign in again to give them.",
+        )
+        .with_details(format!("Missing permissions (scopes): {}", missing.join(", ")))
+        .with_action(Action::SignInGithub { scopes: missing.to_vec() })
+    }
+}
+
 /// A tool Kora can install or point to. `#[non_exhaustive]`: new tools may be added.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,6 +217,7 @@ impl Action {
             }
             Action::SignInGithub { .. } => Some("Sign in to GitHub: gh auth login".into()),
             Action::InstallTool { tool } => Some(format!("Install {}.", tool.label())),
+            Action::RequestAdmin => Some("This needs administrator rights: run it again as administrator (root).".into()),
             _ => None,
         }
     }

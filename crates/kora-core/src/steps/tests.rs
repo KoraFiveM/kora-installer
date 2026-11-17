@@ -102,3 +102,70 @@ fn rollback_reverses_started_steps_only() {
     assert_eq!(st.status("c"), Some(StepStatus::Pending));
     assert_eq!(st.status("a"), Some(StepStatus::RolledBack));
 }
+
+/// A step that fails every time, until it is skipped.
+fn always_fails(id: &'static str, log: &Log) -> Box<dyn Step> {
+    struct F(&'static str, Log);
+    impl Step for F {
+        fn id(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            "always fails"
+        }
+        fn verify(&self) -> StepResult<bool> {
+            Ok(false)
+        }
+        fn run(&mut self) -> StepResult<()> {
+            self.1.borrow_mut().push(format!("run {}", self.0));
+            Err(StepError::Failed("still broken".into()))
+        }
+        fn rollback(&mut self) -> StepResult<()> {
+            self.1.borrow_mut().push(format!("rollback {}", self.0));
+            Ok(())
+        }
+    }
+    Box::new(F(id, log.clone()))
+}
+
+#[test]
+fn a_skipped_step_is_passed_over_and_the_rest_runs() {
+    let d = tempdir().unwrap();
+    let p = d.path().join("s.json");
+    let log: Log = Default::default();
+    let mut steps = vec![fake("a", false, &log), always_fails("b", &log), fake("c", false, &log)];
+    assert!(run_plan(&mut steps, &p).is_err());
+    // Retrying alone fails again at the same step and never reaches c.
+    assert!(run_plan(&mut steps, &p).is_err());
+    assert_eq!(*log.borrow(), ["run a", "run b", "run b"]);
+    log.borrow_mut().clear();
+    let st = mark_skipped(&p, "b").unwrap();
+    assert_eq!(st.status("b"), Some(StepStatus::Skipped));
+    let st = run_plan(&mut steps, &p).unwrap();
+    assert_eq!(*log.borrow(), ["run c"]);
+    assert_eq!((st.status("b"), st.status("c")), (Some(StepStatus::Skipped), Some(StepStatus::Done)));
+    assert!(std::fs::read_to_string(&p).unwrap().contains("\"skipped\""));
+    // It stays skipped on later runs, and rollback still undoes whatever part of it ran.
+    log.borrow_mut().clear();
+    run_plan(&mut steps, &p).unwrap();
+    assert!(log.borrow().is_empty());
+    rollback_plan(&mut steps, &p).unwrap();
+    assert_eq!(*log.borrow(), ["rollback c", "rollback b", "rollback a"]);
+}
+
+#[test]
+fn a_done_step_is_never_marked_skipped() {
+    let d = tempdir().unwrap();
+    let p = d.path().join("s.json");
+    let log: Log = Default::default();
+    let mut steps = vec![fake("a", false, &log)];
+    run_plan(&mut steps, &p).unwrap();
+    assert_eq!(mark_skipped(&p, "a").unwrap().status("a"), Some(StepStatus::Done));
+}
+
+#[test]
+fn a_failed_step_keeps_a_packed_problem_and_shows_text() {
+    let p = crate::problem::Problem::new("x", "Readable.").with_action(crate::problem::Action::Retry);
+    let e = StepError::Failed(p.encode());
+    assert_eq!(e.to_string(), "step failed: Readable.");
+}

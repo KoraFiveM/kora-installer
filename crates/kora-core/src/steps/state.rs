@@ -12,6 +12,9 @@ pub enum StepStatus {
     Done,
     Failed,
     RolledBack,
+    /// The user chose to carry on without this step (after it failed). [`super::run_plan`] leaves
+    /// it alone from then on; rollback still undoes whatever part of it ran.
+    Skipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

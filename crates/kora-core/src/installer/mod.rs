@@ -35,6 +35,7 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
 use crate::catalog::{self, Catalog, Kind, Resource};
+use crate::problem::{codes, Action, Problem};
 use crate::steps::{rollback_plan, run_plan, Step, StepError};
 
 pub use http::HttpClient;
@@ -43,9 +44,33 @@ pub(crate) use steps::db_override;
 pub use registry::{Registry, ServerEntry, ServerFile};
 
 /// Installer error: plain-language message, safe to show (never contains secrets).
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
+///
+/// The string is either plain text or a packed [`Problem`] (`InstallError::from(problem)`), so a
+/// step can say what the user can do about it. `Display` always gives readable text (for the CLI
+/// and logs); [`InstallError::problem`] gives the structured form (for the panel).
+#[derive(Debug)]
 pub struct InstallError(pub String);
+
+impl std::fmt::Display for InstallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&crate::problem::plain_text(&self.0))
+    }
+}
+
+impl std::error::Error for InstallError {}
+
+impl InstallError {
+    /// The structured form (a generic problem for plain text).
+    pub fn problem(&self) -> Problem {
+        Problem::decode(&self.0)
+    }
+}
+
+impl From<Problem> for InstallError {
+    fn from(p: Problem) -> Self {
+        InstallError(p.encode())
+    }
+}
 
 pub type Result<T> = std::result::Result<T, InstallError>;
 
@@ -227,7 +252,19 @@ pub struct PlannedStep {
     /// Relative share of the overall progress bar.
     pub weight: u8,
     pub needs_admin: bool,
+    /// The user may skip this step after it failed ([`skip_step`]) and the install still gives a
+    /// working server. Only steps whose result is optional or can be done later; see [`SKIPPABLE`].
+    pub skippable: bool,
 }
+
+/// Steps that may be skipped after they failed. Deliberately few: everything the server needs to
+/// run (folder, catalogue, tools, resources, database, FXServer, configuration, registration) and
+/// the background service (its partial setup is easier to finish than to leave) are not.
+/// * `system.firewall`: the server works; the port can be opened by hand (the notes say how).
+/// * `system.schedule`: only the daily automatic update; `kora schedule set` adds it later.
+/// * `system.app`: the `kora` command and shortcuts; the server does not need them.
+/// * `launch`: starting the server; it can be started from the panel at any time.
+pub const SKIPPABLE: &[&str] = &["system.firewall", "system.schedule", "system.app", "launch"];
 
 /// Steps for a request (also the order of rollback, reversed).
 pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
@@ -238,47 +275,49 @@ pub fn plan_steps(req: &InstallRequest, _admin: bool) -> Vec<PlannedStep> {
 pub fn plan_steps_for(req: &InstallRequest, kora_user: bool) -> Vec<PlannedStep> {
     let mut v = Vec::new();
     if kora_user {
-        v.push(PlannedStep { id: "prepare.account", title: "Create the 'kora' user account that owns the server folder", weight: 1, needs_admin: true });
+        v.push(PlannedStep { id: "prepare.account", title: "Create the 'kora' user account that owns the server folder", weight: 1, needs_admin: true, skippable: false });
     }
     v.extend([
-        PlannedStep { id: "prepare.dir", title: "Create the server folder", weight: 2, needs_admin: false },
-        PlannedStep { id: "prepare.catalog", title: "Load the resource catalog", weight: 3, needs_admin: false },
+        PlannedStep { id: "prepare.dir", title: "Create the server folder", weight: 2, needs_admin: false, skippable: false },
+        PlannedStep { id: "prepare.catalog", title: "Load the resource catalog", weight: 3, needs_admin: false, skippable: false },
         PlannedStep {
             id: "prepare.tools",
             title: "Check git, GitHub CLI, database server and ports",
             weight: 5,
             needs_admin: false,
+            skippable: false,
         },
     ]);
     if req.mode == Mode::Development {
-        v.push(PlannedStep { id: "build.forks", title: "Fork the resources into your GitHub account", weight: 30, needs_admin: false });
+        v.push(PlannedStep { id: "build.forks", title: "Fork the resources into your GitHub account", weight: 30, needs_admin: false, skippable: false });
     }
     v.push(PlannedStep {
         id: "build.resources",
         title: if req.mode == Mode::Production { "Download the resources (pinned releases)" } else { "Clone your forks" },
         weight: 30,
         needs_admin: false,
+        skippable: false,
     });
     if req.db != DbChoice::Skip {
-        v.push(PlannedStep { id: "build.db", title: "Create a new database and user", weight: 5, needs_admin: false });
+        v.push(PlannedStep { id: "build.db", title: "Create a new database and user", weight: 5, needs_admin: false, skippable: false });
     }
-    v.push(PlannedStep { id: "build.artifact", title: "Download and unpack the FiveM server build", weight: 20, needs_admin: false });
-    v.push(PlannedStep { id: "build.config", title: "Write txAdmin profile, server.cfg, permissions.cfg and secrets.cfg", weight: 3, needs_admin: false });
+    v.push(PlannedStep { id: "build.artifact", title: "Download and unpack the FiveM server build", weight: 20, needs_admin: false, skippable: false });
+    v.push(PlannedStep { id: "build.config", title: "Write txAdmin profile, server.cfg, permissions.cfg and secrets.cfg", weight: 3, needs_admin: false, skippable: false });
     if req.firewall {
-        v.push(PlannedStep { id: "system.firewall", title: "Open the game port in the firewall", weight: 2, needs_admin: true });
+        v.push(PlannedStep { id: "system.firewall", title: "Open the game port in the firewall", weight: 2, needs_admin: true, skippable: true });
     }
     if req.service {
-        v.push(PlannedStep { id: "system.service", title: "Register the background service", weight: 2, needs_admin: true });
+        v.push(PlannedStep { id: "system.service", title: "Register the background service", weight: 2, needs_admin: true, skippable: false });
     }
     if req.service && req.mode == Mode::Development {
-        v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true });
+        v.push(PlannedStep { id: "system.schedule", title: "Schedule daily automatic updates (04:00)", weight: 1, needs_admin: true, skippable: true });
     }
     if req.app.is_some() {
-        v.push(PlannedStep { id: "system.app", title: "Install the Kora app (command, Start Menu shortcut)", weight: 1, needs_admin: true });
+        v.push(PlannedStep { id: "system.app", title: "Install the Kora app (command, Start Menu shortcut)", weight: 1, needs_admin: true, skippable: true });
     }
-    v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false });
+    v.push(PlannedStep { id: "finalize", title: "Save server settings and register the server", weight: 1, needs_admin: false, skippable: false });
     if req.start {
-        v.push(PlannedStep { id: "launch", title: "Start your server", weight: 4, needs_admin: false });
+        v.push(PlannedStep { id: "launch", title: "Start your server", weight: 4, needs_admin: false, skippable: true });
     }
     v
 }
@@ -459,6 +498,35 @@ fn validate_request(req: &InstallRequest) -> Result<()> {
 // Public API
 // ---------------------------------------------------------------------------------------------
 
+/// Where a Cfx.re licence key is made.
+pub const LICENCE_URL: &str = "https://portal.cfx.re/servers/registration-keys";
+
+/// A port was taken after the questions were answered: pick other ports.
+pub(crate) fn ports_busy(conflicts: &[String]) -> Problem {
+    Problem::new(codes::INSTALL_PORTS_BUSY, conflicts.join(" ")).with_action(Action::change_answers("ports"))
+}
+
+/// The user chose to go on without step `id` after it failed (the panel's "Skip this step"). The
+/// next run of the install passes over it. Refused for steps that are not [`SKIPPABLE`] or not in
+/// this install's plan. Never touches anything but the install's own `plan-state.json`.
+pub fn skip_step(req: &InstallRequest, id: &str) -> std::result::Result<(), Problem> {
+    let plan = plan_steps(req, false);
+    let Some(step) = plan.iter().find(|p| p.id == id) else {
+        return Err(Problem::new(codes::INSTALL_CANNOT_RESUME, format!("This install has no step called '{id}'.")));
+    };
+    if !step.skippable {
+        return Err(Problem::new(
+            codes::INSTALL_CANNOT_RESUME,
+            format!("\"{}\" cannot be skipped: your server needs it. Try it again, or change your answers.", step.title),
+        )
+        .with_action(Action::RetryStep { step: id.to_string() })
+        .with_action(Action::ChangeAnswers { section: None }));
+    }
+    crate::steps::mark_skipped(&meta_dir(&req.dir).join("plan-state.json"), id)
+        .map(|_| ())
+        .map_err(|e| Problem::generic("Kora could not save your choice to skip this step.").with_details(e.to_string()))
+}
+
 /// Run (or resume) an install. `dry_run` executes nothing and emits the full plan.
 pub fn run(req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome> {
     run_with(req, sink, &Hooks::from_env())
@@ -471,7 +539,10 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
         return dry_run(req, sink, hooks, admin);
     }
     if req.license_key.as_deref().map(str::trim).unwrap_or("").is_empty() {
-        return err("a Cfx.re license key is required (get one at https://portal.cfx.re/servers/registration-keys)");
+        return Err(Problem::new(codes::INSTALL_LICENCE_MISSING, "a Cfx.re license key is required (get one at https://portal.cfx.re/servers/registration-keys)")
+            .with_action(Action::change_answers("licence"))
+            .with_action(Action::open_link(LICENCE_URL))
+            .into());
     }
     check_dir_links(&req.dir)?;
     preflight(req, hooks, admin)?;
@@ -479,7 +550,7 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
     if !req.dir.join("kora-server.json").is_file() {
         let c = crate::firewall::ports::install_conflicts(&req.name, &req.dir, req.ports.game, req.ports.txadmin, &crate::firewall::ports::SystemProber);
         if !c.is_empty() {
-            return err(c.join(" "));
+            return Err(ports_busy(&c).into());
         }
     }
     let (tx, rx) = mpsc::channel();
@@ -506,11 +577,12 @@ pub fn run_with(req: &InstallRequest, sink: &mut dyn ProgressSink, hooks: &Hooks
             crate::service::apply_plan(&plan, &crate::service::SystemRunner).map_err(|e| InstallError(e.to_string()))?;
         }
         save_request(&ctx)?;
-        run_plan(&mut list, &state_path)?;
-        // Steps that were already complete never emitted anything: report them as skipped.
+        let state = run_plan(&mut list, &state_path)?;
+        // Steps that were already complete (or that the user chose to skip) never emitted anything: report them as skipped.
         for p in &ctx.plan {
             if !ctx.was_emitted(p.id) {
-                ctx.emit(p.id, StepStatus::Skipped, "Already done", 1.0);
+                let why = if state.status(p.id) == Some(crate::steps::StepStatus::Skipped) { "Skipped: you chose to go on without it" } else { "Already done" };
+                ctx.emit(p.id, StepStatus::Skipped, why, 1.0);
             }
         }
         let mut sh = ctx.shared.lock().unwrap();
@@ -828,6 +900,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn only_optional_steps_can_be_skipped() {
+        let t = tempfile::tempdir().unwrap();
+        let mut r = req(t.path());
+        (r.dry_run, r.app, r.start) = (false, Some(crate::app_install::AppChoice { desktop_shortcut: false }), true);
+        let plan = plan_steps_for(&r, false);
+        let skippable: Vec<&str> = plan.iter().filter(|p| p.skippable).map(|p| p.id).collect();
+        assert_eq!(skippable, ["system.firewall", "system.app", "launch"]);
+        assert!(plan.iter().all(|p| p.skippable == SKIPPABLE.contains(&p.id)));
+        // A step the server needs: refused, with the ways that do help.
+        let p = skip_step(&r, "build.artifact").unwrap_err();
+        assert_eq!(p.code, codes::INSTALL_CANNOT_RESUME);
+        assert!(p.actions.contains(&Action::RetryStep { step: "build.artifact".into() }));
+        assert!(skip_step(&r, "no.such.step").is_err());
+        assert!(!t.path().join(".kora/plan-state.json").exists(), "nothing written for a refusal");
+        // An optional one is recorded, so the next run passes over it.
+        std::fs::create_dir_all(t.path().join(".kora")).unwrap();
+        skip_step(&r, "system.firewall").unwrap();
+        let st = crate::steps::PlanState::load_or_default(&t.path().join(".kora/plan-state.json")).unwrap();
+        assert_eq!(st.status("system.firewall"), Some(crate::steps::StepStatus::Skipped));
+        // Not part of this install (no schedule without a development service): refused.
+        assert!(skip_step(&r, "system.schedule").is_err());
+    }
+
     struct Collect(Vec<ProgressEvent>);
     impl ProgressSink for Collect {
         fn event(&mut self, ev: ProgressEvent) {
@@ -1083,7 +1179,7 @@ mod tests {
         let dir = t.path().join("srv");
         let mut r = req(&dir);
         assert!(!plan_steps(&r, true).iter().any(|p| p.id == "system.app"), "no app step by default");
-        r.app = Some(crate::app_install::AppChoice::default());
+        r.app = Some(crate::app_install::AppChoice { desktop_shortcut: false });
         let ids: Vec<&str> = plan_steps(&r, true).iter().map(|p| p.id).collect();
         assert_eq!(&ids[ids.len() - 2..], ["system.app", "finalize"], "after config and services, before registering");
         r.catalog = Some("/nonexistent/catalog.json".into());
