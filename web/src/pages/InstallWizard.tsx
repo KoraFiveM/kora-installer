@@ -330,6 +330,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
         <Checkbox label="Show advanced options" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
       </div>
+      {at === 0 && !editing && (
+        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline-offset-4 hover:underline">Add an existing server</Link> instead.</p>
+      )}
       {saved && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
           <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers (not your licence key).</p>

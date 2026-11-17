@@ -307,6 +307,11 @@ describe('Install wizard: who may install', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('offers "Add an existing server" on the first step, so the wizard is never a dead end', async () => {
+    renderWithMeta({ remote: false, identity: { name: 'sam', provider: 'local', role: 'admin' } })
+    expect(await screen.findByRole('link', { name: 'Add an existing server' })).toHaveAttribute('href', '/?add=1')
+  })
+
   it('lets a Tailscale admin install', async () => {
     renderWithMeta({ remote: true, allow_remote_destructive: true, identity: { name: 'sam', provider: 'tailscale', role: 'admin' } })
     expect(await screen.findByLabelText('Licence key')).toBeInTheDocument()

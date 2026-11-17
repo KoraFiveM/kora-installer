@@ -51,7 +51,18 @@ fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> 
         "status": status,
         "badge": badge_json(badge),
         "managed": is_managed(e),
+        "connect": connect_address(e.ports.game),
     })
+}
+
+/// `<this computer's network address>:<game port>`, the address someone on the same network types to
+/// join, or `null` when the address cannot be found. It is NOT an address players on the internet can
+/// use: that is the router's public address (which Kora cannot see) with the same port forwarded.
+fn connect_address(game_port: u16) -> Value {
+    match kora_core::launch::lan_address() {
+        Some(ip) => json!(format!("{ip}:{game_port}")),
+        None => Value::Null,
+    }
 }
 
 /// The body of `GET /servers` (also what the events stream sends).

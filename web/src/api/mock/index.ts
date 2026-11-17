@@ -148,6 +148,7 @@ const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, sta
 
 const detail = (s: T.ServerSummary): T.ServerDetail => ({
   ...s,
+  connect: `192.168.1.20:${s.ports.game}`,
   running: s.status === 'running',
   game_listening: s.status === 'running',
   txadmin_up: s.status === 'running',
@@ -383,7 +384,7 @@ route('POST', '/session/link', () => {
   return { code, expires_in: 600 }
 })
 route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
-route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
+route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
     await sleep(1200)

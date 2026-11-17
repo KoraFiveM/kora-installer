@@ -345,6 +345,26 @@ async fn scan_and_adopt() {
 }
 
 #[tokio::test]
+async fn servers_carry_the_address_players_on_the_network_use() {
+    let f = FakeBackend::sample();
+    let a = app(&f);
+    let list = json_of(call(&a, "GET", "/servers", None).await).await;
+    for sv in list["servers"].as_array().unwrap() {
+        let port = sv["ports"]["game"].as_u64().unwrap();
+        match sv["connect"].as_str() {
+            // Network address and the server's own game port, never localhost or the txAdmin port.
+            Some(c) => {
+                assert!(c.ends_with(&format!(":{port}")), "{c}");
+                assert!(!c.starts_with("127.") && !c.starts_with("localhost"), "{c}");
+            }
+            None => assert!(sv["connect"].is_null()),
+        }
+    }
+    let one = json_of(call(&a, "GET", "/servers/prod", None).await).await;
+    assert!(one.get("connect").is_some(), "{one}");
+}
+
+#[tokio::test]
 async fn open_folder_uses_the_servers_own_folder_and_refuses_when_headless() {
     use kora_web::handlers::{servers::set_opener, system::seam::set_headless};
     let d = tempfile::tempdir().unwrap();
@@ -360,6 +380,9 @@ async fn open_folder_uses_the_servers_own_folder_and_refuses_when_headless() {
     set_headless(Some(true));
     let r = call(&a, "POST", "/servers/mine/open-folder", None).await;
     assert_eq!(r.status(), 400);
+    // The refusal gives the path, so the person can copy it and go there themselves.
+    let msg = json_of(r).await["error"]["message"].as_str().unwrap().to_string();
+    assert!(msg.contains(&d.path().display().to_string()), "{msg}");
     assert!(opened.lock().unwrap().is_empty());
     set_headless(Some(false));
     assert_eq!(
