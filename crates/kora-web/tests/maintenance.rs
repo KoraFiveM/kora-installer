@@ -16,10 +16,23 @@ const TOKEN: &str = "testtoken";
 const ADDR: &str = "127.0.0.1:47120";
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// These tests describe the "no way to elevate: give the command" answer. Windows would otherwise ask its
+/// UAC worker (and need a real Kora home), so the worker is switched off through the broker seam.
+struct NoWorker;
+impl kora_web::elevated::Broker for NoWorker {
+    fn supported(&self) -> bool {
+        false
+    }
+    fn open(&self, _home: Option<&str>) -> Result<Box<dyn kora_web::elevated::Channel>, kora_core::helper::worker::OpenError> {
+        unreachable!("the worker is switched off in this test file")
+    }
+}
+
 /// The maintenance seam is process-wide: tests take turns.
 fn setup(admin: bool) -> (axum::Router, Arc<FakeMaintenance>, MutexGuard<'static, ()>) {
     let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::remove_var("KORA_APP_PREFIX");
+    kora_web::elevated::set_broker_override(Some(Arc::new(NoWorker)));
     let m = FakeMaintenance::new(admin);
     maintenance::set_override(Some(m.clone()));
     let fake = FakeBackend::sample();
