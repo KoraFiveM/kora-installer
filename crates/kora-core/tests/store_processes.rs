@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use kora_core::api::{JobRegistry, JobState, Op};
 use kora_core::installer::registry::{PortsRecord, Registry, ServerEntry};
 use kora_core::installer::Mode;
 use kora_core::keystore::KeyStore;
@@ -87,6 +88,19 @@ fn worker_entry() {
             for i in 0.. {
                 keys.add(&format!("k{i}"), &format!("cfxk_until_killed_{i:06}")).unwrap();
             }
+        }
+        "job_hang" => {
+            // A durable job that shows progress and then never ends (the process is killed meanwhile).
+            let reg = JobRegistry::durable_in(home.clone());
+            let id = reg
+                .spawn(Op::UpdateApply, Some("srv".into()), |j| {
+                    j.event(serde_json::json!({"step": "download", "status": "running"}));
+                    std::thread::sleep(std::time::Duration::from_secs(600));
+                    Ok(serde_json::Value::Null)
+                })
+                .unwrap();
+            std::fs::write(home.join("job-id.txt"), id.0).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(600));
         }
         other => panic!("unknown role {other}"),
     }
@@ -181,4 +195,28 @@ fn a_process_killed_at_a_random_moment_between_writes_leaves_a_consistent_databa
             assert!(keys.get(&info.name).unwrap().starts_with("cfxk_"));
         }
     }
+}
+
+#[test]
+fn a_panel_killed_while_a_job_runs_leaves_an_interrupted_job_for_the_next_panel() {
+    let h = tempfile::tempdir().unwrap();
+    let mut k = spawn("job_hang", h.path(), 0, 0);
+    let idfile = h.path().join("job-id.txt");
+    let started = std::time::Instant::now();
+    while !idfile.exists() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "the worker never started its job");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let id = std::fs::read_to_string(&idfile).unwrap();
+    // the event is written at once (the job had been quiet), so it is there when the process is killed
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    k.kill().unwrap();
+    let _ = k.wait();
+    // the next panel starts (for real: the pid of the dead process is really gone)
+    let next = JobRegistry::durable_in(h.path().to_path_buf());
+    let j = next.get(&id).expect("the job is remembered");
+    assert_eq!(j.state, JobState::Interrupted);
+    assert_eq!(j.events.len(), 1, "what it had shown is kept");
+    let e: serde_json::Value = serde_json::from_str(j.error.as_deref().unwrap()).unwrap();
+    assert_eq!(e["code"], "job.interrupted");
 }

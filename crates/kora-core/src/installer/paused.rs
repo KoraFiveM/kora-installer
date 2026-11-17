@@ -75,6 +75,17 @@ impl PausedStore {
     /// Write a stopped install down. Only installs that use a saved key can be (`Ok(false)` otherwise:
     /// nothing is written). One stopped install per folder: an older one for the same folder goes.
     pub fn save(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value]) -> std::io::Result<bool> {
+        self.save_as(job, req, via_helper, failed_step, finished, false)
+    }
+
+    /// An install that is RUNNING now, written down so that a panel that dies leaves something to carry on
+    /// from. It is not offered as "carry on" while its job runs ([`list`](Self::list) skips it); the next
+    /// panel that finds the job unfinished makes it a stopped install (see `store::jobs::recover`).
+    pub fn save_in_progress(&self, job: &str, req: &InstallRequest, via_helper: bool, finished: &[Value]) -> std::io::Result<bool> {
+        self.save_as(job, req, via_helper, None, finished, true)
+    }
+
+    fn save_as(&self, job: &str, req: &InstallRequest, via_helper: bool, failed_step: Option<&str>, finished: &[Value], in_progress: bool) -> std::io::Result<bool> {
         if !valid_id(job) || req.license_key_name.is_none() {
             return Ok(false);
         }
@@ -88,9 +99,9 @@ impl PausedStore {
         s.write(|tx| {
             tx.execute("DELETE FROM paused_installs WHERE dir = ?1 AND job <> ?2", rusqlite::params![dir, job])?;
             tx.execute(
-                "INSERT INTO paused_installs (job, dir, via_helper, failed_step, req_json, finished_json, saved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(job) DO UPDATE SET dir = excluded.dir, via_helper = excluded.via_helper, failed_step = excluded.failed_step, req_json = excluded.req_json, finished_json = excluded.finished_json, saved_at = excluded.saved_at",
-                rusqlite::params![job, dir, via_helper, failed_step, req_json, finished_json, now() as i64],
+                "INSERT INTO paused_installs (job, dir, via_helper, failed_step, req_json, finished_json, saved_at, in_progress) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(job) DO UPDATE SET dir = excluded.dir, via_helper = excluded.via_helper, failed_step = excluded.failed_step, req_json = excluded.req_json, finished_json = excluded.finished_json, saved_at = excluded.saved_at, in_progress = excluded.in_progress",
+                rusqlite::params![job, dir, via_helper, failed_step, req_json, finished_json, now() as i64, in_progress],
             )?;
             Ok(())
         })
@@ -141,7 +152,7 @@ impl PausedStore {
         });
         let rows: Vec<(String, bool, Option<String>, String, String, i64)> = s
             .read(|c| {
-                let mut st = c.prepare("SELECT job, via_helper, failed_step, req_json, finished_json, saved_at FROM paused_installs ORDER BY saved_at, job")?;
+                let mut st = c.prepare("SELECT job, via_helper, failed_step, req_json, finished_json, saved_at FROM paused_installs WHERE in_progress = 0 ORDER BY saved_at, job")?;
                 let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?.collect::<Result<Vec<_>, _>>()?;
                 Ok(v)
             })

@@ -108,16 +108,17 @@ CREATE TABLE hub_nodes (
         name: "durable jobs",
         sql: r#"
 CREATE TABLE jobs (
-    id          TEXT PRIMARY KEY NOT NULL,
-    op          TEXT NOT NULL,
-    server      TEXT,
-    state       TEXT NOT NULL,         -- running | done | failed | interrupted
-    started     INTEGER NOT NULL,
-    ended       INTEGER,
-    result_json TEXT,
-    error_json  TEXT,                  -- a Problem as the UI reads it
-    owner_pid   INTEGER NOT NULL DEFAULT 0
-) WITHOUT ROWID;
+    id             TEXT PRIMARY KEY NOT NULL,
+    op             TEXT NOT NULL,
+    server         TEXT,
+    state          TEXT NOT NULL,      -- running | done | failed | interrupted
+    started        INTEGER NOT NULL,
+    ended          INTEGER,
+    result_json    TEXT,
+    error          TEXT,               -- exactly what the job returned (a packed Problem or a JSON error) or the interruption's Problem
+    owner_pid      INTEGER NOT NULL DEFAULT 0,
+    owner_instance TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX jobs_started ON jobs(started);
 CREATE TABLE job_events (
     job_id     TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -125,6 +126,9 @@ CREATE TABLE job_events (
     event_json TEXT NOT NULL,
     PRIMARY KEY (job_id, n)
 ) WITHOUT ROWID;
+-- An install that is running right now (and so is not offered as "carry on" yet); a restart that finds its job
+-- unfinished turns it into a stopped install that can be continued.
+ALTER TABLE paused_installs ADD COLUMN in_progress INTEGER NOT NULL DEFAULT 0;
 "#,
     },
     Migration {
