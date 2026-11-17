@@ -260,6 +260,12 @@ pub fn record_of(dir: &Path) -> Option<ContainerRecord> {
     ContainerRecord::load(dir)
 }
 
+/// The sentence with a capital first letter.
+pub fn capitalised(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
 /// A container-mode server found by its registry name: its folder, its (checked) record and its slug.
 #[derive(Debug, Clone)]
 pub struct Target {
