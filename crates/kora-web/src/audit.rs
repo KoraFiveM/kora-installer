@@ -114,43 +114,71 @@ pub fn server_in(path: &str) -> Option<String> {
 
 /// Everything the guard needs to write the row once the answer is known.
 pub struct Ctx {
+    home: std::path::PathBuf,
     op: Op,
     server: Option<String>,
     actor: Actor,
 }
 
-fn home() -> std::path::PathBuf {
-    kora_core::installer::registry::kora_home()
+enum Msg {
+    Row(std::path::PathBuf, Box<New>),
+    Flush(std::sync::mpsc::Sender<()>),
 }
 
-fn write(op: Op, server: Option<&str>, a: &Actor, res: &str, detail: Option<String>) {
-    audit::record_quiet(
-        &home(),
-        &New {
-            op: op.name().to_string(),
-            server: server.map(String::from),
-            actor_kind: a.kind.to_string(),
-            actor_name: a.name.clone(),
-            provider: a.provider.map(String::from),
-            role: a.role.map(String::from),
-            result: res.to_string(),
-            detail,
-        },
-    );
+/// One writer thread, so a request never waits for the disk and rows land in the order they were handed over.
+fn queue() -> &'static std::sync::Mutex<std::sync::mpsc::Sender<Msg>> {
+    static Q: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<Msg>>> = std::sync::OnceLock::new();
+    Q.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Msg>();
+        let _ = std::thread::Builder::new().name("kora-audit".into()).spawn(move || {
+            for m in rx {
+                match m {
+                    Msg::Row(home, n) => audit::record_quiet(&home, &n),
+                    Msg::Flush(done) => {
+                        let _ = done.send(());
+                    }
+                }
+            }
+        });
+        std::sync::Mutex::new(tx)
+    })
+}
+
+/// Wait until every row handed over so far is written (tests; and when the panel stops).
+#[doc(hidden)]
+pub fn flush() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if queue().lock().unwrap_or_else(|p| p.into_inner()).send(Msg::Flush(tx)).is_ok() {
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(10));
+    }
+}
+
+fn write(home: &std::path::Path, op: Op, server: Option<&str>, a: &Actor, res: &str, detail: Option<String>) {
+    let row = New {
+        op: op.name().to_string(),
+        server: server.map(String::from),
+        actor_kind: a.kind.to_string(),
+        actor_name: a.name.clone(),
+        provider: a.provider.map(String::from),
+        role: a.role.map(String::from),
+        result: res.to_string(),
+        detail,
+    };
+    let _ = queue().lock().unwrap_or_else(|p| p.into_inner()).send(Msg::Row(home.to_path_buf(), Box::new(row)));
 }
 
 impl Ctx {
     /// `None` when the request is not one to record.
-    pub fn begin(method: &Method, path: &str, caller: &Caller) -> Option<Ctx> {
+    pub fn begin(home: &std::path::Path, method: &Method, path: &str, caller: &Caller) -> Option<Ctx> {
         let op = roles::op_for(method.as_str(), path)?;
-        audited(op, method).then(|| Ctx { op, server: server_in(path), actor: actor_of(caller.remote, caller.identity.as_ref()) })
+        audited(op, method).then(|| Ctx { home: home.to_path_buf(), op, server: server_in(path), actor: actor_of(caller.remote, caller.identity.as_ref()) })
     }
 
     /// The request was answered.
     pub fn answered(self, resp: &Response) {
         let status = resp.status();
         if let Some(job) = resp.extensions().get::<JobStarted>() {
-            write(self.op, job.server.as_deref().or(self.server.as_deref()), &self.actor, result::STARTED, Some(format!("job {}", job.id)));
+            write(&self.home, self.op, job.server.as_deref().or(self.server.as_deref()), &self.actor, result::STARTED, Some(format!("job {}", job.id)));
             return;
         }
         let res = if status.is_success() {
@@ -160,23 +188,23 @@ impl Ctx {
         } else {
             result::FAILED
         };
-        write(self.op, self.server.as_deref(), &self.actor, res, (!status.is_success()).then(|| format!("HTTP {}", status.as_u16())));
+        write(&self.home, self.op, self.server.as_deref(), &self.actor, res, (!status.is_success()).then(|| format!("HTTP {}", status.as_u16())));
     }
 
     /// Wait for the job to end (on its own thread) and write how it ended.
     pub fn follow_job(&self, st: &AppState, job: &JobStarted) {
         let Some((_, rx)) = st.registry.subscribe(&job.id) else { return };
-        let (op, actor, server, id) = (self.op, self.actor.clone(), job.server.clone().or_else(|| self.server.clone()), job.id.clone());
+        let (home, op, actor, server, id) = (self.home.clone(), self.op, self.actor.clone(), job.server.clone().or_else(|| self.server.clone()), job.id.clone());
         let _ = std::thread::Builder::new().name("kora-audit-job".into()).spawn(move || {
             use kora_core::api::JobMessage;
             loop {
                 match rx.recv() {
                     Ok(JobMessage::Event(_)) => {}
-                    Ok(JobMessage::Done(_)) => return write(op, server.as_deref(), &actor, result::OK, Some(format!("job {id}"))),
+                    Ok(JobMessage::Done(_)) => return write(&home, op, server.as_deref(), &actor, result::OK, Some(format!("job {id}"))),
                     Ok(JobMessage::Failed(e)) => {
                         // Only the error CODE: the text can name paths.
                         let code = crate::jobs::job_error(&e).get("code").and_then(Value::as_str).unwrap_or("failed").to_string();
-                        return write(op, server.as_deref(), &actor, result::FAILED, Some(format!("job {id}: {code}")));
+                        return write(&home, op, server.as_deref(), &actor, result::FAILED, Some(format!("job {id}: {code}")));
                     }
                     Err(_) => return,
                 }
@@ -186,20 +214,22 @@ impl Ctx {
 }
 
 /// A signed-in remote user was turned away by the role rules.
-pub fn refused(method: &Method, path: &str, id: &Identity) {
+pub fn refused(home: &std::path::Path, method: &Method, path: &str, id: &Identity) {
     if let Some(op) = roles::op_for(method.as_str(), path) {
         if audited(op, method) {
-            write(op, server_in(path).as_deref(), &actor_of(true, Some(id)), result::REFUSED, None);
+            write(home, op, server_in(path).as_deref(), &actor_of(true, Some(id)), result::REFUSED, None);
         }
     }
 }
 
 /// `GET /audit?limit=&before=&server=&op=&actor=&result=&since=`: the newest first. Admins only.
-pub async fn audit_list(State(_st): State<AppState>, Extension(caller): Extension<Caller>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
+pub async fn audit_list(State(st): State<AppState>, Extension(caller): Extension<Caller>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Value>, ApiError> {
     if caller.remote && !caller.identity.as_ref().is_some_and(|i| i.role >= Role::Admin) {
         return Err(ApiError::forbidden("Only an administrator can see the audit log."));
     }
+    let home = st.audit_home.clone().unwrap_or_else(kora_core::installer::registry::kora_home);
     crate::blocking(move || {
+        flush();
         let limit: usize = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(100);
         let query = audit::Query {
             limit: limit + 1,
@@ -210,7 +240,7 @@ pub async fn audit_list(State(_st): State<AppState>, Extension(caller): Extensio
             result: q.get("result").filter(|v| !v.is_empty()).cloned(),
             since: q.get("since").and_then(|v| v.parse().ok()),
         };
-        let s = kora_core::store::Store::open(&home()).map_err(|p| ApiError::problem(StatusCode::INTERNAL_SERVER_ERROR, p))?;
+        let s = kora_core::store::Store::open(&home).map_err(|p| ApiError::problem(StatusCode::INTERNAL_SERVER_ERROR, p))?;
         let mut rows = audit::list(&s, &query).map_err(|p| ApiError::problem(StatusCode::INTERNAL_SERVER_ERROR, p))?;
         let more = rows.len() > limit.clamp(1, 500);
         rows.truncate(limit.clamp(1, 500));

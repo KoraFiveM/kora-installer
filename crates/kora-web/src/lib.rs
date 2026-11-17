@@ -1,5 +1,6 @@
 //! Kora Panel HTTP server: security middleware, sessions, jobs/SSE, embedded UI.
-mod audit;
+#[doc(hidden)]
+pub mod audit;
 pub mod elevated;
 mod error;
 pub mod handlers;
@@ -95,6 +96,9 @@ pub struct AppState {
     pub events: Arc<handlers::system::EventsHub>,
     /// The last `GET /fleet` answer, for a few seconds.
     pub fleet_cache: Arc<handlers::hub::FleetCache>,
+    /// The Kora folder whose store gets an audit row for every state-changing request. `None` (the default: tests and
+    /// embedders) records nothing and never touches the disk; the real panel sets it ([`AppState::with_audit`]).
+    pub audit_home: Option<std::path::PathBuf>,
 }
 
 impl AppState {
@@ -119,7 +123,13 @@ impl AppState {
             streams: Arc::default(),
             events: Arc::default(),
             fleet_cache: Arc::default(),
+            audit_home: None,
         }
+    }
+    /// Record state-changing requests in the audit log of the store in this Kora folder.
+    pub fn with_audit(mut self, home: std::path::PathBuf) -> Self {
+        self.audit_home = Some(home);
+        self
     }
     /// A one-time code for a sign-in link: `http://127.0.0.1:<port>/#code=<code>`. Works once, for ten
     /// minutes, from this computer only.
@@ -149,9 +159,7 @@ impl AppState {
     }
     /// The real setup: `SystemBackend` and one registry that both starts and serves jobs.
     pub fn system(token: String, addr: SocketAddr) -> Self {
-        // Jobs are kept in the store: history survives a restart, and what was running when the last panel died is
-        // marked interrupted.
-        let registry = JobRegistry::durable();
+        let registry = JobRegistry::new();
         let mut st = Self::new(token, addr, Arc::new(registry.clone()));
         st.registry = registry;
         st
@@ -479,7 +487,9 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let listener = bind_retrying(addr).await.map_err(|source| PanelError::Bind { addr, source })?;
         let addr = listener.local_addr()?;
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
-        let state = AppState::system(token.clone(), addr).with_remote(rem);
+        // The real panel keeps its jobs in the store: history survives a restart, and what was running when the last panel died is
+        // marked interrupted. (Tests use `AppState::system` with the in-memory registry and never touch the Kora folder.)
+        let state = AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem);
         for w in &warnings {
             eprintln!("{w}");
         }
