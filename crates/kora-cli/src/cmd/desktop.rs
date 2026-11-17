@@ -100,6 +100,24 @@ pub(crate) fn run(cmd: DesktopCmd) -> i32 {
     }
 }
 
+/// `kora app uninstall`: if the desktop app is installed next to `kora`, have it take its own "start with
+/// Windows / when I sign in" entry out (`kora-desktop --uninstall`; per-user, no administrator rights).
+pub(crate) fn remove_autostart(dry_run: bool) {
+    let Ok(kora) = std::env::current_exe() else { return };
+    let shell = kora_core::app_install::user::shell_sibling(&kora, cfg!(windows));
+    if !shell.is_file() {
+        return;
+    }
+    if dry_run {
+        println!("  - Take the Kora desktop app out of what starts when you sign in");
+        return;
+    }
+    match std::process::Command::new(&shell).arg("--uninstall").status() {
+        Ok(s) if s.success() => println!("  - The Kora desktop app no longer starts when you sign in"),
+        _ => println!("  note: could not turn off the Kora desktop app's start-up entry; use its tray menu (\"Start with Windows\") instead."),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
