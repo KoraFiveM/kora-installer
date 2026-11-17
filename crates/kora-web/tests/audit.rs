@@ -68,7 +68,7 @@ async fn changes_are_recorded_with_who_and_how_it_went_and_reads_are_not() {
     let [viewer, operator, admin] = w.tokens.clone();
     // reads and looking are not recorded
     assert_eq!(send(&w, "GET", "/api/v1/servers", &operator, Some(REMOTE_PEER), None).await.0, 200);
-    assert_eq!(send(&w, "POST", "/api/v1/checks/ports", &admin, Some(REMOTE_PEER), Some(json!({"game": 30120, "txadmin": 40120}))).await.0 / 100 != 5, true);
+    assert!(send(&w, "POST", "/api/v1/checks/ports", &admin, Some(REMOTE_PEER), Some(json!({"game": 30120, "txadmin": 40120}))).await.0 / 100 != 5);
     assert!(rows(&w).is_empty(), "{:?}", rows(&w));
     // an operator restarts a server (allowed), a viewer tries (refused), this computer stops one
     let (s, _) = send(&w, "POST", "/api/v1/servers/prod/control", &operator, Some(REMOTE_PEER), Some(json!({"action": "restart"}))).await;
