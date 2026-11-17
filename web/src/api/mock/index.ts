@@ -804,7 +804,7 @@ route('GET', '/artifacts', () => ({ recommended: 17000, items: [17200, 17100, 17
 route('GET', '/installs/defaults', () => {
   const taken = servers.map((s) => s.ports.game)
   const game = nextFree(30120, taken)
-  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall && prefs.savedInstall.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { ...prefs.savedInstall, license_key_name: null } : prefs.savedInstall, profile: keysMock.profile(), ...(prefs.savedInstall?.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { saved_key_missing: prefs.savedInstall.license_key_name } : {}) } satisfies T.InstallDefaults
+  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall && prefs.savedInstall.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { ...prefs.savedInstall, license_key_name: null } : prefs.savedInstall, profile: keysMock.profile(), resumable: [...paused.entries()].map(([job, p]) => ({ job, name: p.req.name, failed_step: p.failed })), ...(prefs.savedInstall?.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { saved_key_missing: prefs.savedInstall.license_key_name } : {}) } satisfies T.InstallDefaults
 })
 route('DELETE', '/installs/saved', () => {
   prefs.savedInstall = null

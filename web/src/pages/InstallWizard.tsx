@@ -208,6 +208,8 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const [diskOk, setDiskOk] = useState(true)
   /** Carrying on with a stopped install did not work (for example: the panel was restarted). */
   const [resumeErr, setResumeErr] = useState<unknown>(null)
+  /** "Carry on" on an install that stopped earlier did not work (for example: its saved key was deleted). */
+  const [carryErr, setCarryErr] = useState<unknown>(null)
   /** A failure offered "Sign in to GitHub": the sign-in is shown under it. */
   const [githubAsked, setGithubAsked] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
@@ -346,6 +348,17 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
             <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(saved.mode ?? f.mode).indexOf('licence')) }}>Continue where I left off</Button>
             <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>
           </div>
+        </Alert>
+      )}
+      {defaults.resumable && defaults.resumable.length > 0 && at === 0 && !editing && (
+        <Alert tone="info" title="An install stopped and can carry on">
+          {defaults.resumable.map((r) => (
+            <div key={r.job} className="mt-1 flex flex-wrap items-center gap-2">
+              <span>&quot;{r.name}&quot; stopped{r.failed_step ? ` at the step ${r.failed_step}` : ''}. Its answers and licence key are kept.</span>
+              <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>Carry on</Button>
+            </div>
+          ))}
+          <ErrorNotice error={carryErr} actions={startActions} />
         </Alert>
       )}
       <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Steps">

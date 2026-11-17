@@ -5,6 +5,7 @@ import InstallWizard from '../InstallWizard'
 import { installMock } from '@/api/mock'
 import { api } from '@/api/client'
 import { renderApp } from '@/test/utils'
+import { buildRequest, initialForm } from './form'
 
 const MAIN = 'cfxk_MAINKEYMAINKEY12345_1111'
 const TEST = 'cfxk_TESTKEYTESTKEY12345_2222'
@@ -147,5 +148,20 @@ describe('Remembered Cfx.re name and GitHub owner', () => {
     await user.click(screen.getByRole('button', { name: 'Install the server' }))
     expect(start.mock.calls[0][0].cfx_identifier).toBe('fivem:4465268')
     start.mockRestore()
+  })
+})
+
+describe('A stopped install', () => {
+  it('is offered in the wizard (also after a panel restart) and carries on with its saved key', async () => {
+    const user = userEvent.setup()
+    await api.keys.add('Main', MAIN)
+    const d = await api.installs.defaults()
+    const form = { ...initialForm(d, (await api.keys.list()).keys), name: 'fail-town' }
+    const { job } = await api.installs.start(buildRequest(form))
+    await waitFor(async () => expect((await api.jobs.get(job)).state).toBe('failed'))
+    renderApp(<InstallWizard />, '/install')
+    expect(await screen.findByText(/"fail-town" stopped at the step build.db/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Carry on' }))
+    expect(await screen.findByText(/Installing your server|All done/)).toBeInTheDocument()
   })
 })
