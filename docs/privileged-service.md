@@ -56,7 +56,7 @@ The parser is strict, and the service passes the child arguments made from the t
 
 ## Slices
 
-1. **Design, protocol, validator, ownership (done):** `privsvc::{op, policy, ownership, paths, audit}`, 26 tests.
+1. **Design, protocol, validator, ownership (done):** `privsvc::{op, policy, ownership, paths, audit, dispatch}`, 35 tests. `dispatch::handle` is the whole per-request pipeline (authorise, parse, re-derive and check through the `Host` trait, run, ledger, audit); both OS services will implement `Host` and the socket/pipe loop only.
 2. Linux service + `.deb` + panel routing.
 3. Windows service + MSI + panel routing.
 4. Migration from 0.6.x / 0.7.0 ("Finish upgrading Kora"; old update tasks rewritten to the unelevated form).

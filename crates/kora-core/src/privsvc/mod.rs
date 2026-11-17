@@ -65,6 +65,7 @@
 //! `deny`, or uninstalls the service).
 
 pub mod audit;
+pub mod dispatch;
 pub mod op;
 pub mod ownership;
 pub mod paths;
