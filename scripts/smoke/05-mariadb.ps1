@@ -68,8 +68,45 @@ Assert-That ($x.Code -eq 0) 'the generated login works'
 $acl = Get-Acl-Text "$d\database.json"
 Assert-That ($acl -notmatch '(?i)BUILTIN\\Users|Everyone|Authenticated Users') 'database.json ACL is restricted'
 Assert-That ((Get-Content "$d\secrets.cfg" -Raw) -match 'mysql_connection_string') 'secrets.cfg has the connection string'
-$r = Invoke-Native $kora @('delete', 'dbx', '-y'); Show 'kora delete dbx' $r
+# --- backup, wipe a table, restore (a real MariaDB), then a password-protected export
+$bk = 'C:\kora-smoke\backups-dbx'
+$null = Invoke-Sql $client.FullName $stockPort 'root' $pw 'CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(40))' $c.database
+$null = Invoke-Sql $client.FullName $stockPort 'root' $pw "INSERT INTO players VALUES (1,'alice'),(2,'bob')" $c.database
+$r = Invoke-Native $kora @('backup', 'create', 'dbx', '--folder', $bk); Show 'kora backup create dbx' $r
+Assert-That ($r.Code -eq 0) 'kora backup create exits 0'
+Assert-That ($r.Output -notmatch [regex]::Escape($c.password)) 'the database password is not printed'
+$arch = Get-ChildItem $bk -Recurse -Filter '*.tar.gz' | Select-Object -First 1
+Assert-That ($null -ne $arch) 'the backup archive exists'
+$acl = Get-Acl-Text $arch.FullName
+Assert-That ($acl -notmatch '(?i)BUILTIN\\Users|Everyone|Authenticated Users') 'the archive is not readable by other accounts'
+$r = Invoke-Native $kora @('backup', 'verify', 'dbx', 'latest'); Show 'kora backup verify' $r
+Assert-That ($r.Code -eq 0) 'kora backup verify exits 0'
+$null = Invoke-Sql $client.FullName $stockPort 'root' $pw 'DELETE FROM players' $c.database
+$x = Invoke-Sql $client.FullName $stockPort 'root' $pw 'SELECT COUNT(*) FROM players' $c.database
+Assert-That ($x.Output -eq '0') 'the table is wiped'
+$r = Invoke-Native $kora @('backup', 'restore', 'dbx', 'latest', '--yes'); Show 'kora backup restore' $r
+Assert-That ($r.Code -eq 0) 'kora backup restore exits 0'
+$x = Invoke-Sql $client.FullName $stockPort 'root' $pw 'SELECT COUNT(*) FROM players' $c.database
+Assert-That ($x.Output -eq '2') "both rows are back after the restore (got '$($x.Output)')"
+$mv = 'C:\kora-smoke\move-dbx'
+$r = Invoke-Native $kora @('backup', 'create', 'dbx', '--for-move', '--folder', $mv) @{ KORA_BACKUP_PASSWORD = 'a smoke test passphrase' }; Show 'kora backup create --for-move' $r
+Assert-That ($r.Code -eq 0) 'the password-protected export is made'
+$mvf = Get-ChildItem $mv -Recurse -Filter '*.tar.gz.age' | Select-Object -First 1
+Assert-That ($null -ne $mvf) 'the export is an age file'
+$r = Invoke-Native $kora @('delete', 'dbx', '-y'); Show 'kora delete dbx (before the import)' $r
 Assert-That ($r.Code -eq 0) 'kora delete exits 0'
+$d2 = 'C:\kora-smoke\dbx-moved'
+$r = Invoke-Native $kora @('backup', 'import', $mvf.FullName, '--name', 'dbx-moved', '--dir', $d2, '--game-port', '32121', '--txadmin-port', '42121', '--yes') @{ KORA_BACKUP_PASSWORD = 'a smoke test passphrase' }; Show 'kora backup import' $r
+Assert-That ($r.Code -eq 0) 'kora backup import exits 0'
+$c2 = Read-DbName $d2
+Assert-That ($c2.database -like 'kora_*' -and $c2.database -ne $c.database) 'the import made a NEW database'
+$x = Invoke-Sql $client.FullName $stockPort 'root' $pw 'SELECT COUNT(*) FROM players' $c2.database
+Assert-That ($x.Output -eq '2') "the rows are in the new database (got '$($x.Output)')"
+Assert-That ((Get-Content "$d2\secrets.cfg" -Raw) -match 'cfxk_FAKE') 'the licence key moved with the server'
+$r = Invoke-Native $kora @('delete', 'dbx-moved', '-y'); Show 'kora delete dbx-moved' $r
+Assert-That ($r.Code -eq 0) 'the imported server is deleted'
+$c = $c2; $d = $d2
+# ($c and $d now describe the imported server, which was deleted above: the checks below look at its database and folder)
 $x = Invoke-Sql $client.FullName $stockPort 'root' $pw "SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$($c.database)') + (SELECT COUNT(*) FROM mysql.user WHERE user='$($c.user)')"
 Assert-That ($x.Output -eq '0') "the database AND its user are gone after kora delete (got '$($x.Output)')"
 Assert-That (-not (Test-Path $d)) 'server folder gone'
