@@ -1,5 +1,5 @@
-//! Server registry (`~/.kora/servers.json`, Windows `%LOCALAPPDATA%\Kora\servers.json`) and the
-//! per-server `kora-server.json`. Neither file ever contains secrets.
+//! Server registry (in the Kora home's database, see [`crate::store`]; it was `servers.json` before v0.8) and
+//! the per-server `kora-server.json`. Neither ever contains secrets.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::types::{Mode, Ports};
+use crate::store::{problem_to_io, Store};
 
 /// Directory holding the registry. `KORA_HOME` overrides (tests, portable installs).
 pub fn kora_home() -> PathBuf {
@@ -73,46 +74,65 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// The servers in the store of the Kora folder that holds `path` (the file name is only used to find
+    /// the folder: the data lives in the database, see [`crate::store`]). Nothing registered: empty.
     pub fn load_from(path: &Path) -> std::io::Result<Self> {
-        match fs::read(path) {
-            Ok(b) => serde_json::from_slice(&b).map_err(std::io::Error::other),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(e),
-        }
+        let Some(s) = Store::open_existing_beside(path).map_err(problem_to_io)? else { return Ok(Self::default()) };
+        s.read(|c| read_servers(c)).map(|servers| Self { servers }).map_err(problem_to_io)
     }
 
     pub fn load() -> std::io::Result<Self> {
         Self::load_from(&registry_path())
     }
 
+    /// Replace the whole list in one transaction. (Two programs that each load, change and save can still
+    /// overwrite each other's change: use [`Registry::update_at`] for a change that must not be lost.)
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(d) = path.parent() {
-            fs::create_dir_all(d)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
-        fs::rename(tmp, path)
+        let s = Store::open_beside(path).map_err(problem_to_io)?;
+        s.write(|tx| write_servers(tx, &self.servers)).map_err(problem_to_io)
     }
 
     pub fn save(&self) -> std::io::Result<()> {
         self.save_to(&registry_path())
     }
 
-    /// Like [`save_to`](Self::save_to), but when no server is left the (empty) registry file is
-    /// deleted, and its folder too if that leaves it empty.
+    /// The old name of [`save_to`](Self::save_to): the registry used to be a file that was deleted when it
+    /// became empty. There is no such file any more, so this is the same.
     pub fn save_or_clean_to(&self, path: &Path) -> std::io::Result<()> {
-        if !self.servers.is_empty() {
-            return self.save_to(path);
+        if self.servers.is_empty() && Store::open_existing_beside(path).map_err(problem_to_io)?.is_none() {
+            return Ok(());
         }
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e),
+        self.save_to(path)
+    }
+
+    /// Read, change and write the list inside ONE transaction, so two programs changing it at the same
+    /// moment cannot lose each other's change. `f` returns whether it changed anything.
+    pub fn update_at<R>(path: &Path, f: impl FnOnce(&mut Registry) -> std::io::Result<R>) -> std::io::Result<R> {
+        let s = Store::open_beside(path).map_err(problem_to_io)?;
+        let mut inner: Option<std::io::Error> = None;
+        let r = s.write(|tx| {
+            let mut reg = Registry { servers: read_servers(tx)? };
+            match f(&mut reg) {
+                Ok(out) => {
+                    write_servers(tx, &reg.servers)?;
+                    Ok(out)
+                }
+                Err(e) => {
+                    let p = crate::problem::Problem::generic(e.to_string());
+                    inner = Some(e);
+                    Err(p)
+                }
+            }
+        });
+        match r {
+            Ok(v) => Ok(v),
+            Err(p) => Err(inner.unwrap_or_else(|| problem_to_io(p))),
         }
-        if let Some(d) = path.parent() {
-            let _ = fs::remove_dir(d); // only succeeds when empty
-        }
-        Ok(())
+    }
+
+    /// [`update_at`](Self::update_at) for the Kora home of this process.
+    pub fn update<R>(f: impl FnOnce(&mut Registry) -> std::io::Result<R>) -> std::io::Result<R> {
+        Self::update_at(&registry_path(), f)
     }
 
     /// Insert or replace by name.
@@ -135,6 +155,41 @@ impl Registry {
             .or_else(|| self.servers.iter().find(|s| super::slug(&s.name) == name_or_dir))
             .or_else(|| self.servers.iter().find(|s| same_path(&s.dir, Path::new(name_or_dir))))
     }
+}
+
+
+// ---- the `servers` table ---------------------------------------------------------------------
+
+fn read_servers(c: &rusqlite::Connection) -> Result<Vec<ServerEntry>, crate::problem::Problem> {
+    let mut st = c.prepare("SELECT name, dir, mode, game_port, txadmin_port, created_unix FROM servers ORDER BY seq")?;
+    let rows = st.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (name, dir, mode, game, txadmin, created) = row?;
+        let mode: Mode = serde_json::from_value(serde_json::Value::String(mode.clone()))
+            .map_err(|_| crate::problem::Problem::new(crate::store::codes::STORE_UNREADABLE, format!("Kora's server list has an unknown mode \"{mode}\" for \"{name}\". Nothing was changed.")))?;
+        out.push(ServerEntry { name, dir: PathBuf::from(dir), mode, ports: PortsRecord { game: game as u16, txadmin: txadmin as u16 }, created_unix: created as u64 });
+    }
+    Ok(out)
+}
+
+pub(crate) fn mode_text(m: Mode) -> String {
+    match serde_json::to_value(m) {
+        Ok(serde_json::Value::String(s)) => s,
+        _ => "production".into(),
+    }
+}
+
+fn write_servers(tx: &rusqlite::Connection, servers: &[ServerEntry]) -> Result<(), crate::problem::Problem> {
+    // Names are unique: the last of two equal names wins, like `upsert`.
+    tx.execute("DELETE FROM servers", [])?;
+    let mut st = tx.prepare("INSERT INTO servers (name, seq, dir, mode, game_port, txadmin_port, created_unix) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(name) DO UPDATE SET seq = excluded.seq, dir = excluded.dir, mode = excluded.mode, game_port = excluded.game_port, txadmin_port = excluded.txadmin_port, created_unix = excluded.created_unix")?;
+    for (i, e) in servers.iter().enumerate() {
+        st.execute(rusqlite::params![e.name, i as i64, e.dir.to_string_lossy(), mode_text(e.mode), e.ports.game as i64, e.ports.txadmin as i64, e.created_unix as i64])?;
+    }
+    Ok(())
 }
 
 /// One installed resource, as recorded in `kora-server.json`.
@@ -227,10 +282,9 @@ mod tests {
         assert!(r2.find("/x").is_some());
         let mut r2 = r2;
         assert!(r2.remove("a") && !r2.remove("a"));
-        // an emptied registry disappears (with its folder, when nothing else is in it)
         r2.save_or_clean_to(&p).unwrap();
-        assert!(!p.exists() && !p.parent().unwrap().exists());
-        r2.save_or_clean_to(&p).unwrap(); // already gone: fine
+        assert!(Registry::load_from(&p).unwrap().servers.is_empty());
+        r2.save_or_clean_to(&p).unwrap(); // saving an empty list again: fine
     }
 
     #[test]

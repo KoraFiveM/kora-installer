@@ -1,20 +1,20 @@
 //! What Kora remembers about the person between installs: their Cfx.re name (and the identifier it
 //! resolved to) and the GitHub owner they fork into. `<kora home>/profile.json`.
 //!
-//! Nothing in this file is secret (a public forum name, its public id, a public GitHub login), so it is
-//! a normal file, separate from `secrets.json`. The wizard pre-fills from it; the person can edit or
-//! forget any of it. A damaged file is treated as empty (it only saves typing) and replaced on the next save.
+//! Nothing in here is secret (a public forum name, its public id, a public GitHub login), so it has its
+//! own table, separate from the saved keys. The wizard pre-fills from it; the person can edit or forget
+//! any of it. Anything unreadable is treated as empty (it only saves typing). Before v0.8 this was
+//! `profile.json`; the store imports that file once (see `store::legacy`).
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
 use crate::installer::registry::kora_home;
+use crate::problem::Problem;
+use crate::store::{problem_to_io, Store};
 
 pub const FILE_NAME: &str = "profile.json";
-
-static LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
@@ -48,7 +48,8 @@ impl Field {
     }
 }
 
-/// The file in the Kora home (or elsewhere, for tests).
+/// The profile in the Kora home's store (or in the home beside `path`, for tests): `path` only says which
+/// Kora home (`<home>/profile.json` was the file before v0.8; the data is in the database now).
 #[derive(Debug, Clone)]
 pub struct ProfileStore {
     path: PathBuf,
@@ -60,6 +61,38 @@ impl Default for ProfileStore {
     }
 }
 
+const FIELDS: [&str; 3] = ["cfx_username", "cfx_identifier", "github_owner"];
+
+fn read(c: &rusqlite::Connection) -> Result<Profile, Problem> {
+    let mut p = Profile::default();
+    let mut st = c.prepare("SELECT field, value FROM profile")?;
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (k, v) = row?;
+        match k.as_str() {
+            "cfx_username" => p.cfx_username = Some(v),
+            "cfx_identifier" => p.cfx_identifier = Some(v),
+            "github_owner" => p.github_owner = Some(v),
+            _ => {}
+        }
+    }
+    Ok(p)
+}
+
+fn write(c: &rusqlite::Connection, p: &Profile) -> Result<(), Problem> {
+    let vals = [&p.cfx_username, &p.cfx_identifier, &p.github_owner];
+    for (f, v) in FIELDS.iter().zip(vals) {
+        match v {
+            Some(v) => {
+                c.execute("INSERT INTO profile (field, value) VALUES (?1, ?2) ON CONFLICT(field) DO UPDATE SET value = excluded.value", [f, v.as_str()])?;
+            }
+            None => {
+                c.execute("DELETE FROM profile WHERE field = ?1", [f])?;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl ProfileStore {
     pub fn at(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
@@ -69,25 +102,25 @@ impl ProfileStore {
         &self.path
     }
 
+    /// What is remembered. It only saves typing, so anything that goes wrong reads as "nothing remembered".
     pub fn load(&self) -> Profile {
-        std::fs::read(&self.path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let Ok(Some(s)) = Store::open_existing_beside(&self.path) else { return Profile::default() };
+        s.read(read).unwrap_or_default()
     }
 
-    /// Change the given fields. Best effort for the caller: a failure to remember never blocks an install.
+    /// Change the given fields (in one transaction: two programs changing different fields keep both).
+    /// Best effort for the caller: a failure to remember never blocks an install.
     pub fn update(&self, cfx_username: Field, cfx_identifier: Field, github_owner: Field) -> std::io::Result<Profile> {
-        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let mut p = self.load();
-        cfx_username.apply(&mut p.cfx_username);
-        cfx_identifier.apply(&mut p.cfx_identifier);
-        github_owner.apply(&mut p.github_owner);
-        if let Some(d) = self.path.parent() {
-            std::fs::create_dir_all(d)?;
-        }
-        let text = serde_json::to_string_pretty(&p).map_err(std::io::Error::other)?;
-        // Never through a link: `kora install` can run as root (through the helper) inside the user's own folder.
-        crate::fsutil::write_no_follow(&self.path, text.as_bytes(), 0o644)?;
-        crate::keystore::hand_to_home_owner(&self.path);
-        Ok(p)
+        let s = Store::open_beside(&self.path).map_err(problem_to_io)?;
+        s.write(|tx| {
+            let mut p = read(tx)?;
+            cfx_username.apply(&mut p.cfx_username);
+            cfx_identifier.apply(&mut p.cfx_identifier);
+            github_owner.apply(&mut p.github_owner);
+            write(tx, &p)?;
+            Ok(p)
+        })
+        .map_err(problem_to_io)
     }
 
     /// Remember a Cfx.re account that was just found.
@@ -101,11 +134,12 @@ impl ProfileStore {
     }
 
     pub fn forget_all(&self) -> std::io::Result<()> {
-        let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        match std::fs::remove_file(&self.path) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
-        }
+        let Some(s) = Store::open_existing_beside(&self.path).map_err(problem_to_io)? else { return Ok(()) };
+        s.write(|tx| {
+            tx.execute("DELETE FROM profile", [])?;
+            Ok(())
+        })
+        .map_err(problem_to_io)
     }
 }
 

@@ -138,6 +138,20 @@ impl Store {
         Ok(s)
     }
 
+    /// For READ-ONLY questions ("what servers are there?"): `None` when this home has no store yet and no
+    /// old JSON files to import, so asking never creates anything (a fresh machine, or a test that never
+    /// set `KORA_HOME`).
+    pub fn open_existing(home: &Path) -> Result<Option<Store>, Problem> {
+        if !db_path(home).exists() && !legacy::any_legacy_files(home) {
+            return Ok(None);
+        }
+        Store::open(home).map(Some)
+    }
+
+    pub fn open_existing_beside(file: &Path) -> Result<Option<Store>, Problem> {
+        Store::open_existing(file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")))
+    }
+
     /// Open without migrating or importing (backups, `store status`, tests).
     pub fn open_raw(home: &Path) -> Result<Store, Problem> {
         let dir = store_dir(home);
