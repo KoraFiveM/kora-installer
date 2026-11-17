@@ -68,7 +68,7 @@ pub async fn install_defaults(State(st): State<AppState>) -> Result<Json<Value>,
         let mut v = core::defaults(&*e, &servers);
         // What Kora remembers (never secret): the wizard pre-fills these, still editable.
         let p = ProfileStore::default().load();
-        v["profile"] = json!({"cfx_username": p.cfx_username, "cfx_identifier": p.cfx_identifier, "github_owner": p.github_owner});
+        v["profile"] = serde_json::to_value(super::keys::profile_view(&p)).unwrap_or(Value::Null);
         // Saved answers that name a saved key which is gone: say so instead of silently picking nothing.
         if let Some(n) = v["saved"]["license_key_name"].as_str().map(String::from) {
             if !KeyStore::default().exists(&n).unwrap_or(true) {

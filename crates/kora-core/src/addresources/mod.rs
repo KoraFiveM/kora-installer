@@ -19,6 +19,7 @@ use crate::installer::{layout, pinned};
 use crate::installer::{repo_slug, InstallError, Mode, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PlanItem {
     pub id: String,
     /// Relative to `<server>/resources/`.
@@ -39,6 +40,7 @@ pub struct PlanItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct AddPlan {
     pub items: Vec<PlanItem>,
     /// Ids that were asked for and are already installed.
@@ -154,6 +156,7 @@ impl Cloner for GitCloner<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct AddOutcome {
     pub installed: Vec<String>,
     pub failed: Vec<(String, String)>,

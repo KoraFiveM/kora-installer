@@ -95,6 +95,7 @@ fn lock_for(sf: &ServerFile) -> PResult<lock::UpdateLock> {
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "BranchState"))]
 #[serde(rename_all = "snake_case")]
 pub enum State {
     /// On its normal branch.
@@ -109,6 +110,7 @@ pub enum State {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ResourceBranch {
     pub id: String,
     /// The folder, relative to `resources/`.
@@ -116,8 +118,10 @@ pub struct ResourceBranch {
     pub state: State,
     /// Local branch name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub pr: Option<u32>,
     /// The normal branch (`dev`).
     pub default_branch: String,
@@ -127,9 +131,11 @@ pub struct ResourceBranch {
     /// Sets of changes Kora kept aside in this folder.
     pub stashes: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub note: Option<String>,
     /// For `unavailable`: what to do about it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub problem: Option<Problem>,
 }
 
@@ -209,6 +215,7 @@ pub fn overview(r: &dyn CommandRunner, sf: &ServerFile) -> PResult<Vec<ResourceB
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "BranchChoices"))]
 pub struct Choices {
     pub resource: ResourceBranch,
     pub branches: Branches,
@@ -282,6 +289,7 @@ pub fn page(r: &dyn CommandRunner, sf: &ServerFile, resource: &str) -> PResult<P
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PrChoices {
     pub prs: Vec<PullRequest>,
     pub notes: Vec<String>,
@@ -308,6 +316,7 @@ pub enum Target {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SwitchResult {
     pub resource: String,
     #[serde(flatten)]
@@ -315,6 +324,7 @@ pub struct SwitchResult {
     /// True when files changed: the running server still has the old version until it is restarted.
     pub needs_restart: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub restart_note: Option<String>,
 }
 
@@ -356,12 +366,14 @@ pub fn restore_stash(r: &dyn CommandRunner, sf: &ServerFile, resource: &str, ind
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BulkRow {
     pub id: String,
     /// The resource has this branch (here, on the fork or on the original).
     pub has: bool,
     /// Where Kora would take it from when the folder does not have it yet (`origin` / `upstream`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub from: Option<String>,
     /// Already on it.
     pub already: bool,
@@ -370,10 +382,12 @@ pub struct BulkRow {
     pub changed_count: usize,
     /// Why it cannot be looked at, if so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BulkPreview {
     pub branch: String,
     pub rows: Vec<BulkRow>,
@@ -434,6 +448,7 @@ pub fn bulk_preview(r: &dyn CommandRunner, sf: &ServerFile, branch: &str, fetch:
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum BulkStatus {
     Switched,
@@ -446,21 +461,25 @@ pub enum BulkStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BulkItem {
     pub id: String,
     pub status: BulkStatus,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub stashed: Option<Stash>,
     /// Files with changes (for `needs_choice`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
     /// For `failed`: what to do about it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub problem: Option<Problem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BulkResult {
     pub items: Vec<BulkItem>,
     pub switched: usize,
@@ -469,6 +488,7 @@ pub struct BulkResult {
     pub skipped: usize,
     pub needs_restart: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub restart_note: Option<String>,
 }
 

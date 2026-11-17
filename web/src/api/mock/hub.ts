@@ -14,7 +14,7 @@ interface MockNode {
 
 const now = Math.floor(Date.now() / 1000)
 const ALL_OPS = ['meta', 'servers_list', 'server_get', 'server_control', 'jobs_get', 'update_preview']
-const srv = (name: string, status: T.ServerStatus, game: number): T.ServerSummary => ({ name, dir: `/srv/${name}`, mode: 'production', ports: { game, txadmin: game + 10000 }, created_unix: now - 86400 * 30, status, badge: { kind: 'up_to_date' }, managed: true })
+const srv = (name: string, status: T.ServerStatus, game: number): T.ServerSummary => ({ name, dir: `/srv/${name}`, mode: 'production', ports: { game, txadmin: game + 10000 }, created_unix: now - 86400 * 30, status, badge: { kind: 'up_to_date' }, managed: true, connect: null })
 
 function seed(): MockNode[] {
   const base = { token_set: true, insecure: false, warning: null, reachable: true, platform: 'linux', last_error: null }

@@ -139,6 +139,7 @@ impl Schedule {
 pub type ServerRecord = ServerEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Preset {
     Daily,
@@ -148,6 +149,7 @@ pub enum Preset {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum RunAs {
     /// The person who installed: their `gh`/`git` sign-in works, so private forks can be fetched.
@@ -157,6 +159,7 @@ pub enum RunAs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ScheduleConfig {
     pub preset: Preset,
     /// `HH:MM`, 24 hours, server local time.

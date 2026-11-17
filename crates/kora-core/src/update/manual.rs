@@ -38,6 +38,7 @@ pub const ENSURE_NOTE: &str = "files updated, server not restarted: restart the 
 const CHANGELOG_MAX: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
     All,
@@ -45,6 +46,7 @@ pub enum Scope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeStatus {
     UpToDate,
@@ -59,6 +61,7 @@ pub enum ChangeStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ResourceChange {
     pub id: String,
     pub from: String,
@@ -70,10 +73,12 @@ pub struct ResourceChange {
     pub status: ChangeStatus,
     /// Plain sentence about this resource when it is not a normal update ("trying pull request #12; not updated").
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct UpdatePreview {
     pub resources: Vec<ResourceChange>,
     /// Production: the newest release version the catalog offers, when it is newer than what is installed.
@@ -84,6 +89,7 @@ pub struct UpdatePreview {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum RestartPolicy {
     /// Apply the files, restart nothing.
@@ -143,6 +149,7 @@ pub enum UpdateEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SnapshotInfo {
     pub id: String,
     pub created_unix: u64,

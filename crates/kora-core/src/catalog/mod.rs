@@ -29,6 +29,7 @@ pub enum CatalogError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum Group {
     Pre,
@@ -47,6 +48,7 @@ pub enum Group {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
     Kora,
@@ -77,12 +79,15 @@ impl ResType {
 
 /// A third-party creator whose resources the catalog lists (schema v3 `creators`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Creator {
     pub id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub description: Option<String>,
 }
 
@@ -100,6 +105,9 @@ pub struct Resource {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// One sentence about what it is, shown next to its name in the pickers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub repository: String,
     /// Relative to the server's `resources/` dir, e.g. `[kora]/kora_core`.
     pub path: String,

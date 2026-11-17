@@ -95,6 +95,10 @@ export function actionLabel(a: ProblemAction, p?: { code: string }): string {
       return 'Copy details'
     case 'start_database':
       return 'Start it for me'
+    case 'unknown':
+    default:
+      // A kind from a newer Kora (or the Rust `Action::Unknown`): never shown, see `hasHandler`.
+      return ''
   }
 }
 

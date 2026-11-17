@@ -1,6 +1,7 @@
 // In-app mock backend: replaces window.fetch (for /api/v1) and window.EventSource.
 // Only loaded when VITE_MOCK=1 (or `npm run dev`), see src/main.tsx.
 import type * as T from '../types'
+import type { SavedInstall as GeneratedSavedInstall } from '../generated/types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
 import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
@@ -26,7 +27,7 @@ let snapshots: Record<string, T.SnapshotInfo[]> = {}
 let consoleEnabled: Record<string, boolean> = {}
 let webhooks: Record<string, string> = {}
 let schedules: Record<string, T.ScheduleConfig> = {}
-let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
+let prefs = { github: false as boolean, savedInstall: null as GeneratedSavedInstall | null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
 let dirtyPreviewed: Record<string, T.UpdatePreview> = {}
 let paidAssets: Record<string, T.PaidAsset[]> = {}
 let uploads = new Map<string, string>()
@@ -158,6 +159,7 @@ const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, sta
 const detail = (s: T.ServerSummary): T.ServerDetail => ({
   ...s,
   connect: `192.168.1.20:${s.ports.game}`,
+  status_detail: { running: s.status === 'running', game_listening: s.status === 'running', txadmin_up: s.status === 'running' },
   running: s.status === 'running',
   game_listening: s.status === 'running',
   txadmin_up: s.status === 'running',
@@ -315,7 +317,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     await sleep(step === 'build.fxserver' ? 1800 : 900)
     if (step === failAt) {
       emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null }
+      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null, txadmin_public: req.txadmin_public, artifact_url: req.artifact_url, game_build: req.game_build, github_owner: req.github_owner, start: req.start }
       const id = jobId()
       paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
       const common: Partial<T.JobError> = {
@@ -357,7 +359,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
   }
   prefs.savedInstall = null
-  servers.push({ name: req.name, dir: req.dir, mode: req.mode, ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true })
+  servers.push({ name: req.name, dir: req.dir, mode: req.mode, ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null })
   installed[req.name] = ['oxmysql', 'ox_lib', 'kora_core']
   return {
     dir: req.dir,
@@ -381,7 +383,11 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
 type Body = Record<string, unknown>
 type Handler = (m: RegExpMatchArray, body: Body, query: URLSearchParams) => unknown | Promise<unknown>
 const routes: [string, RegExp, Handler][] = []
+const routeKeys: string[] = []
+/** `METHOD /path/{param}` of every route the mock answers (the parity test compares them with the generated route map). */
+export const mockRouteKeys = (): readonly string[] => routeKeys
 const route = (method: string, pattern: string, h: Handler) => {
+  routeKeys.push(`${method} ${pattern}`)
   routes.push([method, new RegExp('^' + pattern.replace(/\{(\w+)\}/g, '([^/]+)') + '$'), h])
 }
 const dec = (s: string) => decodeURIComponent(s)
@@ -435,7 +441,7 @@ route('POST', '/session/link', () => {
 })
 route('GET', '/system', () => (beh.windows
   ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
-  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
+  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true, admin_prompt: false }) satisfies T.SystemInfo)
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
@@ -450,7 +456,7 @@ route('POST', '/servers/adopt', (_m, b) => {
   if (dir.includes('nothing')) throw new Fail(400, 'bad_request', 'That folder does not look like a FiveM server (no server.cfg or resources folder).')
   if (servers.some((s) => s.dir === dir)) throw new Fail(409, 'conflict', 'That server is already in your list.')
   const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? 'adopted'
-  const s: T.ServerSummary = { name, dir, mode: 'production', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false }
+  const s: T.ServerSummary = { name, dir, mode: 'production', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false, connect: null }
   servers.push(s)
   installed[name] = ['chat']
   snapshots[name] = []
@@ -880,7 +886,7 @@ route('POST', '/checks/disk', (_m, b) => {
 })
 route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
-  if (beh.trouble || mockDbStoppedProblem() || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() } satisfies T.DbLoginCheck
+  if (beh.trouble || mockDbStoppedProblem() || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() ?? undefined } satisfies T.DbLoginCheck
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
 })
 route('POST', '/checks/cfx', (_m, b) => {
@@ -892,6 +898,15 @@ route('POST', '/checks/cfx', (_m, b) => {
   if (name.toLowerCase() === 'jsixty') { keysMock.remember({ cfx_username: 'JSixty', cfx_identifier: 'fivem:4465268' }); return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck }
   return none(`No Cfx.re account called "${name}" was found. Check the spelling: it is the name on forum.cfx.re.`)
 })
+/** The parts of an install plan that do not depend on the administrator rights. */
+const planBase = (r: T.InstallRequest) => ({
+  summary: `${r.mode === 'production' ? 'Production' : 'Development'} server "${r.name}" in ${r.dir}`,
+  steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })),
+  elevated: false,
+  disk: { ok: true, free_bytes: 148e9, needed_bytes: 6e9, message: '148 GB free, about 6 GB needed.' },
+  warnings: [] as string[],
+  notes: [] as string[],
+})
 route('POST', '/installs/plan', (_m, b) => {
   const r = b as unknown as T.InstallRequest
   const needs: string[] = []
@@ -901,9 +916,9 @@ route('POST', '/installs/plan', (_m, b) => {
   if (r.db === 'install_if_missing') needs.push('Install the database if it is missing')
   if (beh.windows) {
     const w = adminNeeds(r)
-    return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: w, notes: [], admin_prompt: w.length > 0 } satisfies T.InstallPlan
+    return { ...planBase(r), needs_admin: w, admin_prompt: w.length > 0 } satisfies T.InstallPlan
   }
-  return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: needs, notes: [] } satisfies T.InstallPlan
+  return { ...planBase(r), needs_admin: needs, admin_prompt: false } satisfies T.InstallPlan
 })
 route('POST', '/installs', (_m, b) => {
   const r = b as unknown as T.InstallRequest
