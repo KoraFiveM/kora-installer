@@ -110,6 +110,21 @@ export function applySaved(f: WizardForm, s: SavedInstall): WizardForm {
   }
 }
 
+/**
+ * The answers without anything that needs administrator rights ("Continue without the administrator
+ * parts"): no firewall change, no background service, no Kora app, and the database only used when
+ * it is already there.
+ */
+export function withoutAdmin(f: WizardForm): WizardForm {
+  return { ...f, firewall: false, txPublic: false, service: false, app: false, db: f.db === 'install_if_missing' ? 'use_existing' : f.db }
+}
+
+/** The wizard page a `change_answers` action names, when this kind of server has it. */
+export function sectionStep(section: string | undefined, mode: Mode): StepId | null {
+  const all = stepsFor(mode)
+  return section && (all as string[]).includes(section) && section !== 'review' ? (section as StepId) : null
+}
+
 export function folderFor(base: string, name: string): string {
   return joinPath(base, slug(name) || 'my-server')
 }

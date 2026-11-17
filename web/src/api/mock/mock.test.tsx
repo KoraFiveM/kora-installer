@@ -7,7 +7,7 @@ import SettingsPage from '@/pages/SettingsPage'
 import Styleguide from '@/pages/Styleguide'
 import { installMock } from './index'
 import { SCENARIOS, STORAGE_KEY, resolveScenario } from './scenarios'
-import type { ServerSummary } from '../types'
+import type { GithubStatus, Job, ServerSummary } from '../types'
 
 const realFetch = window.fetch
 const realEs = window.EventSource
@@ -97,6 +97,38 @@ describe('scenarios', () => {
     const t = await fetch('/api/v1/servers/kora-live/webhook/test', { method: 'POST', headers: { 'X-Kora': '1' } })
     expect(t.ok).toBe(false)
     expect(((await (await get('/servers/kora-live/logs')).json()) as { files: unknown[] }).files).toEqual([])
+  })
+
+  it('GitHub status tells "signed out" (default) and "gh missing" (trouble) apart, each with its fix', async () => {
+    installMock({ scenario: 'default', speed: 0 })
+    const out = (await (await get('/github/status')).json()) as GithubStatus
+    expect([out.state, out.problem?.actions]).toEqual(['signed_out', [{ kind: 'sign_in_github' }]])
+    installMock({ scenario: 'trouble', speed: 0 })
+    const missing = (await (await get('/github/status')).json()) as GithubStatus
+    expect([missing.state, missing.problem?.code, missing.problem?.actions?.[0]]).toEqual(['gh_missing', 'github.gh_missing', { kind: 'install_tool', tool: 'gh' }])
+  })
+
+  it('a stopped install can be continued once, and only its optional failed step skipped', async () => {
+    installMock({ scenario: 'default', speed: 0 })
+    const post = (path: string, body: unknown) => fetch(`/api/v1${path}`, { method: 'POST', headers: { 'X-Kora': '1' }, body: JSON.stringify(body) })
+    const req = { mode: 'production', name: 'fail-town', dir: '/srv/fivem/fail-town', hostname: 'x', license_key: 'k', ports: { game: 30150, txadmin: 40150 }, txadmin_public: false, artifact_url: null, game_build: null, resources: 'all', db: 'use_existing', service: false, firewall: false, github_owner: null, dry_run: false, db_admin: null, start: true, cfx_identifier: null, app: null }
+    const { job } = (await (await post('/installs', req)).json()) as { job: string }
+    const ended = async (id: string) => {
+      let j: Job = { state: 'running' } as Job
+      await waitFor(async () => {
+        j = (await (await get(`/jobs/${id}`)).json()) as Job
+        expect(j.state).not.toBe('running')
+      })
+      return j
+    }
+    const failed = await ended(job)
+    expect([failed.error?.code, failed.error?.failed_step, failed.error?.resume]).toEqual(['install.db_login_failed', 'build.db', true])
+    expect((await post(`/installs/${job}/resume`, { skip: 'build.db' })).status).toBe(409)
+    const again = (await (await post(`/installs/${job}/resume`, {})).json()) as { job: string }
+    expect((await ended(again.job)).state).toBe('done')
+    const twice = await post(`/installs/${job}/resume`, {})
+    expect(twice.status).toBe(404)
+    expect(((await twice.json()) as { error: { code: string } }).error.code).toBe('install.cannot_resume')
   })
 
   it('every scenario name is known to the switcher', () => {

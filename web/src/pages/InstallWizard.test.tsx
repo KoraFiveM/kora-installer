@@ -330,3 +330,66 @@ describe('Install wizard: who may install', () => {
     expect(await screen.findByLabelText('Licence key')).toBeInTheDocument()
   })
 })
+
+describe('Install wizard: when a step fails', () => {
+  /** Short path to the summary with this server name, then install. */
+  async function installNamed(user: ReturnType<typeof userEvent.setup>, name: string) {
+    installMock({ scenario: 'default', speed: 0 })
+    renderApp(<InstallWizard />, '/install')
+    await user.type(await screen.findByLabelText('Licence key'), KEY)
+    await next(user)
+    const box = await screen.findByLabelText('Server name')
+    await user.clear(box)
+    await user.type(box, name)
+    await next(user)
+    await heading('Check and install')
+    await waitFor(() => expect(installButton()).toBeEnabled(), { timeout: 3000 })
+    await user.click(installButton())
+    return heading('The install stopped')
+  }
+
+  it('says what happened and retries only that step, without asking for anything again', async () => {
+    const user = userEvent.setup()
+    const resume = vi.spyOn(api.installs, 'resume')
+    await installNamed(user, 'fail-town')
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent("Could not log in to the database server as 'root'")
+    // The technical part is folded away; the fixes are buttons. The database step cannot be skipped.
+    expect(screen.getByText('Show details')).toBeInTheDocument()
+    expect(within(alert).getByRole('button', { name: 'Change the database choice' })).toBeInTheDocument()
+    expect(within(alert).queryByRole('button', { name: 'Skip this step' })).toBeNull()
+    expect(screen.getByText(/What was kept/)).toBeInTheDocument()
+    await user.click(within(alert).getByRole('button', { name: 'Try this step again' }))
+    expect(await heading('All done')).toBeInTheDocument()
+    expect(resume).toHaveBeenCalledTimes(1)
+    expect(resume.mock.calls[0][1]).toBeUndefined() // no step skipped
+  })
+
+  it('offers to skip a step that is safe to skip, and finishes without it', async () => {
+    const user = userEvent.setup()
+    await installNamed(user, 'skip-town')
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('it did not start')
+    await user.click(within(alert).getByRole('button', { name: 'Skip this step' }))
+    expect(await heading('All done')).toBeInTheDocument()
+    expect(screen.getByText('Skipped: you chose to go on without it')).toBeInTheDocument()
+  })
+
+  it('"Change the database choice" opens that page with the answers kept', async () => {
+    const user = userEvent.setup()
+    await installNamed(user, 'fail-town')
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Change the database choice' }))
+    expect(await heading('Database')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back to the summary' }))
+    expect(await heading('Check and install')).toBeInTheDocument()
+    expect(screen.getByText('Provided (hidden)')).toBeInTheDocument()
+  })
+
+  it('shows the GitHub sign-in when the step needs it', async () => {
+    const user = userEvent.setup()
+    await installNamed(user, 'github-town')
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Sign in to GitHub' }))
+    expect(await screen.findByText(/use "Try this step again" above/)).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Sign in to GitHub' }).length).toBeGreaterThan(0)
+  })
+})
