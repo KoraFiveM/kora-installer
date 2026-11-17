@@ -18,7 +18,7 @@ assert_gone() {
   assert "unit file $UNIT is gone" test ! -e "$UNIT"
   assert "service user $ACCOUNT is gone" bash -c "! id -u $ACCOUNT"
   assert "server folder is gone" test ! -e "$D"
-  assert "no registry entry" bash -c "! sudo grep -q '\"name\": \"$NAME\"' '$KORA_HOME/servers.json' 2>/dev/null"
+  assert "no registry entry" registry_lacks "$NAME"
   assert "systemd does not know the unit" bash -c "! systemctl list-unit-files $SVC.service --no-legend | grep -q ."
 }
 

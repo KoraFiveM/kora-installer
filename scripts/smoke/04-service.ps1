@@ -27,7 +27,7 @@ Assert-That (Test-Path $srv) 'the earlier step-3 server exists (this step starts
 $r = Invoke-Native $kora @('delete', 'smoke', '-y'); Show 'kora delete smoke -y' $r
 Assert-That ($r.Code -eq 0) 'kora delete exits 0'
 Assert-That (-not (Test-Path $srv)) 'kora delete removed the server folder (no file-lock leftovers)'
-$reg = Get-Content "$env:LOCALAPPDATA\Kora\servers.json" -Raw -ErrorAction SilentlyContinue
+$reg = Get-RegistryText
 Assert-That (-not $reg -or $reg -notmatch '"smoke"') 'kora delete removed the registry entry'
 
 # --- fresh install with the service + firewall ---------------------------------------------
@@ -103,7 +103,7 @@ Assert-That ((Get-SvcState) -eq 'GONE') 'the service is gone'
 $fw = (& netsh advfirewall firewall show rule name=all | Out-String)
 Assert-That ($fw -notmatch 'Kora smoke') 'all Kora firewall rules are gone'
 Assert-That (-not (Test-Path $srv)) 'the server folder is gone'
-$reg = Get-Content "$env:LOCALAPPDATA\Kora\servers.json" -Raw -ErrorAction SilentlyContinue
+$reg = Get-RegistryText
 Assert-That (-not $reg -or $reg -notmatch '"smoke"') 'the registry entry is gone'
 Assert-That (-not (Test-Path "$env:ProgramFiles\Kora\bin\*\kora.exe")) 'the Program Files kora copy is gone'
 $t = (& schtasks.exe /Query /FO LIST 2>&1 | Out-String)

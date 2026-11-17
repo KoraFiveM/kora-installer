@@ -5,6 +5,17 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **One data file instead of many JSON files.** Kora keeps what it remembers about itself (the server list, saved licence keys, what it remembers about you, stopped installs and saved answers, remote-access settings and users, nodes) in one private SQLite database, `store/kora.db` in the Kora folder (bundled with Kora: nothing to install; see [docs/store.md](docs/store.md)). The panel and a `kora` command running at the same moment can no longer overwrite each other's change: every change is one short transaction. It is as private as `secrets.json` was (`0700`/`0600` on Linux, including the `-wal`/`-shm` files; inherited permissions removed on the folder on Windows), links are refused, and under `sudo` in someone else's Kora folder the files go back to that folder's owner.
+- **Upgrading is automatic and keeps everything.** On first start the old files (`servers.json`, `secrets.json`, `profile.json`, `last-install.json`, `panel.json`, `hub.json`, `paused-installs/`) are imported in one transaction and checked, then **moved** (not deleted) to `store/before-sqlite/`. A file that cannot be read is never lost or replaced: the part of Kora that needs it says so and everything else works. A copy of the data file is made before every later change of its format. Going back to 0.7: `kora store export-json` writes the old files (see docs/store.md).
+- Saved licence key values have their own table behind one small trait (`KeyMaterial`), so a later version can keep them in the system keychain.
+- `kora uninstall` now asks about deleting your saved keys and remembered names in terms of the data file (answering yes forgets them; the rest of the data file stays).
+
+### Added
+- **Jobs survive a restart.** Updates, installs and the like are recorded as they run (events kept to the newest 1000, secrets never written), so Settings > **Recent jobs** shows history after the panel restarts. A job that was running when the panel was closed (or the computer restarted) shows as "stopped by a restart" with what to do next; an install that used a saved key can be carried on from the install page. (`GET /jobs`, `Op::JobsList`.)
+- **Activity log.** An append-only audit log of every change made from the panel (this computer or another device, with sign-in name, provider and role) and from `kora` commands: when, operation, server, who, result; never a secret or request contents. Administrators see it in Settings > **Activity log**; `kora audit` shows it in a terminal. Kept 365 days. (`GET /audit`, `Op::AuditList`, admins only.)
+- `kora store status`, `kora store backup [--to FILE]` (a consistent copy of the data file, safe while the panel runs) and `kora store export-json [--to DIR]`.
+
 ## [0.7.0] - 2026-11-17
 
 This is 0.7.0, "panel first": the web panel is the only interface, nothing needed to get started asks for administrator rights, and failures say what to do and offer the button to do it.

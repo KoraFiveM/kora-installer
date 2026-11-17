@@ -113,20 +113,27 @@ does not, stop on that step, write down its number and collect the items under *
       "Logged in".
     *If not, copy back:* the Show details text and the output above.
 
-## 4. Saved licence keys and `secrets.json`
+## 4. Saved licence keys and the private data file
 
 19. [ ] **Add a key in Settings.** Settings > Licence keys > add one named "Main" with your real key. The list shows
     "Main" and only the **last four characters**. The full key is nowhere on the page (also not in "Show details").
-20. [ ] **`secrets.json` is private to you.** In a normal PowerShell window run
-    `icacls "$env:LOCALAPPDATA\Kora\secrets.json"`. *Should happen:* exactly one entry, your own account
-    (`<MACHINE>\<you>:(R,W)`); **no** `BUILTIN\Users`, `Everyone`, `Authenticated Users`, and no `(I)` inherited
-    entries. You can still open the file in Notepad (do not paste its contents anywhere).
+20. [ ] **The data file is private to you.** Kora keeps the saved keys in `%LOCALAPPDATA%\Kora\store\kora.db` (there is no
+    `secrets.json` any more). In a normal PowerShell window run `icacls "$env:LOCALAPPDATA\Kora\store"` and
+    `icacls "$env:LOCALAPPDATA\Kora\store\kora.db"`. *Should happen:* exactly one entry, your own account
+    (`<MACHINE>\<you>:(OI)(CI)(F)` for the folder, `<MACHINE>\<you>:(F)` for the file; the file's entry may show `(I)` because it
+    comes from the folder); **no** `BUILTIN\Users`, `Everyone`, `Authenticated Users`. While the panel runs, any `kora.db-wal` /
+    `kora.db-shm` next to it shows the same single entry.
     *If not, copy back:* the `icacls` output only.
+20a. [ ] **An old install is carried over.** If this computer had Kora 0.7 before: after the first start of this version Settings >
+    Licence keys still lists your keys, Settings > Recent jobs and the server list are intact, and
+    `%LOCALAPPDATA%\Kora\store\before-sqlite\` holds the old `secrets.json`, `servers.json` etc. (nothing was deleted).
+    `kora store status` prints the data file, its version and what is in it; `kora store backup` makes a copy in `store\backups`.
+    *If not, copy back:* the output of `kora store status`.
 21. [ ] **Replace, rename and delete work on that private file.** In Settings > Licence keys rename "Main" to "Live", add a
     second key "Test" (any text of the right shape, for example `cfxk_` followed by 20 letters/digits, then `_` and
     four more), replace "Test" with another, delete "Test". Every action succeeds with no "access denied" and
-    `icacls` on the file still shows only your account. (The file is rewritten through a temporary file each time; this
-    is the one place Windows permissions could get in the way.)
+    `icacls` on the file still shows only your account. (SQLite creates and removes `kora.db-wal` and `kora.db-shm` in the
+    private folder each time; this is the one place Windows permissions could get in the way.)
     *If not, copy back:* the error text and the `icacls` output.
 22. [ ] **`kora keys list`** in a normal window shows the same names and last four characters, never a full key.
 
@@ -310,7 +317,7 @@ run `kora app install` (this is how 0.6.x made the machine-wide app, with its ad
     the servers and the panel are untouched; **no UAC prompt**. Make them again with `kora app install`.
 43. [ ] **Panel Uninstall.** Settings > Uninstall Kora shows an item-by-item list that names the shortcuts and Kora's own
     Git/GitHub CLI copies. Do **not** tick the server folders or databases. Run it (type `uninstall`): services, firewall
-    rules and the server-list entries go; **the server folders and `secrets.json` stay**.
+    rules and the server-list entries go; **the server folders and Kora's data file stay**.
 44. [ ] **`kora delete "test dev"`** and **`kora delete "test prod"`** (administrator window if it says so) remove the
     server, its service and its firewall rule: `Get-Service kora-*` and
     `Get-NetFirewallRule -DisplayName "*kora*"` show nothing for them.

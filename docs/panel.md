@@ -234,16 +234,19 @@ saving it is only remembered while the panel runs. The wizard also checks free d
   the old copy. Removing the old copy needs administrator rights: on Windows the panel asks Windows for permission
   (one prompt); on Linux it shows the command to run (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
 - **GitHub account:** sign in or see who you are signed in as.
-- **Licence keys:** the keys saved on this computer (`secrets.json` in the Kora folder: plain text, readable only by you,
-  not encrypted, like each server's `secrets.cfg`). Add, rename, replace and delete (admins and this computer only); each
+- **Licence keys:** the keys saved on this computer (in Kora's data file, `store/kora.db` in the Kora folder: plain text, readable only by you,
+  not encrypted, like each server's `secrets.cfg`; see [store.md](store.md)). Add, rename, replace and delete (admins and this computer only); each
   shows its last 4 characters and the servers that use it. Deleting a key does not affect servers already installed with it
   (they have their own copy); an unfinished install that used it needs another key. Same as `kora keys`.
-- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in `profile.json` (nothing secret), with a
+- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in Kora's data file (nothing secret), with a
   button to forget each. Same as `kora profile`.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
   and databases are kept unless you tick them. Your saved licence keys and remembered answers are never removed from here;
-  `kora uninstall` in a terminal asks about them (default: keep), or delete `secrets.json` and `profile.json` in the Kora
-  folder yourself.
+  `kora uninstall` in a terminal asks about them (default: keep), or run `kora keys remove <name>` and `kora profile forget`.
+- **Recent jobs:** updates, installs and the like, also from before the panel last restarted. A job that was running when
+  the panel was closed shows as "stopped by a restart" with what to do next (an install that used a saved key can be carried on).
+- **Activity log** (administrators only): who changed what, from this panel (this computer or another device, with sign-in name, provider
+  and role) and from `kora` commands, with the result. Nothing secret is recorded; entries are kept 365 days. Same as `kora audit`.
 - **About:** the version, platform, and links. The settings page makes no requests to other websites.
 
 ### The System check
