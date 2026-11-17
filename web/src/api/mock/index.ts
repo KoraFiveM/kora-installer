@@ -604,7 +604,8 @@ route('POST', '/servers/{s}/update/preview', (m, b) => {
     await sleep(1500)
     const p = makePreview(s)
     // A resource switched to another branch or a pull request is left alone by updates.
-    p.resources = p.resources.map((r) => { const note = branchesMock.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
+    // (The trouble scenario keeps its own examples of resources that need attention.)
+    if (!beh.trouble) p.resources = p.resources.map((r) => { const note = branchesMock.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
     dirtyPreviewed[s.name] = p
     s.badge = badgeFrom(p)
     pushServer(s)
@@ -858,10 +859,10 @@ route('POST', '/servers/{s}/issues', (m, b) => {
 })
 route('POST', '/servers/{s}/pr/plan', (m, b) => {
   const s = find(dec(m[1]))
-  if (s.mode !== 'development') throw new Fail(400, 'bad_request', 'Pull requests are only for development servers.')
+  if (s.source !== 'fork') throw new Fail(422, 'collab.needs_fork', 'A pull request is made from your own copy of the resource on GitHub, and this server uses plain copies of the originals. Choose "Make my own copy (fork)" for this resource first.', undefined, { actions: [{ kind: 'make_fork' }] })
   if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   const r = String(b.resource ?? '')
-  if (r !== 'kora_core' && r !== 'kora_inventory') throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
+  if (!['kora_core', 'kora_inventory', 'kora_jobs'].includes(r)) throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
   return { resource: r, upstream: `KoraFiveM/${r}`, base: 'dev', head_owner: 'sam-rp', head_branch: 'fix-payroll', ahead: 2, dir: `${s.dir}/resources/[kora]/${r}` } satisfies T.PrPlan
 })
 route('POST', '/servers/{s}/pr', (m, b) => {

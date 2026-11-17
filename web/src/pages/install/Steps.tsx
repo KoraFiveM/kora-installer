@@ -367,7 +367,8 @@ export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signe
   const owners = useQuery({ queryKey: ['github-owners'], queryFn: api.github.owners, enabled: signedIn })
   const personal = (owners.data ?? []).find((o) => o.kind === 'user')
   const orgs = (owners.data ?? []).filter((o) => o.kind !== 'user')
-  const chosenOrg = orgs.some((o) => o.login === f.githubOwner)
+  const usable = orgs.filter((o) => o.can_fork)
+  const chosenOrg = usable.some((o) => o.login === f.githubOwner)
   // Two plain steps: personal account or organisation; an organisation then asks which one.
   const [where, setWhere] = useState<'personal' | 'org' | null>(null)
   const shown = where ?? (chosenOrg ? 'org' : f.githubOwner && personal?.login === f.githubOwner ? 'personal' : null)
@@ -394,16 +395,16 @@ export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signe
           <Radio
             name="fork-where"
             checked={shown === 'org'}
-            disabled={orgs.length === 0}
+            disabled={usable.length === 0}
             onChange={() => { setWhere('org'); if (!chosenOrg) set({ githubOwner: '', githubRemembered: false }) }}
             label="An organisation I belong to"
-            hint={orgs.length === 0 ? 'You do not belong to an organisation that Kora can put copies in. Ask an owner of the organisation to let you create repositories, then sign in to GitHub again.' : undefined}
+            hint={orgs.length === 0 ? 'You do not belong to an organisation that Kora can put copies in. Ask an owner of the organisation to let you create repositories, then sign in to GitHub again.' : usable.length === 0 ? `You belong to ${orgs.map((o) => o.login).join(', ')}, but you may not create repositories there: ${orgs[0].reason ?? 'not allowed'}. Ask an owner to allow it, then sign in to GitHub again.` : undefined}
           />
-          {shown === 'org' && orgs.length > 0 && (
+          {shown === 'org' && usable.length > 0 && (
             <Field label="Which organisation?" hint={f.githubRemembered && chosenOrg ? 'Remembered from your last install: pick another to change it.' : 'Your own copies are created there, so you need the right to create repositories in it.'}>
               <Select value={chosenOrg ? f.githubOwner : ''} onChange={(e) => set({ githubOwner: e.target.value, githubRemembered: false })}>
                 <option value="">Choose...</option>
-                {orgs.map((o) => <option key={o.login} value={o.login}>{o.login}</option>)}
+                {orgs.map((o) => <option key={o.login} value={o.login} disabled={!o.can_fork}>{o.can_fork ? o.login : `${o.login} (you may not create repositories here)`}</option>)}
               </Select>
             </Field>
           )}
