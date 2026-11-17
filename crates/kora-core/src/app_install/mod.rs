@@ -434,8 +434,9 @@ pub fn compare_versions(a: &str, b: &str) -> Option<Ordering> {
 /// `Exec=` value: quote a path containing spaces or special characters.
 pub fn desktop_exec_arg(p: &Path) -> String {
     let s = p.to_string_lossy();
-    if s.chars().any(|c| c.is_whitespace() || "\"'`$\\<>~|&;*?#()".contains(c)) {
-        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$").replace('`', "\\`"))
+    // `%` starts a field code (`%f`, `%U`...) in an `Exec=` line; a literal one is written `%%`.
+    if s.chars().any(|c| c.is_whitespace() || "\"'`$\\<>~|&;*?#()%".contains(c)) {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$").replace('`', "\\`").replace('%', "%%"))
     } else {
         s.into_owned()
     }
