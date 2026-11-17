@@ -1,11 +1,18 @@
 <#
 .SYNOPSIS
-  Installs the Kora program for the current user (no administrator rights needed).
+  Installs Kora: for the whole computer (recommended, one administrator approval) or just for you.
 
 .DESCRIPTION
-  Downloads kora.exe from the newest stable release, checks its SHA-256, copies it to
-  %LOCALAPPDATA%\Kora\bin and adds that folder to your user PATH. An existing kora.exe is only
-  replaced when it really is an earlier kora (the old one is kept as kora.exe.previous).
+  First choice, the system install: downloads the Kora installer (.msi) from the newest stable release,
+  checks its SHA-256 and runs it with ONE Windows permission prompt. Kora goes into Program Files together
+  with Kora's small administrator service, so installing servers, firewall rules and databases later needs
+  no prompt at all. It asks before doing this ("Install Kora for this whole computer?"); answer n, or press
+  No at the Windows prompt, to install just for you instead.
+
+  The per-user install (no administrator rights): downloads kora.exe from the same release, checks its
+  SHA-256, copies it to %LOCALAPPDATA%\Kora\bin and adds that folder to your user PATH. The parts of a
+  server that need administrator rights are then "continue without" or a command to run. An existing
+  kora.exe is only replaced when it really is an earlier kora (the old one is kept as kora.exe.previous).
 
   It also makes a "Kora" shortcut in your Start Menu and on your Desktop (yours only, no administrator
   rights). They open Kora Panel in your browser.
@@ -16,7 +23,9 @@
 
   Settings (parameters or environment variables, all optional):
     -Base / KORA_RELEASE_BASE   Where the release files live. https:// only (http:// for localhost).
-    -InstallDir / KORA_INSTALL_DIR   Target folder. Default: %LOCALAPPDATA%\Kora\bin
+    -System / KORA_SYSTEM=1     Do the system install without asking (fail if it cannot be done).
+    -PerUser / KORA_SYSTEM=0    Install just for you, without asking and without administrator rights.
+    -InstallDir / KORA_INSTALL_DIR   Target folder (a per-user install: the system install is not offered). Default: %LOCALAPPDATA%\Kora\bin
     -Version / KORA_VERSION     Release to install, e.g. v0.2.0 (any release, pre-releases too).
                                 Default: the newest stable release (not a pre-release, not a draft).
     -Prerelease / KORA_PRERELEASE=1   Without -Version: take the newest release even if it is a pre-release.
@@ -35,6 +44,8 @@ param(
     [string]$InstallDir = $(if ($env:KORA_INSTALL_DIR) { $env:KORA_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Kora\bin' }),
     [string]$Version = $env:KORA_VERSION,
     [switch]$Force,
+    [switch]$System,
+    [switch]$PerUser,
     [switch]$NoLaunch,
     [switch]$NoShortcuts,
     [switch]$Prerelease
@@ -83,6 +94,31 @@ function Get-Text($Response) {
     $text
 }
 
+# The system install: the checked .msi with ONE permission prompt. $true when it is installed.
+function Install-System([string]$Source, [string]$Work) {
+    $msiAsset = 'kora-windows-x86_64.msi'
+    $msi = Join-Path $Work 'kora.msi'
+    Invoke-HttpsOnly -Uri "$Source/$msiAsset" -OutFile $msi | Out-Null
+    $want = ((Get-Text -Response (Invoke-HttpsOnly -Uri "$Source/$msiAsset.sha256")).Trim() -split '\s+')[0].ToLowerInvariant()
+    if ($want -notmatch '^[0-9a-f]{64}$') { Write-Host 'The installer checksum file is not a SHA-256 value.'; return $false }
+    # Lock the file FIRST (nobody can write or replace it from now on), then check the very bytes msiexec will read.
+    $lock = [IO.File]::Open($msi, 'Open', 'Read', 'Read')
+    try {
+        $got = (Get-FileHash -Algorithm SHA256 -InputStream $lock).Hash.ToLowerInvariant()
+        if ($got -ne $want) { Write-Host 'The installer does not match its checksum (SHA-256). Nothing was installed.'; return $false }
+        Write-Host 'Installer checksum OK. Windows asks for administrator permission once: choose Yes.'
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $arguments = "/i `"$msi`" /passive /norestart ALLOWUSERS=`"$sid`""
+        try {
+            $p = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\msiexec.exe') -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+        }
+        catch { Write-Host "The installer did not run: $($_.Exception.Message)"; return $false }
+        if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { Write-Host "The installer stopped with code $($p.ExitCode)."; return $false }
+    }
+    finally { $lock.Dispose() }
+    Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Kora\kora.exe')
+}
+
 # Older Windows PowerShell does not use TLS 1.2 by default.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
@@ -127,37 +163,57 @@ try {
     if ($actual -ne $expected) { Exit-Install 'the download is corrupt or has been tampered with (SHA-256 mismatch). Nothing was installed.' }
     Write-Host "Checksum OK ($actual)."
 
-    $dest = Join-Path $InstallDir 'kora.exe'
-    $upToDate = $false
-    if (Test-Path -LiteralPath $dest) {
-        $current = (Get-FileHash -Algorithm SHA256 -Path $dest).Hash.ToLowerInvariant()
-        if ($current -eq $actual) {
-            Write-Host "kora is already up to date at $dest."
-            $upToDate = $true
-        }
-        elseif ($Force -or (Select-String -Path $dest -Pattern 'Kora installer and server manager' -Quiet -Encoding ascii)) {
-            Move-Item -LiteralPath $dest -Destination "$dest.previous" -Force
-            Write-Host "The earlier version was kept as $dest.previous."
-        }
-        else {
-            Exit-Install "$dest already exists and is not a kora program, so it was left alone. Use -InstallDir for another folder or -Force to replace it."
+    # The system install first (see the description); anything that goes wrong falls back to the per-user
+    # install below unless it was asked for with -System / KORA_SYSTEM=1.
+    $wantSystem = $false
+    $mustSystem = $System -or $env:KORA_SYSTEM -eq '1'
+    if ($mustSystem) { $wantSystem = $true }
+    elseif (-not ($PerUser -or $env:KORA_SYSTEM -eq '0' -or $PSBoundParameters.ContainsKey('InstallDir') -or $env:KORA_INSTALL_DIR)) {
+        if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+            $answer = Read-Host 'Install Kora for this whole computer (recommended)? It asks for administrator permission once; after that Kora can set up servers, firewall rules and databases by itself. Answer n to install just for you [Y/n]'
+            $wantSystem = $answer -eq '' -or $answer -match '^(y|yes)$'
         }
     }
-    if (-not $upToDate) {
-        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-        Copy-Item -LiteralPath $exe -Destination $dest -Force
-        Write-Host "Installed kora to $dest"
+    $systemDone = $false
+    if ($wantSystem) {
+        $systemDone = Install-System -Source $Base -Work $tmp
+        if ($systemDone) { Write-Host 'Kora is installed for this computer, with its administrator service.' }
+        elseif ($mustSystem) { Exit-Install 'the system install did not work (-System / KORA_SYSTEM=1, so nothing else was tried). Run it again, or use -PerUser to install just for you.' }
+        else { Write-Host 'The system install was not done; installing just for you instead (no administrator rights needed).' }
     }
+    $dest = if ($systemDone) { Join-Path $env:ProgramFiles 'Kora\kora.exe' } else { Join-Path $InstallDir 'kora.exe' }
+    if (-not $systemDone) {
+        $upToDate = $false
+        if (Test-Path -LiteralPath $dest) {
+            $current = (Get-FileHash -Algorithm SHA256 -Path $dest).Hash.ToLowerInvariant()
+            if ($current -eq $actual) {
+                Write-Host "kora is already up to date at $dest."
+                $upToDate = $true
+            }
+            elseif ($Force -or (Select-String -Path $dest -Pattern 'Kora installer and server manager' -Quiet -Encoding ascii)) {
+                Move-Item -LiteralPath $dest -Destination "$dest.previous" -Force
+                Write-Host "The earlier version was kept as $dest.previous."
+            }
+            else {
+                Exit-Install "$dest already exists and is not a kora program, so it was left alone. Use -InstallDir for another folder or -Force to replace it."
+            }
+        }
+        if (-not $upToDate) {
+            New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+            Copy-Item -LiteralPath $exe -Destination $dest -Force
+            Write-Host "Installed kora to $dest"
+        }
 
-    # Put the folder on the user's PATH (current user only, no admin).
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $entries = @($userPath -split ';' | Where-Object { $_ })
-    if ($entries -notcontains $InstallDir) {
-        [Environment]::SetEnvironmentVariable('Path', (($entries + $InstallDir) -join ';'), 'User')
-        $env:Path = "$env:Path;$InstallDir"
-        Write-Host "Added $InstallDir to your PATH (new terminals pick it up)."
+        # Put the folder on the user's PATH (current user only, no admin).
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $entries = @($userPath -split ';' | Where-Object { $_ })
+        if ($entries -notcontains $InstallDir) {
+            [Environment]::SetEnvironmentVariable('Path', (($entries + $InstallDir) -join ';'), 'User')
+            $env:Path = "$env:Path;$InstallDir"
+            Write-Host "Added $InstallDir to your PATH (new terminals pick it up)."
+        }
     }
-}
+    }
 finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
