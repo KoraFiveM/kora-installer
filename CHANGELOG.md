@@ -5,6 +5,8 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-17
+
 This is 0.7.0, "panel first": the web panel is the only interface, nothing needed to get started asks for administrator rights, and failures say what to do and offer the button to do it.
 
 ### Fixed
