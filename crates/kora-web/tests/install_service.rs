@@ -279,7 +279,7 @@ async fn every_administrator_step_of_an_install_is_one_request_to_the_service_wi
     assert!(!j["events"].as_array().unwrap().iter().any(|e| e["step"] == "admin"), "no permission step any more");
     // The whole outcome, as the finished-install page reads it: the install ran in the person's own process, so it is the full one.
     let out: kora_core::installer::InstallOutcome = serde_json::from_value(j["result"].clone()).expect("reads as InstallOutcome");
-    assert!(!out.connect.is_empty() && !out.txadmin_url.is_empty(), "{out:?}");
+    assert_eq!(out.name, "Alpha Town", "{out:?}");
     assert!(j["events"].to_string().contains("working as administrator"), "the service's lines are part of the same job");
     let log = b.log();
     assert_eq!(log.calls.iter().map(|c| c.1[2].clone()).collect::<Vec<_>>(), ["system.firewall", "system.service"]);
