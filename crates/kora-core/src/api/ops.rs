@@ -149,6 +149,18 @@ pub enum Op {
     BranchBulkPreview,
     /// Development: switch every resource that has a branch, or all back to normal.
     BranchBulkApply,
+    /// Can players reach this server? The guided checklist (running, firewall, router, internet).
+    ReachCheck,
+    /// Which outside services the reachability check may contact.
+    ReachSettingsGet,
+    /// Allow or forbid those outside lookups.
+    ReachSettingsSet,
+    /// Turn automatic port forwarding (UPnP / NAT-PMP) of the game port on or off for one server.
+    ForwardingSet,
+    /// Open the game port in this computer's firewall (administrator rights).
+    ReachFirewallOpen,
+    /// A one-time ticket to open this server's txAdmin through the panel (needs the same role as controlling the server's code).
+    TxAdminTicket,
 }
 
 impl Op {
@@ -258,6 +270,12 @@ impl Op {
         Op::StashRestore,
         Op::BranchBulkPreview,
         Op::BranchBulkApply,
+        Op::ReachCheck,
+        Op::ReachSettingsGet,
+        Op::ReachSettingsSet,
+        Op::ForwardingSet,
+        Op::ReachFirewallOpen,
+        Op::TxAdminTicket,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -368,6 +386,12 @@ impl Op {
             Op::StashRestore => "stash_restore",
             Op::BranchBulkPreview => "branch_bulk_preview",
             Op::BranchBulkApply => "branch_bulk_apply",
+            Op::ReachCheck => "reach_check",
+            Op::ReachSettingsGet => "reach_settings_get",
+            Op::ReachSettingsSet => "reach_settings_set",
+            Op::ForwardingSet => "forwarding_set",
+            Op::ReachFirewallOpen => "reach_firewall_open",
+            Op::TxAdminTicket => "txadmin_ticket",
         }
     }
 
@@ -481,6 +505,12 @@ impl Op {
             Op::StashRestore => (Method::Post, "/servers/{s}/resources/{name}/stash/restore"),
             Op::BranchBulkPreview => (Method::Post, "/servers/{s}/branches/preview"),
             Op::BranchBulkApply => (Method::Post, "/servers/{s}/branches/apply"),
+            Op::ReachCheck => (Method::Post, "/servers/{s}/reach"),
+            Op::ReachSettingsGet => (Method::Get, "/reach/settings"),
+            Op::ReachSettingsSet => (Method::Put, "/reach/settings"),
+            Op::ForwardingSet => (Method::Put, "/servers/{s}/forwarding"),
+            Op::ReachFirewallOpen => (Method::Post, "/servers/{s}/reach/firewall"),
+            Op::TxAdminTicket => (Method::Post, "/servers/{s}/txadmin/ticket"),
         }
     }
 
@@ -686,13 +716,19 @@ mod tests {
             | Op::BranchSwitch
             | Op::StashRestore
             | Op::BranchBulkPreview
-            | Op::BranchBulkApply => Op::ALL.contains(&op),
+            | Op::BranchBulkApply
+            | Op::ReachCheck
+            | Op::ReachSettingsGet
+            | Op::ReachSettingsSet
+            | Op::ForwardingSet
+            | Op::ReachFirewallOpen
+            | Op::TxAdminTicket => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 105);
+        assert_eq!(Op::ALL.len(), 111);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

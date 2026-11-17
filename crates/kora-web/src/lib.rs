@@ -8,6 +8,7 @@ pub mod remote;
 pub mod routes;
 pub mod security;
 mod static_ui;
+pub mod txgate;
 mod wire_from;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -94,6 +95,8 @@ pub struct AppState {
     pub events: Arc<handlers::system::EventsHub>,
     /// The last `GET /fleet` answer, for a few seconds.
     pub fleet_cache: Arc<handlers::hub::FleetCache>,
+    /// txAdmin through the panel: tickets, sessions and the per-server gateway listeners.
+    pub txgate: Arc<txgate::Gate>,
 }
 
 impl AppState {
@@ -118,6 +121,7 @@ impl AppState {
             streams: Arc::default(),
             events: Arc::default(),
             fleet_cache: Arc::default(),
+            txgate: Arc::default(),
         }
     }
     /// A one-time code for a sign-in link: `http://127.0.0.1:<port>/#code=<code>`. Works once, for ten
@@ -396,6 +400,7 @@ async fn serve_tailnet(state: AppState, port: u16) {
                 match tokio::net::TcpListener::bind(SocketAddr::new(ip, port)).await {
                     Ok(l) => {
                         bound.push(ip);
+                        state.txgate.add_ip(&state, ip);
                         let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
                         tokio::spawn(async move {
                             let _ = axum::serve(l, app).await;
@@ -499,12 +504,15 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         println!("Press Ctrl+C to stop.");
         // Sample the servers and raise alerts for as long as the panel runs.
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
+        // Forward the game port on the router for servers that have it switched on (and run without a service).
+        let port_keeper = kora_core::reach::forward::keeper::spawn_panel_keeper();
         let served = axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(async {
                 let _ = tokio::signal::ctrl_c().await;
             })
             .await;
         monitor.stop();
+        port_keeper.stop();
         served?;
         Ok(())
     })

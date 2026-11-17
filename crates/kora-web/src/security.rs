@@ -517,6 +517,7 @@ fn actions_off(op: Op) -> ApiError {
         Op::UninstallRun | Op::AppUninstall => "Uninstalling Kora",
         Op::ConsoleSend => "Sending commands to the server console",
         Op::SelfUpdateApply => "Updating Kora",
+        Op::TxAdminTicket => "Opening txAdmin (full control of the game server)",
         _ => "Changing the schedule",
     };
     let p = Problem::new(

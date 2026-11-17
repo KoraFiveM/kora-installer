@@ -73,7 +73,9 @@ pub fn min_role(op: Op) -> Role {
         | Op::SessionLogout
         // Monitoring charts are status, like the server list.
         | Op::MetricsGet
-        | Op::AlertsList => Viewer,
+        | Op::AlertsList
+        // Whether outside lookups are allowed is just a yes/no.
+        | Op::ReachSettingsGet => Viewer,
         // Running servers day to day. Logs and the console can hold player names and addresses,
         // so they are operator and above even though they only read.
         Op::ServerControl
@@ -107,7 +109,9 @@ pub fn min_role(op: Op) -> Role {
         // one needs an admin (the handler checks that).
         | Op::KeysList
         | Op::ServerKeySet
-        | Op::ProfileGet => Operator,
+        | Op::ProfileGet
+        // The checklist reads the machine and (if allowed) asks the outside services the person chose.
+        | Op::ReachCheck => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
         | Op::ServerUnregister
@@ -171,7 +175,13 @@ pub fn min_role(op: Op) -> Role {
         // Moving a resource onto another branch or a pull request changes the code the server runs.
         | Op::BranchSwitch
         | Op::StashRestore
-        | Op::BranchBulkApply => Admin,
+        | Op::BranchBulkApply
+        // Forwarding a port on the router and opening the firewall change the network around the machine; a
+        // txAdmin ticket opens full control of the game server (it can run code through resources).
+        | Op::ForwardingSet
+        | Op::ReachFirewallOpen
+        | Op::ReachSettingsSet
+        | Op::TxAdminTicket => Admin,
     }
 }
 
@@ -191,7 +201,10 @@ pub fn destructive(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::SelfUpdateApply
         | Op::ScheduleSet
-        | Op::ScheduleRemove => true,
+        | Op::ScheduleRemove
+        // txAdmin is full control of the game server, including running code through resources: as serious as
+        // console input.
+        | Op::TxAdminTicket => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -291,7 +304,12 @@ pub fn destructive(op: Op) -> bool {
         | Op::KeyRemove
         | Op::ServerKeySet
         | Op::ProfileGet
-        | Op::ProfileSet => false,
+        | Op::ProfileSet
+        | Op::ReachCheck
+        | Op::ReachSettingsGet
+        | Op::ReachSettingsSet
+        | Op::ForwardingSet
+        | Op::ReachFirewallOpen => false,
     }
 }
 
@@ -403,7 +421,13 @@ pub fn installs(op: Op) -> bool {
         | Op::BranchSwitch
         | Op::StashRestore
         | Op::BranchBulkPreview
-        | Op::BranchBulkApply => false,
+        | Op::BranchBulkApply
+        | Op::ReachCheck
+        | Op::ReachSettingsGet
+        | Op::ReachSettingsSet
+        | Op::ForwardingSet
+        | Op::ReachFirewallOpen
+        | Op::TxAdminTicket => false,
     }
 }
 
@@ -548,7 +572,13 @@ pub fn local_only(op: Op) -> bool {
         | Op::KeyRemove
         | Op::ServerKeySet
         | Op::ProfileGet
-        | Op::ProfileSet => false,
+        | Op::ProfileSet
+        | Op::ReachCheck
+        | Op::ReachSettingsGet
+        | Op::ReachSettingsSet
+        | Op::ForwardingSet
+        | Op::ReachFirewallOpen
+        | Op::TxAdminTicket => false,
     }
 }
 
@@ -632,6 +662,23 @@ mod tests {
     }
 
     #[test]
+    fn reach_and_txadmin_roles() {
+        // Looking is day-to-day work; changing the router or firewall, and txAdmin (which can run code), are admin.
+        assert_eq!(min_role(Op::ReachCheck), Role::Operator);
+        assert_eq!(min_role(Op::ReachSettingsGet), Role::Viewer);
+        for op in [Op::ReachSettingsSet, Op::ForwardingSet, Op::ReachFirewallOpen, Op::TxAdminTicket] {
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(!local_only(op), "{op:?} is for remote sessions too");
+        }
+        // txAdmin is as serious as console input: a token session needs the switch.
+        assert!(destructive(Op::TxAdminTicket));
+        assert!(!remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Token, false));
+        assert!(remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Token, true));
+        assert!(remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Tailscale, false));
+        assert!(!remote_allowed(Op::TxAdminTicket, Role::Operator, Via::Tailscale, true));
+    }
+
+    #[test]
     fn viewer_ops_are_reads() {
         for op in Op::ALL {
             if min_role(*op) == Role::Viewer {
@@ -643,7 +690,7 @@ mod tests {
 
     #[test]
     fn the_listed_destructive_ops() {
-        let want = [Op::ServerDelete, Op::ServerUnregister, Op::UninstallRun, Op::AppUninstall, Op::ConsoleSend, Op::SelfUpdateApply, Op::ScheduleSet, Op::ScheduleRemove];
+        let want = [Op::ServerDelete, Op::ServerUnregister, Op::UninstallRun, Op::AppUninstall, Op::ConsoleSend, Op::SelfUpdateApply, Op::ScheduleSet, Op::ScheduleRemove, Op::TxAdminTicket];
         for op in Op::ALL {
             assert_eq!(destructive(*op), want.contains(op), "{op:?}");
         }

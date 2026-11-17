@@ -12,6 +12,7 @@ Commands:
   add-asset      Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal
   status         Show registered servers
   self-update    Update the kora program itself to the newest stable release (checksum-verified)
+  reach          Can players reach a server? A checklist (running, firewall, router, internet) and the fixes
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
@@ -126,11 +127,11 @@ Options:
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
@@ -550,6 +551,42 @@ Options:
 
       --version <vX.Y.Z>
           Install exactly this release (also an older one or a pre-release), e.g. v0.2.1
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora reach =====
+Can players reach a server? A checklist (running, firewall, router, internet) and the fixes
+
+Usage: kora reach [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --cfx-list
+          Also look the server up on Cfx.re's public server list (for this check; --remember keeps the choice)
+
+      --ip-echo
+          Also ask api.ipify.org for this connection's public address (for this check; --remember keeps the choice)
+
+      --remember
+          Keep the outside lookups chosen above for next time
+
+      --forward <FORWARD>
+          Turn automatic port forwarding (UPnP / NAT-PMP) of the game port on or off for this server
+          
+          [possible values: on, off]
+
+      --open-firewall
+          Open the game port (TCP and UDP) in this computer's firewall. Needs administrator rights
+
+      --json
+          Print the result as JSON
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

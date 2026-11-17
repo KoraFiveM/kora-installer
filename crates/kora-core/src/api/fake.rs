@@ -22,6 +22,11 @@ use crate::update::UpdateReport;
 
 #[derive(Default)]
 pub struct FakeState {
+    /// `reach_check` answers this (`None`: a plausible checklist).
+    pub reach_report: Option<crate::reach::ReachReport>,
+    pub reach_consent: crate::reach::settings::Consent,
+    pub forwarding: HashMap<String, bool>,
+    pub firewall_open_error: Option<String>,
     pub servers: Vec<ServerEntry>,
     pub status: HashMap<String, Status>,
     pub badges: HashMap<String, UpdateBadge>,
@@ -305,6 +310,37 @@ impl Backend for FakeBackend {
             x.ports = PortsRecord { game: p.game, txadmin: p.txadmin };
         }
         Ok(vec!["Firewall rules were not changed.".into()])
+    }
+    fn reach_check(&mut self, e: &ServerEntry, consent: Option<crate::reach::settings::Consent>) -> Res<crate::reach::ReachReport> {
+        let mut s = self.state();
+        s.calls.push(format!("reach_check {} {consent:?}", e.name));
+        let on = s.forwarding.get(&e.name).copied().unwrap_or(false);
+        let mut f = crate::reach::sample_facts(&e.name, e.ports.game);
+        f.forwarding.enabled = on;
+        Ok(s.reach_report.clone().unwrap_or_else(|| crate::reach::assess(&f)))
+    }
+    fn reach_consent(&mut self) -> crate::reach::settings::Consent {
+        self.state().reach_consent
+    }
+    fn reach_consent_set(&mut self, c: crate::reach::settings::Consent) -> Res<()> {
+        let mut s = self.state();
+        s.calls.push(format!("reach_consent_set {c:?}"));
+        s.reach_consent = c;
+        Ok(())
+    }
+    fn forwarding_set(&mut self, e: &ServerEntry, on: bool) -> Res<crate::reach::ForwardingView> {
+        let mut s = self.state();
+        s.calls.push(format!("forwarding_set {} {on}", e.name));
+        s.forwarding.insert(e.name.clone(), on);
+        Ok(crate::reach::ForwardingView { enabled: on, status: None })
+    }
+    fn firewall_open(&mut self, e: &ServerEntry) -> Res<Vec<String>> {
+        let mut s = self.state();
+        s.calls.push(format!("firewall_open {}", e.name));
+        match &s.firewall_open_error {
+            Some(x) => Err(x.clone()),
+            None => Ok(vec![format!("Opened port {} (TCP and UDP) in the firewall.", e.ports.game)]),
+        }
     }
     fn assets_list(&mut self, e: &ServerEntry) -> Res<AssetsView> {
         Ok(self.state().assets.get(&e.name).cloned().unwrap_or_default())

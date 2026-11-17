@@ -19,6 +19,9 @@ test.describe('install wizard: the happy paths', () => {
     await expect(page.getByRole('progressbar').first()).toBeVisible()
     await expect(page.getByRole('heading', { name: 'All done' })).toBeVisible({ timeout: 40_000 })
     await expect(page.getByText(/address on your own network/)).toBeVisible()
+    // The reachability check is offered right here, and txAdmin opens with a button (through the panel when away from this computer).
+    await expect(page.getByRole('heading', { name: 'Can players reach this server?' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Check now' })).toBeVisible()
     await scan('wizard: all done')
 
     // The new server is in the list, running.

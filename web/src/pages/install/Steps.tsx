@@ -216,7 +216,7 @@ export function OptionsStep({ f, set, advanced }: StepProps) {
   return (
     <div className="space-y-4">
       <Checkbox label="Open the game port in the firewall" hint="Lets players outside this computer connect. Needs administrator rights." checked={f.firewall} onChange={(e) => set({ firewall: e.target.checked })} />
-      {advanced && <Checkbox label="Also open the txAdmin port" hint="Lets you reach txAdmin from other computers. Anyone who can reach it can try to sign in, so leave this off unless you need it." checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
+      {advanced && <Checkbox label="Also open the txAdmin port" hint="You do not need this to use txAdmin from other devices: the panel's Open txAdmin button reaches it for you, signed in with the panel (it uses one more port on the panel's own address). Open txAdmin's own port only if you want to reach it directly, without the panel. Anyone who can reach it can try to sign in, so leave this off unless you need it." checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
       <Checkbox label="Install as a background service" hint="The server starts with the computer and restarts if it crashes. Needs administrator rights." checked={f.service} onChange={(e) => set({ service: e.target.checked })} />
     </div>
   )

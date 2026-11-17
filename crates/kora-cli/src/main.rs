@@ -12,6 +12,7 @@ use crate::cmd::github::{github_owners, GithubCmd};
 use crate::cmd::helper::{helper, HelperCmd};
 use crate::cmd::install::{install, InstallArgs};
 use crate::cmd::panel::{panel, PanelArgs};
+use crate::cmd::reach::ReachArgs;
 use crate::cmd::resources::{add_asset, add_resources, AddAssetArgs, AddResourcesArgs};
 use crate::cmd::schedule::{schedule, ScheduleCmd};
 use crate::cmd::server::{control, delete, status};
@@ -62,6 +63,8 @@ enum Command {
         #[arg(long, value_name = "vX.Y.Z")]
         version: Option<String>,
     },
+    /// Can players reach a server? A checklist (running, firewall, router, internet) and the fixes.
+    Reach(ReachArgs),
     /// Discord notifications for update reports.
     Webhook {
         #[command(subcommand)]
@@ -207,6 +210,7 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
             | Command::Branch { .. }
             | Command::Pr { .. }
             | Command::Webhook { .. }
+            | Command::Reach(_)
             | Command::SelfUpdate { .. }
             | Command::Panel(_),
         ) => K::Other,
@@ -398,6 +402,7 @@ fn main() {
         Some(Command::Status) => status(),
         Some(Command::SelfUpdate { check, yes, version }) => kora_core::self_update::cli::run(&kora_core::self_update::cli::Options { check, yes, version }),
         Some(Command::Webhook { cmd }) => webhook(cmd),
+        Some(Command::Reach(a)) => cmd::reach::run(a),
         Some(Command::Branch { cmd }) => branch::branch(cmd),
         Some(Command::Pr { cmd }) => branch::pr(cmd),
         Some(Command::Schedule { cmd }) => schedule(cmd),

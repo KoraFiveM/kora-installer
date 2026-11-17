@@ -313,6 +313,15 @@ export const api = {
     set: (name: string, cfg: T.ScheduleConfig) => call('schedule_set', { params: { s: name }, body: cfg }),
     remove: (name: string) => call('schedule_remove', { params: { s: name } }),
   },
+  reach: {
+    /** `once`: allow a lookup for this check only (nothing is saved). */
+    check: (name: string, once?: T.ReachConsentPatch) => call('reach_check', { params: { s: name }, body: once ?? {} }),
+    settings: () => call('reach_settings_get', {}),
+    setSettings: (c: T.ReachConsentPatch) => call('reach_settings_set', { body: c }),
+    setForwarding: (name: string, enabled: boolean) => call('forwarding_set', { params: { s: name }, body: { enabled } }),
+    openFirewall: (name: string) => call('reach_firewall_open', { params: { s: name } }),
+    txadminTicket: (name: string) => call('txadmin_ticket', { params: { s: name } }),
+  },
   ports: {
     set: (name: string, ports: T.Ports) => call('ports_set', { params: { s: name }, body: ports }),
   },

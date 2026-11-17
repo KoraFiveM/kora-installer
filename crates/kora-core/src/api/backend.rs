@@ -169,6 +169,26 @@ pub trait Backend {
     /// Change the game and txAdmin ports of a stopped server. Returns notes to show (firewall, restart).
     fn ports_set(&mut self, e: &ServerEntry, p: Ports) -> Res<Vec<String>>;
 
+    /// "Can players reach my server?": the checklist of [`crate::reach`]. `consent` replaces the saved
+    /// choice about outside lookups for this one check. Front ends without it keep the default.
+    fn reach_check(&mut self, _e: &ServerEntry, _consent: Option<crate::reach::settings::Consent>) -> Res<crate::reach::ReachReport> {
+        Err(NO_REACH.into())
+    }
+    /// Which outside lookups the person allowed.
+    fn reach_consent(&mut self) -> crate::reach::settings::Consent {
+        crate::reach::settings::Consent::default()
+    }
+    fn reach_consent_set(&mut self, _c: crate::reach::settings::Consent) -> Res<()> {
+        Err(NO_REACH.into())
+    }
+    /// Switch automatic port forwarding of the server's game port on or off.
+    fn forwarding_set(&mut self, _e: &ServerEntry, _on: bool) -> Res<crate::reach::ForwardingView> {
+        Err(NO_REACH.into())
+    }
+    /// Open the game port in this computer's firewall (needs administrator rights). Returns notes.
+    fn firewall_open(&mut self, _e: &ServerEntry) -> Res<Vec<String>> {
+        Err(NO_REACH.into())
+    }
     /// Paid (Cfx.re Portal) assets imported on the server, and console hints about licence problems.
     fn assets_list(&mut self, _e: &ServerEntry) -> Res<AssetsView> {
         Err(NO_PAID_ASSETS.into())
@@ -191,6 +211,9 @@ pub trait Backend {
         Err(NO_PAID_ASSETS.into())
     }
 }
+
+/// What a front end without the reachability check answers.
+pub const NO_REACH: &str = "The reachability check isn't available here.";
 
 /// What a front end without branch switching answers.
 pub const NO_BRANCHES: &str = "Branches can't be changed from here.";

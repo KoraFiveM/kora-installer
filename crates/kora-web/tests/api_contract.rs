@@ -524,11 +524,17 @@ fn cases() -> Vec<Case> {
         with(case(Op::StashRestore, &[("s", "dev"), ("name", "kora_hud")], Some(json!({"index": 0}))), branches_switched),
         with(case(Op::BranchBulkPreview, dev, Some(json!({"branch": "fix-hud", "fetch": true}))), bulk_preview),
         with(case(Op::BranchBulkApply, dev, Some(json!({"action": "default", "changes": "ask"}))), bulk_apply),
+        case(Op::ReachCheck, s, Some(json!({}))),
+        case(Op::ReachSettingsGet, &[], None),
+        case(Op::ReachSettingsSet, &[], Some(json!({"cfx_list": true}))),
+        case(Op::ForwardingSet, s, Some(json!({"enabled": true}))),
+        case(Op::ReachFirewallOpen, s, None),
     ]
 }
 
 /// Operations the contract test does not run yet, and why. Shrinks as cases are added.
 const UNVERIFIED: &[(Op, &str)] = &[
+    (Op::TxAdminTicket, "needs a browser session (cookie and secret) and binds a listening port; covered by tests/txgate.rs"),
     (Op::SessionLogout, "204, nothing to read"),
     (Op::SessionLink, "needs a local session"),
     (Op::PanelRestart, "would restart the process"),

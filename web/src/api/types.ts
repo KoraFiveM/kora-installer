@@ -39,6 +39,20 @@ export type AssetSource = { upload: string } | { download: string }
 // (Do not define a type here that the Rust side already describes: add it to crates/kora-core/src/api/wire/.)
 
 export type {
+  ConsentKind,
+  Connect as ReachConnect,
+  Consent as ReachConsent,
+  ForwardStatus,
+  ForwardingView,
+  Fix as ReachFix,
+  FixId as ReachFixId,
+  Layer as ReachLayer,
+  LayerId as ReachLayerId,
+  PublicSource,
+  ReachConsentPatch,
+  ReachReport,
+  ReachState,
+  TxAdminTicket,
   AddOutcome,
   AddPlan,
   AdoptRequest,

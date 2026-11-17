@@ -1258,7 +1258,7 @@ impl InstallStep {
         let Some(kind) = firewall::detect(svc_platform(), &rn) else {
             if !ctx.req.txadmin_public {
                 ctx.note(format!(
-                    "txAdmin (port {}) listens on all interfaces: txAdmin 8.1.2 cannot bind only the panel to loopback. No firewall is active here, so block that port from outside yourself or use it through an SSH tunnel.",
+                    "txAdmin (port {}) listens on all interfaces: txAdmin 8.1.2 cannot bind only the panel to loopback. No firewall is active here, so block that port from outside yourself. You do not need it open to use txAdmin from other devices: the panel's Open txAdmin button reaches it for you.",
                     ctx.req.ports.txadmin
                 ));
             }

@@ -582,6 +582,49 @@ export type CheckItem = {
 export type CheckState = "ok" | "problem" | "info";
 
 /**
+ * The addresses to give people, each for who it works for.
+ */
+export type Connect = {
+  /**
+   * `ip:port` on the same network.
+   */
+  lan: string | null,
+  /**
+   * `ip:port` from the internet, once the public address is known (and not behind carrier-grade NAT).
+   */
+  public: string | null,
+  /**
+   * `https://cfx.re/join/<code>` when the server has a join code.
+   */
+  cfx: string | null,
+  /**
+   * What to type in FiveM's console (F8) for the best address.
+   */
+  command: string | null,
+};
+
+/**
+ * Which outside services the reachability check may contact. Nothing is contacted by default.
+ */
+export type Consent = {
+  /**
+   * Ask Cfx.re's public server list about this server's own join code (it learns nothing new: the
+   * server already announces itself there). Gives the address Cfx.re sees.
+   */
+  cfx_list: boolean,
+  /**
+   * Ask a plain "what is my address" website (`api.ipify.org`) for this connection's public
+   * address. It sees that address and that a request was made, nothing else.
+   */
+  ip_echo: boolean,
+};
+
+/**
+ * An outside lookup the person may allow.
+ */
+export type ConsentKind = "cfx_list" | "ip_echo";
+
+/**
  * `POST /servers/{s}/console`.
  */
 export type ConsoleCommand = {
@@ -593,6 +636,14 @@ export type ConsoleCommand = {
  */
 export type ConsoleLine = {
   line: string,
+};
+
+/**
+ * What was (and was not) contacted outside this computer, for the "what did you do" line.
+ */
+export type Contacted = {
+  what: string,
+  learned: string,
 };
 
 /**
@@ -748,6 +799,16 @@ export type ErrorEnvelope = {
   error: ErrorBody,
 };
 
+export type Fix = {
+  id: FixId,
+  label: string,
+};
+
+/**
+ * A button the panel can show on a line.
+ */
+export type FixId = "start_server" | "open_firewall" | "enable_forwarding" | "allow_cfx_list" | "allow_ip_echo";
+
 /**
  * `GET /fleet`.
  */
@@ -786,6 +847,45 @@ export type FleetServer = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+};
+
+/**
+ * What the last attempt to forward the port did (written by whichever process maintains the mapping).
+ */
+export type ForwardStatus = {
+  /**
+   * Unix seconds.
+   */
+  at: number,
+  ok: boolean,
+  /**
+   * `UPnP`, `NAT-PMP` or `PCP` when it worked.
+   */
+  via?: string,
+  /**
+   * In words for a person.
+   */
+  message: string,
+  /**
+   * The router's own report of its internet-side address.
+   */
+  external_ip?: string,
+  /**
+   * The mapping is not removed by the router itself (`lease` 0): only Kora removes it.
+   */
+  permanent: boolean,
+};
+
+/**
+ * `PUT /servers/{s}/forwarding`.
+ */
+export type ForwardingRequest = {
+  enabled: boolean,
+};
+
+export type ForwardingView = {
+  enabled: boolean,
+  status: ForwardStatus | null,
 };
 
 /**
@@ -1193,6 +1293,20 @@ export type KeyUpdateRequest = {
 };
 
 export type Kind = "kora" | "dependency" | "optional" | "internal";
+
+export type Layer = {
+  id: LayerId,
+  state: ReachState,
+  title: string,
+  detail: string,
+  /**
+   * What to do by hand, one step per line, with the exact values to enter.
+   */
+  steps: Array<string>,
+  fixes: Array<Fix>,
+};
+
+export type LayerId = "running" | "firewall" | "router" | "internet";
 
 export type LogFile = {
   name: string,
@@ -1603,6 +1717,8 @@ export type ProgressEvent = {
  */
 export type Provider = "local" | "tailscale" | "token";
 
+export type PublicSource = "router" | "cfx" | "ip_echo";
+
 export type PullRequest = {
   number: number,
   title: string,
@@ -1624,6 +1740,46 @@ export type PullRequest = {
   url: string,
   updated: string,
 };
+
+/**
+ * `POST /servers/{s}/reach` and `PUT /reach/settings`: which outside lookups to allow. A field that is left out
+ * changes nothing (settings) or keeps the saved choice (a check). A check never saves what it is given.
+ */
+export type ReachConsentPatch = {
+  cfx_list?: boolean,
+  ip_echo?: boolean,
+};
+
+export type ReachReport = {
+  server: string,
+  game_port: number,
+  layers: Array<Layer>,
+  /**
+   * `ok`, `problem` or `unknown`: the worst of the layers, in one word.
+   */
+  verdict: ReachState,
+  headline: string,
+  lan_ip: string | null,
+  public_ip: string | null,
+  public_source: PublicSource | null,
+  behind_nat: boolean | null,
+  cgnat: boolean,
+  join_code: string | null,
+  connect: Connect,
+  forwarding: ForwardingView,
+  contacted: Array<Contacted>,
+  /**
+   * Outside lookups that would help but were not allowed: `cfx_list`, `ip_echo`.
+   */
+  needs_consent: Array<ConsentKind>,
+  checked_unix: number,
+  /**
+   * The saved choices about outside lookups (the check itself may have used wider ones for one time).
+   */
+  consent: Consent,
+};
+
+export type ReachState = "ok" | "likely" | "problem" | "unknown";
 
 /**
  * `GET /assets/downloads`.
@@ -2305,6 +2461,20 @@ export type ToolStatus = {
 
 export type ToolsList = {
   tools: Array<ToolStatus>,
+};
+
+/**
+ * `POST /servers/{s}/txadmin/ticket`: where to open txAdmin through the panel. The address works once, for a minute.
+ * txAdmin has its own sign-in; `username` is the account Kora made at install (never its password).
+ */
+export type TxAdminTicket = {
+  url: string,
+  /**
+   * The panel-side port of this server's txAdmin.
+   */
+  port: number,
+  expires_in: number,
+  username: string | null,
 };
 
 export type UninstallAnswer = {

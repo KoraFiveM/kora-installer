@@ -27,6 +27,7 @@ pub mod notify;
 pub mod paidassets;
 pub mod problem;
 pub mod profile;
+pub mod reach;
 pub mod self_update;
 pub mod service;
 pub mod space;

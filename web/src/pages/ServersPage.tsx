@@ -38,7 +38,7 @@ function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
       <td className="px-4 py-3"><ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} /></td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-2">
-          <TxAdminButton port={s.ports.txadmin} up={s.status === 'running'} />
+          <TxAdminButton name={s.name} port={s.ports.txadmin} up={s.status === 'running'} />
           <OpenFolderButton name={s.name} dir={s.dir} />
           <CopyConnectButton connect={s.connect} />
         </div>

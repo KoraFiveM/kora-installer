@@ -296,5 +296,11 @@ pub fn spec(op: Op) -> OpSpec {
         Op::StashRestore => OpSpec::call::<w::StashRestoreRequest, crate::branches::SwitchResult>(),
         Op::BranchBulkPreview => OpSpec::start_job_with::<w::BulkPreviewRequest>().events::<w::BulkEvent>().result::<crate::branches::BulkPreview>(),
         Op::BranchBulkApply => OpSpec::start_job_with::<w::BulkApplyRequest>().events::<w::BulkEvent>().result::<crate::branches::BulkResult>(),
+        Op::ReachCheck => OpSpec::call::<w::ReachConsentPatch, crate::reach::ReachReport>(),
+        Op::ReachSettingsGet => OpSpec::get::<crate::reach::settings::Consent>(),
+        Op::ReachSettingsSet => OpSpec::call::<w::ReachConsentPatch, crate::reach::settings::Consent>(),
+        Op::ForwardingSet => OpSpec::call::<w::ForwardingRequest, crate::reach::ForwardingView>(),
+        Op::ReachFirewallOpen => OpSpec::get::<w::Notes>(),
+        Op::TxAdminTicket => OpSpec::get::<w::TxAdminTicket>(),
     }
 }
