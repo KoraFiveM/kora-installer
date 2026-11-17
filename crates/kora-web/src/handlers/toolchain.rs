@@ -107,7 +107,7 @@ pub async fn db_start(State(st): State<AppState>) -> Result<axum::response::Resp
     if !admin.elevated && cfg!(windows) {
         // The elevated worker (the `request_admin` action) does it; the command is the fallback.
         let name = db.name.clone().unwrap_or_default();
-        return Err(ApiError::needs_elevation(format!("Starting the database server {name} needs administrator rights."), cmd(&["net", "start", &name])));
+        return Err(ApiError::needs_elevation(format!("Starting the database server {name} needs administrator rights."), vec!["net".to_string(), "start".to_string(), name.clone()]));
     }
     if !admin.elevated {
         let name = db.name.clone().unwrap_or_default();
