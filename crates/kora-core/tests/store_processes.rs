@@ -102,13 +102,18 @@ fn worker_entry() {
         "job_hang" => {
             // A durable job that shows progress and then never ends (the process is killed meanwhile).
             let reg = JobRegistry::durable_in(home.clone());
+            // The id file is written only once the event has been recorded, so the test knows the moment
+            // it may kill this process (a fixed sleep was a guess that a slow machine lost).
+            let (shown, shown_rx) = std::sync::mpsc::channel::<()>();
             let id = reg
-                .spawn(Op::UpdateApply, Some("srv".into()), |j| {
+                .spawn(Op::UpdateApply, Some("srv".into()), move |j| {
                     j.event(serde_json::json!({"step": "download", "status": "running"}));
+                    let _ = shown.send(());
                     std::thread::sleep(std::time::Duration::from_secs(600));
                     Ok(serde_json::Value::Null)
                 })
                 .unwrap();
+            shown_rx.recv_timeout(std::time::Duration::from_secs(30)).expect("the job never showed its event");
             std::fs::write(home.join("job-id.txt"), id.0).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(600));
         }
@@ -218,8 +223,7 @@ fn a_panel_killed_while_a_job_runs_leaves_an_interrupted_job_for_the_next_panel(
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     let id = std::fs::read_to_string(&idfile).unwrap();
-    // the event is written at once (the job had been quiet), so it is there when the process is killed
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    // the worker wrote the id only after its event was recorded (the first event of a quiet job is stored at once)
     k.kill().unwrap();
     let _ = k.wait();
     // the next panel starts (for real: the pid of the dead process is really gone)
