@@ -8,11 +8,11 @@
 import { chromium, expect, test, type Page } from '@playwright/test'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createHmac } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { koraBinary } from './panel'
+import { koraBinary, removeTree } from './panel'
 
 const NAME = 'kora-box.test'
 
@@ -158,7 +158,7 @@ test.describe('a real panel over HTTPS', () => {
       panel.kill('SIGTERM')
       await new Promise((r) => setTimeout(r, 500))
       if (panel.exitCode === null) panel.kill('SIGKILL')
-      rmSync(root, { recursive: true, force: true })
+      removeTree(root)
     }
   })
 })
