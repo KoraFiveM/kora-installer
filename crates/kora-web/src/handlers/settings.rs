@@ -5,9 +5,9 @@
 #![allow(clippy::unused_async)]
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use kora_core::api::panel_updates::schedule_state_json;
 use kora_core::api::{Status, WebhookView};
 use kora_core::installer::{Mode, Ports};
@@ -108,12 +108,15 @@ pub async fn schedule_get(
     .await
 }
 
-/// The schedule change needs administrator rights: the helper does it when it is installed,
-/// otherwise this is the `needs_elevation` answer with the command to run.
-fn run_elevated(args: Vec<String>) -> Result<(), ApiError> {
+/// The schedule change needs administrator rights: on Windows the elevated worker does it (one
+/// permission prompt), on Linux the helper when it is installed; otherwise this is the
+/// `needs_elevation` answer with the command to run.
+fn run_elevated(ask: crate::elevated::AdminAsk, args: Vec<String>) -> Result<(), ApiError> {
     let mut command = vec!["kora".to_string()];
     command.extend(args);
-    crate::elevated::privileged_msg(
+    crate::elevated::privileged_as(
+        ask,
+        "change the automatic updates",
         "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.",
         command,
         vec![],
@@ -124,9 +127,12 @@ fn run_elevated(args: Vec<String>) -> Result<(), ApiError> {
 
 pub async fn schedule_set(
     State(st): State<AppState>,
+    Extension(caller): Extension<crate::remote::Caller>,
+    headers: HeaderMap,
     Path(s): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
+    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
     let cfg: ScheduleConfig = serde_json::from_value(body)
         .map_err(|_| ApiError::bad_request("The schedule needs a preset (daily, weekly or custom), a time like 04:00, a weekday for weekly, who it runs as, and whether it is on."))?;
     cfg.validate()
@@ -140,7 +146,7 @@ pub async fn schedule_set(
         }
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, Some(&cfg)) {
-            run_elevated(args)?;
+            run_elevated(ask, args)?;
         } else {
             b.schedule_set(&e, &cfg).map_err(ApiError::core)?;
         }
@@ -152,13 +158,16 @@ pub async fn schedule_set(
 
 pub async fn schedule_remove(
     State(st): State<AppState>,
+    Extension(caller): Extension<crate::remote::Caller>,
+    headers: HeaderMap,
     Path(s): Path<String>,
 ) -> Result<Response, ApiError> {
+    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
     blocking(move || {
         let e = st.entry(&s)?;
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, None) {
-            run_elevated(args)?;
+            run_elevated(ask, args)?;
         } else {
             b.schedule_remove(&e).map_err(ApiError::core)?;
         }

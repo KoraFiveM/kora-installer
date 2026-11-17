@@ -99,11 +99,11 @@ Options:
       --db-admin-port <DB_ADMIN_PORT>
           Database server port for the admin login (default 3306)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --start
           Start the server when the install finishes and wait until txAdmin answers (the interactive installer does this by default)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --no-start
           Do not start the server after installing (start it later with `kora start <name>`)
@@ -990,6 +990,65 @@ Say whether the helper is installed and running
 Usage: kora helper status [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora admin-worker =====
+Windows: Kora Panel's short-lived administrator helper (started through the permission prompt)
+
+Usage: kora admin-worker [OPTIONS] --pipe <PIPE> --parent <PARENT>
+
+Options:
+      --pipe <PIPE>
+          The panel's pipe
+
+      --parent <PARENT>
+          The panel's process id
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora admin-step =====
+One administrator step of an install or delete, run by that helper
+
+Usage: kora admin-step [OPTIONS] --step <STEP> --dir <DIR> <ACTION>
+
+Arguments:
+  <ACTION>
+          `run` (install) or `undo` (delete)
+          
+          [possible values: run, undo]
+
+Options:
+      --step <STEP>
+          The install step (see `kora_core::installer::system_ops`)
+          
+          [possible values: prepare.db, build.db, system.firewall, system.service, system.schedule]
+
+      --dir <DIR>
+          The server folder
+
+      --name <NAME>
+          Undo: the name in the person's server list
+
+      --game-port <GAME_PORT>
+          
+
+      --txadmin-port <TXADMIN_PORT>
+          
+
+      --keep-files
+          
+
+      --keep-db
+          
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

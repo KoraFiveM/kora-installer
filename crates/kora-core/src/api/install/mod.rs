@@ -755,6 +755,20 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
     v
 }
 
+/// The answers without anything that needs administrator rights ("Continue without the
+/// administrator parts"): no firewall change, no background service (so no update task), and the
+/// database only used when it is already there. The same rule as the wizard's `withoutAdmin`.
+pub fn without_admin(req: &InstallRequest) -> InstallRequest {
+    let mut r = req.clone();
+    r.firewall = false;
+    r.txadmin_public = false;
+    r.service = false;
+    if r.db == DbChoice::InstallIfMissing {
+        r.db = DbChoice::UseExisting;
+    }
+    r
+}
+
 /// What to tell the user to do before running [`install_command`] (names the variables, never values).
 pub fn elevation_message(req: &InstallRequest, reasons: &[String]) -> String {
     let mut m = format!(

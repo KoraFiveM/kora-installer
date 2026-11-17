@@ -9,15 +9,28 @@
 #![allow(clippy::unused_async)]
 
 use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::Response;
-use axum::Json;
+use axum::{Extension, Json};
 use kora_core::api::maintenance::{self as maint, UninstallRequest};
 use kora_core::api::Op;
 use kora_core::app_install::AppOptions;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::elevated::AdminAsk;
+use crate::remote::Caller;
 use crate::{blocking, ApiError, AppState};
+use kora_core::helper::worker::Context;
+
+/// A job error that keeps a Problem's code and choices (the declined prompt's "Ask again", ...).
+fn job_error(e: ApiError) -> String {
+    if e.actions().is_empty() {
+        e.message
+    } else {
+        e.to_problem().encode()
+    }
+}
 
 fn cmd(parts: &[&str]) -> Vec<String> {
     let mut v = vec!["kora".to_string()];
@@ -55,8 +68,11 @@ pub struct SelfUpdateReq {
 
 pub async fn self_update_apply(
     State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    headers: HeaderMap,
     bytes: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
+    let ask = AdminAsk::of(&caller, &headers);
     let req: SelfUpdateReq = body(&bytes)?;
     let version = req
         .version
@@ -80,13 +96,12 @@ pub async fn self_update_apply(
             c.push(v.clone());
         }
         let msg = "Updating Kora needs administrator rights. Run this command as administrator:";
-        if !crate::elevated::helper_installed() {
-            return Err(ApiError::needs_elevation(msg, c));
-        }
-        // The helper does it: the same command, run as administrator, as a job.
+        let what = "update Kora";
+        crate::elevated::precheck(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
+        // The worker (Windows) or the helper (Linux) does it: the same command, run as administrator, as a job.
         return st.spawn_job(Op::SelfUpdateApply, None, move |h| {
-            let out = crate::elevated::privileged_msg(msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
-                .map_err(|e| e.message)?;
+            let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
+                .map_err(job_error)?;
             Ok(json!({"version": v2, "output": out["output"]}))
         });
     }
@@ -137,7 +152,8 @@ impl Default for AppInstallReq {
 /// first so the old ones keep working until the end), then remove the old machine-wide copy and its
 /// shortcuts. That last part needs administrator rights: through the helper when it is installed, otherwise
 /// the `needs_elevation` answer with the command to run.
-pub async fn app_install(bytes: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
+pub async fn app_install(Extension(caller): Extension<Caller>, headers: HeaderMap, bytes: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
+    let ask = AdminAsk::of(&caller, &headers);
     let req: AppInstallReq = body(&bytes)?;
     blocking(move || {
         let m = maint::current();
@@ -155,7 +171,7 @@ pub async fn app_install(bytes: axum::body::Bytes) -> Result<Json<Value>, ApiErr
         }
         if maint::tidy_needs_admin(m.as_ref(), false) {
             let msg = "Your new Kora shortcuts are ready, and the old ones keep working. Removing the old copy of Kora needs administrator rights. Run this command as administrator:";
-            crate::elevated::privileged_msg(msg, cmd(&["app", "uninstall", "--yes"]), vec![], &mut |_| {})?;
+            crate::elevated::privileged_as(ask, "remove the old copy of Kora", msg, cmd(&["app", "uninstall", "--yes"]), vec![], &mut |_| {})?;
         } else {
             m.app_uninstall(false).map_err(ApiError::core)?;
         }
@@ -171,16 +187,19 @@ pub struct AppUninstallReq {
 }
 
 pub async fn app_uninstall(
+    Extension(caller): Extension<Caller>,
+    headers: HeaderMap,
     Query(q): Query<AppUninstallReq>,
     bytes: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
+    let ask = AdminAsk::of(&caller, &headers);
     // The UI sends `{dry_run}` as a body; a query string works too.
     let b: AppUninstallReq = body(&bytes)?;
     let dry_run = b.dry_run || q.dry_run;
     blocking(move || {
         let m = maint::current();
         if maint::app_change_needs_admin(m.as_ref(), dry_run) {
-            crate::elevated::privileged_msg("Removing the Kora app needs administrator rights. Run this command as administrator:", cmd(&["uninstall", "--app", "--yes"]), vec![], &mut |_| {})?;
+            crate::elevated::privileged_as(ask, "remove the Kora app", "Removing the Kora app needs administrator rights. Run this command as administrator:", cmd(&["uninstall", "--app", "--yes"]), vec![], &mut |_| {})?;
             return Ok(Json(json!({"message": "The Kora app was removed. Your servers and databases were not touched."})));
         }
         let lines = m.app_uninstall(dry_run).map_err(ApiError::core)?;
@@ -234,8 +253,11 @@ pub struct RunReq {
 
 pub async fn uninstall_run(
     State(st): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    headers: HeaderMap,
     bytes: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
+    let ask = AdminAsk::of(&caller, &headers);
     let req: RunReq = body(&bytes)?;
     let st2 = st.clone();
     let only = req.only.clone();
@@ -263,13 +285,12 @@ pub async fn uninstall_run(
             c.push(one.clone());
         }
         let msg = "Removing services, firewall rules and accounts needs administrator rights. Run this command as administrator:";
-        if !crate::elevated::helper_installed() {
-            return Err(ApiError::needs_elevation(msg, c));
-        }
+        let what = "remove the services, firewall rules and accounts Kora set up";
+        crate::elevated::precheck(ask, &Context { what: what.into(), command: c.clone(), can_skip_admin: false }, msg)?;
         let server = if let [one] = r.only.as_slice() { Some(one.clone()) } else { None };
         return st.spawn_job(Op::UninstallRun, server, move |h| {
-            let out = crate::elevated::privileged_msg(msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
-                .map_err(|e| e.message)?;
+            let out = crate::elevated::privileged_as(ask, what, msg, c, vec![], &mut |m| h.event(json!({"type": "status", "message": m})))
+                .map_err(job_error)?;
             Ok(json!({"notes": ["Your server folders and databases were kept unless you chose to delete them."], "output": out["output"]}))
         });
     }

@@ -511,6 +511,12 @@ enum Command {
         #[command(subcommand)]
         cmd: HelperCmd,
     },
+    /// Windows: Kora Panel's short-lived administrator helper (started through the permission prompt).
+    #[command(hide = true)]
+    AdminWorker(admin_worker::AdminWorkerArgs),
+    /// One administrator step of an install or delete, run by that helper.
+    #[command(hide = true)]
+    AdminStep(admin_worker::AdminStepArgs),
 }
 
 #[derive(Subcommand)]
@@ -2379,6 +2385,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::Delete { .. }) => K::Delete,
         // The panel runs as the user; privileged actions report the command to run instead.
         Some(Command::ServiceHost { .. } | Command::Github { .. } | Command::Webhook { .. } | Command::SelfUpdate { .. } | Command::Panel(_)) => K::Other,
+        // Already elevated (the worker) or run by it: never relaunched.
+        Some(Command::AdminWorker(_) | Command::AdminStep(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
         Some(Command::Helper { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
@@ -2518,7 +2526,13 @@ fn main() {
     elevate_if_needed(&cli, &cli.command);
     let command = cli.command;
     // "New version available": background check, interactive runs only (never CI, pipes, services).
-    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::Update(UpdateArgs { auto: true, .. })));
+    let quiet = matches!(command, Some(Command::ServiceHost { .. } | Command::SelfUpdate { .. } | Command::Helper { .. } | Command::AdminWorker(_) | Command::AdminStep(_) | Command::Update(UpdateArgs { auto: true, .. })));
+    // The worker has a hidden window and its step children no terminal: never wait for a key.
+    match &command {
+        Some(Command::AdminWorker(a)) => std::process::exit(admin_worker::admin_worker(a)),
+        Some(Command::AdminStep(a)) => std::process::exit(admin_worker::admin_step(a)),
+        _ => {}
+    }
     let pending = if quiet { None } else { kora_core::self_update::update_check::Pending::start(tty) };
     // Already running as root for these: repair update jobs an older Kora pointed at a program other
     // accounts can change (`~/.local/bin/kora`). Does nothing when not root or nothing is wrong.
@@ -2561,6 +2575,7 @@ fn main() {
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
         Some(Command::Helper { cmd }) => helper(cmd),
+        Some(Command::AdminWorker(_) | Command::AdminStep(_)) => unreachable!("handled above"),
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
         Some(Command::App { cmd }) => match cmd {
@@ -2575,6 +2590,7 @@ fn main() {
     finish(code);
 }
 
+mod admin_worker;
 mod bare;
 mod panel_tailscale;
 

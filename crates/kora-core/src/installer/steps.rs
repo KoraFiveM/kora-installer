@@ -669,7 +669,8 @@ impl InstallStep {
     fn via_helper(&self, undo: bool, step: &str) -> Result<super::system_ops::StepResult> {
         let ctx = &*self.ctx;
         let Some(h) = self.helper() else { return err("no administrator helper is available") };
-        let args = super::system_ops::step_args(undo, step, &ctx.req.dir, ctx.keep_files, ctx.keep_db);
+        let known = (undo && ctx.system_trusted).then(|| (ctx.req.name.clone(), ctx.req.ports.game, ctx.req.ports.txadmin));
+        let args = super::system_ops::step_args(undo, step, &ctx.req.dir, ctx.keep_files, ctx.keep_db, &known);
         ctx.emit(self.id, StepStatus::Running, "Working with administrator rights", 0.2);
         let out = h.0.admin_step(&args, &mut |l| ctx.emit(self.id, StepStatus::Running, l.to_string(), 0.5))?;
         let Some(r) = out.data.and_then(|v| serde_json::from_value::<super::system_ops::StepResult>(v).ok()) else {

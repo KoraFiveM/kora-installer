@@ -94,15 +94,30 @@ pub struct DbResult {
     pub remove_secret_file: bool,
 }
 
+impl StepResult {
+    /// The child's last output line (`helper::worker::RESULT_PREFIX` + JSON).
+    pub fn to_line(&self) -> std::result::Result<String, String> {
+        serde_json::to_string(self).map(|j| format!("{}{j}", crate::helper::worker::RESULT_PREFIX)).map_err(|e| e.to_string())
+    }
+}
+
 impl std::fmt::Debug for DbResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DbResult").field("state", &self.state).field("clear_old_state", &self.clear_old_state).finish_non_exhaustive()
     }
 }
 
-/// The helper's arguments for one step.
-pub fn step_args(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: bool) -> Vec<String> {
+/// The server's name and ports from the person's server list (for undoing).
+pub type Known = Option<(String, u16, u16)>;
+
+/// The helper's arguments for one step. `known`: undoing, the name and ports from the person's
+/// server list (read before the delete took the server off it), which the helper uses instead of
+/// the folder's own record (the server's service account can change that one).
+pub fn step_args(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: bool, known: &Known) -> Vec<String> {
     let mut v = vec![if undo { "undo" } else { "run" }.to_string(), "--step".into(), step.into(), "--dir".into(), dir.to_string_lossy().into_owned()];
+    if let Some((name, game, txadmin)) = known {
+        v.extend(["--name".into(), name.clone(), "--game-port".into(), game.to_string(), "--txadmin-port".into(), txadmin.to_string()]);
+    }
     if keep_files {
         v.push("--keep-files".into());
     }
@@ -138,9 +153,24 @@ pub fn check_dir_for(dir: &Path, user_sid: &str, owner: Option<&str>, has_record
     }
 }
 
+/// Does deleting the server in `dir` need the helper (not elevated)? When Kora made system-wide
+/// things for it (service, firewall rules, update task, program copy, account), or when its
+/// database is to be dropped with Kora's own MariaDB login (`db_with_helper`: Windows, no password
+/// given).
+pub fn delete_needs_admin(created: Option<&Created>, has_db_state: bool, keep_db: bool, db_with_helper: bool) -> bool {
+    let system = created.is_some_and(|c| c.firewall || c.update_timer || c.service_unit.is_some() || c.service_account_created || c.binary.is_some());
+    system || (has_db_state && !keep_db && db_with_helper)
+}
+
+/// [`delete_needs_admin`] for the server folder `dir` on this machine.
+pub fn delete_needs_admin_at(dir: &Path, keep_db: bool, password_given: bool) -> bool {
+    let has_db = super::meta_dir(dir).join("db-provision.json").is_file();
+    delete_needs_admin(super::load_created_from(dir).as_ref(), has_db, keep_db, cfg!(windows) && !password_given)
+}
+
 /// `kora admin-step`: run (or undo) one administrator step for the server in `dir`, in THIS
 /// (elevated) process, without writing into the server folder. Progress lines go to `say`.
-pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: bool, say: &mut dyn FnMut(&str)) -> Result<StepResult> {
+pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: bool, known: Known, say: &mut dyn FnMut(&str)) -> Result<StepResult> {
     let allowed = if undo { UNDO_STEPS } else { RUN_STEPS };
     if !allowed.contains(&step) {
         return Err(InstallError(format!("'{step}' is not a step Kora's administrator helper does")));
@@ -150,10 +180,10 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     // Removing system-wide things: the name and ports come from the server list, not from the
     // folder's own (changeable) record, exactly as `kora delete` does.
     let trusted = if undo {
-        match registered(dir) {
-            Some((name, ports)) => {
+        match known.or_else(|| registered(dir).map(|(n, p)| (n, p.game, p.txadmin))) {
+            Some((name, game, txadmin)) => {
                 req.name = name;
-                (req.ports.game, req.ports.txadmin) = (ports.game, ports.txadmin);
+                (req.ports.game, req.ports.txadmin) = (game, txadmin);
                 true
             }
             None => false,
@@ -194,10 +224,10 @@ mod tests {
     #[test]
     fn step_arguments_name_the_folder_and_options() {
         let dir = if cfg!(windows) { std::path::PathBuf::from(r"C:\Users\Jo Smith\kora\my server") } else { "/home/jo/kora/my server".into() };
-        let a = step_args(false, "system.service", &dir, false, false);
+        let a = step_args(false, "system.service", &dir, false, false, &None);
         assert_eq!(a, ["run", "--step", "system.service", "--dir", &dir.to_string_lossy()]);
-        let a = step_args(true, "build.db", &dir, true, true);
-        assert_eq!(&a[a.len() - 2..], ["--keep-files", "--keep-db"]);
+        let a = step_args(true, "build.db", &dir, true, true, &Some(("my-server".into(), 30120, 40120)));
+        assert_eq!(&a[a.len() - 8..], ["--name", "my-server", "--game-port", "30120", "--txadmin-port", "40120", "--keep-files", "--keep-db"]);
         assert_eq!(a[0], "undo");
     }
 
@@ -225,10 +255,28 @@ mod tests {
     }
 
     #[test]
+    fn deleting_needs_the_helper_only_for_system_wide_things() {
+        let none = Created::default();
+        assert!(!delete_needs_admin(Some(&none), false, false, true));
+        assert!(!delete_needs_admin(None, false, false, true));
+        for c in [
+            Created { firewall: true, ..Default::default() },
+            Created { update_timer: true, ..Default::default() },
+            Created { service_unit: Some("kora-a".into()), ..Default::default() },
+            Created { binary: Some("C:/k.exe".into()), ..Default::default() },
+        ] {
+            assert!(delete_needs_admin(Some(&c), false, true, false), "{c:?}");
+        }
+        assert!(delete_needs_admin(Some(&none), true, false, true), "Kora's MariaDB login");
+        assert!(!delete_needs_admin(Some(&none), true, true, true), "the database is kept");
+        assert!(!delete_needs_admin(Some(&none), true, false, false), "a password was given");
+    }
+
+    #[test]
     fn unknown_steps_are_refused_before_anything_is_read() {
-        let e = run_admin_step(false, "build.config", Path::new("/nonexistent"), false, false, &mut |_| {}).unwrap_err();
+        let e = run_admin_step(false, "build.config", Path::new("/nonexistent"), false, false, None, &mut |_| {}).unwrap_err();
         assert!(e.0.contains("not a step"), "{e:?}");
-        assert!(run_admin_step(true, "prepare.db", Path::new("/nonexistent"), false, false, &mut |_| {}).is_err());
+        assert!(run_admin_step(true, "prepare.db", Path::new("/nonexistent"), false, false, None, &mut |_| {}).is_err());
     }
 
     #[test]

@@ -110,6 +110,11 @@ pub trait Backend {
     fn delete_with_db_password(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, _db_admin_password: Option<&str>) -> Res<Vec<String>> {
         self.delete(e, keep_files, keep_db)
     }
+    /// [`Backend::delete_with_db_password`] with an administrator helper for the system-wide parts
+    /// (the Windows panel's worker, see `installer::system_ops`). Front ends without one keep the default.
+    fn delete_with_admin(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>, _admin: Option<crate::installer::system_ops::SharedAdmin>) -> Res<Vec<String>> {
+        self.delete_with_db_password(e, keep_files, keep_db, db_admin_password)
+    }
     /// Take the server off the manager's list without touching anything else.
     fn unregister(&mut self, e: &ServerEntry) -> Res<()>;
     fn register(&mut self, e: ServerEntry) -> Res<()>;
