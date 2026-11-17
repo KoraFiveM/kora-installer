@@ -320,4 +320,13 @@ export type {
   UndoInfo,
   VerifyResult,
   Label as BackupLabel,
+  BundleCreateRequest,
+  BundleFile,
+  BundleFileRequest,
+  BundleFileText,
+  BundleListing,
+  BundleSaved,
+  Omitted,
+  SupportRequest,
+  SupportSummary,
 } from './generated/types'

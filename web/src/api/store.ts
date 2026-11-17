@@ -60,6 +60,8 @@ const LABELS: Record<string, string> = {
   backup_settings_set: 'Changed backup settings',
   backup_prune: 'Removed old backups',
   backup_download: 'Downloaded a backup',
+  support_bundle_create: 'Saved a support bundle',
+  support_bundle_download: 'Downloaded a support bundle',
 }
 
 export function opLabel(op: string): string {

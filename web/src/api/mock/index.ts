@@ -10,6 +10,7 @@ import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
 import { installReachMock } from './reach'
 import { installBackupsMock } from './backups'
+import { installSupportMock } from './support'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
@@ -416,6 +417,7 @@ const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const reachMock = installReachMock(route, () => servers)
+installSupportMock(route, Fail)
 const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep)
 const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })

@@ -337,6 +337,15 @@ export const api = {
     /** The address of the archive (a download; it holds secrets: administrators only). Fetched with the session header, see `downloadBackup`. */
     fileUrl: (name: string, id: string) => `${BASE}/servers/${encodeURIComponent(name)}/backups/${encodeURIComponent(id)}/file`,
   },
+  support: {
+    /** Prepare a support bundle and say what is in it. Nothing is saved or sent. */
+    preview: (server?: string) => call('support_bundle_preview', { body: server ? { server } : {} }),
+    file: (id: string, name: string) => call('support_bundle_file', { body: { id, name } }),
+    create: (id: string) => call('support_bundle_create', { body: { id } }),
+    /** The short cleaned text an issue report may attach (never the file). */
+    summary: (server?: string) => call('support_summary', { body: server ? { server } : {} }),
+    fileUrl: (file: string) => `${BASE}/support/bundle/${encodeURIComponent(file)}`,
+  },
   ports: {
     set: (name: string, ports: T.Ports) => call('ports_set', { params: { s: name }, body: ports }),
   },
