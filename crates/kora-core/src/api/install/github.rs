@@ -4,14 +4,15 @@
 //! The logic is the same as `kora github owners` (`kora-cli`); it is kept here because that
 //! lives in a front-end crate.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::git::owners::{self, GhAuth, OwnerKind, SystemLogin};
 use crate::git::SystemRunner;
 use crate::problem::{codes, known, Action, Problem};
 
 /// Where GitHub stands for Kora, so the panel can offer the right fix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GithubState {
     /// Signed in with every permission Kora needs.

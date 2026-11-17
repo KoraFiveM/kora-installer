@@ -89,7 +89,7 @@ fn broker() -> Arc<dyn Broker> {
     BROKER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().unwrap_or_else(|| Arc::new(ServiceBroker))
 }
 
-/// Can administrator work be done now (the service answers and serves this account)? (`GET /system` `helper_installed`.)
+/// Can administrator work be done now (the service answers and serves this account)? (Used by `GET /system`.)
 pub fn service_ready() -> bool {
     broker().availability() == Availability::Ready
 }
@@ -100,6 +100,16 @@ pub fn service_state() -> Value {
         Availability::Ready => json!({"state": "ready"}),
         Availability::Missing => json!({"state": "missing"}),
         Availability::NotAllowed(why) => json!({"state": "not_allowed", "reason": why}),
+    }
+}
+
+/// The state for `GET /system` (typed).
+pub fn service_info() -> kora_core::api::wire::AdminServiceInfo {
+    use kora_core::api::wire::{AdminServiceInfo as I, AdminServiceState as S};
+    match broker().availability() {
+        Availability::Ready => I { state: S::Ready, reason: None },
+        Availability::Missing => I { state: S::Missing, reason: None },
+        Availability::NotAllowed(why) => I { state: S::NotAllowed, reason: Some(why) },
     }
 }
 

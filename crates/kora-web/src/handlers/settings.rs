@@ -20,7 +20,7 @@ use crate::{blocking, ApiError, AppState};
 fn webhook_state(c: &NotifyConfig) -> Value {
     let v = WebhookView::from(c);
     // `configured` is what the UI reads; `set` is the core's name for the same thing.
-    json!({"configured": v.set, "set": v.set, "redacted": v.redacted})
+    serde_json::to_value(kora_core::api::wire::WebhookState { configured: v.set, set: v.set, redacted: v.redacted }).unwrap_or(Value::Null)
 }
 
 pub async fn webhook_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {

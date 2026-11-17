@@ -227,7 +227,7 @@ fn kinds(e: &Value) -> Vec<String> {
 async fn without_the_service_everything_answers_needs_elevation_with_the_choices() {
     let r = rig(None).await;
     let (s, j) = r.call("GET", "/system", None).await;
-    assert_eq!((s, &j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (200, &json!(false), &json!("missing"), &Value::Null), "no prompt exists any more");
+    assert_eq!((s, &j["admin_service"]["state"], &j["admin_prompt"]), (200, &json!("missing"), &Value::Null), "no prompt exists any more");
 
     // "Tidy up old shortcuts": the per-user half is done, the old copy needs the command (never the service's job).
     r.maint.app.lock().unwrap().legacy = true;
@@ -263,7 +263,7 @@ async fn system_reports_the_service() {
     let h = FakeHelper::new(0);
     let r = rig(Some(h)).await;
     let j = r.call("GET", "/system", None).await.1;
-    assert_eq!((&j["helper_installed"], &j["admin_service"]["state"], &j["admin_prompt"]), (&json!(true), &json!("ready"), &Value::Null), "no prompt exists any more");
+    assert_eq!((&j["admin_service"]["state"], &j["admin_prompt"]), (&json!("ready"), &Value::Null), "no prompt exists any more");
     set_broker_override(None);
 }
 

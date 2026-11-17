@@ -201,6 +201,11 @@ There is no permission prompt any more except the one for the installer itself. 
 (`windows-smoke.yml`, job `msi`) installs the MSI and drives the service from standard test accounts through the Task
 Scheduler; this list is what a real desktop adds (prompts, shortcuts, Apps & features, upgrade over what you have).
 
+Part of this is now checked by CI (`windows-uac.yml`; see [windows-uac-ci.md](windows-uac-ci.md) for which steps and what only a self-hosted VM can do). The list below stays the owner's pass.
+
+Do these on a normal administrator account unless a step says otherwise. The prompt can appear as a flashing shield in
+the taskbar instead of on screen: note where it showed.
+
 S1. [ ] **Install the MSI** (double-click `kora-windows-x86_64.msi`, or the one-liner `irm ... | iex` and answer Y).
     *Should happen:* exactly one Windows permission prompt; `C:\Program Files\Kora\kora.exe` exists; Services shows
     "Kora administrator service" running, startup Automatic, log on as Local System; `kora` works in a new terminal (machine

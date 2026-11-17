@@ -71,7 +71,7 @@ async fn system_info_has_the_fields_the_ui_reads() {
     let j = json_of(r).await;
     assert_eq!(j["platform"], if cfg!(windows) { "windows" } else { "linux" });
     assert_eq!(j["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(j["helper_installed"], false);
+    assert_eq!(j["admin_service"]["state"], "missing");
     assert!(j["elevated"].is_boolean() && j["admin"] == j["elevated"]);
     assert!(j["headless"].is_boolean());
     assert!(j["kora_home"].is_string());

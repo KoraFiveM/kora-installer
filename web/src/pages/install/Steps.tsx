@@ -78,7 +78,7 @@ export function PortsStep({ f, set, ports }: StepProps & { ports: PortsChecked }
         <Field label={label}><Input inputMode="numeric" value={f[field]} onChange={(e) => set({ [field]: e.target.value } as Partial<WizardForm>)} /></Field>
         {l && (
           <div className="flex flex-wrap items-center gap-2 text-sm" aria-live="polite">
-            <span className={l.ok ? 'text-success' : 'text-destructive'}>{l.text}</span>
+            <span className={l.ok ? 'text-success' : 'text-danger-text'}>{l.text}</span>
             {l.suggestion && <Button size="sm" onClick={() => set({ [field]: String(l.suggestion) } as Partial<WizardForm>)}>Use {l.suggestion}</Button>}
           </div>
         )}
@@ -92,7 +92,7 @@ export function PortsStep({ f, set, ports }: StepProps & { ports: PortsChecked }
         {line('Game port', 'game', 'game')}
         {line('txAdmin port', 'txadmin', 'tx')}
       </div>
-      {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
+      {problem && <p role="alert" className="text-sm text-danger-text">{problem}</p>}
       <ErrorNotice error={ports.error} />
       {ports.state === 'unknown' && <Button onClick={ports.retry}>Check the ports again</Button>}
     </div>
@@ -111,7 +111,7 @@ export function BuildStep({ f, set, advanced }: StepProps) {
           <Field label="Build">
             <Select value={f.artifactBuild ?? ''} onChange={(e) => set({ artifactBuild: e.target.value ? Number(e.target.value) : null })}>
               <option value="">Choose a build</option>
-              {(arts.data?.items ?? []).map((a) => <option key={a.build} value={a.build}>{a.build}{a.build === arts.data?.recommended ? ' (recommended)' : ''}{a.date ? `, ${a.date}` : ''}</option>)}
+              {(arts.data?.items ?? []).map((a) => <option key={a.build} value={a.build}>{a.build}{a.build === arts.data?.recommended ? ' (recommended)' : ''}</option>)}
             </Select>
           </Field>
         )}
@@ -197,7 +197,7 @@ export function DatabaseStep({ f, set }: StepProps) {
               <Field label="Type the password again"><Input type="password" value={f.dbPass2} onChange={(e) => set({ dbPass2: e.target.value })} autoComplete="new-password" /></Field>
               <Field label="Host"><Input value={f.dbHost} onChange={(e) => set({ dbHost: e.target.value })} /></Field>
               <Field label="Port"><Input inputMode="numeric" value={f.dbPort} onChange={(e) => set({ dbPort: e.target.value })} /></Field>
-              {problem && <p role="alert" className="text-sm text-destructive sm:col-span-2">{problem}</p>}
+              {problem && <p role="alert" className="text-sm text-danger-text sm:col-span-2">{problem}</p>}
             </div>
           )}
           <Button disabled={busy || !!problem} onClick={test}>Test login</Button>

@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use kora_core::api::{adopt, logs, Backend, Op, Status, UpdateBadge};
+use kora_core::api::{adopt, logs, wire, Backend, Op, Status, UpdateBadge};
 use kora_core::installer::registry::{self, ServerEntry};
 use kora_core::service::ControlAction;
 use serde::Deserialize;
@@ -25,69 +25,58 @@ pub(crate) fn is_managed(e: &ServerEntry) -> bool {
     e.dir.join(".kora").join("request.json").is_file()
 }
 
-fn badge_json(b: Option<UpdateBadge>) -> Value {
-    match b {
-        None => Value::Null,
-        Some(UpdateBadge::UpToDate) => json!({"kind": "up_to_date"}),
-        Some(UpdateBadge::Updates(n)) => json!({"kind": "updates", "count": n}),
-        Some(UpdateBadge::NeedsAttention) => json!({"kind": "needs_attention"}),
-        Some(UpdateBadge::NewRelease) => json!({"kind": "new_release"}),
-    }
-}
-
-fn summary(b: &mut dyn Backend, e: &ServerEntry) -> Value {
+fn summary(b: &mut dyn Backend, e: &ServerEntry) -> wire::ServerSummary {
     let status = b.status(e);
     let badge = b.badge(e);
     summary_with(e, status, badge)
 }
 
-fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> Value {
-    json!({
-        "name": e.name,
-        "dir": e.dir,
-        "mode": e.mode,
-        "ports": e.ports,
-        "created_unix": e.created_unix,
-        "status": status,
-        "badge": badge_json(badge),
-        "managed": is_managed(e),
-        "connect": connect_address(e.ports.game),
-    })
+fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> wire::ServerSummary {
+    wire::ServerSummary {
+        name: e.name.clone(),
+        dir: e.dir.clone(),
+        mode: e.mode,
+        ports: kora_core::installer::Ports { game: e.ports.game, txadmin: e.ports.txadmin },
+        created_unix: e.created_unix,
+        status,
+        badge: badge.map(wire::Badge::from),
+        managed: is_managed(e),
+        connect: connect_address(e.ports.game),
+    }
 }
 
 /// `<this computer's network address>:<game port>`, the address someone on the same network types to
 /// join, or `null` when the address cannot be found. It is NOT an address players on the internet can
 /// use: that is the router's public address (which Kora cannot see) with the same port forwarded.
-fn connect_address(game_port: u16) -> Value {
-    match kora_core::launch::lan_address() {
-        Some(ip) => json!(format!("{ip}:{game_port}")),
-        None => Value::Null,
-    }
+fn connect_address(game_port: u16) -> Option<String> {
+    kora_core::launch::lan_address().map(|ip| format!("{ip}:{game_port}"))
 }
 
 /// The body of `GET /servers` (also what the events stream sends).
 pub(crate) fn list_json(b: &mut dyn Backend) -> Result<Value, ApiError> {
     let list = b.list().map_err(ApiError::internal)?;
-    let servers: Vec<Value> = list.iter().map(|e| summary(b, e)).collect();
-    Ok(json!({ "servers": servers }))
+    let servers: Vec<wire::ServerSummary> = list.iter().map(|e| summary(b, e)).collect();
+    Ok(serde_json::to_value(wire::ServersList { servers }).unwrap_or(Value::Null))
 }
 
 pub async fn servers_list(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
     blocking(move || list_json(&mut *st.backend()).map(Json)).await
 }
 
-pub async fn server_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
+pub async fn server_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<wire::ServerDetail>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let mut b = st.backend();
         let detail = b.status_detail(&e);
-        let mut v = summary(&mut *b, &e);
-        v["running"] = json!(detail.running);
-        v["game_listening"] = json!(detail.game_listening);
-        v["txadmin_up"] = json!(detail.txadmin_up);
-        v["status_detail"] = json!(detail);
-        v["console_enabled"] = json!(kora_core::console::is_installed(&e.dir));
-        Ok(Json(v))
+        let summary = summary(&mut *b, &e);
+        Ok(Json(wire::ServerDetail {
+            summary,
+            running: detail.running,
+            game_listening: detail.game_listening,
+            txadmin_up: detail.txadmin_up,
+            status_detail: detail,
+            console_enabled: kora_core::console::is_installed(&e.dir),
+        }))
     })
     .await
 }
@@ -118,27 +107,23 @@ pub async fn server_control(State(st): State<AppState>, Path(s): Path<String>, J
     let name = e.name.clone();
     let stc = st.clone();
     st.spawn_job(Op::ServerControl, Some(name), move |h| {
-        h.event(json!({"type": "status", "message": match action {
+        let message = match action {
             ControlAction::Start => "Starting",
             ControlAction::Stop => "Stopping",
             ControlAction::Restart => "Restarting",
-        }}));
+        };
+        h.event(to_value(&wire::StatusEvent::Status { message: message.into() }));
         let mut b = stc.backend();
         b.control(&e, action)?;
-        Ok(json!({"status": b.status(&e)}))
+        Ok(to_value(&wire::ControlResult { status: b.status(&e) }))
     })
 }
 
-#[derive(Deserialize)]
-pub struct DeleteBody {
-    confirm_name: String,
-    #[serde(default)]
-    keep_files: bool,
-    #[serde(default)]
-    keep_db: bool,
-    /// Only when dropping the database needs a login the install did not keep. Used once, never stored or returned.
-    #[serde(default)]
-    db_admin_password: Option<String>,
+use wire::DeleteRequest as DeleteBody;
+
+/// A wire value as the JSON a job stores.
+fn to_value<T: serde::Serialize>(v: &T) -> Value {
+    serde_json::to_value(v).unwrap_or(Value::Null)
 }
 
 pub async fn server_delete(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<DeleteBody>) -> Result<Response, ApiError> {
@@ -184,9 +169,9 @@ pub async fn server_delete(State(st): State<AppState>, Path(s): Path<String>, Js
     let name = e.name.clone();
     let stc = st.clone();
     st.spawn_job(Op::ServerDelete, Some(name), move |h| {
-        h.event(json!({"type": "status", "message": "Deleting the server"}));
+        h.event(to_value(&wire::StatusEvent::Status { message: "Deleting the server".into() }));
         let notes = stc.backend().delete_with_admin(&e, body.keep_files, body.keep_db, body.db_admin_password.as_deref(), admin).map_err(delete_error)?;
-        Ok(json!({"notes": notes}))
+        Ok(to_value(&wire::Notes { notes }))
     })
 }
 
@@ -224,17 +209,23 @@ pub async fn servers_scan(State(st): State<AppState>) -> Result<Response, ApiErr
         let roots = b.scan_roots();
         let known: Vec<PathBuf> = b.list()?.into_iter().map(|e| e.dir).collect();
         let found = adopt::scan(&roots, 3, &known);
-        let candidates: Vec<Value> = found.iter().map(|c| json!({"name": c.name, "dir": c.dir, "mode": c.mode, "kind": c.kind, "ports": c.ports})).collect();
-        Ok(json!({ "candidates": candidates }))
+        let candidates = found
+            .iter()
+            .map(|c| wire::ScanCandidate {
+                name: c.name.clone(),
+                dir: c.dir.clone(),
+                mode: c.mode,
+                kind: c.kind.into(),
+                ports: kora_core::installer::Ports { game: c.ports.game, txadmin: c.ports.txadmin },
+            })
+            .collect();
+        Ok(to_value(&wire::ScanResult { candidates }))
     })
 }
 
-#[derive(Deserialize)]
-pub struct AdoptBody {
-    dir: String,
-}
+use wire::AdoptRequest as AdoptBody;
 
-pub async fn servers_adopt(State(st): State<AppState>, Json(body): Json<AdoptBody>) -> Result<Json<Value>, ApiError> {
+pub async fn servers_adopt(State(st): State<AppState>, Json(body): Json<AdoptBody>) -> Result<Json<wire::ServerSummary>, ApiError> {
     blocking(move || {
         let p = PathBuf::from(body.dir.trim());
         if !p.is_absolute() {
@@ -297,28 +288,25 @@ pub async fn server_open_folder(State(st): State<AppState>, Path(s): Path<String
 
 // ---------------------------------------------------------------- logs
 
-pub async fn logs_list(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
+pub async fn logs_list(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<wire::LogsList>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
-        let files: Vec<Value> = logs::discover(&e.dir)
+        let files: Vec<wire::LogFile> = logs::discover(&e.dir)
             .into_iter()
             .map(|l| {
                 let m = std::fs::metadata(&l.path).ok();
                 let modified = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
-                json!({"name": l.name, "size": m.map_or(0, |m| m.len()), "modified_unix": modified})
+                wire::LogFile { name: l.name.to_string(), size: m.map_or(0, |m| m.len()), modified_unix: modified }
             })
             .collect();
-        Ok(Json(json!({ "files": files })))
+        Ok(Json(wire::LogsList { files }))
     })
     .await
 }
 
-#[derive(Deserialize)]
-pub struct TailQuery {
-    lines: Option<usize>,
-}
+use wire::LogTailQuery as TailQuery;
 
-pub async fn logs_tail(State(st): State<AppState>, Path((s, file)): Path<(String, String)>, Query(q): Query<TailQuery>) -> Result<Json<Value>, ApiError> {
+pub async fn logs_tail(State(st): State<AppState>, Path((s, file)): Path<(String, String)>, Query(q): Query<TailQuery>) -> Result<Json<wire::LogTail>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         if file.contains('/') || file.contains('\\') || file.contains("..") {
@@ -327,7 +315,7 @@ pub async fn logs_tail(State(st): State<AppState>, Path((s, file)): Path<(String
         let src = logs::discover(&e.dir).into_iter().find(|l| l.name == file).ok_or_else(|| ApiError::not_found("That log file does not exist."))?;
         let n = q.lines.unwrap_or(300).clamp(1, logs::MAX_LINES);
         let lines = logs::tail(&src.path, n).map_err(ApiError::internal)?;
-        Ok(Json(json!({"file": file, "lines": lines})))
+        Ok(Json(wire::LogTail { file, lines }))
     })
     .await
 }

@@ -17,6 +17,7 @@ use crate::api::UpdateBadge;
 use crate::space::{human, GIB};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum AlertKind {
     /// Was running and now is not, and nobody asked it to stop.

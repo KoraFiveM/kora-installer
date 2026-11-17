@@ -153,6 +153,7 @@ pub mod known {
 /// A tool Kora can install or point to. `#[non_exhaustive]`: new tools may be added.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Tool {
     Git,
@@ -182,6 +183,7 @@ impl Tool {
 /// [`Action::Unknown`], which front ends do not show.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
     /// Do the same thing again (the generic "Try again").
@@ -195,6 +197,7 @@ pub enum Action {
     /// `mode`, `name`, `ports`, `database`, `options`, `github`, ...), `None` = the summary.
     ChangeAnswers {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         section: Option<String>,
     },
     /// Sign in to GitHub (again). `scopes`: the permissions that are missing (empty = a plain sign-in).
@@ -221,8 +224,10 @@ pub enum Action {
     /// Show the log: of a panel job (`job`) or a file on this computer (`path`).
     OpenLog {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         job: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         path: Option<String>,
     },
     /// Copy the message and details (for a bug report).
@@ -266,6 +271,7 @@ impl Action {
 ///
 /// JSON: `{"code", "message", "details"?, "actions": [..]}` (`details` left out when empty).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Problem {
     /// Stable machine code ([`codes`]).
     pub code: String,
@@ -273,6 +279,7 @@ pub struct Problem {
     pub message: String,
     /// Technical details (command output, error text) for the "Show details" box.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub details: Option<String>,
     /// What the user can do, best first. Empty: the front end offers its generic choices.
     #[serde(default)]

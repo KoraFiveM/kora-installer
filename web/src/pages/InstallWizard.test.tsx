@@ -216,7 +216,7 @@ describe('Install wizard: the short path', () => {
     const d = await api.installs.defaults()
     vi.spyOn(api.installs, 'defaults').mockResolvedValue({
       ...d,
-      saved: { mode: 'production', name: 'old-one', dir: '/srv/games/old-one', hostname: 'Old One', ports: { game: 30555, txadmin: 40555 }, db: 'skip', resources: { only: ['kora_core', 'chat'] }, service: false, firewall: false, cfx_identifier: 'fivem:99' },
+      saved: { mode: 'production', name: 'old-one', dir: '/srv/games/old-one', hostname: 'Old One', ports: { game: 30555, txadmin: 40555 }, db: 'skip', resources: { only: ['kora_core', 'chat'] }, service: false, firewall: false, cfx_identifier: 'fivem:99', txadmin_public: false, artifact_url: null, game_build: null, github_owner: null, start: false, license_key_name: null },
     })
     renderApp(<InstallWizard />, '/install')
     await user.click(await screen.findByRole('button', { name: 'Continue where I left off' }))
