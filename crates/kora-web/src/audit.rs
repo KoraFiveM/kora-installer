@@ -240,7 +240,10 @@ pub async fn audit_list(State(st): State<AppState>, Extension(caller): Extension
             result: q.get("result").filter(|v| !v.is_empty()).cloned(),
             since: q.get("since").and_then(|v| v.parse().ok()),
         };
-        let s = kora_core::store::Store::open(&home).map_err(|p| ApiError::problem(StatusCode::INTERNAL_SERVER_ERROR, p))?;
+        // Looking never creates the store: nothing recorded yet is an empty list.
+        let Some(s) = kora_core::store::Store::open_existing(&home).map_err(|p| ApiError::problem(StatusCode::INTERNAL_SERVER_ERROR, p))? else {
+            return Ok(Json(json!({"entries": [], "more": false, "retention_days": audit::RETENTION_DAYS})));
+        };
         let mut rows = audit::list(&s, &query).map_err(|p| ApiError::problem(StatusCode::INTERNAL_SERVER_ERROR, p))?;
         let more = rows.len() > limit.clamp(1, 500);
         rows.truncate(limit.clamp(1, 500));

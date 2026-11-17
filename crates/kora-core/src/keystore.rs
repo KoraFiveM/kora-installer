@@ -250,6 +250,15 @@ impl KeyStore {
         })
     }
 
+    /// Like [`change`](Self::change) for something that needs a key to exist already (rename, replace, forget): with no
+    /// store yet there is no such key, and nothing is created to say so.
+    fn change_existing<T>(&self, name: &str, f: impl FnOnce(&mut Vec<Entry>) -> Result<(T, bool), Problem>) -> Result<T, Problem> {
+        if self.open_read()?.is_none() {
+            return Err(not_found(name));
+        }
+        self.change(f)
+    }
+
     /// The saved keys, safe to show.
     pub fn list(&self) -> Result<Vec<KeyInfo>, Problem> {
         Ok(self.read()?.iter().map(info).collect())
@@ -303,7 +312,7 @@ impl KeyStore {
     pub fn update(&self, name: &str, new_name: Option<&str>, new_key: Option<&str>) -> Result<KeyInfo, Problem> {
         let new_name = new_name.map(check_name).transpose()?;
         let new_key = new_key.map(check_key).transpose()?;
-        self.change(|keys| {
+        self.change_existing(name, |keys| {
             let Some(i) = keys.iter().position(|e| same(&e.name, name)) else { return Err(not_found(name)) };
             if let Some(n) = &new_name {
                 if keys.iter().enumerate().any(|(j, e)| j != i && same(&e.name, n)) {
@@ -333,7 +342,7 @@ impl KeyStore {
 
     /// Forget a saved key. Servers installed with it are not touched.
     pub fn remove(&self, name: &str) -> Result<(), Problem> {
-        self.change(|keys| {
+        self.change_existing(name, |keys| {
             let Some(i) = keys.iter().position(|e| same(&e.name, name)) else { return Err(not_found(name)) };
             keys.remove(i);
             Ok(((), true))

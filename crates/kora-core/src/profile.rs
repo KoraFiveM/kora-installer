@@ -133,6 +133,11 @@ impl ProfileStore {
     /// Change the given fields (in one transaction: two programs changing different fields keep both).
     /// Best effort for the caller: a failure to remember never blocks an install.
     pub fn update(&self, cfx_username: Field, cfx_identifier: Field, github_owner: Field) -> std::io::Result<Profile> {
+        // Nothing to remember and nothing saved: nothing to do, and nothing is created.
+        let only_forgetting = !matches!(cfx_username, Field::Set(_)) && !matches!(cfx_identifier, Field::Set(_)) && !matches!(github_owner, Field::Set(_));
+        if only_forgetting && Store::open_existing_beside(&self.legacy).map_err(problem_to_io)?.is_none() {
+            return Ok(Profile::default());
+        }
         let s = Store::open_beside(&self.legacy).map_err(problem_to_io)?;
         s.write(|tx| {
             let mut p = read(tx)?;

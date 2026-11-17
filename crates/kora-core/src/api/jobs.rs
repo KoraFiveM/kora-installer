@@ -209,17 +209,16 @@ impl JobHandle {
 
     /// Append an event (kept for replay and sent to live subscribers).
     pub fn event(&self, value: Value) {
-        {
-            let mut g = self.reg.lock();
-            if let Some(j) = g.jobs.get_mut(&self.id.0) {
-                if j.snap.events.len() < MAX_EVENTS {
-                    j.snap.events.push(value.clone());
-                }
-                j.subscribers.retain(|s| s.send(JobMessage::Event(value.clone())).is_ok());
-            }
-        }
+        // Written down BEFORE anyone can see it, so whatever a viewer saw is also in the store if the panel dies now.
         if let Some(j) = &self.reg.journal {
             j.event(&self.id.0, &value);
+        }
+        let mut g = self.reg.lock();
+        if let Some(j) = g.jobs.get_mut(&self.id.0) {
+            if j.snap.events.len() < MAX_EVENTS {
+                j.snap.events.push(value.clone());
+            }
+            j.subscribers.retain(|s| s.send(JobMessage::Event(value.clone())).is_ok());
         }
     }
 }
