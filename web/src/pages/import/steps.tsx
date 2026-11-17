@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { FileArchive, Upload } from 'lucide-react'
-import type { ArchivedServer, BackupEvent, Clash, DbAdmin, ForkChoice, ImportChoices, ImportPreview, ImportResult, ImportSource, JobError } from '@/api/types'
+import type { ArchivedServer, BackupEvent, Clash, DbAdmin, ForkChoice, ImportChoices, ImportPreview, ImportResult, ImportSource, JobError, RunMode } from '@/api/types'
 import { api } from '@/api/client'
 import { StyleChip } from '@/components/Status'
 import { browseForFile, inShell } from '@/lib/shell'
@@ -98,7 +98,7 @@ function ClashRow({ c, onUse }: { c: Clash; onUse: (c: Clash) => void }) {
   )
 }
 
-export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkChoice, setForkChoice, admin, setAdmin, start, setStart, busy, onGo }: {
+export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkChoice, setForkChoice, admin, setAdmin, start, setStart, runMode, setRunMode, busy, onGo }: {
   preview: ImportPreview
   choices: ImportChoices
   setChoices: (c: ImportChoices) => void
@@ -110,6 +110,9 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkCh
   setAdmin: (a: DbAdmin | null) => void
   start: boolean
   setStart: (b: boolean) => void
+  /** How the new server runs (`null`: not asked, because this computer has no container engine and the backup was no container). */
+  runMode: RunMode | null
+  setRunMode: (m: RunMode) => void
   busy: boolean
   onGo: () => void
 }) {
@@ -152,7 +155,15 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkCh
           <Radio name="fork" checked={forkChoice === 'originals'} onChange={() => setForkChoice('originals')} label="Use the originals" hint="Plain copies of the original repositories, no GitHub account needed. The server becomes a server of plain copies here." />
         </fieldset>
       )}
-      {preview.db_login && !preview.db_login.ok && <DbLoginForm note={preview.db_login.message} setAdmin={setAdmin} />}
+      {(runMode !== null || preview.run_mode === 'container') && (
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm font-semibold">How the server runs here</legend>
+          {preview.run_mode === 'container' && <p className="text-sm text-muted-foreground">The server you are bringing in ran in a container.</p>}
+          <Radio name="runmode" checked={runMode !== 'container'} onChange={() => setRunMode('service')} label="As a system service" hint="Starts with the computer. Setting the service up needs administrator rights (Kora shows what to do afterwards)." />
+          <Radio name="runmode" checked={runMode === 'container'} onChange={() => setRunMode('container')} disabled={!preview.container_engine} label="In a container" hint={preview.container_engine ? `Uses ${preview.container_engine}. The database goes into a MariaDB container next to the server.` : 'This computer has no container engine (Podman or Docker) that Kora can use.'} />
+        </fieldset>
+      )}
+      {preview.db_login && !preview.db_login.ok && runMode !== 'container' && <DbLoginForm note={preview.db_login.message} setAdmin={setAdmin} />}
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-semibold">Licence key</legend>
         <Alert tone="warning">{preview.licence_note}</Alert>
@@ -169,7 +180,7 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkCh
       </div>
       {preview.warnings.map((w, i) => <Alert key={i} tone="info">{w}</Alert>)}
       <Checkbox checked={start} onChange={(e) => setStart(e.target.checked)} label="Start the server when it is ready" />
-      <Button variant="default" disabled={busy || portBad || !choices.name.trim() || !choices.dir.trim() || (preview.db_login?.ok === false && !admin)} onClick={onGo}>Bring the server in</Button>
+      <Button variant="default" disabled={busy || portBad || !choices.name.trim() || !choices.dir.trim() || (preview.db_login?.ok === false && !admin && runMode !== 'container')} onClick={onGo}>Bring the server in</Button>
     </div>
   )
 }
