@@ -140,7 +140,7 @@ pub fn program_runs(p: &str) -> bool {
 }
 
 fn connection_args(c: &Credentials) -> Vec<String> {
-    vec!["--protocol=tcp".into(), "-h".into(), c.host.clone(), "-P".into(), c.port.to_string(), "-u".into(), c.user.clone(), "--connect-timeout=10".into()]
+    vec!["--protocol=tcp".into(), "-h".into(), c.host.clone(), "-P".into(), c.port.to_string(), "-u".into(), c.user.clone()]
 }
 
 fn env_for(c: &Credentials) -> Vec<(String, String)> {
@@ -212,6 +212,8 @@ pub fn dump_is_complete(path: &Path) -> bool {
 fn client_spec(client: &str, c: &Credentials, sql: Option<&str>) -> CommandSpec {
     let mut args = vec!["--batch".to_string(), "--skip-column-names".into(), "--default-character-set=utf8mb4".into()];
     args.extend(connection_args(c));
+    // The client takes a connect timeout; mysqldump/mariadb-dump do NOT ("unknown variable 'connect-timeout=10'").
+    args.push("--connect-timeout=10".into());
     args.push(c.database.clone());
     CommandSpec { program: client.to_string(), args, env: env_for(c), stdin: sql.map(str::to_string) }
 }
@@ -390,6 +392,7 @@ mod tests {
         assert_eq!(s.args.last().unwrap(), "kora_abc");
         assert!(!line.contains("--all-databases") && !line.contains("--databases"));
         assert!(!line.contains("--no-tablespaces"));
+        assert!(!line.contains("connect-timeout"), "the dump tools reject it: {line}");
         assert!(dump_spec("x", &creds(), true).args.contains(&"--no-tablespaces".to_string()));
         assert!(!format!("{s:?}").contains("s3cr3t"));
     }
