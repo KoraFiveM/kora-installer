@@ -5,6 +5,15 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-11-17
+
+### Added
+- **Coloured console and logs, like the game and txAdmin.** The server's colour codes now reach the panel: the live console and the Logs tab show the colours the server prints (bold and the 16, 256 and true colour codes), on the dark theme. Everything else (cursor movement, titles, control characters) is still removed, and the text is never read as HTML.
+
+### Changed
+- The panel's name in the sidebar and on the sign-in page is the Kora wordmark from the website, not text.
+- The Updates tab is gone: its check and update flow sit at the top of the Resources tab, and clicking a resource's name checks just that resource (with an update button when it has a simple change).
+
 ## [0.6.3] - 2026-11-16
 
 ### Changed
