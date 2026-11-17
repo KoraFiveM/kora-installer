@@ -223,9 +223,12 @@ Manage the people who may sign in to the panel remotely (each has a token and a 
 Usage: kora panel user [OPTIONS] <COMMAND>
 
 Commands:
-  add     Add a user and print their token once (it cannot be shown again)
-  list    List the users and their roles
-  remove  Remove a user; their sessions stop working at once
+  invite       Invite a person: makes the user and prints a one-time link (30 minutes, works once) where they set up a passkey or one-time codes. No token is made
+  list         List the users, their roles and how they sign in
+  credentials  Show what one user can sign in with (counts and dates, never a secret)
+  reset        A lost phone or laptop: take credentials away, end the user's sessions and print a new one-time link to set up again
+  remove       Remove a user; their sessions stop working at once
+  api-token    Tokens for scripts (an `Authorization: Bearer` header; never for signing in, never in an address)
 
 Options:
       --no-elevate
@@ -234,10 +237,10 @@ Options:
   -h, --help
           Print help
 
-===== kora panel user add =====
-Add a user and print their token once (it cannot be shown again)
+===== kora panel user invite =====
+Invite a person: makes the user and prints a one-time link (30 minutes, works once) where they set up a passkey or one-time codes. No token is made
 
-Usage: kora panel user add [OPTIONS] --role <ROLE> <NAME>
+Usage: kora panel user invite [OPTIONS] --role <ROLE> <NAME>
 
 Arguments:
   <NAME>
@@ -256,11 +259,49 @@ Options:
           Print help
 
 ===== kora panel user list =====
-List the users and their roles
+List the users, their roles and how they sign in
 
 Usage: kora panel user list [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user credentials =====
+Show what one user can sign in with (counts and dates, never a secret)
+
+Usage: kora panel user credentials [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user reset =====
+A lost phone or laptop: take credentials away, end the user's sessions and print a new one-time link to set up again
+
+Usage: kora panel user reset [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user
+
+Options:
+      --what <WHAT>
+          What to take away: passkeys, code (password and one-time codes), all (also the old token link) or legacy-token (only the old token link, no new link)
+          
+          [default: all]
+          [possible values: passkeys, code, all, legacy-token]
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -275,6 +316,75 @@ Usage: kora panel user remove [OPTIONS] <NAME>
 Arguments:
   <NAME>
           The user to remove
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token =====
+Tokens for scripts (an `Authorization: Bearer` header; never for signing in, never in an address)
+
+Usage: kora panel user api-token [OPTIONS] <COMMAND>
+
+Commands:
+  create  Make a token and print it once
+  list    List the tokens (never their secrets)
+  revoke  Revoke a token by its name or number
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token create =====
+Make a token and print it once
+
+Usage: kora panel user api-token create [OPTIONS] --role <ROLE> <NAME>
+
+Arguments:
+  <NAME>
+          A name for the script (backup-script)
+
+Options:
+      --role <ROLE>
+          What it may do: viewer, operator or admin. Deleting and uninstalling still need `kora panel remote-actions on`
+          
+          [possible values: viewer, operator, admin]
+
+      --days <DAYS>
+          Valid for this many days. Without it the token never expires
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token list =====
+List the tokens (never their secrets)
+
+Usage: kora panel user api-token list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token revoke =====
+Revoke a token by its name or number
+
+Usage: kora panel user api-token revoke [OPTIONS] <TOKEN>
+
+Arguments:
+  <TOKEN>
+          The token's name or number (see `list`)
 
 Options:
       --no-elevate
