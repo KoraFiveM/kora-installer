@@ -30,6 +30,20 @@ $r = Invoke-Native $kora @('keys', 'list') $e; Show 'keys list' $r
 Assert-That ($r.Code -eq 0 -and $r.Output -match '1234') 'list shows the last four characters'
 Assert-That ($r.Output -notmatch 'SAVEDSAVED') 'list never shows the key'
 
+# DPAPI (Windows' protected storage for this account): the key is sealed in the data file, `keys keychain` says where it is kept, and
+# turning it off moves the value back in clear (and on seals it again). Written on Linux, unverified there: this is the real check.
+$r = Invoke-Native $kora @('keys', 'keychain', 'status') $e; Show 'keys keychain status' $r
+Assert-That ($r.Code -eq 0 -and $r.Output -match 'Windows') 'the status says the key is kept in Windows protected storage'
+$sealed = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($file))
+Assert-That ($sealed -notmatch 'SAVEDSAVED') 'the data file holds the key sealed (DPAPI), not in clear'
+$r = Invoke-Native $kora @('keys', 'list') $e; Assert-That ($r.Output -match 'Windows') 'keys list says where the key is kept'
+$r = Invoke-Native $kora @('keys', 'keychain', 'off') $e; Show 'keys keychain off' $r
+Assert-That ($r.Code -eq 0) 'keychain off exits 0'
+$r = Invoke-Native $kora @('keys', 'keychain', 'on') $e; Show 'keys keychain on' $r
+Assert-That ($r.Code -eq 0) 'keychain on exits 0'
+$r = Invoke-Native $kora @('install', '--name', 'named2', '--dir', (Join-Path $home1 'srv2'), '--db', 'skip', '--license-key-name', 'main', '--dry-run', '-y') $e; Show 'install with a sealed key (dry run)' $r
+Assert-That ($r.Code -eq 0) 'a sealed saved key is still found by name'
+
 $r = Invoke-Native $kora @('keys', 'add', 'Again') $e; Show 'keys add (same key)' $r
 Assert-That ($r.Code -eq 1 -and $r.Output -match 'already saved as') 'the same key twice is refused, naming the saved one'
 

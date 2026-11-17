@@ -202,7 +202,8 @@ fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
 }
 
-/// Set up one-time codes with `link`; returns (session, secret bytes, recovery codes).
+/// Set up one-time codes with `link`; returns (session, secret bytes, recovery codes). The code that proved the set-up is
+/// `LAST_SETUP_CODE` (kept per test thread, for the replay check).
 async fn enrol_code(w: &W, link: &str, password: &str) -> (Sess, Vec<u8>, Vec<String>) {
     let begin = req("POST", "/api/v1/auth/enrol").json(json!({"step": "code_begin", "link": link})).send(&w.app).await;
     assert_eq!(begin.status, 200, "{:?}", begin.json);
@@ -210,6 +211,7 @@ async fn enrol_code(w: &W, link: &str, password: &str) -> (Sess, Vec<u8>, Vec<St
     assert!(begin.json["otpauth"].as_str().unwrap().starts_with("otpauth://totp/"));
     let secret = b32_decode(begin.json["secret"].as_str().unwrap());
     let code = totp::code_at(&secret, totp::step_of(now()));
+    SETUP_CODE.with(|c| *c.borrow_mut() = code.clone());
     let done = req("POST", "/api/v1/auth/enrol").json(json!({"step": "code_finish", "link": link, "password": password, "code": code})).send(&w.app).await;
     assert_eq!(done.status, 200, "{:?}", done.json);
     let codes: Vec<String> = done.json["recovery_codes"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
@@ -217,6 +219,10 @@ async fn enrol_code(w: &W, link: &str, password: &str) -> (Sess, Vec<u8>, Vec<St
 }
 
 const PW: &str = "plum otter lantern quietly";
+
+thread_local! {
+    static SETUP_CODE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
 
 #[tokio::test]
 async fn a_user_is_invited_enrols_a_passkey_and_signs_in_with_it() {
@@ -341,7 +347,8 @@ async fn one_time_codes_with_a_password_recovery_codes_and_replay_protection() {
     // The code that proved the set-up is spent: signing in with it again is refused (a code is single use).
     let step = totp::step_of(now());
     let login = |code: String, pw: &str| req("POST", "/api/v1/auth/login").json(json!({"step": "code", "user": "amy", "password": pw, "code": code})).send(&w.app);
-    assert_eq!(login(totp::code_at(&secret, step), PW).await.status, 401, "the set-up code cannot be replayed");
+    let used = SETUP_CODE.with(|c| c.borrow().clone());
+    assert_eq!(login(used, PW).await.status, 401, "the set-up code cannot be replayed");
     // The next step's code signs in, once.
     let next = totp::code_at(&secret, step + 1);
     let ok = login(next.clone(), PW).await;
