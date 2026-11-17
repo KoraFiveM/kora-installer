@@ -620,7 +620,7 @@ impl InstallStep {
 
     /// Does this install's database work go to the helper (Kora's own MariaDB login)?
     fn db_helper(&self) -> bool {
-        super::system_ops::db_needs_helper(db::Os::current() == db::Os::Windows, self.ctx.admin, self.ctx.hooks.admin.is_some(), db_override(&self.ctx.req))
+        super::system_ops::db_needs_helper(self.ctx.admin, self.ctx.hooks.admin.is_some(), db_override(&self.ctx.req))
     }
 
     /// Have the administrator helper do `step` (see `system_ops`): its lines become this step's

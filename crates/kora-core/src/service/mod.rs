@@ -76,6 +76,10 @@ pub trait CommandRunner {
     fn copy_file(&self, src: &str, dst: &str, mode: Option<u32>) -> io::Result<()>;
     /// Remove `path` only if it is an empty directory (missing / not empty is fine).
     fn remove_empty_dir(&self, path: &str) -> io::Result<()>;
+    /// Hand a folder tree to `uid:gid` without following links (the real thing; a fake may record it).
+    fn chown_tree(&self, path: &str, uid: u32, gid: u32) -> io::Result<()> {
+        crate::fsutil::chown_tree_no_follow(std::path::Path::new(path), uid, gid)
+    }
 }
 
 /// Bytes to write for `contents`. An XML document that declares `encoding="UTF-16"` (Windows Task Scheduler's
@@ -156,11 +160,32 @@ impl CommandRunner for SystemRunner {
 /// What a step does when applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Run { program: String, args: Vec<String> },
-    WriteFile { path: String, contents: String, mode: Option<u32> },
-    RemoveFile { path: String },
-    CopyFile { src: String, dst: String, mode: Option<u32> },
-    RemoveEmptyDir { path: String },
+    Run {
+        program: String,
+        args: Vec<String>,
+    },
+    WriteFile {
+        path: String,
+        contents: String,
+        mode: Option<u32>,
+    },
+    RemoveFile {
+        path: String,
+    },
+    CopyFile {
+        src: String,
+        dst: String,
+        mode: Option<u32>,
+    },
+    RemoveEmptyDir {
+        path: String,
+    },
+    /// `chown -R uid:gid` through open folder handles (never through a link; see `fsutil::chown_tree_no_follow`).
+    ChownTree {
+        path: String,
+        uid: u32,
+        gid: u32,
+    },
 }
 
 /// One system change: plain-language description plus what it needs.
@@ -190,6 +215,10 @@ impl SystemStep {
 
     pub fn write(description: impl Into<String>, path: &str, contents: String, mode: u32) -> Self {
         SystemStep { description: description.into(), needs_admin: true, action: Action::WriteFile { path: path.to_string(), contents, mode: Some(mode) }, ignore_failure: false }
+    }
+
+    pub fn chown_tree(description: impl Into<String>, path: &str, uid: u32, gid: u32) -> Self {
+        SystemStep { description: description.into(), needs_admin: true, action: Action::ChownTree { path: path.to_string(), uid, gid }, ignore_failure: false }
     }
 
     pub fn remove(description: impl Into<String>, path: &str) -> Self {
@@ -260,6 +289,7 @@ pub fn apply_plan(plan: &Plan, runner: &dyn CommandRunner) -> ServiceResult<()> 
             Action::RemoveFile { path } => runner.remove_file(path).map_err(Into::into),
             Action::CopyFile { src, dst, mode } => runner.copy_file(src, dst, *mode).map_err(Into::into),
             Action::RemoveEmptyDir { path } => runner.remove_empty_dir(path).map_err(Into::into),
+            Action::ChownTree { path, uid, gid } => runner.chown_tree(path, *uid, *gid).map_err(Into::into),
         };
         if let Err(e) = res {
             if !step.ignore_failure {
@@ -811,6 +841,10 @@ pub(crate) mod testing {
         }
         fn remove_empty_dir(&self, path: &str) -> io::Result<()> {
             self.log.borrow_mut().push(format!("rmdir {path}"));
+            Ok(())
+        }
+        fn chown_tree(&self, path: &str, uid: u32, gid: u32) -> io::Result<()> {
+            self.log.borrow_mut().push(format!("chown -R -- {uid}:{gid} {path}"));
             Ok(())
         }
     }

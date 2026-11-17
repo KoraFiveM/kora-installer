@@ -131,11 +131,11 @@ pub fn step_args(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: 
     v
 }
 
-/// Should the database work of an install go to the helper? Only on Windows, not elevated, with a
-/// helper, when no login was given (so the login is Kora's own MariaDB one, which only
-/// administrators can read).
-pub fn db_needs_helper(windows: bool, admin: bool, has_helper: bool, login_given: bool) -> bool {
-    windows && !admin && has_helper && !login_given
+/// Should the database work of an install go to the administrator service? When not elevated, with
+/// the service available, and no login was given (so the login is the administrator one: Kora's own
+/// MariaDB login on Windows, the root socket on Linux; only administrators can use it).
+pub fn db_needs_helper(admin: bool, has_helper: bool, login_given: bool) -> bool {
+    !admin && has_helper && !login_given
 }
 
 /// The Administrators group (owner of what an elevated administrator creates on Windows Server).
@@ -260,7 +260,7 @@ pub fn delete_needs_admin(created: Option<&Created>, has_db_state: bool, keep_db
 pub fn delete_needs_admin_at(dir: &Path, keep_db: bool, password_given: bool) -> bool {
     let has_db = super::meta_dir(dir).join("db-provision.json").is_file();
     let own_login = load_request_from(dir).is_some_and(|r| r.db_admin.is_none());
-    delete_needs_admin(super::load_created_from(dir).as_ref(), has_db, keep_db, cfg!(windows) && !password_given && own_login)
+    delete_needs_admin(super::load_created_from(dir).as_ref(), has_db, keep_db, !password_given && own_login)
 }
 
 /// `kora admin-db start|install`: Kora's own MariaDB on Windows, outside an install (the panel's
@@ -374,12 +374,11 @@ mod tests {
     }
 
     #[test]
-    fn the_database_goes_to_the_helper_only_for_kora_s_own_login_on_windows() {
-        assert!(db_needs_helper(true, false, true, false));
-        assert!(!db_needs_helper(false, false, true, false), "Linux: root socket / given login");
-        assert!(!db_needs_helper(true, true, true, false), "already administrator");
-        assert!(!db_needs_helper(true, false, false, false), "no helper: the old behaviour");
-        assert!(!db_needs_helper(true, false, true, true), "a login the person typed works without administrator rights");
+    fn the_database_goes_to_the_service_only_for_the_administrator_login() {
+        assert!(db_needs_helper(false, true, false));
+        assert!(!db_needs_helper(true, true, false), "already administrator");
+        assert!(!db_needs_helper(false, false, false), "no service: the old behaviour");
+        assert!(!db_needs_helper(false, true, true), "a login the person typed works without administrator rights");
     }
 
     #[test]
