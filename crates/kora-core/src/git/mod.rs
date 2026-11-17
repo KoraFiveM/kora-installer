@@ -2391,10 +2391,13 @@ mod tests {
         assert!(login_args(true).iter().any(|x| x.contains("admin:org")));
     }
 
+    #[cfg(unix)]
     fn sam() -> crate::userhome::Account {
         crate::userhome::Account { name: "sam".into(), uid: 1000, gid: 1000, home: "/home/sam".into() }
     }
 
+    // sudo and runuser are Unix-only; on Windows `gh` would also be shown by its full path here.
+    #[cfg(unix)]
     #[test]
     fn under_sudo_gh_runs_as_the_user_and_git_asks_their_gh() {
         let u = sam();
@@ -2418,10 +2421,13 @@ mod tests {
         assert!(sudo_invocation("git", &["fetch"], None, Some(&u), Some(ru), Some("1"), None).env.is_empty());
     }
 
+    #[cfg(unix)]
     fn env_of<'a>(i: &'a Invocation, k: &str) -> Option<&'a str> {
         i.env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
     }
 
+    // sudo and runuser are Unix-only; on Windows `gh` would also be shown by its full path here.
+    #[cfg(unix)]
     #[test]
     fn git_as_root_never_reads_the_users_config_or_runs_hooks_but_keeps_their_gh_sign_in() {
         let u = sam();
@@ -2456,6 +2462,8 @@ mod tests {
         assert!(me.env.is_empty());
     }
 
+    // sudo and runuser are Unix-only; on Windows `gh` would also be shown by its full path here.
+    #[cfg(unix)]
     #[test]
     fn without_sudo_or_runuser_nothing_changes() {
         let u = sam();
