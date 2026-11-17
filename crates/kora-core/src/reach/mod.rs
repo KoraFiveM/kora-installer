@@ -24,16 +24,17 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::installer::registry::ServerEntry;
 use addr::{classify, AddrClass};
 use probe::{Listing, Lookup};
 use settings::{Consent, ForwardStatus};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
-pub enum State {
+pub enum ReachState {
     Ok,
     /// Evidence that it works, short of proof.
     Likely,
@@ -41,18 +42,42 @@ pub enum State {
     Unknown,
 }
 
+/// Short name used inside this module and by the CLI.
+pub type State = ReachState;
+
 /// A button the panel can show on a line.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum FixId {
+    StartServer,
+    OpenFirewall,
+    EnableForwarding,
+    AllowCfxList,
+    AllowIpEcho,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Fix {
-    /// `start_server`, `open_firewall`, `enable_forwarding`, `allow_cfx_list`, `allow_ip_echo`.
-    pub id: &'static str,
+    pub id: FixId,
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum LayerId {
+    Running,
+    Firewall,
+    Router,
+    Internet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Layer {
-    /// `running`, `firewall`, `router`, `internet`.
-    pub id: &'static str,
+    pub id: LayerId,
     pub state: State,
     pub title: String,
     pub detail: String,
@@ -62,7 +87,8 @@ pub struct Layer {
 }
 
 /// The addresses to give people, each for who it works for.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Connect {
     /// `ip:port` on the same network.
     pub lan: Option<String>,
@@ -74,20 +100,41 @@ pub struct Connect {
     pub command: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ForwardingView {
     pub enabled: bool,
     pub status: Option<ForwardStatus>,
 }
 
 /// What was (and was not) contacted outside this computer, for the "what did you do" line.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Contacted {
     pub what: String,
     pub learned: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum PublicSource {
+    Router,
+    Cfx,
+    IpEcho,
+}
+
+/// An outside lookup the person may allow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ConsentKind {
+    CfxList,
+    IpEcho,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ReachReport {
     pub server: String,
     pub game_port: u16,
@@ -97,8 +144,7 @@ pub struct ReachReport {
     pub headline: String,
     pub lan_ip: Option<String>,
     pub public_ip: Option<String>,
-    /// Where the public address came from: `router`, `cfx`, `ip_echo`.
-    pub public_source: Option<&'static str>,
+    pub public_source: Option<PublicSource>,
     pub behind_nat: Option<bool>,
     pub cgnat: bool,
     pub join_code: Option<String>,
@@ -106,8 +152,10 @@ pub struct ReachReport {
     pub forwarding: ForwardingView,
     pub contacted: Vec<Contacted>,
     /// Outside lookups that would help but were not allowed: `cfx_list`, `ip_echo`.
-    pub needs_consent: Vec<&'static str>,
+    pub needs_consent: Vec<ConsentKind>,
     pub checked_unix: u64,
+    /// The saved choices about outside lookups (the check itself may have used wider ones for one time).
+    pub consent: Consent,
 }
 
 // ------------------------------------------------------------------ facts
@@ -212,13 +260,13 @@ pub fn gather(env: &dyn ReachEnv, e: &ServerEntry, consent_override: Option<Cons
 }
 
 /// The public address and where it came from, best source first.
-fn known_public(router_ext: Option<Ipv4Addr>, cfx: Option<&Lookup<Listing>>) -> Option<(IpAddr, &'static str)> {
+fn known_public(router_ext: Option<Ipv4Addr>, cfx: Option<&Lookup<Listing>>) -> Option<(IpAddr, PublicSource)> {
     if let Some(ip) = router_ext.filter(|ip| classify(IpAddr::V4(*ip)) == AddrClass::Public) {
-        return Some((IpAddr::V4(ip), "router"));
+        return Some((IpAddr::V4(ip), PublicSource::Router));
     }
     if let Some(Lookup::Found(l)) = cfx {
         if let Some(ip) = l.endpoints.iter().filter_map(|e| e.parse::<SocketAddr>().ok()).map(|s| s.ip()).find(|ip| classify(*ip) == AddrClass::Public) {
-            return Some((ip, "cfx"));
+            return Some((ip, PublicSource::Cfx));
         }
     }
     None
@@ -226,34 +274,34 @@ fn known_public(router_ext: Option<Ipv4Addr>, cfx: Option<&Lookup<Listing>>) -> 
 
 // ------------------------------------------------------------------ the checklist
 
-fn layer(id: &'static str, state: State, title: impl Into<String>, detail: impl Into<String>) -> Layer {
+fn layer(id: LayerId, state: State, title: impl Into<String>, detail: impl Into<String>) -> Layer {
     Layer { id, state, title: title.into(), detail: detail.into(), steps: Vec::new(), fixes: Vec::new() }
 }
 
 fn running_layer(f: &Facts) -> Layer {
     let p = f.game_port;
     let mut l = if !f.running {
-        let mut l = layer("running", State::Problem, "The server is not running", "Nobody can join a server that is switched off.");
-        l.fixes.push(Fix { id: "start_server", label: "Start the server".into() });
+        let mut l = layer(LayerId::Running, ReachState::Problem, "The server is not running", "Nobody can join a server that is switched off.");
+        l.fixes.push(Fix { id: FixId::StartServer, label: "Start the server".into() });
         l
     } else if !f.tcp_local {
         layer(
-            "running",
-            State::Problem,
+            LayerId::Running,
+            ReachState::Problem,
             format!("The server is not answering on port {p} yet"),
             "It may still be starting (give it a minute and check again), or it could not use this port: look at the server's log for \"port is busy\" or a licence message.",
         )
     } else if !f.udp_held {
         layer(
-            "running",
-            State::Problem,
+            LayerId::Running,
+            ReachState::Problem,
             format!("Nothing is listening on UDP port {p}"),
             "FiveM needs both TCP and UDP on the game port. The web part answers but the game part does not: check the server's log, and that the server.cfg lines \"endpoint_add_udp\" and \"endpoint_add_tcp\" use the same port.",
         )
     } else if f.tcp_lan == Some(false) {
         let mut l = layer(
-            "running",
-            State::Problem,
+            LayerId::Running,
+            ReachState::Problem,
             "The server only listens on this computer itself",
             format!("It answers on 127.0.0.1 but not on this computer's network address, so no other device can join. In server.cfg the endpoint_add_tcp and endpoint_add_udp lines should say \"0.0.0.0:{p}\"."),
         );
@@ -261,7 +309,7 @@ fn running_layer(f: &Facts) -> Layer {
         l.steps.push("Restart the server.".into());
         l
     } else {
-        layer("running", State::Ok, format!("The server is running and listening on port {p} (TCP and UDP)"), "")
+        layer(LayerId::Running, ReachState::Ok, format!("The server is running and listening on port {p} (TCP and UDP)"), "")
     };
     if l.detail.is_empty() {
         l.detail = "This computer accepts connections on the game port.".into();
@@ -272,13 +320,13 @@ fn running_layer(f: &Facts) -> Layer {
 fn firewall_layer(f: &Facts) -> Layer {
     let p = f.game_port;
     let fw = &f.firewall;
-    let open_fix = Fix { id: "open_firewall", label: format!("Open port {p} in the firewall") };
+    let open_fix = Fix { id: FixId::OpenFirewall, label: format!("Open port {p} in the firewall") };
     match (fw.kind, fw.opened_by_kora) {
-        (Some(k), true) => layer("firewall", State::Ok, format!("The firewall ({k}) lets port {p} in"), "Kora opened this server's port when it was installed."),
+        (Some(k), true) => layer(LayerId::Firewall, ReachState::Ok, format!("The firewall ({k}) lets port {p} in"), "Kora opened this server's port when it was installed."),
         (Some(k), false) if k != "Windows Firewall" => {
             let mut l = layer(
-                "firewall",
-                State::Problem,
+                LayerId::Firewall,
+                ReachState::Problem,
                 format!("The firewall ({k}) is on and Kora did not open port {p}"),
                 format!("Unless you opened port {p} yourself (TCP and UDP), players are blocked here."),
             );
@@ -293,19 +341,19 @@ fn firewall_layer(f: &Facts) -> Layer {
         (Some(_), false) => {
             // Windows Firewall also asks the first time a program listens, so a rule may exist that Kora never made.
             let mut l = layer(
-                "firewall",
-                State::Unknown,
+                LayerId::Firewall,
+                ReachState::Unknown,
                 format!("Windows Firewall: Kora did not open port {p}"),
                 "Windows may have asked you when the server first started and you may have allowed it. Kora cannot read your other firewall rules. If friends cannot join, open the port here.",
             );
             l.fixes.push(open_fix);
             l
         }
-        (None, _) if fw.readable => layer("firewall", State::Ok, "No firewall is blocking this computer", "No active firewall (ufw, firewalld, Windows Firewall) was found."),
+        (None, _) if fw.readable => layer(LayerId::Firewall, ReachState::Ok, "No firewall is blocking this computer", "No active firewall (ufw, firewalld, Windows Firewall) was found."),
         (None, _) => {
             let mut l = layer(
-                "firewall",
-                State::Unknown,
+                LayerId::Firewall,
+                ReachState::Unknown,
                 "Kora cannot see this computer's firewall",
                 "Reading the firewall needs administrator rights. If you use one (ufw, firewalld, or your hosting provider's), port 30120-style game ports need TCP and UDP allowed."
                     .replace("30120-style game ports", &format!("port {p}")),
@@ -327,12 +375,12 @@ fn cgnat_help(lan: Option<&str>, port: u16) -> Vec<String> {
     ]
 }
 
-fn nat_view(f: &Facts) -> (Option<bool>, bool, Option<(IpAddr, &'static str)>) {
+fn nat_view(f: &Facts) -> (Option<bool>, bool, Option<(IpAddr, PublicSource)>) {
     let mut public = known_public(f.router.external_ip, f.cfx.as_ref());
     if public.is_none() {
         if let Some(Lookup::Found(ip)) = &f.echo {
             if classify(*ip) == AddrClass::Public {
-                public = Some((*ip, "ip_echo"));
+                public = Some((*ip, PublicSource::IpEcho));
             }
         }
     }
@@ -362,13 +410,13 @@ fn forward_steps(lan: Option<&str>, port: u16) -> Vec<String> {
     ]
 }
 
-fn router_layer(f: &Facts, behind: Option<bool>, cgnat: bool, public: Option<(IpAddr, &'static str)>) -> Layer {
+fn router_layer(f: &Facts, behind: Option<bool>, cgnat: bool, public: Option<(IpAddr, PublicSource)>) -> Layer {
     let p = f.game_port;
     let lan = f.lan.map(|i| i.to_string());
     if cgnat {
         let mut l = layer(
-            "router",
-            State::Problem,
+            LayerId::Router,
+            ReachState::Problem,
             "Your internet provider shares your public address",
             "Players on the internet cannot reach a server behind carrier-grade NAT, whatever you set in the router.",
         );
@@ -377,8 +425,8 @@ fn router_layer(f: &Facts, behind: Option<bool>, cgnat: bool, public: Option<(Ip
     }
     match behind {
         Some(false) => layer(
-            "router",
-            State::Ok,
+            LayerId::Router,
+            ReachState::Ok,
             "No router in the way",
             format!("This computer has a public address ({}) itself, so nothing needs forwarding.", f.lan.map(|i| i.to_string()).unwrap_or_default()),
         ),
@@ -386,33 +434,33 @@ fn router_layer(f: &Facts, behind: Option<bool>, cgnat: bool, public: Option<(Ip
             let found = !f.router.protocols.is_empty();
             let via = public.map(|(ip, _)| format!(" Your public address is {ip}.")).unwrap_or_default();
             match (&f.forwarding.status, f.forwarding.enabled) {
-                (Some(s), true) if s.ok => layer("router", State::Ok, format!("Port {p} is forwarded by your router"), format!("{}{via}", s.message)),
+                (Some(s), true) if s.ok => layer(LayerId::Router, ReachState::Ok, format!("Port {p} is forwarded by your router"), format!("{}{via}", s.message)),
                 (Some(s), true) => {
-                    let mut l = layer("router", State::Problem, "Automatic port forwarding did not work", format!("{}{via}", s.message));
+                    let mut l = layer(LayerId::Router, ReachState::Problem, "Automatic port forwarding did not work", format!("{}{via}", s.message));
                     l.steps = forward_steps(lan.as_deref(), p);
                     l
                 }
-                (None, true) => layer("router", State::Unknown, "Automatic port forwarding is on, waiting for the server", "It is set up while the server is running."),
+                (None, true) => layer(LayerId::Router, ReachState::Unknown, "Automatic port forwarding is on, waiting for the server", "It is set up while the server is running."),
                 (_, false) => {
                     let mut l = layer(
-                        "router",
-                        State::Unknown,
+                        LayerId::Router,
+                        ReachState::Unknown,
                         format!("Your router must forward port {p}"),
                         format!("This computer is behind a router, so players on the internet only get in if the router sends port {p} (TCP and UDP) here. Kora cannot see the router's rules.{via}"),
                     );
                     if found {
-                        l.fixes.push(Fix { id: "enable_forwarding", label: format!("Forward port {p} for me ({})", f.router.protocols.join(" / ")) });
+                        l.fixes.push(Fix { id: FixId::EnableForwarding, label: format!("Forward port {p} for me ({})", f.router.protocols.join(" / ")) });
                     }
                     l.steps = forward_steps(lan.as_deref(), p);
                     l
                 }
             }
         }
-        None => layer("router", State::Unknown, "Kora could not find this computer's network address", "Without it the router cannot be checked. Connect to your network and check again."),
+        None => layer(LayerId::Router, ReachState::Unknown, "Kora could not find this computer's network address", "Without it the router cannot be checked. Connect to your network and check again."),
     }
 }
 
-fn internet_layer(f: &Facts, cgnat: bool, public: Option<(IpAddr, &'static str)>, connect: &Connect) -> (Layer, Vec<&'static str>) {
+fn internet_layer(f: &Facts, cgnat: bool, public: Option<(IpAddr, PublicSource)>, connect: &Connect) -> (Layer, Vec<ConsentKind>) {
     let p = f.game_port;
     let mut need = Vec::new();
     let test = match (&connect.public, &connect.cfx) {
@@ -421,7 +469,7 @@ fn internet_layer(f: &Facts, cgnat: bool, public: Option<(IpAddr, &'static str)>
         _ => format!("Ask a friend who is NOT on your home network to connect to your public address, port {p}. Find your public address by searching \"what is my IP\" from this computer."),
     };
     if cgnat {
-        let mut l = layer("internet", State::Problem, "Not reachable from the internet", "Your provider's shared address blocks incoming connections (see the line above).");
+        let mut l = layer(LayerId::Internet, ReachState::Problem, "Not reachable from the internet", "Your provider's shared address blocks incoming connections (see the line above).");
         l.steps.push(test);
         return (l, need);
     }
@@ -435,8 +483,8 @@ fn internet_layer(f: &Facts, cgnat: bool, public: Option<(IpAddr, &'static str)>
                 None => false,
             };
             let mut l = layer(
-                "internet",
-                State::Likely,
+                LayerId::Internet,
+                ReachState::Likely,
                 "Cfx.re lists your server",
                 format!(
                     "Cfx.re's server list shows it as cfx.re/join/{}{}. That is a good sign, but only a real player joining proves that the game's UDP port works too.",
@@ -445,23 +493,23 @@ fn internet_layer(f: &Facts, cgnat: bool, public: Option<(IpAddr, &'static str)>
                 ),
             );
             if mismatch {
-                l.state = State::Unknown;
+                l.state = ReachState::Unknown;
                 l.title = "Cfx.re lists your server under a different address".into();
                 l.detail.push_str(" The address Cfx.re has is not the one your router reports: check which address players should use.");
             }
             l
         }
         Some(Lookup::Absent) => {
-            layer("internet", State::Unknown, "Cfx.re does not list your server (yet)", "A new server can take a few minutes to appear. This does not prove players cannot connect.")
+            layer(LayerId::Internet, ReachState::Unknown, "Cfx.re does not list your server (yet)", "A new server can take a few minutes to appear. This does not prove players cannot connect.")
         }
-        Some(Lookup::Unavailable(why)) => layer("internet", State::Unknown, "Could not ask Cfx.re", format!("{why}. This does not say anything about your server.")),
+        Some(Lookup::Unavailable(why)) => layer(LayerId::Internet, ReachState::Unknown, "Could not ask Cfx.re", format!("{why}. This does not say anything about your server.")),
         None => {
             if f.join_code.is_some() && !f.consent.cfx_list {
-                need.push("cfx_list");
+                need.push(ConsentKind::CfxList);
             }
-            let mut l = layer("internet", State::Unknown, "Kora cannot test this from the inside", "Only a computer outside your network can tell whether it gets through.");
-            if need.contains(&"cfx_list") {
-                l.fixes.push(Fix { id: "allow_cfx_list", label: "Look my server up on Cfx.re's server list".into() });
+            let mut l = layer(LayerId::Internet, ReachState::Unknown, "Kora cannot test this from the inside", "Only a computer outside your network can tell whether it gets through.");
+            if need.contains(&ConsentKind::CfxList) {
+                l.fixes.push(Fix { id: FixId::AllowCfxList, label: "Look my server up on Cfx.re's server list".into() });
                 l.detail
                     .push_str(" Kora can look your server up on Cfx.re's public server list, which already knows it (it learns nothing new). It shows whether you are listed and at which address.");
             } else if f.join_code.is_none() {
@@ -471,8 +519,8 @@ fn internet_layer(f: &Facts, cgnat: bool, public: Option<(IpAddr, &'static str)>
         }
     };
     if public.is_none() && !f.consent.ip_echo && f.router.external_ip.is_none() {
-        need.push("ip_echo");
-        l.fixes.push(Fix { id: "allow_ip_echo", label: "Find my public address (asks api.ipify.org)".into() });
+        need.push(ConsentKind::IpEcho);
+        l.fixes.push(Fix { id: FixId::AllowIpEcho, label: "Find my public address (asks api.ipify.org)".into() });
     }
     if let Some(Lookup::Unavailable(why)) = &f.echo {
         l.detail.push_str(&format!(" The public address could not be looked up: {why}."));
@@ -496,18 +544,18 @@ pub fn assess(f: &Facts) -> ReachReport {
     let router = router_layer(f, behind, cgnat, public);
     let (internet, needs_consent) = internet_layer(f, cgnat, public, &connect);
     let layers = vec![running_layer(f), firewall_layer(f), router, internet];
-    let verdict = if layers.iter().any(|l| l.state == State::Problem) {
-        State::Problem
-    } else if layers.iter().all(|l| matches!(l.state, State::Ok)) {
-        State::Ok
-    } else if layers.iter().any(|l| l.state == State::Unknown) {
-        State::Unknown
+    let verdict = if layers.iter().any(|l| l.state == ReachState::Problem) {
+        ReachState::Problem
+    } else if layers.iter().all(|l| matches!(l.state, ReachState::Ok)) {
+        ReachState::Ok
+    } else if layers.iter().any(|l| l.state == ReachState::Unknown) {
+        ReachState::Unknown
     } else {
-        State::Likely
+        ReachState::Likely
     };
-    let headline = match layers.iter().find(|l| l.state == State::Problem) {
+    let headline = match layers.iter().find(|l| l.state == ReachState::Problem) {
         Some(l) => format!("Something is in the way: {}.", l.title.trim_end_matches('.')),
-        None if verdict == State::Ok => "Everything Kora can check looks right.".to_string(),
+        None if verdict == ReachState::Ok => "Everything Kora can check looks right.".to_string(),
         None => "Nothing is wrong that Kora can see, but it cannot prove players can get in: finish with the test below.".to_string(),
     };
     let mut contacted = Vec::new();
@@ -534,6 +582,7 @@ pub fn assess(f: &Facts) -> ReachReport {
         contacted,
         needs_consent,
         checked_unix: f.now,
+        consent: f.consent,
     }
 }
 

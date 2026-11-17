@@ -1,7 +1,7 @@
 // Mock of the reachability check, port forwarding and the txAdmin ticket (kept apart from the main mock).
 // `installReachMock` is called once from mock/index.ts.
 import type * as T from '../types'
-import type { ReachConsent, ReachReport } from '../reach'
+import type { ReachConsent, ReachReport } from '../types'
 
 type Body = Record<string, unknown>
 type Route = (method: string, pattern: string, h: (m: RegExpMatchArray, body: Body, query: URLSearchParams) => unknown | Promise<unknown>) => void
@@ -79,21 +79,21 @@ export function installReachMock(route: Route, servers: () => T.ServerSummary[])
     }
   }
 
-  route('POST', '/servers/:s/reach', (m, body) => report(decodeURIComponent(m[1]), body as Partial<ReachConsent>))
+  route('POST', '/servers/{s}/reach', (m, body) => report(decodeURIComponent(m[1]), body as Partial<ReachConsent>))
   route('GET', '/reach/settings', () => consent)
   route('PUT', '/reach/settings', (_m, body) => {
     consent = { cfx_list: typeof body.cfx_list === 'boolean' ? body.cfx_list : consent.cfx_list, ip_echo: typeof body.ip_echo === 'boolean' ? body.ip_echo : consent.ip_echo }
     return consent
   })
-  route('PUT', '/servers/:s/forwarding', (m, body) => {
+  route('PUT', '/servers/{s}/forwarding', (m, body) => {
     forwarding[decodeURIComponent(m[1])] = body.enabled === true
     return { enabled: body.enabled === true, status: null }
   })
-  route('POST', '/servers/:s/reach/firewall', (m) => {
+  route('POST', '/servers/{s}/reach/firewall', (m) => {
     firewallOpen[decodeURIComponent(m[1])] = true
     return { notes: ['Opened the game port (TCP and UDP) in the firewall.'] }
   })
-  route('POST', '/servers/:s/txadmin/ticket', (m) => {
+  route('POST', '/servers/{s}/txadmin/ticket', (m) => {
     const name = decodeURIComponent(m[1])
     const s = servers().find((x) => x.name === name)
     const port = (s?.ports.txadmin ?? 40120) + 10000

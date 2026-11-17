@@ -9,6 +9,7 @@ pub mod routes;
 pub mod security;
 mod static_ui;
 pub mod txgate;
+mod wire_from;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -20,9 +21,8 @@ use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use axum::{middleware, Json, Router};
-use kora_core::api::{Backend, JobRegistry, Op};
+use kora_core::api::{wire, Backend, JobRegistry, Op};
 use kora_core::installer::registry::ServerEntry;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 pub use error::{blocking, ApiError};
@@ -210,35 +210,24 @@ pub(crate) fn conflict_message(c: &kora_core::api::jobs::Conflict) -> String {
     format!("Another operation is already running for '{}'. Wait for it to finish, then try again.", c.server)
 }
 
-#[derive(Deserialize)]
-struct SessionReq {
-    /// Local: the launch token. Remote: a user token, or absent to sign in by Tailscale identity.
-    #[serde(default)]
-    token: Option<String>,
-    /// Local only: a one-time code from a sign-in link (`/#code=...`).
-    #[serde(default)]
-    code: Option<String>,
-}
+use wire::SessionRequest as SessionReq;
 
 /// `GET /meta`. `identity` is `null` unless the request carries a valid session or bearer token;
 /// then it is `{name, provider: local|tailscale|token, role: viewer|operator|admin}` and `remote` says
 /// whether the request came from another computer. The UI reads these to hide what the role cannot do.
-pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st): State<AppState>) -> Json<Value> {
-    let platform = if cfg!(windows) { "windows" } else { "linux" };
-    Json(json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "api": 1,
-        "platform": platform,
-        "ops": Op::ALL.iter().map(|o| o.name()).collect::<Vec<_>>(),
-        "node": hostname(),
-        "identity": caller.identity,
-        "remote": caller.remote,
+pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st): State<AppState>) -> Json<wire::Meta> {
+    Json(wire::Meta {
+        version: env!("CARGO_PKG_VERSION").into(),
+        api: 1,
+        platform: if cfg!(windows) { wire::PlatformName::Windows } else { wire::PlatformName::Linux },
+        ops: Op::ALL.iter().map(|o| o.name().to_string()).collect(),
+        node: hostname(),
+        identity: caller.identity.as_ref().map(wire::Identity::from),
+        remote: caller.remote,
         // May this remote session use the destructive actions? A Tailscale identity always may; a token
         // session only once `kora panel remote-actions on` has been run. (Installing needs neither.)
-        "allow_remote_destructive": caller.remote && caller.identity.as_ref().is_some_and(|i| {
-            i.provider == remote::Provider::Tailscale || st.remote.config().allow_remote_destructive
-        }),
-    }))
+        allow_remote_destructive: caller.remote && caller.identity.as_ref().is_some_and(|i| i.provider == remote::Provider::Tailscale || st.remote.config().allow_remote_destructive),
+    })
 }
 
 fn hostname() -> String {
@@ -300,7 +289,7 @@ pub(crate) async fn session_create(
         st.sessions.remove(&old);
     }
     let cookie = format!("{}={}; HttpOnly; SameSite=Strict; Path=/", security::cookie_name(st.addr.port()), session.id);
-    let mut r = Json(json!({"ok": true, "identity": identity, "secret": session.secret})).into_response();
+    let mut r = Json(wire::SessionCreated { ok: true, identity: (&identity).into(), secret: session.secret.clone() }).into_response();
     r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).expect("ascii cookie"));
     // Older versions used one name for every port, sent to every service on this host: drop it.
     r.headers_mut().append(header::SET_COOKIE, HeaderValue::from_str(&format!("{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0", security::COOKIE)).expect("ascii cookie"));
@@ -309,15 +298,12 @@ pub(crate) async fn session_create(
 
 /// `POST /session/link`: a one-time sign-in code, `{"code", "expires_in": 600}`. Only for a caller on this
 /// computer that is already signed in (the launch token as a bearer token, or a local session).
-pub(crate) async fn session_link(State(st): State<AppState>, Extension(caller): Extension<remote::Caller>) -> Result<Json<Value>, ApiError> {
+pub(crate) async fn session_link(State(st): State<AppState>, Extension(caller): Extension<remote::Caller>) -> Result<Json<wire::SessionLink>, ApiError> {
     let local = !caller.remote && caller.identity.as_ref().is_some_and(|i| i.provider == remote::Provider::Local);
     if !local {
         return Err(ApiError::forbidden("Sign-in links can only be made on the computer that runs Kora."));
     }
-    Ok(Json(json!({
-        "code": st.mint_link_code(),
-        "expires_in": security::LINK_CODE_TTL.as_secs(),
-    })))
+    Ok(Json(wire::SessionLink { code: st.mint_link_code(), expires_in: security::LINK_CODE_TTL.as_secs() }))
 }
 
 /// `POST /session/logout`: forget this session and clear the cookie. 204.

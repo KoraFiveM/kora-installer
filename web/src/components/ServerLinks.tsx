@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/CopyButton'
 import { toNotice } from '@/components/ErrorNotice'
 import { useRole, whyNot } from '@/hooks/useRole'
-import { reachApi } from '@/api/reach'
 import { txAdminLink, type TxAdminLink } from '@/lib/serverLinks'
 
 type Size = 'sm' | 'default'
@@ -72,7 +71,7 @@ export function TxAdminButton({ name, port, up, size = 'sm' }: { name: string; p
     // Opened first, in the click, so the browser does not take it for a pop-up; pointed at txAdmin once the ticket is there.
     const w = window.open('about:blank', '_blank')
     try {
-      const t = await reachApi.txadminTicket(name)
+      const t = await api.reach.txadminTicket(name)
       if (w) {
         w.opener = null
         w.location.href = t.url

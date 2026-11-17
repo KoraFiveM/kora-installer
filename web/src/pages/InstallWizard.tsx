@@ -104,7 +104,7 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
                 <div className="break-words">{r.value}</div>
                 {problem && (waiting.includes(r.step)
                   ? <p role="status" className="text-muted-foreground">{problem}</p>
-                  : <p role="alert" className="font-medium text-destructive">{problem}</p>)}
+                  : <p role="alert" className="font-medium text-danger-text">{problem}</p>)}
               </dd>
               <dd><Button variant="link" size="sm" className="h-auto p-0 text-sm" aria-label={`Change ${r.label}`} onClick={() => onChange(r)}>Change</Button></dd>
             </div>
@@ -380,7 +380,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         <Checkbox label="Show advanced options" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
       </div>
       {at === 0 && !editing && (
-        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline-offset-4 hover:underline">Add an existing server</Link> instead.</p>
+        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline underline-offset-4">Add an existing server</Link> instead.</p>
       )}
       {saved && !defaults.resumable?.some((r) => r.name === saved.name) && resumeOffered && at === 0 && !editing && (
         <Alert tone="info" title="Continue where you left off?">
@@ -452,7 +452,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           ) : (
             <>
               {problem && !last && <p className="text-sm">{problem}</p>}
-              {last && installBlocked && <p role="alert" className="text-sm font-medium text-destructive">{installBlocked}</p>}
+              {last && installBlocked && <p role="alert" className="text-sm font-medium text-danger-text">{installBlocked}</p>}
               {last && !installBlocked && waiting.length > 0 && <p role="status" className="text-sm">Checking that the ports are free. One moment.</p>}
               <div className="flex justify-between pt-2">
                 <Button disabled={at === 0} onClick={() => setStep(at - 1)}>Back</Button>

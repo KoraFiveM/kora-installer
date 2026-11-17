@@ -22,7 +22,7 @@ fn facts() -> Facts {
 }
 
 fn layer_of<'a>(r: &'a ReachReport, id: &str) -> &'a Layer {
-    r.layers.iter().find(|l| l.id == id).unwrap()
+    r.layers.iter().find(|l| format!("{:?}", l.id).to_lowercase() == id).unwrap()
 }
 
 fn listing(ep: &str) -> Lookup<Listing> {
@@ -37,7 +37,7 @@ fn stopped_server_offers_to_start_it() {
     let r = assess(&f);
     let l = layer_of(&r, "running");
     assert_eq!(l.state, State::Problem);
-    assert_eq!(l.fixes[0].id, "start_server");
+    assert_eq!(l.fixes[0].id, FixId::StartServer);
     assert_eq!(r.verdict, State::Problem);
     assert!(r.headline.starts_with("Something is in the way"));
 }
@@ -66,7 +66,7 @@ fn firewall_cases() {
     let r = assess(&f);
     let l = layer_of(&r, "firewall");
     assert_eq!(l.state, State::Problem);
-    assert_eq!(l.fixes[0].id, "open_firewall");
+    assert_eq!(l.fixes[0].id, FixId::OpenFirewall);
     assert!(l.steps[0].contains("ufw allow 30120/tcp") && l.steps[0].contains("30120/udp"));
     f.firewall = FirewallFacts { kind: Some("Windows Firewall"), opened_by_kora: false, readable: true };
     assert_eq!(layer_of(&assess(&f), "firewall").state, State::Unknown);
@@ -110,10 +110,10 @@ fn behind_a_router_without_forwarding_it_is_unknown_with_exact_values() {
     let r = assess(&f);
     assert_eq!(r.behind_nat, Some(true));
     assert_eq!(r.public_ip.as_deref(), Some("84.12.5.6"));
-    assert_eq!(r.public_source, Some("router"));
+    assert_eq!(r.public_source, Some(PublicSource::Router));
     let l = layer_of(&r, "router");
     assert_eq!(l.state, State::Unknown);
-    assert_eq!(l.fixes[0].id, "enable_forwarding");
+    assert_eq!(l.fixes[0].id, FixId::EnableForwarding);
     let text = l.steps.join("\n");
     assert!(text.contains("TCP and UDP") && text.contains("30120") && text.contains("192.168.1.50"), "{text}");
     assert_eq!(r.connect.lan.as_deref(), Some("192.168.1.50:30120"));
@@ -174,7 +174,7 @@ fn cfx_listing_is_likely_not_ok_and_gives_the_public_address() {
     assert_eq!(l.state, State::Likely);
     assert!(l.detail.contains("only a real player joining proves"));
     assert_eq!(r.public_ip.as_deref(), Some("93.184.216.34"));
-    assert_eq!(r.public_source, Some("cfx"));
+    assert_eq!(r.public_source, Some(PublicSource::Cfx));
     assert_eq!(r.connect.cfx.as_deref(), Some("https://cfx.re/join/abc123"));
     assert_eq!(r.contacted.len(), 1);
     assert!(r.contacted[0].what.contains("Cfx.re"));
@@ -200,11 +200,11 @@ fn without_consent_nothing_is_asked_and_the_buttons_say_what_would_happen() {
     f.join_code = Some("abc123".into());
     let r = assess(&f);
     assert!(r.contacted.is_empty());
-    assert_eq!(r.needs_consent, ["cfx_list", "ip_echo"]);
+    assert_eq!(r.needs_consent, [ConsentKind::CfxList, ConsentKind::IpEcho]);
     let l = layer_of(&r, "internet");
     assert_eq!(l.state, State::Unknown);
-    assert!(l.fixes.iter().any(|x| x.id == "allow_cfx_list"));
-    assert!(l.fixes.iter().any(|x| x.id == "allow_ip_echo" && x.label.contains("api.ipify.org")));
+    assert!(l.fixes.iter().any(|x| x.id == FixId::AllowCfxList));
+    assert!(l.fixes.iter().any(|x| x.id == FixId::AllowIpEcho && x.label.contains("api.ipify.org")));
     // The manual test is always there.
     assert!(l.steps.iter().any(|s| s.contains("friend")));
 }
@@ -228,7 +228,7 @@ fn echo_gives_the_public_address_only_when_nothing_better_is_known() {
     f.consent.ip_echo = true;
     f.echo = Some(Lookup::Found("93.184.216.34".parse().unwrap()));
     let r = assess(&f);
-    assert_eq!(r.public_source, Some("ip_echo"));
+    assert_eq!(r.public_source, Some(PublicSource::IpEcho));
     assert_eq!(r.contacted[0].what, "api.ipify.org");
     assert!(r.contacted[0].learned.contains("public address"));
 }

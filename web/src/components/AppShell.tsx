@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ListChecks, Network, Plus, Server, Settings, X } from 'lucide-react'
@@ -7,6 +8,7 @@ import { useServerEvents } from '@/hooks/useServerEvents'
 import { Alert } from '@/components/ui/alert'
 import { AlertsBanner } from '@/components/AlertsBanner'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { RouteLoading } from '@/components/RouteLoading'
 import { KoraLogo } from '@/components/KoraLogo'
 import { useInstallBlock } from '@/pages/install/access'
 import { cn } from '@/lib/utils'
@@ -77,7 +79,9 @@ export function AppShell() {
         <div className="px-6 pt-4 empty:hidden"><AlertsBanner /></div>
         <main className="p-6">
           <ErrorBoundary resetKey={loc.pathname}>
-            <Outlet />
+            <Suspense fallback={<RouteLoading />}>
+              <Outlet />
+            </Suspense>
           </ErrorBoundary>
         </main>
       </div>

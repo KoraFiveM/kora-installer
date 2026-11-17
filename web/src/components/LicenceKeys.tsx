@@ -83,7 +83,7 @@ export function LicenceKeysCard() {
                 {can && (
                   <div className="flex gap-2">
                     <Button size="sm" aria-label={`Rename ${k.name}`} onClick={() => { setDialog({ kind: 'rename', key: k }); setName(k.name) }}>Rename</Button>
-                    <Button size="sm" aria-label={`Replace the key of ${k.name}`} onClick={() => { setDialog({ kind: 'replace', key: k }); setKey('') }}>Replace key</Button>
+                    <Button size="sm" aria-label={`Replace key of ${k.name}`} onClick={() => { setDialog({ kind: 'replace', key: k }); setKey('') }}>Replace key</Button>
                     <Button size="sm" variant="destructive" aria-label={`Delete ${k.name}`} onClick={() => setDialog({ kind: 'delete', key: k })}>Delete</Button>
                   </div>
                 )}
@@ -140,7 +140,7 @@ function ReplaceDialog({ d, value, setValue, onClose, onDone }: { d: Dialogue; v
   })
   return (
     <Dialog open={d?.kind === 'replace'} onOpenChange={(o) => { if (!o) { onClose(); m.reset() } }}>
-      <DialogContent title={`Replace the key of "${d?.key.name ?? ''}"`} description="Put a different key under this name. Servers already installed keep the key they have; use Change licence key on a server to switch it.">
+      <DialogContent title={`Replace key of "${d?.key.name ?? ''}"`} description="Put a different key under this name. Servers already installed keep the key they have; use Change licence key on a server to switch it.">
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); m.mutate() }}>
           <SecretInput label="New licence key" value={value} onChange={setValue} />
           <ErrorNotice error={m.error} />

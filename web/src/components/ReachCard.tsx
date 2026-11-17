@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, CircleHelp, Loader2, ShieldAlert, ThumbsUp } from 'lucide-react'
-import { reachApi, type ReachFix, type ReachLayer, type ReachReport, type ReachState } from '@/api/reach'
+import { api } from '@/api/client'
+import type { ReachFix, ReachLayer, ReachReport, ReachState } from '@/api/types'
 import { Badge, type Tone } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -94,7 +95,7 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
   const [done, setDone] = useState<string | null>(null)
 
   const check = useMutation({
-    mutationFn: (once?: { cfx_list?: boolean; ip_echo?: boolean }) => reachApi.check(name, once),
+    mutationFn: (once?: { cfx_list?: boolean; ip_echo?: boolean }) => api.reach.check(name, once),
     onSuccess: (r) => {
       setReport(r)
       qc.setQueryData(reachKey(name), r)
@@ -103,11 +104,11 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
   const act = useMutation({
     mutationFn: async (fix: ReachFix | 'forwarding_off') => {
       setDone(null)
-      if (fix === 'forwarding_off') await reachApi.setForwarding(name, false)
-      else if (fix.id === 'enable_forwarding') await reachApi.setForwarding(name, true)
-      else if (fix.id === 'open_firewall') await reachApi.openFirewall(name)
-      else if (fix.id === 'allow_cfx_list') await reachApi.setSettings({ cfx_list: true })
-      else if (fix.id === 'allow_ip_echo') await reachApi.setSettings({ ip_echo: true })
+      if (fix === 'forwarding_off') await api.reach.setForwarding(name, false)
+      else if (fix.id === 'enable_forwarding') await api.reach.setForwarding(name, true)
+      else if (fix.id === 'open_firewall') await api.reach.openFirewall(name)
+      else if (fix.id === 'allow_cfx_list') await api.reach.setSettings({ cfx_list: true })
+      else if (fix.id === 'allow_ip_echo') await api.reach.setSettings({ ip_echo: true })
       else if (fix.id === 'start_server') onStart?.()
     },
     onSuccess: () => {
@@ -208,8 +209,8 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
             )}
             <div className="space-y-1.5 border-t border-border pt-3">
               <div className="text-sm text-muted-foreground">Outside lookups Kora may do for this check (off unless you allow them)</div>
-              <Checkbox label="Cfx.re's public server list" hint="Asks frontend.cfx-services.net about this server's own join code." checked={report.consent.cfx_list} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void reachApi.setSettings({ cfx_list: e.target.checked }).then(() => check.mutate(undefined)) }} />
-              <Checkbox label="A public-address website (api.ipify.org)" hint="Only used when the router cannot tell Kora the public address. It sees this computer's public address." checked={report.consent.ip_echo} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void reachApi.setSettings({ ip_echo: e.target.checked }).then(() => check.mutate(undefined)) }} />
+              <Checkbox label="Cfx.re's public server list" hint="Asks frontend.cfx-services.net about this server's own join code." checked={report.consent.cfx_list} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void api.reach.setSettings({ cfx_list: e.target.checked }).then(() => check.mutate(undefined)) }} />
+              <Checkbox label="A public-address website (api.ipify.org)" hint="Only used when the router cannot tell Kora the public address. It sees this computer's public address." checked={report.consent.ip_echo} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void api.reach.setSettings({ ip_echo: e.target.checked }).then(() => check.mutate(undefined)) }} />
             </div>
             {report.contacted.length > 0 && (
               <ul className="space-y-1 text-xs text-muted-foreground">

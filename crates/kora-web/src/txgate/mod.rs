@@ -66,7 +66,6 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use kora_core::api::Op;
-use serde_json::{json, Value};
 
 use crate::remote::{roles, Provider};
 use crate::{blocking, security, ApiError, AppState};
@@ -318,7 +317,12 @@ fn saved_txadmin_username(dir: &std::path::Path) -> Option<String> {
 
 /// `POST /servers/{s}/txadmin/ticket`: open txAdmin through the panel. Answers
 /// `{url, port, expires_in, username?}`; the page opens `url` in a new tab.
-pub async fn txadmin_ticket(State(st): State<AppState>, Extension(caller): Extension<crate::remote::Caller>, headers: HeaderMap, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
+pub async fn txadmin_ticket(
+    State(st): State<AppState>,
+    Extension(caller): Extension<crate::remote::Caller>,
+    headers: HeaderMap,
+    Path(s): Path<String>,
+) -> Result<Json<kora_core::api::wire::TxAdminTicket>, ApiError> {
     let name = s.clone();
     let st2 = st.clone();
     let e = blocking(move || st2.entry(&name)).await?;
@@ -363,12 +367,7 @@ pub async fn txadmin_ticket(State(st): State<AppState>, Extension(caller): Exten
     let ticket = st.txgate.mint_ticket(Ticket { server: e.name.clone(), panel_session, remote: caller.remote, gateway: port, expires: st.txgate.now() + TICKET_TTL });
     let dir = e.dir.clone();
     let username = blocking(move || Ok(saved_txadmin_username(&dir))).await.ok().flatten();
-    Ok(Json(json!({
-        "url": format!("http://{}:{port}/__kora/enter?t={ticket}", host_name(host)),
-        "port": port,
-        "expires_in": TICKET_TTL.as_secs(),
-        "username": username,
-    })))
+    Ok(Json(kora_core::api::wire::TxAdminTicket { url: format!("http://{}:{port}/__kora/enter?t={ticket}", host_name(host)), port, expires_in: TICKET_TTL.as_secs(), username }))
 }
 
 /// Static pages of the gateway itself (never txAdmin's).

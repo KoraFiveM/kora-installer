@@ -8,3 +8,4 @@
 *.yml text eol=lf
 # Branches each add lines under [Unreleased]: keep both sides instead of conflicting.
 CHANGELOG.md merge=union
+CONTRIBUTING.md merge=union

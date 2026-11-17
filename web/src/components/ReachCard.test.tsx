@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReachLayer, ReachReport } from '@/api/reach'
+import type { ReachLayer, ReachReport } from '@/api/types'
 import { jsonResponse } from '@/test/utils'
 import { FORWARDING_RISK, ReachCard } from './ReachCard'
 

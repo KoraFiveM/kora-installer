@@ -29,7 +29,7 @@ export function PortsForm({ name, ports, running }: { name: string; ports: Ports
         <Field label="Game port" hint="Players connect to this port."><Input inputMode="numeric" value={game} disabled={running || !!blocked} onChange={(e) => setGame(e.target.value)} /></Field>
         <Field label="txAdmin port" hint="The txAdmin web page uses this port."><Input inputMode="numeric" value={tx} disabled={running || !!blocked} onChange={(e) => setTx(e.target.value)} /></Field>
       </div>
-      {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
+      {problem && <p role="alert" className="text-sm text-danger-text">{problem}</p>}
       <Button type="submit" variant="default" disabled={running || !!problem || unchanged || m.isPending || !!blocked} title={blocked ?? undefined}>Change ports</Button>
       {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
       <p className="text-xs text-muted-foreground">Kora does not change your firewall. Open the new ports and close the old ones yourself.</p>

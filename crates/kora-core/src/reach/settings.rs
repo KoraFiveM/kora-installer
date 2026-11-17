@@ -13,17 +13,20 @@ use crate::installer::registry::kora_home;
 
 /// What the last attempt to forward the port did (written by whichever process maintains the mapping).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ForwardStatus {
     /// Unix seconds.
     pub at: u64,
     pub ok: bool,
     /// `UPnP`, `NAT-PMP` or `PCP` when it worked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub via: Option<String>,
     /// In words for a person.
     pub message: String,
     /// The router's own report of its internet-side address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub external_ip: Option<String>,
     /// The mapping is not removed by the router itself (`lease` 0): only Kora removes it.
     #[serde(default)]
@@ -72,6 +75,7 @@ pub fn record_status(dir: &Path, st: Option<ForwardStatus>) {
 
 /// Which outside services the reachability check may contact. Nothing is contacted by default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Consent {
     /// Ask Cfx.re's public server list about this server's own join code (it learns nothing new: the
     /// server already announces itself there). Gives the address Cfx.re sees.

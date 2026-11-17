@@ -8,7 +8,12 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "size": "node scripts/bundle-size.mjs dist",
+    "e2e": "playwright test --project=mock-chromium",
+    "e2e:all": "playwright test --project=mock-chromium --project=mock-webkit",
+    "e2e:real": "playwright test --project=real-chromium",
+    "e2e:install-browsers": "playwright install chromium"
   },
   "dependencies": {
     "@fontsource/big-shoulders": "^5.3.0",
@@ -27,7 +32,9 @@
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.65.1",
     "@tailwindcss/vite": "^4.3.5",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

@@ -6,7 +6,7 @@ use clap::Args;
 use kora_core::api::{Backend, SystemBackend};
 use kora_core::installer::registry;
 use kora_core::reach::settings::Consent;
-use kora_core::reach::{ReachReport, State};
+use kora_core::reach::{ConsentKind, ReachReport, State};
 
 #[derive(Args, Debug, Clone)]
 pub(crate) struct ReachArgs {
@@ -78,8 +78,8 @@ pub(crate) fn render(r: &ReachReport) -> Vec<String> {
         out.push(format!("Asked {}: it learned {}.", c.what, c.learned));
     }
     for n in &r.needs_consent {
-        out.push(match *n {
-            "cfx_list" => "Tip: add --cfx-list to look your server up on Cfx.re's public server list (add --remember to keep this).".into(),
+        out.push(match n {
+            ConsentKind::CfxList => "Tip: add --cfx-list to look your server up on Cfx.re's public server list (add --remember to keep this).".into(),
             _ => "Tip: add --ip-echo to find your public address through api.ipify.org (add --remember to keep this).".into(),
         });
     }
@@ -150,6 +150,6 @@ mod tests {
         assert!(text.contains("outside/external port 30120") && text.contains("192.168.1.50"), "{text}");
         assert!(text.contains("Same network:  192.168.1.50:30120"), "{text}");
         assert!(text.contains("Internet:      84.12.5.6:30120"), "{text}");
-        assert!(text.contains("--cfx-list") || !r.needs_consent.contains(&"cfx_list"));
+        assert!(text.contains("--cfx-list") || !r.needs_consent.contains(&ConsentKind::CfxList));
     }
 }

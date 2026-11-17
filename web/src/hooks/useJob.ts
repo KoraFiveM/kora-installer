@@ -95,7 +95,7 @@ export function useJob<R = unknown, E = unknown>(jobId: string | null, onFinish?
         return
       }
       closed = true
-      setView({ phase: 'failed', events: seen, result: null, error: { message: gone(e) && e instanceof Error ? e.message : 'Kora lost contact with this job. It may still be running: reload the page to look again.' } })
+      setView({ phase: 'failed', events: seen, result: null, error: { code: 'failed', message: gone(e) && e instanceof Error ? e.message : 'Kora lost contact with this job. It may still be running: reload the page to look again.' } })
     }
 
     const fetchFinal = async () => {
