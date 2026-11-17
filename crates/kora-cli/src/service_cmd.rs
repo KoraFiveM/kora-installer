@@ -39,6 +39,24 @@ pub enum ServiceCmd {
         #[arg(long)]
         purge: bool,
     },
+    /// Bring an earlier Kora layout (0.6.x / 0.7.0) over to the service without touching servers or data
+    /// (administrators only; the package and the MSI run it): the old Linux helper goes, update tasks lose their
+    /// full administrator token, servers set up the old way are recorded as yours.
+    Migrate {
+        /// Say nothing unless something is wrong.
+        #[arg(long)]
+        quiet: bool,
+        /// Only say what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Finish upgrading for YOUR account (no administrator rights): your earlier copy of Kora is set aside, its
+    /// PATH entry removed and the background panel pointed at the installed program.
+    FinishUpgrade {
+        /// Only say what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Print the systemd unit text (the package is built from it; not for people).
     #[command(hide = true)]
     Unit,
@@ -121,6 +139,17 @@ pub fn service(cmd: ServiceCmd) -> i32 {
             }
             Err(e) => fail(e),
         },
+        ServiceCmd::Migrate { quiet, dry_run } => migrate(quiet, dry_run),
+        ServiceCmd::FinishUpgrade { dry_run } => {
+            let lines = kora_core::privsvc::migrate_os::finish_upgrade_user(dry_run);
+            if lines.is_empty() {
+                println!("Nothing to finish: there is no earlier copy of Kora of yours to set aside (or this is not the installed Kora).");
+            }
+            for l in lines {
+                println!("{l}");
+            }
+            0
+        }
         ServiceCmd::Unit => {
             print!("{}", kora_core::privsvc::install::unit_text());
             0
@@ -171,6 +200,43 @@ fn apply_plan_for(plan: kora_core::service::Plan, done: &str) -> i32 {
         eprintln!("error: on Windows remove Kora in Settings > Apps > Installed apps (its uninstaller removes the service)");
         1
     }
+}
+
+fn migrate(quiet: bool, dry_run: bool) -> i32 {
+    let mut say = |l: &str| {
+        if !quiet {
+            println!("{l}");
+        }
+    };
+    if !kora_core::elevate::is_elevated() {
+        eprintln!("error: this needs administrator rights: run `sudo kora service migrate` (Windows: from an administrator terminal)");
+        return 1;
+    }
+    #[cfg(unix)]
+    let r = kora_core::privsvc::migrate_os::unix::migrate(&kora_core::privsvc::unixsvc::Files::system(), dry_run, &mut say);
+    #[cfg(windows)]
+    let r = (|| -> Result<(), String> {
+        let sys = kora_core::helper::winpipe::system_dirs();
+        let files = paths_windows(&sys.program_files);
+        let policy = manage::load_or_new(&policy_path())?;
+        kora_core::privsvc::migrate_os::windows::unelevate_tasks(&sys.program_files, dry_run, &mut say)?;
+        kora_core::privsvc::migrate_os::windows::adopt(&policy, std::path::Path::new(&files), dry_run, &mut say)
+    })();
+    match r {
+        Ok(()) => {
+            say("Nothing else to bring over: your servers and data were not touched.");
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+#[cfg(windows)]
+fn paths_windows(program_files: &str) -> String {
+    kora_core::privsvc::paths::windows_files(program_files).ledger
 }
 
 /// Linux: program from the verified release, folders, unit, settings, start. Same layout as the `.deb`.

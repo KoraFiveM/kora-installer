@@ -1415,12 +1415,14 @@ Kora's administrator service: who may use it, and whether it is running
 Usage: kora service [OPTIONS] <COMMAND>
 
 Commands:
-  status     Say whether the service is installed and running, and whether it serves your account
-  list       List the accounts that may use the service
-  allow      Let accounts use the service (administrators only). Give the accounts' names
-  install    Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
-  uninstall  Remove the service (needs administrator rights). Servers it set up keep working
-  deny       Stop an account using the service (administrators only). Servers it set up keep working
+  status          Say whether the service is installed and running, and whether it serves your account
+  list            List the accounts that may use the service
+  allow           Let accounts use the service (administrators only). Give the accounts' names
+  install         Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
+  uninstall       Remove the service (needs administrator rights). Servers it set up keep working
+  migrate         Bring an earlier Kora layout (0.6.x / 0.7.0) over to the service without touching servers or data (administrators only; the package and the MSI run it): the old Linux helper goes, update tasks lose their full administrator token, servers set up the old way are recorded as yours
+  finish-upgrade  Finish upgrading for YOUR account (no administrator rights): your earlier copy of Kora is set aside, its PATH entry removed and the background panel pointed at the installed program
+  deny            Stop an account using the service (administrators only). Servers it set up keep working
 
 Options:
       --no-elevate
@@ -1504,6 +1506,39 @@ Usage: kora service uninstall [OPTIONS]
 Options:
       --purge
           Also remove the list of allowed accounts, the ownership records and the audit log
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service migrate =====
+Bring an earlier Kora layout (0.6.x / 0.7.0) over to the service without touching servers or data (administrators only; the package and the MSI run it): the old Linux helper goes, update tasks lose their full administrator token, servers set up the old way are recorded as yours
+
+Usage: kora service migrate [OPTIONS]
+
+Options:
+      --quiet
+          Say nothing unless something is wrong
+
+      --dry-run
+          Only say what would be done
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service finish-upgrade =====
+Finish upgrading for YOUR account (no administrator rights): your earlier copy of Kora is set aside, its PATH entry removed and the background panel pointed at the installed program
+
+Usage: kora service finish-upgrade [OPTIONS]
+
+Options:
+      --dry-run
+          Only say what would be done
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)

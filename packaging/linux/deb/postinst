@@ -18,6 +18,9 @@ case "$1" in
       [ -n "$name" ] && { "$KORA" service allow "$name" || echo "kora: could not allow $name" >&2; }
     done
     IFS="$OLDIFS"
+    # Bring an earlier layout over (the old kora-helper service, servers set up by a root install) without
+    # touching servers or data. Safe to run again; never blocks the install.
+    "$KORA" service migrate --quiet || echo "kora: could not finish upgrading an earlier layout (run: sudo kora service migrate)" >&2
     if [ -d /run/systemd/system ]; then
       systemctl daemon-reload || true
       systemctl enable kora.service || true
