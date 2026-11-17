@@ -129,11 +129,11 @@ const isAction = (a: unknown): a is ProblemAction => typeof a === 'object' && a 
 
 export function toProblem(e: unknown): NoticeProblem | null {
   if (!e) return null
-  if (e instanceof ApiError) return { code: e.code, message: e.message, details: e.details, actions: (e.actions ?? []).filter(isAction), command: e.command, status: e.status, replay: e.replay }
+  if (e instanceof ApiError) return { code: e.code, message: e.message, details: e.details, actions: (e.actions ?? []).filter(isAction), command: e.command, status: e.status, replay: e.replay, i18n: e.i18n }
   if (typeof e === 'string') return { code: 'failed', message: e, actions: [] }
   if (typeof e === 'object' && 'message' in e) {
     const j = e as JobError
-    return { code: j.code ?? 'failed', message: j.message, details: j.details, actions: (Array.isArray(j.actions) ? j.actions : []).filter(isAction), command: j.command }
+    return { code: j.code ?? 'failed', message: j.message, details: j.details, actions: (Array.isArray(j.actions) ? j.actions : []).filter(isAction), command: j.command, i18n: j.i18n }
   }
   return { code: 'failed', message: t('errors.problemActions.somethingWentWrongPlease'), actions: [] }
 }

@@ -163,6 +163,7 @@ export type {
   LogTailQuery,
   LogsList,
   Message,
+  MessageRef,
   Meta,
   MetricSample,
   Metrics,

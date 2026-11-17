@@ -82,6 +82,8 @@ export interface MessageParams {
   'errors.errorNotice.stillStuckSupportbundlelinkNod': { supportBundleLink: ReactNode }
   'errors.problemActions.installValueMe': { tool: string }
   'errors.problemActions.openHostof': { host: string | number }
+  'errors.problems.dbStopped': { name: string | number }
+  'errors.problems.dbStoppedStep': { name: string | number }
   'errors.supportBundleDialog.accountRoleCannotMake': { role: string | number }
   'errors.supportBundleDialog.downloadNodeDownload': { download: ReactNode }
   'errors.supportBundleDialog.neverUploadedSavedSpan': { never_uploaded: string | number; span: ReactNode }

@@ -34,11 +34,15 @@ pub struct ErrorBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub command: Option<Vec<String>>,
+    /// The message as a catalogue id plus parameters, for a front end that translates (`Problem::i18n`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub i18n: Option<crate::problem::MessageRef>,
 }
 
 impl From<Problem> for ErrorBody {
     fn from(p: Problem) -> Self {
-        ErrorBody { code: p.code, message: p.message, details: p.details, actions: p.actions, command: None }
+        ErrorBody { code: p.code, message: p.message, details: p.details, actions: p.actions, command: None, i18n: p.i18n }
     }
 }
 
@@ -64,6 +68,10 @@ pub struct JobError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub command: Option<Vec<String>>,
+    /// The message as a catalogue id plus parameters, for a front end that translates (`Problem::i18n`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub i18n: Option<crate::problem::MessageRef>,
     /// Install failures: what was kept on disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]

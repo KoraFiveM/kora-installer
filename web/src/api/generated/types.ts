@@ -1486,6 +1486,10 @@ export type ErrorBody = {
    * `needs_elevation`: the command to run as administrator.
    */
   command?: Array<string>,
+  /**
+   * The message as a catalogue id plus parameters, for a front end that translates (`Problem::i18n`).
+   */
+  i18n?: MessageRef,
 };
 
 /**
@@ -2133,6 +2137,10 @@ export type JobError = {
   details?: string,
   actions?: Array<Action>,
   command?: Array<string>,
+  /**
+   * The message as a catalogue id plus parameters, for a front end that translates (`Problem::i18n`).
+   */
+  i18n?: MessageRef,
   /**
    * Install failures: what was kept on disk.
    */

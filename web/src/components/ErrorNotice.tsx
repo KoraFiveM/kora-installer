@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { SupportBundleLink } from '@/components/SupportBundleLink'
 import { CopyButton, CopyField } from '@/components/CopyButton'
 import { actionLabel, buttonActions, detailsText, isAdminCode, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
-import { t, msg } from '@/i18n'
+import { t, msg, tById, locale, debugUntranslated } from '@/i18n'
+import '@/i18n/en/errors/problems' // i18n-dynamic: the server names these messages by id (tById)
 import { rich } from '@/i18n/react'
 import '@/i18n/en/errors/errorNotice'
 
@@ -31,6 +32,8 @@ export function toNotice(e: unknown): Notice | null {
   return p && { message: p.message, code: p.code, command: p.command, status: p.status }
 }
 
+const UNTRANSLATED_TITLE = 'This text comes from the server in English: it has no message id yet' // i18n-ignore: a translators' debug marker, English only
+const UNTRANSLATED_MARK = 'EN' // i18n-ignore: a translators' debug marker
 const NO_ANSWER = msg('errors.errorNotice.koraPanelDidAnswer')
 
 /** What to do next for a few common errors, added under the message (null = nothing to add). */
@@ -109,7 +112,11 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   if (!p) return null
   const elevation = isAdminCode(p.code)
   // The request never arrived (see `request` in api/client.ts).
-  const message = p.code === 'network' ? t(NO_ANSWER) : p.message
+  // The server names many problems by id: those are shown in the person's language. Others show the server's English text;
+  // with the translators' debug switch (localStorage kora.i18n.debug = 1) they carry an "EN" mark.
+  const known = p.i18n ? tById(p.i18n.id, p.i18n.params) : null
+  const message = p.code === 'network' ? t(NO_ANSWER) : known ?? p.message
+  const untranslated = known === null && p.code !== 'network' && locale() !== 'en' && debugUntranslated()
   const step = nextStep(p)
   const commands = p.actions.filter((a): a is Extract<ProblemAction, { kind: 'show_command' }> => a.kind === 'show_command')
   // Older answers carry the command only as `command`.
@@ -134,7 +141,7 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   }
   return (
     <Alert tone={elevation ? 'warning' : 'danger'} title={title ?? (elevation ? adminTitle(p.code) : undefined)}>
-      <p><WithCode text={message} /></p>
+      <p><WithCode text={message} />{untranslated && <span className="ml-1.5 rounded bg-amber/20 px-1 text-[10px] font-semibold text-amber" title={UNTRANSLATED_TITLE}>{UNTRANSLATED_MARK}</span>}</p>
       {step && <p className="mt-2">{step}</p>}
       {explainInstall && (
         <div className="mt-2">

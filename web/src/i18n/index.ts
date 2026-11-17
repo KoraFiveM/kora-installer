@@ -9,7 +9,7 @@
  *    Do not call `t` while a module is being loaded (top-level constants): it would be fixed to the language at that
  *    moment. Keep ids in the constant and call `t` where the text is shown.
  */
-import { format, mapText, parse, type Context, type Node, type Value } from './icu'
+import { args, format, mapText, parse, type Context, type Node, type Value } from './icu'
 import { intlFor, intlLocale } from './format'
 import { DEFAULT_LOCALE, STORAGE_KEY, detect, infoOf, offered } from './locales'
 import { pseudo } from './pseudo'
@@ -136,6 +136,32 @@ export function msg<K extends PlainId>(id: K): Msg<K> {
 /** The pieces of a message with tags (strings and what the tag functions returned). `rich()` wraps this. */
 export function pieces<K extends RichId>(id: K, params: Record<string, Value>): unknown[] {
   return format(lookup(id).nodes, context(params, id))
+}
+
+/**
+ * Text the SERVER sent as a message id plus parameters (a Problem's `i18n`): the message in the current language, or null when
+ * this panel has no such message (an older panel, a newer server): the caller shows the server's English text instead.
+ * Only ids under `errors.problems.` are read this way, and only messages without tags; the parameters are always text.
+ */
+export function tById(id: string, params: Record<string, string> = {}): string | null {
+  if (!id.startsWith('errors.problems.')) return null
+  const en = tables.get('en')?.[id]
+  if (en === undefined) return null
+  const nodes = lookup(id).nodes
+  const kinds = args(parse(en))
+  const typed: Record<string, Value> = {}
+  for (const [k, v] of Object.entries(params)) typed[k] = kinds.get(k) === 'number' ? Number(v) : v
+  if ([...kinds.values()].some((k) => k === 'tag' || k === 'node')) return null
+  return format(nodes, context(typed, id)).join('')
+}
+
+/** Show which server texts are not translated (an "EN" mark): a switch for people who translate, in the browser's storage. */
+export function debugUntranslated(): boolean {
+  try {
+    return localStorage.getItem('kora.i18n.debug') === '1'
+  } catch {
+    return false
+  }
 }
 
 export function locale(): string {

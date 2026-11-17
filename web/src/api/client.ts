@@ -11,6 +11,8 @@ export interface ApiErrorBody {
   details?: string
   /** What the user can do (a Problem's `actions`). */
   actions?: T.ProblemAction[]
+  /** The message as a catalogue id plus parameters (a Problem's `i18n`): shown in the person's language when the panel knows the id. */
+  i18n?: T.MessageRef
 }
 
 /** An error answered by the API (or a network failure, code `network`). `message` is for end users. */
@@ -20,6 +22,7 @@ export class ApiError extends Error {
   readonly command?: string[]
   readonly details?: string
   readonly actions?: T.ProblemAction[]
+  readonly i18n?: T.MessageRef
   /** Send the request that failed again (for example once Kora's administrator service is installed). */
   replay?: () => Promise<unknown>
   constructor(status: number, body: ApiErrorBody) {
@@ -30,6 +33,7 @@ export class ApiError extends Error {
     this.command = body.command
     this.details = body.details
     this.actions = body.actions
+    this.i18n = body.i18n
   }
   get needsElevation(): boolean {
     return this.code === 'needs_elevation'
