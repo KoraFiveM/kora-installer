@@ -66,11 +66,11 @@ impl ToolchainEnv for Fake {
         let have = self.installed.lock().unwrap().clone();
         vec![status(Tool::Git, have.contains(&Tool::Git), Some(Source::System)), status(Tool::Gh, have.contains(&Tool::Gh), Some(Source::Private))]
     }
-    fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, String> {
+    fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, kora_core::problem::Problem> {
         self.install_calls.lock().unwrap().push(tool);
         say("Downloading the GitHub CLI", 0.5);
         if let Some(p) = self.install_error.lock().unwrap().clone() {
-            return Err(p.into());
+            return Err(p);
         }
         self.installed.lock().unwrap().push(tool);
         Ok(status(tool, true, Some(Source::Private)))
@@ -78,7 +78,7 @@ impl ToolchainEnv for Fake {
     fn database(&self) -> DbState {
         self.db.lock().unwrap().clone()
     }
-    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, String> {
+    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, kora_core::problem::Problem> {
         *self.db_starts.lock().unwrap() += 1;
         say("Starting the database server mariadb");
         self.db.lock().unwrap().running = true;
@@ -94,13 +94,13 @@ impl GithubEnv for Gh {
     fn auth(&self) -> GithubUser {
         self.0.clone()
     }
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+    fn owners(&self) -> Result<Vec<OwnerChoice>, kora_core::problem::Problem> {
         Ok(vec![])
     }
-    fn begin_login(&self) -> Result<LoginFlow, String> {
+    fn begin_login(&self) -> Result<LoginFlow, kora_core::problem::Problem> {
         Err("no".into())
     }
-    fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
+    fn resolve_owner(&self, _: Option<&str>) -> Result<String, kora_core::problem::Problem> {
         Err("no".into())
     }
 }

@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { FileArchive, Upload } from 'lucide-react'
-import type { ArchivedServer, BackupEvent, Clash, DbAdmin, ForkChoice, ImportChoices, ImportPreview, ImportResult, ImportSource, JobError } from '@/api/types'
+import type { ArchivedServer, BackupEvent, Clash, DbAdmin, ForkChoice, ImportChoices, ImportPreview, ImportResult, ImportSource, JobError, RunMode } from '@/api/types'
 import { api } from '@/api/client'
 import { StyleChip } from '@/components/Status'
 import { browseForFile, inShell } from '@/lib/shell'
@@ -102,7 +102,7 @@ function ClashRow({ c, onUse }: { c: Clash; onUse: (c: Clash) => void }) {
   )
 }
 
-export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkChoice, setForkChoice, admin, setAdmin, start, setStart, busy, onGo }: {
+export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkChoice, setForkChoice, admin, setAdmin, start, setStart, runMode, setRunMode, busy, onGo }: {
   preview: ImportPreview
   choices: ImportChoices
   setChoices: (c: ImportChoices) => void
@@ -114,6 +114,9 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkCh
   setAdmin: (a: DbAdmin | null) => void
   start: boolean
   setStart: (b: boolean) => void
+  /** How the new server runs (`null`: not asked, because this computer has no container engine and the backup was no container). */
+  runMode: RunMode | null
+  setRunMode: (m: RunMode) => void
   busy: boolean
   onGo: () => void
 }) {
@@ -156,7 +159,15 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkCh
           <Radio name="fork" checked={forkChoice === 'originals'} onChange={() => setForkChoice('originals')} label={t('backups.steps.useOriginals')} hint={t('backups.steps.plainCopiesOriginalRepositorie')} />
         </fieldset>
       )}
-      {preview.db_login && !preview.db_login.ok && <DbLoginForm note={preview.db_login.message} setAdmin={setAdmin} />}
+      {(runMode !== null || preview.run_mode === 'container') && (
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm font-semibold">{t('backups.steps.howServerRunsHere')}</legend>
+          {preview.run_mode === 'container' && <p className="text-sm text-muted-foreground">{t('backups.steps.serverBringingRanContainer')}</p>}
+          <Radio name="runmode" checked={runMode !== 'container'} onChange={() => setRunMode('service')} label={t('backups.steps.systemService')} hint={t('backups.steps.startsComputerSettingService')} />
+          <Radio name="runmode" checked={runMode === 'container'} onChange={() => setRunMode('container')} disabled={!preview.container_engine} label={t('backups.steps.inAContainer')} hint={preview.container_engine ? t('backups.steps.usesContainerEngineDatabase', { container_engine: preview.container_engine }) : t('backups.steps.computerNoContainerEngine')} />
+        </fieldset>
+      )}
+      {preview.db_login && !preview.db_login.ok && runMode !== 'container' && <DbLoginForm note={preview.db_login.message} setAdmin={setAdmin} />}
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-semibold">{t('backups.steps.licenceKey')}</legend>
         <Alert tone="warning">{preview.licence_note}</Alert>
@@ -173,7 +184,7 @@ export function PreviewStep({ preview, choices, setChoices, key_, setKey, forkCh
       </div>
       {preview.warnings.map((w, i) => <Alert key={i} tone="info">{w}</Alert>)}
       <Checkbox checked={start} onChange={(e) => setStart(e.target.checked)} label={t('backups.steps.startServerWhenReady')} />
-      <Button variant="default" disabled={busy || portBad || !choices.name.trim() || !choices.dir.trim() || (preview.db_login?.ok === false && !admin)} onClick={onGo}>{t('backups.steps.bringServer')}</Button>
+      <Button variant="default" disabled={busy || portBad || !choices.name.trim() || !choices.dir.trim() || (preview.db_login?.ok === false && !admin && runMode !== 'container')} onClick={onGo}>{t('backups.steps.bringServer')}</Button>
     </div>
   )
 }

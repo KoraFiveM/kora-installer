@@ -112,7 +112,7 @@ pub trait ForkTools {
     /// Returns (usable, the signed-in login).
     fn usable(&self, owner: &str) -> (bool, Option<String>);
     /// Make a fork of the original repository `upstream` in `owner`; returns its address.
-    fn fork(&self, upstream: &str, owner: &str) -> Result<String, String>;
+    fn fork(&self, upstream: &str, owner: &str) -> Result<String, Problem>;
 }
 
 pub struct SystemForks;
@@ -132,7 +132,7 @@ impl ForkTools for SystemForks {
         let ok = g.owners().map(|l| l.iter().any(|o| o.login.eq_ignore_ascii_case(owner) && o.can_fork)).unwrap_or(false);
         (ok, login)
     }
-    fn fork(&self, upstream: &str, owner: &str) -> Result<String, String> {
+    fn fork(&self, upstream: &str, owner: &str) -> Result<String, Problem> {
         let slug = crate::installer::repo_slug(upstream);
         let name = slug.rsplit('/').next().unwrap_or(&slug).to_string();
         let r = crate::git::SystemRunner;
@@ -146,7 +146,7 @@ impl ForkTools for SystemForks {
         if o.ok() || o.stderr.contains("already exists") {
             Ok(format!("https://github.com/{owner}/{name}.git"))
         } else {
-            Err(o.stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("GitHub refused").trim().to_string())
+            Err(o.stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("GitHub refused").trim().to_string().into())
         }
     }
 }
@@ -189,6 +189,16 @@ pub struct ImportPreview {
     /// The database administrator login Kora would use, tried now (only when the backup has a database). `ok: false` means the
     /// page should ask for one (host, port, user, password: used once, never stored).
     pub db_login: Option<DbLoginNote>,
+    /// `container` when the backed-up server ran in a container; absent otherwise. Offered again here when this
+    /// computer can do the same (see `container_engine`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub run_mode: Option<crate::container::RunMode>,
+    /// The container engine this computer would use (`podman, rootless`), when it has one that looks usable:
+    /// container mode can be chosen for the new server. `None`: only a service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub container_engine: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +231,10 @@ pub struct ImportRequest {
     /// Start the server when it is imported.
     #[serde(default)]
     pub start: bool,
+    /// How the new server runs here. `None` = as a service (the way every import worked before container mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub run_mode: Option<crate::container::RunMode>,
     /// Remove what an earlier, failed import of this server made, and begin again.
     #[serde(default)]
     pub start_over: bool,
@@ -338,7 +352,7 @@ pub fn inspect(
     saved_keys: &[String],
     ports: &dyn PortCheck,
     forks: &dyn ForkTools,
-    db_check: &dyn Fn() -> Result<(), String>,
+    db_check: &dyn Fn() -> Result<(), Problem>,
     default_dir: &dyn Fn(&str) -> String,
 ) -> Result<ImportPreview, Problem> {
     let file_name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -360,6 +374,8 @@ pub fn inspect(
         licence_note: LICENCE_NOTE.into(),
         fork: None,
         db_login: None,
+        run_mode: None,
+        container_engine: None,
     };
     let head = match archive::read_head(file, pass(passphrase).as_ref()) {
         Ok(m) => m,
@@ -445,13 +461,53 @@ pub fn inspect(
     if matches!(head.database.kind, DbKind::Dumped | DbKind::External) {
         p.db_login = Some(match db_check() {
             Ok(()) => DbLoginNote { ok: true, message: "Kora can log in to this computer's database server automatically.".into() },
-            Err(m) => DbLoginNote { ok: false, message: m },
+            Err(m) => DbLoginNote { ok: false, message: m.one_line() },
         });
+    }
+    p.run_mode = head.server.run_mode;
+    p.container_engine = crate::container::detect::quick_label();
+    if head.server.run_mode == Some(crate::container::RunMode::Container) && p.container_engine.is_none() {
+        p.warnings.push("This server ran in a container, but this computer has no container engine (Podman or Docker) that Kora can use. It can be imported to run as a background service instead; or install Podman, then check again.".into());
     }
     p.server = Some(head.server);
     p.database = Some(head.database);
     p.suggested = Some(ImportChoices { name, dir, game_port: game, txadmin_port: tx });
     Ok(p)
+}
+
+/// `.kora/request.json` for an imported container server (an import makes none): what delete reads to know which
+/// steps to undo. Secret-free, and rewritten from the server list's own name and ports when it is used.
+fn container_request_record(dir: &Path, name: &str, game: u16, tx: u16, source: Source, versions: crate::installer::Versions, with_db: bool) {
+    let req = crate::installer::InstallRequest {
+        mode: crate::installer::compat_mode(versions),
+        source: Some(source),
+        versions: Some(versions),
+        name: name.to_string(),
+        dir: dir.to_path_buf(),
+        hostname: name.to_string(),
+        license_key: None,
+        license_key_name: None,
+        cfx_identifier: None,
+        ports: crate::installer::Ports { game, txadmin: tx },
+        txadmin_public: false,
+        artifact_url: None,
+        game_build: None,
+        resources: crate::installer::ResourceSelection::All,
+        db: if with_db { crate::installer::DbChoice::Container } else { crate::installer::DbChoice::Skip },
+        service: false,
+        firewall: false,
+        github_owner: None,
+        catalog: None,
+        dry_run: false,
+        db_admin: None,
+        start: false,
+        app: None,
+        container: Some(Default::default()),
+    };
+    if let Ok(bytes) = serde_json::to_vec_pretty(&req) {
+        let _ = std::fs::create_dir_all(crate::installer::meta_dir(dir));
+        let _ = crate::fsutil::write_no_follow(&crate::installer::meta_dir(dir).join("request.json"), &bytes, 0o644);
+    }
 }
 
 // ------------------------------------------------------------------------------ conversions
@@ -504,13 +560,13 @@ fn secrets_cfg(key: &str, creds: Option<&crate::db::Credentials>) -> String {
 /// Downloads the FXServer build.
 pub trait Fetcher {
     /// Make `build` (or, if it is gone, the recommended one) the current build under `<dir>/artifacts`. Returns the build.
-    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, String>;
+    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, Problem>;
 }
 
 pub struct SystemFetcher;
 
 impl Fetcher for SystemFetcher {
-    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, String> {
+    fn artifact(&self, build: u32, dir: &Path, say: &mut dyn FnMut(&str)) -> Result<u32, Problem> {
         use crate::artifacts::{self, Channel, Platform, Verify};
         let http = crate::installer::HttpClient::default();
         let platform = Platform::current();
@@ -528,7 +584,7 @@ impl Fetcher for SystemFetcher {
         match store.swap(got, &file, platform) {
             Ok(()) => {}
             Err(artifacts::ArtifactError::Store(m)) if m.contains("already current") => {}
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e.to_string().into()),
         }
         let _ = std::fs::remove_dir_all(&dl);
         Ok(got)
@@ -537,7 +593,7 @@ impl Fetcher for SystemFetcher {
 
 /// Creates the new database and login (the admin login is the one install uses).
 pub trait Provisioner {
-    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, String>;
+    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, Problem>;
     /// Drop what `provision` made (rollback).
     fn drop_made(&self, state_path: &Path);
 }
@@ -547,8 +603,8 @@ pub struct SystemProvisioner {
 }
 
 impl Provisioner for SystemProvisioner {
-    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, String> {
-        crate::db::provision(&crate::db::SystemRunner, &self.admin, "localhost", "127.0.0.1", state_path).map_err(|e| e.to_string())
+    fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, Problem> {
+        crate::db::provision(&crate::db::SystemRunner, &self.admin, "localhost", "127.0.0.1", state_path).map_err(Problem::from)
     }
     fn drop_made(&self, state_path: &Path) {
         if let Ok(mut st) = crate::db::ProvisionState::load(state_path) {
@@ -589,18 +645,18 @@ fn save_state(dir: &Path, s: &State) -> Result<(), Problem> {
         .map_err(|e| Problem::generic(format!("Kora could not write its progress note in the new folder: {e}")))
 }
 
-fn io_problem(what: &str, e: std::io::Error) -> Problem {
-    if e.kind() == std::io::ErrorKind::StorageFull {
+fn io_problem(what: &str, e: Problem) -> Problem {
+    if e.code == crate::problem::codes::STORAGE_FULL {
         return create::disk_full(&format!("There is no space left on the disk while {what}."));
     }
-    Problem::generic(format!("Kora could not finish {what}: {e}")).with_action(Action::Retry)
+    e.context(what).with_action(Action::Retry)
 }
 
 /// Run the import. Resumable: a second call with the same file and folder carries on after the last finished step.
 pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(BackupEvent)) -> Result<ImportResult, Problem> {
     let mut ev = |step: &str, msg: &str, pct: u8| say(BackupEvent { step: step.into(), message: msg.into(), percent: pct });
     let c = &req.choices;
-    crate::api::install::validate_name(&c.name).map_err(Problem::generic)?;
+    crate::api::install::validate_name(&c.name)?;
     let dir = PathBuf::from(&c.dir);
     if !dir.is_absolute() {
         return Err(Problem::new(codes::DEST_UNWRITABLE, "Give the full path of the folder for the new server."));
@@ -621,7 +677,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         return Err(Problem::new(codes::BUSY, "The game port and the txAdmin port must be different."));
     }
     let _guard = create::BusyGuard::take(&c.name)?;
-    let sha = archive::file_sha256(file).map_err(|e| io_problem("reading the file", e))?;
+    let sha = archive::file_sha256(file).map_err(|e| io_problem("reading the file", e.into()))?;
     let mut st = load_state(&dir);
     let resuming = dir.join(".kora").join("import-state.json").is_file() && st.source_sha == sha && !req.start_over;
     if req.start_over || (dir.exists() && !resuming) {
@@ -636,7 +692,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         st = State { source_sha: sha.clone(), ..State::default() };
     }
     let created_dir = !dir.exists();
-    std::fs::create_dir_all(&dir).map_err(|e| io_problem("creating the server folder", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| io_problem("creating the server folder", e.into()))?;
     let stage = dir.join(".kora").join("import-staging");
     let mut result = ImportResult {
         name: c.name.clone(),
@@ -680,7 +736,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                                     rb.repository = url;
                                     repointed.push(rb.id.clone());
                                 }
-                                Err(why) => result.problems.push(format!("{}: your own copy could not be made ({why}); it follows the old owner's copy instead.", rb.id)),
+                                Err(why) => result.problems.push(format!("{}: your own copy could not be made ({}); it follows the old owner's copy instead.", rb.id, why.one_line())),
                             }
                         }
                         new_owner = Some(owner);
@@ -695,7 +751,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         if !st.done.iter().any(|d| d == "unpack") || !stage.is_dir() {
             ev("unpack", "Unpacking and checking every file (nothing is placed yet)", 6);
             let _ = std::fs::remove_dir_all(&stage);
-            std::fs::create_dir_all(&stage).map_err(|e| io_problem("unpacking", e))?;
+            std::fs::create_dir_all(&stage).map_err(|e| io_problem("unpacking", e.into()))?;
             if let Some(free) = crate::space::SystemDisk.free_bytes_of(&dir) {
                 if free < head.payload_bytes.saturating_add(512 * crate::space::MIB) {
                     return Err(create::disk_full(&format!("Importing needs about {} of room and only {} is free here.", crate::space::human(head.payload_bytes), crate::space::human(free))));
@@ -719,27 +775,52 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             let server_stage = stage.join(SERVER_DIR);
             for rel in files_below(&server_stage) {
                 let top = rel.split('/').next().unwrap_or("");
-                if matches!(top, "artifacts" | "resources" | ".kora" | ".git") || matches!(rel.as_str(), "secrets.cfg" | "database.json" | "kora-server.json") {
+                if matches!(top, "artifacts" | "resources" | ".kora" | ".git") || matches!(rel.as_str(), "secrets.cfg" | "database.json" | "kora-server.json" | crate::container::record::FILE) {
                     continue;
                 }
                 let Some(dest) = crate::fsutil::join_inside(&dir, &rel) else { continue };
                 let src = server_stage.join(&rel);
                 if is_converted_file(&rel) {
-                    let text = std::fs::read_to_string(&src).map_err(|e| io_problem("reading a settings file", e))?;
+                    let text = std::fs::read_to_string(&src).map_err(|e| io_problem("reading a settings file", e.into()))?;
                     let mut converted = convert_text(&text, &m.server.dir, &c.dir, to_windows);
                     if rel == "server.cfg" && c.game_port != m.server.game_port {
                         converted = crate::installer::change_ports::rewrite_cfg_game_port(&converted, c.game_port).unwrap_or(converted);
                     }
                     if let Some(parent) = dest.parent() {
-                        std::fs::create_dir_all(parent).map_err(|e| io_problem("placing a settings file", e))?;
+                        std::fs::create_dir_all(parent).map_err(|e| io_problem("placing a settings file", e.into()))?;
                     }
-                    std::fs::write(&dest, converted).map_err(|e| io_problem("placing a settings file", e))?;
+                    std::fs::write(&dest, converted).map_err(|e| io_problem("placing a settings file", e.into()))?;
                 } else {
-                    write_into(&dest, &src, false).map_err(|e| io_problem("placing a file", e))?;
+                    write_into(&dest, &src, false).map_err(|e| io_problem("placing a file", e.into()))?;
                 }
             }
             st.done.push("files".into());
             save_state(&dir, &st)?;
+        }
+
+        // 2b. container mode: the folder's record (which engine, which database container), made fresh here; the
+        // backup's own record only lends its address and limits (and is checked like any record).
+        let in_container = req.run_mode == Some(crate::container::RunMode::Container);
+        let with_db_container = in_container && matches!(m.database.kind, DbKind::Dumped | DbKind::External);
+        let cslug = crate::installer::slug(&c.name);
+        let mut crec: Option<crate::container::ContainerRecord> = None;
+        if in_container {
+            if !st.done.iter().any(|d| d == "container") {
+                ev("container", "Setting up the container engine", 30);
+                let (engine, status, _) = crate::container::setup::choose_engine(None)?;
+                let lent: crate::container::ContainerRequest = std::fs::read(stage.join(SERVER_DIR).join(crate::container::record::FILE))
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<crate::container::ContainerRecord>(&b).ok())
+                    .map(|r| crate::container::ContainerRequest { engine: None, bind: r.bind, memory_mb: r.memory_mb, cpu_tenths: r.cpu_tenths })
+                    .unwrap_or_default();
+                let rec = crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &lent, with_db_container)
+                    .or_else(|_| crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &Default::default(), with_db_container))
+                    .map_err(Problem::generic)?;
+                rec.save(&dir).map_err(|e| io_problem("saving the container record", e.into()))?;
+                st.done.push("container".into());
+                save_state(&dir, &st)?;
+            }
+            crec = crate::container::ContainerRecord::load(&dir);
         }
 
         // 3. the FXServer build
@@ -749,7 +830,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             let got = env
                 .fetcher
                 .artifact(m.server.artifact_build, &dir, &mut said)
-                .map_err(|e| Problem::new(codes::NOT_FOUND, format!("The server program could not be downloaded: {e}")).with_action(Action::Retry))?;
+                .map_err(|e| Problem::new(codes::NOT_FOUND, "The server program could not be downloaded.").with_details(e.one_line()).with_action(Action::Retry))?;
             if got != m.server.artifact_build && m.server.artifact_build != 0 {
                 result.notes.push(format!("FXServer build {} is no longer available; build {got} was used instead.", m.server.artifact_build));
             }
@@ -760,7 +841,30 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         // 4. a new database, the dump loaded, the new login written down
         let mut creds: Option<crate::db::Credentials> = None;
         let dump = stage.join(DUMP);
-        if matches!(m.database.kind, DbKind::Dumped | DbKind::External) && dump.is_file() {
+        if with_db_container && dump.is_file() {
+            let rec = crec.as_ref().ok_or_else(|| Problem::generic("the container record is missing"))?;
+            let runner = crate::container::lifecycle::system();
+            let mgr = crate::container::lifecycle::Manager::new(&dir, rec, &runner);
+            if !st.done.iter().any(|d| d == "database") {
+                ev("database", "Creating the database container", 50);
+                let mut say = |l: &str| ev("database", &l.chars().filter(|c| !c.is_control()).take(120).collect::<String>(), 52);
+                mgr.ensure_image(&rec.image, &mut say)?;
+                if let Some(d) = &rec.db {
+                    mgr.ensure_image(&d.image, &mut say)?;
+                }
+                let made = crate::container::setup::ensure_database(&mgr, &cslug, &mut say, &mut |c| st.db_name = Some(c.database.clone()))?;
+                save_state(&dir, &st)?;
+                ev("database", "Loading the database", 58);
+                let set = crate::container::backup::ToolSet::in_container(rec).ok_or_else(|| Problem::generic("no database container"))?;
+                let tools = set.tools();
+                dbdump::restore(tools.db, &tools.db_client, &crate::container::dbc::tool_credentials(&made), &dump).map_err(|f| create::problem_for_db(f, "load the database"))?;
+                creds = Some(made);
+                st.done.push("database".into());
+                save_state(&dir, &st)?;
+            } else if let Ok(b) = std::fs::read(dir.join("database.json")) {
+                creds = serde_json::from_slice(&b).ok();
+            }
+        } else if matches!(m.database.kind, DbKind::Dumped | DbKind::External) && dump.is_file() {
             let prov = env.provisioner.ok_or_else(|| {
                 Problem::new(codes::DB_STOPPED, "A database server is needed to bring this server's database in. Install or start one (the System check page helps), then try again.")
                     .with_action(Action::StartDatabase)
@@ -771,7 +875,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 ev("database", "Creating a new database and login", 50);
                 let made = prov.provision(&ppath).map_err(|e| {
                     Problem::new(codes::DB_STOPPED, "Kora could not create the new database. Is the database server running? Kora uses the same database administrator login as an install: on Linux the root account's own login (run Kora as root for the import) or the KORA_DB_ADMIN_USER and KORA_DB_ADMIN_PASSWORD settings; on Windows the login of the MariaDB Kora set up.")
-                        .with_details(e)
+                        .with_details(e.one_line())
                         .with_action(Action::StartDatabase)
                         .with_action(Action::Retry)
                 })?;
@@ -812,10 +916,10 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         if !st.done.iter().any(|d| d == "resources") {
             ev("resources", "Placing the resources that were in the file", 70);
             let res_dir = dir.join(RESOURCES_DIR);
-            std::fs::create_dir_all(&res_dir).map_err(|e| io_problem("creating the resources folder", e))?;
+            std::fs::create_dir_all(&res_dir).map_err(|e| io_problem("creating the resources folder", e.into()))?;
             for rel in files_below(&stage.join(RESOURCES_DIR)) {
                 if let Some(dest) = crate::fsutil::join_inside(&res_dir, &rel) {
-                    write_into(&dest, &stage.join(RESOURCES_DIR).join(&rel), false).map_err(|e| io_problem("placing a resource", e))?;
+                    write_into(&dest, &stage.join(RESOURCES_DIR).join(&rel), false).map_err(|e| io_problem("placing a resource", e.into()))?;
                 }
             }
             // resources kept in full: their git history comes along; point `origin` where the choice above says
@@ -828,7 +932,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
                 ev("resources", &format!("Fetching {} ({}/{})", rb.id, i + 1, refs.len()), (72 + i * 18 / refs.len().max(1)) as u8);
                 match super::resources::ensure_at_commit(env.tools.git, &res_dir, rb) {
                     Ok(msg) => result.resources_fetched.push(msg),
-                    Err(msg) => result.problems.push(format!("{msg}. Fetch it later from the Resources tab; the server is otherwise complete.")),
+                    Err(msg) => result.problems.push(format!("{}. Fetch it later from the Resources tab; the server is otherwise complete.", msg.one_line())),
                 }
             }
             // every resource counts as changed ("Restart needed"), and a pull request being tried keeps its title
@@ -865,6 +969,16 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         sf.created_unix = now_unix();
         sf.kora_version = env!("CARGO_PKG_VERSION").into();
         sf.save().map_err(|e| io_problem("saving the server's record", e))?;
+        if let Some(rec) = &crec {
+            // The game container (not started) and start at boot; and the install record that lets this server be deleted
+            // (containers, network, volume) like any other.
+            ev("register", "Creating the server's container", 94);
+            let runner = crate::container::lifecycle::system();
+            let mgr = crate::container::lifecycle::Manager::new(&dir, rec, &runner);
+            let boot = crate::container::setup::create_game(&mgr, &mut |_| {})?;
+            result.notes.extend(boot.notes);
+            container_request_record(&dir, &c.name, c.game_port, c.txadmin_port, m.server.source, m.server.versions, with_db_container);
+        }
         let created = crate::installer::Created {
             created_dir,
             files: vec!["server.cfg".into(), "permissions.cfg".into(), "secrets.cfg".into(), "database.json".into(), "txData".into()],
@@ -907,6 +1021,8 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         "Then remove it there: open the server's Danger zone tab and choose Remove (it also drops its database). Kora never does this for you from here.".into(),
         "Keep the moving file until you are sure everything is right: it holds your licence key and logins, so delete it afterwards.".into(),
     ];
+    // A new server has no account of its own yet; this covers one that does (see `handover`).
+    super::handover::note_into(super::handover::after_write(Path::new(&result.dir)), &mut result.notes, &mut result.problems);
     ev("done", "The server is imported", 100);
     Ok(result)
 }
@@ -954,7 +1070,7 @@ mod tests {
         fn usable(&self, _: &str) -> (bool, Option<String>) {
             (true, Some("old-owner".into()))
         }
-        fn fork(&self, _: &str, _: &str) -> Result<String, String> {
+        fn fork(&self, _: &str, _: &str) -> Result<String, Problem> {
             Err("not needed".into())
         }
     }
@@ -975,7 +1091,7 @@ mod tests {
         fn usable(&self, owner: &str) -> (bool, Option<String>) {
             (self.me == Some(owner), self.me.map(str::to_string))
         }
-        fn fork(&self, upstream: &str, owner: &str) -> Result<String, String> {
+        fn fork(&self, upstream: &str, owner: &str) -> Result<String, Problem> {
             self.made.borrow_mut().push(upstream.to_string());
             Ok(format!("https://github.com/{owner}/{}", upstream.rsplit('/').next().unwrap()))
         }
@@ -985,7 +1101,7 @@ mod tests {
         calls: RefCell<Vec<u32>>,
     }
     impl Fetcher for FakeFetcher {
-        fn artifact(&self, build: u32, dir: &Path, _say: &mut dyn FnMut(&str)) -> Result<u32, String> {
+        fn artifact(&self, build: u32, dir: &Path, _say: &mut dyn FnMut(&str)) -> Result<u32, Problem> {
             self.calls.borrow_mut().push(build);
             std::fs::create_dir_all(dir.join("artifacts/current")).map_err(|e| e.to_string())?;
             Ok(build)
@@ -997,7 +1113,7 @@ mod tests {
         dropped: RefCell<bool>,
     }
     impl Provisioner for FakeProvisioner {
-        fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, String> {
+        fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, Problem> {
             if self.fail {
                 return Err("connection refused".into());
             }
@@ -1026,6 +1142,7 @@ mod tests {
             db_admin: None,
             start: false,
             start_over: false,
+            run_mode: None,
         }
     }
 

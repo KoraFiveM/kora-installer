@@ -25,7 +25,7 @@ export interface Finding {
 
 const USER_ATTRS = new Set([
   'aria-label', 'aria-description', 'aria-roledescription', 'aria-placeholder', 'title', 'placeholder', 'alt', 'label', 'hint', 'description', 'text', 'caption', 'summary',
-  'heading', 'tooltip', 'confirmLabel', 'cancelLabel', 'emptyText', 'message', 'error', 'help', 'legend',
+  'heading', 'tooltip', 'yes', 'no', 'confirmLabel', 'cancelLabel', 'emptyText', 'message', 'error', 'help', 'legend',
 ])
 const NOT_TEXT_ATTRS = new Set([
   'className', 'id', 'key', 'type', 'href', 'to', 'name', 'value', 'defaultValue', 'role', 'rel', 'target', 'autoComplete', 'inputMode', 'htmlFor', 'variant', 'tone', 'size', 'd', 'fill',

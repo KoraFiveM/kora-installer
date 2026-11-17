@@ -121,6 +121,7 @@ function SettingsForm({ name, cur }: { name: string; cur: AlertSettings }) {
         <Checkbox label={tt('servers.monitoringTab.memoryNearlyFull')} checked={rules.ram} onChange={rule('ram')} />
         <div className="pl-7 sm:max-w-xs"><Field label={tt('servers.monitoringTab.alertAboveMachineUse')}><Input inputMode="decimal" value={ram} onChange={(e) => setRam(e.target.value)} /></Field></div>
         <Checkbox label={tt('servers.monitoringTab.updatesNeedAttention')} hint={tt('servers.monitoringTab.someResourcesChangesKora')} checked={rules.updates} onChange={rule('updates')} />
+        <Checkbox label={tt('servers.monitoringTab.problemsKoraItself')} hint={tt('servers.monitoringTab.panelsHttpsCertificateEnding')} checked={rules.machine} onChange={rule('machine')} />
       </fieldset>
       <div className="space-y-3 border-t border-border pt-4">
         <h3 className="text-sm font-semibold">{tt('servers.monitoringTab.whereAlertsSent')}</h3>

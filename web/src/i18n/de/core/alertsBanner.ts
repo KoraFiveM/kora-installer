@@ -8,6 +8,8 @@ const messages = {
   'core.alertsBanner.dismiss': 'Schließen',
   'core.alertsBanner.alertCouldDismissed': 'Die Warnung konnte nicht geschlossen werden',
   'core.alertsBanner.valueMoreAlerts': 'Und {count} weitere Warnungen.',
+  'core.alertsBanner.whatDo': 'Was zu tun ist',
+  'core.alertsBanner.dismissAlertTitle': 'Warnung schließen: {title}',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

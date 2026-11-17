@@ -285,7 +285,7 @@ impl Remote {
     /// The settings store of this panel, for the sign-in tables. `Err` when the panel keeps its settings in memory only.
     pub fn auth_store(&self) -> Result<kora_core::store::Store, String> {
         let path = self.path().ok_or_else(|| "Remote sign-in needs the panel's saved settings; this panel keeps none.".to_string())?;
-        kora_core::store::Store::open_beside(&path).map_err(kora_core::store::problem_to_string)
+        kora_core::store::Store::open_beside(&path).map_err(crate::error::store_text)
     }
 
     /// Who an `Authorization: Bearer` token is: an old per-user token link, or an API token. Never a session.

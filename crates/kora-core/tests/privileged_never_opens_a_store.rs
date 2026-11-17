@@ -55,6 +55,7 @@ fn no_privileged_path_opens_a_store() {
         dry_run: true,
         db_admin: None,
         start: false,
+        container: None,
         app: None,
     };
     std::fs::write(server.path().join(".kora/request.json"), serde_json::to_vec(&req).unwrap()).unwrap();

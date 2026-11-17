@@ -8,7 +8,7 @@ use crate::api::wire::{BundleListing, BundleSaved};
 use crate::api::Backend;
 use crate::problem::Problem;
 
-type Res<T> = Result<T, String>;
+type Res<T> = Result<T, Problem>;
 
 /// The sentence shown wherever a bundle is offered.
 pub const NEVER_UPLOADED: &str = "Kora never uploads this file anywhere. It is saved on this computer, and it leaves only if you send it yourself.";
@@ -25,19 +25,19 @@ pub fn listing(built: bundle::Bundle) -> BundleListing {
     BundleListing { id, files, omitted, total_bytes: total, folder: bundle::default_folder().display().to_string(), never_uploaded: NEVER_UPLOADED.into() }
 }
 
-fn gone() -> String {
-    Problem::generic("That support bundle is no longer in memory (they are kept for 15 minutes). Prepare it again.").into()
+fn gone() -> Problem {
+    Problem::generic("That support bundle is no longer in memory (they are kept for 15 minutes). Prepare it again.")
 }
 
 pub fn file_text(id: &str, name: &str) -> Res<String> {
     let b = cache::get(id).ok_or_else(gone)?;
-    b.text(name).map(str::to_string).ok_or_else(|| Problem::generic("That file is not in the bundle.").into())
+    b.text(name).map(str::to_string).ok_or_else(|| Problem::generic("That file is not in the bundle."))
 }
 
 pub fn save(id: &str) -> Res<BundleSaved> {
     let b = cache::get(id).ok_or_else(gone)?;
     let folder = bundle::default_folder();
-    let path = bundle::save(&b, &folder).map_err(|e| String::from(Problem::generic(format!("The support bundle could not be saved in {}: {e}", folder.display()))))?;
+    let path = bundle::save(&b, &folder).map_err(|e| Problem::generic(format!("The support bundle could not be saved in {}.", folder.display())).with_details(e.to_string()))?;
     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     Ok(BundleSaved { file_name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), path: path.display().to_string(), bytes, folder: folder.display().to_string() })
 }

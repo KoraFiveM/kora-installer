@@ -17,6 +17,8 @@ const messages = {
   'core.status.releasedVersions': 'veröffentlichte Versionen',
   'core.status.latestChanges': 'neueste Änderungen',
   'core.status.updates': '{count, plural, one {# Update} other {# Updates}}',
+  'core.status.serverRunsContainerIts': 'Dieser Server läuft in einem Container: Seine Dateien liegen in seinem eigenen Ordner, und er startet über die Container-Engine neu.',
+  'core.status.inAContainer': 'In einem Container',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

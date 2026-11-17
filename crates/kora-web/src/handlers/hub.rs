@@ -239,7 +239,7 @@ pub async fn node_add(State(st): State<AppState>, Json(b): Json<NodeBody>) -> Re
         if let Err(e) = rb.servers_list() {
             return Err(remote_err(e));
         }
-        let node = store().add(&name, &chk.url, &token).map_err(|m| if m.contains("already") { ApiError::conflict(m) } else { ApiError::internal(m) })?;
+        let node = store().add(&name, &chk.url, &token).map_err(|m| if m.message.contains("already") { ApiError::conflict(m) } else { ApiError::internal(m) })?;
         Ok((StatusCode::CREATED, Json(json!({ "node": node_view(&node, &p) }))).into_response())
     })
     .await;
@@ -295,7 +295,7 @@ pub async fn node_server_control(State(st): State<AppState>, Path((id, s)): Path
     st.spawn_job(Op::NodeServerControl, Some(format!("node:{id}:{s}")), move |h| {
         h.event(json!({"type": "status", "message": format!("Asking {} to {}", n.name, action)}));
         let rb = remote(&n);
-        rb.server_control(&s, &action, &mut |e| h.event(e.clone())).map_err(|e| e.to_string())
+        rb.server_control(&s, &action, &mut |e| h.event(e.clone())).map_err(Into::into)
     })
 }
 

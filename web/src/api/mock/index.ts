@@ -4,7 +4,7 @@ import type * as T from '../types'
 import type { SavedInstall as GeneratedSavedInstall } from '../generated/types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
-import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
+import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockContainers, setMockGhInstalled, stopMockDatabase } from './toolchain'
 import { installKeysMock } from './keys'
 import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
@@ -17,6 +17,7 @@ import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedSer
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
 import { installAuthMock } from './auth'
 import { adminNeeds, adminWhat, installCommand, withoutAdminReq } from './adminParts'
+import '@/i18n/en/errors/problems'
 
 const BASE = '/api/v1'
 
@@ -92,6 +93,7 @@ function init(name: ScenarioName) {
   nextId = 1
   consoleTick = 0
   resetToolchainMock(beh.trouble)
+  if (name === 'containers') setMockContainers('ready')
 }
 
 class Fail extends Error {
@@ -308,14 +310,27 @@ interface InstallRun {
   noAdmin?: boolean
 }
 
+/** The steps of this install: a container server swaps the background service for the container steps (the real ids are in `kora_core::installer::plan_steps`). */
+function installSteps(req: T.InstallRequest): [string, string][] {
+  if (req.run_mode !== 'container') return INSTALL_STEPS
+  const out: [string, string][] = []
+  for (const s of INSTALL_STEPS) {
+    if (s[0] === 'build.service') out.push(['container.create', "Creating the server's container"])
+    else if (s[0] === 'build.db') out.push(['container.engine', 'Checking the container engine'], ['container.images', 'Downloading the container images'], req.db === 'container' ? ['build.db', 'Creating the database container'] : s)
+    else out.push(s)
+  }
+  return out
+}
+
 async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, jobId: () => string, run: InstallRun = { attempt: 0, done: [], skip: new Set() }): Promise<T.InstallOutcome> {
+  const INSTALL_STEPS = installSteps(req)
   const lower = req.name.toLowerCase()
   if (run.attempt === 0 && lower.startsWith('nogh')) setMockGhInstalled(false)
   if (run.attempt === 0 && lower.startsWith('nodb')) stopMockDatabase()
   const failAt = lower.startsWith('nogh') && !mockGhInstalled() ? 'prepare.git' : lower.startsWith('nodb') && mockDbStoppedProblem() ? 'build.db' : lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
-  if (!req.service) skipped.add('build.service')
+  if (!req.service && req.run_mode !== 'container') skipped.add('build.service')
   if (req.db === 'skip') skipped.add('build.db')
   if (!req.start) skipped.add('launch')
   for (let i = 0; i < INSTALL_STEPS.length; i++) {
@@ -375,7 +390,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
   }
   prefs.savedInstall = null
-  servers.push({ name: req.name, dir: req.dir, mode: compatMode(req), source: req.source ?? (req.mode === 'development' ? 'fork' : 'clone'), versions: req.versions ?? (req.mode === 'development' ? 'latest' : 'released'), ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null })
+  servers.push({ name: req.name, dir: req.dir, mode: compatMode(req), source: req.source ?? (req.mode === 'development' ? 'fork' : 'clone'), versions: req.versions ?? (req.mode === 'development' ? 'latest' : 'released'), ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null, ...(req.run_mode === 'container' ? { run_mode: 'container' as const, run_label: 'in a container (podman, rootless)' } : {}) })
   installed[req.name] = ['oxmysql', 'ox_lib', 'kora_core']
   return {
     dir: req.dir,
@@ -411,8 +426,8 @@ installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
 const reachMock = installReachMock(route, () => servers)
 installSupportMock(route, Fail)
-const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep)
-const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
+const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep, () => svc() === 'ready')
+const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })), () => svc() === 'ready')
 const resourceMock = installResourceMock(route, Fail, {
   find: (n) => find(n),
   installed: (n) => installed[n] ?? [],

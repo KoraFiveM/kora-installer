@@ -25,6 +25,10 @@ const messages = {
   'settings.auditLog.when': 'Wann',
   'settings.auditLog.what': 'Was',
   'settings.auditLog.showOlderEntries': 'Ältere Einträge anzeigen',
+  'settings.auditLog.doneAdministratorRightsValue': 'Mit Administratorrechten erledigt{value}',
+  'settings.auditLog.panelAposSEntries': ' Die Einträge des Panels werden {days} Tage aufbewahrt.',
+  'settings.auditLog.administratorServicesLogOnly': 'Vom Log des Administratordienstes wird nur angezeigt, was er für dein Konto getan hat. Ein Administrator dieses Computers sieht die Einträge aller.',
+  'settings.auditLog.stopped': 'Angehalten',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

@@ -4,6 +4,7 @@
 //! only answers with *changes*. Settings live in `<server>/.kora/alerts.json` (owner-only: the generic
 //! webhook address is a secret and is never returned, only [`redact_url`]).
 
+use crate::problem::Problem;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -29,16 +30,28 @@ pub enum AlertKind {
     UpdateAttention,
     /// A backup (usually a scheduled one) did not work.
     BackupFailed,
+    /// Machine-level (belongs to no server): the panel's HTTPS certificate ends soon.
+    CertExpiring,
+    /// Machine-level: the panel's HTTPS certificate has expired.
+    CertExpired,
+    /// Machine-level: Kora could not renew the panel's HTTPS certificate by itself.
+    CertRenewalFailed,
+    /// Machine-level: Kora's administrator service was answering and stopped.
+    ServiceStopped,
 }
 
 impl AlertKind {
     /// The tone the UI shows: `danger`, `warning` or `success`.
     pub fn tone(self) -> &'static str {
         match self {
-            AlertKind::Stopped | AlertKind::BackupFailed => "danger",
+            AlertKind::Stopped | AlertKind::BackupFailed | AlertKind::CertExpired | AlertKind::ServiceStopped => "danger",
             AlertKind::Recovered => "success",
-            AlertKind::DiskLow | AlertKind::RamHigh | AlertKind::UpdateAttention => "warning",
+            AlertKind::DiskLow | AlertKind::RamHigh | AlertKind::UpdateAttention | AlertKind::CertExpiring | AlertKind::CertRenewalFailed => "warning",
         }
+    }
+    /// Machine-level kinds belong to no server (their alert has an empty `server`): they are about Kora's own panel and service.
+    pub fn machine(self) -> bool {
+        matches!(self, AlertKind::CertExpiring | AlertKind::CertExpired | AlertKind::CertRenewalFailed | AlertKind::ServiceStopped)
     }
     pub fn title(self) -> &'static str {
         match self {
@@ -48,6 +61,10 @@ impl AlertKind {
             AlertKind::RamHigh => "Memory is nearly full",
             AlertKind::UpdateAttention => "Updates need attention",
             AlertKind::BackupFailed => "Backup failed",
+            AlertKind::CertExpiring => "HTTPS certificate ending soon",
+            AlertKind::CertExpired => "HTTPS certificate expired",
+            AlertKind::CertRenewalFailed => "HTTPS certificate not renewed",
+            AlertKind::ServiceStopped => "Administrator service stopped answering",
         }
     }
 }
@@ -55,6 +72,7 @@ impl AlertKind {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Alert {
     pub id: u64,
+    /// The server it is about; empty for a machine-level alert ([`AlertKind::machine`]).
     pub server: String,
     pub kind: AlertKind,
     pub tone: &'static str,
@@ -76,11 +94,15 @@ pub struct Rules {
     pub disk: bool,
     pub ram: bool,
     pub updates: bool,
+    /// Machine-level alerts (the panel's certificate, the administrator service, a backup pass that could not run) are sent to this
+    /// server's Discord / webhook too. They belong to no server: they go to every server's notification settings that have this on,
+    /// each address once.
+    pub machine: bool,
 }
 
 impl Default for Rules {
     fn default() -> Self {
-        Self { stopped: true, recovered: true, disk: true, ram: true, updates: true }
+        Self { stopped: true, recovered: true, disk: true, ram: true, updates: true, machine: true }
     }
 }
 
@@ -122,15 +144,15 @@ pub fn load_settings(dir: &Path) -> AlertSettings {
     std::fs::read(settings_path(dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-pub fn save_settings(dir: &Path, s: &AlertSettings) -> Result<(), String> {
+pub fn save_settings(dir: &Path, s: &AlertSettings) -> Result<(), Problem> {
     let path = settings_path(dir);
     let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
-    super::write_private(&path, &text).map_err(|e| format!("Could not save the alert settings: {e}"))
+    super::write_private(&path, &text).map_err(|e| e.lead("Could not save the alert settings"))
 }
 
 /// Only `http(s)://host...`, no spaces, control characters or backslashes.
-pub fn validate_url(url: &str) -> Result<(), String> {
-    let bad = |m: &str| Err(format!("That is not a usable web address ({m})."));
+pub fn validate_url(url: &str) -> Result<(), Problem> {
+    let bad = |m: &str| Err(Problem::generic(format!("That is not a usable web address ({m}).")));
     if url.len() > 2048 || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return bad("it has spaces or is too long");
     }
@@ -201,7 +223,7 @@ its private network. Set it on the computer that runs Kora if you need a local a
 
 /// Check a webhook address set over remote access: its host must only resolve to public addresses. The
 /// address is read by the same rules the sender uses (`url`), so the host checked is the host contacted.
-pub fn public_webhook(url: &str, lookup: Lookup<'_>) -> Result<(), String> {
+pub fn public_webhook(url: &str, lookup: Lookup<'_>) -> Result<(), Problem> {
     validate_url(url)?;
     let u = url::Url::parse(url).map_err(|_| "That is not a usable web address.".to_string())?;
     if !matches!(u.scheme(), "http" | "https") {
@@ -214,7 +236,7 @@ pub fn public_webhook(url: &str, lookup: Lookup<'_>) -> Result<(), String> {
         Some(url::Host::Domain(d)) => {
             let looked = lookup(d, port).map_err(|_| format!("Could not look up '{d}'. Check the address."))?;
             if looked.is_empty() {
-                return Err(format!("Could not look up '{d}'. Check the address."));
+                return Err(format!("Could not look up '{d}'. Check the address.").into());
             }
             looked
         }
@@ -262,7 +284,7 @@ pub fn settings_view(s: &AlertSettings) -> Value {
 }
 
 /// Apply a partial update. Absent keys keep their value; `webhook_url` of `""` or `null` removes the address.
-pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, String> {
+pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, Problem> {
     let obj = body.as_object().ok_or("Send the alert settings as a JSON object.")?;
     let mut s = cur.clone();
     let flag = |v: &Value, name: &str| v.as_bool().ok_or_else(|| format!("'{name}' must be true or false."));
@@ -281,7 +303,8 @@ pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, 
                         "disk" => s.rules.disk = b,
                         "ram" => s.rules.ram = b,
                         "updates" => s.rules.updates = b,
-                        other => return Err(format!("There is no alert rule called '{other}'.")),
+                        "machine" => s.rules.machine = b,
+                        other => return Err(format!("There is no alert rule called '{other}'.").into()),
                     }
                 }
             }
@@ -299,7 +322,7 @@ pub fn apply_update(cur: &AlertSettings, body: &Value) -> Result<AlertSettings, 
             },
             // Read-only echoes from the view; ignored.
             "webhook" | "email" => {}
-            other => return Err(format!("Unknown alert setting '{other}'.")),
+            other => return Err(format!("Unknown alert setting '{other}'.").into()),
         }
     }
     if !(0.0..=100_000.0).contains(&s.disk_min_gb) {
@@ -392,7 +415,7 @@ pub fn evaluate(s: &Sample, f: &Facts, set: &AlertSettings, active: &HashMap<Ale
 /// POST `body` as JSON to a user-chosen address. Bounded time, no redirects; the address is never
 /// part of an error message. With `public_only` (the address was set over remote access) the name is
 /// looked up again now and the send is refused if any address it gives is internal.
-pub fn post_json(url: &str, body: &Value, public_only: bool) -> Result<(), String> {
+pub fn post_json(url: &str, body: &Value, public_only: bool) -> Result<(), Problem> {
     if public_only {
         post_via(url, body, |n: &str| public_addrs(n, &|n| n.to_socket_addrs().map(Iterator::collect)))
     } else {
@@ -401,7 +424,7 @@ pub fn post_json(url: &str, body: &Value, public_only: bool) -> Result<(), Strin
 }
 
 /// [`post_json`] with the lookup the connection uses (tests point a name at a local listener).
-pub(crate) fn post_via(url: &str, body: &Value, resolve: impl Fn(&str) -> std::io::Result<Vec<SocketAddr>> + Send + Sync + 'static) -> Result<(), String> {
+pub(crate) fn post_via(url: &str, body: &Value, resolve: impl Fn(&str) -> std::io::Result<Vec<SocketAddr>> + Send + Sync + 'static) -> Result<(), Problem> {
     validate_url(url)?;
     let t = Duration::from_secs(5);
     let agent = ureq::AgentBuilder::new()
@@ -414,9 +437,31 @@ pub(crate) fn post_via(url: &str, body: &Value, resolve: impl Fn(&str) -> std::i
         .build();
     match agent.post(url).set("Content-Type", "application/json").set("User-Agent", "kora-monitor").send_string(&body.to_string()) {
         Ok(r) if r.status() < 300 => Ok(()),
-        Ok(r) | Err(ureq::Error::Status(_, r)) => Err(format!("The webhook answered with HTTP {}.", r.status())),
+        Ok(r) | Err(ureq::Error::Status(_, r)) => Err(format!("The webhook answered with HTTP {}.", r.status()).into()),
         Err(_) => Err("Could not reach the webhook address.".into()),
     }
+}
+
+/// What a machine-level alert is sent to: the Discord addresses and generic webhooks of the servers whose notification settings allow it,
+/// each address once (`servers`: each server's settings and its Discord webhook). Pure; [`super::RealSink`] does the sending.
+pub fn machine_targets(servers: &[(AlertSettings, Option<String>)]) -> (Vec<String>, Vec<(String, bool)>) {
+    let (mut discord, mut hooks): (Vec<String>, Vec<(String, bool)>) = (vec![], vec![]);
+    for (set, discord_url) in servers {
+        if !set.enabled || !set.rules.machine {
+            continue;
+        }
+        if let Some(u) = discord_url.as_ref().filter(|_| set.discord) {
+            if !discord.contains(u) {
+                discord.push(u.clone());
+            }
+        }
+        if let Some(u) = &set.webhook_url {
+            if !hooks.iter().any(|(h, _)| h == u) {
+                hooks.push((u.clone(), set.webhook_set_remotely));
+            }
+        }
+    }
+    (discord, hooks)
 }
 
 /// The JSON a generic webhook receives.
@@ -498,6 +543,37 @@ mod tests {
         // Everything off: active alerts resolve.
         set = AlertSettings { enabled: false, ..AlertSettings::default() };
         assert_eq!(ev(&s, &facts(None), &set, &[AlertKind::RamHigh]), vec![Change::Resolve(AlertKind::RamHigh)]);
+    }
+
+    #[test]
+    fn machine_alerts_go_to_each_address_once_and_only_where_the_server_allows_them() {
+        let on = AlertSettings { webhook_url: Some("https://hooks.test/a".into()), ..AlertSettings::default() };
+        let off = AlertSettings { rules: Rules { machine: false, ..Rules::default() }, webhook_url: Some("https://hooks.test/b".into()), ..AlertSettings::default() };
+        let disabled = AlertSettings { enabled: false, webhook_url: Some("https://hooks.test/c".into()), ..AlertSettings::default() };
+        let no_discord = AlertSettings { discord: false, ..AlertSettings::default() };
+        let (discord, hooks) = machine_targets(&[
+            (on.clone(), Some("https://discord.test/1".into())),
+            (on, Some("https://discord.test/1".into())),
+            (off, Some("https://discord.test/2".into())),
+            (disabled, Some("https://discord.test/3".into())),
+            (no_discord, Some("https://discord.test/4".into())),
+        ]);
+        assert_eq!(discord, ["https://discord.test/1"]);
+        assert_eq!(hooks, [("https://hooks.test/a".to_string(), false)]);
+        // the new rule is switched with the others and old files without it mean "on"
+        let s = apply_update(&AlertSettings::default(), &json!({"rules": {"machine": false}})).unwrap();
+        assert!(!s.rules.machine);
+        let old: AlertSettings = serde_json::from_str(r#"{"rules": {"stopped": true}}"#).unwrap();
+        assert!(old.rules.machine, "a settings file from before has no such rule: it is on");
+    }
+
+    #[test]
+    fn machine_kinds_have_words_a_tone_and_belong_to_no_server() {
+        for k in [AlertKind::CertExpiring, AlertKind::CertExpired, AlertKind::CertRenewalFailed, AlertKind::ServiceStopped] {
+            assert!(k.machine() && !k.title().is_empty() && matches!(k.tone(), "danger" | "warning"), "{k:?}");
+        }
+        assert!(!AlertKind::Stopped.machine() && !AlertKind::BackupFailed.machine());
+        assert_eq!((AlertKind::CertExpired.tone(), AlertKind::CertExpiring.tone()), ("danger", "warning"));
     }
 
     #[test]
@@ -623,12 +699,12 @@ mod tests {
             "http://hooks.example.com@127.0.0.1/",
         ] {
             let e = public_webhook(bad, &dns).unwrap_err();
-            assert!(e.contains("public internet address"), "{bad}: {e}");
+            assert!(e.to_string().contains("public internet address"), "{bad}: {e}");
         }
         // `\` counts as `/` for the sender, so this would go to 127.0.0.1.
         let e = public_webhook("http://127.0.0.1:8080\\@hooks.example.com/", &dns).unwrap_err();
-        assert!(e.contains("backslash"), "{e}");
-        assert!(public_webhook("https://nowhere.invalid/", &dns).unwrap_err().contains("Could not look up"));
+        assert!(e.to_string().contains("backslash"), "{e}");
+        assert!(public_webhook("https://nowhere.invalid/", &dns).unwrap_err().to_string().contains("Could not look up"));
         assert!(public_webhook("https://hooks.example.com:x/", &dns).is_err());
         assert!(public_webhook("ftp://hooks.example.com/", &dns).is_err());
     }
@@ -654,7 +730,7 @@ mod tests {
         l.set_nonblocking(true).unwrap();
         let port = l.local_addr().unwrap().port();
         let e = post_json(&format!("http://127.0.0.1:{port}/x"), &json!({}), true).unwrap_err();
-        assert!(e.contains("Could not reach"), "{e}");
+        assert!(e.to_string().contains("Could not reach"), "{e}");
         assert!(l.accept().is_err(), "nothing connected");
         // Set on this computer: the same address is used as before.
         let t = std::thread::spawn(move || {

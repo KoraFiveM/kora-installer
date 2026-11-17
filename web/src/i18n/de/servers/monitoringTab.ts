@@ -56,6 +56,8 @@ const messages = {
   'servers.monitoringTab.lastHour': 'Letzte Stunde',
   'servers.monitoringTab.lastHours': 'Letzte 6 Stunden',
   'servers.monitoringTab.lastHours2': 'Letzte 24 Stunden',
+  'servers.monitoringTab.problemsKoraItself': 'Probleme mit Kora selbst',
+  'servers.monitoringTab.panelsHttpsCertificateEnding': 'Das HTTPS-Zertifikat des Panels läuft bald ab oder konnte nicht erneuert werden, oder Koras Administratordienst antwortet nicht mehr. Sie gehören zu keinem Server und gehen deshalb an die Adresse jedes Servers, der das eingeschaltet hat, je einmal.',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

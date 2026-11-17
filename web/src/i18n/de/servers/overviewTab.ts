@@ -20,6 +20,12 @@ const messages = {
   'servers.overviewTab.koraCouldFindComputers': 'Kora konnte die Netzwerkadresse dieses Computers nicht finden. Spieler verbinden sich mit der Adresse dieses Computers und dem Port {game}.',
   'servers.overviewTab.serverFolder': 'Serverordner',
   'servers.overviewTab.openingFolderOnlyWorks': 'Das Öffnen des Ordners funktioniert nur auf dem Computer, auf dem Kora läuft, an dessen Bildschirm. Kopiere von hier aus den Pfad.',
+  'servers.overviewTab.runs': 'Läuft in',
+  'servers.overviewTab.inAContainer': 'In einem Container',
+  'servers.overviewTab.running': 'Läuft',
+  'servers.overviewTab.stopped': 'Angehalten',
+  'servers.overviewTab.listening': 'Hört zu',
+  'servers.overviewTab.answering': 'Antwortet',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

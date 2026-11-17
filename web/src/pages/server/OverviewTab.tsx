@@ -28,9 +28,10 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
         <CardHeader><CardTitle>{t('servers.overviewTab.status')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-3 text-sm">
-            <dt className="text-muted-foreground">{t('servers.overviewTab.server')}</dt><dd><Check ok={s.running} yes="Running" no={s.status === 'missing' ? t('servers.overviewTab.folderMissing') : 'Stopped'} /></dd>
-            <dt className="text-muted-foreground">{t('servers.overviewTab.gamePortGame', { game: s.ports.game })}</dt><dd><Check ok={s.game_listening} yes="Listening" no={t('servers.overviewTab.notListening')} /></dd>
-            <dt className="text-muted-foreground">{t('servers.overviewTab.txadminPortTxadmin', { txadmin: s.ports.txadmin })}</dt><dd><Check ok={s.txadmin_up} yes="Answering" no={t('servers.overviewTab.notAnswering')} /></dd>
+            <dt className="text-muted-foreground">{t('servers.overviewTab.server')}</dt><dd><Check ok={s.running} yes={t('servers.overviewTab.running')} no={s.status === 'missing' ? t('servers.overviewTab.folderMissing') : t('servers.overviewTab.stopped')} /></dd>
+            {s.run_mode === 'container' && <><dt className="text-muted-foreground">{t('servers.overviewTab.runs')}</dt><dd>{s.run_label ?? t('servers.overviewTab.inAContainer')}</dd></>}
+            <dt className="text-muted-foreground">{t('servers.overviewTab.gamePortGame', { game: s.ports.game })}</dt><dd><Check ok={s.game_listening} yes={t('servers.overviewTab.listening')} no={t('servers.overviewTab.notListening')} /></dd>
+            <dt className="text-muted-foreground">{t('servers.overviewTab.txadminPortTxadmin', { txadmin: s.ports.txadmin })}</dt><dd><Check ok={s.txadmin_up} yes={t('servers.overviewTab.answering')} no={t('servers.overviewTab.notAnswering')} /></dd>
             <dt className="text-muted-foreground">{t('servers.overviewTab.updates')}</dt><dd><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></dd>
             {backup && <><dt className="text-muted-foreground">{t('servers.overviewTab.backups')}</dt><dd><BackupChip server={s.name} summary={backup} /></dd></>}
           </dl>

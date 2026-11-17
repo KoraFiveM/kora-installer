@@ -462,6 +462,10 @@ export const api = {
     list: (q: { limit?: number; before?: number; server?: string; op?: string; actor?: string; result?: string } = {}) =>
       call('audit_list', { query: { limit: q.limit, before: q.before, server: q.server || undefined, op: q.op || undefined, actor: q.actor || undefined, result: q.result || undefined } }),
   },
+  /** What Kora's administrator service did with administrator rights (its own log; administrators only). */
+  auditService: {
+    list: (limit = 200) => call('audit_service_list', { query: { limit } }),
+  },
   keys: {
     list: () => call('keys_list', {}),
     add: (name: string, license_key: string) => call('key_add', { body: { name, license_key } }),

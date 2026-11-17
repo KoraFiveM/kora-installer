@@ -79,3 +79,33 @@ export function whoLabel(r: Pick<AuditRow, 'actor_kind' | 'actor_name' | 'provid
   if (r.actor_kind === 'cli') return t('core.store.nKoraCommand', { n })
   return t('core.store.nComputer', { n })
 }
+
+/** What the administrator service wrote (`run system.firewall [my-server]`) in plain words, and the server it was about. */
+export function serviceWhat(what: string): { text: string; server: string | null } {
+  const m = /^(.*?)(?: \[(.+)\])?$/.exec(what)
+  const op = (m?.[1] ?? what).trim()
+  const server = m?.[2] ?? null
+  const words: Record<string, string> = {
+    'run system.service': t('settings.store.setUpServersBackground'),
+    'undo system.service': t('settings.store.removedServersBackgroundServic'),
+    'run system.firewall': t('settings.store.openedServersFirewallPorts'),
+    'run reach.firewall': t('settings.store.openedGamePortFirewall'),
+    'undo system.firewall': t('settings.store.closedServersFirewallPorts'),
+    'run system.schedule': t('settings.store.setUpAutomaticUpdates'),
+    'undo system.schedule': t('settings.store.removedAutomaticUpdates'),
+    'schedule set': t('settings.store.changedAutomaticupdateSchedule'),
+    'schedule off': t('settings.store.turnedAutomaticUpdatesOff'),
+    'backup job set': t('settings.store.setUpScheduledBackups'),
+    'backup job off': t('settings.store.removedScheduledbackupJob'),
+    'hand over': t('settings.store.handedRestoredFilesServers'),
+    'run prepare.db': t('settings.store.preparedDatabaseServer'),
+    'run build.db': t('settings.store.createdServersDatabase'),
+    'undo build.db': t('settings.store.removedServersDatabase'),
+    'db start': t('settings.store.startedKorasDatabaseServer'),
+    'db install': t('settings.store.installedKorasDatabaseServer'),
+    'start-database': t('settings.store.startedDatabaseServer'),
+    'install git': t('settings.store.installedGit'),
+    update: t('settings.store.updatedKora'),
+  }
+  return { text: words[op] ?? op, server }
+}

@@ -18,6 +18,12 @@ const messages = {
   'servers.overviewTab.koraCouldFindComputers': "Kora could not find this computer's network address. Players connect to this computer's address with port {game}.",
   'servers.overviewTab.serverFolder': 'Server folder',
   'servers.overviewTab.openingFolderOnlyWorks': 'Opening the folder only works on the computer that runs Kora, at its screen. From here, copy the path.',
+  'servers.overviewTab.runs': 'Runs',
+  'servers.overviewTab.inAContainer': 'In a container',
+  'servers.overviewTab.running': 'Running',
+  'servers.overviewTab.stopped': 'Stopped',
+  'servers.overviewTab.listening': 'Listening',
+  'servers.overviewTab.answering': 'Answering',
 } as const
 
 register('en', messages)

@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::problem::Problem;
+
 use crate::installer::registry::kora_home;
 
 /// What the last attempt to forward the port did (written by whichever process maintains the mapping).
@@ -53,13 +55,13 @@ pub fn load_server(dir: &Path) -> ServerReach {
     std::fs::read(server_path(dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-pub fn save_server(dir: &Path, s: &ServerReach) -> Result<(), String> {
+pub fn save_server(dir: &Path, s: &ServerReach) -> Result<(), Problem> {
     let p = server_path(dir);
     if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot save the setting: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| Problem::from(e).context("saving the setting"))?;
     }
-    let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
-    crate::monitor::write_private(&p, &text).map_err(|e| format!("Cannot save the setting: {e}"))
+    let text = serde_json::to_string_pretty(s)?;
+    crate::monitor::write_private(&p, &text).map_err(|e| e.context("saving the setting"))
 }
 
 /// Remember the outcome without touching the choice (the file is re-read, so a switch made in the
@@ -98,11 +100,10 @@ pub fn load_consent_at(p: &Path) -> Consent {
     crate::store::documents::get(&s, CONSENT_DOC).ok().flatten().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }
 
-pub fn save_consent_at(p: &Path, c: &Consent) -> Result<(), String> {
-    let fail = |e: crate::problem::Problem| format!("Cannot save the setting: {}", e.message);
-    let s = crate::store::Store::open_beside(p).map_err(fail)?;
-    let doc = serde_json::to_value(c).map_err(|e| e.to_string())?;
-    crate::store::documents::put(&s, CONSENT_DOC, &doc).map_err(fail)
+pub fn save_consent_at(p: &Path, c: &Consent) -> Result<(), Problem> {
+    let s = crate::store::Store::open_beside(p)?;
+    let doc = serde_json::to_value(c)?;
+    crate::store::documents::put(&s, CONSENT_DOC, &doc)
 }
 
 const CONSENT_DOC: &str = "reach-consent";
@@ -111,7 +112,7 @@ pub fn load_consent() -> Consent {
     load_consent_at(&consent_path())
 }
 
-pub fn save_consent(c: &Consent) -> Result<(), String> {
+pub fn save_consent(c: &Consent) -> Result<(), Problem> {
     save_consent_at(&consent_path(), c)
 }
 

@@ -35,6 +35,8 @@ const messages = {
   'install.form.github': 'GitHub',
   'install.form.main': 'Main',
   'install.form.keyN': 'Key {n}',
+  'install.form.runningContainerNeedsPodman': 'Running in a container needs Podman or Docker, and none that works was found. Choose a system service, or fix the container engine on the System check page.',
+  'install.form.howServerRuns': 'How the server runs',
 } as const
 
 register('en', messages)

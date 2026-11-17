@@ -20,6 +20,8 @@ use crate::service::{self, account, binary, CommandRunner, ManagedServer, Plan, 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     UpdateTimer,
+    /// The scheduled-backup job of the operating system (`service::backup_job`), found by its Kora name.
+    BackupJob,
     Service,
     Firewall,
     ServiceAccount,
@@ -82,7 +84,7 @@ pub fn binary_used_elsewhere(reg: &Registry, path: &str, excluding: &[&Path]) ->
 ///   (otherwise the files would belong to a number that a future account could reuse).
 /// * `binary_still_used`: another server still runs the shared copy: keep it.
 pub fn items_for(t: &Target, c: &Created, platform: Platform, runner: &dyn CommandRunner, keep_files: bool, binary_still_used: bool) -> super::Result<Vec<Item>> {
-    let err = |e: service::ServiceError| super::InstallError(e.to_string());
+    let err = |e: service::ServiceError| super::Problem::generic(e.to_string());
     let account_name = c.service_account.clone().unwrap_or_else(|| account::account_name(&slug(&t.name)));
     let server = t.managed(if account_name == "root" { "kora" } else { &account_name });
     let mut v = Vec::new();
@@ -181,6 +183,17 @@ pub fn items_for(t: &Target, c: &Created, platform: Platform, runner: &dyn Comma
     Ok(v)
 }
 
+/// The scheduled-backup job of this server, when there is one (found by its Kora name, `kora-backup-<slug>`; nothing else).
+/// Removed by `kora uninstall`; deleting one server removes it through the administrator service (`backup::osjob`).
+pub fn backup_job_item(t: &Target, platform: Platform, runner: &dyn CommandRunner) -> Option<Item> {
+    let slug = slug(&t.name);
+    if !service::backup_job::exists_with(&slug, runner, platform) {
+        return None;
+    }
+    let plan = service::backup_job::uninstall_plan(&slug, platform).ok()?;
+    Some(Item { kind: Kind::BackupJob, title: "Remove the scheduled-backup job".into(), plan, note: None })
+}
+
 /// `uid:gid` in digits, as the installer records the previous owner (nothing `chown` could read as an option).
 fn valid_owner(s: &str) -> bool {
     s.split_once(':').is_some_and(|(u, g)| [u, g].iter().all(|p| !p.is_empty() && p.len() <= 10 && p.bytes().all(|b| b.is_ascii_digit())))
@@ -196,6 +209,7 @@ pub fn clears_record(item: &Item) -> bool {
 pub fn clear_record(c: &mut Created, kind: Kind) {
     match kind {
         Kind::UpdateTimer => c.update_timer = false,
+        Kind::BackupJob => {}
         Kind::Service => c.service_unit = None,
         Kind::Firewall => c.firewall = false,
         Kind::ServiceAccount => {
@@ -232,6 +246,22 @@ mod tests {
 
     fn lines(i: &Item) -> Vec<String> {
         i.plan.steps.iter().map(|s| s.command_line().unwrap_or_else(|| format!("{:?}", s.action))).collect()
+    }
+
+    #[test]
+    fn a_scheduled_backup_job_is_found_by_its_kora_name_and_only_that_is_removed() {
+        let r = FakeRunner::default();
+        let item = backup_job_item(&target(), Platform::Linux, &r).unwrap();
+        assert_eq!(item.kind, Kind::BackupJob);
+        let rn = FakeRunner::default();
+        service::apply_plan(&item.plan, &rn).unwrap();
+        assert!(rn.calls().iter().any(|c| c == "systemctl disable --now kora-backup-my-server.timer"), "{:?}", rn.calls());
+        assert!(rn.calls().iter().filter(|c| c.starts_with("remove ")).all(|c| c.contains("kora-backup-my-server.")));
+        let none = FakeRunner::default();
+        none.respond("cat /etc/systemd/system/kora-backup-my-server.timer", 1, "");
+        assert!(backup_job_item(&target(), Platform::Linux, &none).is_none(), "no job: nothing offered");
+        let w = backup_job_item(&target(), Platform::Windows, &r).unwrap();
+        assert!(w.plan.steps[0].command_line().unwrap().contains("Kora\\Backup my-server"));
     }
 
     #[test]

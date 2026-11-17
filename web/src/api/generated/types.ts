@@ -227,7 +227,7 @@ export type AlertEmail = {
   supported: boolean,
 };
 
-export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention" | "backup_failed";
+export type AlertKind = "stopped" | "recovered" | "disk_low" | "ram_high" | "update_attention" | "backup_failed" | "cert_expiring" | "cert_expired" | "cert_renewal_failed" | "service_stopped";
 
 export type AlertRules = {
   stopped: boolean,
@@ -235,6 +235,10 @@ export type AlertRules = {
   disk: boolean,
   ram: boolean,
   updates: boolean,
+  /**
+   * Problems with Kora itself (the panel's certificate, the administrator service): sent to this server's addresses too.
+   */
+  machine: boolean,
 };
 
 /**
@@ -246,6 +250,7 @@ export type AlertRulesUpdate = {
   disk?: boolean,
   ram?: boolean,
   updates?: boolean,
+  machine?: boolean,
 };
 
 /**
@@ -790,6 +795,10 @@ export type BackupsView = {
    * What the schedule needs to run, in words.
    */
   schedule_note: string,
+  /**
+   * The schedule is a job of the operating system (through the administrator service), not the panel's own scheduler.
+   */
+  schedule_by_os: boolean,
 };
 
 /**
@@ -1235,6 +1244,28 @@ export type Contacted = {
 };
 
 /**
+ * What an install asks for when it chooses container mode. Secret-free.
+ */
+export type ContainerRequest = {
+  /**
+   * `podman` or `docker`; `None` = the best one found (rootless Podman first).
+   */
+  engine?: EngineKind | null,
+  /**
+   * Address the game port is published on (`None` = every address).
+   */
+  bind?: string | null,
+  /**
+   * Memory limit in MiB (`None` = none).
+   */
+  memory_mb?: number | null,
+  /**
+   * CPU limit in tenths of a core, e.g. 20 = 2.0 cores (`None` = none).
+   */
+  cpu_tenths?: number | null,
+};
+
+/**
  * start/stop/restart verbs.
  */
 export type ControlAction = "start" | "stop" | "restart";
@@ -1310,7 +1341,7 @@ export type DbAdmin = {
   password?: string,
 };
 
-export type DbChoice = "use_existing" | "install_if_missing" | "skip";
+export type DbChoice = "use_existing" | "install_if_missing" | "skip" | "container";
 
 export type DbKind = "dumped" | "none" | "external" | "failed";
 
@@ -1396,6 +1427,11 @@ export type DownloadZip = {
   size: number,
   modified_unix: number,
 };
+
+/**
+ * Which engine.
+ */
+export type EngineKind = "podman" | "docker";
 
 /**
  * `POST /auth/enrol` (no sign-in needed; the link is the credential): the steps of the first set-up.
@@ -1558,6 +1594,14 @@ export type FleetServer = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+  /**
+   * `container` for a server that runs in a container; absent for every other (a service, or by hand).
+   */
+  run_mode?: RunMode,
+  /**
+   * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
+   */
+  run_label?: string,
 };
 
 /**
@@ -1853,6 +1897,16 @@ export type ImportPreview = {
    * page should ask for one (host, port, user, password: used once, never stored).
    */
   db_login: DbLoginNote | null,
+  /**
+   * `container` when the backed-up server ran in a container; absent otherwise. Offered again here when this
+   * computer can do the same (see `container_engine`).
+   */
+  run_mode?: RunMode,
+  /**
+   * The container engine this computer would use (`podman, rootless`), when it has one that looks usable:
+   * container mode can be chosen for the new server. `None`: only a service.
+   */
+  container_engine?: string,
 };
 
 export type ImportRequest = {
@@ -1876,6 +1930,10 @@ export type ImportRequest = {
    * Start the server when it is imported.
    */
   start: boolean,
+  /**
+   * How the new server runs here. `None` = as a service (the way every import worked before container mode).
+   */
+  run_mode?: RunMode,
   /**
    * Remove what an earlier, failed import of this server made, and begin again.
    */
@@ -2101,6 +2159,14 @@ export type InstallRequest = {
    * Cfx.re account that becomes the txAdmin admin, e.g. `fivem:4465268`. Null = a generated local admin.
    */
   cfx_identifier: string | null,
+  /**
+   * How the server runs: `service` (the default) or `container` (Linux, Podman or Docker).
+   */
+  run_mode?: RunMode,
+  /**
+   * What container mode asks for: which engine, the address to publish on, limits. Only with `run_mode: container`.
+   */
+  container?: ContainerRequest,
 };
 
 export type IssueItem = {
@@ -3507,6 +3573,11 @@ export type RollbackRequest = {
 export type RunAs = "installing_user" | "system";
 
 /**
+ * How a server runs. Servers made before container mode are all `Service`.
+ */
+export type RunMode = "service" | "container";
+
+/**
  * What is known about updates, shown as a small badge. Absent = not known yet.
  */
 export type SampleBadge = "up_to_date"
@@ -3547,6 +3618,8 @@ export type SavedInstall = {
    * The Cfx.re account that becomes the txAdmin admin (not a secret).
    */
   cfx_identifier: string | null,
+  run_mode?: RunMode,
+  container?: ContainerRequest,
 };
 
 export type SavedKey = {
@@ -3739,6 +3812,14 @@ export type ServerDetail = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+  /**
+   * `container` for a server that runs in a container; absent for every other (a service, or by hand).
+   */
+  run_mode?: RunMode,
+  /**
+   * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
+   */
+  run_label?: string,
 };
 
 export type ServerInfo = {
@@ -3774,6 +3855,10 @@ export type ServerInfo = {
    * The GitHub account the forks are in (a fork server only). A login is not a secret.
    */
   github_owner?: string,
+  /**
+   * `container` when the server ran in a container. Absent in older backups and for a service (or by hand).
+   */
+  run_mode?: RunMode,
 };
 
 export type ServerKeyChanged = {
@@ -3831,6 +3916,14 @@ export type ServerSummary = {
    * Kora could not find the address. It is not an internet address (that is the router's, which Kora cannot see).
    */
   connect: string | null,
+  /**
+   * `container` for a server that runs in a container; absent for every other (a service, or by hand).
+   */
+  run_mode?: RunMode,
+  /**
+   * For a container server, in words: `in a container (podman, rootless)`. Absent for the others.
+   */
+  run_label?: string,
 };
 
 /**
@@ -3838,6 +3931,59 @@ export type ServerSummary = {
  */
 export type ServersList = {
   servers: Array<ServerSummary>,
+};
+
+/**
+ * The answer: the service's lines, newest first. `available` is false when the service is not there for this account.
+ */
+export type ServiceAuditPage = {
+  available: boolean,
+  entries: Array<ServiceAuditRow>,
+  /**
+   * The lines of every account on this computer (the signed-in account administers the machine); otherwise only the lines about this account.
+   */
+  all_accounts: boolean,
+  /**
+   * Why there is nothing to show, or what to know, in plain words.
+   */
+  note: string | null,
+};
+
+/**
+ * `GET /audit/service?limit=`.
+ */
+export type ServiceAuditQuery = {
+  /**
+   * At most this many (default 200, at most 500).
+   */
+  limit?: number,
+};
+
+/**
+ * One line of the administrator service's own audit file: what it did with administrator rights, for whom, and how it went.
+ * Never a secret, a path or a typed value: the service writes only the operation's short label.
+ */
+export type ServiceAuditRow = {
+  /**
+   * Unix seconds.
+   */
+  at: number,
+  /**
+   * The account it was done for: its name when the service knew it, else its id.
+   */
+  account: string,
+  /**
+   * The operation, in short (`run system.firewall [my-server]`, `backup job set [my-server]`).
+   */
+  what: string,
+  /**
+   * `done`, `failed`, `refused` or `stopped`.
+   */
+  result: string,
+  /**
+   * The service's own words after the result (`code 1`, why it was refused).
+   */
+  detail: string | null,
 };
 
 /**

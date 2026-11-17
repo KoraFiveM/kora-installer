@@ -67,6 +67,13 @@ const messages = {
   'backups.steps.fileMadeOldComputer': 'Eine Datei, die auf dem alten Computer mit „Diesen Server umziehen“ erstellt wurde (sie endet auf .tar.gz.age), oder ein beliebiges Kora-Server-Backup (.tar.gz oder .tar.gz.age).',
   'backups.steps.backupOf': 'Backup vom {when, datetime}',
   'backups.steps.backupOfProtected': 'Backup vom {when, datetime} · passwortgeschützt',
+  'backups.steps.howServerRunsHere': 'So läuft der Server hier',
+  'backups.steps.serverBringingRanContainer': 'Der Server, den du hereinholst, lief in einem Container.',
+  'backups.steps.systemService': 'Als Systemdienst',
+  'backups.steps.startsComputerSettingService': 'Startet mit dem Computer. Das Einrichten des Dienstes braucht Administratorrechte (Kora zeigt danach, was zu tun ist).',
+  'backups.steps.inAContainer': 'In einem Container',
+  'backups.steps.usesContainerEngineDatabase': 'Nutzt {container_engine}. Die Datenbank kommt in einen MariaDB-Container neben dem Server.',
+  'backups.steps.computerNoContainerEngine': 'Dieser Computer hat keine Container-Engine (Podman oder Docker), die Kora nutzen kann.',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/Skeleton'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { StatusChip, StyleChip, UpdateChip } from '@/components/Status'
+import { RunChip, StatusChip, StyleChip, UpdateChip } from '@/components/Status'
 import { ServerControls } from '@/components/ServerControls'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton } from '@/components/ServerLinks'
 import { useServerControl } from '@/hooks/useServerControl'
@@ -38,7 +38,7 @@ function Row({ s, alerts, backup }: { s: ServerSummary; alerts: number; backup?:
         <div className="mt-1"><OffNormalSummary server={s} /></div>
         {!s.managed && <div className="text-xs text-muted-foreground">{t('servers.serversPage.addedFromExistingFolder')}</div>}
       </td>
-      <td className="px-4 py-3"><StyleChip source={s.source} versions={s.versions} /></td>
+      <td className="px-4 py-3"><StyleChip source={s.source} versions={s.versions} /> <RunChip mode={s.run_mode} label={s.run_label} /></td>
       <td className="px-4 py-3"><StatusChip status={s.status} pending={ctl.pending} /></td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.game}</td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.txadmin}</td>

@@ -37,6 +37,8 @@ const messages = {
   'install.form.github': 'GitHub',
   'install.form.main': 'Hauptschlüssel',
   'install.form.keyN': 'Schlüssel {n}',
+  'install.form.runningContainerNeedsPodman': 'Für die Ausführung in einem Container braucht es Podman oder Docker, und es wurde keines gefunden, das funktioniert. Wähle einen Systemdienst oder behebe die Container-Engine auf der Seite Systemprüfung.',
+  'install.form.howServerRuns': 'Wie der Server läuft',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

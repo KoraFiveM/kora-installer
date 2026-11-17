@@ -23,7 +23,7 @@ import { formatBytes, validatePorts } from '@/lib/utils'
 import { useInstallBlock } from './install/access'
 import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
-import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, OptionsStep, PortsStep, ResourcesStep, SourceStep, VersionsStep } from './install/Steps'
+import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, OptionsStep, PortsStep, ResourcesStep, RunModeStep, SourceStep, VersionsStep } from './install/Steps'
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
 import { rich } from '@/i18n/react'
@@ -38,7 +38,7 @@ interface ReviewRow {
   advanced?: boolean
 }
 
-function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
+function reviewRows(f: WizardForm, req: InstallRequest, containersOffered = false): ReviewRow[] {
   const build = f.artifact === 'recommended' ? t('install.installWizard.recommended') : f.artifact === 'pick' ? (f.artifactBuild === null ? t('install.installWizard.pickedYet') : t('install.installWizard.buildArtifactbuild', { artifactBuild: f.artifactBuild })) : t('install.installWizard.customDownload')
   const rows: ReviewRow[] = [
     { label: t('install.installWizard.licenceKey'), value: f.licenceChoice === 'saved' ? (f.licenceName ? t('install.installWizard.savedLicenceKeyLicencename', { licenceName: f.licenceName }) : t('install.installWizard.pickedYet')) : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? t('install.installWizard.providedHiddenSavedTrim', { trim: f.saveKeyName.trim() }) : t('install.installWizard.providedHiddenSaved')) : t('install.installWizard.givenYet'), step: 'licence' },
@@ -50,10 +50,11 @@ function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
     { label: t('install.installWizard.ports'), value: t('install.installWizard.gameValueTxadminValue', { game: f.game.trim() || '?', txadmin: f.tx.trim() || '?' }), step: 'ports' },
     { label: t('install.installWizard.fivemServerBuild'), value: f.gameBuild.trim() ? t('install.installWizard.buildGameBuildTrim', { build, trim: f.gameBuild.trim() }) : build, step: 'build' },
     { label: t('install.installWizard.resources'), value: f.resourcesAll ? t('install.installWizard.everything') : t('install.installWizard.resourcesPicked', { count: f.resourceIds.length }), step: 'resources' },
-    { label: t('install.installWizard.database'), value: f.db === 'use_existing' ? t('install.installWizard.useExistingDatabase') : f.db === 'install_if_missing' ? t('install.installWizard.setUpMe') : t('install.installWizard.skip'), step: 'database' },
+    ...(containersOffered || f.runMode === 'container' ? [{ label: t('install.installWizard.howServerRuns'), value: f.runMode === 'container' ? t('install.installWizard.inAContainer') : t('install.installWizard.systemService'), step: 'runmode' as StepId }] : []),
+    { label: t('install.installWizard.database'), value: f.db === 'use_existing' ? t('install.installWizard.useExistingDatabase') : f.db === 'install_if_missing' ? t('install.installWizard.setUpMe') : f.db === 'container' ? t('install.installWizard.mariadbContainerNextServer') : t('install.installWizard.skip'), step: 'database' },
     { label: t('install.installWizard.databaseLogin'), value: f.db === 'skip' ? t('install.installWizard.notNeeded') : f.dbCustom ? t('install.installWizard.typedUserDbuserPassword', { dbUser: f.dbUser }) : t('install.installWizard.automatic'), step: 'database' },
     { label: t('install.installWizard.firewall'), value: req.firewall ? (req.txadmin_public ? t('install.installWizard.openGameTxadminPorts') : t('install.installWizard.openGamePort')) : t('install.installWizard.leaveClosed'), step: 'options' },
-    { label: t('install.installWizard.backgroundService'), value: req.service ? t('install.installWizard.yes') : t('install.installWizard.no'), step: 'options' },
+    { label: t('install.installWizard.backgroundService'), value: f.runMode === 'container' ? t('install.installWizard.usedContainerRestartsItself') : req.service ? t('install.installWizard.yes') : t('install.installWizard.no'), step: 'options' },
   ]
   rows.push({
     label: t('install.installWizard.signTxadminCfxRe'),
@@ -257,17 +258,21 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   /** A fix (installing a tool, signing in, starting the database) worked and the failed step was retried by itself. */
   const [autoRetried, setAutoRetried] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
+  // "Containers" line of the System check: a container engine that really ran a container offers "How the server runs".
+  const check = useQuery({ queryKey: ['system-check'], queryFn: api.systemCheck.get, retry: false })
+  const containerItem = check.data?.items.find((i) => i.id === 'container')
+  const containers = containerItem?.state === 'ok'
   const ports = usePortsCheck(f.game, f.tx)
   const run = useJob<InstallOutcome, InstallEvent>(job, onServersChanged)
   /** Windows: the panel can ask Windows for permission itself ("Ask again" / "Ask for administrator permission"). */
 
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
   const req = buildRequest(f, { artifactUrl: artUrl })
-  const stepsOf = (source: WizardForm['source']) => (everyStep ? stepsFor(source) : quickStepsFor(source))
+  const stepsOf = (source: WizardForm['source']) => (everyStep ? stepsFor(source, containers) : quickStepsFor(source))
   const steps = stepsOf(f.source)
   const at = Math.min(step, steps.length - 1)
   const id: StepId = steps[at]
-  const ctx = { ports: ports.state, githubSignedIn }
+  const ctx = { ports: ports.state, githubSignedIn, containers }
   const problems = allProblems(f, ctx)
   const saved = defaults.saved
   const common = { f, set, advanced, defaultsDir: defaults.dir }
@@ -445,6 +450,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           {showing === 'ports' && <PortsStep {...common} ports={ports} />}
           {showing === 'build' && <BuildStep {...common} />}
           {showing === 'resources' && <ResourcesStep {...common} />}
+          {showing === 'runmode' && <RunModeStep {...common} containers={containerItem} />}
           {showing === 'database' && <DatabaseStep {...common} />}
           {showing === 'options' && <OptionsStep {...common} />}
           {showing === 'licence' && <LicenceStep {...common} />}
@@ -452,7 +458,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           {showing === 'github' && <GithubStep {...common} signedIn={githubSignedIn} onSignedIn={onGithubSignedIn} />}
           {showing === 'review' && (
             <ReviewStep
-              rows={reviewRows(f, req)}
+              rows={reviewRows(f, req, containers)}
               req={req}
               problems={problems}
               waiting={waiting}

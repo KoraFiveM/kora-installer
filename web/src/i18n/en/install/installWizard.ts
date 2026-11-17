@@ -120,6 +120,11 @@ const messages = {
   'install.installWizard.yes': 'Yes',
   'install.installWizard.no': 'No',
   'install.installWizard.resourcesPicked': '{count, plural, one {# picked, plus what it needs} other {# picked, plus what they need}}',
+  'install.installWizard.howServerRuns': 'How the server runs',
+  'install.installWizard.inAContainer': 'In a container',
+  'install.installWizard.systemService': 'As a system service',
+  'install.installWizard.mariadbContainerNextServer': 'A MariaDB container next to the server',
+  'install.installWizard.usedContainerRestartsItself': 'Not used (the container restarts itself)',
 } as const
 
 register('en', messages)

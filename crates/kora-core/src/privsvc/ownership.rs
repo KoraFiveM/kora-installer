@@ -64,6 +64,11 @@ pub fn ledger_keys(step: &str, slug: &str, db: Option<&str>) -> Vec<String> {
     }
 }
 
+/// The ledger key of a server's scheduled-backup job (`kora-backup-<slug>`).
+pub fn backup_key(slug: &str) -> String {
+    format!("backup:{slug}")
+}
+
 /// The ledger for the service: a missing file is an empty ledger, an unreadable or damaged one is
 /// an error (the service then refuses to change anything rather than forgetting who owns what).
 pub fn load(path: &Path) -> Result<Ledger, String> {
@@ -151,6 +156,7 @@ fn describe(k: &str) -> String {
         Some(("service", n)) => format!("the service {n}"),
         Some(("firewall", n)) => format!("the firewall rules of {n}"),
         Some(("task", n)) => format!("the update task of {n}"),
+        Some(("backup", n)) => format!("the scheduled backups of {n}"),
         Some(("db", n)) => format!("the database {n}"),
         _ => k.to_string(),
     }

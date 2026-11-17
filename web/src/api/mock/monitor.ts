@@ -43,7 +43,7 @@ export function installMonitorMock({ route, servers, fail }: Hooks): void {
   const settingsOf = (n: string) =>
     (settings[n] ??= {
       enabled: true,
-      rules: { stopped: true, recovered: true, disk: true, ram: true, updates: true },
+      rules: { stopped: true, recovered: true, disk: true, ram: true, updates: true, machine: true },
       disk_min_gb: 5,
       disk_min_percent: 5,
       ram_max_percent: 90,
@@ -58,6 +58,7 @@ export function installMonitorMock({ route, servers, fail }: Hooks): void {
   }
   const alerts: T.PanelAlert[] = [
     { id: 1, server: 'kora-dev', kind: 'stopped', tone: 'danger', title: 'Server stopped', message: 'The server stopped without being asked to. It may have crashed.', raised: now() - 1800, resolved: null, acked: false },
+    { id: 3, server: '', kind: 'cert_expiring', tone: 'warning', title: 'HTTPS certificate ending soon', message: "The panel's HTTPS certificate expires in 9 days. Kora renews it by itself; if it does not, run `kora panel tls renew`.", raised: now() - 300, resolved: null, acked: false },
     { id: 2, server: 'kora-live', kind: 'disk_low', tone: 'warning', title: 'Disk space is low', message: "Only 4.2 GB (4%) is free on the server's disk.", raised: now() - 600, resolved: null, acked: false },
   ]
 

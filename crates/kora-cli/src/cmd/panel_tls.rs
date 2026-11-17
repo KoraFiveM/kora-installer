@@ -57,6 +57,16 @@ pub(crate) enum ProxyCmd {
         #[arg(long, default_value = "127.0.0.1:47120")]
         panel: String,
     },
+    /// How each server's txAdmin is reached through the proxy: a host name template with {server}, like `tx-{server}.example.com`
+    /// (give every server's txAdmin a name in the proxy), or `--clear` to use the panel's own name with the server's gateway port
+    /// (the proxy listens on that port). txAdmin cannot run under a path prefix, so it gets a name or a port of its own. See docs/panel.md.
+    TxadminHost {
+        /// The template (lower-case letters, digits, `-` and `.`, with `{server}`; `{port}` is the gateway port).
+        template: Option<String>,
+        /// Go back to the panel's own name with the gateway port.
+        #[arg(long, conflicts_with = "template")]
+        clear: bool,
+    },
     /// Stop trusting any proxy: forwarded headers are refused again.
     Forget,
     /// Show the trusted proxy setting.
@@ -123,7 +133,7 @@ pub(crate) fn tls(cmd: &TlsCmd) -> i32 {
 fn run_tls(cmd: &TlsCmd, home: &Path) -> Result<(), String> {
     let whois = || -> Arc<dyn remote::Whois> { Arc::new(SystemWhois) };
     let save = |c: TlsConfig, fetch: bool| manager::apply(home, whois(), hints_from_settings(home), c, fetch);
-    let store = || kora_core::store::Store::open(home).map_err(kora_core::store::problem_to_string);
+    let store = || kora_core::store::Store::open(home).map_err(|p| p.one_line());
     match cmd {
         TlsCmd::Status => {
             let m = Manager::new(home.to_path_buf(), whois());
@@ -244,6 +254,29 @@ pub(crate) fn proxy(cmd: &ProxyCmd) -> i32 {
                 println!("\nAlso add the public name to the allowed hosts and turn remote access on (Settings, Remote access). Anything without the secret is still refused.");
                 Ok(())
             }
+            ProxyCmd::TxadminHost { template, clear } => {
+                if template.is_none() && !clear {
+                    return Err("give a template like tx-{server}.example.com, or --clear".into());
+                }
+                if let Some(t) = template {
+                    proxy::ProxyConfig::valid_txadmin_template(t)?;
+                }
+                let want = template.clone();
+                remote::RemoteConfig::update_at(&path, |c| match c.trusted_proxy.as_mut() {
+                    Some(p) => {
+                        p.txadmin_host = want.clone();
+                        Ok(())
+                    }
+                    None => Err("No reverse proxy is trusted yet: run `kora panel proxy trust <address>` first.".to_string()),
+                })?;
+                match template {
+                    Some(t) => println!(
+                        "txAdmin is opened at {t} (with {{server}} the server's short name). Give each server that name in the proxy (see docs/panel.md), and add the names to the allowed hosts."
+                    ),
+                    None => println!("txAdmin is opened at the panel's public name with the server's gateway port (the proxy listens on that same port)."),
+                }
+                Ok(())
+            }
             ProxyCmd::Forget => {
                 remote::RemoteConfig::update_at(&path, |c| {
                     c.trusted_proxy = None;
@@ -256,7 +289,11 @@ pub(crate) fn proxy(cmd: &ProxyCmd) -> i32 {
                 let c = remote::RemoteConfig::load(&path)?;
                 match c.trusted_proxy {
                     Some(p) => {
-                        println!("Trusted proxy: {} (secret set; rotate it by running `kora panel proxy trust` again).", p.addresses.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "))
+                        println!("Trusted proxy: {} (secret set; rotate it by running `kora panel proxy trust` again).", p.addresses.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "));
+                        match &p.txadmin_host {
+                            Some(t) => println!("txAdmin is opened at the host name {t}."),
+                            None => println!("txAdmin is opened at the panel's public name with the server's gateway port."),
+                        }
                     }
                     None => println!("No reverse proxy is trusted: requests with forwarded headers are refused."),
                 }
@@ -297,6 +334,8 @@ mod tests {
         assert!(matches!(parse(&["kora", "panel", "tls", "off"]), Ok(PanelCmd::Tls { cmd: TlsCmd::Off })));
         assert!(matches!(parse(&["kora", "panel", "proxy", "trust", "127.0.0.1"]), Ok(PanelCmd::Proxy { cmd: ProxyCmd::Trust { .. } })));
         assert!(parse(&["kora", "panel", "proxy", "trust"]).is_err(), "an address is required");
+        assert!(matches!(parse(&["kora", "panel", "proxy", "txadmin-host", "tx-{server}.example.com"]), Ok(PanelCmd::Proxy { cmd: ProxyCmd::TxadminHost { .. } })));
+        assert!(parse(&["kora", "panel", "proxy", "txadmin-host", "x", "--clear"]).is_err());
     }
 
     #[test]

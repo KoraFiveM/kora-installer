@@ -45,8 +45,10 @@ export interface MessageParams {
   'backups.steps.openName': { name: string | number }
   'backups.steps.referenceResourcesFetchedAgain': { by_reference: string | number; in_full: string | number; value: string | number }
   'backups.steps.spanNodeValue': { span: ReactNode; value: string | number }
+  'backups.steps.usesContainerEngineDatabase': { container_engine: string | number }
   'backups.steps.useSuggestion': { suggestion: string | number }
   'core.alertsBanner.dismissAlertServer': { server: string | number }
+  'core.alertsBanner.dismissAlertTitle': { title: string | number }
   'core.alertsBanner.valueMoreAlerts': { count: string | number }
   'core.announcer.labelMPerCent': { label: string | number; m: string | number }
   'core.appShell.pageCannotReachKora': { code: Tag }
@@ -341,8 +343,10 @@ export interface MessageParams {
   'servers.serversPage.runningRunning': { running: string | number }
   'servers.serversPage.stoppedStopped': { stopped: string | number }
   'servers.versionsCard.resourcesHereValueSets': { style: string }
+  'settings.auditLog.doneAdministratorRightsValue': { value: string | number }
   'settings.auditLog.entriesKeptDaysDays': { days: string | number }
   'settings.auditLog.nothingMatchesValue': { value: string | number }
+  'settings.auditLog.panelAposSEntries': { days: string | number }
   'settings.auditLog.whoChangedWhatFrom': { code: Tag; code2: Tag; code3: Tag; value: string | number }
   'settings.changeLicenceKey.chooseKeyNameShould': { name: string | number }
   'settings.changeLicenceKey.keyEndingLastValue': { last4: string | number; value: string | number }

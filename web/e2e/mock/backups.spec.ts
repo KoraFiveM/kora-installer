@@ -86,6 +86,16 @@ test.describe('Backups', () => {
     await expect(page.getByText('Saved.')).toBeVisible()
   })
 
+  test('with the administrator service the schedule is a job of the operating system', async ({ page, open, scan }) => {
+    await open(TAB, { scenario: 'service' })
+    await page.getByLabel('Every day').check()
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.getByText('Saved.')).toBeVisible()
+    await expect(page.getByText(/run as a job of your operating system \(kora-backup-kora-live\)/)).toBeVisible()
+    await expect(page.getByText(/even when Kora's panel is closed/)).toBeVisible()
+    await scan('the backup schedule as an operating-system job')
+  })
+
   test('a database that is not running fails the backup with a fix button', async ({ page, open, problems }) => {
     problems.expect(/422|backup/)
     await open(TAB, { scenario: 'trouble' })

@@ -15,6 +15,8 @@ const messages = {
   'core.status.releasedVersions': 'released versions',
   'core.status.latestChanges': 'latest changes',
   'core.status.updates': '{count, plural, one {# update} other {# updates}}',
+  'core.status.serverRunsContainerIts': 'This server runs in a container: its files are in its own folder and it restarts through the container engine.',
+  'core.status.inAContainer': 'In a container',
 } as const
 
 register('en', messages)

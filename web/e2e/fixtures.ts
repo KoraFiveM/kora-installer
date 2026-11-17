@@ -8,7 +8,7 @@ import AxeBuilder from '@axe-core/playwright'
 
 export const KEY = 'cfxk_abcdefghij_12345'
 
-export type Scenario = 'default' | 'empty' | 'fleet' | 'trouble' | 'slow' | 'offline' | 'down' | 'windows' | 'service' | 'noservice' | 'notallowed' | 'restarted' | 'keylost'
+export type Scenario = 'default' | 'empty' | 'fleet' | 'trouble' | 'slow' | 'offline' | 'down' | 'windows' | 'service' | 'noservice' | 'notallowed' | 'restarted' | 'keylost' | 'containers'
 export type Viewer = 'local' | 'operator' | 'remote-operator' | 'remote-admin' | 'remote-tailscale-admin' | 'remote-passkey-admin' | 'remote-code-operator'
 
 /** Impacts that fail a test. Only "minor" findings are tolerated. */

@@ -116,6 +116,20 @@ const messages = {
   'install.steps.skipDatabase': 'Die Datenbank überspringen',
   'install.steps.connectDatabaseYourselfLater': 'Du verbindest später selbst eine Datenbank.',
   'install.steps.txadminPort': 'txAdmin-Port',
+  'install.steps.howShouldServerRun': 'Wie soll dieser Server laufen?',
+  'install.steps.systemServiceUsualWay': 'Als Systemdienst (der übliche Weg)',
+  'install.steps.startsComputerRestartsCrashes': 'Startet mit dem Computer und startet nach einem Absturz neu. Das Einrichten braucht Administratorrechte.',
+  'install.steps.inAContainer': 'In einem Container',
+  'install.steps.serverRunsContainerPodman': 'Der Server läuft in einem Container (Podman oder Docker) mit seinen Dateien in seinem eigenen Ordner. Er verändert dein System nicht: kein Dienst, kein zusätzliches Konto und mit Rootless-Podman gar keine Administratorrechte.',
+  'install.steps.dockerRunsRoot': 'Docker läuft als root',
+  'install.steps.beingAllowedUseDocker': 'Docker benutzen zu dürfen ist dasselbe, wie auf diesem Computer root zu sein: Jeder, der einen Container starten kann, sieht jede Datei. Installiere nach Möglichkeit stattdessen Podman, das Container ohne Administratorrechte ausführt. ',
+  'install.steps.whatContainerDoesDoes': 'Was ein Container schützt und was nicht',
+  'install.steps.serverCannotSeeRest': 'Der Server kann den Rest des Computers nicht sehen, aber er kann seinen eigenen Ordner lesen und ändern, einschließlich des dort gespeicherten Lizenzschlüssels und der Datenbank-Anmeldung. Sein Spiel-Port wird im Netzwerk veröffentlicht; der von txAdmin nur auf diesem Computer, und das Panel erreicht ihn für dich. ',
+  'install.steps.containerRestartsServerCrashes': 'Der Container startet den Server nach einem Absturz neu und startet ihn wieder, wenn der Computer startet. Es muss kein Hintergrunddienst installiert werden.',
+  'install.steps.mariadbContainerNextServer': 'Ein MariaDB-Container neben dem Server (empfohlen)',
+  'install.steps.koraRunsMariadbIts': 'Kora betreibt MariaDB in einem eigenen Container in einem privaten Netzwerk, hält die Daten in einem Volume und erstellt die Anmeldung für dich. Auf diesem Computer wird nichts installiert.',
+  'install.steps.useDatabaseIAlready': 'Eine Datenbank verwenden, die ich schon habe',
+  'install.steps.mustReachableItsNetwork': 'Sie muss über ihre Netzwerkadresse erreichbar sein (nicht 127.0.0.1: In einem Container ist das der Container selbst). Kora erstellt für diesen Server eine neue Datenbank und einen neuen Benutzer.',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

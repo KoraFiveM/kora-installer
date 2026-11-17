@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { DbChoice, Problem, Source } from '@/api/types'
+import type { CheckItem, DbChoice, Problem, Source } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
@@ -12,7 +12,7 @@ import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { slug, validatePorts } from '@/lib/utils'
-import { dbLoginProblem, defaultVersions, dirBase, folderFor, type WizardForm } from './form'
+import { dbLoginProblem, defaultVersions, dirBase, folderFor, runModePatch, type WizardForm } from './form'
 import type { PortsChecked } from './ports'
 import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
@@ -173,9 +173,37 @@ export function ResourcesStep({ f, set }: StepProps) {
   )
 }
 
+/** "How should this server run?" (asked only where a container engine works). */
+export function RunModeStep({ f, set, containers }: StepProps & { containers?: CheckItem }) {
+  const docker = /docker/i.test(containers?.summary ?? '') && !/rootless/i.test(containers?.summary ?? '')
+  return (
+    <div className="space-y-4">
+      <fieldset className="space-y-3">
+        <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.howShouldServerRun')}</legend>
+        <Radio name="runmode" checked={f.runMode === 'service'} onChange={() => set(runModePatch(f, 'service'))} label={t('install.steps.systemServiceUsualWay')} hint={t('install.steps.startsComputerRestartsCrashes')} />
+        <Radio name="runmode" checked={f.runMode === 'container'} onChange={() => set(runModePatch(f, 'container'))} label={t('install.steps.inAContainer')} hint={t('install.steps.serverRunsContainerPodman')} />
+      </fieldset>
+      {containers && <p className="text-sm text-muted-foreground">{containers.summary}</p>}
+      {containers?.problem && <ErrorNotice error={containers.problem} />}
+      {f.runMode === 'container' && docker && (
+        <Alert tone="warning" title={t('install.steps.dockerRunsRoot')}>{t('install.steps.beingAllowedUseDocker')}</Alert>
+      )}
+      {f.runMode === 'container' && (
+        <Alert tone="info" title={t('install.steps.whatContainerDoesDoes')}>{t('install.steps.serverCannotSeeRest')}</Alert>
+      )}
+    </div>
+  )
+}
+
 const DB_OPTIONS: { v: DbChoice; label: Msg; hint: Msg }[] = [
   { v: 'install_if_missing', label: msg('install.steps.setUpDatabaseMe'), hint: msg('install.steps.usesMariadbMysqlAlready') },
   { v: 'use_existing', label: msg('install.steps.useDatabaseAlreadyComputer'), hint: msg('install.steps.koraCreatesNewDatabase') },
+  { v: 'skip', label: msg('install.steps.skipDatabase'), hint: msg('install.steps.connectDatabaseYourselfLater') },
+]
+
+const CONTAINER_DB_OPTIONS: { v: DbChoice; label: Msg; hint: Msg }[] = [
+  { v: 'container', label: msg('install.steps.mariadbContainerNextServer'), hint: msg('install.steps.koraRunsMariadbIts') },
+  { v: 'use_existing', label: msg('install.steps.useDatabaseIAlready'), hint: msg('install.steps.mustReachableItsNetwork') },
   { v: 'skip', label: msg('install.steps.skipDatabase'), hint: msg('install.steps.connectDatabaseYourselfLater') },
 ]
 
@@ -200,9 +228,9 @@ export function DatabaseStep({ f, set }: StepProps) {
     <div className="space-y-4">
       <fieldset className="space-y-3">
         <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whereShouldServerKeep')}</legend>
-        {DB_OPTIONS.map((o) => <Radio key={o.v} name="db" checked={f.db === o.v} onChange={() => set({ db: o.v })} label={t(o.label)} hint={t(o.hint)} />)}
+        {(f.runMode === 'container' ? CONTAINER_DB_OPTIONS : DB_OPTIONS).map((o) => <Radio key={o.v} name="db" checked={f.db === o.v} onChange={() => set({ db: o.v })} label={t(o.label)} hint={t(o.hint)} />)}
       </fieldset>
-      {f.db !== 'skip' && (
+      {f.db !== 'skip' && f.db !== 'container' && (
         <fieldset className="space-y-3">
           <legend className="mb-2 text-sm font-semibold">{t('install.steps.databaseAdministratorLogin')}</legend>
           <Radio name="dbadmin" checked={!f.dbCustom} onChange={() => set({ dbCustom: false })} label={t('install.steps.automatic')} hint={t('install.steps.koraTriesNormalLocal')} />
@@ -235,7 +263,9 @@ export function OptionsStep({ f, set, advanced }: StepProps) {
     <div className="space-y-4">
       <Checkbox label={t('install.steps.openGamePortFirewall')} hint={t('install.steps.letsPlayersOutsideComputer')} checked={f.firewall} onChange={(e) => set({ firewall: e.target.checked })} />
       {advanced && <Checkbox label={t('install.steps.alsoOpenTxadminPort')} hint={t('install.steps.doNeedUseTxadmin')} checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
-      <Checkbox label={t('install.steps.installBackgroundService')} hint={t('install.steps.serverStartsComputerRestarts')} checked={f.service} onChange={(e) => set({ service: e.target.checked })} />
+      {f.runMode === 'container'
+        ? <p className="text-sm text-muted-foreground">{t('install.steps.containerRestartsServerCrashes')}</p>
+        : <Checkbox label={t('install.steps.installBackgroundService')} hint={t('install.steps.serverStartsComputerRestarts')} checked={f.service} onChange={(e) => set({ service: e.target.checked })} />}
     </div>
   )
 }

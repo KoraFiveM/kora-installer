@@ -12,6 +12,8 @@ use crate::privsvc::wire::Rejected;
 pub const MAX_ACCOUNTS: usize = 64;
 /// `SECURITY_MANDATORY_MEDIUM_RID`: lower-integrity (sandboxed) programs are refused.
 pub const MEDIUM_INTEGRITY: u32 = 0x2000;
+/// The mandatory-label RID of an elevated administrator's token.
+pub const HIGH_INTEGRITY: u32 = 0x3000;
 
 /// An OS account as the service stores and compares it: `uid:<n>` on Linux, the SID text on Windows.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -161,6 +163,15 @@ pub struct Caller {
     pub remote: bool,
 }
 
+/// Is `user` a member of an administrators' group (`sudo`, `wheel` or `admin`) in this `/etc/group` text? (Linux.)
+pub fn in_admin_group(etc_group: &str, user: &str) -> bool {
+    etc_group.lines().any(|l| {
+        let mut f = l.split(':');
+        let (name, members) = (f.next().unwrap_or(""), f.nth(2).unwrap_or(""));
+        matches!(name, "sudo" | "wheel" | "admin") && members.split(',').any(|m| m == user)
+    })
+}
+
 /// May this caller use the service? `policy` is `Err` when `service.json` could not be read.
 pub fn authorise(caller: &Caller, policy: &Result<Policy, String>) -> Result<(), Rejected> {
     let no = |m: &str| Err(Rejected(m.to_string()));
@@ -241,6 +252,14 @@ mod tests {
         }
         assert_eq!(AccountId::parse("uid:1000").unwrap(), AccountId::uid(1000));
         assert!(AccountId::parse("S-1-12-1-1-2-3-4").is_ok(), "Entra ID account");
+    }
+
+    #[test]
+    fn administrators_groups_are_read_from_etc_group() {
+        let g = "root:x:0:\nsudo:x:27:jo,sam\nwheel:x:10:\nusers:x:100:kim\nsudoers:x:5:kim\n";
+        assert!(in_admin_group(g, "jo") && in_admin_group(g, "sam"));
+        assert!(!in_admin_group(g, "kim"), "a group that only starts like sudo is not one");
+        assert!(!in_admin_group(g, "j") && !in_admin_group("", "jo"));
     }
 
     #[test]

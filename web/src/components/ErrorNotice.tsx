@@ -10,9 +10,9 @@ import { SupportBundleLink } from '@/components/SupportBundleLink'
 import { CopyButton, CopyField } from '@/components/CopyButton'
 import { actionLabel, buttonActions, detailsText, isAdminCode, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
 import { t, msg, tById, locale, debugUntranslated } from '@/i18n'
-import '@/i18n/en/errors/problems' // i18n-dynamic: the server names these messages by id (tById)
 import { rich } from '@/i18n/react'
 import '@/i18n/en/errors/errorNotice'
+import '@/i18n/en/errors/problems' // i18n-dynamic: the server names these messages by id (tById)
 
 /** Turn a command array into one line that can be pasted into a terminal. */
 export function commandLine(cmd: string[]): string {

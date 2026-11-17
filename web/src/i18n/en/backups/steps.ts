@@ -65,6 +65,13 @@ const messages = {
   'backups.steps.fileMadeOldComputer': 'A file made on the old computer with "Move this server" (it ends in .tar.gz.age), or any Kora server backup (.tar.gz or .tar.gz.age).',
   'backups.steps.backupOf': 'backup of {when, datetime}',
   'backups.steps.backupOfProtected': 'backup of {when, datetime} · password protected',
+  'backups.steps.howServerRunsHere': 'How the server runs here',
+  'backups.steps.serverBringingRanContainer': 'The server you are bringing in ran in a container.',
+  'backups.steps.systemService': 'As a system service',
+  'backups.steps.startsComputerSettingService': 'Starts with the computer. Setting the service up needs administrator rights (Kora shows what to do afterwards).',
+  'backups.steps.inAContainer': 'In a container',
+  'backups.steps.usesContainerEngineDatabase': 'Uses {container_engine}. The database goes into a MariaDB container next to the server.',
+  'backups.steps.computerNoContainerEngine': 'This computer has no container engine (Podman or Docker) that Kora can use.',
 } as const
 
 register('en', messages)

@@ -231,6 +231,13 @@ impl Host for LinuxSvc {
             let _ = writeln!(f, "{line}");
         }
     }
+    fn read_audit(&self, max: u64) -> Result<String, String> {
+        super::audit::read_tail(&self.files.audit, max).map_err(|e| e.to_string())
+    }
+    fn is_machine_admin(&self, id: &AccountId) -> bool {
+        let Some(a) = id.as_str().strip_prefix("uid:").and_then(|n| n.parse().ok()).and_then(crate::userhome::lookup_account) else { return false };
+        super::policy::in_admin_group(&std::fs::read_to_string("/etc/group").unwrap_or_default(), &a.name)
+    }
     fn own_version(&self) -> String {
         env!("CARGO_PKG_VERSION").into()
     }

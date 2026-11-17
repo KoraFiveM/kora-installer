@@ -89,6 +89,10 @@ safe: firewall, schedule, starting the server) instead of starting over. An inst
 restarting the panel, can be carried on from the install page when it used a saved licence key. Scripts can use flags
 instead of the wizard (`kora install --help`, `kora install --dry-run` to preview).
 
+### How the server runs (Linux)
+
+By default a server is a system service. When Podman or Docker works, the wizard (and `kora install --run-mode container`) can run it **in a container** instead: nothing is installed on the system, rootless Podman needs no administrator rights, the database is a MariaDB container next to the server, and everything in the panel works the same. See [docs/panel.md](docs/panel.md#running-a-server-in-a-container-linux).
+
 ### Where the resources come from, and which versions
 
 - **Plain clones** (no GitHub account needed) or **your own copies** (forks in your GitHub account or an organisation you belong to, so you can change them, push and open pull requests).

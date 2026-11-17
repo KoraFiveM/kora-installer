@@ -114,6 +114,20 @@ const messages = {
   'install.steps.skipDatabase': 'Skip the database',
   'install.steps.connectDatabaseYourselfLater': 'You will connect a database yourself later.',
   'install.steps.txadminPort': 'txAdmin port',
+  'install.steps.howShouldServerRun': 'How should this server run?',
+  'install.steps.systemServiceUsualWay': 'As a system service (the usual way)',
+  'install.steps.startsComputerRestartsCrashes': 'Starts with the computer and restarts if it crashes. Setting it up needs administrator rights.',
+  'install.steps.inAContainer': 'In a container',
+  'install.steps.serverRunsContainerPodman': 'The server runs in a container (Podman or Docker) with its files in its own folder. It does not change your system: no service, no extra account, and with rootless Podman no administrator rights at all.',
+  'install.steps.dockerRunsRoot': 'Docker runs as root',
+  'install.steps.beingAllowedUseDocker': 'Being allowed to use Docker is the same as having root on this computer: anyone who can start a container can see every file. If you can, install Podman instead, which runs containers without administrator rights. ',
+  'install.steps.whatContainerDoesDoes': 'What a container does and does not protect',
+  'install.steps.serverCannotSeeRest': "The server cannot see the rest of the computer, but it can read and change its own folder, including the licence key and the database login stored there. Its game port is published to the network; txAdmin's only on this computer, and the panel reaches it for you. ",
+  'install.steps.containerRestartsServerCrashes': 'The container restarts the server if it crashes and starts it again when the computer starts. There is no background service to install.',
+  'install.steps.mariadbContainerNextServer': 'A MariaDB container next to the server (recommended)',
+  'install.steps.koraRunsMariadbIts': 'Kora runs MariaDB in its own container on a private network, keeps its data in a volume, and makes the login for you. Nothing is installed on this computer.',
+  'install.steps.useDatabaseIAlready': 'Use a database I already have',
+  'install.steps.mustReachableItsNetwork': 'It must be reachable by its network address (not 127.0.0.1: inside a container that is the container itself). Kora creates a new database and user for this server.',
 } as const
 
 register('en', messages)

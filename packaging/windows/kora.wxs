@@ -100,10 +100,15 @@
 
     <!-- Allow the installing account (and ALLOWUSERS). Runs as SYSTEM after the files are in place. -->
     <CustomAction Id="KoraEnrolUsers" FileRef="KoraExe" ExeCommand="service allow [UserSID] &quot;[ALLOWUSERS]&quot;" Execute="deferred" Impersonate="no" Return="ignore" />
+    <!-- The person who started the installer, when an administrator typed the password for them: Windows names the process that started the
+         installation (ClientProcessId); Kora asks Windows who that is and who asked for the permission, and allows that person only when the
+         answer is sound (privsvc/installer_user.rs). Anything unclear allows nobody extra: the account above and ALLOWUSERS stand. -->
+    <CustomAction Id="KoraEnrolInstallerUser" FileRef="KoraExe" ExeCommand="service allow-installer &quot;[ClientProcessId]&quot;" Execute="deferred" Impersonate="no" Return="ignore" />
     <!-- Bring earlier layouts over (per-user program, the old machine-wide app, update tasks that still run with highest privileges). -->
     <CustomAction Id="KoraMigrate" FileRef="KoraExe" ExeCommand="service migrate --quiet" Execute="deferred" Impersonate="no" Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="KoraEnrolUsers" Before="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="KoraEnrolInstallerUser" Before="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
       <Custom Action="KoraMigrate" Before="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>
 

@@ -8,6 +8,7 @@
 //! generated on any OS.
 
 pub mod account;
+pub mod backup_job;
 pub mod binary;
 mod schedule;
 

@@ -32,6 +32,9 @@ pub(crate) fn status() -> i32 {
         let ports = format!("game {}, txAdmin {}", if st.game_listening { "listening" } else { "closed" }, if st.txadmin_up { "up" } else { "down" });
         let style = format!("{}, {}", if s.source() == Source::Clone { "clone" } else { "fork" }, if s.versions() == Versions::Released { "released" } else { "latest" });
         println!("{:<20} {:<15} {:<7} {:<7} {:<9} {:<26} {}", s.name, style, s.ports.game, s.ports.txadmin, state, ports, s.dir.display());
+        if let Some(rec) = kora_core::container::ContainerRecord::load(&s.dir) {
+            println!("    runs {}", rec.describe());
+        }
         if s.dir.is_dir() {
             for l in crate::cmd::resource::attention_lines(&s.name, st.running) {
                 println!("    {l}");

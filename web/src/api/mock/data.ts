@@ -50,11 +50,13 @@ export function seedFleet(): ServerSummary[] {
 export function seedServers(scenario: ScenarioName = 'default'): ServerSummary[] {
   if (scenario === 'empty') return []
   if (scenario === 'fleet') return seedFleet()
-  return [
+  const list: ServerSummary[] = [
     { name: 'kora-live', dir: '/srv/fivem/kora-live', mode: 'production', source: 'clone', versions: 'released', ports: { game: 30120, txadmin: 40120 }, created_unix: now - 40 * DAY, status: 'running', badge: { kind: 'up_to_date' }, managed: true, connect: null },
     { name: 'kora-dev', dir: '/srv/fivem/kora-dev', mode: 'development', source: 'fork', versions: 'latest', ports: { game: 30121, txadmin: 40121 }, created_unix: now - 12 * DAY, status: 'stopped', badge: { kind: 'updates', count: 2 }, managed: true, connect: null },
     { name: 'kora-old', dir: '/srv/fivem/kora-old', mode: 'production', source: 'clone', versions: 'released', ports: { game: 30122, txadmin: 40122 }, created_unix: now - 200 * DAY, status: 'missing', badge: null, managed: true, connect: null },
   ]
+  // Scenario `containers`: the live server runs in a container (rootless Podman).
+  return scenario === 'containers' ? list.map((s) => (s.name === 'kora-live' ? { ...s, run_mode: 'container' as const, run_label: 'in a container (podman, rootless)' } : s)) : list
 }
 
 function res(id: string, group: Group, kind: Kind, extra: Partial<CatalogResource> = {}): CatalogResource {

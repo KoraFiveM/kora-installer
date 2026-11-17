@@ -45,6 +45,7 @@ describe('AuditLogCard', () => {
     const user = userEvent.setup()
     fetchMock.mockImplementation(async (url: string) => {
       const u = new URL(url, 'http://x')
+      if (u.pathname !== '/api/v1/audit') return jsonResponse(404, {})
       return jsonResponse(200, { entries: u.searchParams.get('result') === 'failed' ? [] : [row(1)], more: false, retention_days: 365 })
     })
     renderAs()
@@ -64,5 +65,46 @@ describe('AuditLogCard', () => {
     expect(opLabel('key_remove')).toBe('Forgot a saved licence key')
     expect(opLabel('brand_new_thing')).toBe('Brand new thing')
     expect(whoLabel({ actor_kind: 'remote', actor_name: null, provider: null, role: null })).toBe('someone (signed in from another device)')
+  })
+
+  it('merges what the administrator service did into the table by time, labelled, and respects the filters', async () => {
+    const user = userEvent.setup()
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = new URL(url, 'http://x')
+      if (u.pathname === '/api/v1/audit/service') {
+        return jsonResponse(200, {
+          available: true,
+          all_accounts: false,
+          note: null,
+          entries: [
+            { at: 1_700_000_050, account: 'jo', what: 'backup job set [live]', result: 'done', detail: null },
+            { at: 1_700_000_001, account: 'jo', what: 'run system.service [live]', result: 'failed', detail: 'code 1' },
+          ],
+        })
+      }
+      return jsonResponse(200, { entries: [row(3, { op: 'server_delete' }), row(2)], more: false, retention_days: 365 })
+    })
+    renderAs()
+    await waitFor(() => expect(screen.getAllByTestId('audit-row')).toHaveLength(4))
+    const trs = screen.getAllByTestId('audit-row')
+    // newest first across both sources: the service's job at +50, then the panel's rows at +3 and +2, then the service's failure at +1
+    expect(trs[0]).toHaveTextContent('Set up scheduled backups as an operating-system job')
+    expect(trs[1]).toHaveTextContent('Deleted a server')
+    expect(trs[3]).toHaveTextContent('Set up the server’s background service')
+    expect(trs[3]).toHaveTextContent('code 1')
+    expect(screen.getByText(/only what it did for your account is shown/)).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Result'), 'failed')
+    await waitFor(() => expect(screen.getAllByTestId('audit-row').length).toBeLessThan(4))
+  })
+
+  it('says why the administrator service has nothing to show, and the panel rows stay', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = new URL(url, 'http://x')
+      if (u.pathname === '/api/v1/audit/service') return jsonResponse(200, { available: false, entries: [], all_accounts: false, note: "Kora's administrator service is not installed on this computer, so nothing has been done with administrator rights." })
+      return jsonResponse(200, { entries: [row(1)], more: false, retention_days: 365 })
+    })
+    renderAs()
+    expect(await screen.findByTestId('service-audit-note')).toHaveTextContent('not installed on this computer')
+    expect(screen.getAllByTestId('audit-row')).toHaveLength(1)
   })
 })

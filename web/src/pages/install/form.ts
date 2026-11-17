@@ -1,4 +1,4 @@
-import type { DbChoice, InstallDefaults, InstallRequest, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
+import type { DbChoice, InstallDefaults, InstallRequest, RunMode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
 import { styleOfMode } from '@/lib/style'
 import { t, msg, type Msg } from '@/i18n'
@@ -42,6 +42,8 @@ export interface WizardForm {
   firewall: boolean
   txPublic: boolean
   service: boolean
+  /** How the server runs: as a system service (default), or in a container (Linux, when a container engine works). */
+  runMode: RunMode
   /** The licence key page: pick one of the saved keys, or paste a new one. */
   licenceChoice: 'saved' | 'new'
   /** The saved key picked (`licenceChoice` is `saved`). */
@@ -62,7 +64,7 @@ export interface WizardForm {
   cfxFound: { username: string | null; identifier: string } | null
 }
 
-export type StepId = 'source' | 'versions' | 'name' | 'ports' | 'build' | 'resources' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
+export type StepId = 'source' | 'versions' | 'name' | 'ports' | 'build' | 'resources' | 'runmode' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
 
 export const STEP_LABEL: Record<StepId, Msg> = {
   source: msg('install.form.whereResourcesComeFrom'),
@@ -71,6 +73,7 @@ export const STEP_LABEL: Record<StepId, Msg> = {
   ports: msg('install.form.ports'),
   build: msg('install.form.fivemServerBuild'),
   resources: msg('install.form.resources'),
+  runmode: msg('install.form.howServerRuns'),
   database: msg('install.form.database'),
   options: msg('install.form.options'),
   licence: msg('install.form.licenceKey'),
@@ -79,9 +82,9 @@ export const STEP_LABEL: Record<StepId, Msg> = {
   review: msg('install.form.checkInstall'),
 }
 
-/** Every step, one after the other ("Choose everything myself"). */
-export function stepsFor(source: Source): StepId[] {
-  const s: StepId[] = ['source', 'versions', 'name', 'ports', 'build', 'resources', 'database', 'options', 'licence', 'cfx']
+/** Every step, one after the other ("Choose everything myself"). `containers`: a container engine works here, so "How the server runs" is asked. */
+export function stepsFor(source: Source, containers = false): StepId[] {
+  const s: StepId[] = ['source', 'versions', 'name', 'ports', 'build', 'resources', ...(containers ? (['runmode'] as StepId[]) : []), 'database', 'options', 'licence', 'cfx']
   if (source === 'fork') s.push('github')
   s.push('review')
   return s
@@ -119,7 +122,7 @@ export function initialForm(d: InstallDefaults, keys: SavedKey[] = []): WizardFo
     resourcesAll: true, resourceIds: [],
     // Works on a clean machine: uses a database server that is already there, installs MariaDB only when none is found.
     db: 'install_if_missing', dbCustom: false, dbUser: '', dbPass: '', dbPass2: '', dbHost: '127.0.0.1', dbPort: '3306',
-    firewall: true, txPublic: false, service: true,
+    firewall: true, txPublic: false, service: true, runMode: 'service',
     licenceChoice: keys.length > 0 ? 'saved' : 'new', licenceName: keys[0]?.name ?? '', license: '', saveKey: true, saveKeyName: suggestKeyName(keys),
     // What Kora remembers from the last install: still editable on their own pages.
     githubOwner: d.profile?.github_owner ?? '', githubRemembered: !!d.profile?.github_owner,
@@ -148,6 +151,7 @@ export function applySaved(f: WizardForm, s: SavedInstall): WizardForm {
     resourcesAll: s.resources ? s.resources === 'all' : f.resourcesAll,
     resourceIds: s.resources && s.resources !== 'all' ? s.resources.only : f.resourceIds,
     db: s.db ?? f.db,
+    runMode: s.run_mode ?? f.runMode,
     service: s.service ?? f.service,
     firewall: s.firewall ?? f.firewall,
     txPublic: s.txadmin_public ?? f.txPublic,
@@ -167,11 +171,19 @@ export function withoutAdmin(f: WizardForm): WizardForm {
   return { ...f, firewall: false, txPublic: false, service: false, db: f.db === 'install_if_missing' ? 'use_existing' : f.db }
 }
 
+/** Choosing how the server runs also moves the database to that mode's usual answer (a container next to the server, or what a service installs). */
+export function runModePatch(f: WizardForm, runMode: RunMode): Partial<WizardForm> {
+  // A container server needs no administrator rights: the firewall step (which does) is off until the person asks for it.
+  if (runMode === 'container') return { runMode, db: f.db === 'skip' ? 'skip' : 'container', dbCustom: false, firewall: false }
+  return { runMode, db: f.db === 'container' ? 'install_if_missing' : f.db, firewall: true }
+}
+
 /** The wizard page a `change_answers` action names, when this kind of server has it. */
 export function sectionStep(section: string | undefined, source: Source): StepId | null {
-  const all = stepsFor(source)
+  const all = stepsFor(source, true)
   // The old name of the first page.
   if (section === 'mode') section = 'source'
+  if (section === 'run_mode') section = 'runmode'
   return section && (all as string[]).includes(section) && section !== 'review' ? (section as StepId) : null
 }
 
@@ -196,18 +208,20 @@ export function buildRequest(f: WizardForm, opts: { artifactUrl?: string | null 
     game_build: gb ? Number(gb) : null,
     resources: f.resourcesAll ? 'all' : { only: f.resourceIds },
     db: f.db,
-    service: f.service,
+    // A container server has no system service: it restarts through its engine.
+    service: f.runMode === 'container' ? false : f.service,
+    ...(f.runMode === 'container' ? { run_mode: 'container' as const, container: {} } : {}),
     firewall: f.firewall,
     github_owner: f.source === 'fork' ? f.githubOwner || null : null,
     dry_run: false,
-    db_admin: f.db !== 'skip' && f.dbCustom ? { host: f.dbHost.trim(), port: Number(f.dbPort), user: f.dbUser.trim(), password: f.dbPass } : null,
+    db_admin: f.db !== 'skip' && f.db !== 'container' && f.dbCustom ? { host: f.dbHost.trim(), port: Number(f.dbPort), user: f.dbUser.trim(), password: f.dbPass } : null,
     start: true,
     cfx_identifier: f.cfxFound?.identifier ?? null,
   }
 }
 
 export function dbLoginProblem(f: WizardForm): string | null {
-  if (f.db === 'skip' || !f.dbCustom) return null
+  if (f.db === 'skip' || f.db === 'container' || !f.dbCustom) return null
   if (!f.dbUser.trim()) return t('install.form.typeDatabaseAdministratorUser')
   if (!f.dbPass) return t('install.form.typeDatabaseAdministratorPassw')
   if (f.dbPass !== f.dbPass2) return t('install.form.twoPasswordsSame')
@@ -223,6 +237,8 @@ export type PortsState = 'checking' | 'ok' | 'taken' | 'unknown'
 export interface ProblemContext {
   ports: PortsState
   githubSignedIn: boolean
+  /** A container engine works here (the System check's Containers line is fine). */
+  containers?: boolean
 }
 
 const PORTS_MESSAGE: Record<PortsState, Msg | null> = {
@@ -248,6 +264,8 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): s
       return null
     case 'resources':
       return !f.resourcesAll && f.resourceIds.length === 0 ? t('install.form.pickLeastOneResource') : null
+    case 'runmode':
+      return f.runMode === 'container' && !ctx.containers ? t('install.form.runningContainerNeedsPodman') : null
     case 'database':
       return dbLoginProblem(f)
     case 'licence':
@@ -267,7 +285,7 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): s
 /** Every step that still has a problem, whether or not the person opened it. Used by the last screen. */
 export function allProblems(f: WizardForm, ctx: ProblemContext): Partial<Record<StepId, string>> {
   const out: Partial<Record<StepId, string>> = {}
-  for (const id of stepsFor(f.source)) {
+  for (const id of stepsFor(f.source, true)) {
     const p = stepProblem(id, f, ctx)
     if (p) out[id] = p
   }

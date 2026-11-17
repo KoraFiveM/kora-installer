@@ -137,7 +137,7 @@ async fn pull_requests_come_back_labelled_and_sign_in_problems_keep_their_action
     let (s, v) = call(&app, "GET", "/servers/dev/resources/kora_hud/prs", None).await;
     assert_eq!(s, 200);
     assert_eq!((v["prs"][0]["source"].as_str(), v["prs"][0]["author"].as_str()), (Some("upstream"), Some("sam")));
-    fake.state().branches = Some(Err(known::github_signed_out().into()));
+    fake.state().branches = Some(Err(known::github_signed_out()));
     let (s, v) = call(&app, "GET", "/servers/dev/resources/kora_hud/prs", None).await;
     assert_eq!(s, 422);
     assert_eq!(v["error"]["code"], "github.signed_out");
@@ -193,12 +193,12 @@ async fn failures_arrive_as_guided_problems_and_a_running_update_is_a_conflict()
     let app = app(&fake);
     let u = "/servers/dev/resources/kora_hud/branch";
     let closed = Problem::new(codes::PR_CLOSED, "Pull request #5 has already been merged.").with_action(Action::open_link("https://github.com/o/n/pull/5"));
-    fake.state().branches = Some(Err(closed.into()));
+    fake.state().branches = Some(Err(closed));
     let (s, v) = call(&app, "POST", u, Some(json!({"action": "pr", "pr": 5}))).await;
     assert_eq!((s, v["error"]["code"].as_str()), (422, Some(codes::PR_CLOSED)));
     assert_eq!(v["error"]["actions"][0]["kind"], "open_link");
     let busy = Problem::new(codes::BUSY, "An update is running for this server right now.");
-    fake.state().branches = Some(Err(busy.into()));
+    fake.state().branches = Some(Err(busy));
     let (s, v) = call(&app, "POST", u, Some(json!({"action": "default"}))).await;
     assert_eq!((s, v["error"]["code"].as_str()), (409, Some(codes::BUSY)));
 }

@@ -36,6 +36,10 @@ pub struct AuditArgs {
     /// Print JSON, one row per line.
     #[arg(long)]
     pub json: bool,
+    /// Show what Kora's administrator service did with administrator rights instead (its own log: your account's lines, or everyone's
+    /// when you administer this computer).
+    #[arg(long, conflicts_with_all = ["server", "op", "actor", "result", "days"])]
+    pub service: bool,
 }
 
 #[derive(Subcommand)]
@@ -62,9 +66,7 @@ pub enum StoreCmd {
 }
 
 fn say(p: kora_core::problem::Problem) -> i32 {
-    let s: String = p.into();
-    eprintln!("error: {}", kora_core::problem::plain_text(&s));
-    1
+    crate::ui::fail(p)
 }
 
 fn when(at: u64) -> String {
@@ -84,8 +86,59 @@ fn when(at: u64) -> String {
     format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
 }
 
+/// `kora audit --service`: the administrator service's own log, read through the service.
+fn service_audit(a: &AuditArgs) -> i32 {
+    use kora_core::privsvc::{client, problems::Availability};
+    match client::availability() {
+        Availability::Ready => {}
+        Availability::Missing => {
+            println!("Kora's administrator service is not installed on this computer, so nothing has been done with administrator rights.");
+            return 0;
+        }
+        Availability::NotAllowed(why) => {
+            eprintln!("error: Kora's administrator service does not serve this account ({why}).");
+            return 1;
+        }
+    }
+    let lines = a.limit.clamp(1, 500).to_string();
+    let answer = match client::call("audit-read", &["--lines".to_string(), lines], &[], &mut |_| {}) {
+        Ok(r) if r.ok => r,
+        Ok(_) => {
+            eprintln!("error: the administrator service could not read its log just now");
+            return 1;
+        }
+        Err(client::ClientError::Refused(m) | client::ClientError::Unavailable(m) | client::ClientError::Broken(m)) => {
+            eprintln!("error: {m}");
+            return 1;
+        }
+    };
+    let data = answer.data.unwrap_or_default();
+    let all = data.get("admin").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let rows: Vec<kora_core::privsvc::audit::Parsed> =
+        data.get("lines").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(serde_json::Value::as_str).filter_map(kora_core::privsvc::audit::parse_line).collect();
+    if a.json {
+        for r in rows.iter().rev() {
+            println!("{}", serde_json::json!({"at": r.at, "account": r.account, "what": r.what, "result": r.result, "detail": r.detail}));
+        }
+        return 0;
+    }
+    if rows.is_empty() {
+        println!("The administrator service has done nothing {}yet.", if all { "" } else { "for your account " });
+        return 0;
+    }
+    println!("Done with administrator rights ({}):", if all { "every account on this computer" } else { "your account" });
+    println!("{:<20} {:<9} {:<16} WHAT", "WHEN (UTC)", "RESULT", "ACCOUNT");
+    for r in rows.iter().rev() {
+        println!("{:<20} {:<9} {:<16} {}{}", when(r.at), r.result, r.account, r.what, r.detail.as_ref().map(|d| format!("  [{d}]")).unwrap_or_default());
+    }
+    0
+}
+
 /// `kora audit`.
 pub fn audit(a: AuditArgs) -> i32 {
+    if a.service {
+        return service_audit(&a);
+    }
     let s = match Store::open_home() {
         Ok(s) => s,
         Err(p) => return say(p),
@@ -200,7 +253,7 @@ pub fn store(cmd: StoreCmd) -> i32 {
 // ---- the audit row of a `kora` command ---------------------------------------------------------------
 
 /// The operation a command path stands for, `None` for what only reads or only runs the panel itself.
-fn op_of(path: &[&str]) -> Option<Op> {
+pub(crate) fn op_of(path: &[&str]) -> Option<Op> {
     Some(match path {
         ["install"] => Op::InstallStart,
         ["update"] => Op::UpdateApply,
@@ -232,7 +285,13 @@ fn op_of(path: &[&str]) -> Option<Op> {
         ["panel", "user", "api-token", "revoke"] => Op::ApiTokenRevoke,
         ["panel", "tls", "renew"] => Op::TlsRenew,
         ["panel", "user", "remove"] => Op::UserRemove,
-        ["panel", "tailscale", "allow"] | ["panel", "tailscale", "remove"] | ["panel", "tailscale", "off"] | ["panel", "remote-actions", "on"] | ["panel", "remote-actions", "off"] => Op::RemoteSet,
+        ["panel", "tailscale", "allow"]
+        | ["panel", "tailscale", "remove"]
+        | ["panel", "tailscale", "off"]
+        | ["panel", "remote-actions", "on"]
+        | ["panel", "remote-actions", "off"]
+        | ["panel", "remote", "require-strong", "on"]
+        | ["panel", "remote", "require-strong", "off"] => Op::RemoteSet,
         ["panel", "restart"] => Op::PanelRestart,
         _ => return None,
     })

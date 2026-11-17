@@ -122,6 +122,11 @@ const messages = {
   'install.installWizard.yes': 'Ja',
   'install.installWizard.no': 'Nein',
   'install.installWizard.resourcesPicked': '{count, plural, one {# gewählt, plus was sie braucht} other {# gewählt, plus was sie brauchen}}',
+  'install.installWizard.howServerRuns': 'Wie der Server läuft',
+  'install.installWizard.inAContainer': 'In einem Container',
+  'install.installWizard.systemService': 'Als Systemdienst',
+  'install.installWizard.mariadbContainerNextServer': 'Ein MariaDB-Container neben dem Server',
+  'install.installWizard.usedContainerRestartsItself': 'Nicht verwendet (der Container startet sich selbst neu)',
 } satisfies Record<keyof typeof en, string>
 
 register('de', messages)

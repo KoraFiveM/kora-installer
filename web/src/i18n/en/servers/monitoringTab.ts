@@ -54,6 +54,8 @@ const messages = {
   'servers.monitoringTab.lastHour': 'Last hour',
   'servers.monitoringTab.lastHours': 'Last 6 hours',
   'servers.monitoringTab.lastHours2': 'Last 24 hours',
+  'servers.monitoringTab.problemsKoraItself': 'Problems with Kora itself',
+  'servers.monitoringTab.panelsHttpsCertificateEnding': "The panel's HTTPS certificate is ending or could not be renewed, or Kora's administrator service stopped answering. These belong to no server, so they go to every server's address that has this on, each once.",
 } as const
 
 register('en', messages)

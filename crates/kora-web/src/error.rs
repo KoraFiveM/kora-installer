@@ -1,9 +1,9 @@
 //! API error type with the JSON shape from the plan (section 2.2), extended with the fields of a
 //! [`Problem`]: `{"error": {"code", "message", "details"?, "actions"?, "command"?}}`.
 //!
-//! Handlers that know what the user can do return [`ApiError::problem`] (or `?` on a `Problem`);
-//! core errors (`Res<T>` strings) go through [`ApiError::core`], which unpacks a packed Problem and
-//! keeps plain strings working exactly as before.
+//! Core errors are [`Problem`]s ([`kora_core::problem::Res`]): handlers return them with `?` (an
+//! `impl From<Problem> for ApiError`) or through [`ApiError::core`]. A Problem keeps its code,
+//! details and actions all the way to the JSON envelope.
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -72,8 +72,8 @@ impl ApiError {
         }
         self
     }
-    pub fn bad_request(m: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_REQUEST, "bad_request", m)
+    pub fn bad_request(m: impl Into<Problem>) -> Self {
+        Self::plain_or_problem(StatusCode::BAD_REQUEST, "bad_request", m.into())
     }
     pub fn unauthorized(m: impl Into<String>) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, "unauthorized", m)
@@ -81,14 +81,25 @@ impl ApiError {
     pub fn forbidden(m: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, "forbidden", m)
     }
-    pub fn not_found(m: impl Into<String>) -> Self {
-        Self::new(StatusCode::NOT_FOUND, "not_found", m)
+    pub fn not_found(m: impl Into<Problem>) -> Self {
+        Self::plain_or_problem(StatusCode::NOT_FOUND, "not_found", m.into())
     }
-    pub fn conflict(m: impl Into<String>) -> Self {
-        Self::new(StatusCode::CONFLICT, "conflict", m)
+    pub fn conflict(m: impl Into<Problem>) -> Self {
+        Self::plain_or_problem(StatusCode::CONFLICT, "conflict", m.into())
     }
-    pub fn internal(m: impl Into<String>) -> Self {
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", m)
+    /// Status 500. A plain message (or a generic [`Problem`]) gets the code `internal`; a Problem that has a
+    /// code of its own keeps it, with its details and actions.
+    pub fn internal(m: impl Into<Problem>) -> Self {
+        Self::plain_or_problem(StatusCode::INTERNAL_SERVER_ERROR, "internal", m.into())
+    }
+    /// A plain sentence (a generic Problem with no details and no actions) gets this status and code;
+    /// a Problem that says more keeps its own code, details and actions under the same status.
+    fn plain_or_problem(status: StatusCode, code: &str, p: Problem) -> Self {
+        if p.code == codes::FAILED && p.details.is_none() && p.actions.is_empty() {
+            Self::new(status, code, p.message)
+        } else {
+            Self::problem(status, p)
+        }
     }
     /// Administrator rights are needed. Offers to install the administrator service ([`Action::InstallAdminService`])
     /// and the command to run as administrator; `command` stays for older pages.
@@ -99,16 +110,16 @@ impl ApiError {
     pub fn not_implemented(op: kora_core::api::Op) -> Self {
         Self::new(StatusCode::NOT_IMPLEMENTED, "not_implemented", format!("'{}' is not available in this version", op.name()))
     }
-    /// Map a core error string (`Res<T>`) to an API error. Core messages are written for people; a
-    /// packed [`Problem`] keeps its code, details and actions.
-    pub fn core(m: impl Into<String>) -> Self {
-        let m = m.into();
-        if Problem::is_encoded(&m) {
-            let p = Problem::decode(&m);
-            let status = if p.code == codes::NEEDS_ELEVATION { StatusCode::FORBIDDEN } else { StatusCode::UNPROCESSABLE_ENTITY };
-            return Self::problem(status, p);
+    /// Map a core error to an API error. A Problem with a code of its own, details or actions keeps
+    /// them (422, 403 for `needs_elevation`). A plain sentence (code `failed`, nothing else) answers
+    /// as `bad_request`, or `not_found` (404) when it says a server or thing is not found: the one
+    /// place that still reads such a sentence, kept so the older answers do not change.
+    pub fn core(e: impl Into<Problem>) -> Self {
+        let p: Problem = e.into();
+        if p.code != codes::FAILED || p.details.is_some() || !p.actions.is_empty() {
+            return p.into();
         }
-        let m = friendly(m);
+        let m = p.message;
         let lower = m.to_lowercase();
         if lower.contains("not found") || lower.contains("no server named") || lower.contains("unknown server") {
             Self::not_found(m)
@@ -132,20 +143,6 @@ impl From<Problem> for ApiError {
     fn from(p: Problem) -> Self {
         let status = if p.code == codes::NEEDS_ELEVATION { StatusCode::FORBIDDEN } else { StatusCode::UNPROCESSABLE_ENTITY };
         Self::problem(status, p)
-    }
-}
-
-/// What a person should read when an action needs Kora's own record of a server (`kora-server.json`)
-/// and the server was added from an existing folder instead.
-pub const NOT_KORA_INSTALLED: &str = "This server was added from an existing folder, so Kora did not install it and has no record of how it was set up. Updates, resources, ports and starting from Kora only work for servers that Kora installed.";
-
-/// Replace raw file-system errors about Kora's server record with a plain explanation.
-pub fn friendly(m: String) -> String {
-    let record_missing = m.contains("kora-server.json") && (m.contains("No such file") || m.contains("cannot find") || m.contains("os error 2"));
-    if record_missing || m == "No such file or directory (os error 2)" {
-        NOT_KORA_INSTALLED.to_string()
-    } else {
-        m
     }
 }
 
@@ -175,6 +172,12 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// A store [`Problem`] as one plain line, for the sign-in and certificate settings code, which still
+/// reports its failures as plain sentences (`Result<_, String>`) that the handlers show as they are.
+pub fn store_text(p: Problem) -> String {
+    p.one_line()
+}
+
 /// Run blocking work off the async runtime; a panic becomes an `internal` error.
 pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + Send + 'static) -> Result<T, ApiError> {
     match tokio::task::spawn_blocking(f).await {
@@ -189,11 +192,11 @@ mod tests {
 
     #[test]
     fn a_missing_server_record_gets_a_plain_message() {
-        let raw = "cannot read kora-server.json: No such file or directory (os error 2)";
-        assert_eq!(friendly(raw.into()), NOT_KORA_INSTALLED);
-        assert_eq!(friendly("No such file or directory (os error 2)".into()), NOT_KORA_INSTALLED);
-        assert_eq!(friendly("the port is busy".into()), "the port is busy");
-        assert_eq!(ApiError::core(raw).message, NOT_KORA_INSTALLED);
+        let tmp = tempfile::tempdir().unwrap();
+        let p = kora_core::installer::ServerFile::load(tmp.path()).unwrap_err();
+        let e = ApiError::core(p);
+        assert_eq!(e.code, codes::SERVER_NOT_KORA);
+        assert!(e.message.contains("Kora did not install it"));
     }
 
     async fn body(e: ApiError) -> (StatusCode, serde_json::Value) {
@@ -204,14 +207,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_packed_problem_reaches_the_browser_whole() {
+    async fn a_problem_reaches_the_browser_whole() {
         let p = Problem::new(codes::GH_MISSING, "The GitHub CLI is not installed.").with_details("gh: not found").with_action(Action::InstallTool { tool: kora_core::problem::Tool::Gh });
-        // Through a `Res<T>` string, as a Backend method would return it.
-        let (status, v) = body(ApiError::core(String::from(p.clone()))).await;
+        // As a Backend method returns it.
+        let (status, v) = body(ApiError::core(p.clone())).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(v["error"], p.to_json());
         assert_eq!(serde_json::from_value::<Problem>(v["error"].clone()).unwrap(), p);
-        // Plain strings answer exactly as before (no details, no actions).
+        // A plain sentence answers exactly as before (no details, no actions).
         let (status, v) = body(ApiError::core("the port is busy")).await;
         assert_eq!((status, v), (StatusCode::UNPROCESSABLE_ENTITY, json!({"error": {"code": "bad_request", "message": "the port is busy"}})));
     }
@@ -223,8 +226,8 @@ mod tests {
         assert_eq!(v["error"]["code"], "needs_elevation");
         assert_eq!(v["error"]["command"], json!(["kora", "x"]));
         assert_eq!(v["error"]["actions"], json!([{"kind": "install_admin_service"}, {"kind": "show_command", "command": ["kora", "x"], "elevated": true}]));
-        // A packed elevation problem from the core is a 403 with the same shape.
-        let e = ApiError::core(String::from(elevation_problem("Needs admin.", vec!["kora".into(), "x".into()])));
+        // An elevation problem from the core is a 403 with the same shape.
+        let e = ApiError::core(elevation_problem("Needs admin.", vec!["kora".into(), "x".into()]));
         assert_eq!((e.status, e.command.clone()), (StatusCode::FORBIDDEN, Some(vec!["kora".to_string(), "x".to_string()])));
         assert_eq!(e.to_problem().code, "needs_elevation");
     }
