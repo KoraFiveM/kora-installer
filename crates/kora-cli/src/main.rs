@@ -545,6 +545,11 @@ enum Command {
         #[arg(long)]
         app: bool,
     },
+    /// Kora's administrator service: who may use it, and whether it is running.
+    Service {
+        #[command(subcommand)]
+        cmd: service_cmd::ServiceCmd,
+    },
     /// The optional privileged helper: lets the panel do the few things that need administrator rights.
     Helper {
         #[command(subcommand)]
@@ -2594,6 +2599,8 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
         Some(Command::Helper { .. }) => K::Other,
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } }) => K::Uninstall { dry_run: false },
+        Some(Command::Service { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },
         Some(Command::AddAsset(_)) => K::Update { auto: false },
@@ -2637,6 +2644,7 @@ fn admin_reasons_for_command(cmd: &Option<Command>) -> Vec<String> {
         Some(Command::Uninstall { dry_run: false, app: true, .. }) => one("remove the old Kora app (the command, shortcuts and the installed program)"),
         Some(Command::Uninstall { dry_run: false, .. }) => one("remove the services, firewall rules and accounts Kora set up"),
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => one("install or remove the Kora helper service"),
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } }) => one("change which accounts may use Kora's administrator service"),
         _ => vec![],
     }
 }
@@ -2737,6 +2745,7 @@ fn main() {
             Command::ServiceHost { .. }
                 | Command::SelfUpdate { .. }
                 | Command::Helper { .. }
+                | Command::Service { .. }
                 | Command::AdminWorker(_)
                 | Command::AdminStep(_)
                 | Command::AdminDb(_)
@@ -2799,6 +2808,7 @@ fn main() {
         Some(Command::Stop { server }) => control(&server, kora_core::service::ControlAction::Stop),
         Some(Command::Restart { server }) => control(&server, kora_core::service::ControlAction::Restart),
         Some(Command::Helper { cmd }) => helper(cmd),
+        Some(Command::Service { cmd }) => service_cmd::service(cmd),
         Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => unreachable!("handled above"),
         Some(Command::Uninstall { app: true, yes, dry_run, .. }) => app_uninstall(yes, dry_run, false),
         Some(Command::Uninstall { server, dry_run, yes, delete_files, delete_databases, app: false }) => uninstall(server, dry_run, yes, delete_files, delete_databases),
@@ -2819,6 +2829,7 @@ mod bare;
 mod branch;
 mod keys_cmd;
 mod panel_tailscale;
+mod service_cmd;
 mod toolchain;
 
 #[cfg(test)]

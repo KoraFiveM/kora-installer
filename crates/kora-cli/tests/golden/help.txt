@@ -27,6 +27,7 @@ Commands:
   stop           Stop a server's background service
   restart        Restart a server's background service
   uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
+  service        Kora's administrator service: who may use it, and whether it is running
   helper         The optional privileged helper: lets the panel do the few things that need administrator rights
 
 Options:
@@ -126,11 +127,11 @@ Options:
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
@@ -1402,6 +1403,92 @@ Options:
       --app
           Remove only the OLD machine-wide Kora app (its shortcuts, PATH entry, the installed copy); servers and databases are never touched. (`kora app uninstall` removes Kora's own shortcuts.)
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service =====
+Kora's administrator service: who may use it, and whether it is running
+
+Usage: kora service [OPTIONS] <COMMAND>
+
+Commands:
+  status  Say whether the service is installed and running, and whether it serves your account
+  list    List the accounts that may use the service
+  allow   Let an account use the service (administrators only). Give the account's name
+  deny    Stop an account using the service (administrators only). Servers it set up keep working
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service serve =====
+Run the service (started by the system; not for people)
+
+Usage: kora service serve [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service status =====
+Say whether the service is installed and running, and whether it serves your account
+
+Usage: kora service status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service list =====
+List the accounts that may use the service
+
+Usage: kora service list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service allow =====
+Let an account use the service (administrators only). Give the account's name
+
+Usage: kora service allow [OPTIONS] <ACCOUNT>
+
+Arguments:
+  <ACCOUNT>
+          Account name (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service deny =====
+Stop an account using the service (administrators only). Servers it set up keep working
+
+Usage: kora service deny [OPTIONS] <ACCOUNT>
+
+Arguments:
+  <ACCOUNT>
+          
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
