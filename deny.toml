@@ -9,8 +9,18 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-# No advisory exceptions: sevenz-rust -> sevenz-rust2 removed the previous ones (the terminal UI crates are gone too).
-ignore = []
+# Advisories that appeared after the dependencies were chosen (RUSTSEC-2026-03xx, the 2026 constant-time ones). Each
+# is in a crate pulled in by a library we use, none has a fix we can reach (`cargo update` finds nothing newer), and
+# each is ignored for a stated reason, never silently. Re-check when age, webauthn-rs, secret-service move: remove
+# an entry the moment its crate can be upgraded (cargo-deny warns about entries that no longer match).
+ignore = [
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 timing, via p256 0.13 inside age's hpke: Kora only uses age's passphrase (scrypt) recipient (backup/crypt.rs), the p256/hpke code is never run" },
+  { id = "RUSTSEC-2023-0071", reason = "rsa 0.10.0-rc.19 Marvin timing, pinned by webauthn's crypto-glue: Kora only VERIFIES attestation signatures with public keys, it never signs or decrypts with an RSA private key" },
+  { id = "RUSTSEC-2026-0370", reason = "zbus_names unmaintained, via secret-service (system keychain on Linux): no safe upgrade exists; replace secret-service when it moves to zbus 6" },
+  { id = "RUSTSEC-2026-0371", reason = "zvariant unmaintained, via secret-service: same as RUSTSEC-2026-0370" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained, via secret-service: same as RUSTSEC-2026-0370" },
+  { id = "RUSTSEC-2026-0374", reason = "basic-toml unmaintained, a build-time macro dependency of age's translations (i18n-config): not in the shipped code path" },
+]
 
 [licenses]
 version = 2
