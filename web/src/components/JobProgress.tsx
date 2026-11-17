@@ -44,7 +44,7 @@ export function StepProgress({ events, planned }: { events: ProgressEvent[]; pla
   const said = failed ? `${failed.title}: ${STATUS_TEXT.failed}` : allDone ? 'All steps are finished.' : running ? `${running.title}: ${STATUS_TEXT.running}` : ''
   return (
     <div className="space-y-4">
-      <Announcer message={said} assertive={!!failed} />
+      <Announcer message={said} />
       <div className="flex items-center gap-3">
         <Progress value={percent} label="Overall progress" className="flex-1" />
         <span className="w-10 text-right text-sm tabular-nums text-muted-foreground">{percent}%</span>
