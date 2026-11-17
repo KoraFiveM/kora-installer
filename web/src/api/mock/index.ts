@@ -5,6 +5,7 @@ import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
 import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
 import { installKeysMock } from './keys'
+import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
@@ -59,6 +60,7 @@ function init(name: ScenarioName) {
   busy.clear()
   paused.clear()
   keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
+  storeMock.reset()
   nextId = 1
   consoleTick = 0
   resetToolchainMock(beh.trouble)
@@ -389,6 +391,7 @@ let lastHeaders = new Headers()
 const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
 const keysMock = installKeysMock(route, Fail, () => servers)
+const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, started: Math.floor(Date.now() / 1000), ended: null, result: j.result, error: j.error })))
 const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
 route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
