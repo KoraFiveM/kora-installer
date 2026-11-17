@@ -76,3 +76,33 @@ export function whoLabel(r: Pick<AuditRow, 'actor_kind' | 'actor_name' | 'provid
   if (r.actor_kind === 'cli') return `${n} (a kora command)`
   return `${n} (on this computer)`
 }
+
+/** What the administrator service wrote (`run system.firewall [my-server]`) in plain words, and the server it was about. */
+export function serviceWhat(what: string): { text: string; server: string | null } {
+  const m = /^(.*?)(?: \[(.+)\])?$/.exec(what)
+  const op = (m?.[1] ?? what).trim()
+  const server = m?.[2] ?? null
+  const words: Record<string, string> = {
+    'run system.service': 'Set up the server\u2019s background service',
+    'undo system.service': 'Removed the server\u2019s background service',
+    'run system.firewall': 'Opened the server\u2019s firewall ports',
+    'run reach.firewall': 'Opened the game port in the firewall',
+    'undo system.firewall': 'Closed the server\u2019s firewall ports',
+    'run system.schedule': 'Set up automatic updates',
+    'undo system.schedule': 'Removed automatic updates',
+    'schedule set': 'Changed the automatic-update schedule',
+    'schedule off': 'Turned automatic updates off',
+    'backup job set': 'Set up scheduled backups as an operating-system job',
+    'backup job off': 'Removed the scheduled-backup job',
+    'hand over': 'Handed restored files to the server\u2019s own account',
+    'run prepare.db': 'Prepared the database server',
+    'run build.db': 'Created the server\u2019s database',
+    'undo build.db': 'Removed the server\u2019s database',
+    'db start': 'Started Kora\u2019s database server',
+    'db install': 'Installed Kora\u2019s database server',
+    'start-database': 'Started the database server',
+    'install git': 'Installed Git',
+    update: 'Updated Kora',
+  }
+  return { text: words[op] ?? op, server }
+}

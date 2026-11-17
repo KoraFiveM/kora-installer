@@ -150,6 +150,8 @@ export type {
   JobsList,
   AuditRow,
   AuditPage,
+  ServiceAuditPage,
+  ServiceAuditRow,
   JobFailedData,
   JobStarted,
   KeyAddRequest,

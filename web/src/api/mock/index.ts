@@ -412,7 +412,7 @@ const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identi
 const reachMock = installReachMock(route, () => servers)
 installSupportMock(route, Fail)
 const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep, () => svc() === 'ready')
-const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })))
+const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })), () => svc() === 'ready')
 const resourceMock = installResourceMock(route, Fail, {
   find: (n) => find(n),
   installed: (n) => installed[n] ?? [],

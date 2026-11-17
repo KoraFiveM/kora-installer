@@ -45,7 +45,7 @@ export interface StoreMock {
   reset: (withHistory: boolean) => void
 }
 
-export function installStoreMock(route: Route, live: () => JobSummary[]): StoreMock {
+export function installStoreMock(route: Route, live: () => JobSummary[], serviceReady: () => boolean = () => false): StoreMock {
   let jobs: JobSummary[] = []
   let audit: AuditRow[] = []
   route('GET', '/jobs', (_m, _b, q) => {
@@ -61,6 +61,18 @@ export function installStoreMock(route: Route, live: () => JobSummary[]): StoreM
     const result = q.get('result')
     const rows = [...audit].sort((a, b) => b.id - a.id).filter((r) => r.id < before && (!server || r.server === server) && (!actor || (r.actor_name ?? '').toLowerCase().includes(actor)) && (!result || r.result === result))
     return { entries: rows.slice(0, limit), more: rows.length > limit, retention_days: 365 }
+  })
+  // What the administrator service did with administrator rights (its own log): there only when the service is.
+  route('GET', '/audit/service', (_m, _b, q) => {
+    if (!serviceReady()) return { available: false, entries: [], all_accounts: false, note: "Kora's administrator service is not installed on this computer, so nothing has been done with administrator rights." }
+    const limit = Math.min(Number(q.get('limit') ?? 200) || 200, 500)
+    const e = (mins: number, what: string, result: string, detail: string | null = null) => ({ at: ago(mins), account: 'demo', what, result, detail })
+    return {
+      available: true,
+      all_accounts: false,
+      note: null,
+      entries: [e(2, 'backup job set [Main roleplay]', 'done'), e(95, 'run system.firewall [Staging]', 'done'), e(1400, 'run system.service [Staging]', 'failed', 'code 1'), e(2000, 'undo system.service', 'refused', 'checks failed')].slice(0, limit),
+    }
   })
   return {
     reset: (withHistory) => {
