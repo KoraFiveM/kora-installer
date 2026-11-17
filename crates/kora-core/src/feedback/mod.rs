@@ -41,7 +41,7 @@ fn find<'a>(server: &'a ServerFile, id: &str) -> Result<&'a ResourceRecord> {
 
 fn gh_err(e: git::GitError) -> InstallError {
     InstallError(match e {
-        git::GitError::Spawn(..) => "GitHub's `gh` program could not be started. Is it installed? Run `kora install` once to set it up, or install it from https://cli.github.com.".to_string(),
+        git::GitError::Spawn(..) => "GitHub's `gh` program could not be started. Run `kora tools install gh` to get Kora's own copy, or use 'Install it for me' on the System check page in the panel.".to_string(),
         other => other.to_string(),
     })
 }
@@ -52,7 +52,7 @@ pub fn diagnostics(server: &ServerFile, res: &ResourceRecord, commit: Option<&st
         Mode::Production => "production",
         Mode::Development => "development",
     };
-    let mut s = String::from("---\nReported from the Kora manager.\n");
+    let mut s = String::from("---\nReported from Kora Panel.\n");
     s.push_str(&format!(
         "- Kora installer: {}\n",
         env!("CARGO_PKG_VERSION")

@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use kora_core::api::{adopt, logs, Backend, Op, Status, UpdateBadge};
 use kora_core::installer::registry::{self, ServerEntry};
 use kora_core::service::ControlAction;
@@ -51,7 +51,18 @@ fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> 
         "status": status,
         "badge": badge_json(badge),
         "managed": is_managed(e),
+        "connect": connect_address(e.ports.game),
     })
+}
+
+/// `<this computer's network address>:<game port>`, the address someone on the same network types to
+/// join, or `null` when the address cannot be found. It is NOT an address players on the internet can
+/// use: that is the router's public address (which Kora cannot see) with the same port forwarded.
+fn connect_address(game_port: u16) -> Value {
+    match kora_core::launch::lan_address() {
+        Some(ip) => json!(format!("{ip}:{game_port}")),
+        None => Value::Null,
+    }
 }
 
 /// The body of `GET /servers` (also what the events stream sends).
@@ -145,9 +156,12 @@ pub struct DeleteBody {
 
 pub async fn server_delete(
     State(st): State<AppState>,
+    Extension(caller): Extension<crate::remote::Caller>,
+    headers: axum::http::HeaderMap,
     Path(s): Path<String>,
     Json(body): Json<DeleteBody>,
 ) -> Result<Response, ApiError> {
+    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
     let stc = st.clone();
     let (e, running) = blocking(move || {
         let e = stc.entry(&s)?;
@@ -168,13 +182,36 @@ pub async fn server_delete(
     if running {
         return Err(ApiError::conflict("Stop the server first, then delete it."));
     }
+    // Windows: removing the service, firewall rules or update task (or dropping the database with
+    // Kora's own MariaDB login) needs the elevated worker: one permission prompt, asked when the
+    // delete reaches those parts.
+    let admin = if crate::elevated::worker_supported() {
+        let (dir, keep_db, pw) = (e.dir.clone(), body.keep_db, body.db_admin_password.as_deref().is_some_and(|p| !p.is_empty()));
+        let needs = blocking(move || Ok(!kora_core::elevate::is_elevated() && kora_core::installer::system_ops::delete_needs_admin_at(&dir, keep_db, pw))).await?;
+        if needs {
+            let mut command = vec!["kora".to_string(), "delete".into(), e.name.clone(), "--yes".into()];
+            if body.keep_files {
+                command.push("--keep-files".into());
+            }
+            if body.keep_db {
+                command.push("--keep-db".into());
+            }
+            let ctx = kora_core::helper::worker::Context { what: "remove the server's background service, firewall rules and database".into(), command, can_skip_admin: false };
+            crate::elevated::precheck(ask, &ctx, "Removing the server's background service needs administrator rights. Run this command as administrator:")?;
+            Some(kora_core::installer::system_ops::SharedAdmin(std::sync::Arc::new(crate::elevated::WorkerAdmin::new(ask, ctx))))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let name = e.name.clone();
     let stc = st.clone();
     st.spawn_job(Op::ServerDelete, Some(name), move |h| {
         h.event(json!({"type": "status", "message": "Deleting the server"}));
         let notes = stc
             .backend()
-            .delete_with_db_password(&e, body.keep_files, body.keep_db, body.db_admin_password.as_deref())
+            .delete_with_admin(&e, body.keep_files, body.keep_db, body.db_admin_password.as_deref(), admin)
             .map_err(delete_error)?;
         Ok(json!({"notes": notes}))
     })

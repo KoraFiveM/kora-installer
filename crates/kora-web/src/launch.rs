@@ -183,6 +183,16 @@ pub fn sign_in_link(port: u16, token: &str) -> String {
     format!("http://127.0.0.1:{port}/#token={token}")
 }
 
+/// `link` (`http://host:port/#code=...`) opening on `page` (`/install`) instead of the start page.
+/// Anything that is not a plain absolute page path leaves the link as it is.
+pub fn with_landing(link: &str, page: &str) -> String {
+    let plain = page.starts_with('/') && !page.starts_with("//") && page.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_'));
+    match link.split_once("/#") {
+        Some((base, rest)) if plain && page != "/" => format!("{base}{page}#{rest}"),
+        _ => link.to_string(),
+    }
+}
+
 /// A sign-in link with a one-time code (works once, for a few minutes), so the long-lived token
 /// never sits in a browser's history.
 pub fn code_link(port: u16, code: &str) -> String {
@@ -362,6 +372,18 @@ pub fn wait_for_panel(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_link_can_open_on_another_page() {
+        let l = "http://127.0.0.1:47120/#code=abc123";
+        assert_eq!(super::with_landing(l, "/install"), "http://127.0.0.1:47120/install#code=abc123");
+        assert_eq!(super::with_landing(l, "/"), l, "the start page is the default");
+        assert_eq!(super::with_landing("http://127.0.0.1:47120/#token=t", "/install"), "http://127.0.0.1:47120/install#token=t");
+        for bad in ["install", "//evil.example", "/a b", "/x?y=1", "/../x"] {
+            assert_eq!(super::with_landing(l, bad), l, "{bad}");
+        }
+        assert_eq!(super::with_landing("http://127.0.0.1:47120/", "/install"), "http://127.0.0.1:47120/", "no sign-in part: unchanged");
+    }
+
     use super::*;
     use std::collections::HashMap;
 

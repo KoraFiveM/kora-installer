@@ -54,14 +54,32 @@ pub fn admin_reasons(req: &InstallRequest) -> Vec<String> {
             Ok(found) => found.is_empty(),
             Err(_) => true,
         };
-    admin_reasons_for(req, windows, db_missing)
+    // Windows: a database server is there but no login was given, and Kora's own MariaDB login is
+    // kept where only administrators can read it: creating the new database needs them too.
+    let kora_login_hidden = windows
+        && !db_missing
+        && req.db != DbChoice::Skip
+        && !req.dry_run
+        && !crate::installer::db_override(req)
+        && crate::installer::windows_db::base_dir().is_some_and(|b| b.exists())
+        && crate::installer::windows_db::saved_admin().is_none();
+    admin_reasons_with(req, windows, db_missing, kora_login_hidden)
 }
 
 /// Pure part of [`admin_reasons`]: `db_missing` = `--db install` and no database server was found.
 pub fn admin_reasons_for(req: &InstallRequest, windows: bool, db_missing: bool) -> Vec<String> {
+    admin_reasons_with(req, windows, db_missing, false)
+}
+
+/// [`admin_reasons_for`]; `kora_login_hidden` = Windows, Kora's own MariaDB is installed and its
+/// administrator login (needed to create the new database) is readable by administrators only.
+pub fn admin_reasons_with(req: &InstallRequest, windows: bool, db_missing: bool, kora_login_hidden: bool) -> Vec<String> {
     let mut v = Vec::new();
     if req.dry_run {
         return v;
+    }
+    if kora_login_hidden {
+        v.push("create the new database in Kora's own database server (its administrator login is kept for administrators only)".to_string());
     }
     if db_missing {
         v.push(if windows {
@@ -261,10 +279,7 @@ impl Elevator for SystemElevator {
 /// What kind of command is being run (drives the Windows "always elevated" rule).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdKind {
-    /// No arguments: the interactive wizard.
-    Wizard,
     Install { dry_run: bool },
-    Manager,
     Delete,
     Uninstall { dry_run: bool },
     Start,
@@ -277,10 +292,11 @@ pub enum CmdKind {
 }
 
 impl CmdKind {
-    /// Interactive and privileged: on Windows these always run elevated.
+    /// Interactive and privileged: on Windows these always run elevated. (Bare `kora`, `kora manager` and
+    /// `kora install` with no options only open the panel, so they are `Other` and never elevate.)
     pub fn privileged(self) -> bool {
         match self {
-            CmdKind::Wizard | CmdKind::Manager | CmdKind::Delete | CmdKind::Start | CmdKind::Stop | CmdKind::Restart => true,
+            CmdKind::Delete | CmdKind::Start | CmdKind::Stop | CmdKind::Restart => true,
             CmdKind::Install { dry_run } | CmdKind::Uninstall { dry_run } => !dry_run,
             CmdKind::Update { auto } => !auto,
             CmdKind::Status | CmdKind::Other => false,
@@ -428,6 +444,7 @@ mod tests {
             dir: "d".into(),
             hostname: String::new(),
             license_key: None,
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports::default(),
             txadmin_public: false,
@@ -590,6 +607,15 @@ mod tests {
     }
 
     #[test]
+    fn kora_s_own_database_login_is_a_reason_on_windows() {
+        let r = InstallRequest { db: DbChoice::UseExisting, ..req() };
+        let v = admin_reasons_with(&r, true, false, true);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].contains("Kora's own database server"), "{v:?}");
+        assert!(admin_reasons_with(&InstallRequest { dry_run: true, ..r }, true, false, true).is_empty());
+    }
+
+    #[test]
     fn reasons_are_joined_in_plain_language() {
         let s = |v: &[&str]| join_reasons(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
         assert_eq!(s(&["a"]), "a");
@@ -680,11 +706,9 @@ mod tests {
         assert_eq!((r, f.calls.get(), said.len()), (Elevation::Continue, 0, 0));
     }
 
-    const ALL: [CmdKind; 12] = [
-        CmdKind::Wizard,
+    const ALL: [CmdKind; 10] = [
         CmdKind::Install { dry_run: false },
         CmdKind::Install { dry_run: true },
-        CmdKind::Manager,
         CmdKind::Delete,
         CmdKind::Uninstall { dry_run: false },
         CmdKind::Uninstall { dry_run: true },
@@ -710,7 +734,7 @@ mod tests {
         let privileged: Vec<CmdKind> = ALL.into_iter().filter(|k| k.privileged()).collect();
         assert_eq!(
             privileged,
-            [CmdKind::Wizard, CmdKind::Install { dry_run: false }, CmdKind::Manager, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]
+            [CmdKind::Install { dry_run: false }, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]
         );
         assert!(CmdKind::Stop.privileged() && CmdKind::Restart.privileged());
         assert!(!CmdKind::Status.privileged() && !CmdKind::Other.privileged(), "--version/--help/status stay unelevated");

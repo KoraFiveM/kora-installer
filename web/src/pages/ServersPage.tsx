@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderPlus, Plus, RefreshCw } from 'lucide-react'
 import { api } from '@/api/client'
@@ -11,10 +11,15 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { AddExistingDialog } from '@/components/AddExistingDialog'
 import { ModeChip, StatusChip, UpdateChip } from '@/components/Status'
 import { ServerControls } from '@/components/ServerControls'
+import { CopyConnectButton, OpenFolderButton, TxAdminButton } from '@/components/ServerLinks'
 import { useServerControl } from '@/hooks/useServerControl'
 import { usePanelAlerts } from '@/hooks/usePanelAlerts'
 import { Badge } from '@/components/ui/badge'
 import { useInstallBlock } from './install/access'
+import { TidyUpBanner } from '@/components/Shortcuts'
+
+/** Asked once per browser tab: a first visit with no servers goes straight to the install wizard. */
+const FIRST_RUN_KEY = 'kora.firstRunShown'
 
 function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
   const ctl = useServerControl(s.name)
@@ -31,6 +36,13 @@ function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
       <td className="px-4 py-3 font-mono text-xs">{s.ports.txadmin}</td>
       <td className="px-4 py-3"><UpdateChip badge={s.badge} to={`/servers/${encodeURIComponent(s.name)}?tab=resources`} /></td>
       <td className="px-4 py-3"><ServerControls name={s.name} status={s.status} busy={ctl.busy} run={ctl.run} /></td>
+      <td className="px-4 py-3">
+        <div className="flex flex-wrap gap-2">
+          <TxAdminButton port={s.ports.txadmin} up={s.status === 'running'} />
+          <OpenFolderButton name={s.name} dir={s.dir} />
+          <CopyConnectButton connect={s.connect} />
+        </div>
+      </td>
     </tr>
   )
 }
@@ -38,9 +50,24 @@ function Row({ s, alerts }: { s: ServerSummary; alerts: number }) {
 export default function ServersPage() {
   const nav = useNavigate()
   const installBlock = useInstallBlock()
-  const [adding, setAdding] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const [adding, setAddingState] = useState(params.get('add') === '1')
+  const setAdding = (v: boolean) => {
+    setAddingState(v)
+    if (!v && params.has('add')) setParams({}, { replace: true })
+  }
   const q = useQuery({ queryKey: ['servers'], queryFn: api.servers.list })
   const servers = q.data ?? []
+  const empty = q.isSuccess && servers.length === 0
+  useEffect(() => {
+    // Someone who asked to add an existing server is not sent to the wizard.
+    if (!empty || installBlock || params.get('add') === '1') return
+    try {
+      if (sessionStorage.getItem(FIRST_RUN_KEY)) return
+      sessionStorage.setItem(FIRST_RUN_KEY, '1')
+    } catch { /* storage blocked: still go to the wizard once per load */ }
+    nav('/install', { replace: true })
+  }, [empty, installBlock, nav, params])
   const { open: openAlerts } = usePanelAlerts()
   const running = servers.filter((x) => x.status === 'running').length
   const stopped = servers.filter((x) => x.status === 'stopped').length
@@ -53,6 +80,7 @@ export default function ServersPage() {
           <Button onClick={() => setAdding(true)}><FolderPlus /> Add an existing server</Button>
         </div>
       </div>
+      <TidyUpBanner />
       {q.isError && <ErrorNotice error={q.error} />}
       {q.isLoading && <Skeleton className="h-40" />}
       {q.isSuccess && servers.length === 0 && (
@@ -74,11 +102,11 @@ export default function ServersPage() {
       )}
       {servers.length > 0 && (
         <Card className="overflow-x-auto">
-          <table className="w-full min-w-[44rem] text-left text-sm">
+          <table className="w-full min-w-[64rem] text-left text-sm">
             <caption className="sr-only">Your servers</caption>
             <thead className="text-xs text-muted-foreground">
               <tr>
-                {['Name', 'Mode', 'Status', 'Game port', 'txAdmin port', 'Updates', 'Actions'].map((h) => (
+                {['Name', 'Mode', 'Status', 'Game port', 'txAdmin port', 'Updates', 'Actions', 'Open and copy'].map((h) => (
                   <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>
                 ))}
               </tr>

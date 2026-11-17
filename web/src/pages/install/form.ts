@@ -1,4 +1,4 @@
-import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall } from '@/api/types'
+import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall, SavedKey } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
 
 export type ArtifactChoice = 'recommended' | 'pick' | 'custom'
@@ -27,10 +27,20 @@ export interface WizardForm {
   firewall: boolean
   txPublic: boolean
   service: boolean
-  app: boolean
-  desktopShortcut: boolean
+  /** The licence key page: pick one of the saved keys, or paste a new one. */
+  licenceChoice: 'saved' | 'new'
+  /** The saved key picked (`licenceChoice` is `saved`). */
+  licenceName: string
+  /** A pasted key (`licenceChoice` is `new`). */
   license: string
+  /** Keep a pasted key on this computer for next time (on unless the person turns it off). */
+  saveKey: boolean
+  saveKeyName: string
   githubOwner: string
+  /** The GitHub owner came from the last install (shown with a hint to change it). */
+  githubRemembered: boolean
+  /** The Cfx.re account came from the last install. */
+  cfxRemembered: boolean
   /** What the person typed in the Cfx.re step. */
   cfxUsername: string
   /** The account the last successful check found for `cfxUsername` (null = not checked / skipped). `username` is null when restored from saved answers. */
@@ -75,7 +85,17 @@ export function dirBase(dir: string): string {
   return i > 0 ? dir.slice(0, i) : dir
 }
 
-export function initialForm(d: InstallDefaults): WizardForm {
+/** The name offered for a key about to be saved: "Main" first, then "Key 2", "Key 3"... */
+export function suggestKeyName(keys: SavedKey[]): string {
+  if (keys.length === 0) return 'Main'
+  for (let n = keys.length + 1; ; n++) {
+    const name = `Key ${n}`
+    if (!keys.some((k) => k.name.toLowerCase() === name.toLowerCase())) return name
+  }
+}
+
+export function initialForm(d: InstallDefaults, keys: SavedKey[] = []): WizardForm {
+  const cfxId = d.profile?.cfx_identifier ?? null
   return {
     mode: 'production', name: d.name, dir: d.dir, dirTouched: false, hostname: d.hostname,
     game: String(d.ports.game), tx: String(d.ports.txadmin),
@@ -83,8 +103,11 @@ export function initialForm(d: InstallDefaults): WizardForm {
     resourcesAll: true, resourceIds: [],
     // Works on a clean machine: uses a database server that is already there, installs MariaDB only when none is found.
     db: 'install_if_missing', dbCustom: false, dbUser: '', dbPass: '', dbPass2: '', dbHost: '127.0.0.1', dbPort: '3306',
-    firewall: true, txPublic: false, service: true, app: true, desktopShortcut: true,
-    license: '', githubOwner: '', cfxUsername: '', cfxFound: null,
+    firewall: true, txPublic: false, service: true,
+    licenceChoice: keys.length > 0 ? 'saved' : 'new', licenceName: keys[0]?.name ?? '', license: '', saveKey: true, saveKeyName: suggestKeyName(keys),
+    // What Kora remembers from the last install: still editable on their own pages.
+    githubOwner: d.profile?.github_owner ?? '', githubRemembered: !!d.profile?.github_owner,
+    cfxUsername: d.profile?.cfx_username ?? '', cfxFound: cfxId ? { username: d.profile?.cfx_username ?? null, identifier: cfxId } : null, cfxRemembered: !!cfxId,
   }
 }
 
@@ -107,21 +130,40 @@ export function applySaved(f: WizardForm, s: SavedInstall): WizardForm {
     txPublic: s.txadmin_public ?? f.txPublic,
     githubOwner: s.github_owner ?? f.githubOwner,
     cfxFound: s.cfx_identifier ? { username: null, identifier: s.cfx_identifier } : f.cfxFound,
+    licenceChoice: s.license_key_name ? 'saved' : f.licenceChoice,
+    licenceName: s.license_key_name ?? f.licenceName,
   }
+}
+
+/**
+ * The answers without anything that needs administrator rights ("Continue without the administrator
+ * parts"): no firewall change, no background service, and the database only used when
+ * it is already there.
+ */
+export function withoutAdmin(f: WizardForm): WizardForm {
+  return { ...f, firewall: false, txPublic: false, service: false, db: f.db === 'install_if_missing' ? 'use_existing' : f.db }
+}
+
+/** The wizard page a `change_answers` action names, when this kind of server has it. */
+export function sectionStep(section: string | undefined, mode: Mode): StepId | null {
+  const all = stepsFor(mode)
+  return section && (all as string[]).includes(section) && section !== 'review' ? (section as StepId) : null
 }
 
 export function folderFor(base: string, name: string): string {
   return joinPath(base, slug(name) || 'my-server')
 }
 
-export function buildRequest(f: WizardForm, opts: { appSupported?: boolean; artifactUrl?: string | null } = {}): InstallRequest {
+export function buildRequest(f: WizardForm, opts: { artifactUrl?: string | null } = {}): InstallRequest {
   const gb = f.gameBuild.trim()
   return {
     mode: f.mode,
     name: slug(f.name),
     dir: f.dir.trim(),
     hostname: f.hostname.trim(),
-    license_key: f.license.trim() || null,
+    license_key: f.licenceChoice === 'new' ? f.license.trim() || null : null,
+    license_key_name: f.licenceChoice === 'saved' ? f.licenceName : undefined,
+    save_license_key_as: f.licenceChoice === 'new' && f.saveKey && f.license.trim() ? f.saveKeyName.trim() : undefined,
     ports: { game: Number(f.game), txadmin: Number(f.tx) },
     txadmin_public: f.txPublic,
     artifact_url: f.artifact === 'custom' ? f.artifactUrl.trim() : f.artifact === 'pick' ? (opts.artifactUrl ?? null) : null,
@@ -135,7 +177,6 @@ export function buildRequest(f: WizardForm, opts: { appSupported?: boolean; arti
     db_admin: f.db !== 'skip' && f.dbCustom ? { host: f.dbHost.trim(), port: Number(f.dbPort), user: f.dbUser.trim(), password: f.dbPass } : null,
     start: true,
     cfx_identifier: f.cfxFound?.identifier ?? null,
-    app: opts.appSupported && f.app ? { desktop_shortcut: f.desktopShortcut } : null,
   }
 }
 
@@ -184,7 +225,9 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): s
     case 'database':
       return dbLoginProblem(f)
     case 'licence':
-      return f.license.trim().length < 8 ? 'Paste your licence key. It is a long string of letters and numbers.' : null
+      if (f.licenceChoice === 'saved') return f.licenceName ? null : 'Pick one of your saved keys, or add a new one.'
+      if (f.license.trim().length < 8) return 'Paste your licence key. It is a long string of letters and numbers.'
+      return f.saveKey && !f.saveKeyName.trim() ? 'Give the key a name so you can find it next time, or turn off "Save this key".' : null
     case 'cfx':
       return f.cfxFound || !f.cfxUsername.trim() ? null : 'Check the Cfx.re username, or clear the box to skip this step.'
     case 'github':

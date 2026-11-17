@@ -30,6 +30,10 @@ cat > "$WORK/rel/kora-linux-x86_64" <<'FAKE'
 #!/bin/sh
 # Kora installer and server manager
 [ -n "${KORA_TEST_LOG:-}" ] && printf '%s %s\n' "$0" "$*" >> "$KORA_TEST_LOG"
+if [ "$1 $2" = "app install" ]; then
+  echo "FAKE: shortcuts made"
+  exit "${KORA_TEST_APP_EXIT:-0}"
+fi
 if [ "$1 $2" = "panel --setup" ]; then
   # Must not read stdin (it is the piped script under curl | sh).
   if [ -t 0 ] || read -r _line; then echo "FAKE: setup read stdin"; fi
@@ -86,14 +90,24 @@ check "no backup is made for an identical file" test ! -e "$D/kora.previous"
 # 2b. launch: exact call, opt-out, and a failing launch does not fail the install
 D="$WORK/t2b/bin"; LOG="$WORK/t2b.log"
 check "install with a launch log succeeds" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D" KORA_TEST_LOG="$LOG"
-check "  ... runs '<absolute path> panel --setup' exactly once" test "$(cat "$LOG")" = "$D/kora panel --setup"
+check "  ... makes the shortcuts, then runs '<absolute path> panel --setup' exactly once" test "$(cat "$LOG")" = "$D/kora app install --yes
+$D/kora panel --setup"
+check "  ... says the shortcuts were made" out_has "FAKE: shortcuts made"
 rm -f "$LOG"
 D="$WORK/t2c/bin"
 check "KORA_NO_LAUNCH=1 install succeeds" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D" KORA_TEST_LOG="$LOG" KORA_NO_LAUNCH=1
-check "  ... does not start the panel" test ! -e "$LOG"
-check "  ... prints the manual next step" out_has "Next step: run   kora panel"
+check "  ... does not start the panel" test "$(cat "$LOG")" = "$D/kora app install --yes"
+check "  ... prints the manual next step" out_has "Next step: run   kora "
 check "KORA_NO_LAUNCH=1 on an up-to-date install succeeds" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D" KORA_TEST_LOG="$LOG" KORA_NO_LAUNCH=1
-check "  ... and does not start it either" test ! -e "$LOG"
+check "  ... and does not start it either" test "$(grep -c 'panel --setup' "$LOG" || true)" = "0"
+rm -f "$LOG"
+D="$WORK/t2c2/bin"
+check "KORA_NO_SHORTCUTS=1 install succeeds" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D" KORA_TEST_LOG="$LOG" KORA_NO_SHORTCUTS=1
+check "  ... makes no shortcuts" test "$(cat "$LOG")" = "$D/kora panel --setup"
+rm -f "$LOG"
+D="$WORK/t2c3/bin"
+check "failing shortcuts do not fail the install" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D" KORA_TEST_APP_EXIT=1
+check "  ... the launcher problem is explained, the panel still starts" sh -c "grep -q 'launcher could not be made' '$WORK/out' && grep -q 'panel setup ran' '$WORK/out'"
 D="$WORK/t2d/bin"
 check "a failing launch does not fail the install" run KORA_RELEASE_BASE="$BASE" KORA_INSTALL_DIR="$D" KORA_TEST_SETUP_EXIT=1
 check "  ... kora is installed" test -x "$D/kora"
@@ -101,7 +115,7 @@ check "  ... the manual next step is printed" out_has "did not start by itself"
 check "  ... with the full path" out_has "$D/kora panel"
 # bash reads a piped script a byte at a time, so a launch that read stdin would swallow the rest of it.
 check "the curl | bash shape works (script on a pipe)" sh -c "cat '$SCRIPT' | env HOME='$WORK/home' KORA_ALLOW_ROOT_PANEL=1 KORA_RELEASE_BASE='$BASE' KORA_INSTALL_DIR='$WORK/t2e/bin' bash > '$WORK/out' 2>&1"
-check "  ... setup ran and did not eat the script" out_has "Prefer the terminal"
+check "  ... setup ran and did not eat the script" out_has "Open Kora again any time"
 check "  ... setup did not read stdin" eval '! out_has "FAKE: setup read stdin"'
 
 # 3. upgrade of an older kora keeps the previous one

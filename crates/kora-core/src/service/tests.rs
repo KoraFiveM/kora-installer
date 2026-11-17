@@ -363,6 +363,21 @@ fn windows_service_runs_as_its_virtual_account_with_access_to_its_folder_only() 
 }
 
 #[test]
+fn windows_service_keeps_only_ordinary_user_privileges_and_grants_are_a_separate_plan() {
+    let mut s = server();
+    s.dir = "C:\\Kora\\main".into();
+    let reg: Vec<_> = windows_register_plan(&s).steps.iter().filter_map(|s| s.command_line()).collect();
+    let privs = reg.iter().find(|l| l.contains(" privs ")).expect("the privilege list is set");
+    assert_eq!(*privs, "sc.exe privs kora-main SeChangeNotifyPrivilege/SeIncreaseWorkingSetPrivilege");
+    assert!(!privs.contains("Impersonate"));
+    assert!(reg.iter().all(|l| !l.starts_with("icacls")), "registering needs no folder rights: {reg:?}");
+    let grants: Vec<_> = windows_grant_plan(&s).steps.iter().filter_map(|s| s.command_line()).collect();
+    assert!(grants.iter().all(|l| l.starts_with("icacls.exe")) && grants.len() == 4);
+    let all = install_plan(&s, Platform::Windows).unwrap().steps.len();
+    assert_eq!(all, reg.len() + grants.len());
+}
+
+#[test]
 fn copy_and_rmdir_actions_go_through_the_runner() {
     let r = FakeRunner::default();
     let p = Plan::new(vec![
@@ -570,4 +585,34 @@ fn a_forged_binary_in_created_json_never_becomes_the_root_update_job() {
     }
     let unit = systemd_update_unit(&s).unwrap();
     assert!(!unit.contains("/tmp/evil"), "{unit}");
+}
+
+#[test]
+fn the_installing_users_update_task_runs_without_elevation_and_may_restart_only_its_service() {
+    let mut s = server();
+    s.dir = "C:\\Kora\\main".into();
+    let xml = task_xml(&s, &Schedule::Daily(TimeOfDay::new(4, 0).unwrap()), RunAs::InstallingUser, "PC\\jo").unwrap();
+    assert!(xml.contains("<RunLevel>LeastPrivilege</RunLevel>") && !xml.contains("HighestAvailable"), "{xml}");
+    let me = "S-1-5-21-1-2-3-1001";
+    let d = windows_user_control_sddl(me).unwrap();
+    assert!(d.ends_with(&format!("(A;;CCLCSWRPWPDTLOCRRC;;;{me})")), "query, start, stop: {d}");
+    assert!(!d.contains(&format!("WDWO;;;{me}")) && !d.contains(&format!("SD;;;{me}")), "never reconfigure or delete");
+    assert!(windows_user_control_sddl("S-1-5-32-544").is_none() && windows_user_control_sddl("S-1-5-21-1)(A;;GA;;;WD").is_none());
+    let lines: Vec<_> = windows_register_plan_for(&s, Some(me)).steps.iter().filter_map(|s| s.command_line()).collect();
+    assert!(lines.last().unwrap().starts_with("sc.exe sdset kora-main D:"), "{lines:?}");
+    assert_eq!(windows_register_plan_for(&s, None).steps.len(), windows_register_plan(&s).steps.len());
+    assert_eq!(parse_whoami_sid("\"pc\\jo\",\"S-1-5-21-1-2-3-1001\"\r\n").as_deref(), Some(me));
+    assert_eq!(parse_whoami_sid("garbage"), None);
+}
+
+#[test]
+fn a_retried_service_step_adopts_only_kora_s_own_service_for_the_same_folder() {
+    let qc = "[SC] QueryServiceConfig SUCCESS\r\n\r\nSERVICE_NAME: kora-main\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        BINARY_PATH_NAME   : \"C:\\Program Files\\Kora\\bin\\0.7.0-abc\\kora.exe\" service-host \"C:\\Users\\jo\\kora\\main\"\r\n";
+    let b = parse_qc_binpath(qc).unwrap();
+    assert!(binpath_is_for(&b, "C:\\Users\\jo\\kora\\main"));
+    assert!(binpath_is_for(&b, "c:\\users\\jo\\kora\\main\\"), "case and trailing slash");
+    assert!(!binpath_is_for(&b, "C:\\Users\\other\\kora\\main"));
+    assert!(!binpath_is_for("\"C:\\evil\\x.exe\" service-host \"C:\\Users\\jo\\kora\\main\"", "C:\\Users\\jo\\kora\\main"));
+    assert!(!binpath_is_for("C:\\Windows\\system32\\svchost.exe -k netsvcs", "C:\\Users\\jo\\kora\\main"));
+    assert_eq!(parse_qc_binpath("nothing"), None);
 }

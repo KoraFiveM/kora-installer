@@ -248,6 +248,10 @@ impl Backend for SystemBackend {
         installer::rollback_with_db_password(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, &mut Quiet).map_err(err)
     }
 
+    fn delete_with_admin(&mut self, e: &ServerEntry, keep_files: bool, keep_db: bool, db_admin_password: Option<&str>, admin: Option<installer::system_ops::SharedAdmin>) -> Res<Vec<String>> {
+        installer::rollback_with_admin(&e.dir, &RollbackOptions { keep_files, keep_db }, db_admin_password, admin, &mut Quiet).map_err(err)
+    }
+
     fn unregister(&mut self, e: &ServerEntry) -> Res<()> {
         let mut r = Registry::load().map_err(err)?;
         r.remove(&e.name);
@@ -397,6 +401,11 @@ impl Backend for SystemBackend {
 
     fn asset_remove(&mut self, e: &ServerEntry, name: &str) -> Res<Vec<String>> {
         paidassets::remove(&e.dir, name)
+    }
+
+    fn branches(&mut self, e: &ServerEntry, req: &crate::branches::Request, say: &mut dyn FnMut(usize, usize, &str)) -> Res<crate::branches::Reply> {
+        let sf = crate::installer::registry::ServerFile::load(&e.dir).map_err(|err| format!("cannot read {}: {err}", e.dir.join("kora-server.json").display()))?;
+        crate::installer::gitops::with_runner(&e.dir, |r| crate::branches::run(r, &sf, req, say)).map_err(String::from)
     }
 }
 

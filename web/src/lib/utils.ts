@@ -16,7 +16,7 @@ export function formatDate(unix: number): string {
   return new Date(unix * 1000).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-/** "my server!" -> "my-server" (same rule as the TUI wizard). */
+/** "my server!" -> "my-server" (same rule as `kora install`). */
 export function slug(name: string): string {
   let out = ''
   for (const c of name.trim()) {

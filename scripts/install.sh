@@ -3,6 +3,9 @@
 # checks its SHA-256 and puts it on your PATH. It does not need root and never replaces a file
 # it cannot identify as an earlier kora.
 #
+# It also makes a launcher in your applications menu (yours only, desktop sessions only) that opens
+# Kora Panel in your browser.
+#
 # Then it starts Kora Panel as a background service (a systemd user service that also starts after
 # a restart) with `kora panel --setup`, opens it in your browser when there is a screen and prints
 # the sign-in link (plus the SSH tunnel command on a server with no screen). If that step fails the
@@ -18,6 +21,7 @@
 #   KORA_INSTALL_DIR   target folder. Default: /usr/local/bin as root, else ~/.local/bin.
 #   KORA_FORCE=1       replace an existing file at the target even if it is not a kora program.
 #   KORA_NO_LAUNCH=1   only install the program: do not start Kora Panel or open a browser.
+#   KORA_NO_SHORTCUTS=1   do not make the applications-menu launcher.
 #   KORA_TAILSCALE=1   on a server with Tailscale, open Kora Panel to your own Tailscale devices without asking
 #                      (KORA_TAILSCALE=0: never ask). See `kora panel --tailscale`.
 # For tests only (same https:// rule): KORA_API_BASE (default https://api.github.com) and
@@ -210,10 +214,14 @@ main() {
     *":$DEST_DIR:"*) ;;
     *) say "Note: $DEST_DIR is not on your PATH yet. Add it:  export PATH=\"$DEST_DIR:\$PATH\"" ;;
   esac
+  # The applications-menu launcher (per user; not from a root shell, which would put it in root's home).
+  # A failure here does not undo the install.
+  if [ "${KORA_NO_SHORTCUTS:-}" != "1" ] && { [ "$(id -u)" != "0" ] || [ "${KORA_ALLOW_ROOT_PANEL:-}" = "1" ]; }; then
+    "$DEST" app install --yes </dev/null || say "The applications-menu launcher could not be made. You can still open Kora by running   kora"
+  fi
   say ""
   if [ "${KORA_NO_LAUNCH:-}" = "1" ]; then
-    say "Next step: run   kora panel   (opens Kora Panel in your browser)"
-    say "Prefer the terminal? Run   kora install   instead. (On a server with no screen: kora panel --no-open)"
+    say "Next step: run   kora   (opens Kora Panel in your browser; on a server with no screen it prints the link and the tunnel command)"
     exit 0
   fi
   # Kora Panel is for a normal account, never root (it would then sit in root's home and run with full
@@ -235,12 +243,11 @@ main() {
   # the program must not read it. A failure here does not undo the install.
   if "$DEST" panel --setup </dev/null; then
     say ""
-    say "Prefer the terminal? Run   kora install   instead."
+    say "Open Kora again any time by running   kora"
   else
     say ""
     say "Kora Panel did not start by itself. kora is installed; start the panel with:"
     say "    $DEST panel"
-    say "Prefer the terminal? Run   kora install   instead."
   fi
   exit 0
 }

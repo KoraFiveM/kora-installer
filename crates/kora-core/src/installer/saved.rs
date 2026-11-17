@@ -20,14 +20,10 @@ pub fn save(req: &InstallRequest) -> std::io::Result<PathBuf> {
     r.catalog = None;
     r.dry_run = false;
     let p = path();
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d)?;
-    }
     let text = serde_json::to_string_pretty(&r).map_err(std::io::Error::other)?;
-    // Write then rename, so a crash never leaves half a file that would break the next start.
-    let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, &p)?;
+    // Written to a fresh file and renamed over the old one (a crash never leaves half a file), and never
+    // through a link: a failed install can run as root (through the helper) inside the user's own folder.
+    crate::fsutil::write_no_follow(&p, text.as_bytes(), 0o644)?;
     Ok(p)
 }
 
@@ -54,6 +50,7 @@ mod tests {
             dir: "/tmp/dev-den".into(),
             hostname: "Dev Den".into(),
             license_key: Some("cfxk_SECRETKEY".into()),
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports { game: 30120, txadmin: 40120 },
             txadmin_public: false,

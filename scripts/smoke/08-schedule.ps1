@@ -25,6 +25,8 @@ Assert-That ($x -match '05:30:00') 'trigger time is 05:30'
 Assert-That ($x -match 'InteractiveToken') 'runs "only when logged on" (no stored password)'
 Assert-That ($x -match 'StartWhenAvailable>true') 'a missed run happens at the next opportunity'
 Assert-That ($x -notmatch 'S-1-5-18') 'not SYSTEM'
+# Task Scheduler leaves LeastPrivilege out of the exported XML (it is the default), so check for what must not be there.
+Assert-That ($x -notmatch 'HighestAvailable') 'the installing user''s task runs without elevation'
 Assert-That ($x -match 'update --auto') 'the task runs kora update --auto'
 Assert-That (-not (Test-Path "$srv\.kora\update-task.xml")) 'the temporary task XML is cleaned up'
 Assert-That (Test-Path "$srv\.kora\schedule.json") 'the setting is stored in the server folder'

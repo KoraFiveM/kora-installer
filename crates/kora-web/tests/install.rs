@@ -61,6 +61,8 @@ struct S {
     db_ok: bool,
     saved: Option<InstallRequest>,
     fail: Option<String>,
+    /// The step that fails (default `build.db`).
+    fail_step: Option<&'static str>,
     runs: Vec<InstallRequest>,
     artifacts: Option<Result<ArtifactList, String>>,
 }
@@ -143,9 +145,19 @@ impl InstallEnv for Env {
         };
         sink.event(ev("prepare.dir", StepStatus::Running, 10));
         sink.event(ev("prepare.dir", StepStatus::Done, 30));
-        if let Some(m) = self.st().fail.clone() {
-            sink.event(ev("build.db", StepStatus::Failed, 50));
-            return Err(m);
+        let (fail, step) = {
+            let st = self.st();
+            (st.fail.clone(), st.fail_step.unwrap_or("build.db"))
+        };
+        if let Some(m) = fail {
+            // Like the installer: a step the user chose to skip is passed over.
+            let state = kora_core::steps::PlanState::load_or_default(&req.dir.join(".kora/plan-state.json")).unwrap_or_default();
+            if state.status(step) == Some(kora_core::steps::StepStatus::Skipped) {
+                sink.event(ev(step, StepStatus::Skipped, 90));
+            } else {
+                sink.event(ev(step, StepStatus::Failed, 50));
+                return Err(m);
+            }
         }
         sink.event(ev("finalize", StepStatus::Done, 100));
         Ok(InstallOutcome {
@@ -163,16 +175,32 @@ impl InstallEnv for Env {
 
 type Approval = Result<Option<String>, String>;
 
+/// A machine without `gh`.
+struct MissingGh;
+impl GithubEnv for MissingGh {
+    fn auth(&self) -> GithubUser {
+        GithubUser::gh_missing()
+    }
+    fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+        Err("gh not found".into())
+    }
+    fn begin_login(&self) -> Result<LoginFlow, String> {
+        Err(kora_core::problem::known::gh_missing().encode())
+    }
+    fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
+        Err(kora_core::problem::known::gh_missing().encode())
+    }
+}
+
 struct Gh {
     user: Mutex<Option<String>>,
     release: Mutex<Option<mpsc::Receiver<Approval>>>,
 }
 impl GithubEnv for Gh {
     fn auth(&self) -> GithubUser {
-        let u = self.user.lock().unwrap().clone();
-        GithubUser {
-            signed_in: u.is_some(),
-            user: u,
+        match self.user.lock().unwrap().clone() {
+            Some(u) => GithubUser::ready(&u),
+            None => GithubUser::signed_out(),
         }
     }
     fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
@@ -307,7 +335,7 @@ fn install_body(dir: &Path) -> Value {
         "artifact_url": null, "game_build": null, "resources": "all", "db": "use_existing",
         "service": false, "firewall": false, "github_owner": null, "dry_run": false,
         "db_admin": {"host": "127.0.0.1", "port": 3306, "user": "root", "password": DBPASS},
-        "start": true, "app": null
+        "start": true
     })
 }
 
@@ -470,6 +498,40 @@ async fn database_login_test_never_echoes_the_password() {
     assert_eq!(s, 400);
 }
 
+/// A computer whose database server is installed but stopped.
+struct StoppedDb;
+impl kora_core::api::toolchain::ToolchainEnv for StoppedDb {
+    fn tools(&self) -> Vec<kora_core::tools::ToolStatus> {
+        vec![]
+    }
+    fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, String> {
+        Err("no".into())
+    }
+    fn database(&self) -> kora_core::api::toolchain::DbState {
+        kora_core::api::toolchain::DbState { installed: true, running: false, name: Some("mariadb".into()), version: None, unknown: false }
+    }
+    fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, String> {
+        Err("no".into())
+    }
+    fn admin(&self) -> kora_core::api::toolchain::AdminState {
+        Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_failed_database_login_offers_to_start_a_stopped_database() {
+    let r = rig().await;
+    kora_web::handlers::toolchain::set_env(Some(Arc::new(StoppedDb)));
+    let (_, v) = r.call("POST", "/checks/db-login", Some(json!({"admin": {"user": "root", "password": "wrong", "host": "127.0.0.1", "port": 3306}}))).await;
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["problem"]["code"], "install.db_stopped");
+    assert_eq!(v["problem"]["actions"], json!([{"kind": "start_database"}]));
+    // A database on another computer is not ours to start.
+    let (_, v) = r.call("POST", "/checks/db-login", Some(json!({"admin": {"user": "root", "password": "wrong", "host": "db.example.com", "port": 3306}}))).await;
+    assert!(v["problem"].is_null(), "{v}");
+    kora_web::handlers::toolchain::set_env(None);
+}
+
 #[tokio::test]
 async fn artifacts_are_listed_without_broken_builds() {
     let r = rig().await;
@@ -497,6 +559,9 @@ async fn artifacts_are_listed_without_broken_builds() {
 
 // ---- plan -----------------------------------------------------------------------------------
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn plan_validates_like_the_cli_and_returns_no_secrets() {
     let r = rig().await;
@@ -622,7 +687,8 @@ async fn a_failed_install_reports_what_was_kept_and_saves_the_answers_without_se
     // this branch's registry keeps the raw string; the integrator's passes a JSON object through
     // The jobs route returns the error in the UI's shape: `{code, message, kept, log_path}`.
     let err: Value = job["error"].clone();
-    assert_eq!(err["code"], "failed");
+    assert_eq!(err["code"], "install.step_failed");
+    assert_eq!((err["failed_step"].as_str(), err["resume"].as_bool()), (Some("build.db"), Some(true)));
     assert!(err["message"]
         .as_str()
         .unwrap()
@@ -645,6 +711,83 @@ async fn a_failed_install_reports_what_was_kept_and_saves_the_answers_without_se
     let (_, d) = r.call("GET", "/installs/defaults", None).await;
     assert_eq!(d["saved"]["name"], "Alpha Town");
     no_secrets(&d);
+}
+
+/// Retry runs the failed step again in a new job, with the same answers and the licence key that
+/// was only ever kept in memory; nothing is typed again.
+#[tokio::test]
+async fn a_stopped_install_can_retry_its_step_without_retyping_anything() {
+    let r = rig().await;
+    let dir = tmp("retry");
+    std::fs::create_dir_all(dir.join(".kora")).unwrap();
+    r.env.st().fail = Some("download failed".into());
+    let (_, v) = r.call("POST", "/installs", Some(install_body(&dir))).await;
+    let first = v["job"].as_str().unwrap().to_string();
+    let job = r.job(&first).await;
+    let err = &job["error"];
+    assert_eq!(err["actions"][0], json!({"kind": "retry_step", "step": "build.db"}));
+    assert!(err["actions"].as_array().unwrap().contains(&json!({"kind": "change_answers"})), "{err}");
+    assert!(!err["actions"].as_array().unwrap().iter().any(|a| a["kind"] == "skip_step"), "build.db is not optional: {err}");
+    assert!(err["actions"].as_array().unwrap().iter().any(|a| a["kind"] == "open_log" && a["job"] == first.as_str()), "{err}");
+    no_secrets(&job);
+    // Skipping a step that is not optional is refused, and the install can still be retried.
+    let (s, v) = r.call("POST", &format!("/installs/{first}/resume"), Some(json!({"skip": "build.db"}))).await;
+    assert_eq!((s, v["error"]["code"].as_str()), (409, Some("install.cannot_resume")), "{v}");
+    // Retry: fails again, as a new job that first shows the steps already done.
+    let (s, v) = r.call("POST", &format!("/installs/{first}/resume"), Some(json!({}))).await;
+    assert_eq!(s, 202, "{v}");
+    let second = v["job"].as_str().unwrap().to_string();
+    assert_ne!(second, first);
+    let job = r.job(&second).await;
+    assert_eq!(job["state"], "failed");
+    assert_eq!(job["events"][0]["step"], "prepare.dir");
+    assert_eq!(job["events"][0]["status"], "done");
+    // The first job cannot be continued twice.
+    let (s, v) = r.call("POST", &format!("/installs/{first}/resume"), Some(json!({}))).await;
+    assert_eq!((s, v["error"]["code"].as_str()), (404, Some("install.cannot_resume")));
+    assert_eq!(v["error"]["actions"], json!([{"kind": "change_answers"}]));
+    // The problem is fixed: retrying the second one finishes the install.
+    r.env.st().fail = None;
+    let (s, v) = r.call("POST", &format!("/installs/{second}/resume"), Some(json!({}))).await;
+    assert_eq!(s, 202, "{v}");
+    let job = r.job(v["job"].as_str().unwrap()).await;
+    assert_eq!(job["state"], "done", "{job}");
+    no_secrets(&job);
+    let runs = r.env.st().runs.clone();
+    assert_eq!(runs.len(), 3);
+    for run in &runs {
+        assert_eq!(run.license_key.as_deref(), Some(LICENCE), "the key is kept for retries");
+        assert_eq!(run.db_admin.as_ref().unwrap().password.as_deref(), Some(DBPASS));
+    }
+}
+
+/// An optional step (here: starting the server) that failed can be skipped; the install finishes without it.
+#[tokio::test]
+async fn an_optional_failed_step_can_be_skipped() {
+    let r = rig().await;
+    let dir = tmp("skip");
+    std::fs::create_dir_all(dir.join(".kora")).unwrap();
+    {
+        let mut st = r.env.st();
+        st.fail = Some("the server did not start".into());
+        st.fail_step = Some("launch");
+    }
+    let (_, v) = r.call("POST", "/installs", Some(install_body(&dir))).await;
+    let id = v["job"].as_str().unwrap().to_string();
+    let job = r.job(&id).await;
+    let actions = job["error"]["actions"].as_array().unwrap().clone();
+    assert!(actions.contains(&json!({"kind": "skip_step", "step": "launch"})), "{actions:?}");
+    let (s, v) = r.call("POST", &format!("/installs/{id}/resume"), Some(json!({"skip": "launch"}))).await;
+    assert_eq!(s, 202, "{v}");
+    let job = r.job(v["job"].as_str().unwrap()).await;
+    assert_eq!(job["state"], "done", "{job}");
+    assert!(job["events"].as_array().unwrap().iter().any(|e| e["step"] == "launch" && e["status"] == "skipped"));
+    let st = kora_core::steps::PlanState::load_or_default(&dir.join(".kora/plan-state.json")).unwrap();
+    assert_eq!(st.status("launch"), Some(kora_core::steps::StepStatus::Skipped));
+    let (s, _) = r.call("POST", "/installs/nope/resume", Some(json!({}))).await;
+    assert_eq!(s, 404);
+    let (s, _) = r.call("POST", &format!("/installs/{id}/resume"), Some(json!({"skip": 5}))).await;
+    assert_eq!(s, 400);
 }
 
 #[tokio::test]
@@ -682,6 +825,9 @@ async fn install_refuses_bad_requests_before_starting() {
     assert!(r.env.st().runs.is_empty(), "nothing may have started");
 }
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn install_needing_administrator_rights_answers_needs_elevation_without_secrets() {
     let r = rig().await;
@@ -691,7 +837,7 @@ async fn install_needing_administrator_rights_answers_needs_elevation_without_se
     b["service"] = json!(true);
     b["firewall"] = json!(true);
     b["resources"] = json!({"only": ["kora_hud", "ox_lib"]});
-    b["app"] = json!({"desktop_shortcut": false});
+    b["app"] = json!({"desktop_shortcut": false}); // an old UI may still send it: ignored
     let (s, v) = r.call("POST", "/installs", Some(b.clone())).await;
     assert_eq!(s, 403, "{v}");
     assert_eq!(v["error"]["code"], "needs_elevation");
@@ -714,7 +860,6 @@ async fn install_needing_administrator_rights_answers_needs_elevation_without_se
         "--db",
         "existing",
         "--db-admin-user",
-        "--no-desktop-shortcut",
         "--start",
     ] {
         assert!(cmd.iter().any(|c| c == want), "missing {want} in {cmd:?}");
@@ -756,7 +901,7 @@ async fn development_installs_resolve_the_github_owner() {
 async fn github_status_and_owners() {
     let r = rig().await;
     let (s, v) = r.call("GET", "/github/status", None).await;
-    assert_eq!((s, v), (200, json!({"signed_in": true, "user": "sam"})));
+    assert_eq!((s, v), (200, json!({"signed_in": true, "user": "sam", "state": "ready", "missing_scopes": [], "problem": null})));
     let (s, v) = r.call("GET", "/github/owners", None).await;
     assert_eq!(s, 200);
     assert_eq!(
@@ -769,9 +914,18 @@ async fn github_status_and_owners() {
         release: Mutex::new(None),
     })));
     let (_, v) = r.call("GET", "/github/status", None).await;
-    assert_eq!(v, json!({"signed_in": false, "user": null}));
+    assert_eq!((v["signed_in"].clone(), v["state"].clone()), (json!(false), json!("signed_out")));
+    assert_eq!(v["problem"]["actions"], json!([{"kind": "sign_in_github"}]));
     let (s, v) = r.call("GET", "/github/owners", None).await;
-    assert_eq!((s, v["error"]["code"].as_str()), (403, Some("forbidden")));
+    assert_eq!((s, v["error"]["code"].as_str()), (403, Some("github.signed_out")));
+    assert_eq!(v["error"]["actions"], json!([{"kind": "sign_in_github"}]));
+    // gh missing is told apart from signed out, with "install it" offered.
+    gh_seam::set_env(Some(Arc::new(MissingGh)));
+    let (_, v) = r.call("GET", "/github/status", None).await;
+    assert_eq!((v["state"].clone(), v["problem"]["code"].clone()), (json!("gh_missing"), json!("github.gh_missing")));
+    assert_eq!(v["problem"]["actions"][0], json!({"kind": "install_tool", "tool": "gh"}));
+    let (s, v) = r.call("GET", "/github/owners", None).await;
+    assert_eq!((s, v["error"]["code"].as_str()), (403, Some("github.gh_missing")));
 }
 
 #[tokio::test]

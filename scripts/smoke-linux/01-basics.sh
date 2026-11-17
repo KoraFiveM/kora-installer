@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# basics: --version, friendly no-TTY error, dry-run plan, port handling, github owners without gh login.
+# basics: --version, the removed --code flag, dry-run plan, port handling, github owners without gh login.
 . "$(dirname "$0")/common.sh"
 rm -rf "$SMOKE_ROOT"; mkdir -p "$SMOKE_ROOT"
 
@@ -8,10 +8,10 @@ kora --version
 assert_eq "exit 0" 0 "$CODE"
 assert_matches "prints 'kora X.Y.Z'" "$OUT" '^kora [0-9]+\.[0-9]+\.[0-9]+'
 
-step "2. kora install with no terminal: friendly error, exit 2"
-kora install
+step "2. kora install --code: removed, friendly error, exit 2"
+kora install --code KORA-0000-0000
 assert_eq "exit 2" 2 "$CODE"
-assert_contains "explains that a terminal is needed" "$OUT" "needs an interactive terminal"
+assert_contains "explains that setup codes are gone" "$OUT" "setup codes were removed"
 
 step "3. kora status with nothing registered"
 kora status
@@ -65,5 +65,31 @@ assert_contains "tells the user to run gh auth login" "$OUT" "gh auth login"
 step "7. kora uninstall without --yes and without a terminal"
 kora uninstall
 assert_eq "exit 2" 2 "$CODE"
+
+step "8. saved licence keys: private file, masked list, named install"
+SAVED_KEY='cfxk_SAVEDSAVEDSAVEDSAVED_1234'
+OUT="$(printf '%s\n' "$SAVED_KEY" | "$KORA_BIN" keys add Main 2>&1)"; CODE=$?
+echo "$OUT"
+assert_eq "keys add exits 0" 0 "$CODE"
+assert_not_contains "add never prints the key" "$OUT" "$SAVED_KEY"
+assert_matches "secrets.json is 0600" "$(stat -c %a "$KORA_HOME/secrets.json")" '^600$'
+kora keys list
+assert_eq "keys list exits 0" 0 "$CODE"
+assert_contains "list shows the last four characters" "$OUT" "1234"
+assert_not_contains "list never shows the key" "$OUT" "SAVEDSAVED"
+printf '%s\n' "$SAVED_KEY" | "$KORA_BIN" keys add Again >/dev/null 2>&1 && CODE=0 || CODE=$?
+assert_eq "the same key twice is refused" 1 "$CODE"
+D="$SMOKE_ROOT/named"
+kora install --name named --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db skip --license-key-name main --dry-run -y
+assert_eq "install --license-key-name (dry run): exit 0" 0 "$CODE"
+assert_not_contains "the plan never prints the key" "$OUT" "$SAVED_KEY"
+kora install --name named --dir "$D" --license-key-name nope --dry-run -y
+assert_eq "an unknown key name: exit 2" 2 "$CODE"
+assert_contains "says there is no such key" "$OUT" "no saved licence key called"
+kora keys rename main Live
+assert_eq "keys rename exits 0" 0 "$CODE"
+kora keys remove live -y
+assert_eq "keys remove exits 0" 0 "$CODE"
+assert_not_contains "the file no longer holds the key" "$(cat "$KORA_HOME/secrets.json")" "SAVEDSAVED"
 
 echo; echo "basics: $PASS assertions passed"

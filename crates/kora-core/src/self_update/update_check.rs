@@ -88,7 +88,7 @@ pub fn notice_text(v: &Version) -> String {
     format!("Kora v{v} is available - run: kora self-update")
 }
 
-/// One-line notice from the cache alone (for the TUI footer). `None` when disabled, unknown or current.
+/// One-line notice from the cache alone (for a one-line footer). `None` when disabled, unknown or current.
 pub fn notice_line() -> Option<String> {
     if !enabled_here(true) {
         return None;

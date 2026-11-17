@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
-import type { DbChoice } from '@/api/types'
+import type { DbChoice, Problem } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
@@ -162,7 +162,7 @@ const DB_OPTIONS: { v: DbChoice; label: string; hint: string }[] = [
 ]
 
 export function DatabaseStep({ f, set }: StepProps) {
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; message: string; problem?: Problem | null } | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<unknown>(null)
   const problem = dbLoginProblem(f)
@@ -201,7 +201,10 @@ export function DatabaseStep({ f, set }: StepProps) {
             </div>
           )}
           <Button disabled={busy || !!problem} onClick={test}>Test login</Button>
-          {result && <Alert tone={result.ok ? 'success' : 'danger'}>{result.message}</Alert>}
+          {result && !result.ok && result.problem
+            // The database is installed but stopped: the same "Start it for me" as everywhere, then the test runs again by itself.
+            ? <ErrorNotice error={result.problem} onFixed={test} />
+            : result && <Alert tone={result.ok ? 'success' : 'danger'}>{result.message}</Alert>}
           <ErrorNotice error={err} />
         </fieldset>
       )}
@@ -209,18 +212,12 @@ export function DatabaseStep({ f, set }: StepProps) {
   )
 }
 
-export function OptionsStep({ f, set, advanced, appSupported }: StepProps & { appSupported: boolean }) {
+export function OptionsStep({ f, set, advanced }: StepProps) {
   return (
     <div className="space-y-4">
       <Checkbox label="Open the game port in the firewall" hint="Lets players outside this computer connect. Needs administrator rights." checked={f.firewall} onChange={(e) => set({ firewall: e.target.checked })} />
       {advanced && <Checkbox label="Also open the txAdmin port" hint="Lets you reach txAdmin from other computers. Anyone who can reach it can try to sign in, so leave this off unless you need it." checked={f.txPublic} onChange={(e) => set({ txPublic: e.target.checked })} />}
       <Checkbox label="Install as a background service" hint="The server starts with the computer and restarts if it crashes. Needs administrator rights." checked={f.service} onChange={(e) => set({ service: e.target.checked })} />
-      {appSupported && (
-        <div className="space-y-2">
-          <Checkbox label="Install the Kora app" hint="Adds Kora to the Start Menu so you can open the manager later." checked={f.app} onChange={(e) => set({ app: e.target.checked })} />
-          {f.app && <div className="pl-7"><Checkbox label="Also put a shortcut on the desktop" checked={f.desktopShortcut} onChange={(e) => set({ desktopShortcut: e.target.checked })} /></div>}
-        </div>
-      )}
     </div>
   )
 }
@@ -230,23 +227,69 @@ export const CFX_KEYS_URL = 'https://portal.cfx.re/servers/registration-keys'
 
 export function LicenceStep({ f, set }: StepProps) {
   const [show, setShow] = useState(false)
+  const keys = useQuery({ queryKey: ['keys'], queryFn: api.keys.list, retry: false })
+  const saved = keys.data?.keys ?? []
+  const canManage = keys.data?.can_manage ?? true
+  // The saved key the answers name is gone (renamed or deleted since): say so, and pick something else.
+  const gone = f.licenceChoice === 'saved' && keys.isSuccess && !saved.some((k) => k.name === f.licenceName) ? f.licenceName : null
+  const [goneName, setGoneName] = useState<string | null>(null)
+  useEffect(() => {
+    if (!gone) return
+    setGoneName(gone)
+    set(saved.length > 0 ? { licenceName: saved[0].name } : { licenceChoice: 'new', licenceName: '' })
+  }, [gone]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Saving needs a readable keys file.
+  useEffect(() => {
+    if (keys.isError && f.saveKey) set({ saveKey: false })
+  }, [keys.isError]) // eslint-disable-line react-hooks/exhaustive-deps
+  const picking = f.licenceChoice === 'saved' && saved.length > 0
+  const noKeysForYou = keys.isSuccess && saved.length === 0 && !canManage
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Every FiveM server needs its own licence key. It is free. To get one:</p>
-      <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-        <li>Open the Cfx.re portal and sign in.</li>
-        <li>Choose &quot;Server keys&quot;, then register a new key.</li>
-        <li>Copy the key and paste it below.</li>
-      </ol>
-      <Button asChild><a href={CFX_KEYS_URL} target="_blank" rel="noreferrer">Open the Cfx.re portal <ExternalLink /></a></Button>
-      <div className="space-y-1.5">
-        <Label htmlFor="licence-key">Licence key</Label>
-        <div className="flex gap-2">
-          <Input id="licence-key" aria-describedby="licence-hint" type={show ? 'text' : 'password'} value={f.license} onChange={(e) => set({ license: e.target.value })} autoComplete="off" spellCheck={false} />
-          <Button size="icon" aria-label={show ? 'Hide the licence key' : 'Show the licence key'} aria-pressed={show} onClick={() => setShow((s) => !s)}>{show ? <EyeOff /> : <Eye />}</Button>
-        </div>
-        <p id="licence-hint" className="text-xs text-muted-foreground">It is only used to set up this server and is never shown again.</p>
-      </div>
+      {goneName && <Alert tone="warning">The saved licence key &quot;{goneName}&quot; is not there any more (it was renamed or deleted). Pick another one{canManage ? ' or add it again' : ''}.</Alert>}
+      {keys.isError && <ErrorNotice error={keys.error} title="Kora cannot read your saved licence keys" />}
+      {saved.length > 0 && (
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm text-muted-foreground">Which licence key should this server use?</legend>
+          {saved.map((k) => (
+            <Radio key={k.name} name="licence-pick" checked={picking && f.licenceName === k.name} onChange={() => set({ licenceChoice: 'saved', licenceName: k.name })}
+              label={k.name} hint={`Key ending ${k.last4}${k.servers.length > 0 ? `. Used by ${k.servers.join(', ')}.` : '.'}`} />
+          ))}
+          {canManage && <Radio name="licence-pick" checked={f.licenceChoice === 'new'} onChange={() => set({ licenceChoice: 'new' })} label="Add a new licence key" hint="Paste a key you have not used here before." />}
+        </fieldset>
+      )}
+      {noKeysForYou && <Alert tone="info">There are no saved licence keys yet. Only an administrator can add one: ask them to add it in Settings, under Licence keys.</Alert>}
+      {f.licenceChoice === 'new' && !noKeysForYou && (
+        <>
+          <p className="text-sm text-muted-foreground">Every FiveM server needs its own licence key. It is free. To get one:</p>
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>Open the Cfx.re portal and sign in.</li>
+            <li>Choose &quot;Server keys&quot;, then register a new key.</li>
+            <li>Copy the key and paste it below.</li>
+          </ol>
+          <Button asChild><a href={CFX_KEYS_URL} target="_blank" rel="noreferrer">Open the Cfx.re portal <ExternalLink /></a></Button>
+          <div className="space-y-1.5">
+            <Label htmlFor="licence-key">Licence key</Label>
+            <div className="flex gap-2">
+              <Input id="licence-key" aria-describedby="licence-hint" type={show ? 'text' : 'password'} value={f.license} onChange={(e) => set({ license: e.target.value })} autoComplete="off" spellCheck={false} />
+              <Button size="icon" aria-label={show ? 'Hide the licence key' : 'Show the licence key'} aria-pressed={show} onClick={() => setShow((x) => !x)}>{show ? <EyeOff /> : <Eye />}</Button>
+            </div>
+            <p id="licence-hint" className="text-xs text-muted-foreground">Kora only ever shows the last 4 characters of a key.</p>
+          </div>
+          <Checkbox
+            label="Save this key on this computer for next time"
+            hint={f.saveKey
+              ? 'Kept in a private file in the Kora folder that only you can read. Next time you pick it by name instead of pasting it, and an install that stops can carry on even if Kora Panel is restarted.'
+              : 'Not saved. You will paste it again next time, and an install that stops can only carry on while Kora Panel keeps running.'}
+            checked={f.saveKey} disabled={keys.isError} onChange={(e) => set({ saveKey: e.target.checked })}
+          />
+          {f.saveKey && (
+            <Field label="Name for this key" hint='Something you will recognise, for example "Main" or "Test server".'>
+              <Input value={f.saveKeyName} maxLength={40} onChange={(e) => set({ saveKeyName: e.target.value })} autoComplete="off" />
+            </Field>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -257,7 +300,7 @@ export function CfxStep({ f, set }: StepProps) {
   const [err, setErr] = useState<unknown>(null)
   const name = f.cfxUsername.trim()
   const edit = (v: string) => {
-    set({ cfxUsername: v, cfxFound: null })
+    set({ cfxUsername: v, cfxFound: null, cfxRemembered: false })
     setFailure(null)
     setErr(null)
   }
@@ -267,7 +310,7 @@ export function CfxStep({ f, set }: StepProps) {
     setFailure(null)
     try {
       const r = await api.checks.cfx(name)
-      if (r.ok && r.identifier) set({ cfxFound: { username: r.username ?? name, identifier: r.identifier } })
+      if (r.ok && r.identifier) set({ cfxFound: { username: r.username ?? name, identifier: r.identifier }, cfxRemembered: false })
       else { set({ cfxFound: null }); setFailure(r.message) }
     } catch (e) {
       setErr(e)
@@ -289,6 +332,7 @@ export function CfxStep({ f, set }: StepProps) {
       </div>
       <div aria-live="polite" className="space-y-2">
         {found && <Alert tone="success">{found.username ? `Found ${found.username} (${found.identifier}). This account will be the txAdmin admin.` : `Kept from your earlier answers: ${found.identifier}. This account will be the txAdmin admin.`}</Alert>}
+        {found && f.cfxRemembered && <p className="text-xs text-muted-foreground">Remembered from your last install. Type another username and press Check to change it, or use Skip below.</p>}
         {failure && <Alert tone="danger">{failure}</Alert>}
         {!found && !failure && !name && <p className="text-sm text-muted-foreground">Without it, Kora creates a local admin with a generated password.</p>}
       </div>
@@ -305,8 +349,8 @@ export function GithubStep({ f, set, signedIn, onSignedIn }: StepProps & { signe
       <p className="text-sm text-muted-foreground">A development server keeps its own copy (a fork) of each Kora resource on GitHub, so you can change them and share your changes.</p>
       <GithubSignIn onSignedIn={onSignedIn} />
       {signedIn && (
-        <Field label="Put the forks in" hint="Your own account, or an organisation you belong to.">
-          <Select value={f.githubOwner} onChange={(e) => set({ githubOwner: e.target.value })} disabled={owners.isLoading} aria-busy={owners.isLoading}>
+        <Field label="Put the forks in" hint={f.githubRemembered && f.githubOwner ? 'Your own account, or an organisation you belong to. Remembered from your last install: pick another to change it.' : 'Your own account, or an organisation you belong to.'}>
+          <Select value={f.githubOwner} onChange={(e) => set({ githubOwner: e.target.value, githubRemembered: false })} disabled={owners.isLoading} aria-busy={owners.isLoading}>
             <option value="">{owners.isLoading ? 'Loading your accounts...' : 'Choose...'}</option>
             {(owners.data ?? []).map((o) => <option key={o.login} value={o.login}>{o.login} ({o.kind === 'user' ? 'your account' : 'organisation'})</option>)}
           </Select>

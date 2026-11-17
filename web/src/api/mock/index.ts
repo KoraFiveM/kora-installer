@@ -3,8 +3,12 @@
 import type * as T from '../types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
+import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
+import { installKeysMock } from './keys'
+import { installBranchesMock } from './branches'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
+import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
 
 const BASE = '/api/v1'
 
@@ -21,7 +25,7 @@ let snapshots: Record<string, T.SnapshotInfo[]> = {}
 let consoleEnabled: Record<string, boolean> = {}
 let webhooks: Record<string, string> = {}
 let schedules: Record<string, T.ScheduleConfig> = {}
-let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
+let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
 let dirtyPreviewed: Record<string, T.UpdatePreview> = {}
 let paidAssets: Record<string, T.PaidAsset[]> = {}
 let uploads = new Map<string, string>()
@@ -45,15 +49,19 @@ function init(name: ScenarioName) {
   }
   webhooks = beh.trouble && servers[0] ? { [servers[0].name]: 'https://discord.com/api/webhooks/123456789012345678/TOKEN-that-no-longer-exists' } : {}
   schedules = {}
-  prefs = { github: false, savedInstall: null, app: false, desktopShortcut: false, version: '0.4.0', signedIn: true }
+  prefs = { github: false, savedInstall: null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
   dirtyPreviewed = {}
   paidAssets = {}
   uploads = new Map()
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
+  resetBranches?.()
   jobs.clear()
   busy.clear()
+  paused.clear()
+  keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
   nextId = 1
   consoleTick = 0
+  resetToolchainMock(beh.trouble)
 }
 
 class Fail extends Error {
@@ -74,7 +82,10 @@ const find = (name: string): T.ServerSummary => {
   return s
 }
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms * speed))
-const elevate = (what: string, cmd: string[]) => new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd])
+const elevate = (what: string, cmd: string[]) =>
+  new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd], {
+    actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
+  })
 
 // ---- buses ----------------------------------------------------------------------------------
 
@@ -144,6 +155,7 @@ const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, sta
 
 const detail = (s: T.ServerSummary): T.ServerDetail => ({
   ...s,
+  connect: `192.168.1.20:${s.ports.game}`,
   running: s.status === 'running',
   game_listening: s.status === 'running',
   txadmin_up: s.status === 'running',
@@ -238,8 +250,49 @@ const INSTALL_STEPS: [string, string][] = [
   ['launch', 'Starting the server'],
 ]
 
-async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void): Promise<T.InstallOutcome> {
-  const fail = req.name.toLowerCase().startsWith('fail')
+/** Steps that may be skipped after they failed (the real list: `kora_core::installer::SKIPPABLE`). */
+const SKIPPABLE = new Set(['build.firewall', 'launch'])
+
+/**
+ * Stopped installs that can carry on (`POST /installs/{job}/resume`), with their answers. Demo names:
+ * "fail..." stops at the database the first time (Try this step again then works); "skip..." stops at
+ * starting the server, which may be skipped; "github..." stops because GitHub is not signed in; "nogh..."
+ * stops because the GitHub CLI is missing ("Install it for me", then the step is retried by itself);
+ * "nodb..." stops because the database server is stopped ("Start it for me", then the same).
+ */
+const paused = new Map<string, { req: T.InstallRequest; failed: string; attempt: number; done: string[]; skip: Set<string>; noAdmin?: boolean }>()
+
+interface InstallRun {
+  /** How many times this install was tried before. */
+  attempt: number
+  /** Steps finished in an earlier attempt (shown as done again first). */
+  done: string[]
+  /** Steps the user chose to skip. */
+  skip: Set<string>
+  /** Windows: "Continue without the administrator parts" was chosen (no prompt any more). */
+  noAdmin?: boolean
+}
+
+async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, jobId: () => string, run: InstallRun = { attempt: 0, done: [], skip: new Set() }): Promise<T.InstallOutcome> {
+  const lower = req.name.toLowerCase()
+  if (run.attempt === 0 && lower.startsWith('nogh')) setMockGhInstalled(false)
+  if (run.attempt === 0 && lower.startsWith('nodb')) stopMockDatabase()
+  const failAt = lower.startsWith('nogh') && !mockGhInstalled() ? 'prepare.git' : lower.startsWith('nodb') && mockDbStoppedProblem() ? 'build.db' : lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
+  // Windows: one permission prompt before the first step (see ./windowsAdmin).
+  if (beh.windows && !run.noAdmin && adminNeeds(req).length > 0) {
+    const title = 'Administrator permission'
+    emit({ step: ADMIN_STEP, title, status: 'running', detail: 'Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on. If you do not see the prompt, look for a flashing shield icon in the taskbar.', percent: 0 } satisfies T.ProgressEvent)
+    await sleep(700)
+    const answer = promptAnswer(req.name, run.attempt)
+    if (answer !== 'yes') {
+      const p = promptProblem(req, answer)
+      emit({ step: ADMIN_STEP, title, status: 'failed', detail: p.message, percent: 0 } satisfies T.ProgressEvent)
+      const id = jobId()
+      paused.set(id, { req, failed: '', attempt: run.attempt + 1, done: run.done, skip: run.skip })
+      throw new Fail(403, p.code ?? 'admin.declined', p.message, undefined, { details: p.details, resume: true, kept: [], actions: [...(p.actions ?? []), { kind: 'change_answers' }, { kind: 'open_log', job: id }] })
+    }
+    emit({ step: ADMIN_STEP, title, status: 'done', detail: 'Permission given: Kora does the administrator steps when the install reaches them', percent: 0 } satisfies T.ProgressEvent)
+  }
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
   if (!req.service) skipped.add('build.service')
@@ -248,18 +301,55 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void): Pr
   for (let i = 0; i < INSTALL_STEPS.length; i++) {
     const [step, title] = INSTALL_STEPS[i]
     const pct = Math.round(((i + 1) / INSTALL_STEPS.length) * 100)
-    if (skipped.has(step)) {
-      emit({ step, title, status: 'skipped', detail: 'Not needed for your choices', percent: pct } satisfies T.ProgressEvent)
+    if (skipped.has(step) || run.skip.has(step)) {
+      emit({ step, title, status: 'skipped', detail: run.skip.has(step) ? 'Skipped: you chose to go on without it' : 'Not needed for your choices', percent: pct } satisfies T.ProgressEvent)
+      continue
+    }
+    if (run.done.includes(step)) {
+      emit({ step, title, status: 'done', detail: 'Already done', percent: pct } satisfies T.ProgressEvent)
       continue
     }
     emit({ step, title, status: 'running', detail: 'Working on it', percent: Math.max(0, pct - 10) } satisfies T.ProgressEvent)
     await sleep(step === 'build.fxserver' ? 1800 : 900)
-    if (fail && step === 'build.db') {
-      emit({ step, title, status: 'failed', detail: 'Could not log in to the database', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier }
-      throw new Fail(500, 'internal', 'The database refused the administrator login, so the install stopped before creating the server database.', undefined, {
-        kept: [`The FiveM server files in ${req.dir}`, 'Your answers (use "Try again" to continue)'],
+    if (step === failAt) {
+      emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
+      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null }
+      const id = jobId()
+      paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
+      const common: Partial<T.JobError> = {
+        kept: [`What was already created in ${req.dir}`, 'Your answers (not the licence key or database password)'],
         log_path: `${req.dir}/.kora/install.log`,
+        failed_step: step,
+        resume: true,
+      }
+      const tail: T.ProblemAction[] = [
+        { kind: 'retry_step', step },
+        ...(SKIPPABLE.has(step) ? [{ kind: 'skip_step', step } as T.ProblemAction] : []),
+        { kind: 'change_answers' },
+        { kind: 'open_log', job: id, path: `${req.dir}/.kora/install.log` },
+      ]
+      const dbStopped = mockDbStoppedProblem()
+      if (step === 'build.db' && dbStopped) {
+        throw new Fail(500, dbStopped.code, dbStopped.message, undefined, { ...common, actions: [...(dbStopped.actions ?? []), ...tail] })
+      }
+      if (step === 'build.db') {
+        throw new Fail(500, 'install.db_login_failed', "Could not log in to the database server as 'root'. Kora needs an administrator account to create a NEW database and user. Check the admin user, password, address and port you gave.", undefined, {
+          ...common,
+          details: "ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: YES)",
+          actions: [{ kind: 'change_answers', section: 'database' }, ...tail],
+        })
+      }
+      const ghGone = mockGhMissingProblem()
+      if (step === 'prepare.git' && ghGone) {
+        throw new Fail(500, ghGone.code, ghGone.message, undefined, { ...common, actions: [...(ghGone.actions ?? []), ...tail] })
+      }
+      if (step === 'prepare.git') {
+        throw new Fail(500, 'github.signed_out', 'You are not signed in to GitHub.', undefined, { ...common, actions: [{ kind: 'sign_in_github' }, ...tail] })
+      }
+      throw new Fail(500, 'install.step_failed', 'The server was installed, but it did not start: txAdmin did not answer within 60 seconds.', undefined, {
+        ...common,
+        details: '[txAdmin] Error: listen EADDRINUSE: address already in use 0.0.0.0:40120',
+        actions: tail,
       })
     }
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
@@ -293,9 +383,15 @@ const route = (method: string, pattern: string, h: Handler) => {
   routes.push([method, new RegExp('^' + pattern.replace(/\{(\w+)\}/g, '([^/]+)') + '$'), h])
 }
 const dec = (s: string) => decodeURIComponent(s)
+/** The headers of the request being answered (the mock routes only get the body). */
+let lastHeaders = new Headers()
+/** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
+const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
+const keysMock = installKeysMock(route, Fail, () => servers)
+const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
 const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
@@ -329,8 +425,10 @@ route('POST', '/session/link', () => {
   linkCodes.add(code)
   return { code, expires_in: 600 }
 })
-route('GET', '/system', () => ({ admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
-route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s })) }))
+route('GET', '/system', () => (beh.windows
+  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
+  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
+route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
     await sleep(1200)
@@ -702,13 +800,13 @@ route('DELETE', '/servers/{s}/assets/{a}', (m) => {
 route('POST', '/servers/{s}/issues', (m, b) => {
   find(dec(m[1]))
   if (!String(b.title ?? '').trim()) throw new Fail(400, 'bad_request', 'Give the issue a short title.')
-  if (!prefs.github) throw new Fail(403, 'forbidden', 'Sign in to GitHub first.')
+  if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   return { url: `https://github.com/KoraFiveM/${String(b.resource)}/issues/42` }
 })
 route('POST', '/servers/{s}/pr/plan', (m, b) => {
   const s = find(dec(m[1]))
   if (s.mode !== 'development') throw new Fail(400, 'bad_request', 'Pull requests are only for development servers.')
-  if (!prefs.github) throw new Fail(403, 'forbidden', 'Sign in to GitHub first.')
+  if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   const r = String(b.resource ?? '')
   if (r !== 'kora_core' && r !== 'kora_inventory') throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
   return { resource: r, upstream: `KoraFiveM/${r}`, base: 'dev', head_owner: 'sam-rp', head_branch: 'fix-payroll', ahead: 2, dir: `${s.dir}/resources/[kora]/${r}` } satisfies T.PrPlan
@@ -718,7 +816,20 @@ route('POST', '/servers/{s}/pr', (m, b) => {
   if (!String(b.title ?? '').trim()) throw new Fail(400, 'bad_request', 'Give the pull request a title.')
   return { url: 'https://github.com/KoraFiveM/kora_core/pull/87' }
 })
-route('GET', '/github/status', () => ({ signed_in: prefs.github, user: prefs.github ? 'sam-rp' : null }) satisfies T.GithubStatus)
+const githubStatus = (): T.GithubStatus => {
+  // `trouble`: the GitHub CLI is not installed (told apart from "signed out") until the "Install it for me" button has run.
+  if (!mockGhInstalled()) {
+    return {
+      signed_in: false, user: null, state: 'gh_missing', missing_scopes: [],
+      problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
+    }
+  }
+  return prefs.github
+    ? { signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null }
+    : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } }
+}
+route('GET', '/github/status', () => githubStatus())
+installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble, windows: () => beh.windows })
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
     await sleep(beh.trouble ? 3000 : 6000)
@@ -729,7 +840,7 @@ route('POST', '/github/login', () => {
   return { ...started, code: 'WDJB-MJHT', url: 'https://github.com/login/device' } satisfies T.GithubLoginStart
 })
 route('GET', '/github/owners', () => {
-  if (!prefs.github) throw new Fail(403, 'forbidden', 'Sign in to GitHub first.')
+  if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   return { owners: [{ login: 'sam-rp', kind: 'user', can_fork: true, reason: null }, { login: 'sunset-roleplay', kind: 'org', can_fork: false, reason: 'You cannot create repositories in this organisation.' }] satisfies T.GithubOwner[] }
 })
 route('GET', '/catalog', () => catalog)
@@ -737,7 +848,7 @@ route('GET', '/artifacts', () => ({ recommended: 17000, items: [17200, 17100, 17
 route('GET', '/installs/defaults', () => {
   const taken = servers.map((s) => s.ports.game)
   const game = nextFree(30120, taken)
-  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall } satisfies T.InstallDefaults
+  return { name: 'my-server', dir: '/srv/fivem/my-server', hostname: 'My Kora server', ports: { game, txadmin: nextFree(40120, servers.map((s) => s.ports.txadmin)) }, saved: prefs.savedInstall && prefs.savedInstall.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { ...prefs.savedInstall, license_key_name: null } : prefs.savedInstall, profile: keysMock.profile(), resumable: [...paused.entries()].map(([job, p]) => ({ job, name: p.req.name, failed_step: p.failed })), ...(prefs.savedInstall?.license_key_name && !keysMock.has(prefs.savedInstall.license_key_name) ? { saved_key_missing: prefs.savedInstall.license_key_name } : {}) } satisfies T.InstallDefaults
 })
 route('DELETE', '/installs/saved', () => {
   prefs.savedInstall = null
@@ -757,7 +868,7 @@ route('POST', '/checks/disk', (_m, b) => {
 })
 route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
-  if (beh.trouble || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.' }
+  if (beh.trouble || mockDbStoppedProblem() || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() } satisfies T.DbLoginCheck
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
 })
 route('POST', '/checks/cfx', (_m, b) => {
@@ -766,7 +877,7 @@ route('POST', '/checks/cfx', (_m, b) => {
   const none = (message: string) => ({ ok: false, id: null, username: null, identifier: null, message }) satisfies T.CfxCheck
   if (beh.trouble) return none('forum.cfx.re did not answer. Check the internet connection and try again, or skip this step.')
   if (name.toLowerCase().includes('offline')) return none('Could not reach forum.cfx.re. Check the internet connection and try again, or skip this step.')
-  if (name.toLowerCase() === 'jsixty') return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck
+  if (name.toLowerCase() === 'jsixty') { keysMock.remember({ cfx_username: 'JSixty', cfx_identifier: 'fivem:4465268' }); return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck }
   return none(`No Cfx.re account called "${name}" was found. Check the spelling: it is the name on forum.cfx.re.`)
 })
 route('POST', '/installs/plan', (_m, b) => {
@@ -776,15 +887,47 @@ route('POST', '/installs/plan', (_m, b) => {
   if (r.txadmin_public) needs.push('Open the txAdmin port in the firewall')
   if (r.service) needs.push('Install the background service')
   if (r.db === 'install_if_missing') needs.push('Install the database if it is missing')
+  if (beh.windows) {
+    const w = adminNeeds(r)
+    return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: w, notes: [], admin_prompt: w.length > 0 } satisfies T.InstallPlan
+  }
   return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: needs, notes: [] } satisfies T.InstallPlan
 })
 route('POST', '/installs', (_m, b) => {
   const r = b as unknown as T.InstallRequest
-  if (!r.license_key) throw new Fail(400, 'bad_request', 'A licence key is needed. Get one from the Cfx.re portal.')
+  if (!r.license_key && !r.license_key_name) throw new Fail(400, 'bad_request', 'A licence key is needed. Get one from the Cfx.re portal.')
+  keysMock.forInstall(r)
+  if (r.mode === 'development' && r.github_owner) keysMock.remember({ github_owner: r.github_owner })
   if (servers.some((s) => s.name === r.name)) throw new Fail(409, 'conflict', `A server called "${r.name}" already exists.`)
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)
-  return startJob('install', null, (emit) => runInstall(r, emit))
+  if (beh.windows && r.name.toLowerCase().startsWith('remote') && adminNeeds(r).length > 0 && !askedAdmin()) {
+    const p = remoteProblem(r)
+    throw new Fail(403, p.code ?? 'admin.remote', p.message, undefined, { actions: p.actions })
+  }
+  let id = ''
+  const started = startJob('install', null, (emit) => runInstall(r, emit, () => id))
+  id = started.job
+  return started
+})
+route('POST', '/installs/{j}/resume', (m, b) => {
+  const from = dec(m[1])
+  const p = paused.get(from)
+  if (!p) {
+    throw new Fail(404, 'install.cannot_resume', 'This install can no longer be continued from here (Kora Panel was restarted, or it was continued already). Check your answers and start it again: it carries on where it stopped.', undefined, { actions: [{ kind: 'change_answers' }] })
+  }
+  const skip = typeof b.skip === 'string' ? b.skip : null
+  if (skip && (skip !== p.failed || !SKIPPABLE.has(skip))) {
+    throw new Fail(409, 'install.cannot_resume', 'This step cannot be skipped: your server needs it. Try it again, or change your answers.', undefined, { actions: [{ kind: 'retry_step', step: p.failed }, { kind: 'change_answers' }] })
+  }
+  paused.delete(from)
+  const noAdmin = b.without_admin === true || !!p.noAdmin
+  const run: InstallRun = { attempt: p.attempt, done: p.done, skip: new Set([...p.skip, ...(skip ? [skip] : [])]), noAdmin }
+  const req = noAdmin ? withoutAdminReq(p.req) : p.req
+  let id = ''
+  const started = startJob('install', null, (emit) => runInstall(req, emit, () => id, run))
+  id = started.job
+  return started
 })
 route('GET', '/installs/{j}/log', () => ({ lines: ['[install] started', '[install] see the steps above for details'] }))
 route('GET', '/self-update', () => ({ current: prefs.version, latest: '0.4.1', available: prefs.version !== '0.4.1', update_available: prefs.version !== '0.4.1', versions: ['0.4.1', '0.4.0', '0.3.4'] }) satisfies T.SelfUpdateInfo)
@@ -806,17 +949,18 @@ route('POST', '/panel/restart', () => {
   prefs.version = p.join('.')
   return { restarting: true }
 })
-route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.version : null, path: prefs.app ? 'C:\\Users\\sam\\AppData\\Local\\Kora\\kora.exe' : null, desktop_shortcut: prefs.desktopShortcut, supported: true }) satisfies T.AppStatus)
+route('GET', '/app', () => ({ installed: prefs.app, version: prefs.app ? prefs.version : null, path: prefs.app ? 'C:\\Program Files\\Kora\\kora.exe' : null, desktop_shortcut: prefs.desktopShortcut, supported: true, legacy: prefs.app || beh.trouble, legacy_items: prefs.app || beh.trouble ? ['Delete C:\\Program Files\\Kora\\kora.exe', 'Remove the shortcut Kora.lnk (it runs as administrator)'] : [], shortcuts: prefs.shortcuts }) satisfies T.AppStatus)
 route('PUT', '/app', (_m, b) => {
-  if (beh.trouble) throw elevate('Installing the Kora app', ['app', 'install', '--yes', ...(b.desktop_shortcut ? [] : ['--no-desktop-shortcut'])])
-  prefs.app = true
+  prefs.shortcuts = true
   prefs.desktopShortcut = !!b.desktop_shortcut
-  return { message: 'The Kora app is installed.' }
+  if (beh.trouble) throw elevate('Your new Kora shortcuts are ready. Removing the old copy of Kora', ['uninstall', '--app', '--yes'])
+  prefs.app = false
+  return { message: 'Done. Kora now opens from your own shortcuts. Your servers were not touched.' }
 })
 route('DELETE', '/app', () => {
-  if (beh.trouble) throw elevate('Removing the Kora app', ['uninstall', '--app', '--yes'])
+  if (beh.trouble) throw elevate('Removing the old Kora app', ['uninstall', '--app', '--yes'])
   prefs.app = false
-  return { message: 'The Kora app was removed.' }
+  return { message: 'The old Kora app was removed.' }
 })
 route('POST', '/uninstall/plan', (_m, b) => {
   const only = b.server ? find(String(b.server)) : null
@@ -830,7 +974,7 @@ route('POST', '/uninstall/plan', (_m, b) => {
       { item: `${s.name}/database`, description: `Drop the database and database user Kora created for '${s.name}'`, kind: 'database', remove: false },
     )
   }
-  if (!only && prefs.app) items.push({ item: 'app', description: 'The Kora app (the `kora` command, shortcuts and the installed program)', kind: 'app', remove: false })
+  if (!only && prefs.app) items.push({ item: 'app', description: "Kora's shortcuts (and the old machine-wide Kora app, if it is still installed). Your servers are not touched", kind: 'app', remove: false })
   return { items } satisfies T.UninstallPlan
 })
 route('POST', '/uninstall', (_m, b) => {
@@ -859,7 +1003,8 @@ installMonitorMock({ route, servers, fail: (status, code, message) => new Fail(s
 // ---- fetch shim -----------------------------------------------------------------------------
 
 const json = (status: number, body: unknown) => new Response(body === undefined ? null : JSON.stringify(body), { status: body === undefined && status === 200 ? 204 : status, headers: { 'Content-Type': 'application/json' } })
-const errRes = (e: Fail) => json(e.status, { error: { code: e.code, message: e.message, ...(e.command ? { command: e.command } : {}) } })
+const errRes = (e: Fail) =>
+  json(e.status, { error: { code: e.code, message: e.message, ...(e.command ? { command: e.command } : {}), ...(e.extra.details ? { details: e.extra.details } : {}), ...(e.extra.actions ? { actions: e.extra.actions } : {}) } })
 
 async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.origin)
@@ -884,6 +1029,7 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
     }
     if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
+    lastHeaders = headers
     if (method !== 'GET' && !headers.has('X-Kora')) throw new Fail(403, 'forbidden', 'Missing the X-Kora header.')
     const raw = init?.body
     const body: Body = raw instanceof Blob ? { file: raw, fileName: decodeURIComponent(headers.get('X-File-Name') ?? 'upload.zip') } : raw ? (JSON.parse(String(raw)) as Body) : {}

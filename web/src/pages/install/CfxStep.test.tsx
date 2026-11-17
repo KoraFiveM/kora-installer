@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import InstallWizard from '../InstallWizard'
@@ -26,6 +26,10 @@ async function toCfxStep(user: ReturnType<typeof userEvent.setup>) {
 
 const UNCHECKED = 'Check the Cfx.re username, or clear the box to skip this step.'
 const installButton = () => screen.getByRole('button', { name: 'Install the server' })
+
+beforeEach(() => {
+  installMock() // fresh fake data for every test: no saved keys, nothing remembered
+})
 
 describe('Cfx.re account step', () => {
   it('finds an account, clears it on edit, and puts it in the review and the request', async () => {
@@ -56,6 +60,8 @@ describe('Cfx.re account step', () => {
     await user.click(installButton())
     expect(start).toHaveBeenCalled()
     expect(start.mock.calls[0]?.[0].cfx_identifier).toBe('fivem:4465268')
+    // Let the (fake) request finish before the next test resets the fake backend.
+    await start.mock.results[0]?.value
     start.mockRestore()
   })
 

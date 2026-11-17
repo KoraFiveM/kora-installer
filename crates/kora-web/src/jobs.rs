@@ -70,10 +70,15 @@ impl Jobs for kora_core::api::JobRegistry {
     }
 }
 
-/// The UI reads a job error as `{code, message, command?, kept?, log_path?}`. A job body returns
-/// `Err(String)`: plain text becomes `{code: "failed", message}`; a JSON object (for structured
-/// failures such as installs or `needs_elevation`) is passed through, with `code` defaulting to `failed`.
+/// The UI reads a job error as a Problem (`{code, message, details?, actions?}`) plus, for some
+/// jobs, `command?`, `kept?`, `log_path?`, `resume?`. A job body returns `Err(String)`: plain text
+/// becomes `{code: "failed", message}`; a packed [`kora_core::problem::Problem`] becomes its JSON;
+/// a JSON object (for structured failures such as installs or `needs_elevation`) is passed
+/// through, with `code` defaulting to `failed`.
 pub fn job_error(e: &str) -> Value {
+    if kora_core::problem::Problem::is_encoded(e) {
+        return kora_core::problem::Problem::decode(e).to_json();
+    }
     let e = &crate::error::friendly(e.to_string());
     match serde_json::from_str::<Value>(e) {
         Ok(mut v @ Value::Object(_)) if v.get("message").is_some_and(Value::is_string) => {
@@ -287,5 +292,7 @@ mod tests {
         assert_eq!(job_error(r#"{"message":"m","log_path":"/x"}"#), json!({"code": "failed", "message": "m", "log_path": "/x"}));
         assert_eq!(job_error(r#"{"code":"needs_elevation","message":"m","command":["kora"]}"#)["code"], "needs_elevation");
         assert_eq!(job_error("[1]"), json!({"code": "failed", "message": "[1]"}));
+        let p = kora_core::problem::Problem::new("github.signed_out", "Sign in.").with_action(kora_core::problem::Action::SignInGithub { scopes: vec![] });
+        assert_eq!(job_error(&p.encode()), json!({"code": "github.signed_out", "message": "Sign in.", "actions": [{"kind": "sign_in_github"}]}));
     }
 }

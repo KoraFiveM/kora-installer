@@ -122,6 +122,12 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     fn fetch_origin(&self, repo: &Path) -> GitResult<()> {
         self.git(repo, &["fetch", "origin"]).map(|_| ())
     }
+    fn current_branch(&self, repo: &Path) -> GitResult<Option<String>> {
+        git::branches::current(&self.0, repo).map_err(gerr)
+    }
+    fn switch_branch(&self, repo: &Path, branch: &str) -> GitResult<()> {
+        git::branches::switch_to(&self.0, repo, branch).map_err(gerr)
+    }
     fn has_ref(&self, repo: &Path, rev: &str) -> bool {
         self.git(repo, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")]).is_ok()
     }
@@ -476,6 +482,16 @@ pub(crate) fn service_health(name: &str, dir: &Path, sf: &ServerFile) -> Service
         windows_run_as: None,
     };
     ServiceHealth { managed, game_port: sf.ports.game, wait: Duration::from_secs(90) }
+}
+
+/// Run `f` with the command runner appropriate for who owns `dir` (the same choice as [`with_git`]): for work that needs
+/// `git` and `gh` themselves rather than the update engine's view of them.
+pub(crate) fn with_runner<T>(dir: &Path, f: impl FnOnce(&dyn CommandRunner) -> T) -> T {
+    match foreign_owner(dir) {
+        Some(user) => f(&AsUser { home: credentials_home(&user).unwrap_or_else(|| dir.to_path_buf()), user }),
+        None if cfg!(windows) => f(&SafeDirectory(SystemRunner)),
+        None => f(&SystemRunner),
+    }
 }
 
 /// Run `f` with the git adapter appropriate for who owns `dir` (service account / SYSTEM / plain).

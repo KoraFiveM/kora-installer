@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/kora-core", "crates/kora-cli", "crates/kora-tui", "crates/kora-web"]
+members = ["crates/kora-core", "crates/kora-cli", "crates/kora-web"]
 
 [workspace.package]
-version = "0.6.5"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.93"
 license = "Apache-2.0"
@@ -14,10 +14,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
-ratatui = "0.30"
-crossterm = "0.29"
 kora-core = { path = "crates/kora-core" }
-kora-tui = { path = "crates/kora-tui" }
 kora-web = { path = "crates/kora-web" }
 tempfile = "3"
 

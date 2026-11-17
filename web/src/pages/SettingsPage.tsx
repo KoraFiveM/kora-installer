@@ -4,6 +4,8 @@ import { api } from '@/api/client'
 import type { UninstallItem } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
 import { useRole, whyNot } from '@/hooks/useRole'
+import { ShortcutsCard } from '@/components/Shortcuts'
+import { LicenceKeysCard, RememberedCard } from '@/components/LicenceKeys'
 import { RemoteAccessCard, SignedInCard } from '@/components/RemoteAccess'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -74,37 +76,6 @@ function SelfUpdate() {
   )
 }
 
-function AppCard() {
-  const qc = useQueryClient()
-  const q = useQuery({ queryKey: ['app'], queryFn: api.app.status })
-  const [shortcut, setShortcut] = useState(true)
-  const role = useRole()
-  const refresh = () => qc.invalidateQueries({ queryKey: ['app'] })
-  const install = useMutation({ mutationFn: () => api.app.install({ desktop_shortcut: shortcut, force: false, dry_run: false }), onSuccess: refresh })
-  const remove = useMutation({ mutationFn: () => api.app.uninstall(false), onSuccess: refresh })
-  if (q.data && !q.data.supported) return null
-  if (!role.can('admin')) return null
-  return (
-    <Card>
-      <CardHeader><CardTitle>Kora app</CardTitle></CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">The Kora app adds Kora to the Start Menu so you can open the manager without a terminal.</p>
-        <div className="text-sm">{q.data?.installed ? <Badge tone="success" dot>Installed{q.data.version ? ` (${q.data.version})` : ''}</Badge> : <Badge tone="neutral" dot>Not installed</Badge>}</div>
-        {q.data?.path && <div className="font-mono text-xs text-muted-foreground">{q.data.path}</div>}
-        {q.data?.installed ? (
-          <Button variant="destructive" onClick={() => remove.mutate()} disabled={remove.isPending || !role.canDestroy} title={whyNot(role, 'admin', true) ?? undefined}>Remove the Kora app</Button>
-        ) : (
-          <div className="space-y-3">
-            <Checkbox label="Also put a shortcut on the desktop" checked={shortcut} onChange={(e) => setShortcut(e.target.checked)} />
-            <Button onClick={() => install.mutate()} disabled={install.isPending}>Install the Kora app</Button>
-          </div>
-        )}
-        <ErrorNotice error={install.error ?? remove.error ?? q.error} />
-      </CardContent>
-    </Card>
-  )
-}
-
 function Uninstall() {
   const role = useRole()
   const [items, setItems] = useState<UninstallItem[] | null>(null)
@@ -161,7 +132,9 @@ export default function SettingsPage() {
       <h1 className="font-heading text-2xl font-bold">Settings</h1>
       {role.remote ? <SignedInCard /> : <RemoteAccessCard />}
       <SelfUpdate />
-      <AppCard />
+      <ShortcutsCard />
+      <LicenceKeysCard />
+      <RememberedCard />
       <Card><CardHeader><CardTitle>GitHub account</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>
       <Uninstall />
       <Card>

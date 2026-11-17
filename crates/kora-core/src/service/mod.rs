@@ -1,7 +1,7 @@
 //! OS service layer: systemd units / Windows services and the auto-update scheduler.
 //!
 //! Nothing here touches the OS directly. Every function either *generates* a
-//! [`Plan`] (a list of described [`SystemStep`]s the TUI can show on the
+//! [`Plan`] (a list of described [`SystemStep`]s a front end can show on the
 //! elevation screen before anything happens) or runs commands through a
 //! [`CommandRunner`], which tests replace with a fake.
 //! Windows plans are plain command data (`sc.exe`, `schtasks`) and are
@@ -480,62 +480,169 @@ pub fn install_plan(server: &ManagedServer, platform: Platform) -> ServiceResult
             SystemStep::run(format!("Start '{}' automatically at boot and restart it if it crashes", server.name), "systemctl", &["enable", &svc]),
         ]),
         Platform::Windows => {
-            let bin = format!("\"{}\" service-host \"{}\"", server.kora_exe, server.dir);
-            Plan::new(vec![
-                SystemStep::run_owned(
-                    format!("Register the Windows service '{svc}' so '{}' starts automatically when Windows boots", server.name),
-                    "sc.exe",
-                    vec![
-                        "create".into(), svc.clone(), "binPath=".into(), bin, "start=".into(), "auto".into(),
-                        "DisplayName=".into(), format!("Kora server {}", server.name),
-                        // The per-service virtual account needs no password and has no rights beyond what is granted to it.
-                        "obj=".into(), virtual_account(&svc),
-                    ],
-                ),
-                SystemStep::run_owned(
-                    "Add a description to the service",
-                    "sc.exe",
-                    vec!["description".into(), svc.clone(), format!("Kora-managed server {}", server.name)],
-                ),
-                SystemStep::run_owned(
-                    "Make the service restart itself if it crashes (after 60 seconds, up to three times, counter reset daily)",
-                    "sc.exe",
-                    vec!["failure".into(), svc.clone(), "reset=".into(), "86400".into(), "actions=".into(), "restart/60000/restart/60000/restart/60000".into()],
-                ),
-                SystemStep::run_owned(
-                    format!("Let the service account '{}' change files in the server folder only", virtual_account(&svc)),
-                    "icacls.exe",
-                    vec![server.dir.clone(), "/grant".into(), format!("{}:(OI)(CI)M", virtual_account(&svc))],
-                ),
-                // secrets.cfg / database.json have no inherited permissions (so `Users` cannot read them):
-                // the service account needs its own explicit read right or FXServer cannot read its license key.
-                SystemStep::run_owned(
-                    "Let the service account read the server's secrets file (and only read it)",
-                    "icacls.exe",
-                    vec![format!("{}\\secrets.cfg", server.dir.trim_end_matches(['\\', '/'])), "/grant".into(), format!("{}:(R)", virtual_account(&svc))],
-                )
-                .tolerant(),
-                SystemStep::run_owned(
-                    "Let the service account read the database login file (and only read it)",
-                    "icacls.exe",
-                    vec![format!("{}\\database.json", server.dir.trim_end_matches(['\\', '/'])), "/grant".into(), format!("{}:(R)", virtual_account(&svc))],
-                )
-                .tolerant(),
-                // txAdmin reads (and changes) its admin list: it has no inherited permissions either.
-                SystemStep::run_owned(
-                    "Let the service account read and change txAdmin's admin list",
-                    "icacls.exe",
-                    vec![format!("{}\\txData\\admins.json", server.dir.trim_end_matches(['\\', '/'])), "/grant".into(), format!("{}:(M)", virtual_account(&svc))],
-                )
-                .tolerant(),
-                SystemStep::run_owned(
-                    "Treat a non-zero exit as a crash so the restart rule applies",
-                    "sc.exe",
-                    vec!["failureflag".into(), svc, "1".into()],
-                ),
-            ])
+            let mut p = windows_register_plan(server);
+            p.extend(windows_grant_plan(server));
+            p
         }
     })
+}
+
+/// Windows: the steps of [`install_plan`] that need administrator rights (register the service,
+/// its restart rule, and the narrow privilege list). With `user_sid`, that person may also start
+/// and stop this one service ([`windows_user_control_sddl`]).
+pub fn windows_register_plan_for(server: &ManagedServer, user_sid: Option<&str>) -> Plan {
+    let mut p = windows_register_plan(server);
+    if let Some(sddl) = user_sid.and_then(windows_user_control_sddl) {
+        p.steps.push(
+            SystemStep::run_owned("Let the person who installed start and stop this server's service (and nothing more)", "sc.exe", vec!["sdset".into(), server.service_name(), sddl])
+                .tolerant(),
+        );
+    }
+    p
+}
+
+/// [`windows_register_plan_for`] without the person's right.
+pub fn windows_register_plan(server: &ManagedServer) -> Plan {
+    let svc = server.service_name();
+    let bin = format!("\"{}\" service-host \"{}\"", server.kora_exe, server.dir);
+    Plan::new(vec![
+        SystemStep::run_owned(
+            format!("Register the Windows service '{svc}' so '{}' starts automatically when Windows boots", server.name),
+            "sc.exe",
+            vec![
+                "create".into(), svc.clone(), "binPath=".into(), bin, "start=".into(), "auto".into(),
+                "DisplayName=".into(), format!("Kora server {}", server.name),
+                // The per-service virtual account needs no password and has no rights beyond what is granted to it.
+                "obj=".into(), virtual_account(&svc),
+            ],
+        ),
+        SystemStep::run_owned(
+            "Add a description to the service",
+            "sc.exe",
+            vec!["description".into(), svc.clone(), format!("Kora-managed server {}", server.name)],
+        ),
+        SystemStep::run_owned(
+            "Make the service restart itself if it crashes (after 60 seconds, up to three times, counter reset daily)",
+            "sc.exe",
+            vec!["failure".into(), svc.clone(), "reset=".into(), "86400".into(), "actions=".into(), "restart/60000/restart/60000/restart/60000".into()],
+        ),
+        SystemStep::run_owned(
+            "Treat a non-zero exit as a crash so the restart rule applies",
+            "sc.exe",
+            vec!["failureflag".into(), svc.clone(), "1".into()],
+        ),
+        // Every service process gets "impersonate a client" and a few other privileges by default,
+        // and those are a well-known way from a service account to SYSTEM. The server runs programs
+        // from its own folder (which its owner can change), so it keeps only what an ordinary
+        // signed-in user has.
+        SystemStep::run_owned(
+            "Give the service only the privileges an ordinary user has (no 'impersonate a client')",
+            "sc.exe",
+            vec!["privs".into(), svc, SERVICE_PRIVILEGES.into()],
+        ),
+    ])
+}
+
+/// The service's security descriptor with one extra entry: the person who installed may query,
+/// start and stop THIS service (nothing else: no reconfiguring, no deleting). The rest is
+/// Windows' default for a new service. The update task runs as that person without elevation and
+/// restarts the server with it.
+pub fn windows_user_control_sddl(user_sid: &str) -> Option<String> {
+    let ok = (user_sid.starts_with("S-1-5-21-") || user_sid.starts_with("S-1-12-1-")) && user_sid.len() < 100 && user_sid.bytes().all(|b| b == b'S' || b == b'-' || b.is_ascii_digit());
+    ok.then(|| format!("D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCSWRPWPDTLOCRRC;;;{user_sid})"))
+}
+
+/// The SID of the person Kora works for: the panel's account in the worker or helper
+/// (`KORA_WORKER_USER_SID`), otherwise this process's own account (`whoami /user`).
+pub fn windows_installing_sid(runner: &dyn CommandRunner) -> Option<String> {
+    if let Ok(s) = std::env::var("KORA_WORKER_USER_SID") {
+        return Some(s).filter(|s| !s.is_empty());
+    }
+    let out = runner.run("whoami.exe", &["/user".into(), "/fo".into(), "csv".into(), "/nh".into()]).ok()?;
+    parse_whoami_sid(&out.stdout)
+}
+
+/// `"pc\\jo","S-1-5-21-..."` → the SID.
+pub fn parse_whoami_sid(csv: &str) -> Option<String> {
+    let last = csv.lines().next()?.rsplit(',').next()?.trim().trim_matches('"');
+    last.starts_with("S-1-").then(|| last.to_string())
+}
+
+/// `BINARY_PATH_NAME` from `sc qc <service>` output.
+pub fn parse_qc_binpath(out: &str) -> Option<String> {
+    out.lines().find_map(|l| l.trim().strip_prefix("BINARY_PATH_NAME").map(|r| r.trim_start().trim_start_matches(':').trim().to_string()))
+}
+
+/// Is this service command line the one Kora registers for the server folder `dir`?
+/// (`"<kora.exe>" service-host "<dir>"`; case and a trailing backslash do not matter.)
+pub fn binpath_is_for(bin: &str, dir: &str) -> bool {
+    let norm = |s: &str| s.trim().trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    match bin.rsplit_once(" service-host ") {
+        Some((exe, d)) => exe.trim().starts_with('"') && exe.to_ascii_lowercase().ends_with("kora.exe\"") && norm(d.trim().trim_matches('"')) == norm(dir),
+        None => false,
+    }
+}
+
+/// What a (retried) service step finds under the server's service name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Existing {
+    Missing,
+    /// Kora's service for this very folder (an earlier attempt made it and then stopped before
+    /// recording it): use it.
+    Ours,
+    /// Something else has the name.
+    Other(String),
+}
+
+pub fn windows_existing_service(runner: &dyn CommandRunner, server: &ManagedServer) -> Existing {
+    match runner.run("sc.exe", &["qc".into(), server.service_name()]) {
+        Ok(o) if o.code == 0 => match parse_qc_binpath(&o.stdout) {
+            Some(b) if binpath_is_for(&b, &server.dir) => Existing::Ours,
+            Some(b) => Existing::Other(b),
+            None => Existing::Other(String::new()),
+        },
+        _ => Existing::Missing,
+    }
+}
+
+/// The only privileges a Kora server's Windows service keeps (`sc privs`): what every signed-in
+/// user has. Notably NOT `SeImpersonatePrivilege`.
+pub const SERVICE_PRIVILEGES: &str = "SeChangeNotifyPrivilege/SeIncreaseWorkingSetPrivilege";
+
+/// Windows: let the service account into the server folder. The folder's owner can do this
+/// without administrator rights (owners may always change a folder's permissions), so the opt-in
+/// helper leaves it to the person's own process (see `helper::winhelper`).
+pub fn windows_grant_plan(server: &ManagedServer) -> Plan {
+    let svc = server.service_name();
+    let dir = server.dir.trim_end_matches(['\\', '/']).to_string();
+    Plan::new(vec![
+        SystemStep::run_owned(
+            format!("Let the service account '{}' change files in the server folder only", virtual_account(&svc)),
+            "icacls.exe",
+            vec![server.dir.clone(), "/grant".into(), format!("{}:(OI)(CI)M", virtual_account(&svc))],
+        ),
+        // secrets.cfg / database.json have no inherited permissions (so `Users` cannot read them):
+        // the service account needs its own explicit read right or FXServer cannot read its license key.
+        SystemStep::run_owned(
+            "Let the service account read the server's secrets file (and only read it)",
+            "icacls.exe",
+            vec![format!("{dir}\\secrets.cfg"), "/grant".into(), format!("{}:(R)", virtual_account(&svc))],
+        )
+        .tolerant(),
+        SystemStep::run_owned(
+            "Let the service account read the database login file (and only read it)",
+            "icacls.exe",
+            vec![format!("{dir}\\database.json"), "/grant".into(), format!("{}:(R)", virtual_account(&svc))],
+        )
+        .tolerant(),
+        // txAdmin reads (and changes) its admin list: it has no inherited permissions either.
+        SystemStep::run_owned(
+            "Let the service account read and change txAdmin's admin list",
+            "icacls.exe",
+            vec![format!("{dir}\\txData\\admins.json"), "/grant".into(), format!("{}:(M)", virtual_account(&svc))],
+        )
+        .tolerant(),
+    ])
 }
 
 /// Plan to remove the service Kora created (and only that).

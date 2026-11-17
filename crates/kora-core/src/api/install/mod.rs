@@ -2,10 +2,9 @@
 //! disk, database login, FiveM builds), turning the UI's request into an [`InstallRequest`] with
 //! the same rules as the CLI, and running the installer with progress.
 //!
-//! The logic is the same as the TUI wizard (`kora-tui`) and the headless `kora install`
-//! (`kora-cli`); the non-drawing parts are duplicated here because those crates are front ends
-//! (see the list in the wave-2 report). Everything that touches the machine or the network goes
-//! through [`InstallEnv`], so tests use a fake.
+//! The logic is the same as the headless `kora install` (`kora-cli`); the parts that do not
+//! depend on the command line are kept here because that crate is a front end. Everything that
+//! touches the machine or the network goes through [`InstallEnv`], so tests use a fake.
 
 pub mod github;
 
@@ -14,7 +13,6 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::app_install::AppChoice;
 use crate::artifacts::{self, Platform};
 use crate::firewall::ports::{self, PortProber, SystemProber};
 use crate::firewall::PortRequest;
@@ -23,6 +21,7 @@ use crate::installer::{
     self, slug, DbAdmin, DbChoice, InstallOutcome, InstallRequest, Mode, Ports, ProgressEvent,
     ProgressSink, ResourceSelection, StepStatus,
 };
+use crate::problem::{codes, Action, Problem};
 use crate::space::{self, DiskInfo, SystemDisk};
 
 /// Everything the install routes need from the machine. [`SystemInstallEnv`] is the real one.
@@ -44,12 +43,29 @@ pub trait InstallEnv: Send + Sync {
     fn saved_load(&self) -> Option<InstallRequest>;
     fn saved_save(&self, req: &InstallRequest) -> bool;
     fn saved_clear(&self);
-    /// Run the installer (a dry run when `req.dry_run`).
+    /// Mark a failed step as skipped so the next [`InstallEnv::run`] goes on without it
+    /// (see [`installer::skip_step`]: only steps that are safe to skip).
+    fn skip_step(&self, req: &InstallRequest, step: &str) -> Result<(), Problem> {
+        installer::skip_step(req, step)
+    }
+    /// Run the installer (a dry run when `req.dry_run`). The error text may be a packed
+    /// [`Problem`] ([`Problem::decode`] reads both).
     fn run(
         &self,
         req: &InstallRequest,
         sink: &mut dyn ProgressSink,
     ) -> Result<InstallOutcome, String>;
+    /// [`InstallEnv::run`] with an administrator helper for the steps that need one (the Windows
+    /// panel's worker, see `installer::system_ops`). Fakes may ignore it.
+    fn run_with_admin(
+        &self,
+        req: &InstallRequest,
+        sink: &mut dyn ProgressSink,
+        admin: Option<installer::system_ops::SharedAdmin>,
+    ) -> Result<InstallOutcome, String> {
+        let _ = admin;
+        self.run(req, sink)
+    }
 }
 
 /// The real machine.
@@ -89,7 +105,17 @@ impl InstallEnv for SystemInstallEnv {
         req: &InstallRequest,
         sink: &mut dyn ProgressSink,
     ) -> Result<InstallOutcome, String> {
-        installer::run(req, sink).map_err(|e| e.to_string())
+        // The raw text: it may be a packed Problem (see `installer::InstallError`).
+        installer::run(req, sink).map_err(|e| e.0)
+    }
+    fn run_with_admin(
+        &self,
+        req: &InstallRequest,
+        sink: &mut dyn ProgressSink,
+        admin: Option<installer::system_ops::SharedAdmin>,
+    ) -> Result<InstallOutcome, String> {
+        let hooks = installer::Hooks { admin, ..installer::Hooks::from_env() };
+        installer::run_with(req, sink, &hooks).map_err(|e| e.0)
     }
 }
 
@@ -125,6 +151,7 @@ pub struct WireDbAdmin {
     pub password: Option<String>,
 }
 
+/// Retired in 0.7.0: still accepted from an old client, never used.
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct WireApp {
     #[serde(default)]
@@ -151,6 +178,12 @@ pub struct WireInstall {
     pub hostname: String,
     #[serde(default)]
     pub license_key: Option<String>,
+    /// Use the saved key with this name instead of carrying a key.
+    #[serde(default)]
+    pub license_key_name: Option<String>,
+    /// With a pasted `license_key`: save it under this name (the wizard's default), so the next install can pick it.
+    #[serde(default)]
+    pub save_license_key_as: Option<String>,
     #[serde(default)]
     pub ports: Option<WirePorts>,
     #[serde(default)]
@@ -324,6 +357,7 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         name,
         dir,
         license_key: non_empty(&w.license_key),
+        license_key_name: non_empty(&w.license_key_name),
         cfx_identifier: non_empty(&w.cfx_identifier),
         ports,
         txadmin_public: w.txadmin_public,
@@ -342,14 +376,8 @@ pub fn build_request(w: &WireInstall) -> Result<InstallRequest, String> {
         dry_run: w.dry_run,
         db_admin,
         start: w.start,
-        // Like the CLI: a dry run lists nothing it would not change anyway.
-        app: if w.dry_run {
-            None
-        } else {
-            w.app.map(|a| AppChoice {
-                desktop_shortcut: a.desktop_shortcut,
-            })
-        },
+        // Retired in 0.7.0: an old client may still send `app`; it is ignored.
+        app: None,
     })
 }
 
@@ -377,7 +405,7 @@ pub fn request_json(r: &InstallRequest) -> Value {
         "firewall": r.firewall,
         "github_owner": r.github_owner,
         "start": r.start,
-        "app": r.app.map(|a| json!({"desktop_shortcut": a.desktop_shortcut})),
+        "license_key_name": r.license_key_name,
     })
 }
 
@@ -730,13 +758,22 @@ pub fn install_command(req: &InstallRequest) -> Vec<String> {
         v.extend(["--github-owner".to_string(), o.clone()]);
     }
     v.push(if req.start { "--start" } else { "--no-start" }.into());
-    match req.app {
-        None => v.push("--no-app".into()),
-        Some(a) if !a.desktop_shortcut => v.push("--no-desktop-shortcut".into()),
-        Some(_) => {}
-    }
     v.push("--yes".into());
     v
+}
+
+/// The answers without anything that needs administrator rights ("Continue without the
+/// administrator parts"): no firewall change, no background service (so no update task), and the
+/// database only used when it is already there. The same rule as the wizard's `withoutAdmin`.
+pub fn without_admin(req: &InstallRequest) -> InstallRequest {
+    let mut r = req.clone();
+    r.firewall = false;
+    r.txadmin_public = false;
+    r.service = false;
+    if r.db == DbChoice::InstallIfMissing {
+        r.db = DbChoice::UseExisting;
+    }
+    r
 }
 
 /// What to tell the user to do before running [`install_command`] (names the variables, never values).
@@ -800,13 +837,18 @@ impl<F: FnMut(&ProgressEvent) + Send> ProgressSink for FnSink<F> {
 
 /// How a finished run ended, ready for the job result / error.
 pub struct Finished {
-    /// The outcome, or the installer's plain message when it failed.
+    /// The outcome, or the installer's error text when it failed (may be a packed [`Problem`]).
     pub outcome: Result<InstallOutcome, String>,
     /// The log file (when one could be written).
     pub log_path: Option<PathBuf>,
     /// After a failure: what was kept on disk (folder, saved answers) and how to carry on.
     pub kept: Vec<String>,
+    /// After a failure: the terminal's "how to carry on" text (the panel shows buttons instead).
     pub next: String,
+    /// After a failure: the step that failed (`None` = it stopped before the first step).
+    pub failed_step: Option<String>,
+    /// After a failure: what to tell the user, with the actions that fit ([`failure_problem`]).
+    pub problem: Option<Problem>,
 }
 
 /// Run the install, calling `on_event` for every progress event, then write the log and keep or
@@ -814,24 +856,41 @@ pub struct Finished {
 pub fn run_install(
     env: &dyn InstallEnv,
     req: &InstallRequest,
+    on_event: impl FnMut(&ProgressEvent) + Send,
+) -> Finished {
+    run_install_with(env, req, None, on_event)
+}
+
+/// [`run_install`] with an administrator helper for the steps that need one.
+pub fn run_install_with(
+    env: &dyn InstallEnv,
+    req: &InstallRequest,
+    admin: Option<installer::system_ops::SharedAdmin>,
     mut on_event: impl FnMut(&ProgressEvent) + Send,
 ) -> Finished {
     let mut log: Vec<String> = Vec::new();
+    let mut failed_step: Option<String> = None;
     let result = {
         let log_ref = &mut log;
+        let failed_ref = &mut failed_step;
         let mut sink = FnSink {
             f: |ev: &ProgressEvent| {
                 log_ref.push(log_line(ev));
+                if ev.status == StepStatus::Failed {
+                    *failed_ref = Some(ev.step.clone());
+                }
                 on_event(ev);
             },
         };
-        env.run(req, &mut sink)
+        env.run_with_admin(req, &mut sink, admin)
     };
     let done = |outcome, log_path| Finished {
         outcome,
         log_path,
         kept: vec![],
         next: String::new(),
+        failed_step: None,
+        problem: None,
     };
     if req.dry_run {
         return done(result, None);
@@ -843,7 +902,7 @@ pub fn run_install(
             done(Ok(out), log_path)
         }
         Err(msg) => {
-            let log_path = write_install_log(req, &log, Some(&msg));
+            let log_path = write_install_log(req, &log, Some(&crate::problem::plain_text(&msg)));
             let saved = env.saved_save(req);
             let mut kept = Vec::new();
             if req.dir.join(".kora").is_dir() {
@@ -852,14 +911,46 @@ pub fn run_install(
             if saved {
                 kept.push("Your answers (not the licence key or database password)".to_string());
             }
+            let problem = failure_problem(req, &msg, failed_step.as_deref());
             Finished {
                 outcome: Err(msg),
                 log_path,
                 kept,
                 next: failure_next_steps(req, saved),
+                failed_step,
+                problem: Some(problem),
             }
         }
     }
+}
+
+/// The [`Problem`] the panel shows when an install stopped: the installer's own problem (or its
+/// text as a generic one) followed by the ways on: retry the failed step (or the whole install when
+/// it stopped before the first step), skip the step when it is safe to ([`installer::SKIPPABLE`]),
+/// and change the answers.
+pub fn failure_problem(req: &InstallRequest, error: &str, failed_step: Option<&str>) -> Problem {
+    let mut p = Problem::decode(error);
+    match failed_step {
+        Some(step) => {
+            if p.code == codes::FAILED {
+                p.code = codes::INSTALL_STEP_FAILED.to_string();
+            }
+            p.push_action(Action::RetryStep { step: step.to_string() });
+            let skippable = installer::plan_steps(req, false).iter().any(|s| s.id == step && s.skippable);
+            if skippable {
+                p.push_action(Action::SkipStep { step: step.to_string() });
+            }
+        }
+        None => p.push_action(Action::Retry),
+    }
+    // Not enough room: trying again cannot help; the way on is another folder (the name-and-folder page).
+    if p.message.starts_with("Not enough free disk space") && !p.actions.iter().any(|a| matches!(a, Action::ChangeAnswers { .. })) {
+        p.actions.insert(0, Action::change_answers("name"));
+    }
+    if !p.actions.iter().any(|a| matches!(a, Action::ChangeAnswers { .. })) {
+        p.push_action(Action::ChangeAnswers { section: None });
+    }
+    p
 }
 
 /// What is kept after a failed install and how to carry on (the CLI's wording, for the panel).
@@ -990,6 +1081,31 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_install_offers_the_ways_on() {
+        let mut w = wire("Alpha");
+        w.firewall = true;
+        let req = build_request(&w).unwrap();
+        // A plain error in a step that must not be skipped: retry it, or change the answers.
+        let p = failure_problem(&req, "download failed", Some("build.artifact"));
+        assert_eq!((p.code.as_str(), p.message.as_str()), (codes::INSTALL_STEP_FAILED, "download failed"));
+        assert_eq!(p.actions, vec![Action::RetryStep { step: "build.artifact".into() }, Action::ChangeAnswers { section: None }]);
+        // A step that is safe to skip also offers that.
+        let p = failure_problem(&req, "no firewall", Some("system.firewall"));
+        assert!(p.actions.contains(&Action::SkipStep { step: "system.firewall".into() }));
+        // The step's own problem keeps its code and actions first; its own "change answers" is kept.
+        let own = Problem::new(codes::INSTALL_DB_LOGIN, "login refused").with_action(Action::change_answers("database"));
+        let p = failure_problem(&req, &own.encode(), Some("prepare.tools"));
+        assert_eq!(p.code, codes::INSTALL_DB_LOGIN);
+        assert_eq!(p.actions, vec![Action::change_answers("database"), Action::RetryStep { step: "prepare.tools".into() }]);
+        // Stopped before the first step: try the whole install again.
+        let p = failure_problem(&req, "ports taken", None);
+        assert_eq!((p.code.as_str(), p.actions[0].clone()), (codes::FAILED, Action::Retry));
+        // A full disk points at the folder first: retrying cannot help.
+        let p = failure_problem(&req, "Not enough free disk space on the disk holding /srv/a: Kora needs about 4.6 GiB.", None);
+        assert_eq!(p.actions[0], Action::change_answers("name"), "{:?}", p.actions);
+    }
+
+    #[test]
     fn saved_answers_json_has_no_secrets() {
         let mut w = wire("Alpha");
         w.license_key = Some("cfxk_SECRETKEYSECRETKEY".into());
@@ -1003,7 +1119,7 @@ mod tests {
         assert!(
             !v.contains("SECRET")
                 && !v.contains("\"pw\"")
-                && !v.contains("license")
+                && !v.contains("\"license_key\"")
                 && !v.contains("db_admin"),
             "{v}"
         );

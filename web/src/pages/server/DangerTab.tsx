@@ -17,7 +17,7 @@ import { ResourceProgress } from '@/components/JobProgress'
 
 type Stage = 'files' | 'db' | 'name'
 
-/** Staged like the TUI: keep files? keep database? then type the server name. Adopted servers only get "Remove from list". */
+/** Staged: keep files? keep database? then type the server name. Adopted servers only get "Remove from list". */
 export function DeleteFlow({ server: s, onDone }: { server: Pick<ServerDetail, 'name' | 'managed' | 'dir' | 'status'>; onDone?: () => void }) {
   const qc = useQueryClient()
   const { push } = useAlerts()

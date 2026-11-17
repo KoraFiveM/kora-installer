@@ -1,5 +1,9 @@
-//! The "Kora app": a stable, per-machine copy of `kora` that the user can open again later to see and
-//! manage their servers.
+//! The old "Kora app" (retired from the install flow in 0.7.0) and the per-user shortcuts that replace it.
+//!
+//! Since 0.7.0 the "app" is just the web panel in a browser tab: the install scripts (and `kora app install`)
+//! make per-user shortcuts that run a bare `kora` (see [`user`]): no administrator rights, no copy in
+//! `%ProgramFiles%`. What is described below is the OLD machine-wide app, which this module still detects
+//! and removes ("Tidy up old shortcuts" in the panel, `kora app uninstall`):
 //!
 //! * Windows: `%ProgramFiles%\Kora\kora.exe`, on the machine `PATH`, a Start Menu shortcut "Kora" (and
 //!   optionally a Desktop shortcut) that runs `kora.exe manager` with "Run as administrator" set, and an
@@ -7,7 +11,7 @@
 //! * Linux: `/opt/kora/bin/kora`, a `/usr/local/bin/kora` symlink and (desktop sessions only) a
 //!   `kora.desktop` launcher that opens the manager in a terminal.
 //!
-//! Everything is decided by a pure planner ([`plan_install`] / [`plan_uninstall`]) that only *reads*
+//! Everything is decided by a pure planner ([`plan_uninstall`], and `user::plan_user_install`) that only *reads*
 //! through the [`Sys`] trait, and a small executor that applies the resulting [`Action`]s, so a dry run
 //! lists every change and tests run against an in-memory fake. Uninstalling removes only what the app
 //! installed: never servers, never databases.
@@ -19,6 +23,7 @@ pub mod pathlist;
 mod sys;
 #[cfg(test)]
 mod tests;
+pub mod user;
 
 use std::cmp::Ordering;
 use std::ffi::OsString;
@@ -160,6 +165,7 @@ impl Layout {
     }
 
     /// The folder a user's shell should find `kora` in.
+    #[cfg(test)]
     pub fn command_dir(&self) -> Option<PathBuf> {
         if self.windows {
             Some(self.dir.clone())
@@ -192,6 +198,9 @@ pub struct ShortcutSpec {
     pub icon: String,
     pub description: String,
     pub run_as_admin: bool,
+    /// Start the program in a minimised window (a console program opened from a shortcut should not
+    /// flash a big black window). Not read back from a shortcut, so it is ignored when comparing.
+    pub minimized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +225,8 @@ pub enum Action {
     CopyExe { from: PathBuf, to: PathBuf, kind: CopyKind },
     WriteState(AppState),
     AddMachinePath(String),
+    /// Windows: add a folder to the PATH of this user only (no administrator rights).
+    AddUserPath(String),
     BroadcastEnv,
     Shortcut(ShortcutSpec),
     Symlink { link: PathBuf, target: PathBuf },
@@ -239,6 +250,7 @@ impl Action {
             CopyExe { from, to, kind: CopyKind::Replace } => format!("Replace {} with {}", to.display(), from.display()),
             WriteState(s) => format!("Record installed version {} in the app state file", s.version),
             AddMachinePath(d) => format!("Add {d} to the machine PATH"),
+            AddUserPath(d) => format!("Add {d} to your PATH"),
             BroadcastEnv => "Tell running programs the environment changed (new terminals see the new PATH)".into(),
             Shortcut(s) => format!(
                 "Create the shortcut {} -> {} {}{}",
@@ -267,6 +279,8 @@ pub struct Plan {
     pub notes: Vec<String>,
 }
 
+/// Test fixture: the result of laying down the OLD machine-wide app on a fake machine.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct AppInstall {
     pub exe: PathBuf,
@@ -277,6 +291,7 @@ pub struct AppInstall {
     pub dry_run: bool,
 }
 
+#[cfg(test)]
 impl AppInstall {
     pub fn changed(&self) -> bool {
         !self.changes.is_empty()
@@ -338,6 +353,13 @@ pub trait Sys {
     /// Remove a file or symlink (a program that is in use is renamed away and deleted later).
     fn remove_file(&mut self, p: &Path) -> Result<()>;
     fn remove_dir_if_empty(&mut self, p: &Path) -> Result<()>;
+    // Windows per-user PATH (raw, unexpanded); nothing to read elsewhere
+    fn user_path(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+    fn set_user_path(&mut self, _value: &str) -> Result<()> {
+        Ok(())
+    }
     // Windows machine PATH (raw, unexpanded)
     fn machine_path(&self) -> Result<Option<String>>;
     fn set_machine_path(&mut self, value: &str) -> Result<()>;
@@ -412,13 +434,15 @@ pub fn compare_versions(a: &str, b: &str) -> Option<Ordering> {
 /// `Exec=` value: quote a path containing spaces or special characters.
 pub fn desktop_exec_arg(p: &Path) -> String {
     let s = p.to_string_lossy();
-    if s.chars().any(|c| c.is_whitespace() || "\"'`$\\<>~|&;*?#()".contains(c)) {
-        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$").replace('`', "\\`"))
+    // `%` starts a field code (`%f`, `%U`...) in an `Exec=` line; a literal one is written `%%`.
+    if s.chars().any(|c| c.is_whitespace() || "\"'`$\\<>~|&;*?#()%".contains(c)) {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$").replace('`', "\\`").replace('%', "%%"))
     } else {
         s.into_owned()
     }
 }
 
+#[cfg(test)]
 pub fn desktop_entry_text(exe: &Path, icon: &Path) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName={APP_NAME}\nComment=Install and manage your Kora FiveM servers\nExec={} manager\nIcon={}\nTerminal=true\nCategories=System;Utility;\n{DESKTOP_MARKER}\n",
@@ -428,10 +452,12 @@ pub fn desktop_entry_text(exe: &Path, icon: &Path) -> String {
 }
 
 /// `"<exe>" uninstall --app`
+#[cfg(test)]
 pub fn uninstall_string(exe: &Path) -> String {
     format!("\"{}\" uninstall --app", exe.display())
 }
 
+#[cfg(test)]
 fn shortcut_spec(l: &Layout, path: &Path) -> ShortcutSpec {
     ShortcutSpec {
         path: path.to_path_buf(),
@@ -441,6 +467,7 @@ fn shortcut_spec(l: &Layout, path: &Path) -> ShortcutSpec {
         icon: format!("{},0", l.exe.display()),
         description: "Open the Kora server manager".into(),
         run_as_admin: true,
+        minimized: false,
     }
 }
 
@@ -457,11 +484,13 @@ fn load_state(sys: &dyn Sys, l: &Layout) -> Option<AppState> {
     sys.read(&l.state).and_then(|b| serde_json::from_slice(&b).ok())
 }
 
+#[cfg(test)]
 fn now_unix() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// One-line fix when the folder holding the `kora` command is not on the user's `PATH`.
+#[cfg(test)]
 pub fn path_hint(command_dir: &Path, path_env: &str) -> Option<String> {
     let on = std::env::split_paths(path_env).any(|p| same_path(&p, command_dir));
     (!on).then(|| format!("{} is not on your PATH. Add it with:  export PATH=\"{}:$PATH\"  (put that line in ~/.profile)", command_dir.display(), command_dir.display()))
@@ -472,6 +501,7 @@ pub fn path_hint(command_dir: &Path, path_env: &str) -> Option<String> {
 // ---------------------------------------------------------------------------------------------
 
 /// Work out what installing (or refreshing) the app would change. Reads only.
+#[cfg(test)]
 pub fn plan_install(sys: &dyn Sys, l: &Layout, run: &Running, opts: &AppOptions) -> Plan {
     let mut plan = Plan::default();
     // ---- the program ----
@@ -664,6 +694,13 @@ fn apply(sys: &mut dyn Sys, l: &Layout, a: &Action) -> Result<()> {
                 None => Ok(()),
             }
         }
+        Action::AddUserPath(d) => {
+            let cur = sys.user_path()?.unwrap_or_default();
+            match pathlist::add(&cur, d) {
+                Some(v) => sys.set_user_path(&v),
+                None => Ok(()),
+            }
+        }
         Action::RemoveMachinePath(d) => {
             let cur = sys.machine_path()?.unwrap_or_default();
             match pathlist::remove(&cur, d) {
@@ -696,6 +733,7 @@ fn run_plan(sys: &mut dyn Sys, l: &Layout, plan: &Plan) -> Result<Vec<String>> {
 }
 
 /// Install or refresh the app with explicit dependencies (tests use a fake [`Sys`]).
+#[cfg(test)]
 pub fn install_app_with(sys: &mut dyn Sys, l: &Layout, run: &Running, opts: &AppOptions) -> Result<AppInstall> {
     let mut plan = plan_install(sys, l, run, opts);
     let changes = if opts.dry_run { plan.actions.iter().map(Action::describe).collect() } else { run_plan(sys, l, &plan)? };
@@ -766,6 +804,7 @@ pub fn status_with(sys: &dyn Sys, l: &Layout, run: &Running) -> AppStatus {
 // Public API on the real system
 // ---------------------------------------------------------------------------------------------
 
+#[cfg(test)]
 pub fn install_app(opts: &AppOptions) -> Result<AppInstall> {
     let run = Running::current()?;
     let l = Layout::from_env(&run.exe)?;

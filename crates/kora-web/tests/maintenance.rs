@@ -107,6 +107,9 @@ async fn self_update_apply_runs_a_job() {
     assert_eq!(s, 202);
 }
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn self_update_apply_validates_and_elevates() {
     let (app, _m, _g) = setup(false);
@@ -144,6 +147,7 @@ async fn self_update_apply_validates_and_elevates() {
     );
 }
 
+#[cfg(not(windows))]
 fn clone_fake(m: &FakeMaintenance) -> FakeMaintenance {
     FakeMaintenance {
         admin: m.admin,
@@ -163,102 +167,81 @@ async fn app_status_shape() {
     assert_eq!(s, 200);
     assert_eq!(
         j,
-        json!({"installed": false, "version": null, "path": null, "desktop_shortcut": false, "supported": true})
+        json!({"installed": false, "version": null, "path": null, "desktop_shortcut": false, "supported": true,
+               "legacy": false, "legacy_items": [], "shortcuts": false})
     );
     m.app.lock().unwrap().installed = true;
     m.app.lock().unwrap().path = Some("/opt/kora/kora".into());
+    m.app.lock().unwrap().legacy = true;
+    m.app.lock().unwrap().legacy_items = vec!["Delete /opt/kora/bin/kora".into()];
     let (_, j) = call(&app, "GET", "/api/v1/app", None).await;
     assert_eq!(j["installed"], true);
     assert_eq!(j["path"], "/opt/kora/kora");
+    assert_eq!(j["legacy"], true);
+    assert_eq!(j["legacy_items"], json!(["Delete /opt/kora/bin/kora"]));
 }
 
 #[tokio::test]
-async fn app_install_and_uninstall_as_admin() {
+async fn tidy_up_with_nothing_old_only_makes_the_shortcuts_and_needs_no_administrator() {
+    for admin in [false, true] {
+        let (app, m, _g) = setup(admin);
+        let (s, j) = call(&app, "PUT", "/api/v1/app", Some(json!({"desktop_shortcut": false, "dry_run": false}))).await;
+        assert_eq!(s, 200, "{j}");
+        assert!(j["message"].as_str().unwrap().contains("shortcuts"), "{j}");
+        assert_eq!(m.calls(), ["app_install shortcut=false force=false dry=false"], "no old copy: nothing is removed");
+    }
+}
+
+#[tokio::test]
+async fn tidy_up_as_admin_makes_the_shortcuts_first_then_removes_the_old_copy() {
     let (app, m, _g) = setup(true);
-    let (s, j) = call(
-        &app,
-        "PUT",
-        "/api/v1/app",
-        Some(json!({"desktop_shortcut": false, "force": true, "dry_run": false})),
-    )
-    .await;
+    m.app.lock().unwrap().legacy = true;
+    m.app.lock().unwrap().legacy_items = vec!["Delete the old program".into()];
+    let (s, j) = call(&app, "PUT", "/api/v1/app", Some(json!({}))).await;
     assert_eq!(s, 200, "{j}");
-    assert!(j["message"].as_str().unwrap().contains("installed"));
-    let (s, j) = call(
-        &app,
-        "DELETE",
-        "/api/v1/app",
-        Some(json!({"dry_run": true})),
-    )
-    .await;
+    assert!(j["message"].as_str().unwrap().contains("old copy"), "{j}");
+    assert_eq!(m.calls(), ["app_install shortcut=true force=false dry=false", "app_uninstall dry=false"], "new shortcuts BEFORE the old ones go");
+    // a preview changes nothing and says what would go
+    let (s, j) = call(&app, "PUT", "/api/v1/app", Some(json!({"dry_run": true}))).await;
     assert_eq!(s, 200);
-    assert!(j["message"]
-        .as_str()
-        .unwrap()
-        .contains("Nothing was changed"));
-    let (s, _) = call(
-        &app,
-        "DELETE",
-        "/api/v1/app",
-        Some(json!({"dry_run": false})),
-    )
-    .await;
-    assert_eq!(s, 200);
-    assert_eq!(
-        m.calls(),
-        [
-            "app_install shortcut=false force=true dry=false",
-            "app_uninstall dry=true",
-            "app_uninstall dry=false"
-        ]
-    );
+    let text = j["message"].as_str().unwrap();
+    assert!(text.contains("Nothing was changed") && text.contains("Delete the old program"), "{j}");
+    assert_eq!(m.calls().last().unwrap(), "app_install shortcut=true force=false dry=true");
+}
+
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn tidy_up_without_administrator_rights_makes_the_shortcuts_and_asks_for_the_command() {
+    let (app, m, _g) = setup(false);
+    m.app.lock().unwrap().legacy = true;
+    let (s, j) = call(&app, "PUT", "/api/v1/app", Some(json!({"desktop_shortcut": true}))).await;
+    assert_eq!(s, 403, "{j}");
+    assert_eq!(j["error"]["code"], "needs_elevation");
+    assert_eq!(j["error"]["command"], json!(["kora", "uninstall", "--app", "--yes"]));
+    assert!(j["error"]["message"].as_str().unwrap().contains("old ones keep working"), "{j}");
+    assert_eq!(m.calls(), ["app_install shortcut=true force=false dry=false"], "the per-user half is done; the old copy is untouched");
 }
 
 #[tokio::test]
-async fn app_changes_need_elevation_unless_dry_run() {
-    let (app, m, _g) = setup(false);
-    let (s, j) = call(
-        &app,
-        "PUT",
-        "/api/v1/app",
-        Some(json!({"desktop_shortcut": false, "force": true, "dry_run": false})),
-    )
-    .await;
-    assert_eq!(s, 403);
-    assert_eq!(j["error"]["code"], "needs_elevation");
-    assert_eq!(
-        j["error"]["command"],
-        json!([
-            "kora",
-            "app",
-            "install",
-            "--yes",
-            "--no-desktop-shortcut",
-            "--force"
-        ])
-    );
-    let (s, j) = call(
-        &app,
-        "DELETE",
-        "/api/v1/app",
-        Some(json!({"dry_run": false})),
-    )
-    .await;
-    assert_eq!(s, 403);
-    assert_eq!(
-        j["error"]["command"],
-        json!(["kora", "uninstall", "--app", "--yes"])
-    );
-    assert!(m.calls().is_empty(), "nothing may run without elevation");
-    // A dry run changes nothing, so it needs no elevation.
-    let (s, _) = call(
-        &app,
-        "PUT",
-        "/api/v1/app",
-        Some(json!({"desktop_shortcut": true, "force": false, "dry_run": true})),
-    )
-    .await;
+async fn app_removal_as_admin() {
+    let (app, m, _g) = setup(true);
+    let (s, j) = call(&app, "DELETE", "/api/v1/app", Some(json!({"dry_run": true}))).await;
     assert_eq!(s, 200);
+    assert!(j["message"].as_str().unwrap().contains("Nothing was changed"));
+    let (s, _) = call(&app, "DELETE", "/api/v1/app", Some(json!({"dry_run": false}))).await;
+    assert_eq!(s, 200);
+    assert_eq!(m.calls(), ["app_uninstall dry=true", "app_uninstall dry=false"]);
+}
+
+#[tokio::test]
+async fn app_removal_without_administrator_rights_gives_the_command() {
+    let (app, m, _g) = setup(false);
+    let (s, j) = call(&app, "DELETE", "/api/v1/app", Some(json!({"dry_run": false}))).await;
+    assert_eq!(s, 403);
+    assert_eq!(j["error"]["command"], json!(["kora", "uninstall", "--app", "--yes"]));
+    assert!(m.calls().is_empty(), "nothing may run without elevation");
 }
 
 #[tokio::test]
@@ -316,6 +299,9 @@ async fn uninstall_run_job_and_errors() {
     assert_eq!(done["state"], "failed");
 }
 
+// Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
+// (tests/admin_worker.rs covers that), so the answer here is different by design.
+#[cfg(not(windows))]
 #[tokio::test]
 async fn uninstall_run_needs_elevation_without_admin() {
     let (app, m, _g) = setup(false);

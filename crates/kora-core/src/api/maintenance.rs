@@ -5,7 +5,7 @@
 //! reshapes it into values an HTTP handler can return.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::app_install::{self as app, AppOptions};
@@ -30,13 +30,23 @@ pub struct SelfUpdateInfo {
     pub versions: Vec<String>,
 }
 
+/// The "Kora app" as the panel shows it. Since 0.7.0 the app is the panel plus per-user shortcuts;
+/// `installed`/`version`/`path`/`desktop_shortcut` describe the OLD machine-wide copy (`legacy`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppStatusView {
+    /// The old machine-wide app is installed (`%ProgramFiles%\Kora`, `/opt/kora`).
     pub installed: bool,
     pub version: Option<String>,
     pub path: Option<String>,
     pub desktop_shortcut: bool,
     pub supported: bool,
+    /// The old app, its machine-wide shortcuts or its administrator launchers are still here: the panel
+    /// offers "Tidy up old shortcuts".
+    pub legacy: bool,
+    /// What the tidy-up would remove, one plain sentence each.
+    pub legacy_items: Vec<String>,
+    /// The per-user shortcut (Start Menu / launcher) is in place.
+    pub shortcuts: bool,
 }
 
 /// One thing the uninstall would (or would not) remove.
@@ -77,7 +87,8 @@ pub trait Maintenance: Send + Sync {
         status: &mut dyn FnMut(&str),
     ) -> Result<String, String>;
     fn app_status(&self) -> AppStatusView;
-    /// Lines describing the changes made (or, with `dry_run`, that would be).
+    /// Make the per-user shortcuts (no administrator rights; `force` is ignored). Lines describing the
+    /// changes made (or, with `dry_run`, that would be).
     fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, String>;
     fn app_uninstall(&self, dry_run: bool) -> Result<Vec<String>, String>;
     fn uninstall_plan(&self, only: Option<&str>) -> Result<Vec<PlanItem>, String>;
@@ -86,6 +97,26 @@ pub trait Maintenance: Send + Sync {
         req: &UninstallRequest,
         status: &mut dyn FnMut(&str),
     ) -> Result<UninstallOutcome, String>;
+    /// The server folders an uninstall `req` would delete: `(name, folder)`.
+    fn uninstall_folders(&self, req: &UninstallRequest) -> Vec<(String, PathBuf)> {
+        folders_to_delete(&Registry::load().unwrap_or_default(), req)
+    }
+    /// Delete what Kora put in a server folder, as the person (never elevated: the folder is
+    /// theirs, and an elevated delete in a folder others can change is a risk). Notes.
+    fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, String> {
+        installer::rollback(dir, &RollbackOptions { keep_files: false, keep_db: true }, &mut NullSink).map_err(|e| e.0)
+    }
+}
+
+/// Which registered servers' folders `req` deletes (everything, `only`, `--delete-files` or the
+/// `<name>/folder` answers).
+pub fn folders_to_delete(reg: &Registry, req: &UninstallRequest) -> Vec<(String, PathBuf)> {
+    reg.servers
+        .iter()
+        .filter(|s| req.only.is_empty() || req.only.iter().any(|o| matches_only(s, o)))
+        .filter(|s| req.delete_files || req.answers.iter().any(|(i, r)| *r && *i == format!("{}/folder", s.name)))
+        .map(|s| (s.name.clone(), s.dir.clone()))
+        .collect()
 }
 
 static OVERRIDE: RwLock<Option<Arc<dyn Maintenance>>> = RwLock::new(None);
@@ -103,9 +134,14 @@ pub fn current() -> Arc<dyn Maintenance> {
         .unwrap_or_else(|| Arc::new(SystemMaintenance))
 }
 
-/// Would `kora app install/uninstall` (not a dry run) ask for administrator rights? Same test as the CLI.
+/// Would `kora app uninstall` (not a dry run) ask for administrator rights? Same test as the CLI.
 pub fn app_change_needs_admin(m: &dyn Maintenance, dry_run: bool) -> bool {
     !dry_run && !m.is_admin() && std::env::var_os("KORA_APP_PREFIX").is_none()
+}
+
+/// Does the tidy-up still have a machine-wide part that this user cannot do (removing the old copy)?
+pub fn tidy_needs_admin(m: &dyn Maintenance, dry_run: bool) -> bool {
+    m.app_status().legacy && app_change_needs_admin(m, dry_run)
 }
 
 pub struct SystemMaintenance;
@@ -284,17 +320,21 @@ impl Maintenance for SystemMaintenance {
 
     fn app_status(&self) -> AppStatusView {
         let st = app::status();
+        let legacy = app::user::legacy_present();
         AppStatusView {
             installed: st.installed,
             version: st.version.clone(),
             path: st.installed.then(|| st.exe.display().to_string()),
             desktop_shortcut: st.desktop.unwrap_or(false),
             supported: app::supported(),
+            legacy: legacy.present(),
+            legacy_items: legacy.items,
+            shortcuts: app::user::user_status().in_place(),
         }
     }
 
     fn app_install(&self, opts: &AppOptions) -> Result<Vec<String>, String> {
-        let out = app::install_app(opts).map_err(|e| e.to_string())?;
+        let out = app::user::install_user(&app::user::UserOptions { desktop_shortcut: opts.desktop_shortcut, dry_run: opts.dry_run }).map_err(|e| e.to_string())?;
         let mut lines = out.changes.clone();
         lines.extend(out.notes.iter().map(|n| format!("note: {n}")));
         Ok(lines)
@@ -352,13 +392,21 @@ impl Maintenance for SystemMaintenance {
                 });
             }
         }
-        if only.is_none() && self.app_status().installed {
+        if only.is_none() && (self.app_status().installed || app::user::user_status().any()) {
             out.push(PlanItem {
                 item: "app".into(),
                 description:
-                    "The Kora app (the `kora` command, shortcuts and the installed program)".into(),
+                    "Kora's shortcuts (and the old machine-wide Kora app, if it is still installed). Your servers are not touched".into(),
                 kind: "app",
                 remove: false,
+            });
+        }
+        if only.is_none() && !crate::tools::private_present().is_empty() {
+            out.push(PlanItem {
+                item: "tools".into(),
+                description: format!("Kora's own copies of {} (in Kora's folder; nothing else on this computer changes)", crate::tools::private_present().join(" and ")),
+                kind: "system",
+                remove: true,
             });
         }
         Ok(out)
@@ -464,11 +512,27 @@ impl Maintenance for SystemMaintenance {
                 );
             }
         }
+        if req.only.is_empty() && answers.get("tools").copied().unwrap_or(false) {
+            status("Removing Kora's own copies of Git and the GitHub CLI");
+            match crate::tools::remove_private() {
+                Ok(gone) if !gone.is_empty() => sum.removed.push(format!("Kora's own copies of {}", gone.join(" and "))),
+                Ok(_) => {}
+                Err(e) => sum.failed.push(format!("Kora's own Git and GitHub CLI copies: {e}")),
+            }
+        }
         if answers.get("app").copied().unwrap_or(false) {
-            status("Removing the Kora app");
-            match app::uninstall_app_opts(false) {
-                Ok(_) => sum.removed.push("the Kora app".into()),
-                Err(e) => sum.failed.push(format!("the Kora app: {e}")),
+            status("Removing the Kora shortcuts");
+            match app::user::uninstall_user(false) {
+                Ok(lines) if !lines.is_empty() => sum.removed.push("Kora's shortcuts".into()),
+                Ok(_) => {}
+                Err(e) => sum.failed.push(format!("Kora's shortcuts: {e}")),
+            }
+            if app::user::legacy_present().present() {
+                status("Removing the old Kora app");
+                match app::uninstall_app_opts(false) {
+                    Ok(_) => sum.removed.push("the old Kora app".into()),
+                    Err(e) => sum.failed.push(format!("the old Kora app: {e}")),
+                }
             }
         }
         Ok(UninstallOutcome {
@@ -522,6 +586,9 @@ pub mod fake {
                     path: None,
                     desktop_shortcut: false,
                     supported: true,
+                    legacy: false,
+                    legacy_items: vec![],
+                    shortcuts: false,
                 }),
                 plan: Mutex::new(vec![
                     PlanItem {
@@ -601,6 +668,18 @@ pub mod fake {
             ));
             status("Removing");
             self.outcome.lock().unwrap().clone()
+        }
+        fn uninstall_folders(&self, req: &UninstallRequest) -> Vec<(String, PathBuf)> {
+            let all = ["prod", "dev"];
+            all.iter()
+                .filter(|n| req.only.is_empty() || req.only.iter().any(|o| o == *n))
+                .filter(|n| req.delete_files || req.answers.iter().any(|(i, r)| *r && *i == format!("{n}/folder")))
+                .map(|n| (n.to_string(), PathBuf::from(format!("/srv/{n}"))))
+                .collect()
+        }
+        fn delete_server_files(&self, dir: &Path) -> Result<Vec<String>, String> {
+            self.log(format!("delete_server_files {}", dir.display()));
+            Ok(vec![])
         }
     }
 }

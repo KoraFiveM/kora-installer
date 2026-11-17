@@ -2,7 +2,6 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::{lnk, AppError, Result, ShortcutSpec, Sys, UninstallEntry, UNINSTALL_KEY};
 
@@ -27,7 +26,8 @@ fn io<T>(r: std::io::Result<T>, what: impl AsRef<str>) -> Result<T> {
 /// Run a PowerShell script. Values travel in environment variables (never spliced into the script), so
 /// paths with spaces, quotes or non-ASCII characters need no escaping.
 fn powershell(script: &str, env: &[(&str, OsString)]) -> Result<String> {
-    let mut c = Command::new("powershell.exe");
+    // Through `sysexe`: by name Windows looks next to kora.exe first, and this can run as administrator.
+    let mut c = crate::sysexe::command("powershell.exe");
     let script = format!("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {script}");
     c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script]);
     for (k, v) in env {
@@ -171,6 +171,21 @@ impl Sys for RealSys {
         }
     }
 
+    fn user_path(&self) -> Result<Option<String>> {
+        if !cfg!(windows) {
+            return Ok(None);
+        }
+        // Unexpanded, so a path written with %USERPROFILE% stays that way when it is written back.
+        let script = "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment'); [Console]::Out.Write($k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))";
+        Ok(Some(powershell(script, &[])?))
+    }
+
+    fn set_user_path(&mut self, value: &str) -> Result<()> {
+        // Keep it expandable (REG_EXPAND_SZ) like Windows itself does for a user PATH.
+        let script = "Set-ItemProperty -LiteralPath 'HKCU:\\Environment' -Name Path -Type ExpandString -Value $env:KORA_VALUE";
+        powershell(script, &[("KORA_VALUE", value.into())]).map(|_| ())
+    }
+
     fn machine_path(&self) -> Result<Option<String>> {
         if !cfg!(windows) {
             return Ok(None);
@@ -205,7 +220,7 @@ impl Sys for RealSys {
         }
         let script = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:KORA_LNK); \
             $s.TargetPath = $env:KORA_TARGET; $s.Arguments = $env:KORA_ARGS; $s.WorkingDirectory = $env:KORA_WORKDIR; \
-            $s.IconLocation = $env:KORA_ICON; $s.Description = $env:KORA_DESC; $s.Save()";
+            $s.IconLocation = $env:KORA_ICON; $s.Description = $env:KORA_DESC; if ($env:KORA_MIN -eq '1') { $s.WindowStyle = 7 }; $s.Save()";
         powershell(
             script,
             &[
@@ -215,6 +230,7 @@ impl Sys for RealSys {
                 ("KORA_WORKDIR", s.workdir.clone().into_os_string()),
                 ("KORA_ICON", s.icon.clone().into()),
                 ("KORA_DESC", s.description.clone().into()),
+                ("KORA_MIN", if s.minimized { "1" } else { "0" }.into()),
             ],
         )?;
         if s.run_as_admin {
@@ -245,6 +261,7 @@ impl Sys for RealSys {
             icon: f[3].to_string(),
             description: f[4].to_string(),
             run_as_admin: admin,
+            minimized: false,
         })
     }
 

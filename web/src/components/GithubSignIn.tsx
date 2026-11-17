@@ -34,11 +34,29 @@ export function GithubSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
     }
   }
   if (status.isLoading) return <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden /> Checking GitHub...</p>
-  if (status.data?.signed_in) return <div className="flex items-center gap-2 text-sm"><Badge tone="success" dot>Signed in</Badge><span>as {status.data.user}</span></div>
+  const state = status.data?.state ?? (status.data?.signed_in ? 'ready' : 'signed_out')
+  if (status.data?.signed_in && state !== 'missing_scopes') return <div className="flex items-center gap-2 text-sm"><Badge tone="success" dot>Signed in</Badge><span>as {status.data.user}</span></div>
+  // `gh` itself is missing: signing in cannot work yet. Say so, with what the panel offers to fix it.
+  if (state === 'gh_missing') {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm"><Badge tone="amber" dot>GitHub CLI not installed</Badge></div>
+        <ErrorNotice error={status.data?.problem ?? 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.'} />
+        <Button onClick={() => void status.refetch()}>Check again</Button>
+      </div>
+    )
+  }
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-sm"><Badge tone="neutral" dot>Not signed in</Badge></div>
-      {!start && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>Sign in to GitHub</Button>}
+      {state === 'missing_scopes' ? (
+        <>
+          <div className="flex items-center gap-2 text-sm"><Badge tone="amber" dot>More permissions needed</Badge><span>signed in as {status.data?.user}</span></div>
+          <p className="text-sm text-muted-foreground">{status.data?.problem?.message ?? 'Sign in again to give Kora the permissions it needs.'}</p>
+        </>
+      ) : (
+        <div className="flex items-center gap-2 text-sm"><Badge tone="neutral" dot>Not signed in</Badge></div>
+      )}
+      {!start && <Button onClick={begin} disabled={!!blocked} title={blocked ?? undefined}>{state === 'missing_scopes' ? 'Sign in to GitHub again' : 'Sign in to GitHub'}</Button>}
       {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
       {start && job.phase === 'running' && (
         <Alert tone="info" title="Finish signing in on GitHub">

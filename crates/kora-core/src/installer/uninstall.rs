@@ -289,6 +289,7 @@ mod tests {
             dir: dir.to_path_buf(),
             hostname: name.into(),
             license_key: None,
+            license_key_name: None,
             cfx_identifier: None,
             ports: Ports::default(),
             txadmin_public: false,

@@ -1,14 +1,11 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, FolderOpen } from 'lucide-react'
-import { api } from '@/api/client'
 import type { ServerDetail } from '@/api/types'
 import type { useServerControl } from '@/hooks/useServerControl'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CopyField } from '@/components/CopyButton'
-import { ErrorNotice } from '@/components/ErrorNotice'
+import { CopyConnectButton, OpenFolderButton, TxAdminButton, useCanOpenFolder, useTxAdminLink } from '@/components/ServerLinks'
+import { CONNECT_NOTE } from '@/lib/serverLinks'
+import { LicenceKeyCard } from '@/components/ChangeLicenceKey'
 import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
 
@@ -17,11 +14,8 @@ function Check({ ok, yes, no }: { ok: boolean; yes: string; no: string }) {
 }
 
 export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: ReturnType<typeof useServerControl> }) {
-  const sys = useQuery({ queryKey: ['system'], queryFn: api.system })
-  const [err, setErr] = useState<unknown>(null)
-  const host = window.location.hostname
-  const connect = s.connect ?? `${host}:${s.ports.game}`
-  const tx = `http://${host}:${s.ports.txadmin}`
+  const canOpen = useCanOpenFolder()
+  const tx = useTxAdminLink(s.ports.txadmin)
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <Card>
@@ -40,25 +34,26 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
       <Card>
         <CardHeader><CardTitle>Connect and manage</CardTitle></CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <TxAdminButton port={s.ports.txadmin} up={s.txadmin_up} size="default" />
+            <OpenFolderButton name={s.name} dir={s.dir} size="default" />
+            <CopyConnectButton connect={s.connect} size="default" />
+          </div>
+          {!s.txadmin_up && <p className="text-xs text-muted-foreground">txAdmin answers once the server is running.</p>}
+          {s.txadmin_up && tx.hint && <p className="text-xs text-muted-foreground">{tx.hint}</p>}
           <div className="space-y-1.5">
             <div className="text-sm text-muted-foreground">Connect address (players type this in the FiveM console, or use direct connect)</div>
-            <CopyField value={connect} label="Connect address" />
+            {s.connect ? <CopyField value={s.connect} label="Connect address" /> : <p className="text-sm">Kora could not find this computer's network address. Players connect to this computer's address with port {s.ports.game}.</p>}
+            <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
           </div>
           <div className="space-y-1.5">
             <div className="text-sm text-muted-foreground">Server folder</div>
             <CopyField value={s.dir} label="Server folder" />
-            {sys.data?.local && (
-              <Button size="sm" onClick={async () => { setErr(null); try { await api.servers.openFolder(s.name) } catch (e) { setErr(e) } }}><FolderOpen /> Open folder</Button>
-            )}
-            {sys.data && !sys.data.local && <p className="text-xs text-muted-foreground">Opening the folder only works when you use this page on the computer that runs Kora.</p>}
+            {!canOpen && <p className="text-xs text-muted-foreground">Opening the folder only works on the computer that runs Kora, at its screen. From here, copy the path.</p>}
           </div>
-          <Button asChild variant="default" disabled={!s.txadmin_up}>
-            <a href={tx} target="_blank" rel="noopener noreferrer"><ExternalLink /> Open txAdmin</a>
-          </Button>
-          {!s.txadmin_up && <p className="text-xs text-muted-foreground">txAdmin answers once the server is running.</p>}
-          <ErrorNotice error={err} />
         </CardContent>
       </Card>
+      <LicenceKeyCard server={s} busy={ctl.busy} restart={() => void ctl.run('restart')} />
     </div>
   )
 }

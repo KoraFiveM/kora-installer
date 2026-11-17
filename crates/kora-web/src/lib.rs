@@ -61,6 +61,8 @@ pub struct PanelOptions {
     pub tailscale: bool,
     /// `--allow-public`: let `bind` be a public address or every interface (plain HTTP on the internet).
     pub allow_public: bool,
+    /// The page the browser opens on (`/install`); `None` is the start page.
+    pub landing: Option<String>,
 }
 
 impl Default for PanelOptions {
@@ -74,6 +76,7 @@ impl Default for PanelOptions {
             remote_config: None,
             tailscale: false,
             allow_public: false,
+            landing: None,
         }
     }
 }
@@ -248,7 +251,11 @@ pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st)
         "node": hostname(),
         "identity": caller.identity,
         "remote": caller.remote,
-        "allow_remote_destructive": caller.remote && caller.identity.is_some() && st.remote.config().allow_remote_destructive,
+        // May this remote session use the destructive actions? A Tailscale identity always may; a token
+        // session only once `kora panel remote-actions on` has been run. (Installing needs neither.)
+        "allow_remote_destructive": caller.remote && caller.identity.as_ref().is_some_and(|i| {
+            i.provider == remote::Provider::Tailscale || st.remote.config().allow_remote_destructive
+        }),
     }))
 }
 
@@ -563,6 +570,7 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         } else {
             // A one-time code, not the token: the link may end up in a browser's history.
             let url = launch::code_link(addr.port(), &state.mint_link_code());
+            let url = launch::with_landing(&url, opts.landing.as_deref().unwrap_or("/"));
             println!("Kora Panel: {url}");
             println!("The link works once, within 10 minutes. `kora panel` shows a new one while this runs.");
             // The tunnel hint is for people on a machine without a desktop, whether or not we would have

@@ -583,7 +583,11 @@ pub fn task_xml(s: &ManagedServer, schedule: &Schedule, run_as: RunAs, user: &st
             if user.is_empty() || user.chars().any(|c| c.is_control()) {
                 return Err(ServiceError::Invalid("the installing user's name is not usable".into()));
             }
-            format!("<UserId>{}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel>", xml_escape(user))
+            // Least privilege: the update works in a folder the person (and the server's own
+            // account) can change, so it must never run with their full administrator token. It
+            // restarts the server through the right Kora gives the person on that one service
+            // (`service::windows_user_control_sddl`).
+            format!("<UserId>{}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel>", xml_escape(user))
         }
     };
     Ok(format!(

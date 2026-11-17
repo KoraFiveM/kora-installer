@@ -1,4 +1,4 @@
-//! Shared installer contract between the orchestrator (kora-core) and front ends (CLI/TUI).
+//! Shared installer contract between the orchestrator (kora-core) and front ends (CLI, panel).
 //! Keep this file stable; both sides code against it.
 
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,11 @@ pub struct InstallRequest {
     pub dir: PathBuf,
     pub hostname: String,
     pub license_key: Option<String>,
+    /// The saved key (see `keystore`) the licence key comes from, when it came from there. A name is
+    /// not a secret: it is kept in the saved answers and in a stopped install, so they can carry on
+    /// without the key being written anywhere else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_key_name: Option<String>,
     /// Linked Cfx identifier for the txAdmin master (e.g. "fivem:123456"), if known.
     pub cfx_identifier: Option<String>,
     pub ports: Ports,
@@ -103,8 +108,9 @@ pub struct InstallRequest {
     /// Start the server when the install is done (final `launch` step) and wait until it answers.
     #[serde(default)]
     pub start: bool,
-    /// Also install the Kora app (command / Start Menu shortcut) so the user can reopen the manager later. `None` = no.
-    #[serde(default)]
+    /// Retired in 0.7.0 and ignored: the old machine-wide "Kora app" is no longer installed (the install
+    /// scripts make per-user shortcuts instead). Kept so saved requests and old clients still load.
+    #[serde(default, skip_serializing)]
     pub app: Option<crate::app_install::AppChoice>,
 }
 
@@ -115,6 +121,7 @@ impl std::fmt::Debug for InstallRequest {
             .field("name", &self.name)
             .field("dir", &self.dir)
             .field("license_key", &self.license_key.as_ref().map(|_| "<redacted>"))
+            .field("license_key_name", &self.license_key_name)
             .field("ports", &self.ports)
             .field("db_admin", &self.db_admin)
             .finish_non_exhaustive()
@@ -144,7 +151,7 @@ pub struct ProgressEvent {
     pub percent: u8,
 }
 
-/// Sink the orchestrator reports to (TUI channel, CLI printer, test collector).
+/// Sink the orchestrator reports to (CLI printer, panel job, test collector).
 pub trait ProgressSink: Send {
     fn event(&mut self, ev: ProgressEvent);
 }

@@ -16,6 +16,7 @@ use axum::Json;
 use kora_core::api::install::github::{GithubEnv, SystemGithub};
 use kora_core::api::{valid_resource_name, Op};
 use kora_core::feedback::PrPlan;
+use kora_core::problem::{known, Problem};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -41,7 +42,17 @@ const MAX_TITLE: usize = 256;
 const MAX_TEXT: usize = 60_000;
 
 fn bad_gateway(m: String) -> ApiError {
+    if Problem::is_encoded(&m) {
+        return ApiError::problem(StatusCode::BAD_GATEWAY, Problem::decode(&m));
+    }
     ApiError::new(StatusCode::BAD_GATEWAY, "internal", m)
+}
+
+/// 403 "sign in first", as a Problem with the sign-in action (the message stays the same).
+fn sign_in_first() -> ApiError {
+    let mut p = known::github_signed_out();
+    p.message = SIGN_IN_FIRST.to_string();
+    ApiError::problem(StatusCode::FORBIDDEN, p)
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, ApiError> {
@@ -50,11 +61,12 @@ fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, ApiError> {
     })
 }
 
-/// `GET /github/status` → `{signed_in, user}`.
+/// `GET /github/status` → `{signed_in, user, state, missing_scopes, problem}`. `state` is `ready`,
+/// `gh_missing`, `signed_out` or `missing_scopes`; `problem` (null when ready) says what to do.
 pub async fn github_status() -> Result<Json<Value>, ApiError> {
     let e = env();
     let u = blocking(move || Ok(e.auth())).await?;
-    Ok(Json(json!({"signed_in": u.signed_in, "user": u.user})))
+    Ok(Json(u.json()))
 }
 
 /// Only one sign-in at a time (a second `gh auth login` would fight over the same device flow).
@@ -96,8 +108,11 @@ pub async fn github_login(State(st): State<AppState>) -> Result<Response, ApiErr
 pub async fn github_owners() -> Result<Json<Value>, ApiError> {
     let e = env();
     let owners = blocking(move || {
-        if !e.auth().signed_in {
-            return Err(ApiError::forbidden(SIGN_IN_FIRST));
+        let auth = e.auth();
+        if !auth.signed_in {
+            // Not signed in, or `gh` is missing: say which, with the fix.
+            let p = auth.problem().unwrap_or_else(known::github_signed_out);
+            return Err(ApiError::problem(StatusCode::FORBIDDEN, p));
         }
         e.owners().map_err(ApiError::core)
     })
@@ -148,7 +163,7 @@ pub async fn issue_report(
         }
         let mut be = st.backend();
         if !be.github_signed_in() {
-            return Err(ApiError::forbidden(SIGN_IN_FIRST));
+            return Err(sign_in_first());
         }
         be.report_issue(&e, &b.resource, title, &b.text)
             .map_err(ApiError::core)
@@ -175,7 +190,7 @@ pub async fn pr_plan(
         check_resource(&b.resource)?;
         let mut be = st.backend();
         if !be.github_signed_in() {
-            return Err(ApiError::forbidden(SIGN_IN_FIRST));
+            return Err(sign_in_first());
         }
         be.pr_plan(&e, &b.resource).map_err(ApiError::core)
     })
@@ -214,7 +229,7 @@ pub async fn pr_open(
         }
         let mut be = st.backend();
         if !be.github_signed_in() {
-            return Err(ApiError::forbidden(SIGN_IN_FIRST));
+            return Err(sign_in_first());
         }
         let fresh = be.pr_plan(&e, &client.resource).map_err(ApiError::core)?;
         if fresh != client {

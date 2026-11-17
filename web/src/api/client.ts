@@ -4,6 +4,10 @@ export interface ApiErrorBody {
   code: string
   message: string
   command?: string[]
+  /** Technical details (a Problem's `details`). */
+  details?: string
+  /** What the user can do (a Problem's `actions`). */
+  actions?: T.ProblemAction[]
 }
 
 /** An error answered by the API (or a network failure, code `network`). `message` is for end users. */
@@ -11,12 +15,18 @@ export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly command?: string[]
+  readonly details?: string
+  readonly actions?: T.ProblemAction[]
+  /** Send the request that failed again (`request_admin`: once more, now asking Windows for permission). */
+  replay?: () => Promise<unknown>
   constructor(status: number, body: ApiErrorBody) {
     super(body.message)
     this.name = 'ApiError'
     this.status = status
     this.code = body.code
     this.command = body.command
+    this.details = body.details
+    this.actions = body.actions
   }
   get needsElevation(): boolean {
     return this.code === 'needs_elevation'
@@ -77,7 +87,7 @@ async function readError(res: Response): Promise<ApiError> {
   let body: ApiErrorBody | null = null
   try {
     const j = (await res.json()) as { error?: Partial<ApiErrorBody> }
-    if (j?.error?.message) body = { code: j.error.code ?? 'internal', message: j.error.message, command: j.error.command }
+    if (j?.error?.message) body = { code: j.error.code ?? 'internal', message: j.error.message, command: j.error.command, details: j.error.details, actions: Array.isArray(j.error.actions) ? j.error.actions : undefined }
   } catch {
     /* not JSON */
   }
@@ -93,6 +103,20 @@ export interface RequestOptions {
   quiet401?: boolean
   /** Send this file as the body instead of JSON (streamed by the browser). */
   raw?: { body: Blob; type: string; headers?: Record<string, string> }
+  /** The person chose "Ask for administrator permission": Windows may show its prompt even for a remote session. */
+  askAdmin?: boolean
+}
+
+/** Header of [`RequestOptions.askAdmin`] (`kora_web::elevated::ASK_HEADER`). */
+export const ADMIN_HEADER = 'X-Kora-Admin'
+
+let askAdminAt = 0
+/**
+ * The next change sent within a minute asks Windows for administrator permission (the app-wide
+ * `request_admin` button arms this, then repeats what failed). Used once.
+ */
+export function askForAdminNext(): void {
+  askAdminAt = Date.now()
 }
 
 export async function request<R>(path: string, opts: RequestOptions = {}): Promise<R> {
@@ -101,6 +125,10 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   if (method !== 'GET') headers['X-Kora'] = '1'
   const secret = sessionSecret()
   if (secret) headers['X-Kora-Session'] = secret
+  if (method !== 'GET' && (opts.askAdmin || (askAdminAt && Date.now() - askAdminAt < 60_000))) {
+    headers[ADMIN_HEADER] = 'ask'
+    askAdminAt = 0
+  }
   let body: BodyInit | undefined
   if (opts.raw) {
     headers['Content-Type'] = opts.raw.type
@@ -126,6 +154,7 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
   }
   if (!res.ok) {
     const err = await readError(res)
+    err.replay = () => request<R>(path, opts)
     // The session ended: forget its secret (in every tab, it is shared). Not for a failed sign-in (a stale
     // link opened in a new tab must not sign the other tabs out), nor when another tab has signed in
     // since this request left.
@@ -245,10 +274,50 @@ export const api = {
     prPlan: (name: string, resource: string) => post<T.PrPlan>(`${s(name)}/pr/plan`, { resource }),
     prOpen: (name: string, body: { plan: T.PrPlan; title: string; text: string }) => post<{ url: string }>(`${s(name)}/pr`, body),
   },
+  branches: {
+    /** Where each resource is (nothing is downloaded). Development servers only. */
+    list: (name: string) => get<{ resources: T.ResourceBranch[] }>(`${s(name)}/branches`).then((r) => r.resources),
+    /** Branches and kept-aside changes of one resource; `refresh` downloads the newest lists from GitHub first. */
+    choices: (name: string, resource: string, refresh = false) => get<T.BranchChoices>(`${s(name)}/resources/${enc(resource)}/branches${refresh ? '?refresh=1' : ''}`),
+    /** Open pull requests of the original repository and of the person's fork. */
+    prs: (name: string, resource: string) => get<T.PrChoices>(`${s(name)}/resources/${enc(resource)}/prs`),
+    /** Switch one resource: another branch, a pull request, or back to the normal version. */
+    switch: (name: string, resource: string, body: T.SwitchRequest) => post<T.SwitchResult>(`${s(name)}/resources/${enc(resource)}/branch`, body),
+    /** Bring kept-aside changes back. */
+    restore: (name: string, resource: string, index: number) => post<T.SwitchResult>(`${s(name)}/resources/${enc(resource)}/stash/restore`, { index }),
+    /** Which resources have a branch (a job; result is a `BulkPreview`). */
+    bulkPreview: (name: string, branch: string, fetch = true) => post<T.JobStarted>(`${s(name)}/branches/preview`, { branch, fetch }),
+    /** Switch every resource that has the branch, or all back to the normal version (a job; result is a `BulkResult`). */
+    bulkApply: (name: string, body: { action: 'branch'; branch: string; resources?: string[]; changes?: T.ChangesChoice } | { action: 'default'; resources?: string[]; changes?: T.ChangesChoice }) => post<T.JobStarted>(`${s(name)}/branches/apply`, body),
+  },
   github: {
     status: () => get<T.GithubStatus>('/github/status'),
     login: () => post<T.GithubLoginStart>('/github/login'),
     owners: () => get<{ owners: T.GithubOwner[] }>('/github/owners').then((r) => r.owners),
+  },
+  /** Git and the GitHub CLI, the System check, and starting the database. */
+  tools: {
+    status: () => get<{ tools: T.ToolStatus[] }>('/tools').then((r) => r.tools),
+    /** Download and set up Kora's own copy (a job; `git` on Linux is the system package and needs administrator rights). */
+    install: (tool: 'git' | 'gh') => post<T.JobStarted>(`/tools/${enc(tool)}/install`),
+  },
+  systemCheck: {
+    get: () => get<T.SystemCheck>('/system/check'),
+    startDatabase: () => post<T.JobStarted>('/system/database/start'),
+  },
+  keys: {
+    list: () => get<T.SavedKeys>('/keys'),
+    add: (name: string, license_key: string) => post<{ key: T.SavedKeyInfo }>('/keys', { name, license_key }),
+    /** Rename, put a new key under the name, or both. */
+    update: (name: string, body: { new_name?: string; license_key?: string }) => put<T.KeyChange>(`/keys/${enc(name)}`, body),
+    remove: (name: string) => del<{ removed: boolean; notes: string[] }>(`/keys/${enc(name)}`),
+    /** Change the licence key of an installed server: a saved key by name, or a new one (optionally saved). */
+    setForServer: (server: string, body: { name: string } | { license_key: string; save_as?: string }) => put<T.ServerKeyChanged>(`/servers/${enc(server)}/licence-key`, body),
+  },
+  profile: {
+    get: () => get<T.Profile>('/profile'),
+    /** `null` forgets a field; a field left out stays as it is. */
+    set: (body: Partial<T.Profile>) => put<T.Profile>('/profile', body),
   },
   checks: {
     cfx: (username: string) => post<T.CfxCheck>('/checks/cfx', { username }),
@@ -262,7 +331,14 @@ export const api = {
     checkDisk: (dir: string) => post<T.DiskCheck>('/checks/disk', { dir }),
     checkDbLogin: (admin: T.DbAdmin | null) => post<T.DbLoginCheck>('/checks/db-login', { admin }),
     plan: (req: T.InstallRequest) => post<T.InstallPlan>('/installs/plan', req),
-    start: (req: T.InstallRequest) => post<T.JobStarted>('/installs', req),
+    /** `askAdmin`: the person chose "Ask for administrator permission" (Windows may show its prompt). */
+    start: (req: T.InstallRequest, opts: { askAdmin?: boolean } = {}) => request<T.JobStarted>('/installs', { method: 'POST', body: req, askAdmin: opts.askAdmin }),
+    /**
+     * Carry on with a stopped install (its job error has `resume: true`): retry the failed step, or skip it.
+     * `withoutAdmin`: "Continue without the administrator parts"; `askAdmin`: ask Windows for permission again.
+     */
+    resume: (job: string, skip?: string, opts: { askAdmin?: boolean; withoutAdmin?: boolean } = {}) =>
+      request<T.JobStarted>(`/installs/${enc(job)}/resume`, { method: 'POST', body: { ...(skip ? { skip } : {}), ...(opts.withoutAdmin ? { without_admin: true } : {}) }, askAdmin: opts.askAdmin }),
     log: (job: string) => get<{ lines: string[] }>(`/installs/${enc(job)}/log`).then((r) => r.lines),
   },
   selfUpdate: {
@@ -271,7 +347,8 @@ export const api = {
   },
   app: {
     status: () => get<T.AppStatus>('/app'),
-    install: (body: { desktop_shortcut: boolean; force: boolean; dry_run: boolean }) => put<{ message: string }>('/app', body),
+    /** Make the per-user shortcuts, then remove the old machine-wide copy ("Tidy up old shortcuts"). */
+    install: (body: { desktop_shortcut: boolean; dry_run: boolean }) => put<{ message: string }>('/app', body),
     uninstall: (dryRun = false) => del<{ message: string }>('/app', { dry_run: dryRun }),
   },
   uninstall: {

@@ -56,6 +56,8 @@ pub enum ChangeStatus {
     Dirty,
     /// Local commits and new upstream commits (or could not be checked): skipped.
     Diverged,
+    /// Put on another branch or a pull request on purpose: left alone (see [`ResourceChange::note`]). Not a problem.
+    OtherBranch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -68,6 +70,9 @@ pub struct ResourceChange {
     pub changelog: Vec<String>,
     pub needs_restart: bool,
     pub status: ChangeStatus,
+    /// Plain sentence about this resource when it is not a normal update ("trying pull request #12; not updated").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -426,6 +431,11 @@ fn finish_plan(g: &dyn GitOps, sel: &Selection, mut p: UpdatePlan) -> UpdatePlan
         if !matches!(item.action, Action::FastForward | Action::NeedsRestart) {
             continue;
         }
+        // The person moved it to another branch after the preview: never update it behind their back.
+        if let Some(cur) = super::off_branch(g, &item.target.path, branch_ref) {
+            item.action = Action::Skipped(SkipReason::OtherBranch(cur));
+            continue;
+        }
         if !g
             .is_ancestor(&item.target.path, &item.target.upstream_ref, branch_ref)
             .unwrap_or(false)
@@ -464,7 +474,12 @@ fn git_view<'a>(
 
 fn change_of(git: &dyn GitOps, item: &super::PlanItem) -> ResourceChange {
     let mut changelog = Vec::new();
+    let mut note = None;
     let status = match &item.action {
+        Action::Skipped(r @ SkipReason::OtherBranch(_)) => {
+            note = Some(r.text());
+            ChangeStatus::OtherBranch
+        }
         Action::UpToDate | Action::Skipped(SkipReason::LocalCommits) => ChangeStatus::UpToDate,
         Action::FastForward | Action::NeedsRestart => ChangeStatus::Clean,
         Action::Skipped(SkipReason::Dirty) => ChangeStatus::Dirty,
@@ -483,11 +498,12 @@ fn change_of(git: &dyn GitOps, item: &super::PlanItem) -> ResourceChange {
     ResourceChange {
         id: item.target.id.clone(),
         from: item.current.clone(),
-        to: if status == ChangeStatus::UpToDate { item.current.clone() } else { item.upstream.clone() },
+        to: if matches!(status, ChangeStatus::UpToDate | ChangeStatus::OtherBranch) { item.current.clone() } else { item.upstream.clone() },
         behind: item.behind,
         changelog,
         needs_restart: item.target.class.needs_restart(),
         status,
+        note,
     }
 }
 
@@ -636,7 +652,7 @@ fn preview_checked(
 
 /// The release version to announce: the core's when it changes, else the first changing resource's.
 fn new_release(changes: &[ResourceChange], versions: &[(String, String)]) -> Option<String> {
-    let moving: Vec<&ResourceChange> = changes.iter().filter(|c| c.status != ChangeStatus::UpToDate).collect();
+    let moving: Vec<&ResourceChange> = changes.iter().filter(|c| !matches!(c.status, ChangeStatus::UpToDate | ChangeStatus::OtherBranch)).collect();
     let pick = moving.iter().find(|c| normalize_id(&c.id) == "kora-core").or_else(|| moving.first())?;
     versions.iter().find(|(id, _)| *id == pick.id).map(|(_, v)| v.clone())
 }
@@ -1146,6 +1162,7 @@ pub fn render_preview(p: &UpdatePreview) -> String {
                     s += &format!("    - {l}\n");
                 }
             }
+            ChangeStatus::OtherBranch => s += &format!("{}: {}\n", c.id, c.note.as_deref().unwrap_or("on another branch; not updated")),
             ChangeStatus::Dirty => s += &format!("{}: skipped, it has uncommitted changes of your own\n", c.id),
             ChangeStatus::Diverged => {
                 let why = c.changelog.first().cloned().unwrap_or_else(|| "it has changes of your own as well as new upstream ones".into());

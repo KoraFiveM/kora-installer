@@ -4,6 +4,7 @@
 //! talks to the real GitHub. Bootstrap installation is only *planned* ([`plan_bootstrap`]); the
 //! caller decides when (and with which privileges) to run the described steps.
 
+pub mod branches;
 pub mod forkfind;
 pub mod owners;
 
@@ -73,7 +74,12 @@ impl CommandRunner for SystemRunner {
         let mut c = system_command(program, args, cwd);
         // Never block on interactive prompts from git.
         c.env("GIT_TERMINAL_PROMPT", "0");
-        for (k, v) in windows_git_env(cfg!(windows), std::env::var("GIT_CONFIG_COUNT").ok().as_deref()) {
+        // Only when no other layer (the sudo / root wrappers, or the user) already set `GIT_CONFIG_COUNT`
+        // (`windows_git_env` checks the process; the wrappers' own lists are on the command itself).
+        let own = std::env::var("GIT_CONFIG_COUNT").ok();
+        let wrapped = c.get_envs().any(|(k, _)| k == "GIT_CONFIG_COUNT");
+        let cred = crate::tools::gh_credential_helper().filter(|_| program == "git" && own.is_none() && !wrapped);
+        for (k, v) in git_config_env(cfg!(windows), own.as_deref(), cred.as_deref()) {
             c.env(k, v);
         }
         let o = c.output()?;
@@ -145,7 +151,7 @@ pub fn sudo_invocation(
                 ("GIT_CONFIG_KEY_0".to_string(), key.clone()),
                 ("GIT_CONFIG_VALUE_0".to_string(), String::new()),
                 ("GIT_CONFIG_KEY_1".to_string(), key),
-                ("GIT_CONFIG_VALUE_1".to_string(), format!("!{ru} -u {} -- gh auth git-credential", u.name)),
+                ("GIT_CONFIG_VALUE_1".to_string(), format!("!{ru} -u {} -- {} auth git-credential", u.name, crate::tools::program_for("gh"))),
             ]);
         }
     };
@@ -161,7 +167,7 @@ pub fn sudo_invocation(
             }
         }
         "gh" => {
-            let mut a = vec!["-u".to_string(), u.name.clone(), "--".to_string(), "gh".to_string()];
+            let mut a = vec!["-u".to_string(), u.name.clone(), "--".to_string(), crate::tools::program_for("gh")];
             a.extend(args.iter().map(|s| s.to_string()));
             let mut env = Vec::new();
             if let Some(b) = bus {
@@ -243,7 +249,7 @@ pub fn harden_for_root(mut inv: Invocation, root: Option<bool>, user: Option<&cr
     }
     inv.env.retain(|(k, _)| !k.starts_with("GIT_CONFIG_"));
     let cred = match (user, runuser) {
-        (Some(u), Some(ru)) if u.uid != 0 && crate::userhome::valid_user_name(&u.name) => Some(format!("!{} -u {} -- gh auth git-credential", ru.to_string_lossy(), u.name)),
+        (Some(u), Some(ru)) if u.uid != 0 && crate::userhome::valid_user_name(&u.name) => Some(format!("!{} -u {} -- {} auth git-credential", ru.to_string_lossy(), u.name, crate::tools::program_for("gh"))),
         _ => None,
     };
     inv.env.extend(root_git_env(isolate, cred.as_deref()));
@@ -266,8 +272,16 @@ fn root_mode(sudo_user: bool) -> Option<bool> {
     #[cfg(not(unix))]
     {
         let _ = sudo_user;
-        None
+        windows_root_mode(crate::elevate::is_elevated())
     }
+}
+
+/// Windows: an elevated Kora hardens every git call like root's on Linux (no hooks, no fsmonitor,
+/// no repository-chosen programs), because the repositories are in folders the person and the
+/// server's own account can change. The person's own git settings are not isolated (their files
+/// are theirs), but the hardening settings beat them too.
+pub fn windows_root_mode(elevated: bool) -> Option<bool> {
+    elevated.then_some(false)
 }
 
 /// The account behind `sudo`, `runuser` and the account's session bus (all `None` when not under sudo).
@@ -286,7 +300,9 @@ pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::
     let (user, runuser, bus) = sudo_context();
     let inv = sudo_invocation(program, args, cwd, user.as_ref(), runuser.as_deref(), std::env::var("GIT_CONFIG_COUNT").ok().as_deref(), bus.as_deref());
     let inv = harden_for_root(inv, root_mode(user.is_some()), user.as_ref(), runuser.as_deref());
-    let mut c = crate::sysexe::command(&inv.program);
+    // `git` / `gh`: a system copy, else Kora's own (never depends on this process's PATH being up to date).
+    let program = crate::tools::exec_program(&inv.program);
+    let mut c = crate::sysexe::command(&program);
     c.args(&inv.args);
     if let Some(d) = &inv.cwd {
         c.current_dir(d);
@@ -294,7 +310,38 @@ pub fn system_command(program: &str, args: &[&str], cwd: Option<&Path>) -> std::
     for (k, v) in inv.env {
         c.env(k, v);
     }
+    // Kora's own Git in front of the PATH, so `gh` (which starts `git`) finds it too.
+    if let Some(p) = crate::tools::child_path() {
+        c.env("PATH", p);
+    }
     c
+}
+
+/// [`windows_git_env`] plus, when Kora's own `gh` is the one in use, the credential helper that asks it for
+/// GitHub sign-in details (the private copy is in no global git config, so every Kora git call carries it).
+/// `existing_count`: the caller's own `GIT_CONFIG_COUNT` (then git is left alone).
+pub fn git_config_env(windows: bool, existing_count: Option<&str>, credential: Option<&str>) -> Vec<(String, String)> {
+    if existing_count.is_some() {
+        return vec![];
+    }
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    if windows {
+        pairs.push(("core.longpaths".into(), "true".into()));
+    }
+    if let Some(c) = credential {
+        let key = "credential.https://github.com.helper".to_string();
+        pairs.push((key.clone(), String::new()));
+        pairs.push((key, c.to_string()));
+    }
+    if pairs.is_empty() {
+        return vec![];
+    }
+    let mut env = vec![("GIT_CONFIG_COUNT".to_string(), pairs.len().to_string())];
+    for (i, (k, v)) in pairs.into_iter().enumerate() {
+        env.push((format!("GIT_CONFIG_KEY_{i}"), k));
+        env.push((format!("GIT_CONFIG_VALUE_{i}"), v));
+    }
+    env
 }
 
 /// Windows: allow paths over 260 characters (node_modules inside resources routinely exceed it, and
@@ -398,7 +445,8 @@ fn detect_tool(r: &dyn CommandRunner, tool: &str) -> Option<ToolInfo> {
         return None;
     }
     let version = parse_version(&o.stdout)?;
-    Some(ToolInfo { version, path: locate(r, tool) })
+    let path = locate(r, tool).or_else(|| crate::tools::tool_of(tool).and_then(crate::tools::locate).map(|f| f.path));
+    Some(ToolInfo { version, path })
 }
 
 /// First token that starts with a digit on the first line:
@@ -507,82 +555,21 @@ fn step(desc: &str, admin: bool, program: &str, args: &[&str]) -> PlanStep {
     }
 }
 
-const GH_KEYRING: &str = "/etc/apt/keyrings/githubcli-archive-keyring.gpg";
-
-/// Plan what is needed to get missing tools installed. Empty when nothing is missing.
+/// Plan what the system package manager has to do for a missing tool. Empty when nothing is missing or when
+/// Kora gets the tool itself: the GitHub CLI always comes from Kora's own private copy (`crate::tools`), and
+/// so does Git on Windows (MinGit), so only Git on Linux is planned here (`apt-get`, administrator rights).
 /// Returns `Err(Invalid)` for unsupported OSes.
 pub fn plan_bootstrap(os: Os, tools: &Tools) -> Result<Vec<PlanStep>> {
-    let need_git = tools.git.is_none();
-    let need_gh = tools.gh.is_none();
     let mut steps = Vec::new();
-    if !need_git && !need_gh {
+    if tools.git.is_some() {
         return Ok(steps);
     }
     match os {
         Os::DebianLike => {
-            if need_gh {
-                steps.push(step(
-                    "Install wget and certificates (needed to fetch the GitHub CLI package key)",
-                    true,
-                    "apt-get",
-                    &["install", "-y", "wget", "ca-certificates"],
-                ));
-                steps.push(step(
-                    "Create the folder for package signing keys",
-                    true,
-                    "mkdir",
-                    &["-p", "-m", "755", "/etc/apt/keyrings"],
-                ));
-                steps.push(step(
-                    "Download GitHub's official package signing key",
-                    true,
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "wget -nv -O {GH_KEYRING} https://cli.github.com/packages/githubcli-archive-keyring.gpg && chmod go+r {GH_KEYRING}"
-                        ),
-                    ],
-                ));
-                steps.push(step(
-                    "Add GitHub's official package source for the GitHub CLI",
-                    true,
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "echo \"deb [arch=$(dpkg --print-architecture) signed-by={GH_KEYRING}] https://cli.github.com/packages stable main\" > /etc/apt/sources.list.d/github-cli.list"
-                        ),
-                    ],
-                ));
-            }
             steps.push(step("Refresh the package list", true, "apt-get", &["update"]));
-            let mut args = vec!["install", "-y"];
-            let mut names = Vec::new();
-            if need_git {
-                args.push("git");
-                names.push("git");
-            }
-            if need_gh {
-                args.push("gh");
-                names.push("the GitHub CLI (gh)");
-            }
-            steps.push(step(&format!("Install {}", names.join(" and ")), true, "apt-get", &args));
+            steps.push(step("Install git", true, "apt-get", &["install", "-y", "git"]));
         }
-        Os::Windows => {
-            // winget ships with Windows 10 1809+/11 and Server 2025; no Chocolatey needed.
-            let common = ["--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements"];
-            if need_git {
-                let mut a = vec!["install", "--id", "Git.Git"];
-                a.extend(common);
-                steps.push(step("Install Git for Windows using winget", true, "winget", &a));
-            }
-            if need_gh {
-                let mut a = vec!["install", "--id", "GitHub.cli"];
-                a.extend(common);
-                steps.push(step("Install the GitHub CLI (gh) using winget", true, "winget", &a));
-            }
-        }
+        Os::Windows => {}
         Os::Unsupported => {
             return Err(GitError::Invalid("operating system (not supported yet)", format!("{os:?}")))
         }
@@ -1552,6 +1539,17 @@ pub fn move_pinned(r: &dyn CommandRunner, repo: &Path, commit: &str) -> Result<S
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_elevated_kora_on_windows_hardens_git_like_root_on_linux() {
+        assert_eq!(windows_root_mode(true), Some(false));
+        assert_eq!(windows_root_mode(false), None);
+        let inv = Invocation { program: "git".into(), args: vec!["pull".into()], cwd: None, env: vec![] };
+        let h = harden_for_root(inv, windows_root_mode(true), None, None);
+        let v = h.env.iter().find(|(k, _)| k == "GIT_CONFIG_PARAMETERS" || k.starts_with("GIT_CONFIG_VALUE_") || k.starts_with("GIT_CONFIG_KEY_")).is_some();
+        assert!(v, "{:?}", h.env);
+        assert!(h.env.iter().any(|(_, val)| val == "core.fsmonitor") || h.env.iter().any(|(_, val)| val.contains("fsmonitor")), "{:?}", h.env);
+    }
     use super::*;
     use std::cell::RefCell;
 
@@ -2332,13 +2330,28 @@ mod tests {
         assert!(plan_bootstrap(Os::DebianLike, &both).unwrap().is_empty());
         let deb = plan_bootstrap(Os::DebianLike, &none).unwrap();
         assert!(deb.iter().all(|s| s.needs_admin && !s.description.is_empty()));
-        assert!(deb.iter().any(|s| s.args.join(" ").contains("cli.github.com/packages")));
-        assert_eq!(deb.last().unwrap().args, vec!["install", "-y", "git", "gh"]);
-        let only_git = Tools { git: None, gh: both.gh.clone() };
-        let w = plan_bootstrap(Os::Windows, &only_git).unwrap();
-        assert_eq!(w.len(), 1);
-        assert!(w[0].args.contains(&"Git.Git".to_string()));
+        assert_eq!(deb.last().unwrap().args, vec!["install", "-y", "git"]);
+        // gh never comes from apt: Kora downloads its own copy.
+        assert!(!deb.iter().any(|s| s.args.join(" ").contains("gh") || s.args.join(" ").contains("cli.github.com")));
+        let only_gh = Tools { git: both.git.clone(), gh: None };
+        assert!(plan_bootstrap(Os::DebianLike, &only_gh).unwrap().is_empty());
+        // Windows: nothing for the system to do (Kora's own MinGit and gh).
+        assert!(plan_bootstrap(Os::Windows, &none).unwrap().is_empty());
         assert!(plan_bootstrap(Os::Unsupported, &none).is_err());
+    }
+
+    #[test]
+    fn git_config_env_carries_the_private_gh_credential_helper_unless_the_caller_has_their_own_config() {
+        let kv = |v: Vec<(String, String)>| v.into_iter().collect::<std::collections::BTreeMap<_, _>>();
+        assert!(git_config_env(false, None, None).is_empty());
+        let w = kv(git_config_env(true, None, None));
+        assert_eq!((w["GIT_CONFIG_COUNT"].as_str(), w["GIT_CONFIG_KEY_0"].as_str()), ("1", "core.longpaths"));
+        let c = kv(git_config_env(true, None, Some("!'/k/gh' auth git-credential")));
+        assert_eq!(c["GIT_CONFIG_COUNT"], "3");
+        // The empty value clears any helper listed before it; the next one is gh's.
+        assert_eq!((c["GIT_CONFIG_KEY_1"].as_str(), c["GIT_CONFIG_VALUE_1"].as_str()), ("credential.https://github.com.helper", ""));
+        assert_eq!(c["GIT_CONFIG_VALUE_2"], "!'/k/gh' auth git-credential");
+        assert!(git_config_env(true, Some("2"), Some("x")).is_empty(), "the caller's own GIT_CONFIG_COUNT is left alone");
     }
 
     #[test]
@@ -2378,10 +2391,13 @@ mod tests {
         assert!(login_args(true).iter().any(|x| x.contains("admin:org")));
     }
 
+    #[cfg(unix)]
     fn sam() -> crate::userhome::Account {
         crate::userhome::Account { name: "sam".into(), uid: 1000, gid: 1000, home: "/home/sam".into() }
     }
 
+    // sudo and runuser are Unix-only; on Windows `gh` would also be shown by its full path here.
+    #[cfg(unix)]
     #[test]
     fn under_sudo_gh_runs_as_the_user_and_git_asks_their_gh() {
         let u = sam();
@@ -2405,10 +2421,13 @@ mod tests {
         assert!(sudo_invocation("git", &["fetch"], None, Some(&u), Some(ru), Some("1"), None).env.is_empty());
     }
 
+    #[cfg(unix)]
     fn env_of<'a>(i: &'a Invocation, k: &str) -> Option<&'a str> {
         i.env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
     }
 
+    // sudo and runuser are Unix-only; on Windows `gh` would also be shown by its full path here.
+    #[cfg(unix)]
     #[test]
     fn git_as_root_never_reads_the_users_config_or_runs_hooks_but_keeps_their_gh_sign_in() {
         let u = sam();
@@ -2443,6 +2462,8 @@ mod tests {
         assert!(me.env.is_empty());
     }
 
+    // sudo and runuser are Unix-only; on Windows `gh` would also be shown by its full path here.
+    #[cfg(unix)]
     #[test]
     fn without_sudo_or_runuser_nothing_changes() {
         let u = sam();
