@@ -58,7 +58,7 @@ impl Weekday {
     pub fn long_name(self) -> &'static str {
         ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][self as usize]
     }
-    fn xml(self) -> &'static str {
+    pub(super) fn xml(self) -> &'static str {
         self.long_name()
     }
     fn systemd(self) -> &'static str {
@@ -91,14 +91,14 @@ impl Default for Schedule {
 }
 
 impl Schedule {
-    fn validate(&self) -> ServiceResult<()> {
+    pub(super) fn validate(&self) -> ServiceResult<()> {
         match self {
             Schedule::Custom(days, _) if days.is_empty() => Err(ServiceError::Invalid("pick at least one day for a custom schedule".into())),
             _ => Ok(()),
         }
     }
 
-    fn time(&self) -> TimeOfDay {
+    pub(super) fn time(&self) -> TimeOfDay {
         match self {
             Schedule::Daily(t) | Schedule::Weekly(_, t) | Schedule::Custom(_, t) => *t,
         }
@@ -551,7 +551,7 @@ fn unit_path(s: &ManagedServer, ext: &str) -> String {
     format!("/etc/systemd/system/{}.{ext}", update_unit_name(s))
 }
 
-fn xml_escape(s: &str) -> String {
+pub(super) fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
@@ -600,7 +600,7 @@ pub fn task_xml(s: &ManagedServer, schedule: &Schedule, run_as: RunAs, user: &st
 /// Where the task definition is written for `schtasks /XML` to read. NOT the server folder: other
 /// accounts can change files there, and could swap the definition (and so what runs as SYSTEM)
 /// between the write and the read. `%ProgramFiles%\Kora\tasks` only administrators can change.
-fn task_xml_path(s: &ManagedServer) -> String {
+pub(super) fn task_xml_path(s: &ManagedServer) -> String {
     let pf = std::env::var("ProgramFiles").ok().filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "C:\\Program Files".into());
     format!("{}\\Kora\\tasks\\update-{}.xml", pf.trim_end_matches(['\\', '/']), s.name)
 }
