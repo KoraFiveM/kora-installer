@@ -74,6 +74,8 @@ impl PausedStore {
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, text)?;
         crate::fsutil::rename_retrying(&tmp, &path)?;
+        crate::keystore::hand_to_home_owner(&path);
+        crate::keystore::hand_to_home_owner(&self.dir);
         Ok(true)
     }
 
@@ -132,6 +134,7 @@ impl PausedStore {
                 if let (Some(p), Ok(text)) = (self.file(&s.job), serde_json::to_string_pretty(&s)) {
                     let tmp = p.with_extension("json.tmp");
                     if std::fs::write(&tmp, text).is_ok() && crate::fsutil::rename_retrying(&tmp, &p).is_ok() {
+                        crate::keystore::hand_to_home_owner(&p);
                         n += 1;
                     }
                 }

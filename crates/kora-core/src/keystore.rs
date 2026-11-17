@@ -177,7 +177,9 @@ impl KeyStore {
             Problem::new(codes::FAILED, format!("Kora could not save your licence keys to {}. Check that the folder can be written to.", self.path.display()))
                 .with_details(e)
                 .with_action(Action::CopyDetails)
-        })
+        })?;
+        hand_to_home_owner(&self.path);
+        Ok(())
     }
 
     /// Run `f` on the keys under the lock; the file is written only when `f` says it changed something.
@@ -308,6 +310,26 @@ fn duplicate(name: &str) -> Problem {
     Problem::new(codes::KEYS_DUPLICATE, format!("That key is already saved as \"{name}\". Pick it from the list instead of adding it again.")).with_action(Action::change_answers("licence"))
 }
 
+/// Run as root (`sudo kora ...`) inside someone else's Kora folder, a file Kora creates would belong to root and
+/// that person could no longer read their own keys: give it to the owner of the folder (best effort; nothing
+/// happens off Unix, when not root, or when the folder is root's own).
+pub(crate) fn hand_to_home_owner(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if !crate::installer::is_admin() {
+            return;
+        }
+        if let Some(m) = path.parent().and_then(|p| std::fs::metadata(p).ok()) {
+            if m.uid() != 0 {
+                let _ = std::os::unix::fs::chown(path, Some(m.uid()), Some(m.gid()));
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 /// A file made by an older tool or copied around may be readable by others: take that away (best effort).
 fn tighten(path: &Path) {
     #[cfg(unix)]
@@ -389,11 +411,29 @@ fn config_problem(what: &str, details: String) -> Problem {
     Problem::new(codes::KEYS_SERVER_CONFIG, what.to_string()).with_details(details).with_action(Action::CopyDetails)
 }
 
+/// Replace the contents of an existing config file IN PLACE (same file, so its owner, permissions and on
+/// Windows its access list, including the grant the server's service account was given, all stay as they are:
+/// a new file renamed over it would be owned by whoever runs Kora and the service could no longer read it).
+/// If writing fails half-way the old contents are put back.
+fn rewrite_in_place(path: &Path, old: &str, new: &str) -> std::io::Result<()> {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut f = crate::fsutil::open_no_follow(path, crate::fsutil::Access::ReadWrite, None)?;
+    let put = |f: &mut std::fs::File, text: &str| -> std::io::Result<()> {
+        f.set_len(0)?;
+        f.seek(SeekFrom::Start(0))?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()
+    };
+    put(&mut f, new).inspect_err(|_| {
+        let _ = put(&mut f, old);
+    })
+}
+
 /// Write `key` into the server's own configuration, where the key lives today (`secrets.cfg`, else
-/// `server.cfg`). The key is validated first. The file keeps its other lines and stays private.
+/// `server.cfg`). The key is validated first. The file keeps its other lines, its owner and its permissions.
 pub fn set_server_key(dir: &Path, key: &str) -> Result<(), Problem> {
     let key = check_key(key)?;
-    for (i, f) in SERVER_FILES.iter().enumerate() {
+    for f in SERVER_FILES {
         let path = dir.join(f);
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
@@ -401,8 +441,12 @@ pub fn set_server_key(dir: &Path, key: &str) -> Result<(), Problem> {
             Err(e) => return Err(config_problem("Kora could not read the server's configuration, so the key was not changed.", format!("{}: {e}", path.display()))),
         };
         if let Some(new) = replace_key_line(&text, &key) {
-            return crate::txadmin::write_file(&path, &new, i == 0)
-                .map_err(|e| config_problem("Kora could not write the new key into the server's configuration. The old key is still in place.", format!("{}: {e}", path.display())));
+            return rewrite_in_place(&path, &text, &new).map_err(|e| {
+                config_problem(
+                    "Kora could not write the new key into the server's configuration (the account that runs Kora may not be allowed to change that file). The old key is still in place.",
+                    format!("{}: {e}", path.display()),
+                )
+            });
         }
     }
     Err(config_problem(
@@ -577,10 +621,17 @@ mod tests {
         assert_eq!(server_key(d.path()).as_deref(), Some(K1));
         let t = std::fs::read_to_string(d.path().join("secrets.cfg")).unwrap();
         assert!(t.contains("mysql_connection_string"), "other lines kept: {t}");
+        // Not replaced by a new file: the owner, the mode and (Windows) the service account's grant stay.
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(d.path().join("secrets.cfg")).unwrap().permissions().mode() & 0o777, 0o600);
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            let p = d.path().join("secrets.cfg");
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o640)).unwrap();
+            let ino = std::fs::metadata(&p).unwrap().ino();
+            set_server_key(d.path(), K2).unwrap();
+            let m = std::fs::metadata(&p).unwrap();
+            assert_eq!((m.ino(), m.permissions().mode() & 0o777), (ino, 0o640));
+            set_server_key(d.path(), K1).unwrap();
         }
         // Key only in server.cfg (an adopted server).
         let d2 = tempfile::tempdir().unwrap();

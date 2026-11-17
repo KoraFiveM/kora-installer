@@ -87,6 +87,7 @@ impl ProfileStore {
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, text)?;
         crate::fsutil::rename_retrying(&tmp, &self.path)?;
+        crate::keystore::hand_to_home_owner(&self.path);
         Ok(p)
     }
 
