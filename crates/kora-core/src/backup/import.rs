@@ -577,7 +577,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             if !st.done.iter().any(|d| d == "database") {
                 ev("database", "Creating a new database and login", 50);
                 let made = prov.provision(&ppath).map_err(|e| {
-                    Problem::new(codes::DB_STOPPED, "Kora could not create the new database. Is the database server running, and is the administrator login right?")
+                    Problem::new(codes::DB_STOPPED, "Kora could not create the new database. Is the database server running? Kora uses the same database administrator login as an install: on Linux the root account's own login (run Kora as root for the import) or the KORA_DB_ADMIN_USER and KORA_DB_ADMIN_PASSWORD settings; on Windows the login of the MariaDB Kora set up.")
                         .with_details(e)
                         .with_action(Action::StartDatabase)
                         .with_action(Action::Retry)
