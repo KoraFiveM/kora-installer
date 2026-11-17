@@ -22,8 +22,33 @@ reasonable time to release a fix before you disclose publicly.
 - Responses carry a Content-Security-Policy that allows only the panel's own files (no external origins, no framing),
   `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - Licence keys, database passwords and webhook addresses are accepted but never returned.
-- The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, or a
-  helper (`kora helper`, Linux) that accepts only Kora's fixed list of privileged actions and checks the calling user.
+- The panel runs as the installing user, never as administrator: `kora panel` refuses to start elevated (set `KORA_ALLOW_ROOT_PANEL=1` only where root is the sole account). A bare `kora` (also `kora manager` and `kora install` with no options) never elevates: under `sudo` it runs again as the person who typed it, and from an administrator window it only opens a panel that already runs. Privileged actions are a command shown to you, a
+  helper (`kora helper`, Linux) that accepts only Kora's fixed list of privileged actions and checks the calling user, or on
+  Windows a short-lived administrator worker started through the normal Windows permission prompt (see below).
+- **Windows administrator worker.** For an install (one prompt for all its administrator steps) or one administrator action,
+  the panel starts its own `kora.exe` elevated with the Windows prompt (`runas`) and talks to it over a named pipe:
+  - The pipe has a random name, is created as the first and only instance, refuses network clients, and its security descriptor
+    lets only elevated administrators and SYSTEM open it (the panel's own account cannot loosen it). Another local account, or a
+    program running as you without elevation, cannot connect.
+  - Both ends check each other before anything is sent: the worker serves only the panel process whose id it was given AND that
+    runs the same program file; the panel serves only the process Windows started for it. The worker opens the pipe for
+    identification only, so the panel can never act with the worker's rights.
+  - The worker runs only Kora's fixed list (the Linux helper's checks, then the `kora` command line's own definition): the
+    update schedule, Kora's self-update to a newer version, removing the old app or Kora's system changes, and one administrator
+    step of an install or delete (`kora admin-step`), never a whole install, never any other program, never through a shell.
+    Install steps only work on a server folder that holds a Kora install record and belongs to you (or, for an administrator, a
+    folder an elevated Kora made). The install's plan, state and files stay yours; the elevated side writes nothing into the
+    server folder and hands back what to record.
+  - Secrets never go on a command line: the licence key is not needed by the worker; Kora's own MariaDB administrator login stays
+    on the elevated side, and only the new server's database login comes back (into `database.json`, as before).
+  - The worker exits when its batch is done, when the panel goes away (the pipe breaks), or after 90 minutes without work.
+  - When a remote session (another device, Tailscale, a token) needs administrator rights, the panel does not make Windows ask on a
+    desktop nobody may be watching unless the person asks for it.
+  - What it does not protect against: malware already running as you can show its own permission prompt or tamper with the panel,
+    as it could with any program you run; Windows does not treat the permission prompt as a boundary against your own account.
+    When a standard account's prompt is answered with an administrator's password, that administrator lets this account's server
+    run as a Windows service and its firewall rule be opened, exactly as typing the shown command into an administrator terminal
+    would; files and settings stay the standard account's.
 - Remote access (`--bind <ip> --remote`) is off by default and uses plain HTTP: use Tailscale, WireGuard or an SSH tunnel, never
   the open internet. Roles are viewer / operator / admin. Delete, uninstall and console input are disabled for remote sessions unless
   enabled, and need the server name typed. Tailscale identity is checked with the local Tailscale service, never from request headers.

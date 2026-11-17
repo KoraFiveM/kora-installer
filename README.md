@@ -82,7 +82,9 @@ If an install is interrupted, run `kora install` again to resume it. Scripts can
 ## Requirements
 
 - Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+ (x86-64).
-- Administrator rights: Kora asks for them itself (a UAC prompt, or `sudo`).
+- Administrator rights: Kora asks for them itself (a UAC prompt, or `sudo`). In the panel on Windows, an install asks once,
+  when it starts, for all of its administrator parts; if you say no, you can ask again, carry on without those parts, or
+  see the command to run.
 - Server folder (suggested by default): Windows `C:\Kora\<name>`; Linux `~/kora/<name>` in your own home folder, also
   when Kora runs with `sudo`. Logged in as root (common on rented servers), it is `/home/kora/<name>`: Kora creates a
   normal `kora` user account that owns it. On Linux the background service runs as its own account, which cannot enter

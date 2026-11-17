@@ -51,8 +51,12 @@
 //!   once (for one install, or one action), like typing the shown command into an administrator
 //!   terminal. On a standard account Windows asks for an administrator's password; the work still
 //!   happens for the person signed in (their Kora folder, their server folders, scheduled tasks run
-//!   as them), never for the administrator who typed the password. Folders are only accepted when
-//!   the person owns them (see `kora-cli`'s validator). The administrator who types the password
+//!   as them), never for the administrator who typed the password. Server folders are only accepted
+//!   when they hold a Kora install record and belong to the person (or, when the person is an
+//!   administrator, to the Administrators group: a folder an elevated Kora made for them); see
+//!   `installer::system_ops::check_dir_for` and `kora-cli`'s validator.
+//! * **The worker's token is never lent to the panel.** The worker opens the pipe for
+//!   identification only (`SECURITY_IDENTIFICATION`), so the panel cannot impersonate it. The administrator who types the password
 //!   lets this person's server run as a Windows service, as an install from an administrator
 //!   terminal would.
 //!

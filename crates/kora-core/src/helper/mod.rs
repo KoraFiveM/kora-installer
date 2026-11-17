@@ -59,10 +59,13 @@
 //!
 //! # Windows
 //!
-//! Not built in this slice. The planned shape is a named pipe `\\.\pipe\kora-helper` with a DACL
-//! for the installing user's SID, run by a service through the existing `kora service-host`
-//! machinery, with the same protocol and allow-list. Until then `kora helper install` says it is
-//! not available on Windows and the panel keeps answering `needs_elevation` there.
+//! The panel does not need this service on Windows: it starts its own `kora.exe` elevated through
+//! the normal Windows permission prompt, for one install or one action, and talks to it with this
+//! same protocol and these same request checks over a private named pipe ([`worker`], the design
+//! and threat model; [`winpipe`], the Windows calls). `kora helper install` still says it is not
+//! available on Windows. A later opt-in Windows service (for installs with nobody at the desktop)
+//! would serve [`worker::serve`] on a pipe with a DACL for the installing user's SID, with the same
+//! validator and [`worker::ChildExecutor`]; see the end of [`worker`]'s documentation.
 
 pub mod client;
 pub mod dirs;

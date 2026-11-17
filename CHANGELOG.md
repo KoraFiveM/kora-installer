@@ -20,6 +20,8 @@ versions follow [SemVer](https://semver.org/).
 - **A failed install step can be tried again, or skipped when that is safe, without starting over.** The install stops at the failed step and waits: "Try this step again" carries on from there with the same answers (the licence key is kept in Kora's memory only, never written to disk), "Change my answers" goes back to the summary. Only optional steps can be skipped: opening the firewall, the daily update schedule, and starting the server.
 - The GitHub status tells "the GitHub CLI is not installed", "not signed in" and "signed in without the permissions Kora needs" apart.
 
+- **Windows: the panel asks Windows for administrator permission itself.** An install from the panel no longer stops at "run this command as administrator": Windows asks once when the install starts (the wizard says so beforehand), and the background service, firewall rule, update task and Kora's own MariaDB are set up while you watch the same install. The update schedule, Kora's self-update, "Tidy up old shortcuts", uninstalling and deleting a server that has a service ask once each. If Windows does not get permission (No, nobody answered, or you are signed in from another device, where Kora only asks when you say so) you can ask again, continue without the administrator parts, or see the command. The install's progress and files stay yours, so a failed administrator step can be retried or, when safe, skipped. Behind the prompt is a short-lived elevated copy of Kora that runs only Kora's fixed list of administrator steps (see SECURITY.md).
+
 ### Removed
 - The terminal screens (the `kora-tui` crate: install wizard and server manager). Everything they did is in the panel or the command line.
 
