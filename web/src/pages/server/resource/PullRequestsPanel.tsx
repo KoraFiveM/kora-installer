@@ -14,11 +14,11 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { timeAgo } from '@/lib/ago'
 import { ChangesDialog } from '../branches/ChangesDialog'
 import { PrDetail } from './PrDetail'
-import { t as tt } from '@/i18n'
+import { t as tt, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/resources'
 
-const SOURCE_LABEL = { upstream: 'Original repository', fork: 'Your own copy' } as const
+const SOURCE_LABEL = { upstream: msg('resources.pullRequestsPanel.originalRepository'), fork: msg('resources.pullRequestsPanel.ownCopy') } as const
 
 /** Checks in words with an icon, so the state is never only a colour. */
 export function ChecksBadge({ state }: { state: PullRequest['checks'] }) {
@@ -120,7 +120,7 @@ export function PullRequestsPanel({ page }: { page: ResourcePage }) {
                 <div className="min-w-0 flex-1">
                   <div><span className="font-mono text-xs text-muted-foreground">#{p.number}</span> {p.title}{p.draft && <> <Badge tone="plain">{tt('resources.pullRequestsPanel.draft')}</Badge></>}</div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Badge tone={p.source === 'upstream' ? 'info' : 'amber'}>{SOURCE_LABEL[p.source]}</Badge>
+                    <Badge tone={p.source === 'upstream' ? 'info' : 'amber'}>{tt(SOURCE_LABEL[p.source])}</Badge>
                     <span>{tt('resources.pullRequestsPanel.byAuthor', { author: p.author })}</span>
                     <span>{tt('resources.pullRequestsPanel.openedValueUpdatedValue', { value: since(p.created) || 'a while ago', value2: since(p.updated) || 'a while ago' })}</span>
                     <ChecksBadge state={p.checks} />

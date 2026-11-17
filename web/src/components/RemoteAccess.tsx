@@ -14,14 +14,14 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { t as tt } from '@/i18n'
+import { t as tt, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/settings'
 
-const ROLE_TEXT: Record<Role, string> = {
-  viewer: 'Viewer: can look at servers and status, nothing else',
-  operator: 'Operator: can also start, stop and restart, update, and read logs and the console',
-  admin: 'Admin: everything (deleting and similar needs the switch below)',
+const ROLE_TEXT: Record<Role, Msg> = {
+  viewer: msg('settings.remoteAccess.viewerLookServersStatus'),
+  operator: msg('settings.remoteAccess.operatorAlsoStartStop'),
+  admin: msg('settings.remoteAccess.adminEverythingDeletingSimilar'),
 }
 
 function RoleSelect({ value, onChange, label }: { value: Role; onChange: (r: Role) => void; label: string }) {
@@ -91,7 +91,7 @@ function Users({ settings }: { settings: T.RemoteSettings | undefined }) {
         <div className="w-40"><Field label={tt('settings.remoteAccess.role')}><RoleSelect label={tt('settings.remoteAccess.role')} value={role} onChange={setRole} /></Field></div>
         <Button type="submit" disabled={!name.trim() || add.isPending}>{tt('settings.remoteAccess.invitePerson')}</Button>
       </form>
-      <p className="text-xs text-muted-foreground">{ROLE_TEXT[role]}</p>
+      <p className="text-xs text-muted-foreground">{tt(ROLE_TEXT[role])}</p>
       {fresh && (
         <Alert tone="success" title={fresh.what === 'invited' ? tt('settings.remoteAccess.invitationName', { name: fresh.name }) : tt('settings.remoteAccess.newSetupLinkName', { name: fresh.name })}>
           <p className="mb-2">{tt('settings.remoteAccess.sendLinkThemPrivately')}</p>
@@ -299,7 +299,7 @@ export function SignedInCard() {
       <CardHeader><CardTitle>{tt('settings.remoteAccess.yourAccess')}</CardTitle></CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p>{rich('settings.remoteAccess.signedStrongNodeBadge', { strong: <strong>{r.identity.name}</strong>, badge: <Badge tone="plain">{r.role}</Badge>, value: r.remote ? tt('settings.remoteAccess.fromAnotherComputer') : '' })}</p>
-        <p className="text-muted-foreground">{ROLE_TEXT[r.role]}.</p>
+        <p className="text-muted-foreground">{tt(ROLE_TEXT[r.role])}.</p>
         {r.remote && !r.destructiveAllowed && <p className="text-muted-foreground">{tt('settings.remoteAccess.deletingServersUninstallingCon')}</p>}
         <Button onClick={() => out.mutate()} disabled={out.isPending}>{tt('settings.remoteAccess.signOut')}</Button>
         <ErrorNotice error={out.error} />

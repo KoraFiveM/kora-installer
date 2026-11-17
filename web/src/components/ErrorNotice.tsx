@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { SupportBundleLink } from '@/components/SupportBundleLink'
 import { CopyButton, CopyField } from '@/components/CopyButton'
 import { actionLabel, buttonActions, detailsText, isAdminCode, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
-import { t } from '@/i18n'
+import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/errors'
 
@@ -31,11 +31,11 @@ export function toNotice(e: unknown): Notice | null {
   return p && { message: p.message, code: p.code, command: p.command, status: p.status }
 }
 
-const NO_ANSWER = 'Kora Panel did not answer. Check that it is still running on the server (`kora panel restart` restarts it), then reload this page.'
+const NO_ANSWER = msg('errors.errorNotice.koraPanelDidAnswer')
 
 /** What to do next for a few common errors, added under the message (null = nothing to add). */
 export function nextStep(n: Notice): string | null {
-  if (n.status === 409 && n.message.includes(t('errors.errorNotice.anotherUpdateRunning'))) return t('errors.errorNotice.waitFinishTryAgain')
+  if (n.status === 409 && n.message.includes('Another update is running') /* i18n-ignore: the server's own English text, matched until the 409 carries a code */) return t('errors.errorNotice.waitFinishTryAgain')
   return null
 }
 
@@ -109,7 +109,7 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   if (!p) return null
   const elevation = isAdminCode(p.code)
   // The request never arrived (see `request` in api/client.ts).
-  const message = p.code === 'network' ? NO_ANSWER : p.message
+  const message = p.code === 'network' ? t(NO_ANSWER) : p.message
   const step = nextStep(p)
   const commands = p.actions.filter((a): a is Extract<ProblemAction, { kind: 'show_command' }> => a.kind === 'show_command')
   // Older answers carry the command only as `command`.

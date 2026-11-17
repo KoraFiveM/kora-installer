@@ -10,17 +10,17 @@ import { ResourceProgress } from '@/components/JobProgress'
 import { timeAgo } from '@/lib/ago'
 import { STATUS_INFO } from '../UpdatesPanel'
 import type { Updates } from '../useUpdates'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/resources'
 
 /** The resource Kora sends commands through. Stopping it would cut the panel off from the server. */
 export const CONSOLE_RESOURCE = 'kora_console'
 
-const CONTROL: Record<ControlAction, { label: string; Icon: typeof Play }> = {
-  start: { label: 'Start', Icon: Play },
-  stop: { label: 'Stop', Icon: Square },
-  restart: { label: 'Restart', Icon: RotateCw },
+const CONTROL: Record<ControlAction, { label: Msg; Icon: typeof Play }> = {
+  start: { label: msg('resources.resourceActions.start'), Icon: Play },
+  stop: { label: msg('resources.resourceActions.stop'), Icon: Square },
+  restart: { label: msg('resources.resourceActions.restart'), Icon: RotateCw },
 }
 
 /** Why start, stop and restart are off, in words, with the fix named in `fix` (null = they work). */
@@ -61,11 +61,11 @@ export function ResourceActions({ page, updates: u, pending, said, onControl, on
           <Button disabled={u.busy || noOperator !== null} title={noOperator ?? undefined} aria-busy={checking} onClick={() => void u.checkOne(id)}>{rich('resources.resourceActions.nodeNodeCheckUpdate', { node: checking ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden /> })}</Button>
           <Button variant="default" disabled={!canUpdate || u.busy || noAdmin !== null} title={noAdmin ?? (canUpdate ? undefined : t('resources.resourceActions.checkUpdateFirst'))} aria-busy={updating} onClick={() => void u.applyOne(id)}>{rich('resources.resourceActions.nodeNodeUpdate', { node: updating ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden /> })}</Button>
           {checking && <span className="text-xs text-muted-foreground" role="status">{t('resources.resourceActions.checking')}</span>}
-          {!checking && info && <Badge tone={info.tone}>{info.text}</Badge>}
+          {!checking && info && <Badge tone={info.tone}>{t(info.text)}</Badge>}
           {row && !checking && u.checkedAt[id] !== undefined && <span className="text-xs text-muted-foreground">{t('resources.resourceActions.lastCheckedTimeago', { timeAgo: timeAgo(u.checkedAt[id], Date.now()) })}</span>}
         </div>
         {row?.status === 'clean' && <p className="text-sm text-muted-foreground">{row.changelog.length > 0 ? t('resources.resourceActions.behindNewerChangeWith', { behind: row.behind, changes: row.changelog.slice(0, 3).join('; ') }) : t('resources.resourceActions.behindNewerChangeValue', { behind: row.behind })}</p>}
-        {info?.why && <p className="text-sm text-muted-foreground">{info.why}</p>}
+        {info?.why && <p className="text-sm text-muted-foreground">{t(info.why)}</p>}
         {u.apply.phase !== 'idle' && <ResourceProgress events={u.apply.events} />}
         {u.apply.phase === 'done' && <Alert tone="success">{t('resources.resourceActions.updatedRunningServerStill')}</Alert>}
         <ErrorNotice error={u.error ?? (u.apply.phase === 'failed' ? u.apply.error : null)} />
@@ -78,7 +78,7 @@ export function ResourceActions({ page, updates: u, pending, said, onControl, on
             const why = block?.why ?? (a === 'stop' && id === CONSOLE_RESOURCE ? t('resources.resourceActions.koraUsesResourceSend') : null)
             return (
               <Button key={a} disabled={why !== null || pending !== undefined} title={why ?? undefined} aria-busy={pending === a} onClick={() => onControl(a)}>
-                {pending === a ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />} {label}
+                {pending === a ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />} {t(label)}
               </Button>
             )
           })}

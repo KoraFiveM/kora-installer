@@ -11,11 +11,11 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { useRole, whyNot } from '@/hooks/useRole'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/servers'
 
 const TONE: Record<ReachState, Tone> = { ok: 'success', likely: 'success', problem: 'danger', unknown: 'neutral' }
-const LABEL: Record<ReachState, string> = { ok: 'OK', likely: 'Probably OK', problem: 'Problem', unknown: 'Not known' }
+const LABEL: Record<ReachState, Msg> = { ok: msg('servers.reachCard.ok'), likely: msg('servers.reachCard.probablyOk'), problem: msg('servers.reachCard.problem'), unknown: msg('servers.reachCard.notKnown') }
 
 /** The last check of each server, so other places (the connect address, the wizard) can reuse it. */
 export const reachKey = (name: string) => ['reach', name] as const
@@ -57,12 +57,12 @@ function Icon({ state }: { state: ReachState }) {
 
 /** What turning on port forwarding means, in one honest sentence plus the limits Kora keeps. */
 export const FORWARDING_RISK =
-  "A router that programs can reconfigure is a small risk: any program on your network can do the same. Turning this on lets Kora do it for this server's game port only (TCP and UDP): it keeps the rule while the server runs and removes it when the server stops."
+  msg('servers.reachCard.routerProgramsReconfigureSmall')
 
 /** What each outside lookup contacts and learns, shown before it is allowed. */
 const CONSENT_TEXT = {
-  cfx_list: { what: "Cfx.re's public server list (frontend.cfx-services.net)", learns: "Kora sends your server's join code (the one from its own log). Cfx.re already knows it; Kora learns whether you are listed and which address Cfx.re has.", button: 'Allow and check again' },
-  ip_echo: { what: 'api.ipify.org', learns: "That website sees this computer's public address and that a request was made. Kora learns your public address.", button: 'Allow and check again' },
+  cfx_list: { what: msg('servers.reachCard.cfxResPublicServer2'), learns: msg('servers.reachCard.koraSendsServersJoin'), button: msg('servers.reachCard.allowCheckAgain') },
+  ip_echo: { what: 'api.ipify.org', /* i18n-ignore: a host name */ learns: msg('servers.reachCard.websiteSeesComputersPublic'), button: msg('servers.reachCard.allowCheckAgain') },
 } as const
 
 function Layer({ l, fixes }: { l: ReachLayer; fixes: React.ReactNode }) {
@@ -72,7 +72,7 @@ function Layer({ l, fixes }: { l: ReachLayer; fixes: React.ReactNode }) {
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{l.title}</span>
-          <Badge tone={TONE[l.state]} dot>{LABEL[l.state]}</Badge>
+          <Badge tone={TONE[l.state]} dot>{t(LABEL[l.state])}</Badge>
         </div>
         {l.detail && <p className="text-sm text-muted-foreground">{l.detail}</p>}
         {l.steps.length > 0 && (
@@ -132,11 +132,11 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
           return (
             <div key={f.id} className="space-y-2">
               {asking === key ? (
-                <Alert tone="info" title={t('servers.reachCard.contactWhat', { what: CONSENT_TEXT[key].what })}>
-                  <p>{CONSENT_TEXT[key].learns}</p>
+                <Alert tone="info" title={t('servers.reachCard.contactWhat', { what: typeof CONSENT_TEXT[key].what === 'string' ? CONSENT_TEXT[key].what : t(CONSENT_TEXT[key].what) })}>
+                  <p>{t(CONSENT_TEXT[key].learns)}</p>
                   <p className="mt-1">{t('servers.reachCard.choiceRememberedTurnOff')}</p>
                   <div className="mt-2 flex gap-2">
-                    <Button size="sm" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate(f)}>{CONSENT_TEXT[key].button}</Button>
+                    <Button size="sm" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate(f)}>{t(CONSENT_TEXT[key].button)}</Button>
                     <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>{t('servers.reachCard.notNow')}</Button>
                     <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setAsking(null); check.mutate({ [key]: true }) }}>{t('servers.reachCard.justOnce')}</Button>
                   </div>
@@ -152,7 +152,7 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
             <div key={f.id} className="space-y-2">
               {asking === 'forwarding' ? (
                 <Alert tone="warning" title={t('servers.reachCard.letKoraChangeRouter')}>
-                  <p>{FORWARDING_RISK}</p>
+                  <p>{t(FORWARDING_RISK)}</p>
                   <div className="mt-2 flex gap-2">
                     <Button size="sm" disabled={busy || adminOff !== null} title={adminOff ?? undefined} onClick={() => act.mutate(f)}>{t('servers.reachCard.turnPortForwarding')}</Button>
                     <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>{t('servers.reachCard.notNow')}</Button>

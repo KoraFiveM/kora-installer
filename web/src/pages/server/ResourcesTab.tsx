@@ -23,7 +23,7 @@ import { useBranches } from './branches/useBranches'
 import { VersionBadge } from './branches/VersionBadge'
 import { useUpdates, type Updates } from './useUpdates'
 import { VersionsCard } from './VersionsCard'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/resources'
 
 export function EnsureForm({ server: s, installed }: { server: ServerDetail; installed: string[] }) {
@@ -104,7 +104,7 @@ function AddResources({ server: s }: { server: ServerDetail }) {
         {groups.length === 0 && !cat.isLoading && <p className="text-sm text-muted-foreground">{t('resources.resourcesTab.nothingMatchesSearch')}</p>}
         {groups.map(([g, items]) => (
           <fieldset key={g} className="space-y-2">
-            <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{GROUP_LABEL[g]}</legend>
+            <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(GROUP_LABEL[g])}</legend>
             {items.map((r) => (
               <Checkbox key={r.id} label={<>{r.title ?? r.id} <span className="font-mono text-xs text-muted-foreground">{r.id}</span> {installed.has(r.id) && <Badge tone="success">{t('resources.resourcesTab.installed')}</Badge>}</>} hint={r.description} checked={picked.has(r.id)} disabled={installed.has(r.id)} onChange={() => toggle(r.id)} />
             ))}
@@ -130,10 +130,10 @@ function AddResources({ server: s }: { server: ServerDetail }) {
   )
 }
 
-const CONTROL: Record<ControlAction, { label: string; Icon: typeof Play }> = {
-  start: { label: 'Start', Icon: Play },
-  stop: { label: 'Stop', Icon: Square },
-  restart: { label: 'Restart', Icon: RotateCw },
+const CONTROL: Record<ControlAction, { label: Msg; Icon: typeof Play }> = {
+  start: { label: msg('resources.resourcesTab.start'), Icon: Play },
+  stop: { label: msg('resources.resourcesTab.stop'), Icon: Square },
+  restart: { label: msg('resources.resourcesTab.restart'), Icon: RotateCw },
 }
 
 /** The resource Kora sends commands through. Stopping it would cut the panel off from the server. */
@@ -164,7 +164,7 @@ function InstalledResource({ id, serverName, updates: u, branch, noCheck, noCont
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Link className="min-w-0 flex-1 break-all font-mono text-sm underline-offset-2 hover:underline" to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} aria-label={t('resources.resourcesTab.openPageId', { id })}>{id}</Link>
         {branch && branch.state !== 'pinned' && branch.state !== 'unavailable' && <VersionBadge branch={branch} to={`/servers/${encodeURIComponent(serverName)}/resources/${encodeURIComponent(id)}`} />}
-        {checking ? <span className="text-xs text-muted-foreground" role="status">{t('resources.resourcesTab.checking')}</span> : info && <Badge tone={info.tone}>{info.text}</Badge>}
+        {checking ? <span className="text-xs text-muted-foreground" role="status">{t('resources.resourcesTab.checking')}</span> : info && <Badge tone={info.tone}>{t(info.text)}</Badge>}
         <div className="flex items-center gap-1">
           <Button size="icon" variant="ghost" className="size-8" disabled={u.busy || noCheck !== null} aria-busy={checking} aria-label={t('resources.resourcesTab.checkIdUpdates', { id })} title={noCheck ?? t('resources.resourcesTab.checkUpdates')} onClick={() => void u.checkOne(id)}>
             {checking ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
@@ -173,7 +173,7 @@ function InstalledResource({ id, serverName, updates: u, branch, noCheck, noCont
             const { label, Icon } = CONTROL[a]
             const why = noControl ?? (a === 'stop' && id === CONSOLE_RESOURCE ? t('resources.resourcesTab.koraUsesResourceSend') : null)
             return (
-              <Button key={a} size="icon" variant="ghost" className="size-8" disabled={why !== null || pending !== undefined} aria-label={`${label} ${id}`} title={why ?? label} onClick={() => onControl(a)}>
+              <Button key={a} size="icon" variant="ghost" className="size-8" disabled={why !== null || pending !== undefined} aria-label={`${t(label)} ${id}`} title={why ?? t(label)} onClick={() => onControl(a)}>
                 {pending === a ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />}
               </Button>
             )

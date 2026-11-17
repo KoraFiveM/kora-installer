@@ -23,7 +23,7 @@ import { downloadFile } from '@/lib/download'
 import { browseForFolder, inShell } from '@/lib/shell'
 import { BackupSuggestion } from '@/components/BackupSuggestion'
 import { fileSize } from './PaidAssetsTab'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/backups'
 
@@ -31,7 +31,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 const MIN_PASSWORD = 8
 
 /** What the backup file holds. Said before and after every backup, in plain words. */
-export const SECRETS_NOTE = 'A backup holds your secrets: the licence key, the database login and the txAdmin admin. Keep the file private. Kora makes it readable only by your account here, and only an administrator can download it.'
+export const SECRETS_NOTE = msg('backups.backupsTab.backupHoldsSecretsLicence')
 
 function when(unix: number): string {
   return `${new Date(unix * 1000).toLocaleString()} (${timeAgo(unix * 1000, Date.now())})`
@@ -78,7 +78,7 @@ function MakeBackup({ server: s, onDone }: { server: ServerDetail; onDone: () =>
     <Card>
       <CardHeader><CardTitle>{t('backups.backupsTab.backUpNow')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <Alert tone="info">{SECRETS_NOTE}</Alert>
+        <Alert tone="info">{t(SECRETS_NOTE)}</Alert>
         <Checkbox
           checked={protect}
           onChange={(e) => setProtect(e.target.checked)}
@@ -268,7 +268,7 @@ function UndoBanner({ server, undo, onChanged, onDismiss, canRestore }: { server
 
 // ---- the list --------------------------------------------------------------------------------------------------
 
-const LABEL_TEXT: Record<BackupInfo['label'], string> = { manual: 'Made by you', scheduled: 'Scheduled', before_restore: 'Safety copy before a restore', move: 'For moving the server' }
+const LABEL_TEXT: Record<BackupInfo['label'], Msg> = { manual: msg('backups.backupsTab.madeByYou'), scheduled: msg('backups.backupsTab.scheduled'), before_restore: msg('backups.backupsTab.safetyCopyBeforeRestore'), move: msg('backups.backupsTab.movingServer') }
 
 function Row({ server, b, canAdmin, remote, onVerify, onRestore, onChanged }: { server: string; b: BackupInfo; canAdmin: boolean; remote: boolean; onVerify: () => void; onRestore: () => void; onChanged: () => void }) {
   const [confirm, setConfirm] = useState(false)
@@ -280,7 +280,7 @@ function Row({ server, b, canAdmin, remote, onVerify, onRestore, onChanged }: { 
         <span className="font-medium">{when(b.created_unix)}</span>
         <Badge tone="plain">{fileSize(b.bytes)}</Badge>
         {b.encrypted ? <Badge tone="success">{rich('backups.backupsTab.lockNodePasswordProtected', { lock: <Lock className="size-3" /> })}</Badge> : <Badge tone="neutral">{t('backups.backupsTab.passwordProtected')}</Badge>}
-        <Badge tone="plain">{LABEL_TEXT[b.label]}</Badge>
+        <Badge tone="plain">{t(LABEL_TEXT[b.label])}</Badge>
         {b.stopped && <Badge tone="plain">{t('backups.backupsTab.serverStopped')}</Badge>}
         {b.too_new && <Badge tone="danger">{t('backups.backupsTab.madeNewerKora')}</Badge>}
         <span className="ml-auto flex flex-wrap gap-2">

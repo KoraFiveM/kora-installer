@@ -377,7 +377,7 @@ export interface MessageParams {
   'settings.settingsPage.updatedTo': { version: string | number }
   'settings.settingsPage.versionLatestAvailable': { latest: string | number }
   'settings.tlsCard.certificateEndsSoonValue': { value: string | number }
-  'settings.tlsCard.daysLeftDaysLeft': { days_left: string | number }
+  'settings.tlsCard.daysLeftDaysLeft': { days: number }
   'settings.tlsCard.installCertificateAuthorityOnc': { code: Tag }
   'settings.tlsCard.panelServesPlainHttp': { code: Tag; code2: Tag }
   'settings.tlsCard.panelUsesValueBadge': { value: string | number; badge: ReactNode }

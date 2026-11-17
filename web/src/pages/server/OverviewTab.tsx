@@ -52,7 +52,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
           <div className="space-y-1.5">
             <div className="text-sm text-muted-foreground">{t('servers.overviewTab.connectAddressPlayersType')}</div>
             {s.connect ? <CopyField value={s.connect} label={t('servers.overviewTab.connectAddress')} /> : <p className="text-sm">{t('servers.overviewTab.koraCouldFindComputers', { game: s.ports.game })}</p>}
-            <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
+            <p className="text-xs text-muted-foreground">{t(CONNECT_NOTE)}</p>
           </div>
           <MoreAddresses name={s.name} />
           <div className="space-y-1.5">

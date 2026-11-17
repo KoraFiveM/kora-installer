@@ -10,6 +10,9 @@ const messages = {
   'system.systemCheckPage.problemsThingsNeedFixing': '{problems} things need fixing.',
   'system.systemCheckPage.accountRoleLookBut': 'Your account ({role}) can look at this but not fix it. Ask an administrator to open this page and use the buttons, or to run the commands shown.',
   'system.systemCheckPage.koraRunsCodeNode': 'Kora runs {code, node}',
+  'system.systemCheckPage.fine': 'Fine',
+  'system.systemCheckPage.needsFixing': 'Needs fixing',
+  'system.systemCheckPage.goodKnow': 'Good to know',
 } as const
 
 register('en', messages)

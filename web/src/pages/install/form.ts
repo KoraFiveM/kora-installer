@@ -1,6 +1,6 @@
 import type { DbChoice, InstallDefaults, InstallRequest, Mode, SavedInstall, SavedKey, Source, Versions } from '@/api/types'
 import { joinPath, slug, validatePorts } from '@/lib/utils'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/install'
 
 export type ArtifactChoice = 'recommended' | 'pick' | 'custom'
@@ -68,19 +68,19 @@ export interface WizardForm {
 
 export type StepId = 'source' | 'versions' | 'name' | 'ports' | 'build' | 'resources' | 'database' | 'options' | 'licence' | 'cfx' | 'github' | 'review'
 
-export const STEP_LABEL: Record<StepId, string> = {
-  source: 'Where the resources come from',
-  versions: 'Which versions',
-  name: 'Name your server',
-  ports: 'Ports',
-  build: 'FiveM server build',
-  resources: 'Resources',
-  database: 'Database',
-  options: 'Options',
-  licence: 'Your licence key',
-  cfx: 'Your Cfx.re account',
-  github: 'GitHub',
-  review: 'Check and install',
+export const STEP_LABEL: Record<StepId, Msg> = {
+  source: msg('install.form.whereResourcesComeFrom'),
+  versions: msg('install.form.whichVersions'),
+  name: msg('install.form.nameServer'),
+  ports: msg('install.form.ports'),
+  build: msg('install.form.fivemServerBuild'),
+  resources: msg('install.form.resources'),
+  database: msg('install.form.database'),
+  options: msg('install.form.options'),
+  licence: msg('install.form.licenceKey'),
+  cfx: msg('install.form.cfxReAccount'),
+  github: msg('install.form.github'),
+  review: msg('install.form.checkInstall'),
 }
 
 /** Every step, one after the other ("Choose everything myself"). */
@@ -229,11 +229,11 @@ export interface ProblemContext {
   githubSignedIn: boolean
 }
 
-const PORTS_MESSAGE: Record<PortsState, string | null> = {
+const PORTS_MESSAGE: Record<PortsState, Msg | null> = {
   ok: null,
-  checking: 'Checking that the ports are free...',
-  taken: 'One of the ports is already in use. Pick a free one.',
-  unknown: 'Kora could not check that the ports are free.',
+  checking: msg('install.form.checkingPortsFree'),
+  taken: msg('install.form.onePortsAlreadyUse'),
+  unknown: msg('install.form.koraCouldCheckPorts'),
 }
 
 /** Why a step is not finished (null = fine). Messages are shown to the user. */
@@ -244,7 +244,7 @@ export function stepProblem(step: StepId, f: WizardForm, ctx: ProblemContext): s
       if (!f.dir.trim()) return t('install.form.chooseFolderServer')
       return null
     case 'ports':
-      return validatePorts(f.game, f.tx) ?? PORTS_MESSAGE[ctx.ports]
+      return validatePorts(f.game, f.tx) ?? (PORTS_MESSAGE[ctx.ports] ? t(PORTS_MESSAGE[ctx.ports]!) : null)
     case 'build':
       if (f.artifact === 'custom' && !/^https:\/\/\S+$/.test(f.artifactUrl.trim())) return t('install.form.typeDownloadAddressStarts')
       if (f.artifact === 'pick' && f.artifactBuild === null) return t('install.form.pickBuildFromList')

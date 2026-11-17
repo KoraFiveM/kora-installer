@@ -160,7 +160,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
       <div className="space-y-1.5">
         <div className="text-sm text-muted-foreground">{t('install.installWizard.connectAddressPlayersType')}</div>
         <CopyField value={o.connect} label={t('install.installWizard.connectAddress')} />
-        <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
+        <p className="text-xs text-muted-foreground">{t(CONNECT_NOTE)}</p>
       </div>
       <div className="space-y-1.5">
         <div className="text-sm text-muted-foreground">txAdmin</div>
@@ -433,11 +433,11 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
       )}
       <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label={t('install.installWizard.steps')}>
         {steps.map((s, i) => (
-          <li key={s} aria-current={i === at ? 'step' : undefined} className={cn(i === at ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{i + 1}. {STEP_LABEL[s]}</li>
+          <li key={s} aria-current={i === at ? 'step' : undefined} className={cn(i === at ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{i + 1}. {t(STEP_LABEL[s])}</li>
         ))}
       </ol>
       <Card>
-        <CardHeader><CardTitle className="text-lg">{STEP_LABEL[showing]}</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-lg">{t(STEP_LABEL[showing])}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {showing === 'source' && <SourceStep {...common} />}
           {showing === 'versions' && <VersionsStep {...common} />}

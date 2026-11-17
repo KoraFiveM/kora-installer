@@ -1,4 +1,4 @@
-import { t } from '@/i18n'
+import { t, msg } from '@/i18n'
 import '@/i18n/en/core'
 // Where the per-server buttons point, worked out from how the person reached the panel.
 
@@ -56,4 +56,4 @@ export function txAdminLink(host: string, port: number, local: boolean): TxAdmin
 
 /** What to say next to the connect address. The address is the network one: players elsewhere need more. */
 export const CONNECT_NOTE =
-  'This is the address on your own network: players on the same network (or Wi-Fi) can use it. Players on the internet need your public address with this port, and the port has to be open on your firewall and forwarded on your router (or opened with your hosting provider). The check below ("Can players reach this server?") finds your public address, looks at each of those steps and can set up the port forwarding for you.'
+  msg('core.serverLinks.addressOwnNetworkPlayers')

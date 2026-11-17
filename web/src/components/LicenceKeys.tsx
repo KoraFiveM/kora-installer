@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/settings'
 
 /** A key field that hides what is typed until the eye is pressed. */
@@ -210,7 +210,7 @@ function DeleteDialog({ d, onClose, onDone }: { d: Dialogue; onClose: () => void
   )
 }
 
-const LABELS: [keyof Profile, string][] = [['cfx_username', 'Cfx.re name'], ['cfx_identifier', 'Cfx.re account'], ['github_owner', 'GitHub forks go to']]
+const LABELS: [keyof Profile, Msg][] = [['cfx_username', msg('settings.licenceKeys.cfxReName')], ['cfx_identifier', msg('settings.licenceKeys.cfxReAccount')], ['github_owner', msg('settings.licenceKeys.githubForksGo')]]
 
 /** Settings → what Kora remembers between installs. Nothing here is secret. */
 export function RememberedCard() {
@@ -233,8 +233,8 @@ export function RememberedCard() {
           <dl className="divide-y divide-border text-sm">
             {LABELS.filter(([k]) => p[k]).map(([k, label]) => (
               <div key={k} className="flex items-center justify-between gap-3 py-2">
-                <div><dt className="text-muted-foreground">{label}</dt><dd>{p[k]}</dd></div>
-                {role.can('admin') && <Button size="sm" aria-label={t('settings.licenceKeys.forgetLabel', { label })} disabled={forget.isPending} onClick={() => forget.mutate(k === 'cfx_username' || k === 'cfx_identifier' ? { cfx_username: null, cfx_identifier: null } : { [k]: null })}>{t('settings.licenceKeys.forget')}</Button>}
+                <div><dt className="text-muted-foreground">{t(label)}</dt><dd>{p[k]}</dd></div>
+                {role.can('admin') && <Button size="sm" aria-label={t('settings.licenceKeys.forgetLabel', { label: t(label) })} disabled={forget.isPending} onClick={() => forget.mutate(k === 'cfx_username' || k === 'cfx_identifier' ? { cfx_username: null, cfx_identifier: null } : { [k]: null })}>{t('settings.licenceKeys.forget')}</Button>}
               </div>
             ))}
           </dl>

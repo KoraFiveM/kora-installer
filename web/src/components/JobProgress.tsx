@@ -3,10 +3,10 @@ import type { ProgressEvent, StepStatus } from '@/api/types'
 import { Progress } from '@/components/ui/progress'
 import { Announcer, progressSentence } from '@/components/Announcer'
 import { cn } from '@/lib/utils'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/core'
 
-const STATUS_TEXT: Record<StepStatus, string> = { pending: 'Waiting', running: 'In progress', done: 'Done', skipped: 'Skipped', failed: 'Failed' }
+const STATUS_TEXT: Record<StepStatus, Msg> = { pending: msg('core.jobProgress.waiting'), running: msg('core.jobProgress.inProgress'), done: msg('core.jobProgress.done'), skipped: msg('core.jobProgress.skipped'), failed: msg('core.jobProgress.failed') }
 
 function Icon({ status }: { status: StepStatus }) {
   const c = 'size-4 shrink-0'
@@ -43,7 +43,7 @@ export function StepProgress({ events, planned }: { events: ProgressEvent[]; pla
   const failed = rows.find((r) => r.status === 'failed')
   const running = rows.find((r) => r.status === 'running')
   const allDone = rows.length > 0 && rows.every((r) => r.status === 'done' || r.status === 'skipped')
-  const said = failed ? `${failed.title}: ${STATUS_TEXT.failed}` : allDone ? t('core.jobProgress.allStepsFinished') : running ? `${running.title}: ${STATUS_TEXT.running}` : ''
+  const said = failed ? `${failed.title}: ${t(STATUS_TEXT.failed)}` : allDone ? t('core.jobProgress.allStepsFinished') : running ? `${running.title}: ${t(STATUS_TEXT.running)}` : ''
   return (
     <div className="space-y-4">
       <Announcer message={said} />
@@ -57,7 +57,7 @@ export function StepProgress({ events, planned }: { events: ProgressEvent[]; pla
             <Icon status={s.status} />
             <div className="min-w-0 flex-1">
               <div className={cn(s.status === 'pending' && 'text-muted-foreground')}>
-                {s.title} <span className="sr-only">: {STATUS_TEXT[s.status]}</span>
+                {s.title} <span className="sr-only">: {t(STATUS_TEXT[s.status])}</span>
               </div>
               {s.detail && s.status !== 'done' && <div className="text-xs text-muted-foreground">{s.detail}</div>}
             </div>

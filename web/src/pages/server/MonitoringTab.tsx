@@ -14,15 +14,15 @@ import { Field } from '@/components/Field'
 import { LineChart } from '@/components/LineChart'
 import { Skeleton } from '@/components/Skeleton'
 import { cn } from '@/lib/utils'
-import { t as tt } from '@/i18n'
+import { t as tt, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/servers'
 
 export const METRICS_POLL_MS = 15000
-const RANGES: { id: MetricsRange; label: string }[] = [
-  { id: '1h', label: 'Last hour' },
-  { id: '6h', label: 'Last 6 hours' },
-  { id: '24h', label: 'Last 24 hours' },
+const RANGES: { id: MetricsRange; label: Msg }[] = [
+  { id: '1h', label: msg('servers.monitoringTab.lastHour') },
+  { id: '6h', label: msg('servers.monitoringTab.lastHours') },
+  { id: '24h', label: msg('servers.monitoringTab.lastHours2') },
 ]
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`
@@ -159,7 +159,7 @@ export function MonitoringTab({ server: s }: { server: ServerDetail }) {
           <div role="group" aria-label={tt('servers.monitoringTab.timeRange')} className="inline-flex overflow-hidden rounded-md border border-border">
             {RANGES.map((r) => (
               <button key={r.id} type="button" aria-pressed={range === r.id} onClick={() => setRange(r.id)} className={cn('px-3 py-1.5 text-xs font-medium hover:bg-accent', range === r.id && 'bg-accent text-foreground')}>
-                {r.label}
+                {tt(r.label)}
               </button>
             ))}
           </div>

@@ -14,7 +14,7 @@ import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { slug, validatePorts } from '@/lib/utils'
 import { dbLoginProblem, defaultVersions, dirBase, folderFor, type WizardForm } from './form'
 import type { PortsChecked } from './ports'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/install'
 
@@ -160,7 +160,7 @@ export function ResourcesStep({ f, set }: StepProps) {
           <div className="max-h-80 space-y-4 overflow-y-auto rounded-md border border-border p-3">
             {groups.map(([g, items]) => (
               <fieldset key={g} className="space-y-2">
-                <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{GROUP_LABEL[g]}</legend>
+                <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(GROUP_LABEL[g])}</legend>
                 {items.map((r) => <Checkbox key={r.id} label={r.title ?? r.id} hint={r.description} checked={f.resourceIds.includes(r.id)} onChange={() => toggle(r.id)} />)}
               </fieldset>
             ))}
@@ -173,10 +173,10 @@ export function ResourcesStep({ f, set }: StepProps) {
   )
 }
 
-const DB_OPTIONS: { v: DbChoice; label: string; hint: string }[] = [
-  { v: 'install_if_missing', label: 'Set up the database for me (recommended)', hint: 'Uses MariaDB or MySQL if it is already here, installs MariaDB if not (installing it needs administrator rights). Your other databases are not touched.' },
-  { v: 'use_existing', label: 'Use the database already on this computer', hint: 'Kora creates a new database and user for this server. Your other databases are not touched. The install stops if no database is found.' },
-  { v: 'skip', label: 'Skip the database', hint: 'You will connect a database yourself later.' },
+const DB_OPTIONS: { v: DbChoice; label: Msg; hint: Msg }[] = [
+  { v: 'install_if_missing', label: msg('install.steps.setUpDatabaseMe'), hint: msg('install.steps.usesMariadbMysqlAlready') },
+  { v: 'use_existing', label: msg('install.steps.useDatabaseAlreadyComputer'), hint: msg('install.steps.koraCreatesNewDatabase') },
+  { v: 'skip', label: msg('install.steps.skipDatabase'), hint: msg('install.steps.connectDatabaseYourselfLater') },
 ]
 
 export function DatabaseStep({ f, set }: StepProps) {
@@ -200,7 +200,7 @@ export function DatabaseStep({ f, set }: StepProps) {
     <div className="space-y-4">
       <fieldset className="space-y-3">
         <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whereShouldServerKeep')}</legend>
-        {DB_OPTIONS.map((o) => <Radio key={o.v} name="db" checked={f.db === o.v} onChange={() => set({ db: o.v })} label={o.label} hint={o.hint} />)}
+        {DB_OPTIONS.map((o) => <Radio key={o.v} name="db" checked={f.db === o.v} onChange={() => set({ db: o.v })} label={t(o.label)} hint={t(o.hint)} />)}
       </fieldset>
       {f.db !== 'skip' && (
         <fieldset className="space-y-3">

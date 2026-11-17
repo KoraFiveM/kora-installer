@@ -18,23 +18,23 @@ import { formatDate } from '@/lib/utils'
 import { timeAgo } from '@/lib/ago'
 import type { Updates } from './useUpdates'
 import { applyProgress, checkProgress, rowCheckProgress, type CheckProgress } from './updateProgress'
-import { t as tt } from '@/i18n'
+import { t as tt, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/resources'
 
-export const RESTART_OPTIONS: { value: RestartPolicy; label: string; hint: string }[] = [
-  { value: 'none', label: 'Do not restart', hint: 'Update the files only. The changes load the next time the server restarts.' },
-  { value: 'ensure', label: 'Update files, reload later', hint: 'Update the files without restarting. Resources reload when someone runs "ensure" in the txAdmin console, or at the next restart.' },
-  { value: 'full_restart', label: 'Restart the whole server', hint: 'Always restart after updating. Players are disconnected for a minute or so.' },
-  { value: 'when_quiet', label: 'Restart only when nobody is playing', hint: 'If players are online, the restart is left for later.' },
+export const RESTART_OPTIONS: { value: RestartPolicy; label: Msg; hint: Msg }[] = [
+  { value: 'none', label: msg('resources.updatesPanel.doRestart'), hint: msg('resources.updatesPanel.updateFilesOnlyChanges') },
+  { value: 'ensure', label: msg('resources.updatesPanel.updateFilesReloadLater'), hint: msg('resources.updatesPanel.updateFilesWithoutRestarting') },
+  { value: 'full_restart', label: msg('resources.updatesPanel.restartWholeServer'), hint: msg('resources.updatesPanel.alwaysRestartAfterUpdating') },
+  { value: 'when_quiet', label: msg('resources.updatesPanel.restartOnlyWhenNobody'), hint: msg('resources.updatesPanel.playersOnlineRestartLeft') },
 ]
 
-export const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'amber' | 'orange'; text: string; why?: string }> = {
-  up_to_date: { tone: 'plain', text: 'Up to date' },
-  clean: { tone: 'info', text: 'Ready to update' },
-  dirty: { tone: 'orange', text: 'Needs attention', why: 'You changed files in this resource, so Kora left it alone and did not update it. Your changes are untouched. What to do: open the resource folder in a terminal and run "git stash" to set your changes aside, then check again. After the update, "git stash pop" brings them back. Saving them as a commit does not help: Kora never mixes your own commits with new ones.' },
-  other_branch: { tone: 'amber', text: 'Not updated: on another branch', why: 'You put this resource on another branch or a pull request, so updates leave it alone. Nothing is lost and nothing is pulled in. To update it again, go back to the normal version in the GitHub tab.' },
-  diverged: { tone: 'orange', text: 'Needs attention', why: 'This resource has saved changes of your own (commits) that the new version does not include, or Kora could not check it. Kora did not update it. It will not merge your commits or drop them for you. What to do: move your commits somewhere else or merge the new version by hand with git, then check again.' },
+export const STATUS_INFO: Record<ChangeStatus, { tone: 'plain' | 'info' | 'amber' | 'orange'; text: Msg; why?: Msg }> = {
+  up_to_date: { tone: 'plain', text: msg('resources.updatesPanel.upDate') },
+  clean: { tone: 'info', text: msg('resources.updatesPanel.readyUpdate') },
+  dirty: { tone: 'orange', text: msg('resources.updatesPanel.needsAttention2'), why: msg('resources.updatesPanel.changedFilesResourceKora') },
+  other_branch: { tone: 'amber', text: msg('resources.updatesPanel.updatedAnotherBranch'), why: msg('resources.updatesPanel.putResourceAnotherBranch') },
+  diverged: { tone: 'orange', text: msg('resources.updatesPanel.needsAttention2'), why: msg('resources.updatesPanel.resourceSavedChangesOwn') },
 }
 
 /** Commit ids are long: the first 7 characters are enough to tell them apart. */
@@ -56,7 +56,7 @@ export function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm">{r.id}</span>
-            <Badge tone={info.tone}>{info.text}</Badge>
+            <Badge tone={info.tone}>{tt(info.text)}</Badge>
             {r.needs_restart && selectable && <Badge tone="amber">{tt('resources.updatesPanel.needsRestart')}</Badge>}
             {checkedAt !== undefined && <span className="text-xs text-muted-foreground">{tt('resources.updatesPanel.lastCheckedTimeago', { timeAgo: timeAgo(checkedAt, now) })}</span>}
           </div>
@@ -70,7 +70,7 @@ export function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, 
           {r.status !== 'up_to_date' && r.status !== 'other_branch' && <div className="mt-1 text-xs text-muted-foreground">{rich('resources.updatesPanel.codeNodeCodeNode', { code: <code className="font-mono">{shortSha(r.from)}</code>, code2: <code className="font-mono">{shortSha(r.to)}</code>, value: r.behind ? tt('resources.updatesPanel.behindNewChangeValue', { behind: r.behind }) : '' })}</div>}
           {r.status === 'other_branch'
             ? <p className="mt-1 text-xs text-muted-foreground">{tt('resources.updatesPanel.valueGoBackNormal', { value: r.note ?? tt('resources.updatesPanel.anotherBranch') })}</p>
-            : info.why && <p className="mt-1 text-xs text-orange">{info.why}</p>}
+            : info.why && <p className="mt-1 text-xs text-orange">{tt(info.why)}</p>}
           {r.changelog.length > 0 && (
             <details className="mt-1 text-xs text-muted-foreground">
               <summary className="cursor-pointer">{tt('resources.updatesPanel.whatChanged')}</summary>
@@ -183,7 +183,7 @@ export function UpdatesPanel({ server: s, updates: u }: { server: ServerDetail; 
                   )}
                   <fieldset className="space-y-2">
                     <legend className="mb-1 text-sm font-semibold">{tt('resources.updatesPanel.afterUpdating')}</legend>
-                    {RESTART_OPTIONS.map((o) => <Radio key={o.value} name="restart" value={o.value} checked={u.restart === o.value} onChange={() => u.setRestart(o.value)} label={o.label} hint={o.hint} />)}
+                    {RESTART_OPTIONS.map((o) => <Radio key={o.value} name="restart" value={o.value} checked={u.restart === o.value} onChange={() => u.setRestart(o.value)} label={tt(o.label)} hint={tt(o.hint)} />)}
                   </fieldset>
                   <p className="text-xs text-muted-foreground">{tt('resources.updatesPanel.koraSavesSafetyCopy')}</p>
                   <Button variant="default" disabled={busy || u.chosen.length === 0 || noOperator !== null} title={noOperator ?? undefined} onClick={() => void u.applySelected()}>{tt('resources.updatesPanel.updateCountResourceValue', { count: u.chosen.length })}</Button>

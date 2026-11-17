@@ -186,6 +186,12 @@ const messages = {
   'backups.steps.removeFromOldComputer': 'Remove it from the old computer',
   'backups.steps.koraDoesReachInto': 'Kora does not reach into the old computer. When you are sure this one works:',
   'backups.steps.openName': 'Open {name}',
+  'backups.backupsTab.backupHoldsSecretsLicence': 'A backup holds your secrets: the licence key, the database login and the txAdmin admin. Keep the file private. Kora makes it readable only by your account here, and only an administrator can download it.',
+  'backups.backupsTab.madeByYou': 'Made by you',
+  'backups.backupsTab.scheduled': 'Scheduled',
+  'backups.backupsTab.safetyCopyBeforeRestore': 'Safety copy before a restore',
+  'backups.backupsTab.movingServer': 'For moving the server',
+  'backups.steps.fileMadeOldComputer': 'A file made on the old computer with "Move this server" (it ends in .tar.gz.age), or any Kora server backup (.tar.gz or .tar.gz.age).',
 } as const
 
 register('en', messages)

@@ -321,6 +321,21 @@ const messages = {
   'servers.shortcuts.alsoPutShortcutDesktop': 'Also put a shortcut on the desktop (Windows)',
   'servers.shortcuts.refreshShortcuts': 'Refresh the shortcuts',
   'servers.shortcuts.addShortcuts': 'Add the shortcuts',
+  'servers.reachCard.probablyOk': 'Probably OK',
+  'servers.reachCard.problem': 'Problem',
+  'servers.reachCard.notKnown': 'Not known',
+  'servers.reachCard.routerProgramsReconfigureSmall': "A router that programs can reconfigure is a small risk: any program on your network can do the same. Turning this on lets Kora do it for this server's game port only (TCP and UDP): it keeps the rule while the server runs and removes it when the server stops.",
+  'servers.reachCard.cfxResPublicServer2': "Cfx.re's public server list (frontend.cfx-services.net)",
+  'servers.reachCard.koraSendsServersJoin': "Kora sends your server's join code (the one from its own log). Cfx.re already knows it; Kora learns whether you are listed and which address Cfx.re has.",
+  'servers.reachCard.allowCheckAgain': 'Allow and check again',
+  'servers.reachCard.websiteSeesComputersPublic': "That website sees this computer's public address and that a request was made. Kora learns your public address.",
+  'servers.fleetPage.starting': 'Starting',
+  'servers.fleetPage.stopping': 'Stopping',
+  'servers.fleetPage.restarting': 'Restarting',
+  'servers.monitoringTab.lastHour': 'Last hour',
+  'servers.monitoringTab.lastHours': 'Last 6 hours',
+  'servers.monitoringTab.lastHours2': 'Last 24 hours',
+  'servers.reachCard.ok': 'OK',
 } as const
 
 register('en', messages)

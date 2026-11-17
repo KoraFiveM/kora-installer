@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { timeAgo } from '@/lib/ago'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/resources'
 
@@ -30,10 +30,10 @@ export function fileSize(n: number): string {
   return i === 0 ? `${n} bytes` : `${v.toFixed(1)} ${units[i]}`
 }
 
-const HINT_TITLE: Record<AssetHint['kind'], string> = {
-  entitlement: 'Licence key and asset owner do not match',
-  verify_failed: 'A protected resource could not be verified',
-  download_failed: 'A protected resource could not be fetched',
+const HINT_TITLE: Record<AssetHint['kind'], Msg> = {
+  entitlement: msg('resources.paidAssetsTab.licenceKeyAssetOwner'),
+  verify_failed: msg('resources.paidAssetsTab.protectedResourceCouldVerified'),
+  download_failed: msg('resources.paidAssetsTab.protectedResourceCouldFetched'),
 }
 
 function Hints({ hints }: { hints: AssetHint[] }) {
@@ -41,7 +41,7 @@ function Hints({ hints }: { hints: AssetHint[] }) {
   return (
     <div className="space-y-3">
       {hints.map((h, i) => (
-        <Alert key={`${h.kind}-${h.resource ?? i}`} tone="warning" title={`${HINT_TITLE[h.kind]}${h.resource ? `: ${h.resource}` : ''}`}>
+        <Alert key={`${h.kind}-${h.resource ?? i}`} tone="warning" title={`${t(HINT_TITLE[h.kind])}${h.resource ? `: ${h.resource}` : ''}`}>
           <p>{h.fix}</p>
           <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{t('resources.paidAssetsTab.seenConsoleLine', { line: h.line })}</p>
         </Alert>

@@ -11,25 +11,26 @@ import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { useRole } from '@/hooks/useRole'
 import { when } from '@/components/JobHistory'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/settings'
+import '@/i18n/en/core'
 
-const RESULT: Record<string, { label: string; tone: Tone }> = {
-  ok: { label: 'Done', tone: 'success' },
-  started: { label: 'Started', tone: 'info' },
-  failed: { label: 'Failed', tone: 'danger' },
-  refused: { label: 'Not allowed', tone: 'amber' },
+const RESULT: Record<string, { label: Msg | null; tone: Tone }> = {
+  ok: { label: msg('core.auditLog.done'), tone: 'success' },
+  started: { label: msg('core.auditLog.started'), tone: 'info' },
+  failed: { label: msg('core.auditLog.failed'), tone: 'danger' },
+  refused: { label: msg('core.auditLog.notAllowed'), tone: 'amber' },
 }
 
 function Line({ r }: { r: AuditRow }) {
-  const res = RESULT[r.result] ?? { label: r.result, tone: 'neutral' as Tone }
+  const res = RESULT[r.result] ?? { label: null, tone: 'neutral' as Tone }
   return (
     <tr className="align-top" data-testid="audit-row">
       <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground">{when(r.at)}</td>
       <td className="py-2 pr-3 text-sm">{whoLabel(r)}</td>
       <td className="py-2 pr-3 text-sm">{opLabel(r.op)}{r.server ? <span className="text-muted-foreground"> · {r.server}</span> : null}{r.detail ? <span className="block text-xs text-muted-foreground">{r.detail}</span> : null}</td>
-      <td className="py-2"><Badge tone={res.tone}>{res.label}</Badge></td>
+      <td className="py-2"><Badge tone={res.tone}>{res.label ? t(res.label) : r.result}</Badge></td>
     </tr>
   )
 }

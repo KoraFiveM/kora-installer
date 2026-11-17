@@ -14,18 +14,18 @@ import { Field } from '@/components/Field'
 import { CountBar } from '@/components/JobProgress'
 import { ChangesDialog } from './ChangesDialog'
 import { useRefreshBranches } from './useBranches'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/resources'
 
 interface CountEvent { type: string; done: number; total: number; id: string }
 
-const STATUS_TEXT: Record<BulkStatus, { text: string; tone: 'success' | 'plain' | 'amber' | 'danger' }> = {
-  switched: { text: 'Switched', tone: 'success' },
-  already: { text: 'Already there', tone: 'plain' },
-  needs_choice: { text: 'Has changes of yours', tone: 'amber' },
-  skipped: { text: 'Left as it is', tone: 'plain' },
-  failed: { text: 'Could not switch', tone: 'danger' },
+const STATUS_TEXT: Record<BulkStatus, { text: Msg; tone: 'success' | 'plain' | 'amber' | 'danger' }> = {
+  switched: { text: msg('resources.bulkSwitch.switched'), tone: 'success' },
+  already: { text: msg('resources.bulkSwitch.alreadyThere'), tone: 'plain' },
+  needs_choice: { text: msg('resources.bulkSwitch.changesYours'), tone: 'amber' },
+  skipped: { text: msg('resources.bulkSwitch.leftAsItIs'), tone: 'plain' },
+  failed: { text: msg('resources.bulkSwitch.couldSwitch'), tone: 'danger' },
 }
 
 /** Every resource at once: which ones have a branch, switch them, or put them all back to the normal version. */
@@ -117,7 +117,7 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
           <ul className="divide-y divide-border rounded-md border border-border" aria-label={t('resources.bulkSwitch.whatHappenedEachResource')}>
             {apply.result.items.map((i) => (
               <li key={i.id} className="space-y-1 p-2.5 text-sm">
-                <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 break-all font-mono text-xs">{i.id}</span><Badge tone={STATUS_TEXT[i.status].tone}>{STATUS_TEXT[i.status].text}</Badge></div>
+                <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 break-all font-mono text-xs">{i.id}</span><Badge tone={STATUS_TEXT[i.status].tone}>{t(STATUS_TEXT[i.status].text)}</Badge></div>
                 <p className="text-xs text-muted-foreground">{i.message}</p>
                 {i.stashed && <p className="text-xs text-muted-foreground">{t('resources.bulkSwitch.changesKeptAsideBring')}</p>}
               </li>

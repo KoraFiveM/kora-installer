@@ -1,7 +1,6 @@
 import { register } from '../index'
 
 const messages = {
-  'errors.errorNotice.anotherUpdateRunning': 'Another update is running',
   'errors.errorNotice.waitFinishTryAgain': "Wait for it to finish, then try again. Its progress is on the server's Resources tab.",
   'errors.errorNotice.administratorPartStopped': 'The administrator part stopped',
   'errors.errorNotice.korasAdministratorServiceTurne': "Kora's administrator service is not turned on for you",
@@ -83,6 +82,7 @@ const messages = {
   'errors.supportBundleDialog.downloadNodeDownload': '{download, node} Download it',
   'errors.supportBundleDialog.close': 'Close',
   'errors.errorNotice.openSystemCheckNewTab': 'Open the System check in a new tab',
+  'errors.errorNotice.koraPanelDidAnswer': 'Kora Panel did not answer. Check that it is still running on the server (`kora panel restart` restarts it), then reload this page.',
 } as const
 
 register('en', messages)

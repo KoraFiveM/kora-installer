@@ -13,16 +13,16 @@ import { KoraLogo } from '@/components/KoraLogo'
 import { useInstallBlock } from '@/pages/install/access'
 import { cn } from '@/lib/utils'
 import { useRouteAnnouncer } from '@/hooks/useRouteAnnouncer'
-import { t } from '@/i18n'
+import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/core'
 
 const nav = [
-  { to: '/', label: 'Servers', icon: Server, end: true },
-  { to: '/fleet', label: 'Fleet', icon: Network, end: false },
-  { to: '/install', label: 'Install new server', icon: Plus, end: false },
-  { to: '/system', label: 'System check', icon: ListChecks, end: false },
-  { to: '/settings', label: 'Settings', icon: Settings, end: false },
+  { to: '/', label: msg('core.appShell.servers'), icon: Server, end: true },
+  { to: '/fleet', label: msg('core.appShell.fleet'), icon: Network, end: false },
+  { to: '/install', label: msg('core.appShell.installNewServer'), icon: Plus, end: false },
+  { to: '/system', label: msg('core.appShell.systemCheck'), icon: ListChecks, end: false },
+  { to: '/settings', label: msg('core.appShell.settings'), icon: Settings, end: false },
 ]
 
 export function AppShell() {
@@ -46,7 +46,7 @@ export function AppShell() {
               return (
                 <span key={to} aria-disabled="true" title={installBlock.reason} className="flex cursor-not-allowed items-start gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground/60">
                   <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
-                  <span>{label}<span className="block text-xs font-normal">{installBlock.short}</span></span>
+                  <span>{t(label)}<span className="block text-xs font-normal">{installBlock.short}</span></span>
                 </span>
               )
             }
@@ -60,7 +60,7 @@ export function AppShell() {
                 }
               >
                 <Icon className="size-4" aria-hidden />
-                {label}
+                {t(label)}
               </NavLink>
             )
           })}

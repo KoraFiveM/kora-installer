@@ -7,14 +7,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { useRole } from '@/hooks/useRole'
-import { t as tt } from '@/i18n'
+import { t as tt, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/system'
 
-const BADGE: Record<CheckState, { tone: 'success' | 'amber' | 'neutral'; text: string }> = {
-  ok: { tone: 'success', text: 'Fine' },
-  problem: { tone: 'amber', text: 'Needs fixing' },
-  info: { tone: 'neutral', text: 'Good to know' },
+const BADGE: Record<CheckState, { tone: 'success' | 'amber' | 'neutral'; text: Msg }> = {
+  ok: { tone: 'success', text: msg('system.systemCheckPage.fine') },
+  problem: { tone: 'amber', text: msg('system.systemCheckPage.needsFixing') },
+  info: { tone: 'neutral', text: msg('system.systemCheckPage.goodKnow') },
 }
 
 function StateIcon({ state }: { state: CheckState }) {
@@ -76,7 +76,7 @@ export default function SystemCheckPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <h2 className="font-semibold">{i.label}</h2>
-                        <Badge tone={BADGE[i.state].tone} dot>{BADGE[i.state].text}</Badge>
+                        <Badge tone={BADGE[i.state].tone} dot>{tt(BADGE[i.state].text)}</Badge>
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">{i.summary}</p>
                       {where && <p className="mt-1 break-all text-xs text-muted-foreground">{rich('system.systemCheckPage.koraRunsCodeNode', { code: <code className="font-mono">{where}</code> })}</p>}

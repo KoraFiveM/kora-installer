@@ -18,11 +18,11 @@ import { Field } from '@/components/Field'
 import { Skeleton } from '@/components/Skeleton'
 import { StatusChip, StyleChip, UpdateChip } from '@/components/Status'
 import { useJob } from '@/hooks/useJob'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/servers'
 
-const ING: Record<ControlAction, string> = { start: 'Starting', stop: 'Stopping', restart: 'Restarting' }
+const ING: Record<ControlAction, Msg> = { start: msg('servers.fleetPage.starting'), stop: msg('servers.fleetPage.stopping'), restart: msg('servers.fleetPage.restarting') }
 const DONE: Record<ControlAction, string> = { start: 'started', stop: 'stopped', restart: 'restarted' }
 
 /** Start / stop / restart one server of this panel or of a node, and follow the job. */
@@ -55,7 +55,7 @@ function useFleetControl(s: FleetServer) {
     }
   }
   const busy = starting || view.phase === 'running'
-  return { run, busy, pending: busy && action ? ING[action] : undefined }
+  return { run, busy, pending: busy && action ? t(ING[action]) : undefined }
 }
 
 function Actions({ s, busy, run }: { s: FleetServer; busy: boolean; run: (a: ControlAction) => void }) {

@@ -17,11 +17,11 @@ import { Announcer, progressSentence } from '@/components/Announcer'
 import { Progress } from '@/components/ui/progress'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
-import { t } from '@/i18n'
+import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/backups'
 
-export const FILE_HINT = 'A file made on the old computer with "Move this server" (it ends in .tar.gz.age), or any Kora server backup (.tar.gz or .tar.gz.age).'
+export const FILE_HINT = msg('backups.steps.fileMadeOldComputer')
 
 export function FileStep({ local, busy, error, archived, onFile, onPath, onArchived }: { local: boolean; busy: boolean; error: unknown; archived: ArchivedServer[]; onFile: (f: File) => void; onPath: (p: string) => void; onArchived: (s: ArchivedServer, id: string) => void }) {
   const input = useRef<HTMLInputElement>(null)
@@ -33,7 +33,7 @@ export function FileStep({ local, busy, error, archived, onFile, onPath, onArchi
   }
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">{FILE_HINT}</p>
+      <p className="text-sm text-muted-foreground">{t(FILE_HINT)}</p>
       <div
         role="group"
         aria-label={t('backups.steps.dropBackupFileHere')}

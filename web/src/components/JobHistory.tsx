@@ -6,14 +6,14 @@ import { opLabel } from '@/api/store'
 import { Badge, type Tone } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/core'
 
-const STATE: Record<JobState, { label: string; tone: Tone }> = {
-  running: { label: 'Running', tone: 'info' },
-  done: { label: 'Finished', tone: 'success' },
-  failed: { label: 'Did not finish', tone: 'danger' },
-  interrupted: { label: 'Stopped by a restart', tone: 'amber' },
+const STATE: Record<JobState, { label: Msg; tone: Tone }> = {
+  running: { label: msg('core.jobHistory.running'), tone: 'info' },
+  done: { label: msg('core.jobHistory.finished'), tone: 'success' },
+  failed: { label: msg('core.jobHistory.didFinish'), tone: 'danger' },
+  interrupted: { label: msg('core.jobHistory.stoppedRestart'), tone: 'amber' },
 }
 
 export const when = (secs: number) => new Date(secs * 1000).toLocaleString()
@@ -25,7 +25,7 @@ function Row({ j }: { j: JobSummary }) {
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">{opLabel(j.op)}</span>
         {j.server && <span className="text-muted-foreground">{j.server}</span>}
-        <Badge tone={s.tone}>{s.label}</Badge>
+        <Badge tone={s.tone}>{t(s.label)}</Badge>
         <span className="ml-auto text-xs text-muted-foreground">{when(j.started)}</span>
       </div>
       {(j.state === 'failed' || j.state === 'interrupted') && j.error && <ErrorNotice error={j.error} />}

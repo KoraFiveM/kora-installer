@@ -8,21 +8,21 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { t } from '@/i18n'
+import { t, msg, type Msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/settings'
 
-const SOURCE: Record<string, string> = {
-  provided: 'a certificate you provided',
-  tailscale: 'a Tailscale certificate',
-  'self-signed': 'a self-signed certificate made by Kora',
+const SOURCE: Record<string, Msg> = {
+  provided: msg('settings.tlsCard.sourceProvided'),
+  tailscale: msg('settings.tlsCard.sourceTailscale'),
+  'self-signed': msg('settings.tlsCard.sourceSelfSigned'),
 }
 
 const TRUST_STEPS = [
-  ['Windows (Edge, Chrome)', 'Double-click the saved file, choose Install Certificate, Current User, then place it in Trusted Root Certification Authorities. Restart the browser.'],
-  ['macOS (Safari, Chrome)', 'Double-click the file to add it to Keychain Access, open it there and set "When using this certificate" to Always Trust.'],
-  ['Linux (Chrome, Chromium) and Firefox', 'In the browser settings, Certificates, Authorities: import the file and tick "Trust this CA to identify websites".'],
-  ['iPhone, iPad, Android', 'Send the file to the device and open it, then switch it on under Certificate Trust Settings (iPhone) or install it as a CA certificate (Android).'],
+  [msg('settings.tlsCard.windowsEdgeChrome'), msg('settings.tlsCard.doubleclickSavedFileChoose')],
+  [msg('settings.tlsCard.platformMac'), msg('settings.tlsCard.doubleclickFileAddKeychain')],
+  [msg('settings.tlsCard.linuxChromeChromiumFirefox'), msg('settings.tlsCard.browserSettingsCertificatesAut')],
+  [msg('settings.tlsCard.platformMobile'), msg('settings.tlsCard.sendFileDeviceOpen')],
 ]
 
 function when(unix: number): string {
@@ -46,7 +46,7 @@ export function TlsCard() {
       <CardContent className="space-y-4 text-sm">
         {s.active ? (
           <>
-            <p>{rich('settings.tlsCard.panelUsesValueBadge', { value: SOURCE[s.source ?? ''] ?? 'a certificate', badge: <Badge tone={soon ? 'amber' : 'plain'}>{s.days_left !== null && s.days_left >= 0 ? `${s.days_left} days left` : 'expired'}</Badge> })}</p>
+            <p>{rich('settings.tlsCard.panelUsesValueBadge', { value: t(SOURCE[s.source ?? ''] ?? msg('settings.tlsCard.sourceOther')), badge: <Badge tone={soon ? 'amber' : 'plain'}>{s.days_left !== null && s.days_left >= 0 ? t('settings.tlsCard.daysLeftDaysLeft', { days: s.days_left }) : t('settings.tlsCard.expired')}</Badge> })}</p>
             <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[10rem_1fr]">
               <dt className="text-muted-foreground">{t('settings.tlsCard.validUntil')}</dt><dd>{when(s.not_after)}</dd>
               <dt className="text-muted-foreground">{t('settings.tlsCard.names')}</dt><dd>{s.names.join(', ')}</dd>
@@ -72,7 +72,7 @@ export function TlsCard() {
             <p>{rich('settings.tlsCard.installCertificateAuthorityOnc', { code: (c) => <code className="font-mono">{c}</code> })}</p>
             <CopyField value={ca} label={t('settings.tlsCard.certificateAuthorityPem')} />
             <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-              {TRUST_STEPS.map(([a, b]) => <li key={a}><strong>{a}:</strong> {b}</li>)}
+              {TRUST_STEPS.map(([a, b]) => <li key={a.msgId}><strong>{t(a)}:</strong> {t(b)}</li>)}
             </ul>
           </div>
         )}

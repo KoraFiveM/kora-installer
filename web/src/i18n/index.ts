@@ -82,17 +82,31 @@ function context(params: Record<string, Value>, id: string): Context {
 type ArgsFor<K extends MessageId> = K extends keyof MessageParams ? [params: MessageParams[K]] : []
 
 /** The text of a message. Messages with <tags> need `rich()` (react.tsx). */
-export function t<K extends PlainId>(id: K, ...args: ArgsFor<K>): string {
+export function t<K extends PlainId>(id: K | Msg<K>, ...args: ArgsFor<K>): string {
+  const key: string = typeof id === 'string' ? id : id.msgId
   const params = ((args as unknown[])[0] ?? {}) as Record<string, Value>
-  return format(lookup(id).nodes, context(params, id)).join('')
+  return format(lookup(key).nodes, context(params, key)).join('')
+}
+
+/** A message id kept in a table (see `msg`). It is not text: pass it to `t()` where it is drawn. */
+export interface Msg<K extends PlainId = PlainId> {
+  readonly msgId: K
 }
 
 /**
- * Mark a message id inside a module-level table (`{ running: msg('jobs.state.running') }`): it checks the id exists, and
- * returns it. Show it with `t(row.label)` where it is drawn: calling `t` while the module loads would fix the language.
+ * Mark a message in a module-level table (`{ running: msg('jobs.state.running') }`): the id is checked against the
+ * catalogue, and the value cannot be drawn by mistake (it is not a string): show it with `t(row.label)` where it is
+ * drawn. Calling `t` while the module loads would fix the language at that moment.
  */
-export function msg<K extends PlainId>(id: K): K {
-  return id
+export function msg<K extends PlainId>(id: K): Msg<K> {
+  return {
+    msgId: id,
+    // A Msg pasted into a template literal or a string sum would show "[object Object]": in development and tests say so loudly.
+    toString() {
+      if (DEV_LOCALES) throw new Error(`msg('${id}') used as text: wrap it in t()`)
+      return id
+    },
+  } as Msg<K>
 }
 
 /** The pieces of a message with tags (strings and what the tag functions returned). `rich()` wraps this. */
