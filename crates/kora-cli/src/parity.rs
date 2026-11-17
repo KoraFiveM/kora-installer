@@ -58,7 +58,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("manager", CliOnly("an alias that opens the panel itself (the same as a bare `kora`)")),
     ("service", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
     ("service allow", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
-    ("service allow <account>", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
+    ("service allow <accounts>", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
     ("service deny", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
     ("service deny <account>", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),
     ("service install", CliOnly("administrator-service settings; the panel shows who may use it and an administrator changes it from a terminal")),

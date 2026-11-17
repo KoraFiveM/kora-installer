@@ -2599,9 +2599,16 @@ fn command_kind(cmd: &Option<Command>) -> elevate::CmdKind {
         Some(Command::AdminWorker(_) | Command::AdminStep(_) | Command::AdminDb(_)) => K::Other,
         Some(Command::Helper { cmd: HelperCmd::Install | HelperCmd::Uninstall }) => K::Uninstall { dry_run: false },
         Some(Command::Helper { .. }) => K::Other,
-        Some(Command::Service {
-            cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } | service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. },
-        }) => K::Uninstall { dry_run: false },
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Allow { .. } | service_cmd::ServiceCmd::Deny { .. } }) => K::Uninstall { dry_run: false },
+        // Linux: relaunched with sudo. Windows: the install shows its own one permission prompt (for the
+        // installer), and removal is Apps & features.
+        Some(Command::Service { cmd: service_cmd::ServiceCmd::Install { .. } | service_cmd::ServiceCmd::Uninstall { .. } }) => {
+            if cfg!(windows) {
+                K::Other
+            } else {
+                K::Uninstall { dry_run: false }
+            }
+        }
         Some(Command::Service { .. }) => K::Other,
         // Writes into the server folder, like a manual update: same privilege rules.
         Some(Command::AddResources(_)) => K::Update { auto: false },

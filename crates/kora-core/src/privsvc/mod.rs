@@ -77,4 +77,6 @@ pub mod problems;
 #[cfg(unix)]
 pub mod unixsvc;
 #[cfg(windows)]
+pub mod wininstall;
+#[cfg(windows)]
 pub mod winsvc;

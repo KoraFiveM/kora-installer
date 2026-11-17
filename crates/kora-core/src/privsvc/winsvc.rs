@@ -599,3 +599,143 @@ pub fn call(verb: &str, args: &[String], env: &[(String, String)], on_line: &mut
 pub fn probe() -> Result<String, ClientError> {
     conn::interpret_ping(call(crate::helper::PING, &[], &[], &mut |_| {}))
 }
+
+// ---- helpers for the command line (`kora service install | allow | status`) ---------------------------------------
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetCurrentProcess() -> Handle;
+    fn WaitForSingleObject(h: Handle, ms: u32) -> u32;
+    fn GetExitCodeProcess(h: Handle, code: *mut u32) -> i32;
+}
+
+#[link(name = "advapi32")]
+extern "system" {
+    fn OpenProcessToken(process: Handle, access: u32, token: *mut Handle) -> i32;
+    fn LookupAccountNameW(system: *const u16, name: *const u16, sid: *mut c_void, sid_len: *mut u32, domain: *mut u16, domain_len: *mut u32, sid_use: *mut u32) -> i32;
+}
+
+/// The SID of the account this process runs as.
+pub fn current_user_sid() -> Option<String> {
+    let mut tok: Handle = std::ptr::null_mut();
+    // SAFETY: the pseudo handle of this process and a valid out pointer.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok) } == 0 {
+        return None;
+    }
+    let tok = Owned(tok);
+    let mut len = 0u32;
+    // SAFETY: the first call asks for the size.
+    unsafe { GetTokenInformation(tok.0, TOKEN_USER, std::ptr::null_mut(), 0, &mut len) };
+    if len == 0 || len > 4096 {
+        return None;
+    }
+    let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+    // SAFETY: the buffer is at least `len` bytes and 8-aligned.
+    if unsafe { GetTokenInformation(tok.0, TOKEN_USER, buf.as_mut_ptr().cast(), len, &mut len) } == 0 {
+        return None;
+    }
+    // SAFETY: TOKEN_USER starts with a SID_AND_ATTRIBUTES.
+    let sa = unsafe { &*(buf.as_ptr() as *const SidAndAttributes) };
+    sid_string(sa.sid)
+}
+
+/// The SID of the account called `name` (`DOMAIN\name`, `name`, or a UPN), as text.
+pub fn lookup_account_sid(name: &str) -> Option<String> {
+    let w = wide(name);
+    let (mut sl, mut dl, mut usage) = (0u32, 0u32, 0u32);
+    // SAFETY: the first call asks for the sizes.
+    unsafe { LookupAccountNameW(std::ptr::null(), w.as_ptr(), std::ptr::null_mut(), &mut sl, std::ptr::null_mut(), &mut dl, &mut usage) };
+    if sl == 0 || sl > 1024 || dl > 1024 {
+        return None;
+    }
+    let mut sid = vec![0u64; (sl as usize).div_ceil(8)];
+    let mut dom = vec![0u16; dl as usize + 1];
+    // SAFETY: buffers at least as large as the sizes the first call reported.
+    if unsafe { LookupAccountNameW(std::ptr::null(), w.as_ptr(), sid.as_mut_ptr().cast(), &mut sl, dom.as_mut_ptr(), &mut dl, &mut usage) } == 0 {
+        return None;
+    }
+    sid_string(sid.as_mut_ptr().cast())
+}
+
+/// Where the settings file is (from `%ProgramFiles%` as Windows reports it).
+pub fn policy_path() -> std::path::PathBuf {
+    paths::windows_files(&crate::helper::winpipe::system_dirs().program_files).policy.into()
+}
+
+#[repr(C)]
+struct ShellExecuteInfoW {
+    cb_size: u32,
+    f_mask: u32,
+    hwnd: Handle,
+    lp_verb: *const u16,
+    lp_file: *const u16,
+    lp_parameters: *const u16,
+    lp_directory: *const u16,
+    n_show: i32,
+    h_inst_app: Handle,
+    lp_id_list: *mut c_void,
+    lp_class: *const u16,
+    hkey_class: Handle,
+    dw_hot_key: u32,
+    h_icon_or_monitor: Handle,
+    h_process: Handle,
+}
+
+#[link(name = "shell32")]
+extern "system" {
+    fn ShellExecuteExW(info: *mut ShellExecuteInfoW) -> i32;
+}
+
+#[link(name = "ole32")]
+extern "system" {
+    fn CoInitializeEx(reserved: *mut c_void, flags: u32) -> i32;
+}
+
+/// Start `file params` with the Windows permission prompt (`runas`), wait for it to end and return
+/// its exit code. Used for ONE thing: installing the service itself (`msiexec` on the checked
+/// installer), where someone at this computer approves once.
+pub fn run_elevated_wait(file: &str, params: &str, limit: Duration) -> Result<u32, String> {
+    let verb = wide("runas");
+    let f = wide(file);
+    let p = wide(params);
+    let mut info = ShellExecuteInfoW {
+        cb_size: std::mem::size_of::<ShellExecuteInfoW>() as u32,
+        f_mask: 0x40 | 0x100, // NOCLOSEPROCESS | NOASYNC
+        hwnd: std::ptr::null_mut(),
+        lp_verb: verb.as_ptr(),
+        lp_file: f.as_ptr(),
+        lp_parameters: p.as_ptr(),
+        lp_directory: std::ptr::null(),
+        n_show: 1,
+        h_inst_app: std::ptr::null_mut(),
+        lp_id_list: std::ptr::null_mut(),
+        lp_class: std::ptr::null(),
+        hkey_class: std::ptr::null_mut(),
+        dw_hot_key: 0,
+        h_icon_or_monitor: std::ptr::null_mut(),
+        h_process: std::ptr::null_mut(),
+    };
+    // SAFETY: COM for the shell (apartment threaded, as ShellExecuteEx asks); the struct is fully initialised.
+    unsafe { CoInitializeEx(std::ptr::null_mut(), 2 | 4) };
+    // SAFETY: see above.
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        // SAFETY: no preconditions.
+        return Err(match unsafe { GetLastError() } {
+            1223 => "The Windows permission prompt was answered with No (or closed), so nothing was installed.".to_string(),
+            c => format!("Windows could not show the administrator permission prompt (error {c})."),
+        });
+    }
+    if info.h_process.is_null() {
+        return Err("Windows started the installer but gave Kora no way to wait for it.".into());
+    }
+    let proc = Owned(info.h_process);
+    // SAFETY: a process handle we own.
+    let r = unsafe { WaitForSingleObject(proc.0, limit.as_millis().min(u128::from(u32::MAX - 1)) as u32) };
+    if r != 0 {
+        return Err("The installer did not finish in time.".into());
+    }
+    let mut code = 1u32;
+    // SAFETY: a process handle we own and a valid out pointer.
+    unsafe { GetExitCodeProcess(proc.0, &mut code) };
+    Ok(code)
+}

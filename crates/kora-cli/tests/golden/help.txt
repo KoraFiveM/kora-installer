@@ -1417,7 +1417,7 @@ Usage: kora service [OPTIONS] <COMMAND>
 Commands:
   status     Say whether the service is installed and running, and whether it serves your account
   list       List the accounts that may use the service
-  allow      Let an account use the service (administrators only). Give the account's name
+  allow      Let accounts use the service (administrators only). Give the accounts' names
   install    Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
   uninstall  Remove the service (needs administrator rights). Servers it set up keep working
   deny       Stop an account using the service (administrators only). Servers it set up keep working
@@ -1466,13 +1466,13 @@ Options:
           Print help
 
 ===== kora service allow =====
-Let an account use the service (administrators only). Give the account's name
+Let accounts use the service (administrators only). Give the accounts' names
 
-Usage: kora service allow [OPTIONS] <ACCOUNT>
+Usage: kora service allow [OPTIONS] <ACCOUNTS>...
 
 Arguments:
-  <ACCOUNT>
-          Account name (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000)
+  <ACCOUNTS>...
+          Account names (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000)
 
 Options:
       --no-elevate

@@ -6,7 +6,9 @@
 //! * `kora service serve`: the service itself (started by `kora.service` / the Windows service; not for people).
 
 use clap::Subcommand;
-use kora_core::privsvc::{manage, paths};
+use kora_core::privsvc::manage;
+#[cfg(unix)]
+use kora_core::privsvc::paths;
 
 #[derive(Subcommand, Debug)]
 pub enum ServiceCmd {
@@ -17,10 +19,11 @@ pub enum ServiceCmd {
     Status,
     /// List the accounts that may use the service.
     List,
-    /// Let an account use the service (administrators only). Give the account's name.
+    /// Let accounts use the service (administrators only). Give the accounts' names.
     Allow {
-        /// Account name (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000).
-        account: String,
+        /// Account names (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000).
+        #[arg(required = true)]
+        accounts: Vec<String>,
     },
     /// Install the service on this computer (needs administrator rights; asks once). Linux: downloads this
     /// version's program from the official release, checks its checksum and puts it in /usr/lib/kora.
@@ -48,9 +51,9 @@ pub enum ServiceCmd {
 fn policy_path() -> std::path::PathBuf {
     paths::LINUX_POLICY.into()
 }
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn policy_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into())).join("Kora").join(paths::WINDOWS_DATA_SUBDIR).join("service.json")
+    kora_core::privsvc::winsvc::policy_path()
 }
 
 pub fn service(cmd: ServiceCmd) -> i32 {
@@ -62,8 +65,8 @@ pub fn service(cmd: ServiceCmd) -> i32 {
         ServiceCmd::Serve => {
             #[cfg(unix)]
             let r = kora_core::privsvc::unixsvc::run_service();
-            #[cfg(not(unix))]
-            let r: Result<(), String> = Err("the Windows service is not wired up in this build".into());
+            #[cfg(windows)]
+            let r = kora_core::privsvc::winsvc::run_service();
             match r {
                 Ok(()) => 0,
                 Err(e) => fail(e),
@@ -87,8 +90,22 @@ pub fn service(cmd: ServiceCmd) -> i32 {
                     }
                 }
             }
-            #[cfg(not(unix))]
-            println!("installed: no");
+            #[cfg(windows)]
+            {
+                use kora_core::privsvc::conn::ClientError;
+                println!("installed: {}", if policy_path().exists() { "yes" } else { "no" });
+                match kora_core::privsvc::winsvc::probe() {
+                    Ok(v) => {
+                        println!("running: yes (version {v})");
+                        println!("serves this account: yes");
+                    }
+                    Err(ClientError::Refused(why)) => {
+                        println!("running: yes");
+                        println!("serves this account: no ({why})");
+                    }
+                    Err(ClientError::Unavailable(why) | ClientError::Broken(why)) => println!("running: no ({why})"),
+                }
+            }
             0
         }
         ServiceCmd::List => match manage::list(&policy_path()) {
@@ -110,13 +127,17 @@ pub fn service(cmd: ServiceCmd) -> i32 {
         }
         ServiceCmd::Install { allow } => install(&allow),
         ServiceCmd::Uninstall { purge } => apply_plan_for(kora_core::privsvc::install::uninstall_plan(purge), "Kora's administrator service is removed. Servers it set up keep working."),
-        ServiceCmd::Allow { account } => match manage::allow(&policy_path(), &account) {
-            Ok(m) => {
-                println!("{m}");
-                0
+        ServiceCmd::Allow { accounts } => {
+            let mut code = 0;
+            // empty names are skipped: the installer passes optional properties through
+            for a in accounts.iter().filter(|a| !a.trim().is_empty()) {
+                match manage::allow(&policy_path(), a) {
+                    Ok(m) => println!("{m}"),
+                    Err(e) => code = fail(e),
+                }
             }
-            Err(e) => fail(e),
-        },
+            code
+        }
         ServiceCmd::Deny { account } => match manage::deny(&policy_path(), &account) {
             Ok(m) => {
                 println!("{m}");
@@ -147,7 +168,7 @@ fn apply_plan_for(plan: kora_core::service::Plan, done: &str) -> i32 {
     #[cfg(not(unix))]
     {
         let _ = (plan, done);
-        eprintln!("error: the Windows service is installed by the Kora installer (MSI)");
+        eprintln!("error: on Windows remove Kora in Settings > Apps > Installed apps (its uninstaller removes the service)");
         1
     }
 }
@@ -213,10 +234,16 @@ fn install(allow: &[String]) -> i32 {
     0
 }
 
-#[cfg(not(unix))]
-fn install(_allow: &[String]) -> i32 {
-    eprintln!("error: on Windows the service is installed by the Kora installer (the .msi from the release page)");
-    1
+/// Windows: the checked `.msi` from the release, run with the one permission prompt.
+#[cfg(windows)]
+fn install(allow: &[String]) -> i32 {
+    match kora_core::privsvc::wininstall::install(allow, &mut |l| println!("{l}")) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
 }
 
 #[cfg(test)]
@@ -229,8 +256,10 @@ mod tests {
         assert_eq!(kind(&["service", "serve"]), kora_core::elevate::CmdKind::Other);
         assert_eq!(kind(&["service", "allow", "jo"]), kora_core::elevate::CmdKind::Uninstall { dry_run: false });
         assert_eq!(kind(&["service", "deny", "jo"]), kora_core::elevate::CmdKind::Uninstall { dry_run: false });
-        assert_eq!(kind(&["service", "install"]), kora_core::elevate::CmdKind::Uninstall { dry_run: false });
-        assert_eq!(kind(&["service", "uninstall", "--purge"]), kora_core::elevate::CmdKind::Uninstall { dry_run: false });
+        // sudo on Linux; on Windows the install has its own single prompt and removal is Apps & features
+        let own = if cfg!(windows) { kora_core::elevate::CmdKind::Other } else { kora_core::elevate::CmdKind::Uninstall { dry_run: false } };
+        assert_eq!(kind(&["service", "install"]), own);
+        assert_eq!(kind(&["service", "uninstall", "--purge"]), own);
         assert_eq!(kind(&["service", "unit"]), kora_core::elevate::CmdKind::Other);
     }
 }

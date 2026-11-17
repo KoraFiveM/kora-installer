@@ -53,6 +53,11 @@ pub fn resolve_account(spec: &str) -> Result<(AccountId, String), Rejected> {
         }
         return Ok((AccountId::uid(uid), spec.to_string()));
     }
+    #[cfg(windows)]
+    if let Some(sid) = super::winsvc::lookup_account_sid(spec) {
+        let id = AccountId::sid(&sid)?;
+        return Ok((id, spec.to_string()));
+    }
     Err(Rejected(format!("'{spec}' is not an account on this computer. Use the account's name (or uid:1000 / the Windows SID).")))
 }
 
