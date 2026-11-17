@@ -384,6 +384,7 @@ fn build(
         os: if cfg!(windows) { "windows".into() } else { "linux".into() },
         dir: e.dir.display().to_string(),
         github_owner: sf.and_then(|s| s.github_owner.clone()),
+        run_mode: if crate::container::record::is_container(&e.dir) { crate::container::RunMode::Container } else { crate::container::RunMode::Service },
     };
     if !strictly {
         notes.push("The server was running while the files were copied. The database is one consistent snapshot; the other files were copied one by one, so two of them can be from slightly different moments.".into());
@@ -536,6 +537,27 @@ pub(crate) mod tests {
         assert!(m.notes.iter().any(|n| n.contains("running while")));
         // the status line knows
         assert!(crate::backup::settings::load_status(&rig.entry.name).last_ok_unix.is_some());
+    }
+
+    #[test]
+    fn a_container_servers_backup_records_the_run_mode_and_its_record_and_a_service_servers_does_not() {
+        let rig = Rig::new();
+        let git = rig.clean_git();
+        let tools = rig.tools(&git);
+        let plain = create(&rig.entry, &CreateOptions::default(), &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap();
+        let m = archive::scan(&plain.path, None, None, 1 << 30, None).unwrap();
+        assert_eq!(m.server.run_mode, crate::container::RunMode::Service);
+        assert!(!m.files.iter().any(|f| f.path == "server/kora-container.json"));
+        // make it a container server
+        let mut rec = crate::container::record::tests::sample();
+        rec.container = "kora-main".into();
+        rec.save(&rig.entry.dir).unwrap();
+        let boxed = create(&rig.entry, &CreateOptions::default(), &mut FakeHost::new(false), &tools, &mut |_| {}).unwrap();
+        let m = archive::scan(&boxed.path, None, None, 1 << 30, None).unwrap();
+        assert_eq!(m.server.run_mode, crate::container::RunMode::Container);
+        assert!(m.files.iter().any(|f| f.path == "server/kora-container.json"), "the record travels with the backup");
+        let text = std::fs::read_to_string(rig.entry.dir.join("kora-container.json")).unwrap().to_ascii_lowercase();
+        assert!(!text.contains("password"));
     }
 
     #[test]

@@ -228,6 +228,11 @@ pub fn pull_problem(engine: &Engine, image: &str, stderr: &str) -> Problem {
 
 /// Ask one engine about itself and try a real container.
 pub fn check_engine(runner: &dyn EngineRunner, kind: EngineKind, facts: &Facts) -> Option<EngineStatus> {
+    check_engine_with(runner, kind, facts, true)
+}
+
+/// [`check_engine`]; `smoke: false` skips the test container (the answer is then "nothing found that would stop it").
+pub fn check_engine_with(runner: &dyn EngineRunner, kind: EngineKind, facts: &Facts, smoke: bool) -> Option<EngineStatus> {
     let prog = kind.program();
     let probe = Engine::new(kind, false);
     let o = match runner.run(prog, &engine::info_args(kind)) {
@@ -281,7 +286,9 @@ pub fn check_engine(runner: &dyn EngineRunner, kind: EngineKind, facts: &Facts) 
 
     // A real container, with the flags the real one uses.
     let mut can_run = false;
-    if problem.is_none() {
+    if problem.is_none() && !smoke {
+        can_run = true;
+    } else if problem.is_none() {
         let smoke = vec!["run".into(), "--rm".into(), "--init".into(), "--cap-drop".into(), "ALL".into(), pins::BASE.reference(), "true".into()];
         match runner.run(prog, &smoke) {
             Ok(r) if r.success() => can_run = true,
@@ -318,7 +325,12 @@ fn first_words(m: &str) -> String {
 
 /// Look at both engines. `available` only when one of them ran a real container.
 pub fn check(runner: &dyn EngineRunner, facts: &Facts) -> ContainerCheck {
-    let mut engines: Vec<EngineStatus> = [EngineKind::Podman, EngineKind::Docker].into_iter().filter_map(|k| check_engine(runner, k, facts)).collect();
+    check_with(runner, facts, true)
+}
+
+/// [`check`] without the test container when `smoke` is false (a quick look for a page that only offers a choice).
+pub fn check_with(runner: &dyn EngineRunner, facts: &Facts, smoke: bool) -> ContainerCheck {
+    let mut engines: Vec<EngineStatus> = [EngineKind::Podman, EngineKind::Docker].into_iter().filter_map(|k| check_engine_with(runner, k, facts, smoke)).collect();
     engines.sort_by_key(|s| (!s.can_run, rank(s)));
     let chosen = engines.iter().find(|s| s.can_run).map(|s| s.kind);
     let summary = match (chosen, engines.first()) {
@@ -327,6 +339,17 @@ pub fn check(runner: &dyn EngineRunner, facts: &Facts) -> ContainerCheck {
         _ => "No container engine (Podman or Docker) found".to_string(),
     };
     ContainerCheck { available: chosen.is_some(), chosen, engines, summary }
+}
+
+/// A quick look (no test container): the label of the engine container mode would use (`podman, rootless`),
+/// or `None`. Unit tests of this crate never look at the machine.
+pub fn quick_label() -> Option<String> {
+    if cfg!(test) || !cfg!(target_os = "linux") {
+        return None;
+    }
+    let r = crate::service::SystemRunner;
+    let c = check_with(&r, &Facts::system(&r), false);
+    c.engine_for(None).map(|e| e.label())
 }
 
 /// The real check.
