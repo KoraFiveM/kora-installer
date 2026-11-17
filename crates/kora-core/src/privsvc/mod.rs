@@ -69,6 +69,7 @@ pub mod conn;
 pub mod dispatch;
 pub mod install;
 pub mod manage;
+pub mod migrate;
 pub mod op;
 pub mod ownership;
 pub mod paths;
