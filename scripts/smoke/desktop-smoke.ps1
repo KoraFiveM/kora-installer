@@ -10,6 +10,7 @@ New-Item -ItemType Directory -Force "$work\kora-home", "$work\desktop" | Out-Nul
 $env:KORA_HOME = "$work\kora-home"
 $env:KORA_DESKTOP_HOME = "$work\desktop"
 $env:KORA_DESKTOP_SMOKE_WAIT_SECOND = '1'
+$env:KORA_DESKTOP_TRACE = '1'
 $report = "$work\desktop\report.json"
 
 $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"

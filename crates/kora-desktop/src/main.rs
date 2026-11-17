@@ -67,11 +67,7 @@ fn main() {
         }
     };
 
-    let kora = args
-        .kora
-        .clone()
-        .or_else(|| platform::kora_beside(&exe, cfg!(windows), &|p| p.is_file()))
-        .unwrap_or_else(|| std::path::PathBuf::from(if cfg!(windows) { "kora.exe" } else { "kora" }));
+    let kora = args.kora.clone().or_else(|| platform::kora_beside(&exe, cfg!(windows), &|p| p.is_file())).unwrap_or_else(|| std::path::PathBuf::from(if cfg!(windows) { "kora.exe" } else { "kora" }));
     let smoke = args.smoke.clone();
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();

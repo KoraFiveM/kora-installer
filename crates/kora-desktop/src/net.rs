@@ -102,7 +102,19 @@ fn start_foreground_panel(kora: &Path, slot: &Mutex<Option<Child>>) {
     let mut c = Command::new(kora);
     c.arg("--no-elevate").args(["panel", "--foreground", "--no-open"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     os::hidden(&mut c);
-    *guard = c.spawn().ok();
+    if std::env::var_os("KORA_DESKTOP_TRACE").is_some() {
+        c.stderr(Stdio::inherit());
+    }
+    *guard = match c.spawn() {
+        Ok(child) => {
+            crate::smoke::note("started the panel in the foreground");
+            Some(child)
+        }
+        Err(e) => {
+            crate::smoke::note(format!("could not start the panel in the foreground: {e}"));
+            None
+        }
+    };
 }
 
 fn send(proxy: &Mutex<EventLoopProxy<UserEvent>>, e: UserEvent) {
@@ -117,7 +129,13 @@ pub fn spawn(proxy: EventLoopProxy<UserEvent>, kora: PathBuf, no_background: boo
     std::thread::spawn(move || {
         let mut attempt = 0u32;
         loop {
-            match ask_session(&kora, no_background) {
+            let outcome = ask_session(&kora, no_background);
+            crate::smoke::note(match &outcome {
+                Outcome::Ready(s) => format!("session: ready on port {}", s.port),
+                Outcome::NeedForeground => "session: the panel must be run in the foreground".to_string(),
+                Outcome::Failed(m) => format!("session failed: {m}"),
+            });
+            match outcome {
                 Outcome::Ready(s) => {
                     attempt = 0;
                     let creds = Creds { port: s.port, token: s.token.clone() };
@@ -143,7 +161,8 @@ pub fn spawn(proxy: EventLoopProxy<UserEvent>, kora: PathBuf, no_background: boo
 
 /// Read `GET /events` until it ends. Every `servers` event carries the whole list.
 fn stream(c: &Creds, proxy: &Mutex<EventLoopProxy<UserEvent>>) -> Result<(), String> {
-    let resp = agent(Duration::from_secs(45)).get(&url(c, "/events")).set("Authorization", &format!("Bearer {}", c.token)).set("X-Kora", "1").set("Accept", "text/event-stream").call().map_err(describe)?;
+    let resp =
+        agent(Duration::from_secs(45)).get(&url(c, "/events")).set("Authorization", &format!("Bearer {}", c.token)).set("X-Kora", "1").set("Accept", "text/event-stream").call().map_err(describe)?;
     send(proxy, UserEvent::Connected(true));
     let mut reader = BufReader::new(resp.into_reader());
     let mut parser = sse::Parser::default();

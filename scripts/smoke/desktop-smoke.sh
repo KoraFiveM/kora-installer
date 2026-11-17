@@ -10,7 +10,7 @@ dist="$(cd "${1:?folder with kora and kora-desktop}" && pwd)"
 work="$(mktemp -d)"
 export KORA_HOME="$work/kora-home" KORA_DESKTOP_HOME="$work/desktop" HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config"
 mkdir -p "$KORA_HOME" "$KORA_DESKTOP_HOME" "$HOME"
-export KORA_DESKTOP_SMOKE_WAIT_SECOND=1
+export KORA_DESKTOP_SMOKE_WAIT_SECOND=1 KORA_DESKTOP_TRACE=1
 report="$KORA_DESKTOP_HOME/report.json"
 
 xvfb-run -a dbus-run-session -- "$dist/kora-desktop" --kora "$dist/kora" --smoke "$report" &
@@ -22,7 +22,7 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 if [ ! -f "$report.ready" ]; then
-  echo "::error::the desktop app never showed the panel"; cat "$report" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; exit 1
+  echo "::error::the desktop app never showed the panel"; cat "$report" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null; echo "the app's exit status: $?"; exit 1
 fi
 
 # A second launch asks the first to show its window and exits at once, successfully.

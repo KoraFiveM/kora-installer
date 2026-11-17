@@ -9,6 +9,19 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+static NOTES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// A line of what happened, kept for the smoke report (and printed to standard error). Never put a token or a
+/// sign-in link in one.
+pub fn note(what: impl AsRef<str>) {
+    let what = what.as_ref();
+    eprintln!("kora-desktop: {what}");
+    let mut n = NOTES.lock().unwrap_or_else(|e| e.into_inner());
+    if n.len() < 200 {
+        n.push(what.to_string());
+    }
+}
+
 pub struct Smoke {
     report: PathBuf,
     started: Instant,
@@ -90,6 +103,7 @@ impl Smoke {
             "tray_built": tray_built,
             "menu_ids": self.menu_ids,
             "second_launch": self.second_launch,
+            "notes": NOTES.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         });
         let _ = std::fs::write(&self.report, serde_json::to_vec_pretty(&report).unwrap_or_default());
     }
