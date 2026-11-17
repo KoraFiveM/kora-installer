@@ -30,7 +30,9 @@ fn no_engine(check: &container::detect::ContainerCheck, wanted: Option<container
     let mut p = match (wanted, check.engines.iter().find(|e| wanted.is_none_or(|w| e.kind == w)).and_then(|e| e.problem.clone())) {
         (_, Some(p)) => p,
         (Some(w), None) => Problem::new(codes::NO_ENGINE, format!("{} was chosen to run the server, but it was not found on this computer.", w.label())),
-        (None, None) => Problem::new(codes::NO_ENGINE, "Container mode needs Podman or Docker, and neither was found on this computer. Podman (rootless) needs no administrator rights to run servers."),
+        (None, None) => {
+            Problem::new(codes::NO_ENGINE, "Container mode needs Podman or Docker, and neither was found on this computer. Podman (rootless) needs no administrator rights to run servers.")
+        }
     };
     p.push_action(Action::open_link("https://podman.io/docs/installation"));
     p.push_action(Action::change_answers("run_mode"));
@@ -117,7 +119,15 @@ impl InstallStep {
             ctx.note(n.clone());
         }
         if let Some(p) = status.as_ref().and_then(|s| s.problem.as_ref()) {
-            ctx.note(format!("{} {}", p.message, p.actions.iter().find_map(|a| if let Action::ShowCommand { command, .. } = a { Some(format!("Run: {}", command.join(" "))) } else { None }).unwrap_or_default()).trim().to_string());
+            ctx.note(
+                format!(
+                    "{} {}",
+                    p.message,
+                    p.actions.iter().find_map(|a| if let Action::ShowCommand { command, .. } = a { Some(format!("Run: {}", command.join(" "))) } else { None }).unwrap_or_default()
+                )
+                .trim()
+                .to_string(),
+            );
         }
         Ok(format!("Using {} ({})", engine.label(), check.summary))
     }
@@ -265,7 +275,11 @@ impl InstallStep {
                 let done = m.remove_db_side(!ctx.keep_db)?;
                 if ctx.keep_db {
                     if let Some(db) = &rec.db {
-                        ctx.note(format!("The database's data was kept in the volume {} ({} volume ls shows it). A server with the same name cannot be installed until you remove it.", db.volume, rec.engine().program()));
+                        ctx.note(format!(
+                            "The database's data was kept in the volume {} ({} volume ls shows it). A server with the same name cannot be installed until you remove it.",
+                            db.volume,
+                            rec.engine().program()
+                        ));
                     }
                 } else {
                     let _ = std::fs::remove_file(ctx.req.dir.join("database.json"));
@@ -311,7 +325,21 @@ mod tests {
         assert!(r.is_container());
         assert_eq!(
             ids(&r, true),
-            ["prepare.dir", "prepare.catalog", "prepare.tools", "container.engine", "container.images", "build.resources", "build.db", "build.artifact", "build.config", "system.firewall", "container.create", "finalize", "launch"],
+            [
+                "prepare.dir",
+                "prepare.catalog",
+                "prepare.tools",
+                "container.engine",
+                "container.images",
+                "build.resources",
+                "build.db",
+                "build.artifact",
+                "build.config",
+                "system.firewall",
+                "container.create",
+                "finalize",
+                "launch"
+            ],
             "no `kora` account even when one would be planned, no service, no schedule"
         );
         let plan = crate::installer::plan_steps_for(&r, false);

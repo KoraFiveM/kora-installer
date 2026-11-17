@@ -30,14 +30,27 @@ pub const CLIENT: &str = "mariadb";
 pub const DUMP: &str = "mariadb-dump";
 
 /// A [`StreamRunner`] that runs every tool inside the database container.
-pub struct ExecRunner<'a> {
+pub struct ExecRunner<R> {
     pub engine: Engine,
     pub container: String,
-    pub inner: &'a dyn StreamRunner,
+    pub inner: R,
 }
 
-impl<'a> ExecRunner<'a> {
-    pub fn new(rec: &ContainerRecord, inner: &'a dyn StreamRunner) -> Option<Self> {
+/// A runner behind a reference is a runner.
+impl<T: StreamRunner + ?Sized> StreamRunner for &T {
+    fn run(&self, spec: &CommandSpec) -> DbResult<CommandOutput> {
+        (**self).run(spec)
+    }
+    fn run_to_file(&self, spec: &CommandSpec, out: &Path) -> DbResult<CommandOutput> {
+        (**self).run_to_file(spec, out)
+    }
+    fn run_from_file(&self, spec: &CommandSpec, input: &Path) -> DbResult<CommandOutput> {
+        (**self).run_from_file(spec, input)
+    }
+}
+
+impl<R: StreamRunner> ExecRunner<R> {
+    pub fn new(rec: &ContainerRecord, inner: R) -> Option<Self> {
         rec.db.as_ref().map(|d| ExecRunner { engine: rec.engine(), container: d.container.clone(), inner })
     }
 
@@ -50,7 +63,7 @@ impl<'a> ExecRunner<'a> {
     }
 }
 
-impl StreamRunner for ExecRunner<'_> {
+impl<R: StreamRunner> StreamRunner for ExecRunner<R> {
     fn run(&self, spec: &CommandSpec) -> DbResult<CommandOutput> {
         self.inner.run(&self.wrap(spec))
     }
@@ -62,7 +75,7 @@ impl StreamRunner for ExecRunner<'_> {
     }
 }
 
-impl crate::db::CommandRunner for ExecRunner<'_> {
+impl<R: StreamRunner> crate::db::CommandRunner for ExecRunner<R> {
     fn run(&self, spec: &CommandSpec) -> DbResult<CommandOutput> {
         StreamRunner::run(self, spec)
     }

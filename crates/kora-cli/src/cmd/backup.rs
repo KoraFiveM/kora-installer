@@ -221,8 +221,8 @@ pub(crate) fn run(cmd: BackupCmd) -> i32 {
             };
             if scheduled {
                 // What an operating-system task runs: the same as the panel's schedule does.
-                let (db, git) = (kora_core::db::SystemRunner, kora_core::git::SystemRunner);
-                let tools = kora_core::backup::Tools::system(&db, &git);
+                let set = kora_core::container::backup::ToolSet::for_server(&e.name, &e.dir);
+                let tools = set.tools();
                 let mut host = kora_core::backup::host::BackendHost::new(&mut b, &e);
                 return match kora_core::backup::scheduler::run_scheduled(&e, &mut host, &tools) {
                     kora_core::backup::scheduler::Outcome::Made(id) => {

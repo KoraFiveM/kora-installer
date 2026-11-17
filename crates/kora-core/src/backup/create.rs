@@ -105,6 +105,10 @@ pub fn database_of(dir: &Path) -> Result<DbSource, Problem> {
             if !credentials_are_sane(&c) {
                 return Err(Problem::new(codes::CORRUPT, "The database login file of this server (database.json) has values Kora will not use, so its database cannot be backed up. Check the file."));
             }
+            // A container server's database is the container named in the login: the tools run inside it.
+            if crate::container::record::ContainerRecord::load(dir).and_then(|r| r.db).is_some_and(|d| d.container == c.host) {
+                return Ok(DbSource::Local(crate::container::dbc::tool_credentials(&c)));
+            }
             Ok(if is_local_host(&c.host) { DbSource::Local(c) } else { DbSource::External(c) })
         }
         Err(_) => {

@@ -51,6 +51,7 @@
 //! `detect` the System check · `lifecycle` state, start, stop, remove · `logs` console copy ·
 //! `dbc` the database container and `exec` runner · `record` what a server's `kora-container.json` says.
 
+pub mod backup;
 pub mod dbc;
 pub mod detect;
 pub mod engine;
