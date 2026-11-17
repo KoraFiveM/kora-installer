@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 import type { InstallDefaults, InstallOutcome, InstallRequest, ProgressEvent } from '@/api/types'
 import { useJob } from '@/hooks/useJob'
 import { OpenFolderButton, TxAdminButton, useTxAdminLink } from '@/components/ServerLinks'
-import { ReachCard } from '@/components/ReachCard'
+import { MoreAddresses, ReachCard } from '@/components/ReachCard'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -149,6 +149,7 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
         {link.hint && <p className="text-xs text-muted-foreground">{link.hint}</p>}
       </div>
       <ReachCard name={o.name} compact />
+      <MoreAddresses name={o.name} />
       {!o.admin_user && cfx && (
         <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
       )}

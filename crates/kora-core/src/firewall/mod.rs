@@ -238,13 +238,13 @@ pub fn port_conflicts(req: &PortRequest) -> ServiceResult<Vec<String>> {
     Ok(out)
 }
 
-/// Plain-language router note. Kora never changes the router (no UPnP).
+/// Plain-language router note. Kora only changes the router when the person turned on automatic port forwarding for the server.
 pub fn router_note(req: &PortRequest) -> String {
     let mut s = format!(
         "To let players outside your home network join, your router must forward port {} (both TCP and UDP) \
          to this computer. Open your router's settings page (often 192.168.0.1 or 192.168.1.1), find \
          \"Port forwarding\", and add that rule pointing at this computer's local address. \
-         Kora does not change your router for you.",
+         Kora does not change your router unless you turn on automatic port forwarding for this server (the \"Can players reach this server?\" card, or `kora reach <server> --forward on`); that card also checks the firewall and your public address.",
         req.game_port
     );
     if req.expose_txadmin {

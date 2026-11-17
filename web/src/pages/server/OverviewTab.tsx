@@ -6,7 +6,7 @@ import { CopyField } from '@/components/CopyButton'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton, useCanOpenFolder, useTxAdminLink } from '@/components/ServerLinks'
 import { CONNECT_NOTE } from '@/lib/serverLinks'
 import { LicenceKeyCard } from '@/components/ChangeLicenceKey'
-import { ReachCard } from '@/components/ReachCard'
+import { MoreAddresses, ReachCard } from '@/components/ReachCard'
 import { ServerControls } from '@/components/ServerControls'
 import { UpdateChip } from '@/components/Status'
 
@@ -47,6 +47,7 @@ export function OverviewTab({ server: s, ctl }: { server: ServerDetail; ctl: Ret
             {s.connect ? <CopyField value={s.connect} label="Connect address" /> : <p className="text-sm">Kora could not find this computer's network address. Players connect to this computer's address with port {s.ports.game}.</p>}
             <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
           </div>
+          <MoreAddresses name={s.name} />
           <div className="space-y-1.5">
             <div className="text-sm text-muted-foreground">Server folder</div>
             <CopyField value={s.dir} label="Server folder" />

@@ -662,6 +662,23 @@ mod tests {
     }
 
     #[test]
+    fn reach_and_txadmin_roles() {
+        // Looking is day-to-day work; changing the router or firewall, and txAdmin (which can run code), are admin.
+        assert_eq!(min_role(Op::ReachCheck), Role::Operator);
+        assert_eq!(min_role(Op::ReachSettingsGet), Role::Viewer);
+        for op in [Op::ReachSettingsSet, Op::ForwardingSet, Op::ReachFirewallOpen, Op::TxAdminTicket] {
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(!local_only(op), "{op:?} is for remote sessions too");
+        }
+        // txAdmin is as serious as console input: a token session needs the switch.
+        assert!(destructive(Op::TxAdminTicket));
+        assert!(!remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Token, false));
+        assert!(remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Token, true));
+        assert!(remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Tailscale, false));
+        assert!(!remote_allowed(Op::TxAdminTicket, Role::Operator, Via::Tailscale, true));
+    }
+
+    #[test]
     fn viewer_ops_are_reads() {
         for op in Op::ALL {
             if min_role(*op) == Role::Viewer {

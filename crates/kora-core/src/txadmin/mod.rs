@@ -506,7 +506,7 @@ pub fn write_admins(txdata: &Path, seed: &MasterSeed) -> Result<bool> {
 /// Text for `secrets/txadmin-admin.txt` (generated local admin).
 pub fn local_admin_note(username: &str, password: &Secret, txadmin_port: u16) -> String {
     format!(
-        "txAdmin master account created by the Kora installer\nURL:      http://127.0.0.1:{txadmin_port}/ (use an SSH tunnel for remote access)\nUsername: {username}\nPassword: {}\n\nChange the password after the first login (txAdmin > Admin Manager). Keep this file private.\n",
+        "txAdmin master account created by the Kora installer\nURL:      http://127.0.0.1:{txadmin_port}/ (from other devices use the Open txAdmin button in the Kora panel)\nUsername: {username}\nPassword: {}\n\nChange the password after the first login (txAdmin > Admin Manager). Keep this file private.\n",
         password.expose()
     )
 }

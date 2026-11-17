@@ -154,3 +154,21 @@ describe('ReachCard', () => {
     expect(screen.queryByLabelText('Address on the internet')).not.toBeInTheDocument()
   })
 })
+
+describe('MoreAddresses', () => {
+  it('shows the public address and the Cfx.re link a check found, and nothing before one', async () => {
+    const { MoreAddresses } = await import('./ReachCard')
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const ui = (
+      <QueryClientProvider client={qc}>
+        <MoreAddresses name="prod" />
+      </QueryClientProvider>
+    )
+    const { container, rerender } = render(ui)
+    expect(container).toBeEmptyDOMElement()
+    qc.setQueryData(['reach', 'prod'], report({ connect: { lan: '192.168.1.50:30120', public: '84.12.5.6:30120', cfx: 'https://cfx.re/join/abc123', command: 'connect 84.12.5.6:30120' } }))
+    rerender(ui)
+    expect(await screen.findByLabelText('Internet address')).toHaveTextContent('84.12.5.6:30120')
+    expect(screen.getByLabelText('Cfx.re join link')).toHaveTextContent('https://cfx.re/join/abc123')
+  })
+})

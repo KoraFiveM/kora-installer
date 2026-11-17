@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, CircleHelp, Loader2, ShieldAlert, ThumbsUp } from 'lucide-react'
 import { reachApi, type ReachFix, type ReachLayer, type ReachReport, type ReachState } from '@/api/reach'
 import { Badge, type Tone } from '@/components/ui/badge'
@@ -16,6 +16,34 @@ const LABEL: Record<ReachState, string> = { ok: 'OK', likely: 'Probably OK', pro
 
 /** The last check of each server, so other places (the connect address, the wizard) can reuse it. */
 export const reachKey = (name: string) => ['reach', name] as const
+
+/** The last check of this server made in this browser tab (null before one). Other parts of the page use it to show more addresses. */
+export function useLastReach(name: string): ReachReport | null {
+  const q = useQuery<ReachReport | null>({ queryKey: reachKey(name), queryFn: () => null, enabled: false, staleTime: Infinity })
+  return q.data ?? null
+}
+
+/** The addresses a check found beyond the one for the own network: the public one, and the Cfx.re join link. */
+export function MoreAddresses({ name }: { name: string }) {
+  const r = useLastReach(name)
+  if (!r || (!r.connect.public && !r.connect.cfx)) return null
+  return (
+    <div className="space-y-1.5">
+      {r.connect.public && (
+        <>
+          <div className="text-sm text-muted-foreground">From the internet (needs the router and firewall steps above to be right)</div>
+          <CopyField value={r.connect.public} label="Internet address" />
+        </>
+      )}
+      {r.connect.cfx && (
+        <>
+          <div className="text-sm text-muted-foreground">Cfx.re join link</div>
+          <CopyField value={r.connect.cfx} label="Cfx.re join link" />
+        </>
+      )}
+    </div>
+  )
+}
 
 function Icon({ state }: { state: ReachState }) {
   if (state === 'ok') return <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
