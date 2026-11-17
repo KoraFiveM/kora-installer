@@ -444,13 +444,12 @@ function Get-SecretText([System.Security.SecureString]$Secret) {
 function Initialize-TestAccount([Parameter(Mandatory)][string]$Name, [switch]$Administrator) {
     if ($Name.Length -gt 20 -or $Name -notmatch '^[A-Za-z][A-Za-z0-9_-]*$') { throw "bad test account name '$Name'" }
     $plain = Get-RandomSecret
-    & net.exe user $Name /delete *> $null   # a leftover from an earlier run
-    $out = & net.exe user $Name $plain /add /expires:never /passwordchg:no /comment:"Kora CI test account" 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) { throw "net user /add $Name failed: $out" }
-    & wmic.exe useraccount where "name='$Name'" set PasswordExpires=false *> $null
+    $null = Invoke-Native 'net.exe' @('user', $Name, '/delete')   # a leftover from an earlier run (an error here is fine)
+    $r = Invoke-Native 'net.exe' @('user', $Name, $plain, '/add', '/expires:never', '/passwordchg:no', '/comment:Kora CI test account')
+    if ($r.Code -ne 0) { throw "net user /add $Name failed: $($r.Output)" }
     if ($Administrator) {
-        $out = & net.exe localgroup Administrators $Name /add 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) { throw "net localgroup Administrators $Name /add failed: $out" }
+        $r = Invoke-Native 'net.exe' @('localgroup', 'Administrators', $Name, '/add')
+        if ($r.Code -ne 0) { throw "net localgroup Administrators $Name /add failed: $($r.Output)" }
     }
     $sid = (New-Object System.Security.Principal.NTAccount($env:COMPUTERNAME, $Name)).Translate([System.Security.Principal.SecurityIdentifier]).Value
     $cred = New-Object System.Management.Automation.PSCredential("$env:COMPUTERNAME\$Name", (ConvertTo-SecretString $plain))
@@ -465,7 +464,7 @@ function Clear-TestAccount([Parameter(Mandatory)][string]$Name) {
         if ($o -and $o.User -eq $Name) { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     }
     $userProfile = Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue | Where-Object { $_.LocalPath -like "*\$Name" }
-    & net.exe user $Name /delete *> $null
+    $null = Invoke-Native 'net.exe' @('user', $Name, '/delete')
     if ($userProfile) { $userProfile | Remove-CimInstance -ErrorAction SilentlyContinue }
 }
 
@@ -477,7 +476,7 @@ function Clear-TestAccount([Parameter(Mandatory)][string]$Name) {
 function Initialize-UacWorkDir([string]$Path = 'C:\kora-uac') {
     if (Test-Path $Path) { Remove-Item $Path -Recurse -Force -ErrorAction SilentlyContinue }
     $null = New-Item -ItemType Directory -Force -Path $Path
-    & icacls.exe $Path /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null   # BUILTIN\Users may add and change files here
+    $null = Invoke-Native 'icacls.exe' @($Path, '/grant', '*S-1-5-32-545:(OI)(CI)M')   # BUILTIN\Users may add and change files here
     $Path
 }
 
@@ -488,7 +487,7 @@ function Initialize-ProtectedKora([string]$Source, [string]$Name = 'KoraUacTest'
     $null = New-Item -ItemType Directory -Force -Path $dir
     Copy-Item $Source (Join-Path $dir 'kora.exe')
     $exe = Join-Path $dir 'kora.exe'
-    Write-Host ((& icacls.exe $dir | Out-String).Trim())
+    Write-Host ((Invoke-Native 'icacls.exe' @($dir)).Output.Trim())
     $exe
 }
 

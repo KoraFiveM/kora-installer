@@ -25,8 +25,8 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 $plain = [System.Net.NetworkCredential]::new('', $RunnerPassword).Password
 
 # 1. The runner account.
-& net.exe user $RunnerUser $plain /add /expires:never /passwordchg:no 2>&1 | Out-Host
-& net.exe localgroup Administrators $RunnerUser /add 2>&1 | Out-Host
+& net.exe user $RunnerUser $plain /add /expires:never /passwordchg:no | Out-Host
+& net.exe localgroup Administrators $RunnerUser /add | Out-Host
 
 # 2. Automatic sign-in (a plain password in the registry: acceptable only on this disposable VM; Sysinternals
 #    Autologon stores it as an LSA secret instead, use that if you prefer).
