@@ -67,7 +67,7 @@ function PlanView({ plan, dev }: { plan: AddPlan; dev: boolean }) {
           <pre className="rounded-md border border-border bg-ink p-3 font-mono text-xs">{plan.ensure.map((e) => `ensure ${e}`).join('\n')}</pre>
         </div>
       )}
-      {dev && <p className="text-xs text-muted-foreground">On a development server, Kora's own resources are forked into your GitHub account so you can change them.</p>}
+      {dev && <p className="text-xs text-muted-foreground">Resources you add are made into your own copies on GitHub (forks), like the rest, so you can change them.</p>}
     </div>
   )
 }

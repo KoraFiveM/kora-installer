@@ -64,7 +64,7 @@ pre-release or a draft); see the [Releases page](https://github.com/KoraFiveM/ko
 
 ## What the install wizard does
 
-1. **Welcome:** choose the short guided questions or every step, then production or development.
+1. **Welcome:** choose the short guided questions or every step, then where the resources come from (plain clones, or your own copies on GitHub) and which versions to follow.
 2. **Choices:** server name and folder, your Cfx.re licence key, ports, which resources to install.
 3. **Checks:** free disk space and port conflicts (with next-free-port suggestions) before anything is changed.
 4. **Install:** downloads and verifies FXServer, sets up the database, clones/installs resources, creates the service and firewall rules.
@@ -75,11 +75,11 @@ safe: firewall, schedule, starting the server) instead of starting over. An inst
 restarting the panel, can be carried on from the install page when it used a saved licence key. Scripts can use flags
 instead of the wizard (`kora install --help`, `kora install --dry-run` to preview).
 
-### Production vs development mode
+### Where the resources come from, and which versions
 
-- **Production:** a server that runs for players. Resources are installed from releases; updating to newer releases is manual for now.
-- **Development:** you sign in to GitHub in the wizard and pick where your forks go (your account or an organisation).
-  The server updates itself on a schedule you choose (`kora schedule`).
+- **Plain clones** (no GitHub account needed) or **your own copies** (forks in your GitHub account or an organisation you belong to, so you can change them, push and open pull requests).
+- **Released versions** (pinned, stable: you choose when to move to a newer release) or the **latest changes** (the main branch). The two are separate choices; clones default to released and your own copies to the latest. Older servers made as "production" or "development" read as clones + released and own copies + latest.
+- Everything else (the resource page, branches and pull requests, updates, the automatic update, the GitHub work) is the same for every server.
 
 ## Requirements
 
@@ -107,14 +107,14 @@ Most things are in the panel (`kora`); these are the same operations for scripts
 |---|---|
 | `kora` (also `kora manager`, `kora install` with no options) | Make sure the panel runs in the background and open it (the install page for `kora install`). |
 | `kora panel` | The panel in this window, or set up and manage it: `--tailscale`, `--setup`, `--print-link`, `--new-token`, `--remove-service`, `restart`, `remote-actions on\|off\|status`, `user ...` (remote users), `tailscale allow\|remove\|list\|off`. |
-| `kora install --name ... --mode prod\|dev ...` | Install a server without asking (`--dry-run` to preview, `--license-key-name` to use a saved key). |
+| `kora install --name ... [--source clone\|fork] [--versions released\|latest] [--fork-owner <login-or-org>] ...` | Install a server without asking (`--dry-run` to preview, `--license-key-name` to use a saved key). `--mode prod\|dev` is the old spelling of the first two and still works. |
 | `kora status`, `kora start\|stop\|restart <server>` | List servers; control a server's background service. |
-| `kora update <server>` | Preview, apply and roll back updates (`--auto` is for schedulers). `kora schedule show\|set\|off <server>` sets when a Development server updates itself. |
+| `kora update <server>` | Preview, apply and roll back updates (`--auto` is for schedulers). `kora schedule show\|set\|off <server>` sets when a server updates itself. |
 | `kora add-resources`, `kora add-asset <server> <zip>...` | Add catalogue resources, or paid assets downloaded from the Cfx.re Portal. |
-| `kora branch list\|show\|switch\|default\|all\|restore <server> ...`, `kora pr list\|checkout <server> <resource> ...` | Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone. |
-| `kora resource show <server> <resource>` | One resource: its repository, which version it is on, and whether the running server still needs a restart to load its latest files. |
+| `kora branch list\|show\|switch\|default\|all\|restore <server> ...`, `kora pr list\|checkout\|view\|comment\|review\|merge <server> <resource> ...` | Change a resource's branch or try a pull request (updates leave a switched resource alone), and read, comment on, review or merge pull requests as the GitHub account `gh` is signed in as. |
+| `kora resource show\|changes\|log\|commit\|push\|new-branch\|issues\|issue-comment\|releases\|fork\|versions <server> ...` | One resource: where it is and whether the running server needs a restart; what changed, commit, push, a new branch, issues, releases; make your own copy (fork); change which versions the server follows. |
 | `kora keys list\|add\|replace\|rename\|remove\|use`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line) and the remembered Cfx.re name and GitHub owner. |
-| `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers for Development mode. |
+| `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers. |
 | `kora webhook ...` | Discord notifications for update reports. |
 | `kora app install\|status\|uninstall` | Kora's per-user shortcuts (Start Menu / Desktop, applications menu). `kora uninstall --app` removes the OLD machine-wide app of earlier versions. |
 | `kora self-update` | Update Kora to the newest stable release (checksum-verified). |
@@ -125,7 +125,7 @@ Most things are in the panel (`kora`); these are the same operations for scripts
 ## Status and limits
 
 - Linux is tested end to end. Windows is covered by CI smoke tests; real-machine runs have started, so please report problems.
-- Not released yet: automatic updates for production servers. See [RELEASE_NOTES.md](RELEASE_NOTES.md) and
+- Automatic updates for servers on released versions are new in 0.8 and off until turned on. See [RELEASE_NOTES.md](RELEASE_NOTES.md) and
   [CHANGELOG.md](CHANGELOG.md); check the changelog for what is newer than the version you run.
 - **The Windows `.exe` is unsigned**, so SmartScreen may warn ("More info", "Run anyway").
   The install scripts verify the SHA-256 checksum for you. To check by hand, compare with the `.sha256` file next to each download:
