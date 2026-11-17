@@ -277,3 +277,21 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
     let e = alerts::post_json("http://127.0.0.1:0/secret-path", &serde_json::json!({}), false).unwrap_err();
     assert!(e.contains("Could not reach") && !e.contains("secret-path") && !e.contains("127.0.0.1"), "{e}");
 }
+
+#[test]
+fn a_failed_backup_raises_one_alert_that_closes_when_a_backup_works() {
+    let r = rig();
+    r.mon.raise_external(&r.entry, AlertKind::BackupFailed, "The scheduled backup did not work: the disk is full".into(), 100);
+    r.mon.raise_external(&r.entry, AlertKind::BackupFailed, "again".into(), 200);
+    let list = r.mon.alerts();
+    assert_eq!(list.len(), 1, "a second failure while the first is open is not announced again");
+    assert_eq!((list[0].kind, list[0].tone, list[0].title), (AlertKind::BackupFailed, "danger", "Backup failed"));
+    assert!(list[0].resolved.is_none());
+    // it went to the same sink as the other alerts (Discord / the generic webhook)
+    assert_eq!(r.sink.0.lock().unwrap().len(), 1);
+    r.mon.resolve_external("prod", AlertKind::BackupFailed, 300);
+    assert_eq!(r.mon.alerts()[0].resolved, Some(300));
+    // a later failure is a new alert
+    r.mon.raise_external(&r.entry, AlertKind::BackupFailed, "a week later".into(), 400);
+    assert_eq!(r.mon.alerts().len(), 2);
+}
