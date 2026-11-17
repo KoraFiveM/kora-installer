@@ -78,11 +78,9 @@ impl PausedStore {
                 self.remove(&old.job);
             }
         }
-        std::fs::create_dir_all(&self.dir)?;
         let text = serde_json::to_string_pretty(&item).map_err(std::io::Error::other)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, text)?;
-        crate::fsutil::rename_retrying(&tmp, &path)?;
+        // Never through a link, and the folder is made the same way (see `fsutil::write_no_follow`).
+        crate::fsutil::write_no_follow(&path, text.as_bytes(), 0o644)?;
         crate::keystore::hand_to_home_owner(&path);
         crate::keystore::hand_to_home_owner(&self.dir);
         Ok(true)
@@ -141,8 +139,7 @@ impl PausedStore {
             if s.req.license_key_name.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(old)) {
                 s.req.license_key_name = Some(new.to_string());
                 if let (Some(p), Ok(text)) = (self.file(&s.job), serde_json::to_string_pretty(&s)) {
-                    let tmp = p.with_extension("json.tmp");
-                    if std::fs::write(&tmp, text).is_ok() && crate::fsutil::rename_retrying(&tmp, &p).is_ok() {
+                    if crate::fsutil::write_no_follow(&p, text.as_bytes(), 0o644).is_ok() {
                         crate::keystore::hand_to_home_owner(&p);
                         n += 1;
                     }
@@ -173,8 +170,7 @@ pub fn rename_key_in_saved_answers(path: &Path, old: &str, new: &str) -> bool {
     r.license_key_name = Some(new.to_string());
     r.license_key = None;
     let Ok(text) = serde_json::to_string_pretty(&r) else { return false };
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).is_ok() && crate::fsutil::rename_retrying(&tmp, path).is_ok()
+    crate::fsutil::write_no_follow(path, text.as_bytes(), 0o644).is_ok()
 }
 
 fn read_saved(path: &Path) -> Option<InstallRequest> {
@@ -260,6 +256,35 @@ mod tests {
         std::fs::write(d.path().join("a2.json"), serde_json::to_string(&old).unwrap()).unwrap();
         assert!(s.load("a2").is_none());
         assert!(!d.path().join("a2.json").exists());
+    }
+
+    /// A stopped install is written by the panel, or by `kora install` as root through the helper, inside the user's
+    /// folder: a link left at the file or at its temporary name is replaced, never written through.
+    #[cfg(unix)]
+    #[test]
+    fn writing_never_goes_through_a_link() {
+        let d = tempfile::tempdir().unwrap();
+        let victim = d.path().join("victim.txt");
+        std::fs::write(&victim, "keep me").unwrap();
+        let dir = d.path().join("p");
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["job1.json", "job1.json.tmp"] {
+            std::os::unix::fs::symlink(&victim, dir.join(name)).unwrap();
+        }
+        let s = PausedStore::at(&dir);
+        assert!(s.save("job1", &req("/srv/a", Some("Main")), false, None, &[]).unwrap());
+        assert_eq!(s.rename_key("Main", "Live"), 1);
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
+        assert_eq!(s.load("job1").unwrap().req.license_key_name.as_deref(), Some("Live"));
+        let answers = d.path().join("last-install.json");
+        std::os::unix::fs::symlink(&victim, &answers).unwrap();
+        let mut r = req("/srv/a", Some("Main"));
+        r.license_key = None;
+        std::fs::remove_file(&answers).unwrap();
+        std::fs::write(&answers, serde_json::to_string(&r).unwrap()).unwrap();
+        std::os::unix::fs::symlink(&victim, answers.with_extension("json.tmp")).unwrap();
+        assert!(rename_key_in_saved_answers(&answers, "Main", "Live"));
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
     }
 
     #[test]

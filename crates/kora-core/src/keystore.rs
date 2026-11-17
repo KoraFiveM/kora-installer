@@ -322,7 +322,9 @@ pub(crate) fn hand_to_home_owner(path: &Path) {
         }
         if let Some(m) = path.parent().and_then(|p| std::fs::metadata(p).ok()) {
             if m.uid() != 0 {
-                let _ = std::os::unix::fs::chown(path, Some(m.uid()), Some(m.gid()));
+                // `lchown`: the folder belongs to someone else, who could swap `path` for a link to any file
+                // while root is here; `chown` would follow it and hand that file over.
+                let _ = std::os::unix::fs::lchown(path, Some(m.uid()), Some(m.gid()));
             }
         }
     }
@@ -335,9 +337,10 @@ fn tighten(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(m) = std::fs::metadata(path) {
-            if m.permissions().mode() & 0o077 != 0 {
-                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        // On the open file, never through a link (root may be reading inside someone else's folder).
+        if let Ok(f) = crate::fsutil::open_no_follow(path, crate::fsutil::Access::Read, None) {
+            if f.metadata().is_ok_and(|m| m.permissions().mode() & 0o077 != 0) {
+                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
             }
         }
     }
