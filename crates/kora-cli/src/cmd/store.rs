@@ -62,9 +62,7 @@ pub enum StoreCmd {
 }
 
 fn say(p: kora_core::problem::Problem) -> i32 {
-    let s: String = p.into();
-    eprintln!("error: {}", kora_core::problem::plain_text(&s));
-    1
+    crate::ui::fail(p)
 }
 
 fn when(at: u64) -> String {

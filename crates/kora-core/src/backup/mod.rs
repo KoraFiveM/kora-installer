@@ -65,6 +65,7 @@ pub mod scheduler;
 pub mod service;
 
 use crate::db::SystemRunner;
+use crate::problem::Problem;
 use serde::{Deserialize, Serialize};
 
 /// One step of a backup, restore or import, as a job event.
@@ -82,8 +83,8 @@ pub struct BackupEvent {
 /// Starting and stopping the server around a backup or restore (the panel's backend implements it).
 pub trait Host {
     fn running(&mut self) -> bool;
-    fn stop(&mut self) -> Result<(), String>;
-    fn start(&mut self) -> Result<(), String>;
+    fn stop(&mut self) -> Result<(), Problem>;
+    fn start(&mut self) -> Result<(), Problem>;
 }
 
 /// Everything that touches the machine, so tests can fake it.

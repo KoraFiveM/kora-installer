@@ -276,7 +276,7 @@ fn the_generic_webhook_gets_json_and_errors_do_not_leak_the_address() {
     // Port 0 never answers. (A port freed by an earlier listener could be taken by another test
     // running at the same time, and then answer.)
     let e = alerts::post_json("http://127.0.0.1:0/secret-path", &serde_json::json!({}), false).unwrap_err();
-    assert!(e.contains("Could not reach") && !e.contains("secret-path") && !e.contains("127.0.0.1"), "{e}");
+    assert!(e.to_string().contains("Could not reach") && !e.to_string().contains("secret-path") && !e.to_string().contains("127.0.0.1"), "{e}");
 }
 
 #[test]

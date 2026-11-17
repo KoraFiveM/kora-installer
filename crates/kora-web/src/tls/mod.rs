@@ -179,8 +179,11 @@ pub fn check_item(info: Option<&CertInfo>, error: Option<&str>, exposed: bool, n
                     CertSource::Provided => "Replace the certificate files; the panel reads them again by itself.",
                     _ => "Kora renews it by itself; if it does not, run `kora panel tls renew`.",
                 };
-                let p = Problem::new("tls.expiring", format!("The panel's HTTPS certificate {}. {fix}", if days < 0 { "has expired".to_string() } else { format!("ends in {days} days") }))
-                    .with_action(Action::show_command(&["kora", "panel", "tls", "renew"], false));
+                let p = Problem::new(
+                    kora_core::problem::codes::TLS_EXPIRING,
+                    format!("The panel's HTTPS certificate {}. {fix}", if days < 0 { "has expired".to_string() } else { format!("ends in {days} days") }),
+                )
+                .with_action(Action::show_command(&["kora", "panel", "tls", "renew"], false));
                 item(CheckState::Problem, format!("{} ({})", if days < 0 { "Certificate expired" } else { "Certificate ending soon" }, i.source.label()), Some(p))
             } else {
                 item(CheckState::Ok, format!("On, with {} ({days} days left).", i.source.label()), None)
@@ -189,7 +192,7 @@ pub fn check_item(info: Option<&CertInfo>, error: Option<&str>, exposed: bool, n
         None if exposed => {
             let msg = error.map_or(String::new(), |e| format!(" ({e})"));
             let p = Problem::new(
-                "tls.missing",
+                kora_core::problem::codes::TLS_MISSING,
                 format!("The panel can be reached from other computers over plain HTTP{msg}: the session cookie, sign-in links and licence keys cross the network unencrypted. Set up HTTPS."),
             )
             .with_action(Action::show_command(&["kora", "panel", "tls", "self-signed"], false));

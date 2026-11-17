@@ -78,7 +78,7 @@ impl Manager {
         self.hints.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
     fn store(&self) -> Result<Store, String> {
-        Store::open(&self.home).map_err(kora_core::store::problem_to_string)
+        Store::open(&self.home).map_err(crate::error::store_text)
     }
 
     fn info_of(sum: &CertSummary, source: CertSource, ca_fingerprint: Option<String>) -> CertInfo {
@@ -300,7 +300,7 @@ impl Manager {
 
 /// Save a new setting after checking that it loads: nothing is saved when it does not.
 pub fn apply(home: &Path, whois: Arc<dyn Whois>, hints: Hints, new: TlsConfig, fetch_tailscale: bool) -> Result<(Manager, Option<CertInfo>), String> {
-    let store = Store::open(home).map_err(kora_core::store::problem_to_string)?;
+    let store = Store::open(home).map_err(crate::error::store_text)?;
     let old = TlsConfig::load(&store)?;
     new.save(&store)?;
     let m = Manager::new(home.to_path_buf(), whois);
@@ -317,14 +317,14 @@ pub fn apply(home: &Path, whois: Arc<dyn Whois>, hints: Hints, new: TlsConfig, f
 /// Throw away what a renewal replaces (the Tailscale cache, the made certificate; never the CA) and note it in the
 /// setting so a running panel fetches or makes a new one.
 pub fn force_renewal(home: &Path) -> Result<(), String> {
-    let store = Store::open(home).map_err(kora_core::store::problem_to_string)?;
+    let store = Store::open(home).map_err(crate::error::store_text)?;
     store
         .write(|tx| {
             tx.execute("DELETE FROM tls_tailscale", [])?;
             tx.execute("DELETE FROM tls_local_leaf", [])?;
             Ok(())
         })
-        .map_err(kora_core::store::problem_to_string)?;
+        .map_err(crate::error::store_text)?;
     let mut c = TlsConfig::load(&store)?;
     c.renewed += 1;
     c.save(&store)
@@ -332,7 +332,7 @@ pub fn force_renewal(home: &Path) -> Result<(), String> {
 
 /// Write the local CA's certificate (public) where a person can pick it up to install it in a browser.
 pub fn export_ca(home: &Path, to: &Path) -> Result<String, String> {
-    let store = Store::open(home).map_err(kora_core::store::problem_to_string)?;
+    let store = Store::open(home).map_err(crate::error::store_text)?;
     let ca = selfsigned::load_ca(&store)?.ok_or("There is no local certificate authority yet: run `kora panel tls self-signed` first.")?;
     std::fs::write(to, ca.cert_pem.as_bytes()).map_err(|e| format!("could not write {} ({e})", to.display()))?;
     let chain = certs::parse_chain(ca.cert_pem.as_bytes())?;

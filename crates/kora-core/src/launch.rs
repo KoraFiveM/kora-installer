@@ -91,9 +91,9 @@ impl Report {
 /// Everything the launch logic needs from the machine.
 pub trait LaunchEnv {
     fn service_state(&self, spec: &Spec) -> ServiceState;
-    fn service_start(&self, spec: &Spec) -> Result<(), String>;
+    fn service_start(&self, spec: &Spec) -> Result<(), crate::problem::Problem>;
     /// Start FXServer detached, output to `log`; returns its pid.
-    fn spawn_detached(&self, spec: &Spec, log: &Path) -> Result<u32, String>;
+    fn spawn_detached(&self, spec: &Spec, log: &Path) -> Result<u32, crate::problem::Problem>;
     /// Is `pid` alive and (as far as we can tell) this server's FXServer?
     fn pid_alive(&self, spec: &Spec, pid: u32) -> bool;
     /// Does txAdmin answer HTTP on `port`?
@@ -246,7 +246,7 @@ pub fn start_with(env: &dyn LaunchEnv, spec: &Spec, progress: &mut dyn FnMut(&st
         if svc != ServiceState::Running {
             if let Err(e) = env.service_start(spec) {
                 let what = if crate::container::record::is_container(&spec.dir) { "the server's container" } else { "the background service" };
-                return done(Method::Service, None, false, false, Some(Problem::StartFailed), format!("Could not start {what}: {e}"), vec![]);
+                return done(Method::Service, None, false, false, Some(Problem::StartFailed), format!("Could not start {what}: {}", e.one_line()), vec![]);
             }
         }
         (Method::Service, None)
@@ -256,7 +256,7 @@ pub fn start_with(env: &dyn LaunchEnv, spec: &Spec, progress: &mut dyn FnMut(&st
                 env.write_pid_file(spec, pid);
                 (Method::Detached, Some(pid))
             }
-            Err(e) => return done(Method::Detached, None, false, false, Some(Problem::StartFailed), format!("Could not start FXServer: {e}"), vec![]),
+            Err(e) => return done(Method::Detached, None, false, false, Some(Problem::StartFailed), format!("Could not start FXServer: {}", e.one_line()), vec![]),
         }
     };
     wait_ready(env, spec, progress, method, pid, log_start, tx_timeout, grace)
@@ -528,12 +528,12 @@ impl LaunchEnv for SystemEnv {
         crate::installer::host::service_state(&spec.name).unwrap_or(ServiceState::NotInstalled)
     }
 
-    fn service_start(&self, spec: &Spec) -> Result<(), String> {
-        crate::installer::host::service_control(&spec.name, crate::service::ControlAction::Start).map_err(|e| e.to_string())
+    fn service_start(&self, spec: &Spec) -> Result<(), crate::problem::Problem> {
+        crate::installer::host::service_control(&spec.name, crate::service::ControlAction::Start)
     }
 
-    fn spawn_detached(&self, spec: &Spec, log: &Path) -> Result<u32, String> {
-        let mut cmd = crate::installer::host::build_command(&spec.dir.to_string_lossy()).map_err(|e| e.0)?;
+    fn spawn_detached(&self, spec: &Spec, log: &Path) -> Result<u32, crate::problem::Problem> {
+        let mut cmd = crate::installer::host::build_command(&spec.dir.to_string_lossy())?;
         std::fs::create_dir_all(spec.meta()).map_err(|e| format!("cannot create {}: {e}", spec.meta().display()))?;
         if log.is_file() {
             let _ = std::fs::rename(log, log.with_extension("log.old"));
@@ -631,14 +631,14 @@ impl LaunchEnv for SystemEnv {
 }
 
 /// Resolve a registered name or folder to a [`Spec`].
-pub fn spec_for(name_or_dir: &str) -> Result<Spec, String> {
-    let dir = crate::installer::host::resolve_dir(name_or_dir).map_err(|e| e.0)?;
-    let sf = crate::installer::ServerFile::load(&dir).map_err(|e| format!("cannot read kora-server.json: {e}"))?;
+pub fn spec_for(name_or_dir: &str) -> Result<Spec, crate::problem::Problem> {
+    let dir = crate::installer::host::resolve_dir(name_or_dir)?;
+    let sf = crate::installer::ServerFile::load(&dir).map_err(|e| e.lead("cannot read kora-server.json"))?;
     Ok(Spec { name: sf.name.clone(), dir, game_port: sf.ports.game, txadmin_port: sf.ports.txadmin })
 }
 
 /// `kora start` for a registered server or folder (service or detached).
-pub fn start_named(name_or_dir: &str, progress: &mut dyn FnMut(&str, f32)) -> Result<Report, String> {
+pub fn start_named(name_or_dir: &str, progress: &mut dyn FnMut(&str, f32)) -> Result<Report, crate::problem::Problem> {
     let spec = spec_for(name_or_dir)?;
     Ok(start(&SystemEnv::default(), &spec, progress))
 }
@@ -659,7 +659,7 @@ pub fn status_of(env: &dyn LaunchEnv, spec: &Spec) -> Status {
 }
 
 /// Stop a detached server by name (the service case is handled by `host::service_control`).
-pub fn stop_named_detached(name_or_dir: &str) -> Result<bool, String> {
+pub fn stop_named_detached(name_or_dir: &str) -> Result<bool, crate::problem::Problem> {
     let spec = spec_for(name_or_dir)?;
     Ok(stop_detached(&SystemEnv::default(), &spec))
 }

@@ -5,7 +5,7 @@
 use clap::Subcommand;
 use kora_core::api::install::github::{GithubEnv, SystemGithub};
 use kora_core::api::toolchain::{system_check, CheckState, SystemToolchain, ToolchainEnv};
-use kora_core::problem::{plain_text, Tool};
+use kora_core::problem::Tool;
 use kora_core::tools::Source;
 
 fn tool_from(name: &str) -> Option<Tool> {
@@ -66,7 +66,7 @@ pub fn tools_install(env: &dyn ToolchainEnv, which: Option<&str>) -> i32 {
         }) {
             Ok(s) => println!("{}", describe(&s)),
             Err(e) => {
-                eprintln!("error: {}", plain_text(&e));
+                crate::ui::print_error(&e);
                 code = 1;
             }
         }
@@ -83,7 +83,7 @@ pub fn check(env: &dyn ToolchainEnv, github: &dyn GithubEnv, start_database: boo
                 0
             }
             Err(e) => {
-                eprintln!("error: {}", plain_text(&e));
+                crate::ui::print_error(&e);
                 1
             }
         };
@@ -101,7 +101,7 @@ pub fn check(env: &dyn ToolchainEnv, github: &dyn GithubEnv, start_database: boo
         };
         println!("[{mark}] {}: {}", i.label, i.summary);
         if let Some(p) = &i.problem {
-            for l in plain_text(&p.encode()).lines().skip(1) {
+            for l in p.to_string().lines().skip(1) {
                 println!("       {l}");
             }
         }
@@ -166,7 +166,7 @@ mod tests {
         fn tools(&self) -> Vec<ToolStatus> {
             vec![st(Tool::Git, *self.git_ok.lock().unwrap()), st(Tool::Gh, false)]
         }
-        fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, String> {
+        fn install(&self, tool: Tool, say: &mut dyn FnMut(&str, f32)) -> Result<ToolStatus, kora_core::problem::Problem> {
             say("Downloading", 0.5);
             self.installs.lock().unwrap().push(tool);
             Ok(st(tool, true))
@@ -174,7 +174,7 @@ mod tests {
         fn database(&self) -> DbState {
             DbState::default()
         }
-        fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, String> {
+        fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, kora_core::problem::Problem> {
             Ok("started".into())
         }
         fn admin(&self) -> AdminState {
@@ -186,13 +186,13 @@ mod tests {
         fn auth(&self) -> GithubUser {
             GithubUser::gh_missing()
         }
-        fn owners(&self) -> Result<Vec<kora_core::api::install::github::OwnerChoice>, String> {
+        fn owners(&self) -> Result<Vec<kora_core::api::install::github::OwnerChoice>, kora_core::problem::Problem> {
             Ok(vec![])
         }
-        fn begin_login(&self) -> Result<kora_core::api::install::github::LoginFlow, String> {
+        fn begin_login(&self) -> Result<kora_core::api::install::github::LoginFlow, kora_core::problem::Problem> {
             Err("no".into())
         }
-        fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
+        fn resolve_owner(&self, _: Option<&str>) -> Result<String, kora_core::problem::Problem> {
             Err("no".into())
         }
     }

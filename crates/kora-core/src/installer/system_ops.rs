@@ -27,7 +27,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{check_dir_links, load_request_from, new_ctx_trusted, registered, Created, Hooks, InstallError, Result};
+use super::{check_dir_links, load_request_from, new_ctx_trusted, registered, Created, Hooks, Result};
 use crate::db::{Credentials, ProvisionState};
 use crate::problem::Problem;
 
@@ -190,7 +190,7 @@ pub fn check_panel_dir(dir: &Path) -> Result<()> {
     check_dir_links(dir)?;
     let record = super::meta_dir(dir).join("request.json").is_file() || dir.join("kora-server.json").is_file();
     let owner = crate::privsvc::winapi::path_owner_sid(dir);
-    check_dir_for(dir, &u.sid, owner.as_deref(), record, u.admin_folders).map_err(InstallError)
+    check_dir_for(dir, &u.sid, owner.as_deref(), record, u.admin_folders).map_err(Problem::generic)
 }
 
 /// The request of an `admin-step` must be a sane one, and an elevated step done for Kora Panel
@@ -205,7 +205,7 @@ pub fn check_step_request(req: &super::InstallRequest, step: &str, undo: bool, f
     if for_panel && step == "system.firewall" {
         for p in [req.ports.game, req.ports.txadmin] {
             if !crate::privsvc::op::port_ok(p) {
-                return Err(InstallError(format!(
+                return Err(Problem::generic(format!(
                     "Kora does not open port {p} in the firewall from the panel: Windows, remote administration or databases use it. Choose other ports for the server (30120 and 40120 are the usual ones)."
                 )));
             }
@@ -237,11 +237,11 @@ pub fn delete_needs_admin_at(dir: &Path, keep_db: bool, password_given: bool) ->
 pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
     use super::windows_db;
     if crate::db::Os::current() != crate::db::Os::Windows {
-        return Err(InstallError("Kora manages its own database server only on Windows.".into()));
+        return Err(Problem::generic("Kora manages its own database server only on Windows."));
     }
     match action {
         "start" => {
-            let rec = windows_db::saved_record().ok_or_else(|| InstallError("Kora's own database server (MariaDB) is not installed on this computer.".into()))?;
+            let rec = windows_db::saved_record().ok_or_else(|| Problem::generic("Kora's own database server (MariaDB) is not installed on this computer."))?;
             say(&format!("Starting Kora's MariaDB service {}", rec.service));
             windows_db::ensure_running(&rec)?;
             if let Some(a) = windows_db::saved_admin() {
@@ -256,7 +256,7 @@ pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
             let rec = windows_db::install(&Hooks::from_env().http, say)?;
             Ok(format!("Kora installed its own MariaDB {} as the Windows service '{}'", rec.version, rec.service))
         }
-        other => Err(InstallError(format!("'{other}' is not something Kora's administrator service does with the database server"))),
+        other => Err(Problem::generic(format!("'{other}' is not something Kora's administrator service does with the database server"))),
     }
 }
 
@@ -265,11 +265,11 @@ pub fn db_server(action: &str, say: &mut dyn FnMut(&str)) -> Result<String> {
 pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep_db: bool, known: Known, say: &mut dyn FnMut(&str)) -> Result<StepResult> {
     let allowed = if undo { UNDO_STEPS } else { RUN_STEPS };
     if !allowed.contains(&step) {
-        return Err(InstallError(format!("'{step}' is not a step Kora's administrator service does")));
+        return Err(Problem::generic(format!("'{step}' is not a step Kora's administrator service does")));
     }
     check_dir_links(dir)?;
     check_panel_dir(dir)?;
-    let mut req = load_request_from(dir).ok_or_else(|| InstallError(format!("{} has no Kora install record", dir.display())))?;
+    let mut req = load_request_from(dir).ok_or_else(|| Problem::generic(format!("{} has no Kora install record", dir.display())))?;
     let in_service = crate::privsvc::paths::in_service();
     check_step_request(&req, step, undo, in_service || crate::privsvc::paths::in_service() || panel_user().is_some())?;
     // `reach.firewall`: the game port only (never txAdmin), through the same firewall step and the same port rules.
@@ -277,7 +277,7 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
     let step = if reach { "system.firewall" } else { step };
     if reach {
         if !crate::privsvc::op::port_ok(req.ports.game) {
-            return Err(InstallError(format!("Kora does not open port {} in the firewall from the panel.", req.ports.game)));
+            return Err(Problem::generic(format!("Kora does not open port {} in the firewall from the panel.", req.ports.game)));
         }
         req.txadmin_public = false;
     }
@@ -318,10 +318,10 @@ pub fn run_admin_step(undo: bool, step: &str, dir: &Path, keep_files: bool, keep
                 say(&ev.detail);
             }
         }
-        let (r, created, notes) = h.join().map_err(|_| InstallError("the administrator step stopped unexpectedly".into()))?;
+        let (r, created, notes) = h.join().map_err(|_| Problem::generic("the administrator step stopped unexpectedly"))?;
         Ok(match r {
             Ok((detail, db)) => StepResult { detail, notes, created, db, error: None, grants_left },
-            Err(e) => StepResult { detail: String::new(), notes, created, db: None, error: Some(Problem::decode(&e.0)), grants_left: false },
+            Err(e) => StepResult { detail: String::new(), notes, created, db: None, error: Some(e), grants_left: false },
         })
     })
 }
@@ -395,7 +395,7 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e}"));
         assert!(check_step_request(&req, "system.firewall", false, true).is_ok());
         req.ports.game = 3389;
-        assert!(check_step_request(&req, "system.firewall", false, true).unwrap_err().0.contains("3389"), "remote desktop stays closed when the panel asks");
+        assert!(check_step_request(&req, "system.firewall", false, true).unwrap_err().to_string().contains("3389"), "remote desktop stays closed when the panel asks");
         assert!(check_step_request(&req, "system.firewall", false, false).is_ok(), "an administrator terminal: as before (>= 1024)");
         assert!(check_step_request(&req, "system.firewall", true, true).is_ok(), "closing is always fine");
         req.ports.game = 445;
@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn unknown_steps_are_refused_before_anything_is_read() {
         let e = run_admin_step(false, "build.config", Path::new("/nonexistent"), false, false, None, &mut |_| {}).unwrap_err();
-        assert!(e.0.contains("not a step"), "{e:?}");
+        assert!(e.to_string().contains("not a step"), "{e:?}");
         assert!(run_admin_step(true, "prepare.db", Path::new("/nonexistent"), false, false, None, &mut |_| {}).is_err());
     }
 

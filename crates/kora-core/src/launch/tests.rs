@@ -65,7 +65,7 @@ impl LaunchEnv for Fake {
     fn service_state(&self, _: &Spec) -> ServiceState {
         self.svc.borrow().clone()
     }
-    fn service_start(&self, _: &Spec) -> Result<(), String> {
+    fn service_start(&self, _: &Spec) -> Result<(), crate::problem::Problem> {
         if self.svc_fail {
             return Err("access denied".into());
         }
@@ -73,9 +73,9 @@ impl LaunchEnv for Fake {
         *self.svc.borrow_mut() = ServiceState::Running;
         Ok(())
     }
-    fn spawn_detached(&self, _: &Spec, _: &Path) -> Result<u32, String> {
+    fn spawn_detached(&self, _: &Spec, _: &Path) -> Result<u32, crate::problem::Problem> {
         if let Some(e) = &self.spawn_fail {
-            return Err(e.clone());
+            return Err(e.clone().into());
         }
         self.spawned.borrow_mut().push(4242);
         self.alive.borrow_mut().push(4242);
