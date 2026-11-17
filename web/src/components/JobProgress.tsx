@@ -1,6 +1,7 @@
 import { CheckCircle2, Circle, Loader2, MinusCircle, XCircle } from 'lucide-react'
 import type { ProgressEvent, StepStatus } from '@/api/types'
 import { Progress } from '@/components/ui/progress'
+import { Announcer, progressSentence } from '@/components/Announcer'
 import { cn } from '@/lib/utils'
 
 const STATUS_TEXT: Record<StepStatus, string> = { pending: 'Waiting', running: 'In progress', done: 'Done', skipped: 'Skipped', failed: 'Failed' }
@@ -36,8 +37,14 @@ export function StepProgress({ events, planned }: { events: ProgressEvent[]; pla
   const known = new Set(steps.map((s) => s.step))
   const rows: ProgressEvent[] = [...steps, ...(planned ?? []).filter((p) => !known.has(p.id)).map((p) => ({ step: p.id, title: p.title, status: 'pending' as StepStatus, detail: '', percent: 0 }))]
   const percent = events.length ? Math.max(...events.map((e) => e.percent)) : 0
+  // One sentence that changes when a step starts, fails or the whole thing ends: not on every percent.
+  const failed = rows.find((r) => r.status === 'failed')
+  const running = rows.find((r) => r.status === 'running')
+  const allDone = rows.length > 0 && rows.every((r) => r.status === 'done' || r.status === 'skipped')
+  const said = failed ? `${failed.title}: ${STATUS_TEXT.failed}` : allDone ? 'All steps are finished.' : running ? `${running.title}: ${STATUS_TEXT.running}` : ''
   return (
     <div className="space-y-4">
+      <Announcer message={said} assertive={!!failed} />
       <div className="flex items-center gap-3">
         <Progress value={percent} label="Overall progress" className="flex-1" />
         <span className="w-10 text-right text-sm tabular-nums text-muted-foreground">{percent}%</span>
@@ -67,7 +74,8 @@ export function percentOf(done: number, total: number): number {
 /** A count bar: the bar, the "N of M" text, and an optional line about what is happening now. */
 export function CountBar({ label, done, total, text, detail, className }: { label: string; done: number; total: number; text: string; detail?: string; className?: string }) {
   return (
-    <div className={cn('space-y-1', className)} aria-live="polite">
+    <div className={cn('space-y-1', className)}>
+      <Announcer message={progressSentence(label, percentOf(done, total), total > 0 && done >= total)} />
       <div className="flex items-center gap-3">
         <Progress value={percentOf(done, total)} label={label} className="flex-1" />
         <span className="shrink-0 text-sm tabular-nums text-muted-foreground">{text}</span>
@@ -113,7 +121,8 @@ export function ResourceProgress({ events }: { events: unknown[] }) {
   }
   if (progress && rows.size === 0) notes.unshift(progress)
   return (
-    <div className="space-y-3" aria-live="polite">
+    <div className="space-y-3">
+      <Announcer message={rows.size ? `${[...rows.values()].filter((st) => /updated|installed|rolled|^skipped|^failed/.test(st)).length} of ${rows.size} resources finished` : ''} />
       {[...rows].map(([id, state]) => {
         const done = /updated|installed|rolled/.test(state)
         // Finished, but not as hoped: skipped, failed, waiting for a quiet server, never reached.

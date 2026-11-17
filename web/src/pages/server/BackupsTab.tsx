@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Input, Select } from '@/components/ui/input'
+import { Announcer, progressSentence } from '@/components/Announcer'
 import { Progress } from '@/components/ui/progress'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { CopyField } from '@/components/CopyButton'
@@ -41,7 +42,8 @@ function latestPercent(events: BackupEvent[]): { percent: number; message: strin
 function JobBar({ events, label }: { events: BackupEvent[]; label: string }) {
   const { percent, message } = latestPercent(events)
   return (
-    <div className="space-y-1.5" aria-live="polite">
+    <div className="space-y-1.5">
+      <Announcer message={progressSentence(label, percent)} />
       <Progress value={percent} label={label} />
       <p className="text-sm text-muted-foreground">{message}</p>
     </div>

@@ -58,7 +58,7 @@ export function PrDetail({ page, number, source, tried, onChanged }: { page: Res
       <section aria-label="Files this pull request changes">
         <h4 className="text-xs font-semibold">Changes {p.files.length} file{p.files.length === 1 ? '' : 's'}</h4>
         <ul className="text-xs">
-          {p.files.map((f) => <li key={f.path} className="flex gap-2"><span className="min-w-0 flex-1 break-all font-mono">{f.path}</span><span className="text-success">+{f.additions}</span><span className="text-red">-{f.deletions}</span></li>)}
+          {p.files.map((f) => <li key={f.path} className="flex gap-2"><span className="min-w-0 flex-1 break-all font-mono">{f.path}</span><span className="text-success"><span className="sr-only">added </span>+{f.additions}</span><span className="text-danger-text"><span className="sr-only">removed </span>-{f.deletions}</span></li>)}
         </ul>
       </section>
       <section aria-label="Conversation">

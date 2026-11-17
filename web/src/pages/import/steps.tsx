@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Radio } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Announcer, progressSentence } from '@/components/Announcer'
 import { Progress } from '@/components/ui/progress'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
@@ -42,7 +43,7 @@ export function FileStep({ local, busy, error, archived, onFile, onPath, onArchi
         <p>Drop the file here, or choose it. It is sent to the computer that runs Kora and stays there.</p>
         <input ref={input} id="import-file" type="file" className="sr-only" disabled={busy} onChange={(e) => { pick(e.target.files); e.target.value = '' }} />
         <Button asChild variant="secondary" size="sm"><label htmlFor="import-file" className={busy ? 'pointer-events-none opacity-50' : 'cursor-pointer'}>Choose the backup file</label></Button>
-        {busy && <p className="text-muted-foreground" aria-live="polite">Sending the file… a big file takes a while. Keep this page open.</p>}
+        {busy && <p className="text-muted-foreground" role="status">Sending the file… a big file takes a while. Keep this page open.</p>}
       </div>
       {local && (
         <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (path.trim()) onPath(path.trim()) }}>
@@ -200,7 +201,8 @@ function DbLoginForm({ note, setAdmin }: { note: string; setAdmin: (a: DbAdmin |
 export function RunStep({ events, failed, onRetry, onStartOver }: { events: BackupEvent[]; failed: JobError | null; onRetry: () => void; onStartOver: () => void }) {
   const last = events.at(-1)
   return (
-    <div className="space-y-4" aria-live="polite">
+    <div className="space-y-4">
+      <Announcer message={failed ? '' : progressSentence('Import progress', last?.percent ?? 0)} />
       {!failed && (
         <>
           <Progress value={last?.percent ?? 0} label="Import progress" />

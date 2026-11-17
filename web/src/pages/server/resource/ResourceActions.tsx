@@ -91,7 +91,7 @@ export function ResourceActions({ page, updates: u, pending, said, onControl, on
             {block.fix === 'console' && <Link className="underline" to={`/servers/${encodeURIComponent(page.server.name)}?tab=console`}>Open the Console tab</Link>}
           </p>
         )}
-        {said && <p className={`text-sm ${said.ok ? 'text-muted-foreground' : 'text-red'}`} role="status">{said.text}</p>}
+        {said && <p className={`text-sm ${said.ok ? 'text-muted-foreground' : 'text-danger-text'}`} role="status">{said.text}</p>}
       </section>
     </div>
   )

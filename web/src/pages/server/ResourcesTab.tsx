@@ -178,7 +178,7 @@ function InstalledResource({ id, serverName, updates: u, branch, noCheck, noCont
           })}
         </div>
       </div>
-      {said && <p className={`mt-1 text-xs ${said.ok ? 'text-muted-foreground' : 'text-red'}`} role="status">{said.text}</p>}
+      {said && <p className={`mt-1 text-xs ${said.ok ? 'text-muted-foreground' : 'text-danger-text'}`} role="status">{said.text}</p>}
     </li>
   )
 }

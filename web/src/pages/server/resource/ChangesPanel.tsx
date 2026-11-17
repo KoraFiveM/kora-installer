@@ -18,10 +18,19 @@ import { OpenPullRequest } from './OpenPullRequest'
 /** A diff, read-only, with the added and removed lines marked by a sign and a colour. */
 export function DiffView({ diff }: { diff: string }) {
   return (
-    <pre className="max-h-96 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs" tabIndex={0} aria-label="Changes, line by line">
-      {diff.split('\n').map((l, i) => (
-        <div key={i} className={l.startsWith('+') && !l.startsWith('+++') ? 'text-success' : l.startsWith('-') && !l.startsWith('---') ? 'text-red' : l.startsWith('@@') ? 'text-info' : undefined}>{l || ' '}</div>
-      ))}
+    <pre className="max-h-96 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs" tabIndex={0} role="group" aria-label="Changes, line by line">
+      {diff.split('\n').map((l, i) => {
+        // The colour is a help, not the message: every added or removed line also says so in words (hidden from the eye) and starts with its sign.
+        const added = l.startsWith('+') && !l.startsWith('+++')
+        const removed = l.startsWith('-') && !l.startsWith('---')
+        return (
+          <div key={i} className={added ? 'text-success' : removed ? 'text-danger-text' : l.startsWith('@@') ? 'text-info' : undefined}>
+            {added && <span className="sr-only">Added: </span>}
+            {removed && <span className="sr-only">Removed: </span>}
+            {l || ' '}
+          </div>
+        )
+      })}
     </pre>
   )
 }

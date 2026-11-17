@@ -17,6 +17,7 @@ import { useJob } from '@/hooks/useJob'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Announcer, progressSentence } from '@/components/Announcer'
 import { Progress } from '@/components/ui/progress'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { GithubSignIn } from '@/components/GithubSignIn'
@@ -135,7 +136,8 @@ function RunJob({ start, working, done, afterFix, onClose }: { start: () => Prom
   const progress = [...job.events].reverse().find((e) => e.type === 'progress' && typeof e.fraction === 'number')
   const fraction = progress?.type === 'progress' ? progress.fraction : undefined
   return (
-    <div className="space-y-3" aria-live="polite">
+    <div className="space-y-3">
+      <Announcer message={progressSentence(working, Math.round((fraction ?? 0) * 100))} />
       <p className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin text-info" aria-hidden />{last?.message ?? working}</p>
       <Progress value={Math.round((fraction ?? 0.02) * 100)} label={working} />
       <p className="text-xs text-muted-foreground">You can keep this page open; it carries on by itself.</p>

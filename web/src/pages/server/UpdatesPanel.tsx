@@ -12,6 +12,7 @@ import { Radio } from '@/components/ui/checkbox'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { CountBar, normaliseUpdateEvent, percentOf, ResourceProgress } from '@/components/JobProgress'
+import { Announcer, progressSentence } from '@/components/Announcer'
 import { Progress } from '@/components/ui/progress'
 import { formatDate } from '@/lib/utils'
 import { timeAgo } from '@/lib/ago'
@@ -57,7 +58,8 @@ export function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, 
             {checkedAt !== undefined && <span className="text-xs text-muted-foreground">Last checked {timeAgo(checkedAt, now)}</span>}
           </div>
           {progress && (
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <Announcer message={progressSentence(`Checking ${r.id}`, percentOf(progress.done, progress.total))} />
               <Progress value={percentOf(progress.done, progress.total)} label={`Checking ${r.id}`} className="h-1 w-32 shrink-0" />
               <span>{progress.done > 0 ? `Checked ${r.id}` : `Checking ${r.id}...`}</span>
             </div>
