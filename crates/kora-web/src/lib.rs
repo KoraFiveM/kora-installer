@@ -10,6 +10,7 @@ pub mod remote;
 pub mod routes;
 pub mod security;
 mod static_ui;
+pub mod tls;
 pub mod txgate;
 mod wire_from;
 
