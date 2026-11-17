@@ -604,3 +604,43 @@ function Wait-PanelJob($Panel, [string]$JobId, [int]$TimeoutSec = 120, [scriptbl
     }
     $job
 }
+
+# ---------------------------------------------------------------------------------------------------------------
+# Running a script as someone else, without a panel (for testing the administrator service's refusals and grants).
+# ---------------------------------------------------------------------------------------------------------------
+
+# Run `-Script` (PowerShell text) under another token and return Output and Code. Kind:
+#   Self     this process's token, in a child
+#   Filtered this administrator, unelevated (KoraTok.LaunchFiltered)
+#   Account  the account in -Credential (secondary logon)
+# The script's output goes to a file in -Dir (a folder the account can write: Initialize-UacWorkDir), because
+# nothing can be piped back across a token boundary.
+function Invoke-AsAccount([ValidateSet('Self', 'Filtered', 'Account')][string]$Kind, [string]$Script, [string]$Dir, [pscredential]$Credential, [int]$TimeoutSec = 120) {
+    $id = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $ps1 = Join-Path $Dir "run-$id.ps1"; $out = Join-Path $Dir "out-$id.txt"; $code = Join-Path $Dir "code-$id.txt"
+    $body = "`$ErrorActionPreference = 'Continue'`r`n& {`r`n$Script`r`n} *> $(ConvertTo-PsLiteral $out)`r`n`$LASTEXITCODE | Set-Content $(ConvertTo-PsLiteral $code)`r`n"
+    Set-Content -Path $ps1 -Value $body -Encoding ASCII
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $argText = "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`""
+    switch ($Kind) {
+        'Self' { $procId = (Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden).Id }
+        'Filtered' { $procId = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
+        'Account' {
+            if (-not $Credential) { throw 'Kind Account needs -Credential' }
+            $svc = Get-Service seclogon -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -ne 'Running') { Start-Service seclogon }
+            $procId = (Start-Process -FilePath $ps -ArgumentList $argText -Credential $Credential -LoadUserProfile -WorkingDirectory $Dir -PassThru -WindowStyle Hidden).Id
+        }
+    }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while (-not (Test-Path $code) -and $sw.Elapsed.TotalSeconds -lt $TimeoutSec) { Start-Sleep -Milliseconds 300 }
+    if (-not (Test-Path $code)) {
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        throw "the script run as $Kind did not finish in $TimeoutSec s"
+    }
+    $text = if (Test-Path $out) { (Get-Content $out -Raw) } else { '' }
+    $exit = 1
+    $raw = (Get-Content $code -Raw).Trim()
+    if ($raw -match '^-?\d+$') { $exit = [int]$raw }
+    [pscustomobject]@{ Output = "$text"; Code = $exit }
+}

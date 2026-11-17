@@ -4,7 +4,7 @@
 # interactive desktop as the prompt, and at HIGH integrity: the prompt (consent.exe) is a SYSTEM process, and
 # Windows (UIPI) does not let a medium-integrity process drive a higher one. The VM setup registers a scheduled
 # task "KoraUacDriver" (interactive, highest privileges, no password prompt) that runs this script with the
-# arguments in C:\kora-uac\driver-args.json; the job starts it with `schtasks /run` (14-uac.ps1: Start-UacDriver).
+# arguments in C:\kora-uac\driver-args.json; the job starts it with `schtasks /run` (15-installer-uac.ps1: Invoke-UacDriver).
 # The prompt must be on the normal desktop (policy PromptOnSecureDesktop=0), not the secure desktop.
 #
 #   -Answer Yes|No   click that button

@@ -1,9 +1,8 @@
 <#
   Kora's MSI and administrator service on a real Windows machine (windows-latest runs as an ELEVATED built-in
   administrator, so the unelevated, other-account parts are done through the Task Scheduler as standard test
-  accounts: that is the only way to get a non-elevated process of another account from a non-interactive
-  elevated runner; scripts/smoke/lib-accounts.ps1 on nx/release-trust is another agent's take on the same
-  need, to consolidate later).
+  accounts through scripts/smoke/lib-accounts.ps1 (secondary logon: the way to get a non-elevated process of another
+  account from a non-interactive elevated runner).
 
   What is checked, in order: install the MSI for real, then the layout (Program Files, service, PATH, shortcuts,
   settings), the service used from STANDARD accounts (one allowed, one not), ownership between two allowed
@@ -17,16 +16,14 @@ param(
     [Parameter(Mandatory)][string]$Msi,
     [Parameter(Mandatory)][string]$OldMsi
 )
-. "$PSScriptRoot/common.ps1"
+. "$PSScriptRoot/lib-accounts.ps1"
 $Msi = (Resolve-Path $Msi).Path
 $OldMsi = (Resolve-Path $OldMsi).Path
 $client = (Resolve-Path "$PSScriptRoot/svc-client.ps1").Path
 $work = 'C:\kora-smoke-msi'
 $pf = [Environment]::GetFolderPath('ProgramFiles') + '\Kora'
 $koraExe = "$pf\kora.exe"
-$pw = 'Kora-Smoke-1a!'
 $A = 'korasmokea'; $B = 'korasmokeb'; $C = 'korasmokec'
-function Sid([string]$u) { (New-Object System.Security.Principal.NTAccount($u)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
 
 function Show-Diagnostics {
     Write-Host '----- diagnostics -----'
@@ -38,25 +35,9 @@ function Show-Diagnostics {
     if (Test-Path $pf) { Get-ChildItem $pf -Recurse | Select-Object -First 30 FullName | Out-String | Write-Host; (& icacls $pf | Out-String) | Write-Host }
 }
 
-# Run a PowerShell script as USER: a standard account, NOT elevated, through the Task Scheduler.
+# Run a PowerShell script as USER: a standard account, NOT elevated (lib-accounts.ps1).
 function Invoke-AsUser([string]$User, [string]$Script, [int]$TimeoutSeconds = 120) {
-    $id = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $ps1 = "$work\run-$id.ps1"; $cmd = "$work\run-$id.cmd"; $out = "$work\out-$id.txt"; $code = "$work\code-$id.txt"
-    Set-Content -Path $ps1 -Value $Script -Encoding UTF8
-    Set-Content -Path $cmd -Value "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ps1`" > `"$out`" 2>&1`r`necho %errorlevel% > `"$code`"" -Encoding ASCII
-    $name = "kora-smoke-$id"
-    $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$cmd`""
-    Register-ScheduledTask -TaskName $name -Action $action -User $User -Password $pw -RunLevel Limited -Force | Out-Null
-    try {
-        Start-ScheduledTask -TaskName $name
-        $until = (Get-Date).AddSeconds($TimeoutSeconds)
-        while (-not (Test-Path $code) -and (Get-Date) -lt $until) { Start-Sleep -Milliseconds 500 }
-        if (-not (Test-Path $code)) { $info = Get-ScheduledTaskInfo -TaskName $name; throw "the task for $User did not finish in $TimeoutSeconds s (last result $($info.LastTaskResult))" }
-        $text = if (Test-Path $out) { (Get-Content $out -Raw) } else { '' }
-        $c = [int]((Get-Content $code -Raw).Trim())
-    }
-    finally { Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue }
-    [pscustomobject]@{ Output = "$text"; Code = $c }
+    Invoke-AsAccount -Kind Account -Script $Script -Dir $work -Credential $accounts[$User].Credential -TimeoutSec $TimeoutSeconds
 }
 function Svc([string]$User, [string]$Verb, [string[]]$Arguments) {
     $quoted = ($Arguments | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ','
@@ -67,15 +48,10 @@ function Svc([string]$User, [string]$Verb, [string[]]$Arguments) {
 
 try {
     Write-Host '=== accounts ==='
-    New-Item -ItemType Directory -Force -Path $work | Out-Null
-    & icacls $work /grant 'Users:(OI)(CI)M' | Out-Null
-    foreach ($u in $A, $B, $C) {
-        & net user $u /delete 2>$null | Out-Null
-        & net user $u $pw /add /expires:never | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "could not create the test account $u" }
-        & net user $u /passwordchg:no 2>$null | Out-Null
-    }
-    $sidA = Sid $A; $sidB = Sid $B; $sidC = Sid $C
+    $null = Initialize-UacWorkDir -Path $work   # a folder every test account can write
+    $accounts = @{}
+    foreach ($u in $A, $B, $C) { $accounts[$u] = Initialize-TestAccount -Name $u }
+    $sidA = $accounts[$A].Sid; $sidB = $accounts[$B].Sid; $sidC = $accounts[$C].Sid
     Write-Host "A=$sidA B=$sidB C=$sidC"
     $os = Invoke-AsUser $A '[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); whoami /groups | Select-String "Mandatory Label"'
     Write-Host $os.Output
@@ -181,5 +157,5 @@ catch {
     throw
 }
 finally {
-    foreach ($u in $A, $B, $C) { & net user $u /delete 2>$null | Out-Null }
+    foreach ($u in $A, $B, $C) { Clear-TestAccount -Name $u }
 }
