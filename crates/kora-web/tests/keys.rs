@@ -238,12 +238,12 @@ async fn keys_are_added_listed_renamed_and_deleted_and_only_ever_masked() {
     assert_eq!(list["can_manage"], true);
     assert!(list["keys"][0].get("license_key").is_none() && list["keys"][0].get("key").is_none());
 
-    // The file holds the keys, privately.
+    // The private database holds the keys.
     assert!(r.file().contains(MAIN));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(r.home.join("secrets.json")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(kora_core::store::db_path(&r.home)).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     // Duplicates: by name (any case) and by value.
@@ -398,7 +398,7 @@ async fn a_stopped_install_with_a_saved_key_carries_on_after_a_restart_without_a
     let job = r.job(&second).await;
     assert_eq!(job["state"], "done", "{job}");
     assert_eq!(r.env.st().runs.last().unwrap().license_key.as_deref(), Some(MAIN), "the key was looked up by name");
-    assert!(!file.exists(), "a continued install is not offered again");
+    assert!(kora_core::installer::paused::PausedStore::at(r.home.join("paused-installs")).load(&first).is_none(), "a continued install is not offered again");
     assert_eq!(r.ok("GET", "/installs/defaults", None).await["resumable"], json!([]));
 }
 
