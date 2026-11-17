@@ -261,6 +261,7 @@ export interface MessageParams {
   'resources.updatesPanel.codeNodeCodeNode': { code: ReactNode; code2: ReactNode; value: string | number }
   'resources.updatesPanel.doneTotalResourcesChecked': { done: string | number; total: string | number }
   'resources.updatesPanel.doneTotalUpdatedValue': { done: string | number; total: string | number; value: string | number }
+  'resources.updatesPanel.fromTo': { id: string | number; from: string | number; to: string | number }
   'resources.updatesPanel.healthCheckHealth': { health: string | number }
   'resources.updatesPanel.idBranchBranch': { id: string | number; branch: string | number }
   'resources.updatesPanel.lastCheckedTimeago': { timeAgo: string | number }

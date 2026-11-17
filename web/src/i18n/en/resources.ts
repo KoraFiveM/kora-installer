@@ -516,6 +516,10 @@ const messages = {
   'resources.pullRequestsPanel.originalRepository': 'Original repository',
   'resources.pullRequestsPanel.ownCopy': 'Your own copy',
   'resources.restartNotice.restartNeededRunningServer': 'Restart needed: the running server still has the old version.',
+  'resources.updatesPanel.updated': 'Updated',
+  'resources.updatesPanel.skipped': 'Skipped',
+  'resources.updatesPanel.notes': 'Notes',
+  'resources.updatesPanel.fromTo': '{id} ({from} to {to})',
 } as const
 
 register('en', messages)

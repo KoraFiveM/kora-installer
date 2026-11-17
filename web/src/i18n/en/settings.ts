@@ -332,6 +332,7 @@ const messages = {
   'settings.remoteAccess.oldTokenLink': 'old token link',
   'settings.remoteAccess.waitingSetUp': 'waiting to set up',
   'settings.licenceKeys.movedKeys': '{count, plural, one {Moved # key.} other {Moved # keys.}}',
+  'settings.changeLicenceKey.defaultKeyName': 'Main',
 } as const
 
 register('en', messages)

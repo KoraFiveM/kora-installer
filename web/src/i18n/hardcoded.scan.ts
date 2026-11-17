@@ -68,6 +68,11 @@ function endsInValuePosition(n: ts.Node): boolean {
   return false
 }
 
+/** `{sec('Updated', ...)}`: a string passed straight to a function inside JSX. */
+function inJsxCallArg(n: ts.Node): boolean {
+  return ts.isCallExpression(n.parent) && n.parent.arguments.includes(n as ts.Expression)
+}
+
 /** A plain-word fragment: at least two words (one for a template with a hole), no code characters. */
 export function fragment(text: string, template: boolean): boolean {
   const t = text.trim()
@@ -147,7 +152,7 @@ export function scanSource(file: string, source: string): Finding[] {
       const text = literalText(n)
       if (!skip && text !== null && !inJsx(n) && looksLikeText(text, true)) add(n, text, 'string')
       // A label in a table of labels: one capitalised word is enough ({ running: 'Running' }).
-      else if (!skip && text !== null && endsInValuePosition(n) && tableValue(text)) add(n, text, 'string')
+      else if (!skip && text !== null && (endsInValuePosition(n) || (ts.isCallExpression(p) && p.arguments.includes(n as ts.Expression)) || inJsxCallArg(n)) && tableValue(text)) add(n, text, 'string')
       // Lowercase fragments of a sentence ("a while ago", "was added.", " is up to date"): two or more plain words.
       else if (!skip && text !== null && !inJsx(n) && fragment(text, ts.isTemplateExpression(n))) add(n, text, 'string')
     }

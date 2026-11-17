@@ -82,7 +82,7 @@ function ChangeDialog({ server, open, onClose, onDone }: { server: ServerDetail;
           {choice === 'new' && (
             <div className="space-y-3">
               <SecretInput label={t('settings.changeLicenceKey.newLicenceKey')} value={key} onChange={setKey} hint={t('settings.changeLicenceKey.getOnePortalCfx')} />
-              <Checkbox label={t('settings.changeLicenceKey.saveKeyComputer')} hint={t('settings.changeLicenceKey.pickNameNextTime')} checked={save} disabled={q.isError} onChange={(e) => { setSave(e.target.checked); if (e.target.checked && !saveName) setSaveName('Main') }} />
+              <Checkbox label={t('settings.changeLicenceKey.saveKeyComputer')} hint={t('settings.changeLicenceKey.pickNameNextTime')} checked={save} disabled={q.isError} onChange={(e) => { setSave(e.target.checked); if (e.target.checked && !saveName) setSaveName(t('settings.changeLicenceKey.defaultKeyName')) }} />
               {save && <Field label={t('settings.changeLicenceKey.nameKey')}><Input value={saveName} maxLength={40} onChange={(e) => setSaveName(e.target.value)} autoComplete="off" /></Field>}
             </div>
           )}

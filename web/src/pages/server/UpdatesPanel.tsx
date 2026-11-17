@@ -62,7 +62,7 @@ export function ChangeRow({ r, selected, onToggle, onCheck, checking, disabled, 
           </div>
           {progress && (
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <Announcer message={progressSentence(`Checking ${r.id}`, percentOf(progress.done, progress.total))} />
+              <Announcer message={progressSentence(tt('resources.updatesPanel.checkingId', { id: r.id }), percentOf(progress.done, progress.total))} />
               <Progress value={percentOf(progress.done, progress.total)} label={tt('resources.updatesPanel.checkingId', { id: r.id })} className="h-1 w-32 shrink-0" />
               <span>{progress.done > 0 ? tt('resources.updatesPanel.checkedId', { id: r.id }) : tt('resources.updatesPanel.checkingId2', { id: r.id })}</span>
             </div>
@@ -88,15 +88,15 @@ export function ReportView({ r }: { r: UpdateReport }) {
   const sec = (title: string, items: string[]) => items.length > 0 && <div><div className="text-sm font-semibold">{title}</div><ul className="list-disc pl-5 text-sm text-muted-foreground">{items.map((i, k) => <li key={k}>{i}</li>)}</ul></div>
   return (
     <div className="space-y-3">
-      {sec('Updated', r.updated.map((u) => `${u.id} (${shortSha(u.from)} to ${shortSha(u.to)})`))}
-      {sec('Skipped', r.skipped.map(([i, t]) => `${i}: ${t}`))}
+      {sec(tt('resources.updatesPanel.updated'), r.updated.map((u) => tt('resources.updatesPanel.fromTo', { id: u.id, from: shortSha(u.from), to: shortSha(u.to) })))}
+      {sec(tt('resources.updatesPanel.skipped'), r.skipped.map(([i, t]) => `${i}: ${t}`))}
       {sec(tt('resources.updatesPanel.restartLeftLater'), r.deferred.map(([i, t]) => `${i}: ${t}`))}
       {sec(tt('resources.updatesPanel.rolledBackAutomatically'), r.rolled_back.map(([i, t]) => `${i}: ${t}`))}
       {sec(tt('resources.updatesPanel.containsDatabaseChangesCheck'), r.sql_flagged)}
       {sec(tt('resources.updatesPanel.needsAttention'), r.needs_attention.map(([i, t]) => `${i}: ${t}`))}
       {sec(tt('resources.updatesPanel.attemptedUpdateStoppedBefore'), r.not_attempted ?? [])}
       {sec(tt('resources.updatesPanel.heldBack'), (r.held ?? []).map(([i, t]) => `${i}: ${t}`))}
-      {sec('Notes', r.notes ?? [])}
+      {sec(tt('resources.updatesPanel.notes'), r.notes ?? [])}
       {sec(tt('resources.updatesPanel.forksBroughtUpDate'), r.forks_synced)}
       {sec(tt('resources.updatesPanel.forksLeftAlone'), r.forks_left_alone.map(([i, t]) => `${i}: ${t}`))}
     </div>
