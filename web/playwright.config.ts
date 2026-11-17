@@ -45,8 +45,8 @@ export default defineConfig({
       fullyParallel: false,
     },
   ],
-  // Only the mock layer needs the preview server; `--project real-chromium` starts its own panel.
-  webServer: process.env.E2E_NO_MOCK_SERVER
+  // Only the mock layer needs the preview server; the real layer starts its own panel (e2e/real/panel.ts).
+  webServer: process.env.E2E_NO_MOCK_SERVER || (process.argv.some((a) => a.includes('real-chromium')) && !process.argv.some((a) => a.includes('mock-')))
     ? undefined
     : {
         // A separate output folder, so the normal `dist` is not touched. VITE_MOCK=1 compiles the mock backend in.

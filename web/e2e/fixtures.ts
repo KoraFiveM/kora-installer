@@ -37,7 +37,8 @@ export const test = base.extend<Fixtures>({
       if (m.type() === 'error') p.add(`console.error: ${m.text()}`)
     })
     page.on('pageerror', (e) => p.add(`page error: ${e.message}`))
-    page.on('requestfailed', (r) => p.add(`request failed: ${r.method()} ${r.url()} (${r.failure()?.errorText})`))
+    // A request the browser itself cancelled (the page moved on while it was in flight) is not a failure.
+    page.on('requestfailed', (r) => r.failure()?.errorText !== 'net::ERR_ABORTED' && p.add(`request failed: ${r.method()} ${r.url()} (${r.failure()?.errorText})`))
     await use(p)
     expect(p.list, 'the browser console / page must stay free of errors').toEqual([])
   },
