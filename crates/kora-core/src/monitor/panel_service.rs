@@ -3,8 +3,9 @@
 //!
 //! * Linux: a systemd **user** unit (`~/.config/systemd/user/kora-panel.service`), no administrator
 //!   rights needed. `loginctl enable-linger` is tried so it also runs while nobody is signed in.
-//! * Windows: a hidden script in the user's Startup folder (runs at every sign-in, no administrator
-//!   rights needed; a scheduled task would need them). Started straight away too.
+//! * Windows: a `HKCU\...\Run` registry entry that runs kora.exe itself with `--background` (which
+//!   starts the panel with no console window). Runs at every sign-in, no administrator rights needed;
+//!   started straight away too. No script is involved (the old VBScript launcher was flagged as a trojan).
 //!
 //! The panel needs the same sign-in token every time: it is kept in `<kora home>/panel-token`
 //! (owner-only). `kora panel --print-link` reads it back. All steps are a data [`Plan`], so the unit and
@@ -20,6 +21,9 @@ pub const UNIT_NAME: &str = "kora-panel.service";
 const TOKEN_FILE: &str = "panel-token";
 const INFO_FILE: &str = "panel-service.json";
 const PID_FILE: &str = "panel.pid";
+/// Windows: the per-user Run key (starts at every sign-in, no administrator rights needed).
+pub const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+pub const RUN_VALUE: &str = "Kora Panel";
 const RUNNING_FILE: &str = "panel-running.json";
 
 pub fn token_path(home: &Path) -> PathBuf {
@@ -71,18 +75,61 @@ pub fn clear_running(home: &Path, pid: u32) {
     }
 }
 
-/// Is the background service set up here (unit file or start-up script present)?
+/// Is the background service set up here (unit file, or the Windows Run entry or an old start-up script, present)?
 pub fn service_installed(platform: Platform) -> bool {
     match platform {
         Platform::Linux => unit_path().exists(),
-        Platform::Windows => startup_script_path().exists(),
+        Platform::Windows => run_entry_exists() || legacy_script_path().exists(),
     }
+}
+
+/// The command line stored in the Windows Run entry, if there is one (always `None` elsewhere).
+pub fn run_entry_command() -> Option<String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new("reg.exe").args(["query", RUN_KEY, "/v", RUN_VALUE]).creation_flags(0x0800_0000).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        parse_run_query(&String::from_utf8_lossy(&out.stdout))
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+/// The data of `reg query` output: `    Kora Panel    REG_SZ    "C:\k\kora.exe" panel ...`.
+pub fn parse_run_query(out: &str) -> Option<String> {
+    out.lines().find_map(|l| {
+        let l = l.trim_start();
+        let rest = l.strip_prefix(RUN_VALUE)?.trim_start();
+        let data = rest.strip_prefix("REG_SZ")?.trim();
+        (!data.is_empty()).then(|| data.to_string())
+    })
+}
+
+/// Replace the stored Run entry's command line (Windows).
+pub fn set_run_entry_command(command: &str) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("reg.exe").args(["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", command, "/f"]).creation_flags(0x0800_0000).status().is_ok_and(|s| s.success())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+        false
+    }
+}
+
+fn run_entry_exists() -> bool {
+    run_entry_command().is_some()
 }
 
 /// What decides whether this panel may restart itself (`POST /panel/restart`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RestartFacts {
-    /// The background service is set up (unit file / start-up script present).
+    /// The background service is set up (unit file / Run entry present).
     pub installed: bool,
     /// Linux: this process runs inside the `kora-panel.service` unit (its cgroup says so).
     pub in_service_unit: bool,
@@ -94,7 +141,7 @@ pub struct RestartFacts {
 }
 
 /// Can this panel restart itself? Only when it is the background service: Linux asks systemd to
-/// restart the unit; Windows starts the start-up script's command line again and exits.
+/// restart the unit; Windows starts the panel's command line again and exits.
 pub fn can_restart(platform: Platform, f: &RestartFacts) -> bool {
     f.installed
         && match platform {
@@ -121,7 +168,7 @@ pub fn restart_facts(home: &Path, platform: Platform, our_port: u16) -> RestartF
 }
 
 /// The command that restarts the background panel: Linux the systemd unit, Windows the start-up
-/// script's command line (the caller then exits so the new panel can take the port).
+/// command line (the caller then exits so the new panel can take the port).
 pub fn restart_command(platform: Platform, exe: &Path, port: u16, tailscale: bool) -> (String, Vec<String>) {
     match platform {
         Platform::Linux => ("systemctl".into(), vec!["--user".into(), "restart".into(), UNIT_NAME.into()]),
@@ -131,28 +178,27 @@ pub fn restart_command(platform: Platform, exe: &Path, port: u16, tailscale: boo
 
 /// Everything `kora panel restart` does to the installed background panel, from outside it. Linux: the
 /// same systemd restart as [`restart_command`]. Windows: stop the running panel (`stop_pid`, only set
-/// when that process is known to be our panel), then run the start-up script again.
-pub fn restart_plan(platform: Platform, stop_pid: Option<u32>) -> Plan {
+/// when that process is known to be our panel), then start it again.
+pub fn restart_plan(platform: Platform, stop_pid: Option<u32>, exe: &Path, port: u16, tailscale: bool) -> Plan {
     match platform {
         Platform::Linux => {
             let (program, args) = restart_command(platform, Path::new(""), 0, false);
             Plan::new(vec![SystemStep::run_owned("Restart the panel", &program, args).user_level()])
         }
         Platform::Windows => {
-            let script = startup_script_path().display().to_string();
             let mut steps = Vec::new();
             if let Some(pid) = stop_pid {
                 steps.push(SystemStep::run_owned("Stop the running panel", "taskkill.exe", vec!["/PID".into(), pid.to_string(), "/F".into()]).user_level().tolerant());
             }
-            steps.push(SystemStep::run("Start the panel again", "wscript.exe", &["//nologo", &script]).user_level());
+            steps.push(start_now_step(exe, port, tailscale));
             Plan::new(steps)
         }
     }
 }
 
 /// Restart the installed background panel. Changes nothing on disk: same token, port and settings.
-pub fn restart(runner: &dyn CommandRunner, platform: Platform, stop_pid: Option<u32>) -> ServiceResult<()> {
-    apply_plan(&restart_plan(platform, stop_pid), runner)
+pub fn restart(runner: &dyn CommandRunner, platform: Platform, stop_pid: Option<u32>, exe: &Path, port: u16, tailscale: bool) -> ServiceResult<()> {
+    apply_plan(&restart_plan(platform, stop_pid, exe, port, tailscale), runner)
 }
 
 /// The saved sign-in token, when a service has been installed.
@@ -217,8 +263,9 @@ pub fn unit_path() -> PathBuf {
     .join(UNIT_NAME)
 }
 
-/// Where the Windows start-up script lives.
-pub fn startup_script_path() -> PathBuf {
+/// Where older versions put a VBScript start-up file (antivirus products flag it as a trojan). It is
+/// removed on install and remove, and replaced by the Run entry.
+pub fn legacy_script_path() -> PathBuf {
     let appdata = std::env::var_os("APPDATA").map_or_else(|| user_home().join("AppData").join("Roaming"), PathBuf::from);
     appdata.join("Microsoft").join("Windows").join("Start Menu").join("Programs").join("Startup").join("Kora Panel.vbs")
 }
@@ -244,11 +291,22 @@ pub fn systemd_unit(exe: &Path, port: u16, tailscale: bool, kora_home_env: Optio
     )
 }
 
-/// The Windows script: starts the panel with no console window.
-pub fn startup_script(exe: &Path, port: u16, tailscale: bool) -> String {
+/// The Windows command line: kora.exe itself. `--background` makes it start the panel with no
+/// console window and return at once.
+pub fn run_command_line(exe: &Path, port: u16, tailscale: bool) -> String {
     let exe = exe.display().to_string().replace('"', "");
-    let args = service_args(port, tailscale);
-    format!("' Starts Kora Panel in the background at sign-in. Remove it with: kora panel --remove-service\r\nCreateObject(\"WScript.Shell\").Run \"\"\"{exe}\"\" {args}\", 0, False\r\n")
+    format!("\"{exe}\" {} --background", service_args(port, tailscale))
+}
+
+/// Start the panel now (Windows): kora.exe `--background` relaunches itself hidden and returns.
+fn start_now_step(exe: &Path, port: u16, tailscale: bool) -> SystemStep {
+    let mut args: Vec<String> = service_args(port, tailscale).split(' ').map(String::from).collect();
+    args.push("--background".into());
+    SystemStep::run_owned("Start the panel now", &exe.display().to_string(), args).user_level()
+}
+
+fn remove_legacy_script_step() -> SystemStep {
+    SystemStep::remove("Remove the old Kora Panel start-up script", &legacy_script_path().display().to_string()).user_level()
 }
 
 pub struct InstallSpec<'a> {
@@ -280,14 +338,19 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
             ])
         }
         Platform::Windows => {
-            let script = startup_script_path().display().to_string();
             let mut steps = Vec::new();
             if let Some(pid) = spec.stop_pid {
                 steps.push(SystemStep::run_owned("Stop the running panel", "taskkill.exe", vec!["/PID".into(), pid.to_string(), "/F".into()]).user_level().tolerant());
             }
             steps.extend([
-                SystemStep::write("Write the Kora Panel start-up script", &script, startup_script(spec.exe, spec.port, spec.tailscale), 0o644).user_level(),
-                SystemStep::run("Start the panel now", "wscript.exe", &["//nologo", &script]).user_level(),
+                remove_legacy_script_step(),
+                SystemStep::run_owned(
+                    "Start the panel at every sign-in",
+                    "reg.exe",
+                    vec!["add".into(), RUN_KEY.into(), "/v".into(), RUN_VALUE.into(), "/t".into(), "REG_SZ".into(), "/d".into(), run_command_line(spec.exe, spec.port, spec.tailscale), "/f".into()],
+                )
+                .user_level(),
+                start_now_step(spec.exe, spec.port, spec.tailscale),
             ]);
             Plan::new(steps)
         }
@@ -307,7 +370,8 @@ pub fn remove_plan(platform: Platform, running_pid: Option<u32>) -> Plan {
             if let Some(pid) = running_pid {
                 steps.push(SystemStep::run_owned("Stop the running panel", "taskkill.exe", vec!["/PID".into(), pid.to_string(), "/F".into()]).user_level().tolerant());
             }
-            steps.push(SystemStep::remove("Remove the Kora Panel start-up script", &startup_script_path().display().to_string()).user_level());
+            steps.push(SystemStep::run("Remove the Kora Panel start-up entry", "reg.exe", &["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]).user_level().tolerant());
+            steps.push(remove_legacy_script_step());
             Plan::new(steps)
         }
     }
@@ -377,21 +441,22 @@ mod tests {
     #[test]
     fn restarting_from_outside_changes_no_files_and_needs_no_administrator_rights() {
         let lines = |p: &Plan| -> Vec<String> { p.steps.iter().filter_map(SystemStep::command_line).collect() };
-        let linux = restart_plan(Platform::Linux, Some(42));
+        let k = Path::new(r"C:\k\kora.exe");
+        let linux = restart_plan(Platform::Linux, Some(42), k, 1, false);
         assert_eq!(lines(&linux), ["systemctl --user restart kora-panel.service"]);
-        let win = restart_plan(Platform::Windows, Some(42));
+        let win = restart_plan(Platform::Windows, Some(42), k, 47130, false);
         let l = lines(&win);
         assert_eq!(l.len(), 2, "{l:?}");
-        assert!(l[0].contains("taskkill.exe /PID 42 /F") && l[1].contains("wscript.exe //nologo") && l[1].contains("Kora Panel.vbs"), "{l:?}");
+        assert!(l[0].contains("taskkill.exe /PID 42 /F") && l[1].contains("kora.exe panel --no-open --foreground --port 47130 --background") && !l[1].contains("wscript"), "{l:?}");
         // Nothing known to be running: only start it.
-        let idle = restart_plan(Platform::Windows, None);
+        let idle = restart_plan(Platform::Windows, None, k, 47130, false);
         assert_eq!(lines(&idle).len(), 1);
         for p in [&linux, &win, &idle] {
             assert!(!p.needs_admin());
             assert_eq!(lines(p).len(), p.steps.len(), "only commands, no files");
         }
         let rn = FakeRunner::default();
-        restart(&rn, Platform::Linux, None).unwrap();
+        restart(&rn, Platform::Linux, None, Path::new("/k"), 1, false).unwrap();
         assert_eq!(rn.calls().len(), 1, "{:?}", rn.calls());
     }
 
@@ -405,10 +470,17 @@ mod tests {
     }
 
     #[test]
-    fn the_windows_script_is_hidden_and_quotes_the_path() {
-        let s = startup_script(Path::new(r"C:\Program Files\Kora\kora.exe"), 47120, false);
-        assert!(startup_script(Path::new("k.exe"), 1, true).contains("--port 1 --listen-tailscale\", 0, False"));
-        assert!(s.contains(r#"Run """C:\Program Files\Kora\kora.exe"" panel --no-open --foreground --port 47120", 0, False"#), "{s}");
+    fn the_windows_run_entry_points_at_kora_exe_and_runs_hidden() {
+        let s = run_command_line(Path::new(r"C:\Program Files\Kora\kora.exe"), 47120, false);
+        assert_eq!(s, r#""C:\Program Files\Kora\kora.exe" panel --no-open --foreground --port 47120 --background"#);
+        assert!(run_command_line(Path::new("k.exe"), 1, true).ends_with("--listen-tailscale --background"));
+        let spec = InstallSpec { exe: Path::new("k.exe"), port: 1, tailscale: false, stop_pid: None, kora_home_env: None };
+        let l: Vec<String> = install_plan(&spec, Platform::Windows).steps.iter().filter_map(SystemStep::command_line).collect();
+        assert!(l.iter().any(|c| c.contains("reg.exe add") && c.contains(RUN_KEY)), "{l:?}");
+        assert!(!l.iter().any(|c| c.contains("wscript") || c.contains(".vbs")), "{l:?}");
+        let q = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    Kora Panel    REG_SZ    \"C:\\k\\kora.exe\" panel --background\r\n\r\n";
+        assert_eq!(parse_run_query(q).as_deref(), Some(r#""C:\k\kora.exe" panel --background"#));
+        assert_eq!(parse_run_query("ERROR: The system was unable to find the specified registry key or value."), None);
     }
 
     #[test]
@@ -424,8 +496,8 @@ mod tests {
         // Windows: a running panel is stopped first, so the new token or settings take effect.
         let restart = InstallSpec { exe: Path::new("k.exe"), port: 1, tailscale: false, stop_pid: Some(42), kora_home_env: None };
         let lines: Vec<String> = install_plan(&restart, Platform::Windows).steps.iter().filter_map(SystemStep::command_line).collect();
-        assert!(lines[0].contains("taskkill.exe /PID 42 /F") && lines[1].contains("wscript.exe"), "{lines:?}");
-        assert!(!remove_plan(Platform::Windows, None).steps.iter().any(|s| s.command_line().is_some()));
+        assert!(lines[0].contains("taskkill.exe /PID 42 /F") && lines.iter().any(|l| l.contains("--background")), "{lines:?}");
+        assert!(!remove_plan(Platform::Windows, None).steps.iter().any(|s| s.command_line().is_some_and(|l| l.contains("taskkill"))));
     }
 
     #[test]

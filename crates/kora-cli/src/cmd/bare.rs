@@ -179,7 +179,7 @@ pub(crate) fn facts(home: &std::path::Path, ports: &dyn PortCheck, platform: kor
     let sudo_user = if cfg!(unix) { kora_core::userhome::sudo_account().map(|a| a.name) } else { None };
     // Only worth asking where it can matter (it can take a moment).
     let background_possible = !elevated && running.is_none() && (windows || user_services_available());
-    let f = Facts { elevated, running: running.is_some(), sudo_user, background_possible, startup_script: windows && svc::startup_script_path().is_file(), windows };
+    let f = Facts { elevated, running: running.is_some(), sudo_user, background_possible, startup_script: windows && svc::service_installed(kora_core::service::Platform::Windows), windows };
     (f, running)
 }
 
@@ -268,12 +268,24 @@ fn run_as_user(name: &str, landing: Landing) -> i32 {
     }
 }
 
-/// Windows, from an administrator window: Explorer starts the Startup script with the normal user's rights.
+/// Windows, from an administrator window: `runas /trustlevel` starts the panel with the normal user's rights.
 fn start_as_normal_user(landing: Landing, no_open: bool, home: &std::path::Path, ports: &dyn PortCheck) -> i32 {
     let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
     println!("Kora Panel does not run as administrator, so Kora is starting it as your normal user.");
     // Through `sysexe`: a bare name would be looked for next to kora.exe first, and this window is elevated.
-    let started = kora_core::sysexe::command("explorer.exe").arg(svc::startup_script_path()).spawn().is_ok();
+    let started = match std::env::current_exe() {
+        Ok(exe) => {
+            let line = svc::run_command_line(&exe, port, svc::saved_tailscale(home));
+            kora_core::sysexe::command("runas.exe")
+                .args(["/trustlevel:0x20000", &line])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        }
+        Err(_) => false,
+    };
     if started && launch::wait_for_panel(port, SETUP_WAIT, std::time::Duration::from_millis(250), ports) {
         if let Ok(link) = svc::link(home) {
             present(landing, port, &link, no_open);
@@ -316,7 +328,7 @@ mod tests {
         assert_eq!(decide(&admin), Plan::ExplainElevated, "plain root on Linux: say what to do");
         let win = Facts { windows: true, ..admin };
         assert_eq!(decide(&win), Plan::ExplainElevated);
-        assert_eq!(decide(&Facts { startup_script: true, ..win }), Plan::StartAsNormalUser, "Explorer starts it with the normal user's rights");
+        assert_eq!(decide(&Facts { startup_script: true, ..win }), Plan::StartAsNormalUser, "it is started with the normal user's rights");
     }
 
     #[test]

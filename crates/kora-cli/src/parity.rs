@@ -89,6 +89,7 @@ const TABLE: &[(&str, Entry)] = &[
     ("panel --port", CliOnly("starts the panel itself")),
     ("panel --no-open", CliOnly("starts the panel itself")),
     ("panel --foreground", CliOnly("starts the panel itself")),
+    ("panel --background", CliOnly("how the Windows start-up entry starts the panel hidden")),
     ("panel --setup", CliOnly("sets up and opens the panel itself (run by the install scripts)")),
     ("panel --install-service", CliOnly("sets up how the panel itself is started, so it cannot be done from inside it")),
     ("panel --remove-service", CliOnly("sets up how the panel itself is started, so it cannot be done from inside it")),

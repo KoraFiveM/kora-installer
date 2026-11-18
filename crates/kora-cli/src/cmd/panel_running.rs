@@ -150,6 +150,7 @@ mod tests {
             new_token: false,
             no_open: true,
             foreground: false,
+            background: false,
             setup: true,
             install_service: false,
             remove_service: false,

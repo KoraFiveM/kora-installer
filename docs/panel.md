@@ -516,7 +516,7 @@ they are lost when the panel restarts (the charts keep their history). Email ale
 
 **Keeping the panel running.** A panel run in a window stops when the window closes, so monitoring and alerts only work while it
 runs. On a server with no screen `kora panel` offers to run it in the background for you; anywhere else, run `kora panel --install-service`. It starts when you sign in and needs no
-administrator rights (Linux: a systemd user service; Windows: an entry in your Startup folder). `kora panel
+administrator rights (Linux: a systemd user service; Windows: a per-user Run registry entry that starts kora.exe itself). `kora panel
 --remove-service` removes it, and `kora panel --print-link` prints the sign-in link of the running background panel (the
 link stays the same each time). `kora panel restart` restarts the background panel (open pages sign in again); a panel
 running in a window is stopped there (Ctrl+C) and started again with `kora panel`. On a computer with a desktop it stays off unless you ask for it.

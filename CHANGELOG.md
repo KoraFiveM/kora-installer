@@ -5,6 +5,9 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Windows: the background panel no longer starts from a VBScript file in the Startup folder, which antivirus products reported as a trojan. It now starts from a per-user `Run` registry entry that runs `kora.exe` itself (new hidden `--background` option, no console window). The old `Kora Panel.vbs` is removed the next time the service is installed, and by `kora panel --remove-service`.
+
 ## [0.8.0] - 2026-11-18
 
 This is 0.8.0: one administrator service replaces the per-action permission prompts (with a Windows installer and a Debian package), a server's source is "clone or fork" and "released or latest" instead of Production and Development, every resource has its own page, and Kora gained backups, moving a server, container mode on Linux, HTTPS with passkeys, a SQLite data store, port checks and forwarding, an optional desktop app, and a first translation. Kora's own files are moved into a new data file on first start; read "Changed" before upgrading.

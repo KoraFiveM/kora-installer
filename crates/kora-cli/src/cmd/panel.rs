@@ -40,6 +40,9 @@ pub(crate) struct PanelArgs {
     /// Run the panel in this window and stop it when the window closes: do not offer or use the background panel.
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link", "setup"])]
     pub(crate) foreground: bool,
+    /// Windows: start the panel hidden (no console window) and return at once. The start-up entry uses this; other systems ignore it.
+    #[arg(long, hide = true, requires = "foreground")]
+    pub(crate) background: bool,
     /// Make sure the background panel is set up and running, then open it in your browser and print the sign-in link (the install scripts run this). Never reads standard input; on a server with Tailscale it asks once on the terminal whether to use it (KORA_TAILSCALE=1 or 0 answers in advance).
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link"])]
     pub(crate) setup: bool,
@@ -106,6 +109,122 @@ pub(crate) const ROOT_ONLY_HELP: &[&str] = &[
     "  kora panel --setup",
 ];
 
+/// `kora panel ... --background` (Windows): run the same command again with no console window, and
+/// return. This replaces the old VBScript launcher, which antivirus products flagged as a trojan.
+fn relaunch_hidden() -> i32 {
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: could not find kora.exe: {e}");
+            return 1;
+        }
+    };
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).filter(|x| x != "--background").collect();
+    match spawn_hidden(&exe, &args) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: could not start the panel: {e}");
+            1
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn spawn_hidden(exe: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Result<()> {
+    std::process::Command::new(exe).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|_| ())
+}
+
+/// Windows: start the panel with no console window and NO inherited handles. `std::process::Command`
+/// always inherits every inheritable handle, so a panel started from a script that reads our output
+/// through a pipe (install.ps1, the installer) would keep that pipe open for ever and the reader would
+/// wait for an end that never comes. `CreateProcessW` with `bInheritHandles = FALSE` avoids that.
+#[cfg(windows)]
+fn spawn_hidden(exe: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Result<()> {
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
+    #[repr(C)]
+    struct StartupInfoW {
+        cb: u32,
+        lp_reserved: *mut u16,
+        lp_desktop: *mut u16,
+        lp_title: *mut u16,
+        dw_x: u32,
+        dw_y: u32,
+        dw_x_size: u32,
+        dw_y_size: u32,
+        dw_x_count_chars: u32,
+        dw_y_count_chars: u32,
+        dw_fill_attribute: u32,
+        dw_flags: u32,
+        w_show_window: u16,
+        cb_reserved2: u16,
+        lp_reserved2: *mut u8,
+        h_std_input: isize,
+        h_std_output: isize,
+        h_std_error: isize,
+    }
+    #[repr(C)]
+    struct ProcessInformation {
+        h_process: isize,
+        h_thread: isize,
+        process_id: u32,
+        thread_id: u32,
+    }
+    unsafe extern "system" {
+        fn CreateProcessW(
+            app: *const u16,
+            cmd: *mut u16,
+            pa: *const c_void,
+            ta: *const c_void,
+            inherit: i32,
+            flags: u32,
+            env: *const c_void,
+            dir: *const u16,
+            si: *const StartupInfoW,
+            pi: *mut ProcessInformation,
+        ) -> i32;
+        fn CloseHandle(h: isize) -> i32;
+    }
+    fn quote(a: &OsStr) -> Vec<u16> {
+        let w: Vec<u16> = a.encode_wide().collect();
+        let plain = !w.is_empty() && !w.iter().any(|&c| c == b' ' as u16 || c == b'\t' as u16 || c == b'"' as u16);
+        if plain {
+            return w;
+        }
+        let mut o = vec![b'"' as u16];
+        for c in w {
+            if c == b'"' as u16 {
+                o.push(b'\\' as u16);
+            }
+            o.push(c);
+        }
+        o.push(b'"' as u16);
+        o
+    }
+    let mut app: Vec<u16> = exe.as_os_str().encode_wide().collect();
+    let mut line = quote(exe.as_os_str());
+    for a in args {
+        line.push(b' ' as u16);
+        line.extend(quote(a));
+    }
+    app.push(0);
+    line.push(0);
+    // SAFETY: zeroed plain-data structs, NUL-terminated buffers that outlive the call, and the two
+    // returned handles are closed. CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP.
+    unsafe {
+        let mut si: StartupInfoW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<StartupInfoW>() as u32;
+        let mut pi: ProcessInformation = std::mem::zeroed();
+        let ok = CreateProcessW(app.as_ptr(), line.as_mut_ptr(), std::ptr::null(), std::ptr::null(), 0, 0x0800_0000 | 0x0000_0200, std::ptr::null(), std::ptr::null(), &si, &mut pi);
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        CloseHandle(pi.h_process);
+        CloseHandle(pi.h_thread);
+    }
+    Ok(())
+}
+
 pub(crate) fn panel(a: &PanelArgs) -> i32 {
     panel_with(a, None)
 }
@@ -113,6 +232,9 @@ pub(crate) fn panel(a: &PanelArgs) -> i32 {
 /// [`panel`], opening the browser on `landing` (`/install`) when it runs in this window.
 pub(crate) fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
     use kora_core::monitor::panel_service as svc;
+    if a.background && cfg!(windows) {
+        return relaunch_hidden();
+    }
     // SECURITY.md: the panel runs as the installing user, never as administrator/root. A root panel
     // would keep its token and state in root's home and run every action with full rights.
     if kora_core::elevate::is_elevated() && std::env::var_os("KORA_ALLOW_ROOT_PANEL").is_none_or(|v| v != "1") {

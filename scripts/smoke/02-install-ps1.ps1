@@ -62,12 +62,12 @@ try {
     if ($out -notmatch 'Sign in to Kora Panel') {
         # Diagnostics: why did the background panel not answer?
         Write-Host '== diagnostics: kora processes'
-        Get-CimInstance Win32_Process -Filter "Name='kora.exe' or Name='wscript.exe'" | Select-Object ProcessId, CommandLine | Format-List | Out-Host
+        Get-CimInstance Win32_Process -Filter "Name='kora.exe'" | Select-Object ProcessId, CommandLine | Format-List | Out-Host
         Write-Host '== diagnostics: listeners on 4712x'
         netstat -ano | Select-String ':4712' | Out-Host
         Write-Host '== diagnostics: startup script'
         Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup" -ErrorAction SilentlyContinue | Out-Host
-        Get-Content "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Kora Panel.vbs" -ErrorAction SilentlyContinue | Out-Host
+        Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Kora Panel' -ErrorAction SilentlyContinue | Out-Host
         Write-Host '== diagnostics: kora home'
         Get-ChildItem "$env:LOCALAPPDATA\Kora" -Recurse -File -ErrorAction SilentlyContinue | Select-Object FullName, Length | Out-Host
         Write-Host '== diagnostics: the same command run directly for 10 s'

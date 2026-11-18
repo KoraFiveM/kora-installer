@@ -444,11 +444,20 @@ pub fn repoint_text(text: &str, old: &Path, new: &Path) -> Option<String> {
     found.then_some(out)
 }
 
-/// Best effort: point the background panel's start-up file (Windows Startup script, systemd user unit) at
+/// Best effort: point the background panel's start-up file (Windows Run entry, systemd user unit) at
 /// `new` when it runs `old`. The running panel is left alone; it picks the new program up at its next start.
 pub fn repoint_background_panel(old: &Path, new: &Path) {
     use crate::monitor::panel_service as svc;
-    let file = if cfg!(windows) { svc::startup_script_path() } else { svc::unit_path() };
+    if cfg!(windows) {
+        // The Run entry (and an old VBScript start-up file, which is replaced by it at the next install).
+        if let Some(cmd) = svc::run_entry_command() {
+            if let Some(fixed) = repoint_text(&cmd, old, new) {
+                let _ = svc::set_run_entry_command(&fixed);
+            }
+        }
+        return;
+    }
+    let file = svc::unit_path();
     let Ok(text) = std::fs::read_to_string(&file) else { return };
     if let Some(fixed) = repoint_text(&text, old, new) {
         let _ = std::fs::write(&file, fixed);
