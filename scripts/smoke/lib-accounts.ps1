@@ -50,6 +50,9 @@ public static class KoraTok
     [StructLayout(LayoutKind.Sequential)]
     struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
 
+    // A Win32Exception shows only its text: put the error number in it.
+    static Win32Exception Fail(string what) { int e = Marshal.GetLastWin32Error(); return new Win32Exception(e, what + " (error " + e + ")"); }
+
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
@@ -222,34 +225,34 @@ public static class KoraTok
         IntPtr admins = IntPtr.Zero, medium = IntPtr.Zero, disable = IntPtr.Zero, labelBuf = IntPtr.Zero, ownerBuf = IntPtr.Zero, userInfo = IntPtr.Zero, tok = IntPtr.Zero;
         try
         {
-            if (!ConvertStringSidToSid("S-1-5-32-544", out admins)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "ConvertStringSidToSid admins"); }
+            if (!ConvertStringSidToSid("S-1-5-32-544", out admins)) { throw Fail("ConvertStringSidToSid admins"); }
             SID_AND_ATTRIBUTES dis = new SID_AND_ATTRIBUTES();
             dis.Sid = admins;
             disable = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
             Marshal.StructureToPtr(dis, disable, false);
             // DISABLE_MAX_PRIVILEGE (0x1) | LUA_TOKEN (0x4)
-            if (!CreateRestrictedToken(src, 0x1 | 0x4, 1, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out tok)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateRestrictedToken"); }
+            if (!CreateRestrictedToken(src, 0x1 | 0x4, 1, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out tok)) { throw Fail("CreateRestrictedToken"); }
 
-            if (!ConvertStringSidToSid("S-1-16-8192", out medium)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "ConvertStringSidToSid medium"); }
+            if (!ConvertStringSidToSid("S-1-16-8192", out medium)) { throw Fail("ConvertStringSidToSid medium"); }
             SID_AND_ATTRIBUTES lab = new SID_AND_ATTRIBUTES();
             lab.Sid = medium;
             lab.Attributes = 0x20; // SE_GROUP_INTEGRITY
             labelBuf = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
             Marshal.StructureToPtr(lab, labelBuf, false);
-            if (!SetTokenInformation(tok, TokenIntegrityLevel, labelBuf, Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)) + GetLengthSid(medium))) { throw new Win32Exception(Marshal.GetLastWin32Error(), "SetTokenInformation integrity"); }
+            if (!SetTokenInformation(tok, TokenIntegrityLevel, labelBuf, Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)) + GetLengthSid(medium))) { throw Fail("SetTokenInformation integrity"); }
 
             userInfo = Info(src, TokenUser);
             SID_AND_ATTRIBUTES me = (SID_AND_ATTRIBUTES)Marshal.PtrToStructure(userInfo, typeof(SID_AND_ATTRIBUTES));
             ownerBuf = Marshal.AllocHGlobal(IntPtr.Size);
             Marshal.WriteIntPtr(ownerBuf, me.Sid);
-            if (!SetTokenInformation(tok, TokenOwner, ownerBuf, IntPtr.Size)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "SetTokenInformation owner"); }
+            if (!SetTokenInformation(tok, TokenOwner, ownerBuf, IntPtr.Size)) { throw Fail("SetTokenInformation owner"); }
 
             STARTUPINFO si = new STARTUPINFO();
             si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
             PROCESS_INFORMATION pi;
             StringBuilder cmd = new StringBuilder(commandLine);
             // CREATE_NO_WINDOW
-            if (!CreateProcessAsUser(tok, exe, cmd, IntPtr.Zero, IntPtr.Zero, false, 0x08000000, IntPtr.Zero, cwd, ref si, out pi)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessAsUser"); }
+            if (!CreateProcessAsUser(tok, exe, cmd, IntPtr.Zero, IntPtr.Zero, false, 0x08000000, IntPtr.Zero, cwd, ref si, out pi)) { throw Fail("CreateProcessAsUser"); }
             CloseHandle(pi.hThread);
             CloseHandle(pi.hProcess);
             return pi.dwProcessId;
