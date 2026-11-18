@@ -3,8 +3,9 @@
 //! file calls Windows. Not run in this repository's unit tests (they run on Linux); the Windows
 //! smoke job installs the MSI and drives all of this for real.
 //!
-//! * **Pipe.** Created by the service as SYSTEM with the descriptor from [`policy::pipe_sddl`], rebuilt
-//!   from the settings every time the next instance is made. The first instance carries
+//! * **Pipe.** Created by the service as SYSTEM with the descriptor from [`policy::pipe_sddl`]; Windows keeps one
+//!   descriptor per pipe name, so it is set on the pipe itself (`SetKernelObjectSecurity`) every time the next
+//!   instance is made, and a watcher makes one when the settings change. The first instance carries
 //!   `FILE_FLAG_FIRST_PIPE_INSTANCE` (a squatter makes the service refuse to start instead of
 //!   sharing the name); remote clients are rejected; the listed accounts get only the specific
 //!   rights read data, write data and read attributes: **not** `FILE_CREATE_PIPE_INSTANCE`
@@ -90,10 +91,14 @@ extern "system" {
     fn GetSidSubAuthorityCount(sid: *mut c_void) -> *mut u8;
     fn GetSidSubAuthority(sid: *mut c_void, index: u32) -> *mut u32;
     fn LookupAccountSidW(system: *const u16, sid: *mut c_void, name: *mut u16, name_len: *mut u32, domain: *mut u16, domain_len: *mut u32, sid_use: *mut u32) -> i32;
+    fn SetKernelObjectSecurity(h: Handle, info: u32, sd: *mut c_void) -> i32;
     fn GetSecurityInfo(h: Handle, object_type: u32, info: u32, owner: *mut *mut c_void, group: *mut *mut c_void, dacl: *mut *mut c_void, sacl: *mut *mut c_void, sd: *mut *mut c_void) -> u32;
 }
 
 const PIPE_ACCESS_DUPLEX: u32 = 3;
+const WRITE_DAC: u32 = 0x0004_0000;
+const DACL_SECURITY_INFORMATION: u32 = 4;
+const PROTECTED_DACL_SECURITY_INFORMATION: u32 = 0x8000_0000;
 const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x0008_0000;
 const PIPE_WAIT: u32 = 0;
 const PIPE_REJECT_REMOTE_CLIENTS: u32 = 8;
@@ -383,10 +388,20 @@ fn make_instance(svc: &WinSvc, first: bool) -> std::io::Result<Owned> {
     }
     let sa = SecurityAttributes { n_length: std::mem::size_of::<SecurityAttributes>() as u32, descriptor: sd, inherit: 0 };
     let w = wide(paths::WINDOWS_PIPE);
-    let mode = PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
+    let mode = PIPE_ACCESS_DUPLEX | WRITE_DAC | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
     // SAFETY: valid arguments; byte mode, blocking, remote clients refused.
     let h = unsafe { CreateNamedPipeW(w.as_ptr(), mode, PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &sa) };
     let err = std::io::Error::last_os_error();
+    if h != INVALID && !first {
+        // Windows keeps ONE security descriptor for the pipe's name, the one the first instance was made with; the
+        // descriptor given to a later `CreateNamedPipe` is ignored. So the current list is set on the pipe itself.
+        // SAFETY: our own new handle (opened with WRITE_DAC) and a descriptor we built.
+        let ok = unsafe { SetKernelObjectSecurity(h, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, sd) };
+        if ok == 0 {
+            let why = std::io::Error::last_os_error();
+            svc.audit(&format!("{} | service | could not update the pipe's access list: {why}", super::audit::rfc3339(svc.now())));
+        }
+    }
     // SAFETY: allocated by the conversion above.
     unsafe { LocalFree(sd) };
     if h == INVALID {

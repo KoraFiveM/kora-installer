@@ -125,8 +125,8 @@ impl Policy {
     }
 }
 
-/// The security descriptor of the Windows named pipe, rebuilt from the settings every time the
-/// service makes the next pipe instance, so allow / deny reach the pipe's own access list too:
+/// The security descriptor of the Windows named pipe, rebuilt from the settings and set on the pipe whenever the
+/// service makes the next pipe instance (Windows keeps ONE descriptor per pipe name), so allow / deny reach the pipe's own access list too:
 /// owner SYSTEM (the panel checks that before it sends anything), protected (nothing inherited),
 /// network logons denied, SYSTEM and Administrators full control, and the specific rights to talk
 /// over the pipe (`0x120083`) for exactly the accounts on the list. (The per-connection check of [`authorise`] is the real decision; this is
