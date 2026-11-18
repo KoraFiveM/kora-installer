@@ -408,14 +408,16 @@ fn make_instance(svc: &WinSvc, first: bool) -> std::io::Result<Owned> {
 }
 
 /// Wake the blocking `ConnectNamedPipe` with a client of our own (stop, or restart after an update).
-fn wake_listener(pipe: &str) {
+fn wake_listener(pipe: &str) -> bool {
     let w = wide(pipe);
     // SAFETY: valid name; the handle (if any) is closed at once.
     let h = unsafe { CreateFileW(w.as_ptr(), CLIENT_ACCESS, 0, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut()) };
-    if h != INVALID {
-        // SAFETY: a handle we just opened.
-        unsafe { CloseHandle(h) };
+    if h == INVALID {
+        return false;
     }
+    // SAFETY: a handle we just opened.
+    unsafe { CloseHandle(h) };
+    true
 }
 
 /// How long a client has to send its whole request line (and how long a thread of ours may wait for it).
@@ -917,9 +919,12 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             self.stop.store(true, Ordering::SeqCst);
-            wake_listener(&self.svc.pipe);
-            if let Some(t) = self.thread.take() {
-                let _ = t.join();
+            // When the pipe cannot be reached from here (a test that failed before it could connect) the server thread is
+            // left to end with the process: joining it would hang the test run instead of reporting the failure.
+            if wake_listener(&self.svc.pipe) {
+                if let Some(t) = self.thread.take() {
+                    let _ = t.join();
+                }
             }
             let _ = &self.dir;
         }
