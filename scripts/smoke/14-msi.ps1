@@ -120,7 +120,7 @@ try {
     $acl = (& icacls $pf | Out-String); Write-Host $acl
     Assert-That ($acl -notmatch 'Everyone:.*\(F\)|Users:.*\((M|F)\)') 'ordinary users cannot change Program Files\Kora'
     Assert-That (Test-OnMachinePath $pf) 'Kora is on the machine PATH'
-    Assert-That (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk") 'the Start Menu shortcut exists'
+    Assert-That (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora Panel.lnk") 'the Start Menu shortcut ("Kora Panel", the older MSI has no desktop app) exists'
     $policy = Get-Content "$pf\data\service.json" -Raw
     Assert-That ($policy -match [regex]::Escape($sidA) -and $policy -match [regex]::Escape($sidC)) 'A and C are on the list'
     Assert-That ($policy -notmatch [regex]::Escape($sidB)) 'B is not'
@@ -194,6 +194,7 @@ try {
     Assert-That (Test-Path "$pf\kora-desktop.exe") 'kora-desktop.exe is in Program Files\Kora after the upgrade'
     $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")
     Assert-That ($lnk.TargetPath -eq "$pf\kora-desktop.exe") "the Start Menu shortcut starts the desktop app ($($lnk.TargetPath))"
+    Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora Panel.lnk")) 'the older MSI''s bare "Kora Panel" shortcut is gone: the app replaced it'
     Assert-That (-not (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Kora -ErrorAction SilentlyContinue)) 'the MSI does not write an autostart entry (the app does, per user)'
 
     Write-Host '=== uninstall leaves nothing behind ==='
@@ -202,7 +203,7 @@ try {
     Assert-That (-not (Get-Service KoraService -ErrorAction SilentlyContinue)) 'the service is gone'
     Assert-That (-not (Test-Path $pf)) 'Program Files\Kora is gone (program, settings, records, audit log)'
     Assert-That (-not (Test-OnMachinePath $pf)) 'the PATH entry is gone'
-    Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")) 'the Start Menu shortcut is gone'
+    Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk") -and -not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora Panel.lnk")) 'the Start Menu shortcuts are gone'
     Assert-That (-not (Test-Path "$pf\kora-desktop.exe")) 'the desktop app is gone'
     Assert-That (-not ([IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\kora-service')) 'no pipe'
     Assert-That (Test-Path "$srvA\.kora\request.json") 'the server folder was never touched'
