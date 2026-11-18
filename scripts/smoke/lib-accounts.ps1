@@ -71,8 +71,11 @@ public static class KoraTok
     static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attributes, int impersonationLevel, int tokenType, out IntPtr newToken);
     [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool CreateRestrictedToken(IntPtr existing, uint flags, uint disableCount, IntPtr sidsToDisable, uint deleteCount, IntPtr privsToDelete, uint restrictCount, IntPtr sidsToRestrict, out IntPtr newToken);
+    // CreateProcessWithTokenW, not CreateProcessAsUser: it gives the new process access to the interactive window station and
+    // desktop (a hand-made token has none of its own: the child died with 0xC0000142, DLL initialisation failed). Needs
+    // SeImpersonatePrivilege, which an elevated administrator has.
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool CreateProcessAsUser(IntPtr token, string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+    static extern bool CreateProcessWithTokenW(IntPtr token, uint logonFlags, string app, StringBuilder cmd, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
 
     const uint TOKEN_ASSIGN_PRIMARY = 0x1, TOKEN_DUPLICATE = 0x2, TOKEN_QUERY = 0x8, TOKEN_ADJUST_DEFAULT = 0x80;
     const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
@@ -261,7 +264,7 @@ public static class KoraTok
             PROCESS_INFORMATION pi;
             StringBuilder cmd = new StringBuilder(commandLine);
             // CREATE_NO_WINDOW
-            if (!CreateProcessAsUser(tok, exe, cmd, IntPtr.Zero, IntPtr.Zero, false, 0x08000000, IntPtr.Zero, cwd, ref si, out pi)) { throw Fail("CreateProcessAsUser"); }
+            if (!CreateProcessWithTokenW(tok, 0, exe, cmd, 0x08000000, IntPtr.Zero, cwd, ref si, out pi)) { throw Fail("CreateProcessWithTokenW"); }
             CloseHandle(pi.hThread);
             CloseHandle(pi.hProcess);
             return pi.dwProcessId;
