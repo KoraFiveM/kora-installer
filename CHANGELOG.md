@@ -10,6 +10,7 @@ versions follow [SemVer](https://semver.org/).
 - A troubleshooting page, "Players cannot join my server" (`/help/join?server=<name>`), with the steps in order: server running, try it here, try it on the home network, firewall, router port forwarding, providers that share one address (CGNAT), test from outside. Linked from the "Can players reach this server?" card; it shows the server's own game port.
 
 ### Fixed
+- The panel's Uninstall ("Kora's shortcuts" item) now also removes the start-up entry, the Kora program and its PATH entry. The running panel is not stopped by it; it stays up until closed and does not come back.
 - `kora uninstall` (all servers) now also cleans up the per-user install instead of only the shortcuts: it stops the background panel and removes its start-up entry, removes `kora.exe` (and `.previous`) and its user PATH entry, and removes the Windows Firewall rules for `kora.exe` (needs Administrator; otherwise the command to run is printed). Kora's own records (server list, database, sign-in token) are asked about and kept by default (`--delete-files` deletes them). Whatever is left is listed.
 
 ## [0.8.1] - 2026-11-18

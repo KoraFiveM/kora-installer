@@ -1076,7 +1076,7 @@ route('POST', '/uninstall/plan', (_m, b) => {
       { item: `${s.name}/database`, description: `Drop the database and database user Kora created for '${s.name}'`, kind: 'database', remove: false },
     )
   }
-  if (!only && prefs.app) items.push({ item: 'app', description: "Kora's shortcuts (and the old machine-wide Kora app, if it is still installed). Your servers are not touched", kind: 'app', remove: false })
+  if (!only && prefs.app) items.push({ item: 'app', description: "Kora's shortcuts, its start-up entry, the Kora program and its PATH entry (and the old machine-wide Kora app, if it is still installed). Your servers are not touched", kind: 'app', remove: false })
   return { items } satisfies T.UninstallPlan
 })
 route('POST', '/uninstall', (_m, b) => {
