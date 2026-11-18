@@ -5,6 +5,10 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-18
+
+A small Windows fix: the background panel no longer starts from a script file that antivirus products flagged.
+
 ### Fixed
 - Windows: the background panel no longer starts from a VBScript file in the Startup folder, which antivirus products reported as a trojan. It now starts from a per-user `Run` registry entry that runs `kora.exe` itself (new hidden `--background` option, no console window). The old `Kora Panel.vbs` is removed the next time the service is installed, and by `kora panel --remove-service`.
 

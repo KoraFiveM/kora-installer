@@ -1,7 +1,7 @@
 [package]
 name = "kora-desktop"
 description = "Kora desktop app: a tray icon and a native window that shows Kora Panel (a thin client of the panel)"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 rust-version = "1.93"
 license = "Apache-2.0"

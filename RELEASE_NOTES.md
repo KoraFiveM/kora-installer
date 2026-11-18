@@ -1,3 +1,15 @@
+## Kora Installer v0.8.1
+
+A small Windows fix on top of 0.8.0.
+
+### What is new
+- **No more antivirus warning about the panel's start-up file (Windows).** Kora used to start its background panel from a small script file (`Kora Panel.vbs`) in your Startup folder, and some antivirus products reported that file as a trojan. The panel now starts from a normal per-user start-up entry that runs `kora.exe` itself, with no console window and no script. The old file is removed the next time the service is set up, and by `kora panel --remove-service`.
+
+### Install and update
+Run `kora self-update`, or use the install lines from the 0.8.0 notes below (MSI, `install.ps1`, .deb or `install.sh`). Nothing else changes; your servers keep working.
+
+If your antivirus already quarantined `Kora Panel.vbs`, you can ignore that: updating replaces it.
+
 ## Kora Installer v0.8.0
 
 Install and manage a Kora FiveM server from your browser. Run `kora` (or open the Kora shortcut) and the panel opens.
