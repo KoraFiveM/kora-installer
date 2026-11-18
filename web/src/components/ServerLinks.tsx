@@ -7,6 +7,7 @@ import { CopyButton } from '@/components/CopyButton'
 import { toNotice } from '@/components/ErrorNotice'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { txAdminLink, type TxAdminLink } from '@/lib/serverLinks'
+import { browseForFolder, inShell } from '@/lib/shell'
 import { t as tt } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/servers/serverLinks'
@@ -22,6 +23,24 @@ export function useCanOpenFolder(): boolean {
   const sys = useQuery({ queryKey: ['system'], queryFn: api.system })
   const { remote } = useRole()
   return !remote && sys.data?.local === true
+}
+
+/**
+ * "Browse..." for a folder box: the desktop app's folder window when it is there, else (browser on the
+ * same computer as Kora) the folder window Kora opens itself. `null` = no window is possible here, so the
+ * box stays a plain text box. The returned function gives the folder, or null when it was closed or failed.
+ */
+export function useBrowseFolder(): ((title?: string) => Promise<string | null>) | null {
+  const canOpen = useCanOpenFolder()
+  if (inShell()) return browseForFolder
+  if (!canOpen) return null
+  return async (title) => {
+    try {
+      return await api.pickFolder(title)
+    } catch {
+      return null
+    }
+  }
 }
 
 /** "Open folder" on the computer that runs Kora; "Copy path" from anywhere else (see [`useCanOpenFolder`]). */

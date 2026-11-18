@@ -30,20 +30,24 @@ import { rich } from '@/i18n/react'
 import '@/i18n/en/core/language'
 import '@/i18n/en/settings/settingsPage'
 
-function RestartNow({ version }: { version?: string }) {
+/** `force`: this panel runs in a terminal window and cannot restart the usual way; the restart starts a hidden copy and exits. */
+function RestartNow({ version, force = false }: { version?: string; force?: boolean }) {
   const [state, setState] = useState<'idle' | 'restarting' | 'timeout'>('idle')
   const [err, setErr] = useState<unknown>(null)
   const go = async () => {
     setErr(null); setState('restarting')
     try {
-      if (await restartPanel()) window.location.reload()
+      if (await restartPanel(undefined, undefined, force)) window.location.reload()
       else setState('timeout')
     } catch (e) { setErr(e); setState('idle') }
   }
   return (
     <div className="space-y-3">
-      <Alert tone="success">{version ? t('settings.settingsPage.updatedTo', { version }) : t('settings.settingsPage.updatedValue')}</Alert>
-      {state === 'restarting' ? <p className="text-sm">{t('settings.settingsPage.restarting')}</p> : <Button onClick={() => void go()}>{t('settings.settingsPage.restartNow')}</Button>}
+      {force
+        ? <Alert tone="success">{rich('settings.settingsPage.updatedPanelRunsTerminal', { code: (c) => <code>{c}</code> })}</Alert>
+        : <Alert tone="success">{version ? t('settings.settingsPage.updatedTo', { version }) : t('settings.settingsPage.updatedValue')}</Alert>}
+      {force && <p className="text-sm text-muted-foreground">{rich('settings.settingsPage.forceRestartNote', { code: (c) => <code>{c}</code> })}</p>}
+      {state === 'restarting' ? <p className="text-sm">{t('settings.settingsPage.restarting')}</p> : <Button onClick={() => void go()}>{t(force ? 'settings.settingsPage.forceRestart' : 'settings.settingsPage.restartNow')}</Button>}
       {state === 'timeout' && <Alert tone="warning">{rich('settings.settingsPage.panelDidComeBack', { code: (c) => <code>{c}</code> })}</Alert>}
       <ErrorNotice error={err} />
     </div>
@@ -79,7 +83,7 @@ function SelfUpdate() {
         {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
         {run.phase === 'done' && (sys.data?.can_restart
           ? <RestartNow version={q.data?.current} />
-          : <Alert tone="success">{rich('settings.settingsPage.updatedPanelRunsTerminal', { code: (c) => <code>{c}</code> })}</Alert>)}
+          : <RestartNow version={q.data?.current} force />)}
         {run.phase === 'failed' && <ErrorNotice error={run.error} />}
         <ErrorNotice error={err ?? q.error} />
       </CardContent>

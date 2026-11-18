@@ -36,6 +36,7 @@ pub fn handler(op: Op) -> MethodRouter<AppState> {
         Op::ServersScan => on_op(op, handlers::servers::servers_scan),
         Op::ServersAdopt => on_op(op, handlers::servers::servers_adopt),
         Op::ServerOpenFolder => on_op(op, handlers::servers::server_open_folder),
+        Op::PickFolder => on_op(op, handlers::system::pick_folder),
         Op::LogsList => on_op(op, handlers::servers::logs_list),
         Op::LogsTail => on_op(op, handlers::servers::logs_tail),
         Op::ConsoleStream => on_op(op, handlers::console::console_stream),

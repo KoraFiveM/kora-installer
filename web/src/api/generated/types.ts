@@ -2739,6 +2739,14 @@ export type PanelAlert = {
 };
 
 /**
+ * `?force=true` of `POST /panel/restart`: a panel that is not the background service (one running in a terminal
+ * window) cannot restart itself the usual way; this starts a fresh copy of the same command, hidden, and exits.
+ */
+export type PanelRestartQuery = {
+  force?: boolean,
+};
+
+/**
  * `POST /panel/restart`.
  */
 export type PanelRestarting = {
@@ -2785,6 +2793,23 @@ export type PasskeyView = {
  */
 export type PassphraseRequest = {
   passphrase?: string,
+};
+
+/**
+ * `POST /pick-folder` `{title?}`: open the folder window of the computer that runs Kora (local sessions only).
+ */
+export type PickFolderRequest = {
+  /**
+   * The window's title or prompt (up to 100 characters).
+   */
+  title?: string,
+};
+
+/**
+ * The folder that was chosen; `null` when the window was closed without choosing.
+ */
+export type PickedFolder = {
+  path: string | null,
 };
 
 export type PlanItem =

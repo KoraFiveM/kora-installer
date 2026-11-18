@@ -10,9 +10,11 @@ import { Alert } from '@/components/ui/alert'
 import { Checkbox } from '@/components/ui/checkbox'
 import { CopyField } from '@/components/CopyButton'
 import { ErrorNotice } from '@/components/ErrorNotice'
+import { Link } from 'react-router-dom'
 import { useRole, whyNot } from '@/hooks/useRole'
 import { t, msg, type Msg } from '@/i18n'
 import '@/i18n/en/servers/reachCard'
+import '@/i18n/en/servers/joinHelp'
 
 const TONE: Record<ReachState, Tone> = { ok: 'success', likely: 'success', problem: 'danger', unknown: 'neutral' }
 const LABEL: Record<ReachState, Msg> = { ok: msg('servers.reachCard.ok'), likely: msg('servers.reachCard.probablyOk'), problem: msg('servers.reachCard.problem'), unknown: msg('servers.reachCard.notKnown') }
@@ -207,6 +209,7 @@ export function ReachCard({ name, onStart, compact = false }: { name: string; on
                 {report.connect.cfx && <CopyField value={report.connect.cfx} label={t('servers.reachCard.cfxReJoinLink')} />}
               </div>
             )}
+            <Link to={`/help/join?server=${encodeURIComponent(name)}`} className="block text-sm underline underline-offset-4">{t('servers.joinHelp.link')}</Link>
             <div className="space-y-1.5 border-t border-border pt-3">
               <div className="text-sm text-muted-foreground">{t('servers.reachCard.outsideLookupsKoraMay')}</div>
               <Checkbox label={t('servers.reachCard.cfxResPublicServer')} hint={t('servers.reachCard.asksFrontendCfxservicesNet')} checked={report.consent.cfx_list} disabled={busy || adminOff !== null} onChange={(e) => { setDone(null); void api.reach.setSettings({ cfx_list: e.target.checked }).then(() => check.mutate(undefined)) }} />

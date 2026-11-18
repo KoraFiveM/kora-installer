@@ -25,6 +25,7 @@ const FleetPage = lazy(() => import('@/pages/FleetPage'))
 const ImportPage = lazy(() => import('@/pages/import/ImportPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const SystemCheckPage = lazy(() => import('@/pages/SystemCheckPage'))
+const JoinHelpPage = lazy(() => import('@/pages/JoinHelpPage'))
 
 // The styleguide only exists in mock builds: the constant is false in production, so this branch (and the page) is dropped.
 const Styleguide = __KORA_MOCK__ ? lazy(() => import('@/pages/Styleguide')) : null
@@ -118,6 +119,7 @@ export function App({ boot }: { boot: BootResult }) {
               <Route path="fleet" element={<FleetPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="system" element={<SystemCheckPage />} />
+              <Route path="help/join" element={<JoinHelpPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

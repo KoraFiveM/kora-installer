@@ -23,6 +23,18 @@ describe('restartPanel', () => {
     expect(init.method).toBe('POST')
   })
 
+  it('asks for a forced restart when told to (a panel in a terminal window)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(meta('0.4.1'))
+      .mockResolvedValueOnce(jsonResponse(202, { restarting: true }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(meta('0.4.2'))
+    const p = restartPanel(60_000, 1_000, true)
+    await vi.advanceTimersByTimeAsync(3_000)
+    await expect(p).resolves.toBe(true)
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/panel/restart?force=true')
+  })
+
   it('resolves when the panel answers again after being down', async () => {
     fetchMock
       .mockResolvedValueOnce(meta('0.4.1'))

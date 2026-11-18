@@ -1,3 +1,16 @@
+## Kora Installer v0.8.2
+
+Fixes and small additions on top of 0.8.1.
+
+### What is new
+- **Force restart after an update.** When the panel runs in a terminal window it cannot restart itself, so the update used to end with "stop it and run `kora panel` again". There is now a **Force restart** button: the new version starts in the background (no window) and the page reconnects.
+- **Browse... for the server folder** in the install wizard. It opens the normal folder window, in the desktop app or when the browser is on the same computer as Kora.
+- **"Players cannot join my server"**: a step-by-step troubleshooting page (server, firewall, router port forwarding, internet providers that share one address, test from outside), linked from the "Can players reach this server?" card.
+- **Uninstall now cleans up the per-user install.** `kora uninstall` (and the panel's Uninstall) also removes the start-up entry, `kora.exe` and its PATH entry, and the Windows Firewall rules for `kora.exe` (needs Administrator; otherwise Kora prints the command to run). Your servers and Kora's own records are kept unless you ask to delete them.
+
+### Install and update
+Run `kora self-update`, or use the install lines from the 0.8.0 notes below (MSI, `install.ps1`, .deb or `install.sh`). Your servers keep working.
+
 ## Kora Installer v0.8.1
 
 A small Windows fix on top of 0.8.0.

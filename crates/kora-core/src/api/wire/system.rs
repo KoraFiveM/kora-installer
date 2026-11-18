@@ -58,6 +58,16 @@ pub struct AdminServiceInstallResult {
     pub installed: bool,
 }
 
+/// `?force=true` of `POST /panel/restart`: a panel that is not the background service (one running in a terminal
+/// window) cannot restart itself the usual way; this starts a fresh copy of the same command, hidden, and exits.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PanelRestartQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub force: Option<bool>,
+}
+
 /// `POST /panel/restart`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]

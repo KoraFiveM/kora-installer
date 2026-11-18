@@ -246,6 +246,8 @@ pub enum Action {
     // ---- removal ----
     RemoveShortcut(PathBuf),
     RemoveMachinePath(String),
+    /// Windows: take a folder off the PATH of this user only (no administrator rights).
+    RemoveUserPath(String),
     RemoveUninstall,
     RemoveSymlink(PathBuf),
     RemoveFile(PathBuf),
@@ -269,6 +271,7 @@ impl Action {
             RegisterUninstall(e) => format!("Register \"{}\" {} in Apps & features (uninstall: {})", e.display_name, e.display_version, e.uninstall_string),
             RemoveShortcut(p) => format!("Remove the shortcut {}", p.display()),
             RemoveMachinePath(d) => format!("Remove {d} from the machine PATH"),
+            RemoveUserPath(d) => format!("Remove {d} from your PATH"),
             RemoveUninstall => "Remove the Apps & features entry".into(),
             RemoveSymlink(p) => format!("Remove the link {}", p.display()),
             RemoveFile(p) => format!("Delete {}", p.display()),
@@ -699,6 +702,13 @@ fn apply(sys: &mut dyn Sys, l: &Layout, a: &Action) -> Result<()> {
         Action::AddUserPath(d) => {
             let cur = sys.user_path()?.unwrap_or_default();
             match pathlist::add(&cur, d) {
+                Some(v) => sys.set_user_path(&v),
+                None => Ok(()),
+            }
+        }
+        Action::RemoveUserPath(d) => {
+            let cur = sys.user_path()?.unwrap_or_default();
+            match pathlist::remove(&cur, d) {
                 Some(v) => sys.set_user_path(&v),
                 None => Ok(()),
             }

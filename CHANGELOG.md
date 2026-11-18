@@ -5,6 +5,19 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-18
+
+Fixes for the Windows per-user install, plus a folder picker in the install wizard, a troubleshooting page, and a Force restart after updates.
+
+### Added
+- **Force restart** after an update when the panel runs in a terminal window (it cannot restart itself the usual way): the new version starts in the background with no window, and the page reconnects. `POST /panel/restart?force=true`, local admin only.
+- Install wizard: a **Browse...** button next to the server folder opens the system folder window (in the desktop app, or, when the browser is on the same computer as Kora, a window Kora opens itself: PowerShell's folder dialog on Windows, `zenity` or `kdialog` on Linux, `osascript` on macOS). New local-only API call `pick_folder`.
+- A troubleshooting page, "Players cannot join my server" (`/help/join?server=<name>`), with the steps in order: server running, try it here, try it on the home network, firewall, router port forwarding, providers that share one address (CGNAT), test from outside. Linked from the "Can players reach this server?" card; it shows the server's own game port.
+
+### Fixed
+- The panel's Uninstall ("Kora's shortcuts" item) now also removes the start-up entry, the Kora program and its PATH entry. The running panel is not stopped by it; it stays up until closed and does not come back.
+- `kora uninstall` (all servers) now also cleans up the per-user install instead of only the shortcuts: it stops the background panel and removes its start-up entry, removes `kora.exe` (and `.previous`) and its user PATH entry, and removes the Windows Firewall rules for `kora.exe` (needs Administrator; otherwise the command to run is printed). Kora's own records (server list, database, sign-in token) are asked about and kept by default (`--delete-files` deletes them). Whatever is left is listed.
+
 ## [0.8.1] - 2026-11-18
 
 A small Windows fix: the background panel no longer starts from a script file that antivirus products flagged.

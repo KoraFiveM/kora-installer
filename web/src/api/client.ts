@@ -284,8 +284,11 @@ export const api = {
   },
   system: () => call('system_info', {}),
   panel: {
-    restart: () => call('panel_restart', {}),
+    /** `force`: for a panel in a terminal window, which cannot restart itself the usual way. */
+    restart: (force = false) => call('panel_restart', force ? { query: { force: true } } : {}),
   },
+  /** The folder window of the computer that runs Kora (local sessions only). null = closed without choosing. */
+  pickFolder: (title?: string) => call('pick_folder', { body: title ? { title } : {} }).then((r) => r.path),
   servers: {
     list: () => call('servers_list', {}).then((r) => r.servers),
     get: (name: string) => call('server_get', { params: { s: name } }),

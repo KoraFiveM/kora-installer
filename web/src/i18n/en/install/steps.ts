@@ -15,6 +15,8 @@ const messages = {
   'install.steps.serverName': 'Server name',
   'install.steps.usedFolderServiceDatabase': 'Used for the folder, the service and the database. Saved as "{name}".',
   'install.steps.serverFolder': 'Server folder',
+  'install.steps.browse': 'Browse...',
+  'install.steps.chooseServerFolder': 'Choose the server folder',
   'install.steps.whereServerFilesGo': 'Where the server files go. It is suggested from the name.',
   'install.steps.serverFilesGoCode': 'The server files go in {code, node}. <button>Use another folder</button>',
   'install.steps.serverNameShownPlayers': 'Server name shown to players (hostname)',

@@ -8,7 +8,7 @@ use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{Extension, Json};
 use kora_core::api::wire;
@@ -33,6 +33,77 @@ pub(crate) fn headless() -> bool {
         return true;
     }
     cfg!(unix) && !cfg!(target_os = "macos") && std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none()
+}
+
+type Picker = Box<dyn Fn(&str) -> Result<Option<String>, String> + Send + Sync>;
+static PICKER: Mutex<Option<Picker>> = Mutex::new(None);
+
+/// Tests only: replace the folder window (`None` = the real one).
+pub fn set_picker(f: Option<Picker>) {
+    *PICKER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = f;
+}
+
+/// The system's folder window, on the computer that runs Kora. `Ok(None)` = closed without choosing.
+fn pick_real(title: &str) -> Result<Option<String>, String> {
+    use std::process::Stdio;
+    let run = |mut c: std::process::Command| -> Result<Option<String>, String> {
+        let out = c.stdin(Stdio::null()).stderr(Stdio::null()).output().map_err(|_| "no-tool".to_string())?;
+        let text = String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string();
+        Ok((out.status.success() && !text.is_empty()).then_some(text))
+    };
+    if cfg!(windows) {
+        let script = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
+            $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = $env:KORA_PICK_TITLE; $d.ShowNewFolderButton = $true; \
+            $o = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}; \
+            if ($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }";
+        let mut c = kora_core::sysexe::command("powershell.exe");
+        c.args(["-NoProfile", "-NonInteractive", "-STA", "-Command", script]).env("KORA_PICK_TITLE", title);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(0x0800_0000);
+        }
+        return run(c).map_err(|_| "The folder window could not open. Type the folder instead.".to_string());
+    }
+    if cfg!(target_os = "macos") {
+        let mut c = kora_core::sysexe::command("osascript");
+        c.args(["-e", "on run argv", "-e", "POSIX path of (choose folder with prompt (item 1 of argv))", "-e", "end run", title]);
+        return run(c).map_err(|_| "The folder window could not open. Type the folder instead.".to_string());
+    }
+    let mut zenity = kora_core::sysexe::command("zenity");
+    zenity.args(["--file-selection", "--directory", "--title", title]);
+    match run(zenity) {
+        Err(_) => {}
+        done => return done,
+    }
+    let mut kdialog = kora_core::sysexe::command("kdialog");
+    kdialog.args(["--getexistingdirectory", ".", "--title", title]);
+    run(kdialog).map_err(|_| "This computer has no folder window tool (zenity or kdialog). Type the folder instead.".to_string())
+}
+
+/// `POST /pick-folder` `{title?}` → `{path}`: the folder window of the computer that runs Kora. Local sessions
+/// only (see `remote::roles::local_only`): a remote person must not get windows on this desktop.
+pub async fn pick_folder(Json(body): Json<wire::PickFolderRequest>) -> Result<Json<wire::PickedFolder>, ApiError> {
+    blocking(move || {
+        let title = body.title.unwrap_or_default();
+        if title.chars().count() > 100 || title.contains('\0') {
+            return Err(ApiError::bad_request("The window title is too long."));
+        }
+        let title = if title.trim().is_empty() { "Choose a folder".to_string() } else { title };
+        let seam = PICKER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let picked = match seam.as_ref() {
+            Some(f) => f(&title),
+            None => {
+                drop(seam);
+                if headless() {
+                    return Err(ApiError::bad_request("This computer has no desktop, so a folder window can't open here. Type the folder instead."));
+                }
+                pick_real(&title)
+            }
+        };
+        picked.map(|path| Json(wire::PickedFolder { path })).map_err(ApiError::bad_request)
+    })
+    .await
 }
 
 /// A test seam: lets tests pretend to be headless or not, and choose what "elevated" means.
@@ -77,25 +148,59 @@ fn can_restart(port: u16) -> bool {
     svc::can_restart(platform, &svc::restart_facts(&svc::home(), platform, port))
 }
 
-/// `POST /panel/restart`: 202 `{"restarting": true}`, then the panel restarts (local admin only).
-/// Sign-in sessions live in memory, so the page signs in again afterwards.
-pub async fn panel_restart(State(st): State<AppState>, Extension(caller): Extension<Caller>) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+/// `POST /panel/restart[?force=true]`: 202 `{"restarting": true}`, then the panel restarts (local admin only).
+/// Sign-in sessions live in memory, so the page signs in again afterwards. A panel that is not the background
+/// service (one in a terminal window) only restarts with `force=true`: it then starts a hidden copy of its own
+/// command line and exits.
+pub async fn panel_restart(State(st): State<AppState>, Extension(caller): Extension<Caller>, Query(q): Query<wire::PanelRestartQuery>) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
     if caller.remote {
         return Err(ApiError::forbidden("The panel can only be restarted from the computer that runs Kora."));
     }
     let port = st.addr.port();
-    if !blocking(move || Ok(can_restart(port))).await? {
-        return Err(ApiError::conflict("This panel is not the background service, so it cannot restart itself. Stop it and run `kora panel` again."));
+    let can = blocking(move || Ok(can_restart(port))).await?;
+    let force = q.force.unwrap_or(false);
+    if !can && !force {
+        return Err(ApiError::conflict("This panel is not the background service, so it cannot restart itself. Use \"Force restart\", or stop it and run `kora panel` again."));
     }
     if seam::can_restart_override().is_some() {
         seam::count_restart();
     } else {
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(300)).await;
-            restart_now(port);
+            if can {
+                restart_now(port);
+            } else {
+                relaunch_self();
+            }
         });
     }
     Ok((axum::http::StatusCode::ACCEPTED, Json(json!({"restarting": true}))))
+}
+
+/// Force restart: start a copy of this very command line (same program, same arguments) with no window and no
+/// terminal, then exit so the copy can take the port (it waits for it, see `bind_retrying`).
+fn relaunch_self() {
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("Could not restart the panel: the program's own path is unknown.");
+        return;
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(std::env::args_os().skip(1)).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW | DETACHED_PROCESS
+        cmd.creation_flags(0x0800_0000 | 0x0000_0008);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0); // its own group: the terminal's Ctrl+C no longer reaches it
+    }
+    match cmd.spawn() {
+        Ok(_) => std::process::exit(0),
+        Err(e) => eprintln!("Could not restart the panel: {e}"),
+    }
 }
 
 /// Start the restart (Linux: systemd restarts the unit, and so us; Windows: start a new panel, exit).

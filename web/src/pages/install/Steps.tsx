@@ -10,6 +10,7 @@ import { Input, Label, Select } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
+import { useBrowseFolder } from '@/components/ServerLinks'
 import { GROUP_LABEL, groupResources } from '@/lib/catalog'
 import { slug, validatePorts } from '@/lib/utils'
 import { dbLoginProblem, defaultVersions, dirBase, folderFor, runModePatch, type WizardForm } from './form'
@@ -53,6 +54,7 @@ export function VersionsStep({ f, set }: StepProps) {
 
 export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & { /** The short path: the folder and the kind of server are shown as plain text until asked for. */ quick?: boolean }) {
   const base = dirBase(defaultsDir)
+  const browse = useBrowseFolder()
   const [folderOpen, setFolderOpen] = useState(false)
   const [kindOpen, setKindOpen] = useState(false)
   const showFolder = !quick || advanced || folderOpen || f.dirTouched
@@ -63,9 +65,14 @@ export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & {
         <Input value={f.name} onChange={(e) => set({ name: e.target.value, ...(f.dirTouched ? {} : { dir: folderFor(base, e.target.value) }) })} autoComplete="off" />
       </Field>
       {showFolder ? (
-        <Field label={t('install.steps.serverFolder')} hint={t('install.steps.whereServerFilesGo')}>
-          <Input value={f.dir} onChange={(e) => set({ dir: e.target.value, dirTouched: true })} autoComplete="off" />
-        </Field>
+        <div className="space-y-2">
+          <Field label={t('install.steps.serverFolder')} hint={t('install.steps.whereServerFilesGo')}>
+            <Input value={f.dir} onChange={(e) => set({ dir: e.target.value, dirTouched: true })} autoComplete="off" />
+          </Field>
+          {browse && (
+            <Button type="button" onClick={async () => { const d = await browse(t('install.steps.chooseServerFolder')); if (d) set({ dir: d, dirTouched: true }) }}>{t('install.steps.browse')}</Button>
+          )}
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground">{rich('install.steps.serverFilesGoCode', { code: <code className="break-all font-mono text-xs text-foreground">{f.dir}</code>, button: (c) => <Button variant="link" className="h-auto p-0" onClick={() => setFolderOpen(true)}>{c}</Button> })}</p>
       )}

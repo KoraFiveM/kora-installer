@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import type { ReachLayer, ReachReport } from '@/api/types'
 import { jsonResponse } from '@/test/utils'
 import { t } from '@/i18n'
@@ -45,7 +46,7 @@ function setup(handler: (url: string, init?: RequestInit) => Response | Promise<
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => handler(url, init))
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } })
   qc.setQueryData(['meta'], { version: '0', api: 1, platform: 'linux', ops: [], node: 'n', identity: { name: 'sam', provider: 'local', role }, remote: false })
-  return render(<QueryClientProvider client={qc}><ReachCard name="prod" {...props} /></QueryClientProvider>)
+  return render(<QueryClientProvider client={qc}><MemoryRouter><ReachCard name="prod" {...props} /></MemoryRouter></QueryClientProvider>)
 }
 
 const calls = (needle: string) => fetchMock.mock.calls.filter((c) => String(c[0]).includes(needle))

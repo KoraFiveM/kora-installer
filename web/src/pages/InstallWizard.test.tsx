@@ -461,3 +461,21 @@ describe('Install wizard: an install that stopped', () => {
     expect(screen.getByRole('button', { name: 'Change my answers first' })).toBeInTheDocument()
   })
 })
+
+describe('Install wizard: Browse for the server folder', () => {
+  it('the local panel opens a folder window and puts the chosen folder in the box', async () => {
+    const user = userEvent.setup()
+    const pick = vi.spyOn(api, 'pickFolder').mockResolvedValue('D:\\Servers\\friday')
+    renderApp(<InstallWizard />, '/install')
+    await user.type(await screen.findByLabelText('Licence key'), KEY)
+    await next(user)
+    await user.click(await screen.findByRole('button', { name: 'Use another folder' }))
+    await user.click(await screen.findByRole('button', { name: 'Browse...' }))
+    expect(pick).toHaveBeenCalledWith('Choose the server folder')
+    await waitFor(() => expect(screen.getByLabelText('Server folder')).toHaveValue('D:\\Servers\\friday'))
+    // closing the window without choosing keeps what was there
+    pick.mockResolvedValue(null)
+    await user.click(screen.getByRole('button', { name: 'Browse...' }))
+    expect(screen.getByLabelText('Server folder')).toHaveValue('D:\\Servers\\friday')
+  })
+})

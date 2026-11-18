@@ -299,7 +299,8 @@ impl Maintenance for SystemMaintenance {
         if only.is_none() && (self.app_status().installed || app::user::user_status().any()) {
             out.push(PlanItem {
                 item: "app".into(),
-                description: "Kora's shortcuts (and the old machine-wide Kora app, if it is still installed). Your servers are not touched".into(),
+                description: "Kora's shortcuts, its start-up entry, the Kora program and its PATH entry (and the old machine-wide Kora app, if it is still installed). Your servers are not touched"
+                    .into(),
                 kind: "app",
                 remove: false,
             });
@@ -382,6 +383,24 @@ impl Maintenance for SystemMaintenance {
                 Ok(lines) if !lines.is_empty() => sum.removed.push("Kora's shortcuts".into()),
                 Ok(_) => {}
                 Err(e) => sum.failed.push(format!("Kora's shortcuts: {e}")),
+            }
+            // This panel is the running program: it is not stopped here (the answer of this job would be lost).
+            // It is taken out of start-up and its program and PATH entry are removed; it stays up until closed.
+            status("Removing Kora Panel from start-up");
+            let platform = Platform::current();
+            match crate::service::apply_plan(&crate::monitor::panel_service::remove_plan(platform, None), &runner) {
+                Ok(()) => sum.removed.push("Kora Panel's start-up entry (the panel keeps running until you close it)".into()),
+                Err(e) => sum.failed.push(format!("Kora Panel's start-up entry: {e}")),
+            }
+            if app::user::program_present() {
+                status("Removing the Kora program");
+                match app::user::remove_program(false) {
+                    Ok(_) => sum.removed.push("the Kora program and its PATH entry".into()),
+                    Err(e) => sum.failed.push(format!("the Kora program: {e}")),
+                }
+            }
+            if cfg!(windows) {
+                sum.kept.push("Windows Firewall rules for kora.exe (run `kora uninstall` as Administrator to remove them)".into());
             }
             if app::user::legacy_present().present() {
                 status("Removing the old Kora app");

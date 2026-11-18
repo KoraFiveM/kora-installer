@@ -5,6 +5,8 @@ import type en from '../../en/settings/settingsPage'
 const messages = {
   'settings.settingsPage.updatedValue': 'Aktualisiert.',
   'settings.settingsPage.restarting': 'Startet neu…',
+  'settings.settingsPage.forceRestart': 'Neustart erzwingen',
+  'settings.settingsPage.forceRestartNote': 'Mit „Neustart erzwingen“ wird das Panel dieses Terminalfensters beendet und die neue Version im Hintergrund ohne Fenster gestartet. Führe später <code>kora panel</code> erneut aus, wenn du ein Fenster möchtest.',
   'settings.settingsPage.restartNow': 'Jetzt neu starten',
   'settings.settingsPage.panelDidComeBack': 'Das Panel ist nicht zurückgekommen. Führe <code>kora panel</code> auf dem Server aus.',
   'settings.settingsPage.koraVersion': 'Kora-Version',
@@ -16,7 +18,7 @@ const messages = {
   'settings.settingsPage.specificVersion': 'Oder eine bestimmte Version',
   'settings.settingsPage.choose': 'Wählen...',
   'settings.settingsPage.installVersion': 'Diese Version installieren',
-  'settings.settingsPage.updatedPanelRunsTerminal': 'Aktualisiert. Dieses Panel läuft in einem Terminalfenster: Halte es an (Strg+C) und führe <code>kora panel</code> erneut aus, um die neue Version zu nutzen.',
+  'settings.settingsPage.updatedPanelRunsTerminal': 'Aktualisiert. Dieses Panel läuft in einem Terminalfenster und kann sich nicht auf dem üblichen Weg neu starten. Drücke „Neustart erzwingen“ oder halte es an (Strg+C) und führe <code>kora panel</code> erneut aus, um die neue Version zu nutzen.',
   'settings.settingsPage.uninstallKora': 'Kora deinstallieren',
   'settings.settingsPage.removesWhatKoraAdded': 'Entfernt, was Kora zu diesem Computer hinzugefügt hat. Standardmäßig bleiben deine Serverordner und Datenbanken erhalten.',
   'settings.settingsPage.showWhatWouldRemoved': 'Anzeigen, was entfernt würde',

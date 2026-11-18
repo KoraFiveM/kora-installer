@@ -277,6 +277,27 @@ async fn open_folder_uses_the_servers_own_folder_and_refuses_when_headless() {
 }
 
 #[tokio::test]
+async fn pick_folder_returns_the_chosen_folder_or_null_and_checks_the_title() {
+    use kora_web::handlers::system::set_picker;
+    let a = app(&FakeBackend::sample());
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let s = seen.clone();
+    set_picker(Some(Box::new(move |title| {
+        s.lock().unwrap().push(title.to_string());
+        Ok(if title == "Cancel me" { None } else { Some("C:\\Kora\\my-server".to_string()) })
+    })));
+    let j = json_of(call(&a, "POST", "/pick-folder", Some(json!({"title": "Pick the server folder"}))).await).await;
+    assert_eq!(j["path"], "C:\\Kora\\my-server");
+    let j = json_of(call(&a, "POST", "/pick-folder", Some(json!({"title": "Cancel me"}))).await).await;
+    assert!(j["path"].is_null(), "{j}");
+    // No title: a plain default, never an empty window title.
+    assert_eq!(call(&a, "POST", "/pick-folder", Some(json!({}))).await.status(), 200);
+    assert_eq!(seen.lock().unwrap().last().map(String::as_str), Some("Choose a folder"));
+    assert_eq!(call(&a, "POST", "/pick-folder", Some(json!({"title": "x".repeat(101)}))).await.status(), 400);
+    set_picker(None);
+}
+
+#[tokio::test]
 async fn logs_list_and_tail_only_known_files() {
     let d = tempfile::tempdir().unwrap();
     let f = FakeBackend::sample();
