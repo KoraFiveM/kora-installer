@@ -569,7 +569,7 @@ function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kin
     switch ($Kind) {
         'Self' { $proc = Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden; $wrapperPid = $proc.Id }
         'Filtered' {
-            $wrapperPid = Open-FilteredProcess $ps $argText $w.Script
+            $wrapperPid = Open-FilteredProcess -Exe $ps -ArgumentText $argText -Marker $w.Script
         }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
@@ -666,7 +666,7 @@ function Invoke-AsAccount([ValidateSet('Self', 'Filtered', 'Account')][string]$K
     $argText = "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`""
     switch ($Kind) {
         'Self' { $procId = (Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden).Id }
-        'Filtered' { $procId = Open-FilteredProcess $ps $argText $ps1 }
+        'Filtered' { $procId = Open-FilteredProcess -Exe $ps -ArgumentText $argText -Marker $ps1 }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
             $svc = Get-Service seclogon -ErrorAction SilentlyContinue
