@@ -460,12 +460,21 @@ pub fn serve_pipe(svc: Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
     let done = AtomicBool::new(false);
     std::thread::scope(|scope| {
         scope.spawn(|| {
-            let mut made_from = policy::pipe_sddl(&svc.policy());
+            // what the list was made from, in words an administrator can read in the audit log
+            let note = |p: &Result<Policy, String>| match p {
+                Ok(p) => format!("the pipe's access list has {} account(s)", p.accounts.len()),
+                Err(e) => format!("the pipe's access list is administrators only: the settings are unusable ({e})"),
+            };
+            let first = svc.policy();
+            let mut made_from = policy::pipe_sddl(&first);
+            svc.audit(&format!("{} | service | {}", super::audit::rfc3339(svc.now()), note(&first)));
             while !stop.load(Ordering::SeqCst) && !done.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(500));
-                let now = policy::pipe_sddl(&svc.policy());
+                let p = svc.policy();
+                let now = policy::pipe_sddl(&p);
                 if policy::pipe_list_changed(&made_from, &now) {
                     made_from = now;
+                    svc.audit(&format!("{} | service | {}", super::audit::rfc3339(svc.now()), note(&p)));
                     wake_listener();
                 }
             }
