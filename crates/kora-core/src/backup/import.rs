@@ -797,7 +797,7 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             };
             let runner = crate::db::SystemRunner;
             let os = crate::db::Os::current();
-            let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty());
+            let user = crate::winuser::name();
             if let Some(cr) = &creds {
                 crate::db::write_secret_file(&runner, os, &dir.join("database.json"), &serde_json::to_string_pretty(cr).map_err(|e| Problem::generic(e.to_string()))?, user.as_deref())
                     .map_err(|e| Problem::generic(format!("Kora could not write database.json: {e}")))?;

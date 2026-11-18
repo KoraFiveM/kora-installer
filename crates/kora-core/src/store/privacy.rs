@@ -86,7 +86,7 @@ pub fn ensure_private_dir(home: &Path, dir: &Path) -> Result<(), Problem> {
     }
     #[cfg(windows)]
     if !existed {
-        let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty()).ok_or_else(|| privacy_problem("the Windows user name is not known", "USERNAME is not set".into()))?;
+        let user = crate::winuser::name().ok_or_else(|| privacy_problem("the Windows user name is not known", "neither Windows nor USERNAME says who this is".into()))?;
         let args = windows_dir_acl_args(dir, &user).map_err(|e| privacy_problem("the Windows user name is unusual", e))?;
         let spec = crate::db::CommandSpec { program: "icacls".into(), args, ..crate::db::CommandSpec::default() };
         let ok = crate::db::CommandRunner::run(&crate::db::SystemRunner, &spec).map(|o| o.ok()).unwrap_or(false);
