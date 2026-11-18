@@ -449,7 +449,7 @@ mod tests {
         let c = windows_acl_plan(&s, "Sticky").unwrap();
         assert_eq!(c.program, "icacls");
         assert!(c.args.iter().any(|a| a == "/inheritance:r"));
-        assert!(c.args.iter().any(|a| a == "Sticky:(R,W)"));
+        assert!(c.args.iter().any(|a| a == "Sticky:(R,W,D)"));
         assert!(c.args[0].ends_with("notify.json"));
         assert!(windows_acl_plan(&s, "bad;user").is_err());
     }
