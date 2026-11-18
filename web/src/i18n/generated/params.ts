@@ -307,6 +307,14 @@ export interface MessageParams {
   'servers.fleetPage.startNameNodeName': { name: string | number; node_name: string | number }
   'servers.fleetPage.stopNameNodeName': { name: string | number; node_name: string | number }
   'servers.fleetPage.trashNodeRemove': { trash2: ReactNode }
+  'servers.joinHelp.firewallBody': { port: string | number; command: ReactNode }
+  'servers.joinHelp.homeNetworkBody': { address: ReactNode }
+  'servers.joinHelp.outsideBody': { port: string | number }
+  'servers.joinHelp.portKnown': { port: string | number }
+  'servers.joinHelp.routerIntro': { port: string | number }
+  'servers.joinHelp.routerStep1': { first: ReactNode; second: ReactNode }
+  'servers.joinHelp.routerStep3': { port: string | number }
+  'servers.joinHelp.thisComputerBody': { command: ReactNode }
   'servers.logsTab.lastLinesFile': { file: string | number }
   'servers.logsTab.refreshcwNodeReload': { refreshCw: ReactNode }
   'servers.monitoringTab.koraOnlyMeasuresWhile': { code: Tag }
@@ -499,6 +507,10 @@ export type RichIds =
   | 'servers.fleetPage.rotatecwNodeRestart'
   | 'servers.fleetPage.squareNodeStop'
   | 'servers.fleetPage.trashNodeRemove'
+  | 'servers.joinHelp.firewallBody'
+  | 'servers.joinHelp.homeNetworkBody'
+  | 'servers.joinHelp.routerStep1'
+  | 'servers.joinHelp.thisComputerBody'
   | 'servers.logsTab.refreshcwNodeReload'
   | 'servers.monitoringTab.koraOnlyMeasuresWhile'
   | 'servers.monitoringTab.webAddressCodeNode'
