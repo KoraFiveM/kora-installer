@@ -1,20 +1,58 @@
-## Kora Installer (next release)
+## Kora Installer v0.8.0
+
+Install and manage a Kora FiveM server from your browser. Run `kora` (or open the Kora shortcut) and the panel opens.
+
+### Install
+**Windows:** download `kora-windows-x86_64.msi` from this page and run it. This is the recommended way: Windows asks for an administrator's approval once, and after that Kora never asks again. Or run the one-line installer in PowerShell, which offers the MSI first:
+```powershell
+irm https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.ps1 | iex
+```
+The per-user install still works without administrator rights (answer "n", or use `-PerUser`); the panel then offers to add the administrator service later.
+
+**Linux:** download `kora-linux-x86_64.deb` (Debian and Ubuntu) and install it with `sudo apt install ./kora-linux-x86_64.deb`, or use the one-liner, which offers the same:
+```sh
+curl -fsSL https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.sh | sh
+```
+Already have Kora? Run `kora self-update`, or use the install line again.
 
 ### What is new
-- **"Production" and "Development" are gone.** A server now has two plain choices. **Where the resources come from:** plain copies of Kora's resources (no GitHub account needed), or your own copies on GitHub that you can change (in your account or an organisation you belong to). **Which versions:** released versions (stable, you choose when to move to a newer one) or the latest changes. The install asks both, and "Which versions" can be changed later on the Resources tab. Nothing moves when you change it: the next update check shows what would.
-- **A page for every resource.** Click a resource's name. On its page: check for an update and update just that resource; start, stop and restart it on the running server; its pull requests (with their checks and reviews), your own changes line by line, commit and push, open a pull request, issues, releases, and "Make my own copy". After anything that changes a resource's files the page says **"Restart needed: the running server still has the old version"** until it has really been restarted, for everyone who looks, even after a reload.
-- **You can always see what is not on its normal version.** A resource on a branch or a pull request is marked with one badge ("Trying pull request #12: Fix the HUD", "On branch fix-hud") on the resource's page, the Resources list, the servers list, the Overview, the GitHub tab, the update check and the snapshot list, and in `kora status`.
-- **Branches, pull requests and the automatic update are for every server.** On a server that follows released versions, trying a pull request is a deliberate choice with a clear warning and one click back to the exact release. Review, comment, approve and merge pull requests from the panel if your GitHub account has the rights. Everything done on GitHub is done as the GitHub account the computer is signed in as, and the panel says which one every time.
-- **Command line:** `kora install --source clone|fork --versions released|latest --fork-owner <login-or-org>`; `kora resource ...` (show, changes, log, commit, push, new-branch, issues, releases, fork, versions) and `kora pr view|comment|review|merge`.
-
-- **Run a server in a container (Linux).** When Podman or Docker works, the install can run the server in a container instead of as a system service: nothing is installed on the system, rootless Podman needs no administrator rights at all, and the database is a MariaDB container next to the server. Everything else in the panel works the same (start and stop, logs and console, txAdmin, updates, resources, backups, the reachability check). The System check has a new **Containers** line that says whether it will work and how to fix it when it will not. `kora install --run-mode container`. Backups remember how a server ran, and bringing a server in from a backup offers a container where there is an engine. Docker needs a word of warning, and Kora gives it: being allowed to use Docker is the same as being root, and Docker opens ports around your firewall.
+- **One administrator approval, then no more prompts.** A small Kora administrator service (installed by the MSI or the .deb) does the few things that need administrator rights: services, firewall rules, databases and updating Kora. The permission prompt on every install, and the optional Linux helper, are gone.
+- **"Production" and "Development" are gone.** A server now has two plain choices: where its resources come from (plain copies, or your own copies on GitHub) and which versions it follows (released or latest).
+- **A page for every resource.** Update, start, stop and restart one resource, work with pull requests, changes, issues and releases, and see "Restart needed" until the server really has the new version.
+- **Backups, restore and moving a server.** Back up a server (optionally with a password), restore it with one click and an undo, schedule backups, and bring a server to another computer, Windows or Linux.
+- **Run a server in a container (Linux).** With Podman or Docker, a server and its database can run in containers instead of as a system service.
+- **Safer remote access.** The panel serves HTTPS, and people you invite sign in with a passkey or one-time codes instead of a token link. API tokens are for scripts only.
+- **A proper data store and an activity log.** Kora's own data is in one database file, so two things at once can no longer overwrite each other. Settings shows an activity log of what was changed, by whom. Saved licence keys can live in your system keychain.
+- **Can players reach my server?** A checklist for the server, firewall, router and internet, with optional automatic port forwarding. Open txAdmin from another computer through the panel.
+- **The Kora desktop app (optional).** A tray icon that shows whether your servers are healthy, and a window for the panel, with notifications.
+- **Support bundle.** One file you can look through first and send when you need help. Kora never uploads it, and secrets are removed.
+- **Languages and accessibility.** The panel can be shown in German (beta), and works better with keyboards and screen readers.
 
 ### Upgrading from 0.7.x
-- **Your servers are not changed and keep working.** A server that was "production" now reads as plain copies at released versions; one that was "development" reads as your own copies at the latest changes. Both the old and the new words are written to the server's settings, so an older Kora can still read them. `kora install --mode prod|dev` and `--github-owner` still work.
-- The **Schedule** and **GitHub** tabs now show on every server. The scheduled update is off until you turn it on; on a server that follows released versions it moves between releases and leaves a resource alone that you put on a branch or pull request.
-- The first step of the install wizard asks a different question (see above). Saved answers and stopped installs from the old wizard are read as before.
-- Container mode changes nothing for existing servers: they stay system services. A container server has a new file `kora-container.json` in its folder (no secrets). Before going back to an older Kora, make a backup and delete the container server (say so if the database volume should be kept): an older Kora does not know about the containers.
-- Going back to an older Kora: nothing to do for these settings (`kora store export-json` writes the old words too). A new file, `kora-resource-state.json`, appears in a server's folder; an older Kora ignores it.
+Your servers are not changed and keep working.
+
+**Windows**
+1. Run the MSI (or the one-line installer). It installs the administrator service and sets your earlier per-user copy of Kora aside (kept with `.previous` added to its name).
+2. Other accounts that should use the panel's administrator parts are allowed with `kora service allow <account>` from an administrator window (the account that installed is allowed already).
+3. Open Kora from the Start Menu: the first start moves your data into the new store (see below).
+
+**Linux**
+1. Install the .deb (or run the one-liner). It removes the old helper; accounts that were allowed stay allowed. Servers set up the old way are recorded as yours.
+2. Add other accounts with `sudo kora service allow <account>`.
+
+**Both**
+- Kora's data (server list, saved keys, remembered names, stopped installs, remote settings) moves into `store/kora.db`. The old files are kept in `store/before-sqlite/`. `kora store export-json` writes the old files again if you ever go back to 0.7.
+- "Production" is now "plain copies, released versions" and "Development" is "own copies, latest changes". `kora install --mode prod|dev` still works.
+- People who signed in remotely with a token link are asked to set up a passkey or one-time codes. Their old token still works in a script.
+- `kora helper` and `kora admin-worker` are gone. Sizes in the panel are now shown in decimal units (kB, MB, GB).
+
+### Known limitations
+- The Windows and desktop downloads are not code-signed yet, so Windows SmartScreen may warn you. Check the SHA-256 file next to each download if you want to be sure.
+- German is a machine-assisted beta; wording may be rough in places.
+- Container mode is Linux only, and a server cannot yet be switched between a service and a container in place.
+- On a very slow connection the MariaDB download used by `--db install` can take a very long time.
+
+Full list of changes: [CHANGELOG.md](https://github.com/KoraFiveM/kora-installer/blob/main/CHANGELOG.md).
 
 ## Kora Installer v0.7.0
 

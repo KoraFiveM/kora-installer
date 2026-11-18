@@ -102,11 +102,10 @@ By default a server is a system service. When Podman or Docker works, the wizard
 ## Requirements
 
 - Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+ (x86-64).
-- Administrator rights are **not** needed to install Kora, open the panel or get started. Setting up a server's
-  service, firewall rules or a database server does need them: on Linux the panel shows the `sudo` command to run (or does
-  it for you once the optional helper is installed); on Windows an install from the panel asks once, when it starts, with
-  a normal Windows permission prompt for all of its administrator parts. If you say no, you can ask again, carry on
-  without those parts, or see the command to run.
+- Administrator rights are **not** needed to open the panel or get started. Installing Kora's administrator service (the
+  `.msi` on Windows, the `.deb` on Debian/Ubuntu, or `sudo kora service install`) needs one approval. After that the panel
+  sets up a server's service, firewall rules and database without asking again; without the service it offers to install
+  it, to carry on without those parts, or shows the command to run.
 - Server folder (suggested by default): Windows `C:\Kora\<name>`; Linux `~/kora/<name>` in your own home folder, also
   when Kora runs with `sudo`. Logged in as root (common on rented servers), it is `/home/kora/<name>`: Kora creates a
   normal `kora` user account that owns it. On Linux the background service runs as its own account, which cannot enter
@@ -140,7 +139,7 @@ Most things are in the panel (`kora`); these are the same operations for scripts
 | `kora self-update` | Update Kora to the newest stable release (checksum-verified). |
 | `kora delete <server>` | Delete a server and what the installer created for it. |
 | `kora uninstall [--dry-run]` | Remove the system changes Kora made. Asks item by item; your server folders and databases are kept unless you say otherwise, and so are your saved keys. |
-| `kora helper install\|uninstall\|status` | The optional helper that lets the panel do the few things that need administrator rights. |
+| `kora service status\|list\|allow\|deny\|install\|uninstall` | Kora's administrator service: who may use it, installing and removing it. |
 
 ## Status and limits
 

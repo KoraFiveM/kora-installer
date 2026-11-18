@@ -266,7 +266,7 @@ the server is deleted. Turn it off again with `kora reach <server> --forward off
 
 **Settings → Get help → Create a support bundle** (also a small link in every error's details, and `kora support bundle [<server>]`) makes one zip to give to whoever is helping you: Kora's version, your system, the System check, tool versions, your servers' settings, recent jobs and problems, the activity log, install and update logs, the service, firewall and disk state. **Every secret is removed** (licence keys, database logins, txAdmin accounts and tokens, webhook addresses, Git and GitHub tokens, passwords, people's identifiers, user names in folder paths) and files that hold secrets (`secrets.cfg`, `database.json`, txAdmin's data) are never read, only listed as left out. You see the list and can read any file before it is saved; **it is never uploaded**, it only leaves your computer if you send it. Not removed: server names, ports, folder names, public IP addresses, resource names and ordinary log text: look through the files you are shown. The GitHub tab's **Report an issue** can add a short cleaned summary (never the file).
 
-### Branches and pull requests (Development servers)
+### Branches and pull requests
 ### The page of one resource
 
 Every resource name in the Resources tab opens its own page (`/servers/<server>/resources/<resource>`, so it can be bookmarked and the back link returns to the list). It shows where the resource's files are and has **Check for update**, **Update** (only this resource; it does not restart anything), and **Start**, **Stop**, **Restart** on the running server. The last three send the command through the live console, so they need the server running and the console switched on: when they cannot work the page says why and offers the fix (start the server, or open the Console tab). Checking and the three buttons need the operator role, updating needs admin.
@@ -375,8 +375,8 @@ What a container does and does not protect is in [SECURITY.md](../SECURITY.md#co
   as `kora app install`). If the panel finds the old machine-wide Kora app from earlier versions (a copy in Program
   Files or /opt/kora, and shortcuts that ask for administrator rights) it offers **Tidy up old shortcuts**, also as a
   notice on the servers screen. That makes the new shortcuts first, so the old ones keep working until the end, then removes
-  the old copy. Removing the old copy needs administrator rights: on Windows the panel asks Windows for permission
-  (one prompt); on Linux it shows the command to run (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
+  the old copy. Removing the old copy is a job for an administrator terminal (the administrator service never does it): the
+  panel shows the command to run (`kora uninstall --app --yes`).
 - **GitHub account:** sign in or see who you are signed in as.
 - **Licence keys:** the keys saved on this computer: in your **system keychain** when this computer has one (Windows: protected for your
   account; Linux: GNOME Keyring, KWallet), otherwise in Kora's private data file (`store/kora.db`, readable only by you, not encrypted, like
@@ -403,12 +403,12 @@ words with a button where something is wrong:
 - **Git** and **GitHub CLI**: *Install it for me* downloads Kora's own copy into its own folder (a known, checksum-verified
   release from GitHub; no administrator rights; nothing else on the computer changes). If you already have Git or the
   GitHub CLI Kora uses yours. If the download fails (no internet, a proxy, GitHub busy) you get *Try again* and a link to
-  install it by hand. Git on Linux is your system's package, which needs administrator rights (the helper does it, or the
+  install it by hand. Git on Linux is your system's package, which needs administrator rights (the administrator service does it, or the
   panel shows the command). `kora tools status` shows which copy is used and where it is; `kora tools install` sets them up.
 - **GitHub sign-in**: *Sign in to GitHub* (or *Sign in again* when only some permissions are missing).
 - **Database**: when a database server is installed but not running, *Start it for me*. Starting a service needs
-  administrator rights: with the helper (Linux) it just works, otherwise the panel shows the command (`kora check
-  --start-database`; Windows asks for administrator permission).
+  administrator rights: with the administrator service it just works, otherwise the panel shows the command (`kora check
+  --start-database`).
 - **Administrator rights** and **Background service**: what Kora can do without asking, for your information.
 - **Containers** (Linux, when Podman or Docker is installed): which engine, its version, whether it is rootless, and whether it really ran a test container. A problem comes with its fix: no subuid/subgid range for rootless (an administrator adds one), cgroup v1, lingering off (containers stop when you sign out: `loginctl enable-linger`), the Docker socket refusing this account. Not having an engine is not a problem: servers run as system services.
 
