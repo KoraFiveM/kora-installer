@@ -336,3 +336,20 @@ pub struct InstallLog {
 
 /// The result of an install job.
 pub type InstallResult = InstallOutcome;
+
+/// `POST /pick-folder` `{title?}`: open the folder window of the computer that runs Kora (local sessions only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PickFolderRequest {
+    /// The window's title or prompt (up to 100 characters).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub title: Option<String>,
+}
+
+/// The folder that was chosen; `null` when the window was closed without choosing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PickedFolder {
+    pub path: Option<String>,
+}

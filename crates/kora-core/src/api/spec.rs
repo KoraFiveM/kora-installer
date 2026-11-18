@@ -202,6 +202,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::ServersScan => OpSpec::start_job().events::<w::NoEvents>().result::<w::ScanResult>(),
         Op::ServersAdopt => OpSpec::call::<w::AdoptRequest, w::ServerSummary>(),
         Op::ServerOpenFolder => OpSpec::nothing(),
+        Op::PickFolder => OpSpec::call::<w::PickFolderRequest, w::PickedFolder>(),
         Op::LogsList => OpSpec::get::<w::LogsList>(),
         Op::LogsTail => OpSpec::get::<w::LogTail>().with_query::<w::LogTailQuery>(),
         Op::ConsoleStream => OpSpec::stream::<w::ConsoleLine>("line"),

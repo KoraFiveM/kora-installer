@@ -35,6 +35,77 @@ pub(crate) fn headless() -> bool {
     cfg!(unix) && !cfg!(target_os = "macos") && std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none()
 }
 
+type Picker = Box<dyn Fn(&str) -> Result<Option<String>, String> + Send + Sync>;
+static PICKER: Mutex<Option<Picker>> = Mutex::new(None);
+
+/// Tests only: replace the folder window (`None` = the real one).
+pub fn set_picker(f: Option<Picker>) {
+    *PICKER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = f;
+}
+
+/// The system's folder window, on the computer that runs Kora. `Ok(None)` = closed without choosing.
+fn pick_real(title: &str) -> Result<Option<String>, String> {
+    use std::process::Stdio;
+    let run = |mut c: std::process::Command| -> Result<Option<String>, String> {
+        let out = c.stdin(Stdio::null()).stderr(Stdio::null()).output().map_err(|_| "no-tool".to_string())?;
+        let text = String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string();
+        Ok((out.status.success() && !text.is_empty()).then_some(text))
+    };
+    if cfg!(windows) {
+        let script = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
+            $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = $env:KORA_PICK_TITLE; $d.ShowNewFolderButton = $true; \
+            $o = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}; \
+            if ($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }";
+        let mut c = kora_core::sysexe::command("powershell.exe");
+        c.args(["-NoProfile", "-NonInteractive", "-STA", "-Command", script]).env("KORA_PICK_TITLE", title);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(0x0800_0000);
+        }
+        return run(c).map_err(|_| "The folder window could not open. Type the folder instead.".to_string());
+    }
+    if cfg!(target_os = "macos") {
+        let mut c = kora_core::sysexe::command("osascript");
+        c.args(["-e", "on run argv", "-e", "POSIX path of (choose folder with prompt (item 1 of argv))", "-e", "end run", title]);
+        return run(c).map_err(|_| "The folder window could not open. Type the folder instead.".to_string());
+    }
+    let mut zenity = kora_core::sysexe::command("zenity");
+    zenity.args(["--file-selection", "--directory", "--title", title]);
+    match run(zenity) {
+        Err(_) => {}
+        done => return done,
+    }
+    let mut kdialog = kora_core::sysexe::command("kdialog");
+    kdialog.args(["--getexistingdirectory", ".", "--title", title]);
+    run(kdialog).map_err(|_| "This computer has no folder window tool (zenity or kdialog). Type the folder instead.".to_string())
+}
+
+/// `POST /pick-folder` `{title?}` → `{path}`: the folder window of the computer that runs Kora. Local sessions
+/// only (see `remote::roles::local_only`): a remote person must not get windows on this desktop.
+pub async fn pick_folder(Json(body): Json<wire::PickFolderRequest>) -> Result<Json<wire::PickedFolder>, ApiError> {
+    blocking(move || {
+        let title = body.title.unwrap_or_default();
+        if title.chars().count() > 100 || title.contains('\0') {
+            return Err(ApiError::bad_request("The window title is too long."));
+        }
+        let title = if title.trim().is_empty() { "Choose a folder".to_string() } else { title };
+        let seam = PICKER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let picked = match seam.as_ref() {
+            Some(f) => f(&title),
+            None => {
+                drop(seam);
+                if headless() {
+                    return Err(ApiError::bad_request("This computer has no desktop, so a folder window can't open here. Type the folder instead."));
+                }
+                pick_real(&title)
+            }
+        };
+        picked.map(|path| Json(wire::PickedFolder { path })).map_err(ApiError::bad_request)
+    })
+    .await
+}
+
 /// A test seam: lets tests pretend to be headless or not, and choose what "elevated" means.
 pub mod seam {
     use std::sync::Mutex;

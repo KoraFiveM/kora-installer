@@ -576,6 +576,7 @@ route('POST', '/servers/{s}/open-folder', (m) => {
   find(dec(m[1]))
   return undefined
 })
+route('POST', '/pick-folder', () => ({ path: 'C:\\Kora\\chosen-server' }))
 route('GET', '/servers/{s}/logs', (m) => {
   find(dec(m[1]))
   return { files: beh.trouble ? [] : LOG_FILES }

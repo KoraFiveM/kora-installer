@@ -48,6 +48,7 @@ pub const NOT_AUDITED: &[(Op, &str)] = &[
     (Op::AuthReauth, "the sign-in steps write their own rows"),
     (Op::ServersScan, "only looks for folders (a job that changes nothing)"),
     (Op::ServerOpenFolder, "opens a window on this computer; changes nothing"),
+    (Op::PickFolder, "opens a window on this computer; changes nothing"),
     (Op::UpdatePreview, "a preview; changes nothing"),
     (Op::ResourcesPlan, "a plan; changes nothing"),
     (Op::WebhookTest, "sends a test message; changes nothing"),

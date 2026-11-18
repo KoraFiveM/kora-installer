@@ -137,6 +137,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::ServerUnregister
         | Op::ServersAdopt
         | Op::ServerOpenFolder
+        | Op::PickFolder
         | Op::ConsoleSend
         | Op::ConsoleEnable
         | Op::SnapshotRollback
@@ -281,6 +282,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::ServersScan
         | Op::ServersAdopt
         | Op::ServerOpenFolder
+        | Op::PickFolder
         | Op::LogsList
         | Op::LogsTail
         | Op::ConsoleStream
@@ -442,6 +444,7 @@ pub fn installs(op: Op) -> bool {
         | Op::ServersScan
         | Op::ServersAdopt
         | Op::ServerOpenFolder
+        | Op::PickFolder
         | Op::LogsList
         | Op::LogsTail
         | Op::ConsoleStream
@@ -624,6 +627,7 @@ pub fn remote_allowed(op: Op, role: Role, via: Via, switch_on: bool) -> bool {
 pub fn local_only(op: Op) -> bool {
     match op {
         Op::ServerOpenFolder
+        | Op::PickFolder
         | Op::RemoteGet
         | Op::RemoteSet
         | Op::UsersList

@@ -286,6 +286,8 @@ export const api = {
   panel: {
     restart: () => call('panel_restart', {}),
   },
+  /** The folder window of the computer that runs Kora (local sessions only). null = closed without choosing. */
+  pickFolder: (title?: string) => call('pick_folder', { body: title ? { title } : {} }).then((r) => r.path),
   servers: {
     list: () => call('servers_list', {}).then((r) => r.servers),
     get: (name: string) => call('server_get', { params: { s: name } }),

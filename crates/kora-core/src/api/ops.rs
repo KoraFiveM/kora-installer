@@ -34,6 +34,7 @@ pub enum Op {
     ServersScan,
     ServersAdopt,
     ServerOpenFolder,
+    PickFolder,
     LogsList,
     LogsTail,
     ConsoleStream,
@@ -285,6 +286,7 @@ impl Op {
         Op::ServersScan,
         Op::ServersAdopt,
         Op::ServerOpenFolder,
+        Op::PickFolder,
         Op::LogsList,
         Op::LogsTail,
         Op::ConsoleStream,
@@ -455,6 +457,7 @@ impl Op {
             Op::ServersScan => "servers_scan",
             Op::ServersAdopt => "servers_adopt",
             Op::ServerOpenFolder => "server_open_folder",
+            Op::PickFolder => "pick_folder",
             Op::LogsList => "logs_list",
             Op::LogsTail => "logs_tail",
             Op::ConsoleStream => "console_stream",
@@ -626,6 +629,7 @@ impl Op {
             Op::ServersScan => (Method::Post, "/servers/scan"),
             Op::ServersAdopt => (Method::Post, "/servers/adopt"),
             Op::ServerOpenFolder => (Method::Post, "/servers/{s}/open-folder"),
+            Op::PickFolder => (Method::Post, "/pick-folder"),
             Op::LogsList => (Method::Get, "/servers/{s}/logs"),
             Op::LogsTail => (Method::Get, "/servers/{s}/logs/{file}"),
             Op::ConsoleStream => (Method::Get, "/servers/{s}/console/stream"),
@@ -916,6 +920,7 @@ mod tests {
             | Op::ServersScan
             | Op::ServersAdopt
             | Op::ServerOpenFolder
+            | Op::PickFolder
             | Op::LogsList
             | Op::LogsTail
             | Op::ConsoleStream
@@ -1075,7 +1080,7 @@ mod tests {
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 165);
+        assert_eq!(Op::ALL.len(), 166);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

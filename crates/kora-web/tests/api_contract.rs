@@ -780,6 +780,7 @@ const UNVERIFIED: &[(Op, &str)] = &[
     (Op::ServerDelete, "needs a managed server folder"),
     (Op::ServersAdopt, "needs a real server folder"),
     (Op::ServerOpenFolder, "204"),
+    (Op::PickFolder, "opens a window on this computer"),
     (Op::LogsList, "needs a server folder with logs"),
     (Op::LogsTail, "needs a server folder with logs"),
     (Op::ConsoleStream, "stream"),
