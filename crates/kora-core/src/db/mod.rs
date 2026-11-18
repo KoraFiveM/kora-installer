@@ -708,12 +708,17 @@ pub fn rollback(runner: &dyn CommandRunner, admin: &AdminConn, state: &mut Provi
 
 // ------------------------------------------------------------ secrets file
 
-/// icacls command restricting `path` to `windows_user` only.
+/// icacls command restricting `path` to `windows_user` only: read, write and DELETE (without delete the owner could not
+/// replace the file by a rename or remove it in a folder that gives them only Modify: no "delete child" right).
 pub fn windows_acl_command(path: &Path, windows_user: &str) -> DbResult<CommandSpec> {
     if windows_user.is_empty() || !windows_user.chars().all(|c| c.is_alphanumeric() || " ._-\\$".contains(c)) {
         return Err(DbError::InvalidValue("windows user name".into()));
     }
-    Ok(CommandSpec { program: "icacls".into(), args: vec![path.to_string_lossy().into_owned(), "/inheritance:r".into(), "/grant:r".into(), format!("{windows_user}:(R,W)")], ..CommandSpec::default() })
+    Ok(CommandSpec {
+        program: "icacls".into(),
+        args: vec![path.to_string_lossy().into_owned(), "/inheritance:r".into(), "/grant:r".into(), format!("{windows_user}:(R,W,D)")],
+        ..CommandSpec::default()
+    })
 }
 
 /// Write `contents` so only the owner can read it: 0600 on Unix; on Windows an

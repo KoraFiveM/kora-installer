@@ -325,7 +325,7 @@ fn git_needs_admin() -> Problem {
 }
 
 fn windows_user() -> Option<String> {
-    cfg!(windows).then(|| std::env::var("USERNAME").unwrap_or_default())
+    cfg!(windows).then(|| crate::winuser::name().unwrap_or_default())
 }
 
 fn svc_platform() -> SvcPlatform {

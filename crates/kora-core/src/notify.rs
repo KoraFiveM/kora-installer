@@ -88,7 +88,7 @@ pub fn save(server: &ServerRecord, cfg: &NotifyConfig) -> Result<(), NotifyError
     std::fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(io)?;
     let text = serde_json::to_string_pretty(cfg).map_err(|e| NotifyError::Io(e.to_string()))?;
     let tmp = path.with_extension("json.tmp");
-    let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty());
+    let user = crate::winuser::name();
     db::write_secret_file(&db::SystemRunner, Os::current(), &tmp, &text, user.as_deref()).map_err(|e| NotifyError::Io(e.to_string()))?;
     crate::fsutil::rename_retrying(&tmp, &path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -449,7 +449,7 @@ mod tests {
         let c = windows_acl_plan(&s, "Sticky").unwrap();
         assert_eq!(c.program, "icacls");
         assert!(c.args.iter().any(|a| a == "/inheritance:r"));
-        assert!(c.args.iter().any(|a| a == "Sticky:(R,W)"));
+        assert!(c.args.iter().any(|a| a == "Sticky:(R,W,D)"));
         assert!(c.args[0].ends_with("notify.json"));
         assert!(windows_acl_plan(&s, "bad;user").is_err());
     }

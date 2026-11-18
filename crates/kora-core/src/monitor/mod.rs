@@ -210,7 +210,7 @@ pub fn now_unix() -> u64 {
 pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), Problem> {
     std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
     let tmp = path.with_extension("tmp");
-    let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty());
+    let user = crate::winuser::name();
     crate::db::write_secret_file(&crate::db::SystemRunner, crate::db::Os::current(), &tmp, text, user.as_deref())?;
     crate::fsutil::rename_retrying(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);

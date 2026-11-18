@@ -19,7 +19,7 @@ event log).
 
 | Need | `windows-latest` | Self-hosted VM |
 |---|---|---|
-| An **unelevated process of a normal administrator** (split token) | The job's account is an elevated administrator, with UAC normally off (`EnableLUA=0`; the script prints it). A *filtered copy* of the job's token (`KoraTok.LaunchFiltered`: Administrators deny-only, medium integrity) stands in for it. | Yes, for real: the runner account is a normal administrator signed in interactively with UAC on. |
+| An **unelevated process of a normal administrator** (split token) | The job's account is an elevated administrator, with UAC normally off (`EnableLUA=0`; the script prints it). A *filtered copy* of the job's token (`runas /trustlevel:0x20000`, see `Open-FilteredProcess`: Administrators deny-only, privileges dropped) stands in for it. | Yes, for real: the runner account is a normal administrator signed in interactively with UAC on. |
 | The **consent prompt** | No interactive desktop; with `EnableLUA=0` nothing prompts (`Start-Process -Verb RunAs` just runs). | Yes: on the normal desktop (`PromptOnSecureDesktop=0`); `uac-answer.ps1` clicks it. |
 | A **standard account** and a **second administrator** | Yes: `net user` + secondary logon (`Invoke-AsAccount`, `Open-KoraPanel -Kind Account`). | Yes. |
 
@@ -72,14 +72,16 @@ forks (it runs repository code as an administrator on that machine).
 When a scenario fails, look here first.
 
 1. The hosted job's token is elevated (type 2). `EnableLUA` there is unknown to me; the script prints it.
-2. `CreateProcessAsUser` with a `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE | LUA_TOKEN)` copy of the job's token
-   starts `powershell.exe` and the child is unelevated at integrity 8192 with Administrators deny-only.
+2. `runas /trustlevel:0x20000` starts `powershell.exe` with Administrators deny-only and privileges dropped (measured on
+   Windows 11: integrity stays High). A token made by hand with `CreateRestrictedToken` did not work: the handle could not
+   be adjusted, and the child it started died with 0xC0000142 or hung at start.
 3. Secondary logon (`Start-Process -Credential -LoadUserProfile`) works from the runner for a standard account, and the
    account can write `C:\kora-uac` (`Initialize-UacWorkDir` grants Users modify).
 4. The service's pipe is reachable from a filtered token of an allowed administrator (the descriptor lists the SID; the
    deny-only Administrators group must not matter) and closed or refusing for others. A client that is not allowed may
    get "access denied" at open (exit 5) instead of the service's refusal (exit 3): both are accepted.
-5. `kora service allow|deny <SID>` takes effect at once, also for the pipe's own access list (rebuilt per instance).
+5. `kora service allow|deny <SID>` takes effect within a second, also for the pipe's own access list: Windows keeps ONE
+   descriptor per pipe name, so the service sets it on the pipe itself (`SetKernelObjectSecurity`) when the list changes.
 6. `install.ps1 -Base http://127.0.0.1:47411 -System` accepts the local http base (https is required elsewhere), runs
    `msiexec` through `Start-Process -Verb RunAs` without a prompt on an elevated runner, and `-NoLaunch -NoShortcuts`
    are accepted by the script.

@@ -174,11 +174,13 @@ pub fn service(cmd: ServiceCmd) -> i32 {
                     Err(e) => code = fail(e),
                 }
             }
+            nudge_service();
             code
         }
         ServiceCmd::AllowInstaller { client_pid } => allow_installer(&client_pid),
         ServiceCmd::Deny { account } => match manage::deny(&policy_path(), &account) {
             Ok(m) => {
+                nudge_service();
                 println!("{m}");
                 0
             }
@@ -225,6 +227,12 @@ fn allow_installer(client_pid: &str) -> i32 {
         let _ = client_pid;
         fail("this is part of the Windows installer".to_string())
     }
+}
+
+/// Windows: have the running service use the new list for its pipe at once (it would notice within a couple of seconds).
+fn nudge_service() {
+    #[cfg(windows)]
+    kora_core::privsvc::winsvc::nudge_listener();
 }
 
 fn apply_plan_for(plan: kora_core::service::Plan, done: &str) -> i32 {

@@ -35,39 +35,17 @@ public static class KoraTok
     [StructLayout(LayoutKind.Sequential)]
     struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    struct STARTUPINFO
-    {
-        public int cb;
-        public string lpReserved;
-        public string lpDesktop;
-        public string lpTitle;
-        public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
-        public short wShowWindow, cbReserved2;
-        public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
-
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr buf, int len, out int ret);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int cls, IntPtr buf, int len);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertStringSidToSid(string s, out IntPtr sid);
-    [DllImport("advapi32.dll")] static extern int GetLengthSid(IntPtr sid);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool LookupAccountSid(string system, IntPtr sid, StringBuilder name, ref int cchName, StringBuilder domain, ref int cchDomain, out int use);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool LookupPrivilegeName(string system, ref LUID luid, StringBuilder name, ref int cch);
-    [DllImport("advapi32.dll", SetLastError = true)]
-    static extern bool CreateRestrictedToken(IntPtr existing, uint flags, uint disableCount, IntPtr sidsToDisable, uint deleteCount, IntPtr privsToDelete, uint restrictCount, IntPtr sidsToRestrict, out IntPtr newToken);
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool CreateProcessAsUser(IntPtr token, string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
 
     const uint TOKEN_ASSIGN_PRIMARY = 0x1, TOKEN_DUPLICATE = 0x2, TOKEN_QUERY = 0x8, TOKEN_ADJUST_DEFAULT = 0x80;
     const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
@@ -212,60 +190,6 @@ public static class KoraTok
         return sb.ToString();
     }
 
-    // What UAC gives an administrator who is not elevated, made by hand: the Administrators group becomes
-    // deny-only, every privilege except SeChangeNotify is dropped, integrity is medium, the owner is the user.
-    // Starts `commandLine` with it and returns the new process id. Needs no special privilege: it is a restricted
-    // copy of the caller's own primary token.
-    public static int LaunchFiltered(string exe, string commandLine, string cwd)
-    {
-        IntPtr src = OpenToken(0, TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY);
-        IntPtr admins = IntPtr.Zero, medium = IntPtr.Zero, disable = IntPtr.Zero, labelBuf = IntPtr.Zero, ownerBuf = IntPtr.Zero, userInfo = IntPtr.Zero, tok = IntPtr.Zero;
-        try
-        {
-            if (!ConvertStringSidToSid("S-1-5-32-544", out admins)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "ConvertStringSidToSid admins"); }
-            SID_AND_ATTRIBUTES dis = new SID_AND_ATTRIBUTES();
-            dis.Sid = admins;
-            disable = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
-            Marshal.StructureToPtr(dis, disable, false);
-            // DISABLE_MAX_PRIVILEGE (0x1) | LUA_TOKEN (0x4)
-            if (!CreateRestrictedToken(src, 0x1 | 0x4, 1, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out tok)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateRestrictedToken"); }
-
-            if (!ConvertStringSidToSid("S-1-16-8192", out medium)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "ConvertStringSidToSid medium"); }
-            SID_AND_ATTRIBUTES lab = new SID_AND_ATTRIBUTES();
-            lab.Sid = medium;
-            lab.Attributes = 0x20; // SE_GROUP_INTEGRITY
-            labelBuf = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
-            Marshal.StructureToPtr(lab, labelBuf, false);
-            if (!SetTokenInformation(tok, TokenIntegrityLevel, labelBuf, Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)) + GetLengthSid(medium))) { throw new Win32Exception(Marshal.GetLastWin32Error(), "SetTokenInformation integrity"); }
-
-            userInfo = Info(src, TokenUser);
-            SID_AND_ATTRIBUTES me = (SID_AND_ATTRIBUTES)Marshal.PtrToStructure(userInfo, typeof(SID_AND_ATTRIBUTES));
-            ownerBuf = Marshal.AllocHGlobal(IntPtr.Size);
-            Marshal.WriteIntPtr(ownerBuf, me.Sid);
-            if (!SetTokenInformation(tok, TokenOwner, ownerBuf, IntPtr.Size)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "SetTokenInformation owner"); }
-
-            STARTUPINFO si = new STARTUPINFO();
-            si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
-            PROCESS_INFORMATION pi;
-            StringBuilder cmd = new StringBuilder(commandLine);
-            // CREATE_NO_WINDOW
-            if (!CreateProcessAsUser(tok, exe, cmd, IntPtr.Zero, IntPtr.Zero, false, 0x08000000, IntPtr.Zero, cwd, ref si, out pi)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessAsUser"); }
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            return pi.dwProcessId;
-        }
-        finally
-        {
-            if (admins != IntPtr.Zero) { LocalFree(admins); }
-            if (medium != IntPtr.Zero) { LocalFree(medium); }
-            if (disable != IntPtr.Zero) { Marshal.FreeHGlobal(disable); }
-            if (labelBuf != IntPtr.Zero) { Marshal.FreeHGlobal(labelBuf); }
-            if (ownerBuf != IntPtr.Zero) { Marshal.FreeHGlobal(ownerBuf); }
-            if (userInfo != IntPtr.Zero) { Marshal.FreeHGlobal(userInfo); }
-            if (tok != IntPtr.Zero) { CloseHandle(tok); }
-            CloseHandle(src);
-        }
-    }
 }
 '@
 }
@@ -499,6 +423,22 @@ function Initialize-ProtectedKora([string]$Source, [string]$Name = 'KoraUacTest'
 
 function ConvertTo-PsLiteral([string]$Text) { "'" + ($Text -replace "'", "''") + "'" }
 
+# This administrator without the administrator half: `runas /trustlevel:0x20000` (Safer "basic user") starts the command with a
+# copy of the caller's token whose Administrators group is deny-only and whose privileges are dropped: the shape the service
+# sees from a normal administrator's unelevated programs. (A token made by hand with CreateRestrictedToken gave a process that
+# died with 0xC0000142 or hung at start, on Windows 11 and on the hosted runner.) runas does not return the new process id:
+# it is found by its command line (the wrapper script's path). `$Marker` is a text that is in that command line.
+function Open-FilteredProcess([string]$Exe, [string]$ArgumentText, [string]$Marker) {
+    $cmd = "`"$Exe`" $ArgumentText"
+    $null = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\runas.exe') -ArgumentList @('/trustlevel:0x20000', ('"' + ($cmd -replace '"', '\"') + '"')) -WindowStyle Hidden -PassThru
+    for ($i = 0; $i -lt 40; $i++) {
+        $p = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Marker) } | Select-Object -First 1
+        if ($p) { return [int]$p.ProcessId }
+        Start-Sleep -Milliseconds 250
+    }
+    return 0
+}
+
 # The script run under the other token. It starts `kora panel` there, copies the panel's sign-in record (owner-only
 # on disk, so this process could not read it) to a file the test can read, waits for a `stop` file and ends the panel.
 function Initialize-PanelWrapper([string]$Dir, [string]$Tag, [string]$Exe, [int]$Port, [hashtable]$ExtraEnv = @{}) {
@@ -528,7 +468,7 @@ if (-not `$p.HasExited) { Stop-Process -Id `$p.Id -Force }
 
 # Start `kora panel` and wait until it is signed in-able. Kind:
 #   Self     the current token
-#   Filtered this administrator, filtered (see KoraTok.LaunchFiltered)
+#   Filtered this administrator, filtered (see Open-FilteredProcess)
 #   Account  the account in -Credential (secondary logon; a split token if it is an administrator and UAC is on)
 # Returns an object for Invoke-PanelApi / Close-KoraPanel; WrapperProcessId is the process that runs the wrapper.
 function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kind, [string]$Exe, [string]$Dir, [string]$Tag, [int]$Port, [pscredential]$Credential, [hashtable]$ExtraEnv = @{}, [int]$TimeoutSec = 90) {
@@ -538,8 +478,7 @@ function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kin
     switch ($Kind) {
         'Self' { $proc = Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden; $wrapperPid = $proc.Id }
         'Filtered' {
-            try { $wrapperPid = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
-            catch { throw "RUNNER-LIMIT: this runner does not let a job start a process with a filtered administrator token ($($_.Exception.Message))" }
+            $wrapperPid = Open-FilteredProcess -Exe $ps -ArgumentText $argText -Marker $w.Script
         }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
@@ -620,20 +559,23 @@ function Wait-PanelJob($Panel, [string]$JobId, [int]$TimeoutSec = 120, [scriptbl
 
 # Run `-Script` (PowerShell text) under another token and return Output and Code. Kind:
 #   Self     this process's token, in a child
-#   Filtered this administrator, unelevated (KoraTok.LaunchFiltered)
+#   Filtered this administrator, unelevated (Open-FilteredProcess)
 #   Account  the account in -Credential (secondary logon)
 # The script's output goes to a file in -Dir (a folder the account can write: Initialize-UacWorkDir), because
 # nothing can be piped back across a token boundary.
 function Invoke-AsAccount([ValidateSet('Self', 'Filtered', 'Account')][string]$Kind, [string]$Script, [string]$Dir, [pscredential]$Credential, [int]$TimeoutSec = 120) {
     $id = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $ps1 = Join-Path $Dir "run-$id.ps1"; $out = Join-Path $Dir "out-$id.txt"; $code = Join-Path $Dir "code-$id.txt"
-    $body = "`$ErrorActionPreference = 'Continue'`r`n& {`r`n$Script`r`n} *> $(ConvertTo-PsLiteral $out)`r`n`$LASTEXITCODE | Set-Content $(ConvertTo-PsLiteral $code)`r`n"
+    $ps1 = Join-Path $Dir "run-$id.ps1"; $inner = Join-Path $Dir "inner-$id.ps1"; $out = Join-Path $Dir "out-$id.txt"; $code = Join-Path $Dir "code-$id.txt"
+    # The script is a file of its own: an `exit N` in it ends only that file (inside a `& { }` block it would end the
+    # wrapper before the exit code is written, and the caller would wait for the whole time limit).
+    Set-Content -Path $inner -Value $Script -Encoding ASCII
+    $body = "`$ErrorActionPreference = 'Continue'`r`n& $(ConvertTo-PsLiteral $inner) *> $(ConvertTo-PsLiteral $out)`r`n`$LASTEXITCODE | Set-Content $(ConvertTo-PsLiteral $code)`r`n"
     Set-Content -Path $ps1 -Value $body -Encoding ASCII
     $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $argText = "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`""
     switch ($Kind) {
         'Self' { $procId = (Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden).Id }
-        'Filtered' { $procId = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
+        'Filtered' { $procId = Open-FilteredProcess -Exe $ps -ArgumentText $argText -Marker $ps1 }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
             $svc = Get-Service seclogon -ErrorAction SilentlyContinue
@@ -644,7 +586,7 @@ function Invoke-AsAccount([ValidateSet('Self', 'Filtered', 'Account')][string]$K
     $sw = [Diagnostics.Stopwatch]::StartNew()
     while (-not (Test-Path $code) -and $sw.Elapsed.TotalSeconds -lt $TimeoutSec) { Start-Sleep -Milliseconds 300 }
     if (-not (Test-Path $code)) {
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        if ($procId) { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue }
         throw "the script run as $Kind did not finish in $TimeoutSec s"
     }
     $text = if (Test-Path $out) { (Get-Content $out -Raw) } else { '' }

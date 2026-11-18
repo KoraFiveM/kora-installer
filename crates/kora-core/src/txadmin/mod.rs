@@ -356,15 +356,10 @@ pub fn secret_acl_args(path: &Path, user: &str) -> Vec<String> {
 
 /// The signed-in account as `DOMAIN\name` (what icacls accepts).
 fn current_account() -> Option<String> {
-    let name = std::env::var("USERNAME").ok().filter(|n| !n.is_empty())?;
-    let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || " ._-$".contains(c));
-    if !ok(&name) {
-        return None;
-    }
-    match std::env::var("USERDOMAIN").ok().filter(|d| ok(d)) {
-        Some(d) => Some(format!("{d}\\{name}")),
-        None => Some(name),
-    }
+    // `DOMAIN\name` from the process token (not the environment, which may be another account's)
+    let account = crate::winuser::name()?;
+    let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || " ._-$\\".contains(c));
+    ok(&account).then_some(account)
 }
 
 fn restrict_secret_file(path: &Path) -> Result<()> {

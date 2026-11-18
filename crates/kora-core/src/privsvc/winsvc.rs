@@ -450,6 +450,12 @@ fn wake_listener(pipe: &str) -> bool {
     true
 }
 
+/// `kora service allow|deny` calls this after it saved the settings: the waiting pipe instance is replaced at once, not at
+/// the watcher's next look (a person, or the installer's next step, may use the service the moment the command returns).
+pub fn nudge_listener() {
+    wake_listener(paths::WINDOWS_PIPE);
+}
+
 /// How long a client has to send its whole request line (and how long a thread of ours may wait for it).
 const REQUEST_WAIT: Duration = Duration::from_secs(10);
 
@@ -515,6 +521,15 @@ fn serve_connection(svc: Arc<WinSvc>, pipe: Owned) {
 /// no connection would ever come that makes a newer one. Wake the listener with a connection of our own: it takes the
 /// stale instance and makes the next one from the current settings.
 fn watch_policy(svc: &WinSvc, stop: &AtomicBool, finished: &AtomicBool) {
+    // what the list is made from, in words an administrator can read in the audit log
+    let say = |p: &Result<Policy, String>| {
+        let what = match p {
+            Ok(p) => format!("the pipe's access list has {} account(s)", p.accounts.len()),
+            Err(e) => format!("the pipe's access list is administrators only: the settings are unusable ({e})"),
+        };
+        svc.audit(&format!("{} | service | {what}", super::audit::rfc3339(svc.now())));
+    };
+    say(&svc.policy());
     let mut waited = Duration::ZERO;
     while !stop.load(Ordering::SeqCst) && !finished.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(100));
@@ -523,8 +538,10 @@ fn watch_policy(svc: &WinSvc, stop: &AtomicBool, finished: &AtomicBool) {
             continue;
         }
         waited = Duration::ZERO;
-        let now = policy::pipe_sddl(&svc.policy());
+        let p = svc.policy();
+        let now = policy::pipe_sddl(&p);
         if *svc.listening.lock().unwrap_or_else(std::sync::PoisonError::into_inner) != now {
+            say(&p);
             wake_listener(&svc.pipe);
         }
     }

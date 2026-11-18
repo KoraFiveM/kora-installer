@@ -55,15 +55,18 @@
       </Directory>
     </StandardDirectory>
 
+    <!-- The shortcuts that start a bare `kora` are called "Kora Panel", the desktop app's "Kora": an upgrade from an MSI
+         without the app to one with it installs the new "Kora" before it removes the old product, and one name would
+         make the old product's removal delete the new shortcut (found by the upgrade test). -->
     <StandardDirectory Id="ProgramMenuFolder">
       <Component Id="StartMenuShortcut" Guid="C41B8E2D-5F90-4A37-B6D1-0E9A7C3F8A52" Bitness="always64">
-        <Shortcut Id="KoraStartMenu" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
+        <Shortcut Id="KoraStartMenu" Name="Kora Panel" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
     <StandardDirectory Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="E7D2A049-1B38-4C65-8F90-3D5B6A1C9E04" Bitness="always64">
-        <Shortcut Id="KoraDesktop" Name="Kora" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
+        <Shortcut Id="KoraDesktop" Name="Kora Panel" Description="Open Kora Panel" Target="[INSTALLFOLDER]kora.exe" WorkingDirectory="INSTALLFOLDER" Show="minimized" />
         <RegistryValue Root="HKLM" Key="Software\Kora" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>

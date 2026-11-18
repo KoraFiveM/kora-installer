@@ -194,7 +194,7 @@ impl Destination for LocalFolder {
 /// inherited access so only the person who runs Kora can read it, even in a shared folder.
 fn harden(path: &Path) {
     if crate::db::Os::current() == crate::db::Os::Windows {
-        if let Some(user) = std::env::var("USERNAME").ok().filter(|u| !u.is_empty()) {
+        if let Some(user) = crate::winuser::name() {
             if let Ok(spec) = crate::db::windows_acl_command(path, &user) {
                 let _ = crate::db::CommandRunner::run(&crate::db::SystemRunner, &spec);
             }

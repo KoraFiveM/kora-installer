@@ -120,11 +120,11 @@ try {
     $acl = (& icacls $pf | Out-String); Write-Host $acl
     Assert-That ($acl -notmatch 'Everyone:.*\(F\)|Users:.*\((M|F)\)') 'ordinary users cannot change Program Files\Kora'
     Assert-That (Test-OnMachinePath $pf) 'Kora is on the machine PATH'
-    Assert-That (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk") 'the Start Menu shortcut exists'
+    Assert-That (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora Panel.lnk") 'the Start Menu shortcut ("Kora Panel", the older MSI has no desktop app) exists'
     $policy = Get-Content "$pf\data\service.json" -Raw
     Assert-That ($policy -match [regex]::Escape($sidA) -and $policy -match [regex]::Escape($sidC)) 'A and C are on the list'
     Assert-That ($policy -notmatch [regex]::Escape($sidB)) 'B is not'
-    Assert-That (((Get-Item "$pf\data\service.json").GetAccessControl().Owner) -match 'SYSTEM|Administrators') 'the settings file belongs to SYSTEM or Administrators'
+    Assert-That (((Get-Acl "$pf\data\service.json").Owner) -match 'SYSTEM|Administrators') 'the settings file belongs to SYSTEM or Administrators'
     $pipeSddl = Get-PipeSddl 'kora-service'
     Write-Host "pipe SDDL: $pipeSddl"
     Assert-That ($pipeSddl -match '^O:SY') 'the pipe is owned by SYSTEM'
@@ -166,8 +166,10 @@ try {
     $r = Svc $A 'admin-step' @('run', '--step', 'system.firewall', '--dir', "$work\a\junction")
     Assert-That ($r.Code -eq 3) 'a junction as the folder is refused'
     # the pipe cannot be squatted or doubled by an allowed account
-    $r = Invoke-AsUser $A '$s = New-Object System.IO.Pipes.NamedPipeServerStream("kora-service", [System.IO.Pipes.PipeDirection]::InOut, 10); "created"; exit 0'
-    Assert-That ($r.Output -notmatch 'created') 'an allowed account cannot make another instance of the pipe'
+    # (try/catch: an error in a New-Object does not stop a script, so "created" would be printed after the refusal too)
+    $r = Invoke-AsUser $A 'try { $s = New-Object System.IO.Pipes.NamedPipeServerStream("kora-service", [System.IO.Pipes.PipeDirection]::InOut, 10); "PIPE-CREATED" } catch { "PIPE-REFUSED: " + $_.Exception.InnerException.Message }; exit 0'
+    Write-Host $r.Output
+    Assert-That ($r.Output -match 'PIPE-REFUSED' -and $r.Output -notmatch 'PIPE-CREATED') 'an allowed account cannot make another instance of the pipe'
 
     Write-Host '=== allow and deny take effect at once ==='
     & $koraExe service deny $C | Out-Host
@@ -192,6 +194,7 @@ try {
     Assert-That (Test-Path "$pf\kora-desktop.exe") 'kora-desktop.exe is in Program Files\Kora after the upgrade'
     $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")
     Assert-That ($lnk.TargetPath -eq "$pf\kora-desktop.exe") "the Start Menu shortcut starts the desktop app ($($lnk.TargetPath))"
+    Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora Panel.lnk")) 'the older MSI''s bare "Kora Panel" shortcut is gone: the app replaced it'
     Assert-That (-not (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Kora -ErrorAction SilentlyContinue)) 'the MSI does not write an autostart entry (the app does, per user)'
 
     Write-Host '=== uninstall leaves nothing behind ==='
@@ -200,7 +203,7 @@ try {
     Assert-That (-not (Get-Service KoraService -ErrorAction SilentlyContinue)) 'the service is gone'
     Assert-That (-not (Test-Path $pf)) 'Program Files\Kora is gone (program, settings, records, audit log)'
     Assert-That (-not (Test-OnMachinePath $pf)) 'the PATH entry is gone'
-    Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk")) 'the Start Menu shortcut is gone'
+    Assert-That (-not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora.lnk") -and -not (Test-Path "$([Environment]::GetFolderPath('CommonPrograms'))\Kora Panel.lnk")) 'the Start Menu shortcuts are gone'
     Assert-That (-not (Test-Path "$pf\kora-desktop.exe")) 'the desktop app is gone'
     Assert-That (-not ([IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\kora-service')) 'no pipe'
     Assert-That (Test-Path "$srvA\.kora\request.json") 'the server folder was never touched'

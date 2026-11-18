@@ -43,3 +43,4 @@ pub mod tools;
 pub mod txadmin;
 pub mod update;
 pub mod userhome;
+pub mod winuser;

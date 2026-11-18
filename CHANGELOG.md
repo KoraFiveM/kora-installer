@@ -83,6 +83,12 @@ versions follow [SemVer](https://semver.org/).
 - Remote sessions: passkey/code sessions last 8 hours idle / 3 days; token sessions at most 1 day (was 7). Wording: the remote-actions switch is "for sign-ins that do not come through Tailscale".
 - A token user who has set up a passkey or one-time codes can no longer sign in to the page with the old token (it still works as a script header).
 
+### Fixed (found by running the Windows installer and the administrator service on a real machine)
+- The Windows installer no longer hangs: `kora service allow` (run by the MSI) waited for "Press Enter to close this window" in a console nobody can see. Commands that installers run never wait for Enter, and `ALLOWUSERS` may list several accounts (`;` between names that contain spaces).
+- An account allowed (or denied) with `kora service allow|deny` reaches the service's pipe at once: Windows keeps one access list per pipe name, which the service now sets on the pipe itself, so the first person the installer enrolled is no longer refused at the pipe.
+- Upgrading from a Windows installer without the desktop app to one with it keeps a Start Menu shortcut: the shortcuts that start a bare `kora` are called "Kora Panel"; the desktop app's is "Kora".
+- Files only their owner may open (the panel's sign-in record, saved settings) are locked to the account Windows says is running, not the `USERNAME` variable, and that account may delete them: a program started with another account's environment locked its real user out of its own files.
+
 ### Fixed
 - Windows, administrator service: an account allowed after the service started was refused by Windows for ever (a pipe keeps the access list of its first instance; the installer starts the service before it allows the installing account). Every new pipe instance now sets the list on the pipe, and the service notices `kora service allow|deny` within a couple of seconds.
 - Windows, administrator service: a client that connected and sent nothing (or half a request) held a service thread for ever, so sixteen of them stopped the service answering; they are now cut off after ten seconds.
