@@ -84,6 +84,7 @@ extern "system" {
 extern "system" {
     fn ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl: *const u16, revision: u32, sd: *mut *mut c_void, size: *mut u32) -> i32;
     fn ConvertSidToStringSidW(sid: *mut c_void, out: *mut *mut u16) -> i32;
+    fn SetKernelObjectSecurity(h: Handle, info: u32, sd: *mut c_void) -> i32;
     fn ImpersonateNamedPipeClient(pipe: Handle) -> i32;
     fn RevertToSelf() -> i32;
     fn OpenThreadToken(thread: Handle, access: u32, open_as_self: i32, token: *mut Handle) -> i32;
@@ -95,6 +96,9 @@ extern "system" {
 }
 
 const PIPE_ACCESS_DUPLEX: u32 = 3;
+/// Lets the server change the pipe's access list later ([`make_instance`]).
+const WRITE_DAC: u32 = 0x0004_0000;
+const DACL_SECURITY_INFORMATION: u32 = 4;
 const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x0008_0000;
 const PIPE_WAIT: u32 = 0;
 const PIPE_REJECT_REMOTE_CLIENTS: u32 = 8;
@@ -400,14 +404,31 @@ fn make_instance(svc: &WinSvc, first: bool) -> std::io::Result<Owned> {
     }
     let sa = SecurityAttributes { n_length: std::mem::size_of::<SecurityAttributes>() as u32, descriptor: sd, inherit: 0 };
     let w = wide(&svc.pipe);
-    let mode = PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
+    let mode = PIPE_ACCESS_DUPLEX | WRITE_DAC | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
     // SAFETY: valid arguments; byte mode, blocking, remote clients refused.
     let h = unsafe { CreateNamedPipeW(w.as_ptr(), mode, PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &sa) };
     let err = std::io::Error::last_os_error();
+    if h == INVALID {
+        // SAFETY: allocated by the conversion above.
+        unsafe { LocalFree(sd) };
+        return Err(err);
+    }
+    // The access list belongs to the pipe, not to one instance: Windows keeps the list of the FIRST instance and ignores the
+    // one given for later instances. So every new instance sets it again on the pipe, and an account allowed (or taken
+    // off) while the service runs is let in (or out) by the system too, not only by the service's own check.
+    let set = if first {
+        true
+    } else {
+        // SAFETY: our new handle (opened with WRITE_DAC) and a descriptor from the conversion above.
+        unsafe { SetKernelObjectSecurity(h, DACL_SECURITY_INFORMATION, sd) != 0 }
+    };
+    let set_err = std::io::Error::last_os_error();
     // SAFETY: allocated by the conversion above.
     unsafe { LocalFree(sd) };
-    if h == INVALID {
-        return Err(err);
+    if !set {
+        // SAFETY: a handle we own and have not handed on.
+        unsafe { CloseHandle(h) };
+        return Err(set_err);
     }
     *svc.listening.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = sddl_text;
     Ok(Owned(h))
