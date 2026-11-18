@@ -166,8 +166,10 @@ try {
     $r = Svc $A 'admin-step' @('run', '--step', 'system.firewall', '--dir', "$work\a\junction")
     Assert-That ($r.Code -eq 3) 'a junction as the folder is refused'
     # the pipe cannot be squatted or doubled by an allowed account
-    $r = Invoke-AsUser $A '$s = New-Object System.IO.Pipes.NamedPipeServerStream("kora-service", [System.IO.Pipes.PipeDirection]::InOut, 10); "created"; exit 0'
-    Assert-That ($r.Output -notmatch 'created') 'an allowed account cannot make another instance of the pipe'
+    # (try/catch: an error in a New-Object does not stop a script, so "created" would be printed after the refusal too)
+    $r = Invoke-AsUser $A 'try { $s = New-Object System.IO.Pipes.NamedPipeServerStream("kora-service", [System.IO.Pipes.PipeDirection]::InOut, 10); "PIPE-CREATED" } catch { "PIPE-REFUSED: " + $_.Exception.InnerException.Message }; exit 0'
+    Write-Host $r.Output
+    Assert-That ($r.Output -match 'PIPE-REFUSED' -and $r.Output -notmatch 'PIPE-CREATED') 'an allowed account cannot make another instance of the pipe'
 
     Write-Host '=== allow and deny take effect at once ==='
     & $koraExe service deny $C | Out-Host
