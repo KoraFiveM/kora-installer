@@ -68,6 +68,8 @@ public static class KoraTok
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool LookupPrivilegeName(string system, ref LUID luid, StringBuilder name, ref int cch);
     [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attributes, int impersonationLevel, int tokenType, out IntPtr newToken);
+    [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool CreateRestrictedToken(IntPtr existing, uint flags, uint disableCount, IntPtr sidsToDisable, uint deleteCount, IntPtr privsToDelete, uint restrictCount, IntPtr sidsToRestrict, out IntPtr newToken);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool CreateProcessAsUser(IntPtr token, string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
@@ -231,7 +233,14 @@ public static class KoraTok
             disable = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
             Marshal.StructureToPtr(dis, disable, false);
             // DISABLE_MAX_PRIVILEGE (0x1) | LUA_TOKEN (0x4)
-            if (!CreateRestrictedToken(src, 0x1 | 0x4, 1, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out tok)) { throw Fail("CreateRestrictedToken"); }
+            IntPtr restricted;
+            if (!CreateRestrictedToken(src, 0x1 | 0x4, 1, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted)) { throw Fail("CreateRestrictedToken"); }
+            // The handle CreateRestrictedToken returns cannot be adjusted (SetTokenInformation: access denied, measured on Windows
+            // 11 and on the hosted runner); a duplicate made with full access can. TOKEN_ALL_ACCESS, impersonation, primary.
+            bool duplicated = DuplicateTokenEx(restricted, 0xF01FF, IntPtr.Zero, 2, 1, out tok);
+            int duplicateError = Marshal.GetLastWin32Error();
+            CloseHandle(restricted);
+            if (!duplicated) { throw new Win32Exception(duplicateError, "DuplicateTokenEx (error " + duplicateError + ")"); }
 
             if (!ConvertStringSidToSid("S-1-16-8192", out medium)) { throw Fail("ConvertStringSidToSid medium"); }
             SID_AND_ATTRIBUTES lab = new SID_AND_ATTRIBUTES();
