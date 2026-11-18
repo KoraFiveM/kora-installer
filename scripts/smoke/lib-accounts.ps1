@@ -35,47 +35,17 @@ public static class KoraTok
     [StructLayout(LayoutKind.Sequential)]
     struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    struct STARTUPINFO
-    {
-        public int cb;
-        public string lpReserved;
-        public string lpDesktop;
-        public string lpTitle;
-        public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
-        public short wShowWindow, cbReserved2;
-        public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
-
-    // A Win32Exception shows only its text: put the error number in it.
-    static Win32Exception Fail(string what) { int e = Marshal.GetLastWin32Error(); return new Win32Exception(e, what + " (error " + e + ")"); }
-
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr buf, int len, out int ret);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int cls, IntPtr buf, int len);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool ConvertStringSidToSid(string s, out IntPtr sid);
-    [DllImport("advapi32.dll")] static extern int GetLengthSid(IntPtr sid);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool LookupAccountSid(string system, IntPtr sid, StringBuilder name, ref int cchName, StringBuilder domain, ref int cchDomain, out int use);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool LookupPrivilegeName(string system, ref LUID luid, StringBuilder name, ref int cch);
-    [DllImport("advapi32.dll", SetLastError = true)]
-    static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attributes, int impersonationLevel, int tokenType, out IntPtr newToken);
-    [DllImport("advapi32.dll", SetLastError = true)]
-    static extern bool CreateRestrictedToken(IntPtr existing, uint flags, uint disableCount, IntPtr sidsToDisable, uint deleteCount, IntPtr privsToDelete, uint restrictCount, IntPtr sidsToRestrict, out IntPtr newToken);
-    // CreateProcessWithTokenW, not CreateProcessAsUser: it gives the new process access to the interactive window station and
-    // desktop (a hand-made token has none of its own: the child died with 0xC0000142, DLL initialisation failed). Needs
-    // SeImpersonatePrivilege, which an elevated administrator has.
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool CreateProcessWithTokenW(IntPtr token, uint logonFlags, string app, StringBuilder cmd, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
 
     const uint TOKEN_ASSIGN_PRIMARY = 0x1, TOKEN_DUPLICATE = 0x2, TOKEN_QUERY = 0x8, TOKEN_ADJUST_DEFAULT = 0x80;
     const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
@@ -220,67 +190,6 @@ public static class KoraTok
         return sb.ToString();
     }
 
-    // What UAC gives an administrator who is not elevated, made by hand: the Administrators group becomes
-    // deny-only, every privilege except SeChangeNotify is dropped, integrity is medium, the owner is the user.
-    // Starts `commandLine` with it and returns the new process id. Needs no special privilege: it is a restricted
-    // copy of the caller's own primary token.
-    public static int LaunchFiltered(string exe, string commandLine, string cwd)
-    {
-        IntPtr src = OpenToken(0, TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY);
-        IntPtr admins = IntPtr.Zero, medium = IntPtr.Zero, disable = IntPtr.Zero, labelBuf = IntPtr.Zero, ownerBuf = IntPtr.Zero, userInfo = IntPtr.Zero, tok = IntPtr.Zero;
-        try
-        {
-            if (!ConvertStringSidToSid("S-1-5-32-544", out admins)) { throw Fail("ConvertStringSidToSid admins"); }
-            SID_AND_ATTRIBUTES dis = new SID_AND_ATTRIBUTES();
-            dis.Sid = admins;
-            disable = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
-            Marshal.StructureToPtr(dis, disable, false);
-            // DISABLE_MAX_PRIVILEGE (0x1) | LUA_TOKEN (0x4)
-            IntPtr restricted;
-            if (!CreateRestrictedToken(src, 0x1 | 0x4, 1, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted)) { throw Fail("CreateRestrictedToken"); }
-            // The handle CreateRestrictedToken returns cannot be adjusted (SetTokenInformation: access denied, measured on Windows
-            // 11 and on the hosted runner); a duplicate made with full access can. TOKEN_ALL_ACCESS, impersonation, primary.
-            bool duplicated = DuplicateTokenEx(restricted, 0xF01FF, IntPtr.Zero, 2, 1, out tok);
-            int duplicateError = Marshal.GetLastWin32Error();
-            CloseHandle(restricted);
-            if (!duplicated) { throw new Win32Exception(duplicateError, "DuplicateTokenEx (error " + duplicateError + ")"); }
-
-            if (!ConvertStringSidToSid("S-1-16-8192", out medium)) { throw Fail("ConvertStringSidToSid medium"); }
-            SID_AND_ATTRIBUTES lab = new SID_AND_ATTRIBUTES();
-            lab.Sid = medium;
-            lab.Attributes = 0x20; // SE_GROUP_INTEGRITY
-            labelBuf = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
-            Marshal.StructureToPtr(lab, labelBuf, false);
-            if (!SetTokenInformation(tok, TokenIntegrityLevel, labelBuf, Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)) + GetLengthSid(medium))) { throw Fail("SetTokenInformation integrity"); }
-
-            userInfo = Info(src, TokenUser);
-            SID_AND_ATTRIBUTES me = (SID_AND_ATTRIBUTES)Marshal.PtrToStructure(userInfo, typeof(SID_AND_ATTRIBUTES));
-            ownerBuf = Marshal.AllocHGlobal(IntPtr.Size);
-            Marshal.WriteIntPtr(ownerBuf, me.Sid);
-            if (!SetTokenInformation(tok, TokenOwner, ownerBuf, IntPtr.Size)) { throw Fail("SetTokenInformation owner"); }
-
-            STARTUPINFO si = new STARTUPINFO();
-            si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
-            PROCESS_INFORMATION pi;
-            StringBuilder cmd = new StringBuilder(commandLine);
-            // CREATE_NO_WINDOW
-            if (!CreateProcessWithTokenW(tok, 0, exe, cmd, 0x08000000, IntPtr.Zero, cwd, ref si, out pi)) { throw Fail("CreateProcessWithTokenW"); }
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            return pi.dwProcessId;
-        }
-        finally
-        {
-            if (admins != IntPtr.Zero) { LocalFree(admins); }
-            if (medium != IntPtr.Zero) { LocalFree(medium); }
-            if (disable != IntPtr.Zero) { Marshal.FreeHGlobal(disable); }
-            if (labelBuf != IntPtr.Zero) { Marshal.FreeHGlobal(labelBuf); }
-            if (ownerBuf != IntPtr.Zero) { Marshal.FreeHGlobal(ownerBuf); }
-            if (userInfo != IntPtr.Zero) { Marshal.FreeHGlobal(userInfo); }
-            if (tok != IntPtr.Zero) { CloseHandle(tok); }
-            CloseHandle(src);
-        }
-    }
 }
 '@
 }
