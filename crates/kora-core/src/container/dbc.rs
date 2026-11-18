@@ -220,7 +220,7 @@ mod tests {
         assert_eq!((t.host.as_str(), t.port), ("127.0.0.1", 3306));
     }
 
-    // Container mode is a Linux feature: these paths are Unix paths ("/srv/..", "/" separators).
+    // Container mode is Linux-only (`Facts::system` offers no engine elsewhere) and its folders are POSIX paths.
     #[cfg(unix)]
     #[test]
     fn creating_the_database_container_writes_the_env_file_privately_and_removes_it() {

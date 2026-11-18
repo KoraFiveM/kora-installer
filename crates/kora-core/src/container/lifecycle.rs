@@ -385,7 +385,7 @@ pub(crate) mod tests {
         d
     }
 
-    // Container mode is a Linux feature: these paths are Unix paths ("/srv/..", "/" separators).
+    // Container mode is Linux-only and refuses a folder that is not a POSIX path (see `a_windows_folder_is_refused_in_words` in spec.rs).
     #[cfg(unix)]
     #[test]
     fn start_creates_a_missing_container_then_starts_it_after_the_database() {
@@ -406,7 +406,7 @@ pub(crate) mod tests {
         assert!(calls.iter().all(|c| !c.contains("sh -c") && !c.starts_with("sudo")), "{calls:#?}");
     }
 
-    // Container mode is a Linux feature: these paths are Unix paths ("/srv/..", "/" separators).
+    // Container mode is Linux-only and refuses a folder that is not a POSIX path (see `a_windows_folder_is_refused_in_words` in spec.rs).
     #[cfg(unix)]
     #[test]
     fn a_container_with_the_current_spec_is_only_started_and_one_with_an_old_spec_is_replaced() {
