@@ -27,6 +27,17 @@ mv Cargo.toml.new Cargo.toml
 cargo update -w --offline >/dev/null 2>&1 || cargo metadata --offline --format-version 1 >/dev/null 2>&1 \
   || die "could not refresh Cargo.lock; run 'cargo update -w --offline' yourself"
 
+# The desktop app is its own Cargo workspace (crates/kora-desktop) with its own lock file and a path dependency on
+# kora-shell, whose version follows the main workspace: move both, or its `--locked` release build fails.
+if [ -f crates/kora-desktop/Cargo.toml ]; then
+  awk -v v="$VER" '/^\[package\]/ {s=1; print; next} /^\[/ {s=0}
+    s && !done && /^version *=/ {print "version = \"" v "\""; done=1; next} {print}' crates/kora-desktop/Cargo.toml > crates/kora-desktop/Cargo.toml.new
+  mv crates/kora-desktop/Cargo.toml.new crates/kora-desktop/Cargo.toml
+  cargo update -p kora-desktop -p kora-shell --manifest-path crates/kora-desktop/Cargo.toml --offline >/dev/null 2>&1 \
+    || cargo update -p kora-desktop -p kora-shell --manifest-path crates/kora-desktop/Cargo.toml >/dev/null 2>&1 \
+    || die "could not refresh crates/kora-desktop/Cargo.lock; run 'cargo update -p kora-desktop -p kora-shell --manifest-path crates/kora-desktop/Cargo.toml'"
+fi
+
 printf 'Version %s -> %s\n' "$OLD" "$VER"
 git --no-pager diff --stat
 cat <<NEXT
