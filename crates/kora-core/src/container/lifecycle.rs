@@ -229,6 +229,25 @@ impl<'a> Manager<'a> {
         Ok(())
     }
 
+    /// [`Self::gone`] for a container. Rootless Podman can remove the container and still exit 125 because cleaning up its
+    /// network namespace failed ("rootless netns: kill network process: permission denied"): when the container is gone
+    /// after a failed `rm`, that is what was asked, so it counts as removed (the engine's complaint is kept as a note).
+    fn gone_container(&self, done: &mut Vec<String>, what: &str, name: &str) -> Result<(), Problem> {
+        if self.state_of(name) == ContainerState::Missing {
+            return Ok(());
+        }
+        match self.engine().run_ok(self.runner, &engine::rm_args(name)) {
+            Ok(_) => {}
+            Err(x) if self.state_of(name) == ContainerState::Missing => {
+                done.push(format!("Removed {what} (the engine reported a clean-up problem afterwards: {})", x.to_string().lines().next().unwrap_or("").trim()));
+                return Ok(());
+            }
+            Err(x) => return Err(self.fail(&format!("remove {what}"), x)),
+        }
+        done.push(format!("Removed {what}"));
+        Ok(())
+    }
+
     /// Remove the game container only (stopping it first, whatever state it is in).
     pub fn remove_game(&self) -> Result<Vec<String>, Problem> {
         let mut done = Vec::new();
@@ -236,7 +255,7 @@ impl<'a> Manager<'a> {
         if self.state() == ContainerState::Running {
             self.stop()?;
         }
-        self.gone(&mut done, &format!("the container {}", self.rec.container), engine::rm_args(&self.rec.container), self.state() != ContainerState::Missing)?;
+        self.gone_container(&mut done, &format!("the container {}", self.rec.container), &self.rec.container)?;
         Ok(done)
     }
 
@@ -245,7 +264,7 @@ impl<'a> Manager<'a> {
         let mut done = Vec::new();
         let Some(db) = &self.rec.db else { return Ok(done) };
         let e = self.engine();
-        self.gone(&mut done, &format!("the database container {}", db.container), engine::rm_args(&db.container), self.state_of(&db.container) != ContainerState::Missing)?;
+        self.gone_container(&mut done, &format!("the database container {}", db.container), &db.container)?;
         let net = e.run(self.runner, &engine::network_inspect_args(&db.network)).is_ok_and(|o| o.success());
         self.gone(&mut done, &format!("the private network {}", db.network), engine::network_rm_args(&db.network), net)?;
         if remove_volume {
@@ -366,6 +385,8 @@ pub(crate) mod tests {
         d
     }
 
+    // Container mode is a Linux feature: these paths are Unix paths ("/srv/..", "/" separators).
+    #[cfg(unix)]
     #[test]
     fn start_creates_a_missing_container_then_starts_it_after_the_database() {
         let d = server_dir();
@@ -385,6 +406,8 @@ pub(crate) mod tests {
         assert!(calls.iter().all(|c| !c.contains("sh -c") && !c.starts_with("sudo")), "{calls:#?}");
     }
 
+    // Container mode is a Linux feature: these paths are Unix paths ("/srv/..", "/" separators).
+    #[cfg(unix)]
     #[test]
     fn a_container_with_the_current_spec_is_only_started_and_one_with_an_old_spec_is_replaced() {
         let d = server_dir();

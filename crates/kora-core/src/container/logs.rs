@@ -37,11 +37,19 @@ pub fn follower_running(_dir: &Path) -> bool {
 /// What `--since` gets: the container's own start time when known, else ten minutes back.
 pub fn since_of(started_at: &str) -> String {
     let t = started_at.trim();
-    // `0001-01-01T00:00:00Z` is "never started".
-    if t.len() >= 19 && t.as_bytes()[4] == b'-' && !t.starts_with("0001-") {
-        t.to_string()
-    } else {
-        "10m".to_string()
+    let shaped = t.len() >= 19 && t.as_bytes()[4] == b'-' && !t.starts_with("0001-");
+    if !shaped {
+        return "10m".to_string();
+    }
+    // Docker prints RFC 3339 (`2026-11-17T21:46:01.5Z`). Podman prints Go's own form (`2026-11-17 21:46:01.594366672 +0000 UTC`),
+    // which `podman logs --since` rejects ("unable to interpret time value"): turn that into RFC 3339 (UTC only).
+    if t.as_bytes()[10] == b'T' {
+        return t.to_string();
+    }
+    let mut parts = t.split_whitespace();
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(date), Some(time), Some("+0000"), Some("UTC")) => format!("{date}T{time}Z"),
+        _ => "10m".to_string(),
     }
 }
 
@@ -130,6 +138,8 @@ mod tests {
         assert_eq!(since_of("0001-01-01T00:00:00Z"), "10m");
         assert_eq!(since_of(""), "10m");
         assert_eq!(since_of("<no value>"), "10m");
+        assert_eq!(since_of("2026-11-17 21:46:01.594366672 +0000 UTC"), "2026-11-17T21:46:01.594366672Z", "podman prints Go time");
+        assert_eq!(since_of("2026-11-17 21:46:01 +0100 CET"), "10m");
     }
 
     #[test]

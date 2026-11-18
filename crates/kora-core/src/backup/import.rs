@@ -604,7 +604,8 @@ pub struct SystemProvisioner {
 
 impl Provisioner for SystemProvisioner {
     fn provision(&self, state_path: &Path) -> Result<crate::db::Credentials, Problem> {
-        crate::db::provision(&crate::db::SystemRunner, &self.admin, "localhost", "127.0.0.1", state_path).map_err(Problem::from)
+        // The account host is 127.0.0.1 like the connection: a 'localhost' account does not match a TCP connection.
+        crate::db::provision(&crate::db::SystemRunner, &self.admin, "127.0.0.1", "127.0.0.1", state_path).map_err(Problem::from)
     }
     fn drop_made(&self, state_path: &Path) {
         if let Ok(mut st) = crate::db::ProvisionState::load(state_path) {
@@ -807,12 +808,14 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
         if in_container {
             if !st.done.iter().any(|d| d == "container") {
                 ev("container", "Setting up the container engine", 30);
-                let (engine, status, _) = crate::container::setup::choose_engine(None)?;
-                let lent: crate::container::ContainerRequest = std::fs::read(stage.join(SERVER_DIR).join(crate::container::record::FILE))
-                    .ok()
-                    .and_then(|b| serde_json::from_slice::<crate::container::ContainerRecord>(&b).ok())
-                    .map(|r| crate::container::ContainerRequest { engine: None, bind: r.bind, memory_mb: r.memory_mb, cpu_tenths: r.cpu_tenths })
-                    .unwrap_or_default();
+                let from_backup = std::fs::read(stage.join(SERVER_DIR).join(crate::container::record::FILE)).ok().and_then(|b| serde_json::from_slice::<crate::container::ContainerRecord>(&b).ok());
+                // The engine the server ran on comes along when this computer has it (a Docker server stays on Docker); else the best one found.
+                let (engine, status, _) = match from_backup.as_ref().map(|r| r.engine) {
+                    Some(kind) => crate::container::setup::choose_engine(Some(kind)).or_else(|_| crate::container::setup::choose_engine(None))?,
+                    None => crate::container::setup::choose_engine(None)?,
+                };
+                let lent: crate::container::ContainerRequest =
+                    from_backup.map(|r| crate::container::ContainerRequest { engine: None, bind: r.bind, memory_mb: r.memory_mb, cpu_tenths: r.cpu_tenths }).unwrap_or_default();
                 let rec = crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &lent, with_db_container)
                     .or_else(|_| crate::container::setup::new_record(&dir, &cslug, &engine, status.as_ref(), &Default::default(), with_db_container))
                     .map_err(Problem::generic)?;
@@ -987,6 +990,50 @@ pub fn run(req: &ImportRequest, file: &Path, env: &Env<'_>, say: &mut dyn FnMut(
             ..Default::default()
         };
         let _ = crate::installer::save_created_to(&dir, &created);
+        // What roll-back (`kora delete`) may undo is what `plan-state.json` says is done: the import did these steps itself, so it
+        // says so (otherwise a delete would "have nothing to undo" and leave the new database and its login behind).
+        let mut plan = crate::steps::PlanState::default();
+        let steps_done = ["prepare.dir", "build.resources", "build.artifact", "build.config", "finalize"]
+            .into_iter()
+            .chain((creds.is_some() || with_db_container).then_some("build.db"))
+            .chain(crec.is_some().then_some("container.create"));
+        for id in steps_done {
+            plan.set(id, crate::steps::StepStatus::Done, None);
+        }
+        plan.save(&crate::installer::meta_dir(&dir).join("plan-state.json")).map_err(|e| Problem::generic(format!("Kora could not save the server's progress record: {e}")))?;
+        // The install record `kora delete` / roll-back reads (`.kora/request.json`, no secrets): without it an imported server
+        // could be started and used but never removed again ("has no Kora install record"). A container import wrote its own
+        // (with the container part) above.
+        if crec.is_none() {
+            let record = crate::installer::InstallRequest {
+                mode: sf.mode,
+                source: Some(new_source),
+                versions: Some(m.server.versions),
+                name: c.name.clone(),
+                dir: dir.clone(),
+                hostname: String::new(),
+                license_key: None,
+                license_key_name: None,
+                cfx_identifier: None,
+                ports: crate::installer::Ports { game: c.game_port, txadmin: c.txadmin_port },
+                txadmin_public: false,
+                artifact_url: None,
+                game_build: Some(m.server.game_build).filter(|b| *b != 0),
+                resources: crate::installer::ResourceSelection::All,
+                db: if creds.is_some() { crate::installer::DbChoice::UseExisting } else { crate::installer::DbChoice::Skip },
+                service: false,
+                firewall: false,
+                github_owner: new_owner.clone(),
+                catalog: None,
+                dry_run: false,
+                db_admin: None,
+                start: false,
+                app: None,
+                container: None,
+            };
+            let record_bytes = serde_json::to_vec_pretty(&record).map_err(|e| Problem::generic(e.to_string()))?;
+            crate::fsutil::write_no_follow(&crate::installer::meta_dir(&dir).join("request.json"), &record_bytes, 0o644).map_err(|e| io_problem("saving the install record", Problem::from(e)))?;
+        }
         let entry = ServerEntry {
             name: c.name.clone(),
             dir: dir.clone(),
@@ -1211,6 +1258,8 @@ mod tests {
         // the database came across into the NEW database
         assert_eq!(new_db.0.tables.borrow()[0].1, vec!["alice".to_string(), "bob".to_string()]);
         // the old login is not reused: the new one is in database.json and secrets.cfg, the licence key came from the file
+        assert!(target.join(".kora/plan-state.json").is_file(), "roll-back undoes only what the plan state says is done");
+        assert!(target.join(".kora/request.json").is_file(), "an imported server needs its install record, or `kora delete` cannot remove it");
         let dbj = std::fs::read_to_string(target.join("database.json")).unwrap();
         assert!(dbj.contains("kora_new1") && !dbj.contains("s3cr3t-pass"));
         let sec = std::fs::read_to_string(target.join("secrets.cfg")).unwrap();

@@ -69,10 +69,12 @@ $acl = Get-Acl-Text "$d\database.json"
 Assert-That ($acl -notmatch '(?i)BUILTIN\\Users|Everyone|Authenticated Users') 'database.json ACL is restricted'
 Assert-That ((Get-Content "$d\secrets.cfg" -Raw) -match 'mysql_connection_string') 'secrets.cfg has the connection string'
 # --- backup, wipe a table, restore (a real MariaDB), then a password-protected export
-$bk = 'C:\kora-smoke\backups-dbx'
+# `--folder` is a one-off copy kept elsewhere: `latest`, verify and restore look in Kora's own backups folder.
+$koraHome = if ($env:KORA_HOME) { $env:KORA_HOME } else { Join-Path $env:LOCALAPPDATA 'Kora' }
+$bk = Join-Path $koraHome 'server-backups'
 $null = Invoke-Sql $client.FullName $stockPort 'root' $pw 'CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(40))' $c.database
 $null = Invoke-Sql $client.FullName $stockPort 'root' $pw "INSERT INTO players VALUES (1,'alice'),(2,'bob')" $c.database
-$r = Invoke-Native $kora @('backup', 'create', 'dbx', '--folder', $bk); Show 'kora backup create dbx' $r
+$r = Invoke-Native $kora @('backup', 'create', 'dbx'); Show 'kora backup create dbx' $r
 Assert-That ($r.Code -eq 0) 'kora backup create exits 0'
 Assert-That ($r.Output -notmatch [regex]::Escape($c.password)) 'the database password is not printed'
 $arch = Get-ChildItem $bk -Recurse -Filter '*.tar.gz' | Select-Object -First 1
@@ -88,8 +90,8 @@ $r = Invoke-Native $kora @('backup', 'restore', 'dbx', 'latest', '--yes'); Show 
 Assert-That ($r.Code -eq 0) 'kora backup restore exits 0'
 $x = Invoke-Sql $client.FullName $stockPort 'root' $pw 'SELECT COUNT(*) FROM players' $c.database
 Assert-That ($x.Output -eq '2') "both rows are back after the restore (got '$($x.Output)')"
-$mv = 'C:\kora-smoke\move-dbx'
-$r = Invoke-Native $kora @('backup', 'create', 'dbx', '--for-move', '--folder', $mv) @{ KORA_BACKUP_PASSWORD = 'a smoke test passphrase' }; Show 'kora backup create --for-move' $r
+$mv = $bk
+$r = Invoke-Native $kora @('backup', 'create', 'dbx', '--for-move') @{ KORA_BACKUP_PASSWORD = 'a smoke test passphrase' }; Show 'kora backup create --for-move' $r
 Assert-That ($r.Code -eq 0) 'the password-protected export is made'
 $mvf = Get-ChildItem $mv -Recurse -Filter '*.tar.gz.age' | Select-Object -First 1
 Assert-That ($null -ne $mvf) 'the export is an age file'

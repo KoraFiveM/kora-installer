@@ -71,10 +71,11 @@ assert_eq "still the same database" "$DB" "$(jget "$D/database.json" database)"
 
 step "6b. backup: wipe a table, restore it, the row is back (a real MariaDB)"
 if command -v mariadb-dump >/dev/null 2>&1 || command -v mysqldump >/dev/null 2>&1; then
-  BK="$SMOKE_ROOT/backups"
+  # `--folder` is a one-off copy kept elsewhere: `latest`, `list`, verify and restore look in Kora's own backups folder.
+  BK="$KORA_HOME/server-backups"
   sql "CREATE TABLE \`$DB\`.players (id INT PRIMARY KEY, name VARCHAR(40))"
   sql "INSERT INTO \`$DB\`.players VALUES (1,'alice'),(2,'bob')"
-  kora backup create $NAME --folder "$BK"
+  kora backup create $NAME
   assert_eq "backup create exits 0" 0 "$CODE"
   assert_not_contains "the database password is never printed" "$OUT" "$DBPW"
   ARCHIVE="$(ls "$BK"/*/*.tar.gz | head -n1)"
@@ -92,9 +93,9 @@ if command -v mariadb-dump >/dev/null 2>&1 || command -v mysqldump >/dev/null 2>
   kora backup list $NAME
   assert_contains "the restore left a safety copy that can be undone" "$OUT" "kora backup undo"
   step "6c. a password-protected export for moving the server"
-  MOVE="$SMOKE_ROOT/move"
+  MOVE="$KORA_HOME/server-backups"
   export KORA_BACKUP_PASSWORD='a smoke test passphrase'
-  kora backup create $NAME --for-move --folder "$MOVE"
+  kora backup create $NAME --for-move
   assert_eq "backup create --for-move exits 0" 0 "$CODE"
   MOVEFILE="$(ls "$MOVE"/*/*.tar.gz.age | head -n1)"
   assert "the export is an age file (encrypted)" test -f "$MOVEFILE"

@@ -40,7 +40,7 @@ describe('Install wizard: how the server runs (container mode)', () => {
     expect(await screen.findByText(/How the server runs/, { selector: 'li' })).toBeInTheDocument()
     // walk to the run-mode page by "Next" until its question is on screen
     for (let i = 0; i < 8 && !screen.queryByText('How should this server run?'); i++) await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText(/Podman 4\.9\.3, rootless: ready to run servers/)).toBeInTheDocument()
+    expect(await screen.findByText(/Podman 4\.9\.3, rootless: ready to run servers/)).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /As a system service/ })).toBeChecked()
     await user.click(screen.getByRole('radio', { name: /In a container/ }))
     expect(screen.getByText(/What a container does and does not protect/)).toBeInTheDocument()

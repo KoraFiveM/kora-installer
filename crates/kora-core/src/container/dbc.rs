@@ -152,9 +152,11 @@ pub fn create_container(m: &Manager, creds: &Credentials, progress: &mut dyn FnM
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::container::lifecycle::tests::server_dir;
     use crate::container::record::tests::sample;
     use crate::db::SystemRunner;
+    #[cfg(unix)]
     use crate::service::testing::FakeRunner;
     use std::cell::RefCell;
 
@@ -218,6 +220,8 @@ mod tests {
         assert_eq!((t.host.as_str(), t.port), ("127.0.0.1", 3306));
     }
 
+    // Container mode is a Linux feature: these paths are Unix paths ("/srv/..", "/" separators).
+    #[cfg(unix)]
     #[test]
     fn creating_the_database_container_writes_the_env_file_privately_and_removes_it() {
         let d = server_dir();

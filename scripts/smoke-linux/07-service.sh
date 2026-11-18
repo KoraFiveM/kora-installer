@@ -5,13 +5,15 @@
 # what it saw, and a failure prints the service's journal.
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLIENT="$HERE/svc_client.py"
 A=kora-smoke-a   # allowed
 B=kora-smoke-b   # on the machine, never allowed
 C=kora-smoke-c   # allowed, but not the owner of A's server
 D=kora-smoke-d   # used the OLD helper (v0.7.0), so it stays allowed after the upgrade
 WORK="$(mktemp -d)"
 DEB="$WORK/kora.deb"
+# The other accounts cannot read the runner's home (the repository is in it): give them a copy of the client to run.
+PUB="$(mktemp -d)"; chmod 755 "$PUB"; install -m 0644 "$HERE/svc_client.py" "$PUB/svc_client.py"
+CLIENT="$PUB/svc_client.py"
 
 diag() {
   echo "----- diagnostics -----"
@@ -21,7 +23,7 @@ diag() {
   sudo cat /etc/kora/service.json /var/lib/kora/owners.json 2>&1 || true
   sudo tail -n 30 /var/log/kora/audit.log 2>&1 || true
 }
-trap 'rc=$?; [ $rc -ne 0 ] && diag; sudo userdel -r "$A" 2>/dev/null; sudo userdel -r "$B" 2>/dev/null; sudo userdel -r "$C" 2>/dev/null; sudo userdel -r "$D" 2>/dev/null; sudo userdel kora-old 2>/dev/null; sudo systemctl disable --now kora-helper.service 2>/dev/null; sudo rm -f /etc/systemd/system/kora-helper.service /etc/systemd/system/kora-old.service; rm -rf "$WORK"; exit $rc' EXIT
+trap 'rc=$?; set +e; [ $rc -ne 0 ] && diag; sudo userdel -r "$A" 2>/dev/null; sudo userdel -r "$B" 2>/dev/null; sudo userdel -r "$C" 2>/dev/null; sudo userdel -r "$D" 2>/dev/null; sudo userdel kora-old 2>/dev/null; sudo systemctl disable --now kora-helper.service 2>/dev/null; sudo rm -f /etc/systemd/system/kora-helper.service /etc/systemd/system/kora-old.service; rm -rf "$WORK"; exit $rc' EXIT
 
 as_user() { local u="$1"; shift; sudo -u "$u" env -i HOME="/home/$u" PATH=/usr/bin:/bin "$@"; }
 # svc USER VERB ARGS...: ask the service as USER; sets OUT and CODE (never aborts)

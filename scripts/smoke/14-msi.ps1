@@ -35,6 +35,19 @@ function Show-Diagnostics {
     if (Test-Path $pf) { Get-ChildItem $pf -Recurse | Select-Object -First 30 FullName | Out-String | Write-Host; (& icacls $pf | Out-String) | Write-Host }
 }
 
+# msiexec with a time limit: a hung installer must end the job with what it was doing, not after 20 silent minutes.
+function Invoke-Msiexec([string]$Arguments, [string]$Log, [int]$TimeoutSeconds = 300) {
+    $p = Start-Process msiexec.exe -ArgumentList $Arguments -PassThru
+    if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
+        Write-Host "msiexec did not finish within $TimeoutSeconds s; what it was doing:"
+        if (Test-Path $Log) { Get-Content $Log -Tail 40 | Write-Host }
+        Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'msiexec|kora' } | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-List | Out-String | Write-Host
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        throw "msiexec ($Arguments) hung for $TimeoutSeconds s"
+    }
+    $p
+}
+
 # Run a PowerShell script as USER: a standard account, NOT elevated (lib-accounts.ps1).
 function Invoke-AsUser([string]$User, [string]$Script, [int]$TimeoutSeconds = 120) {
     Invoke-AsAccount -Kind Account -Script $Script -Dir $work -Credential $accounts[$User].Credential -TimeoutSec $TimeoutSeconds
@@ -58,7 +71,7 @@ try {
     Assert-That ($os.Output -match 'False') "the test account runs NOT elevated and not as an administrator"
 
     Write-Host '=== install the (older) MSI for real: one installation, no prompts ==='
-    $p = Start-Process msiexec.exe -ArgumentList "/i `"$OldMsi`" /qn /l*v `"$work\install.log`" ALLOWUSERS=`"$sidA $sidC`"" -Wait -PassThru
+    $p = Invoke-Msiexec "/i `"$OldMsi`" /qn /l*v `"$work\install.log`" ALLOWUSERS=`"$sidA $sidC`"" "$work\install.log"
     Assert-That ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) "msiexec /i succeeded (exit $($p.ExitCode))"
 
     Write-Host '=== layout ==='
@@ -129,7 +142,7 @@ try {
     Assert-That ((& $koraExe service list | Out-String) -match [regex]::Escape($sidC)) 'allow puts C back'
 
     Write-Host '=== upgrade keeps the settings and the records ==='
-    $p = Start-Process msiexec.exe -ArgumentList "/i `"$Msi`" /qn /l*v `"$work\upgrade.log`"" -Wait -PassThru
+    $p = Invoke-Msiexec "/i `"$Msi`" /qn /l*v `"$work\upgrade.log`"" "$work\upgrade.log"
     Assert-That ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) "the upgrade succeeded (exit $($p.ExitCode))"
     Assert-That ((Get-Service KoraService).Status -eq 'Running') 'the service runs again after the upgrade'
     Assert-That ((Get-Content "$pf\data\service.json" -Raw) -match [regex]::Escape($sidA)) 'the list of accounts survived'
@@ -147,7 +160,7 @@ try {
     Assert-That (-not (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Kora -ErrorAction SilentlyContinue)) 'the MSI does not write an autostart entry (the app does, per user)'
 
     Write-Host '=== uninstall leaves nothing behind ==='
-    $p = Start-Process msiexec.exe -ArgumentList "/x `"$Msi`" /qn /l*v `"$work\uninstall.log`"" -Wait -PassThru
+    $p = Invoke-Msiexec "/x `"$Msi`" /qn /l*v `"$work\uninstall.log`"" "$work\uninstall.log"
     Assert-That ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) "msiexec /x succeeded (exit $($p.ExitCode))"
     Assert-That (-not (Get-Service KoraService -ErrorAction SilentlyContinue)) 'the service is gone'
     Assert-That (-not (Test-Path $pf)) 'Program Files\Kora is gone (program, settings, records, audit log)'

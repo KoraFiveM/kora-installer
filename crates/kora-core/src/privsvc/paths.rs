@@ -122,10 +122,14 @@ mod tests {
 
     #[test]
     fn the_program_must_sit_in_the_protected_folder() {
-        assert!(program_location_ok("/usr/lib/kora/kora", false, None));
-        assert!(program_location_ok("/opt/kora/bin/kora", false, None));
-        for bad in ["/home/jo/.local/bin/kora", "/usr/lib/kora", "/usr/lib/korax/kora", "/usr/lib/kora/../../../tmp/kora", "kora", "/tmp/usr/lib/kora/kora"] {
-            assert!(!program_location_ok(bad, false, None), "{bad}");
+        // The Linux rule uses the host's idea of an absolute path ("/usr/..." is relative on Windows): Unix only.
+        #[cfg(unix)]
+        {
+            assert!(program_location_ok("/usr/lib/kora/kora", false, None));
+            assert!(program_location_ok("/opt/kora/bin/kora", false, None));
+            for bad in ["/home/jo/.local/bin/kora", "/usr/lib/kora", "/usr/lib/korax/kora", "/usr/lib/kora/../../../tmp/kora", "kora", "/tmp/usr/lib/kora/kora"] {
+                assert!(!program_location_ok(bad, false, None), "{bad}");
+            }
         }
         let pf = Some(r"C:\Program Files");
         assert!(program_location_ok(r"C:\Program Files\Kora\kora.exe", true, pf));

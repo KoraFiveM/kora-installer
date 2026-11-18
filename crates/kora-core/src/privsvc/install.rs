@@ -87,6 +87,7 @@ mod tests {
         assert!(u.contains("ExecStart=/usr/lib/kora/kora service serve"));
         assert!(u.contains("RuntimeDirectory=kora") && u.contains("RuntimeDirectoryMode=0755"));
         assert!(!u.contains("User="), "the service is root: it makes system services and accounts");
+        #[cfg(unix)]
         assert!(paths::program_location_ok(PROGRAM, false, None), "the service accepts to run from where it is installed");
         assert_eq!(UNIT_PATH.rsplit('/').next(), Some(paths::LINUX_UNIT));
     }
