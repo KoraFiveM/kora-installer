@@ -1018,9 +1018,11 @@ mod tests {
         super::super::manage::allow(Path::new(&fx.svc.files.policy), other).unwrap();
         // no connection of ours in between: the service itself must notice (it looks every couple of seconds)
         std::thread::sleep(POLICY_POLL + Duration::from_secs(3));
+        let made_with = fx.svc.listening.lock().unwrap().clone();
+        assert!(made_with.contains(other), "the service did not notice the change: {made_with}");
         let f = open_client_at(fx.pipe(), false).map_err(|e| format!("{e:?}")).unwrap();
         let dacl = dacl_of(&f);
-        assert!(dacl.contains(other), "the instance that was waiting still has the old list: {dacl}");
+        assert!(dacl.contains(other), "a new instance was made with the new list but the pipe still has the old one: {dacl}");
         drop(f);
         // and taking the account off again is noticed the same way
         super::super::manage::deny(Path::new(&fx.svc.files.policy), other).unwrap();
