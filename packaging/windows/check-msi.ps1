@@ -61,7 +61,7 @@ $guids = [ordered]@{
     DesktopShortcut   = '{E7D2A049-1B38-4C65-8F90-3D5B6A1C9E04}'
 }
 if ($WithDesktop) {
-    $guids['DesktopApp'] = '{DESKTOPAPP-GUID}'
+    $guids['DesktopApp'] = '{94C1442E-A11C-543E-BA0F-87151E3302F3}'
     $guids['DesktopAppStartMenuShortcut'] = '{4B7A1D52-8C3E-4F69-A0D7-5E2B9C6F1A83}'
     $guids['DesktopAppDesktopShortcut'] = '{9E3C5A17-2D84-4B06-8F1A-7C0D6B4E2A95}'
 }
@@ -84,8 +84,8 @@ Expect 'service start type (automatic)' (Get-Value 'SELECT StartType FROM Servic
 Expect 'service account' (Get-Value 'SELECT StartName FROM ServiceInstall') 'LocalSystem'
 Expect 'service arguments' (Get-Value 'SELECT Arguments FROM ServiceInstall') 'service serve'
 Expect 'service component' (Get-Value 'SELECT Component_ FROM ServiceInstall') 'Program'
-# ServiceControl.Event: 0x1 start on install, 0x2 stop on install, 0x10 stop on uninstall, 0x20 delete on uninstall
-Expect 'service control (start+stop on install, stop+delete on uninstall; waits)' ((Get-Value 'SELECT Event FROM ServiceControl') + '/' + (Get-Value 'SELECT Wait FROM ServiceControl')) '51/1'
+# ServiceControl.Event: 0x1 start on install, 0x2 stop on install, 0x20 stop on uninstall, 0x80 delete on uninstall
+Expect 'service control (start+stop on install, stop+delete on uninstall; waits)' ((Get-Value 'SELECT Event FROM ServiceControl') + '/' + (Get-Value 'SELECT Wait FROM ServiceControl')) '163/1'
 
 # The order of the actions.
 $seq = Get-Column 'SELECT Action FROM InstallExecuteSequence ORDER BY Sequence'

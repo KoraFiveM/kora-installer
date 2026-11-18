@@ -73,7 +73,7 @@
          carry the notification identity "Kora.Desktop". No autostart from here: the app turns it on per user at its first
          run (the person's to switch off in the tray); an elevated installer must not write another user's registry. -->
     <DirectoryRef Id="INSTALLFOLDER">
-      <Component Id="DesktopApp" Bitness="always64">
+      <Component Id="DesktopApp" Guid="94C1442E-A11C-543E-BA0F-87151E3302F3" Bitness="always64"> <!-- GUID frozen, see Program -->
         <File Id="KoraDesktopExe" Source="$(DesktopExe)" Name="kora-desktop.exe" KeyPath="yes" />
       </Component>
     </DirectoryRef>
