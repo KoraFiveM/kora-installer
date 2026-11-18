@@ -124,7 +124,7 @@ try {
     $policy = Get-Content "$pf\data\service.json" -Raw
     Assert-That ($policy -match [regex]::Escape($sidA) -and $policy -match [regex]::Escape($sidC)) 'A and C are on the list'
     Assert-That ($policy -notmatch [regex]::Escape($sidB)) 'B is not'
-    Assert-That (((Get-Item "$pf\data\service.json").GetAccessControl().Owner) -match 'SYSTEM|Administrators') 'the settings file belongs to SYSTEM or Administrators'
+    Assert-That (((Get-Acl "$pf\data\service.json").Owner) -match 'SYSTEM|Administrators') 'the settings file belongs to SYSTEM or Administrators'
     $pipeSddl = Get-PipeSddl 'kora-service'
     Write-Host "pipe SDDL: $pipeSddl"
     Assert-That ($pipeSddl -match '^O:SY') 'the pipe is owned by SYSTEM'
