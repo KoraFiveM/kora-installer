@@ -18,6 +18,8 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { ApiError } from '@/api/client'
 import type { JobError, Problem, ProblemAction, ProblemActionKind } from '@/api/types'
+import { t, msg, type Msg } from '@/i18n'
+import '@/i18n/en/errors/problemActions'
 
 export type ActionOf<K extends ProblemActionKind> = Extract<ProblemAction, { kind: K }>
 /**
@@ -45,23 +47,22 @@ const KNOWN: readonly ProblemActionKind[] = [
   'continue_without_admin', 'show_command', 'open_link', 'open_log', 'copy_details', 'start_database', 'make_fork',
 ]
 
-/** Wizard pages that `change_answers` can open, as the user sees them. */
-const SECTION_LABEL: Record<string, string> = {
-  licence: 'the licence key',
-  source: 'where the resources come from',
-  versions: 'which versions to follow',
-  mode: 'where the resources come from',
-  name: 'the name or folder',
-  ports: 'the ports',
-  build: 'the server build',
-  resources: 'the resources',
-  database: 'the database choice',
-  options: 'the options',
-  cfx: 'the txAdmin sign-in',
-  github: 'the GitHub account',
+/** Wizard pages that `change_answers` can open, as the user sees them (the whole button text, so each language can phrase it its own way). */
+const SECTION_LABEL: Record<string, Msg> = {
+  licence: msg('errors.problemActions.changeLicence'),
+  source: msg('errors.problemActions.changeSource'),
+  versions: msg('errors.problemActions.changeVersions'),
+  mode: msg('errors.problemActions.changeMode'),
+  name: msg('errors.problemActions.changeName'),
+  ports: msg('errors.problemActions.changePorts'),
+  build: msg('errors.problemActions.changeBuild'),
+  resources: msg('errors.problemActions.changeResources'),
+  database: msg('errors.problemActions.changeDatabase'),
+  options: msg('errors.problemActions.changeOptions'),
+  cfx: msg('errors.problemActions.changeCfx'),
+  github: msg('errors.problemActions.changeGithub'),
 }
 
-const TOOL_LABEL: Record<string, string> = { git: 'Git', gh: 'the GitHub CLI', mariadb: 'MariaDB' }
 
 /** Codes of "this needs administrator rights" problems: the administrator service is missing or not turned on for you. */
 export function isAdminCode(code: string): boolean {
@@ -71,33 +72,33 @@ export function isAdminCode(code: string): boolean {
 export function actionLabel(a: ProblemAction): string {
   switch (a.kind) {
     case 'retry':
-      return 'Try again'
+      return t('errors.problemActions.tryAgain')
     case 'retry_step':
-      return 'Try this step again'
+      return t('errors.problemActions.tryStepAgain')
     case 'skip_step':
-      return 'Skip this step'
+      return t('errors.problemActions.skipStep')
     case 'change_answers':
-      return a.section && SECTION_LABEL[a.section] ? `Change ${SECTION_LABEL[a.section]}` : 'Change my answers'
+      return a.section && SECTION_LABEL[a.section] ? t(SECTION_LABEL[a.section]) : t('errors.problemActions.changeMyAnswers')
     case 'sign_in_github':
-      return a.scopes?.length ? 'Sign in to GitHub again' : 'Sign in to GitHub'
+      return a.scopes?.length ? t('errors.problemActions.signGithubAgain') : t('errors.problemActions.signGithub')
     case 'install_tool':
-      return `Install ${TOOL_LABEL[a.tool] ?? 'it'} for me`
+      return t('errors.problemActions.installValueMe', { tool: a.tool })
     case 'install_admin_service':
-      return "Install Kora's administrator service"
+      return t('errors.problemActions.installKorasAdministratorServi')
     case 'continue_without_admin':
-      return 'Continue without the administrator parts'
+      return t('errors.problemActions.continueWithoutAdministratorPa')
     case 'show_command':
-      return a.elevated ? 'Command to run as administrator' : 'Command to run'
+      return a.elevated ? t('errors.problemActions.commandRunAdministrator') : t('errors.problemActions.commandRun')
     case 'open_link':
-      return `Open ${hostOf(a.url)}`
+      return t('errors.problemActions.openHostof', { host: hostOf(a.url) })
     case 'open_log':
-      return 'Show the log'
+      return t('errors.problemActions.showLog')
     case 'copy_details':
-      return 'Copy details'
+      return t('errors.problemActions.copyDetails')
     case 'start_database':
-      return 'Start it for me'
+      return t('errors.problemActions.startMe')
     case 'make_fork':
-      return 'Make my own copy (fork)'
+      return t('errors.problemActions.makeMyOwnCopy')
     case 'unknown':
     default:
       // A kind from a newer Kora (or the Rust `Action::Unknown`): never shown, see `hasHandler`.
@@ -109,7 +110,7 @@ function hostOf(url: string): string {
   try {
     return new URL(url).host
   } catch {
-    return 'the page'
+    return t('errors.problemActions.thePage')
   }
 }
 
@@ -128,13 +129,13 @@ const isAction = (a: unknown): a is ProblemAction => typeof a === 'object' && a 
 
 export function toProblem(e: unknown): NoticeProblem | null {
   if (!e) return null
-  if (e instanceof ApiError) return { code: e.code, message: e.message, details: e.details, actions: (e.actions ?? []).filter(isAction), command: e.command, status: e.status, replay: e.replay }
+  if (e instanceof ApiError) return { code: e.code, message: e.message, details: e.details, actions: (e.actions ?? []).filter(isAction), command: e.command, status: e.status, replay: e.replay, i18n: e.i18n }
   if (typeof e === 'string') return { code: 'failed', message: e, actions: [] }
   if (typeof e === 'object' && 'message' in e) {
     const j = e as JobError
-    return { code: j.code ?? 'failed', message: j.message, details: j.details, actions: (Array.isArray(j.actions) ? j.actions : []).filter(isAction), command: j.command }
+    return { code: j.code ?? 'failed', message: j.message, details: j.details, actions: (Array.isArray(j.actions) ? j.actions : []).filter(isAction), command: j.command, i18n: j.i18n }
   }
-  return { code: 'failed', message: 'Something went wrong. Please try again.', actions: [] }
+  return { code: 'failed', message: t('errors.problemActions.somethingWentWrongPlease'), actions: [] }
 }
 
 /** The text "Copy details" puts on the clipboard: everything someone helping would ask for. */

@@ -13,6 +13,8 @@ const TOKEN: &str = "testtoken";
 const ADDR: &str = "127.0.0.1:47120";
 
 fn app(fake: &FakeBackend) -> axum::Router {
+    // These describe the panel without the administrator service: a machine that has the real one must not be asked.
+    kora_web::elevated::set_broker_override(Some(Arc::new(kora_web::elevated::AbsentService)));
     let f = fake.clone();
     router(AppState::system(TOKEN.into(), ADDR.parse().unwrap()).with_backend(Arc::new(move || Box::new(f.clone()))))
 }
@@ -71,8 +73,7 @@ async fn forwarding_and_the_firewall_fix() {
     // A refusal (administrator rights) comes through whole, with its command.
     fake.state().firewall_open_error = Some(
         kora_core::problem::Problem::new(kora_core::problem::codes::NEEDS_ELEVATION, "Changing the firewall needs administrator rights.")
-            .with_action(kora_core::problem::Action::ShowCommand { command: vec!["kora".into(), "reach".into(), "prod".into(), "--open-firewall".into()], elevated: true })
-            .into(),
+            .with_action(kora_core::problem::Action::ShowCommand { command: vec!["kora".into(), "reach".into(), "prod".into(), "--open-firewall".into()], elevated: true }),
     );
     let (st, j) = call(&app, "POST", "/api/v1/servers/prod/reach/firewall", Some(json!({}))).await;
     assert_eq!(st, 403, "{j}");

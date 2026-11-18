@@ -239,7 +239,7 @@ the server is deleted. Turn it off again with `kora reach <server> --forward off
 
 **Where they go.** Kora's own backups folder (in the Kora folder, outside every server folder, so deleting a server does not delete its backups), or a folder you choose, such as another disk or a mounted share. A backup on the same disk does not survive that disk dying: keep one somewhere else too. Kora checks there is room first. **How many to keep:** the newest N, and optionally one per day for D days; older ones are removed after each backup. A safety copy from a restore is kept 30 days; a copy made for moving is never removed.
 
-**Scheduled backups** run **only while Kora's background service runs** (`kora panel --background`, set up in [section 1](#1-starting-the-panel)): they are made by the panel, not by the operating system's scheduler, which would need administrator rights. A slot missed while it was off is made up once when it starts again. A failed backup raises an alert (and goes to your Discord and webhook), and the servers list and Overview show "Last backup 3 days ago" with a warning when the newest is older than the schedule says.
+**Scheduled backups** are a job of your operating system when Kora's administrator service is installed for your account (a systemd timer on Linux, a Task Scheduler task on Windows, named `kora-backup-<server>`): they run as **you**, never as root or the server's service account, whether or not the panel is open, and a slot missed while the computer was off is made up when it is next on (`Persistent=true` / "run as soon as possible after a missed start"). The Backups tab says which one is in charge, and the panel's own scheduler then stands down for that server so a backup never runs twice. Without the service they run **only while Kora's background service runs** (`kora panel --background`, set up in [section 1](#1-starting-the-panel)): they are made by the panel, and a slot missed while it was off is made up once when it starts again. Deleting a server removes its job; `kora uninstall` removes any left. A failed backup raises an alert (and goes to your Discord and webhook), and the servers list and Overview show "Last backup 3 days ago" with a warning when the newest is older than the schedule says.
 
 **Restoring.** Pick a backup, press **Restore…**, read what will change and what stays, and confirm. Kora checks every file against its checksums first (nothing is touched until the file proves good), makes a **safety copy** of the server as it is now, stops the server, puts the database back, then the files, then the resources (fetched back to the saved versions; one that cannot be fetched is listed and left as it is), and starts the server again. `secrets.cfg` and `database.json` of the running server are kept (they hold today's licence key and login). **Undo this restore** puts the safety copy back. A backup made by a newer Kora is refused; a wrong password, a damaged file and a backup of another server are explained.
 
@@ -255,6 +255,8 @@ the server is deleted. Turn it off again with `kora reach <server> --forward off
 *Clone or fork:* the backup records whether the server follows plain copies of the original repositories or your own copies (forks), which versions it follows, and for every resource whether it is on its normal version, on a branch or trying a pull request. A restore puts every resource back exactly so, and marks them all as changed ("Restart needed" shows for what the running server has not loaded). If the server follows copies in a GitHub account the new computer's sign-in cannot use, the import asks: keep the remotes as recorded, make your own copies here, or use the originals.
 
 *Deleted servers:* when you delete a server, its backup settings go and its backups are kept; the import page lists them under "Backups of servers that no longer exist" so one can be restored as a new server.
+
+*Restores and imports and the server's own account:* when a server runs under an account of its own (Linux `kora-<name>`, the Windows service's account), the files a restore wrote as you are handed to that account again at the end, through the administrator service. If the service is not there, the result says so and shows `sudo kora hand-over <folder>` (Windows: `kora hand-over <folder>` in an administrator terminal), which does the same.
 
 *What does not carry over:* the operating-system service, firewall rules and port forwarding, the automatic-update timer and the backup schedule, your GitHub sign-in, and the FXServer program (downloaded again). Folders in the settings and txAdmin's files and line endings are converted for the new system; a resource that runs a program only one system has will not work on the other. The database goes into a **new** database and login on the new computer; the old login is not reused.
 
@@ -346,6 +348,26 @@ saved key can also carry on after Kora Panel was restarted ("Carry on"); the dat
 typed one, is not kept and the install uses the automatic login or fails at that step again. A key you pasted without
 saving it is only remembered while the panel runs. The wizard also checks free disk space before it begins.
 
+### Running a server in a container (Linux)
+
+On Linux, when **Podman** or **Docker** is installed and works, the wizard (in "Choose everything myself", and as a line on the last screen) also asks **How should this server run?**: *As a system service* (the default, as always) or *In a container*. `kora install --run-mode container [--engine podman|docker] [--bind <ip>] [--memory-mb N] [--cpus N]` does the same.
+
+A container server is the same server: start, stop, restart, the console and logs, txAdmin through the panel, updates, resources, branches and pull requests, backups, the reachability check and the resource page all work as before. What is different is what Kora sets up. There is **no system service, no service account and no systemd unit**; with rootless Podman nothing needs administrator rights at all.
+
+- **One container per server**, named `kora-<name>` and labelled `kora.server=<name>`, on a small pinned Alpine image (Kora publishes no image of its own). The FXServer build is downloaded and verified by Kora as always into the server folder and mounted into the container, at the same path inside as outside. Everything you see in the folder (`server.cfg`, `txData`, resources) is the real folder.
+- **The database** is, by default, a **MariaDB container next to the server** (`kora-<name>-db`) on a private network `kora-<name>-net`, with its data in the volume `kora-<name>-dbdata`. The login is generated like always and kept in `database.json`; nothing is published to the network. "Use a database I already have" stays available (give its network address: `127.0.0.1` inside a container is the container itself).
+- **Ports:** the game port is published for TCP and UDP (on every address, or only on the one you chose with `--bind`); txAdmin's port is published on this computer only, and the panel's **Open txAdmin** reaches it there.
+- **Files stay yours.** The container runs as the folder's owner (rootless Podman maps your own id through unchanged), so Kora can update, back up and delete everything the server writes.
+- **Starting at boot and after a crash:** the engine's restart policy. With rootless Podman Kora also enables the user unit `podman-restart.service` and `loginctl enable-linger` (the System check says if that needs one command from an administrator). One difference: Docker keeps a server you stopped stopped across a reboot; Podman starts it again.
+- **Logs and the console:** the Logs and Console tabs read the container's output, copied to `.kora/console.log` by a small background follower that Kora starts and keeps running; the live console's command file is in the folder, so it works unchanged.
+- **Updates** that change the FXServer build, the ports or the container settings recreate the container (it holds no data of its own) at the next start.
+- **Backups** run the database dump inside the database container (no database client is needed on this computer). The backup records how the server ran; **bringing a server in from a backup** offers a container when this computer has an engine, and a service when it has none. Restoring a backup never changes how a server runs.
+- **Deleting** removes the containers and the private network, and (you are asked, like for databases) the database volume. `kora status` and the panel say **in a container (podman, rootless)**.
+- **Docker and your firewall:** Docker (and Podman run as root) publish ports with their own firewall rules, which `ufw` and `firewalld` do not see: the server's port is open to the network whatever your firewall says. The reachability check says so instead of asking you to open a port. Rootless Podman and rootless Docker forward from an ordinary program, so your firewall applies.
+- **Docker needs trust:** being in the `docker` group is the same as being root on the computer. Kora says so before offering it; rootless Podman does not need that trust.
+
+What a container does and does not protect is in [SECURITY.md](../SECURITY.md#container-mode-linux). Not in this release: converting an existing service server to a container (and back) in place. Make a backup, then bring it in as a new container server (**Bring a server from a backup**), or the other way round.
+
 ## 6. Settings
 
 - **Kora version:** check for a newer Kora and update it (same as `kora self-update`), or install a specific version.
@@ -388,6 +410,7 @@ words with a button where something is wrong:
   administrator rights: with the helper (Linux) it just works, otherwise the panel shows the command (`kora check
   --start-database`; Windows asks for administrator permission).
 - **Administrator rights** and **Background service**: what Kora can do without asking, for your information.
+- **Containers** (Linux, when Podman or Docker is installed): which engine, its version, whether it is rootless, and whether it really ran a test container. A problem comes with its fix: no subuid/subgid range for rootless (an administrator adds one), cgroup v1, lingering off (containers stop when you sign out: `loginctl enable-linger`), the Docker socket refusing this account. Not having an engine is not a problem: servers run as system services.
 
 The same buttons appear wherever an error offers them (the install wizard, the GitHub account card), and those errors link here.
 `kora uninstall` also removes Kora's own copies of Git and the GitHub CLI.
@@ -477,6 +500,8 @@ The page files are part of the program and are replaced with it.
 ---
 
 ## 9. Optional: monitoring and alerts
+
+Some alerts belong to no server but to Kora itself: the panel's HTTPS certificate ends within 14 days, has expired, or Kora could not renew it, Kora's administrator service stopped answering after it had been answering, or a pass of the scheduled backups could not run at all. They show in the same alert list at the top of every page (with a link to what to do, not to a server), as a desktop notification in the Kora app, and go to the Discord and webhook addresses of the servers that have **Problems with Kora itself** ticked (Monitoring, each address once).
 
 The **Monitoring** tab shows, for each server: whether it is up, players online, CPU and memory of the server's processes,
 disk space, port checks and the update badge, as charts you can view over 1, 6 or 24 hours. About 24 hours of history is
@@ -585,7 +610,97 @@ the shared secret (`X-Kora-Proxy-Secret`). The visitor's address (the right-most
 the sign-in lockout counts; `X-Forwarded-Proto: https` makes the request count as secure; a proxied visitor is always a
 remote one, never the person at the computer, and never gets a Tailscale identity. Without the secret, or from another
 address, forwarded headers are refused as before. Add the public name to the allowed names (Settings > Remote access)
-and turn remote access on. The "Open txAdmin" gateway ports are not proxied this way. `kora panel proxy forget` removes the trust.
+and turn remote access on. `kora panel proxy forget` removes the trust. To open txAdmin through the proxy, see [below](#opening-txadmin-through-the-proxy).
+
+### Opening txAdmin through the proxy
+
+txAdmin cannot run under a path prefix (`/txadmin/main/`): its page talks to absolute paths such as `/auth/` and `/socket.io`. So
+the panel gives each server's txAdmin an address of its own, a **gateway port** (txAdmin's port + 10000: `50120` for the usual
+`40120`), and the proxy has to give people a **host name** or a **port** that leads to it. Pick one way and set it up once per server:
+
+1. **One host name per server** (recommended, nothing to open in the firewall). Tell Kora the pattern, then give each server that name
+   in the proxy, forwarding to its gateway port on the panel's own address. Add the names to the allowed hosts (Settings, Remote access).
+
+   ```sh
+   kora panel proxy txadmin-host 'tx-{server}.example.com'    # {server} is the server's short name (underscores become dashes)
+   ```
+
+2. **One port per server on the panel's public name.** Nothing to tell Kora (`kora panel proxy txadmin-host --clear`): "Open txAdmin"
+   opens `https://panel.example.com:<gateway port>`, so the proxy must listen on that same public port and forward to the same
+   port on the panel's address. `Host` must reach Kora as the visitor typed it (nginx: `$http_host`, not `$host`).
+
+Replace `<secret>` with the proxy's secret (`kora panel proxy trust`); it is the same one as for the panel. The proxy must pass
+WebSockets on (txAdmin's live console is one) and forward `Host` unchanged. Kora applies the same rules as for the panel: the
+address and the secret together, a visitor is always remote, and txAdmin still needs an administrator, and
+`kora panel remote-actions on` for a token sign-in. A name made for one server does not open another server's txAdmin. The secret and
+the forwarded headers never reach txAdmin.
+
+**Caddy, one host name per server**
+
+```
+tx-main.example.com {
+    reverse_proxy 127.0.0.1:50120 {
+        header_up X-Kora-Proxy-Secret <secret>
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+(Caddy passes WebSockets on and adds X-Forwarded-For and Host itself.)
+```
+
+**Caddy, one port per server**
+
+```
+example.com:50120 {
+    reverse_proxy 127.0.0.1:50120 {
+        header_up X-Kora-Proxy-Secret <secret>
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+```
+
+**nginx, one host name per server**
+
+```
+server {
+    listen 443 ssl;
+    server_name tx-main.example.com;
+    # ssl_certificate and ssl_certificate_key as for the panel
+    location / {
+        proxy_pass http://127.0.0.1:50120;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Kora-Proxy-Secret <secret>;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
+**nginx, one port per server**
+
+```
+server {
+    listen 50120 ssl;
+    server_name example.com;
+    # ssl_certificate and ssl_certificate_key as for the panel
+    location / {
+        proxy_pass http://127.0.0.1:50120;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Kora-Proxy-Secret <secret>;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
 
 ### Other options
 

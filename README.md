@@ -34,7 +34,7 @@ shows at a glance whether your servers run, its menu starts, stops and restarts 
 stops. It is a thin client of the panel (nothing changes for the browser route, remote use or a server without a screen),
 Windows first (WebView2; Linux with WebKitGTK second). See [docs/desktop-app.md](docs/desktop-app.md).
 
-Guide: [docs/panel.md](docs/panel.md). Where Kora keeps its own data, backups and the way back to older versions: [docs/store.md](docs/store.md).
+Guide: [docs/panel.md](docs/panel.md). Languages and how to add one: [docs/translations.md](docs/translations.md); accessibility: [docs/accessibility.md](docs/accessibility.md). Where Kora keeps its own data, backups and the way back to older versions: [docs/store.md](docs/store.md).
 
 ## Install
 
@@ -88,6 +88,10 @@ If a step fails, the install stops there and the page offers **Try this step aga
 safe: firewall, schedule, starting the server) instead of starting over. An install that was stopped, for example by
 restarting the panel, can be carried on from the install page when it used a saved licence key. Scripts can use flags
 instead of the wizard (`kora install --help`, `kora install --dry-run` to preview).
+
+### How the server runs (Linux)
+
+By default a server is a system service. When Podman or Docker works, the wizard (and `kora install --run-mode container`) can run it **in a container** instead: nothing is installed on the system, rootless Podman needs no administrator rights, the database is a MariaDB container next to the server, and everything in the panel works the same. See [docs/panel.md](docs/panel.md#running-a-server-in-a-container-linux).
 
 ### Where the resources come from, and which versions
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense, lazy } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderPlus, Plus, RefreshCw } from 'lucide-react'
@@ -8,8 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/Skeleton'
 import { ErrorNotice } from '@/components/ErrorNotice'
-import { AddExistingDialog } from '@/components/AddExistingDialog'
-import { StatusChip, StyleChip, UpdateChip } from '@/components/Status'
+import { RunChip, StatusChip, StyleChip, UpdateChip } from '@/components/Status'
 import { ServerControls } from '@/components/ServerControls'
 import { CopyConnectButton, OpenFolderButton, TxAdminButton } from '@/components/ServerLinks'
 import { useServerControl } from '@/hooks/useServerControl'
@@ -19,6 +18,12 @@ import { BackupChip, useBackupLines } from '@/components/BackupChip'
 import { OffNormalSummary } from '@/components/OffNormalSummary'
 import { useInstallBlock } from './install/access'
 import { TidyUpBanner } from '@/components/Shortcuts'
+import { t, msg } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/servers/serversPage'
+
+// Only needed when someone asks to add a server they set up another way.
+const AddExistingDialog = lazy(() => import('@/components/AddExistingDialog').then((m) => ({ default: m.AddExistingDialog })))
 
 /** Asked once per browser tab: a first visit with no servers goes straight to the install wizard. */
 const FIRST_RUN_KEY = 'kora.firstRunShown'
@@ -29,11 +34,11 @@ function Row({ s, alerts, backup }: { s: ServerSummary; alerts: number; backup?:
     <tr className="border-t border-border align-middle">
       <td className="px-4 py-3">
         <Link to={`/servers/${encodeURIComponent(s.name)}`} className="font-medium hover:underline">{s.name}</Link>
-        {alerts > 0 && <Link to={`/servers/${encodeURIComponent(s.name)}?tab=monitoring`} className="ml-2 align-middle"><Badge tone="danger">{alerts === 1 ? '1 alert' : `${alerts} alerts`}</Badge></Link>}
+        {alerts > 0 && <Link to={`/servers/${encodeURIComponent(s.name)}?tab=monitoring`} className="ml-2 align-middle"><Badge tone="danger">{t('servers.serversPage.alertsCount', { count: alerts })}</Badge></Link>}
         <div className="mt-1"><OffNormalSummary server={s} /></div>
-        {!s.managed && <div className="text-xs text-muted-foreground">Added from an existing folder</div>}
+        {!s.managed && <div className="text-xs text-muted-foreground">{t('servers.serversPage.addedFromExistingFolder')}</div>}
       </td>
-      <td className="px-4 py-3"><StyleChip source={s.source} versions={s.versions} /></td>
+      <td className="px-4 py-3"><StyleChip source={s.source} versions={s.versions} /> <RunChip mode={s.run_mode} label={s.run_label} /></td>
       <td className="px-4 py-3"><StatusChip status={s.status} pending={ctl.pending} /></td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.game}</td>
       <td className="px-4 py-3 font-mono text-xs">{s.ports.txadmin}</td>
@@ -79,10 +84,10 @@ export default function ServersPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-heading text-2xl font-bold">Your servers</h1>
-        <div className="flex gap-2">
-          <Button onClick={() => void q.refetch()} disabled={q.isFetching}><RefreshCw className={q.isFetching ? 'animate-spin' : ''} /> Refresh</Button>
-          <Button onClick={() => setAdding(true)}><FolderPlus /> Add an existing server</Button>
+        <h1 className="font-heading text-2xl font-bold">{t('servers.serversPage.yourServers')}</h1>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => void q.refetch()} disabled={q.isFetching}>{rich('servers.serversPage.refreshcwNodeRefresh', { refreshCw: <RefreshCw className={q.isFetching ? 'animate-spin' : ''} /> })}</Button>
+          <Button onClick={() => setAdding(true)}>{rich('servers.serversPage.folderplusNodeAddExisting', { folderPlus: <FolderPlus /> })}</Button>
         </div>
       </div>
       <TidyUpBanner />
@@ -91,28 +96,28 @@ export default function ServersPage() {
       {q.isSuccess && servers.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-start gap-4 p-8">
-            <h2 className="font-heading text-xl font-semibold">No servers yet</h2>
-            <p className="max-w-prose text-muted-foreground">Kora can set up a new FiveM server for you in a few minutes: the server files, database and resources. Or add one you already have.</p>
-            <Button variant="default" disabled={!!installBlock} title={installBlock?.reason} aria-describedby={installBlock ? 'install-blocked' : undefined} onClick={() => nav('/install')}><Plus /> Install your first server</Button>
+            <h2 className="font-heading text-xl font-semibold">{t('servers.serversPage.noServersYet')}</h2>
+            <p className="max-w-prose text-muted-foreground">{t('servers.serversPage.koraSetUpNew')}</p>
+            <Button variant="default" disabled={!!installBlock} title={installBlock?.reason} aria-describedby={installBlock ? 'install-blocked' : undefined} onClick={() => nav('/install')}>{rich('servers.serversPage.plusNodeInstallFirst', { plus: <Plus /> })}</Button>
             {installBlock && <p id="install-blocked" className="max-w-prose text-sm text-muted-foreground">{installBlock.reason}</p>}
           </CardContent>
         </Card>
       )}
       {servers.length > 0 && (
-        <p className="flex flex-wrap items-center gap-2 text-sm" aria-label="Health summary">
-          <Badge tone="success" dot>{running} running</Badge>
-          {stopped > 0 && <Badge tone="neutral" dot>{stopped} stopped</Badge>}
-          {openAlerts.length > 0 ? <Badge tone="danger">{openAlerts.length === 1 ? '1 alert needs attention' : `${openAlerts.length} alerts need attention`}</Badge> : <Badge tone="plain">No alerts</Badge>}
+        <p className="flex flex-wrap items-center gap-2 text-sm" aria-label={t('servers.serversPage.healthSummary')}>
+          <Badge tone="success" dot>{t('servers.serversPage.runningRunning', { running })}</Badge>
+          {stopped > 0 && <Badge tone="neutral" dot>{t('servers.serversPage.stoppedStopped', { stopped })}</Badge>}
+          {openAlerts.length > 0 ? <Badge tone="danger">{t('servers.serversPage.alertsNeedAttention', { count: openAlerts.length })}</Badge> : <Badge tone="plain">{t('servers.serversPage.noAlerts')}</Badge>}
         </p>
       )}
       {servers.length > 0 && (
         <Card className="overflow-x-auto">
           <table className="w-full min-w-[72rem] text-left text-sm">
-            <caption className="sr-only">Your servers</caption>
+            <caption className="sr-only">{t('servers.serversPage.yourServers')}</caption>
             <thead className="text-xs text-muted-foreground">
               <tr>
-                {['Name', 'Mode', 'Status', 'Game port', 'txAdmin port', 'Updates', 'Last backup', 'Actions', 'Open and copy'].map((h) => (
-                  <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>
+                {[msg('servers.serversPage.colName'), msg('servers.serversPage.colMode'), msg('servers.serversPage.colStatus'), msg('servers.serversPage.gamePort'), msg('servers.serversPage.colTxadminPort'), msg('servers.serversPage.colUpdates'), msg('servers.serversPage.lastBackup'), msg('servers.serversPage.colActions'), msg('servers.serversPage.openCopy')].map((h) => (
+                  <th key={h.msgId} scope="col" className="px-4 py-3 font-medium">{t(h)}</th>
                 ))}
               </tr>
             </thead>
@@ -120,7 +125,7 @@ export default function ServersPage() {
           </table>
         </Card>
       )}
-      <AddExistingDialog open={adding} onOpenChange={setAdding} />
+      {adding && <Suspense fallback={null}><AddExistingDialog open={adding} onOpenChange={setAdding} /></Suspense>}
     </div>
   )
 }

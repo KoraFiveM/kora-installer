@@ -54,17 +54,24 @@ pub mod codes {
     pub const BUSY: &str = "backup.busy";
     pub const NO_UNDO: &str = "backup.no_undo";
     pub const WEAK_PASSPHRASE: &str = "backup.weak_passphrase";
+    /// The files a restore wrote could not be handed to the server's own account.
+    pub const HANDOVER_FAILED: &str = "backup.handover_failed";
+    /// The operating-system job of the scheduled backups could not be made or removed.
+    pub const OS_JOB_FAILED: &str = "backup.os_job_failed";
 }
 
 pub mod create;
+pub mod handover;
 pub mod host;
 pub mod import;
+pub mod osjob;
 pub mod resources;
 pub mod restore;
 pub mod scheduler;
 pub mod service;
 
 use crate::db::SystemRunner;
+use crate::problem::Problem;
 use serde::{Deserialize, Serialize};
 
 /// One step of a backup, restore or import, as a job event.
@@ -82,8 +89,8 @@ pub struct BackupEvent {
 /// Starting and stopping the server around a backup or restore (the panel's backend implements it).
 pub trait Host {
     fn running(&mut self) -> bool;
-    fn stop(&mut self) -> Result<(), String>;
-    fn start(&mut self) -> Result<(), String>;
+    fn stop(&mut self) -> Result<(), Problem>;
+    fn start(&mut self) -> Result<(), Problem>;
 }
 
 /// Everything that touches the machine, so tests can fake it.

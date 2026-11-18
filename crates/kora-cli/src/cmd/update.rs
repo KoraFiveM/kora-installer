@@ -61,7 +61,7 @@ pub(crate) fn update(a: UpdateArgs) -> i32 {
                 return m::exit_code(&report);
             }
             // The scheduled run simply skips this time (already written to update.log).
-            Err(e) if kora_core::update::lock::is_busy_message(&e.to_string()) => {
+            Err(e) if e.code == kora_core::git::branches::codes::BUSY => {
                 println!("Skipped: {e}");
                 return 0;
             }

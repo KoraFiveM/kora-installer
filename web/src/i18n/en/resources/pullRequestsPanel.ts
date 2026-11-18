@@ -1,0 +1,43 @@
+import { register } from '../../index'
+
+const messages = {
+  'resources.pullRequestsPanel.noChecks': 'No checks',
+  'resources.pullRequestsPanel.checkcircleNodeChecksPassing': '{checkCircle2, node}Checks passing',
+  'resources.pullRequestsPanel.xcircleNodeChecksFailing': '{xCircle, node}Checks failing',
+  'resources.pullRequestsPanel.circledashedNodeChecksRunning': '{circleDashed, node}Checks running',
+  'resources.pullRequestsPanel.approved': 'Approved',
+  'resources.pullRequestsPanel.changesRequested': 'Changes requested',
+  'resources.pullRequestsPanel.waitingReview': 'Waiting for a review',
+  'resources.pullRequestsPanel.pullRequests': 'Pull requests',
+  'resources.pullRequestsPanel.pullRequestChangeSomeone': 'A pull request is a change someone has proposed. Kora can download one so you can try it on this server before it is accepted.',
+  'resources.pullRequestsPanel.pullRequestBeingTried': 'The pull request being tried',
+  'resources.pullRequestsPanel.tryingPullRequestTrying': 'You are trying pull request #{trying}',
+  'resources.pullRequestsPanel.nodeNodeGetLatest': '{node, node}Get the latest commits',
+  'resources.pullRequestsPanel.stopTrying': 'Stop trying it',
+  'resources.pullRequestsPanel.runningServerStillOld': 'The running server still has the old version until it is restarted. The notice at the top of this page has the button.',
+  'resources.pullRequestsPanel.pullRequestSomeoneElses': "A pull request is someone else's code. Once you try it, it runs on your server like any of its resources, before anyone has accepted it. Only try pull requests from people you trust, and look at what they change on GitHub first.",
+  'resources.pullRequestsPanel.serverFollowsReleasedVersions': 'This server follows released versions',
+  'resources.pullRequestsPanel.serverMeantRunOnly': 'This server is meant to run only released versions. Trying a pull request makes this resource run unreleased code until you stop trying it.',
+  'resources.pullRequestsPanel.iUnderstandResourceRun': 'I understand: this resource will run unreleased code',
+  'resources.pullRequestsPanel.searchPullRequests': 'Search pull requests',
+  'resources.pullRequestsPanel.searchNumberTitleAuthor': 'Search by number, title or author',
+  'resources.pullRequestsPanel.askingGithub': 'Asking GitHub...',
+  'resources.pullRequestsPanel.noPullRequestMatches': 'No pull request matches your search.',
+  'resources.pullRequestsPanel.thereNoOpenPull': 'There are no open pull requests.',
+  'resources.pullRequestsPanel.openPullRequests': 'Open pull requests',
+  'resources.pullRequestsPanel.draft': 'Draft',
+  'resources.pullRequestsPanel.byAuthor': 'by {author}',
+  'resources.pullRequestsPanel.openedValueUpdatedValue': 'opened {opened}, updated {updated}',
+  'resources.pullRequestsPanel.itsForkDeleted': 'its fork was deleted',
+  'resources.pullRequestsPanel.openPullRequestNumber': 'Open pull request #{number} on GitHub',
+  'resources.pullRequestsPanel.hideDetails': 'Hide details',
+  'resources.pullRequestsPanel.details': 'Details',
+  'resources.pullRequestsPanel.tickBoxAboveFirst': 'Tick the box above first',
+  'resources.pullRequestsPanel.tryPullRequestNumber': 'Try it: pull request #{number}',
+  'resources.pullRequestsPanel.tryIt': 'Try it',
+  'resources.pullRequestsPanel.originalRepository': 'Original repository',
+  'resources.pullRequestsPanel.ownCopy': 'Your own copy',
+} as const
+
+register('en', messages)
+export default messages

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReachLayer, ReachReport } from '@/api/types'
 import { jsonResponse } from '@/test/utils'
+import { t } from '@/i18n'
 import { FORWARDING_RISK, ReachCard } from './ReachCard'
 
 const fetchMock = vi.fn()
@@ -106,8 +107,8 @@ describe('ReachCard', () => {
     await user.click(await screen.findByRole('button', { name: /forward port 30120 for me/i }))
     expect(calls('/forwarding')).toHaveLength(0)
     const alert = screen.getByRole('alert')
-    expect(within(alert).getByText(FORWARDING_RISK)).toBeInTheDocument()
-    expect(FORWARDING_RISK).toMatch(/game port only/)
+    expect(within(alert).getByText(t(FORWARDING_RISK))).toBeInTheDocument()
+    expect(t(FORWARDING_RISK)).toMatch(/game port only/)
     await user.click(within(alert).getByRole('button', { name: /turn on port forwarding/i }))
     await waitFor(() => expect(calls('/forwarding')).toHaveLength(1))
     expect(JSON.parse(String(calls('/forwarding')[0][1]?.body))).toEqual({ enabled: true })

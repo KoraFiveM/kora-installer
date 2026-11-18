@@ -61,7 +61,11 @@ upgrading), `install` / `wininstall` / `manage` (install, enrol, allow/deny), `p
    in Program Files, so the folder cannot be squatted by a user before the installer runs.
 8. **The Windows pipe grants the listed accounts exactly read data, write data and read attributes (`0x120083`), not
    `FILE_APPEND_DATA`** (= create a pipe instance, part of `GENERIC_WRITE`), so an allowed account cannot make a look-alike
-   pipe; the panel also checks the pipe's owner is SYSTEM before sending anything.
+   pipe; the panel also checks the pipe's owner is SYSTEM before sending anything. A pipe has ONE access list (the first
+   instance's; Windows ignores the list given for later instances), so the service sets it again on every new instance and
+   makes one when `service.json` changes (it looks every two seconds): `kora service allow|deny` takes effect in a few
+   seconds without restarting the service. A client that connects and does not send its request line within ten seconds is
+   cut off (the read is cancelled; disconnecting from another thread would wait behind it).
 9. **Updates through the service** reuse `kora self-update --yes` as the child (same release feed and checksum), with a kept
    copy of the running program, an immediate "does the new one start" check, a pending-update record, a restart by the
    service manager (`Restart=always`; Windows: a failure exit code plus restart actions on non-crash failures) and a
@@ -115,6 +119,13 @@ upgrading), `install` / `wininstall` / `manage` (install, enrol, allow/deny), `p
   Scheduler, refusals, pipe rights, upgrade, uninstall). The Task Scheduler account helper in `14-msi.ps1` should be
   consolidated with `scripts/smoke/lib-accounts.ps1` from branch `nx/release-trust`.
 - `install.sh` / `install.ps1` offer the system install first; `KORA_SYSTEM=1|0`, `-System` / `-PerUser`.
+
+## Operations added after the first release
+
+- **Scheduled backups as an operating-system job** (`backup-job set|off <folder>`). `kora-backup-<slug>` (systemd timer + `User=<caller>` unit / Task Scheduler task, `InteractiveToken`, `LeastPrivilege`) runs `<kora> backup create <folder> --scheduled` as the calling account: the account comes from the connection, the program is the root-owned pinned copy, a time is always given (daily or weekly, validated like the update schedule), never a passphrase. Own ledger key `backup:<slug>`; removed by deleting the server (through the service, before its settings are forgotten) and by `kora uninstall`. The privileged child never opens the store; the job it makes does, as the person. The panel's own scheduler stands down for a server whose `BackupStatus.os_job` is set; the job does nothing when the settings say off, and marks its slot so the panel's scheduler cannot repeat it.
+- **Handing restored files to the server's own account** (`hand-over <folder>`). Linux: `fsutil::chown_tree_no_follow` to `kora-<name>`; Windows: the `NT SERVICE\kora-<name>` rights again. The account is never taken from the request or from the folder's records as written: it is the one Kora makes for the name in the folder's install record, must exist and be a system account. Called at the end of a restore (before the server starts again) and of an import; the result says plainly when it could not be done, with the command.
+- **Reading the service's own audit** (`audit-read`, read-only, answered by the service itself, no child, not written to the log it reads). Only lines about the calling account unless the caller is root, an elevated Windows token or in `sudo`/`wheel`/`admin`; at most 500 lines of at most 300 characters from the last 512 KB, each passed through `support::redact`. The panel shows them in Settings, Activity log, labelled "Done with administrator rights" and merged by time (`GET /audit/service`, administrators only; `kora audit --service`).
+- **Windows: a standard account approved with an administrator's password.** The installer passes Windows Installer's `ClientProcessId` to `kora service allow-installer`; the SYSTEM side reads that process's token and, when it is elevated, its parent's (the program that asked for the permission), and allows that person only when `privsvc::installer_user::decide` finds an interactive session, an ordinary account and matching sessions. Anything unclear allows nobody extra (today's behaviour). Unverified on a real Windows: see the checklist (S3b).
 
 ## Not done / follow-ups
 

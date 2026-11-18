@@ -436,6 +436,7 @@ mod tests {
                 os: "linux".into(),
                 dir: "/srv/test".into(),
                 github_owner: None,
+                run_mode: None,
             },
             database: DatabaseBackup { kind: DbKind::None, name: None, host: None, port: None, dump_bytes: 0, note: String::new() },
             resources: vec![],

@@ -20,6 +20,7 @@ pub mod fw;
 pub mod probe;
 pub mod settings;
 
+use crate::problem::Problem;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::time::Duration;
@@ -588,12 +589,17 @@ pub fn assess(f: &Facts) -> ReachReport {
 
 /// [`gather`] then [`assess`].
 pub fn check(env: &dyn ReachEnv, e: &ServerEntry, consent_override: Option<Consent>) -> ReachReport {
-    assess(&gather(env, e, consent_override))
+    let mut report = assess(&gather(env, e, consent_override));
+    // A container server's port is published by its engine; the firewall line says what that means.
+    if let Some(rec) = crate::container::record::ContainerRecord::load(&e.dir) {
+        crate::container::reach::adjust(&mut report, &rec.engine());
+    }
+    report
 }
 
 /// Turn automatic port forwarding on or off for a server. Off also takes the mapping away at once
 /// (the keepers would do it within half a minute anyway).
-pub fn set_forwarding(e: &ServerEntry, on: bool) -> Result<ForwardingView, String> {
+pub fn set_forwarding(e: &ServerEntry, on: bool) -> Result<ForwardingView, Problem> {
     let mut s = settings::load_server(&e.dir);
     if s.forward == on {
         return Ok(ForwardingView { enabled: on, status: s.status });

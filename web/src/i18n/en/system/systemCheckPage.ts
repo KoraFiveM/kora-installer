@@ -1,0 +1,24 @@
+import { register } from '../../index'
+
+const messages = {
+  'system.systemCheckPage.systemCheck': 'System check',
+  'system.systemCheckPage.whatKoraNeedsComputer': 'What Kora needs on this computer, and a button to fix anything that is missing. Most fixes are a button; where one needs a command, it is shown to copy.',
+  'system.systemCheckPage.nodeNodeCheckAgain': '{node, node}Check again ',
+  'system.systemCheckPage.loaderNodeCheckingComputer': '{loader2, node}Checking this computer...',
+  'system.systemCheckPage.everythingKoraNeedsHere': 'Everything Kora needs is here.',
+  'system.systemCheckPage.accountRoleLookBut': 'Your account ({role}) can look at this but not fix it. Ask an administrator to open this page and use the buttons, or to run the commands shown.',
+  'system.systemCheckPage.koraRunsCodeNode': 'Kora runs {code, node}',
+  'system.systemCheckPage.fine': 'Fine',
+  'system.systemCheckPage.needsFixing': 'Needs fixing',
+  'system.systemCheckPage.goodKnow': 'Good to know',
+  'system.systemCheckPage.thingsNeedFixing': '{count, plural, one {# thing needs fixing.} other {# things need fixing.}}',
+  'system.systemCheckPage.itemGit': 'Git',
+  'system.systemCheckPage.itemGh': 'GitHub CLI',
+  'system.systemCheckPage.itemGithub': 'GitHub sign-in',
+  'system.systemCheckPage.itemDatabase': 'Database',
+  'system.systemCheckPage.itemAdmin': 'Administrator rights',
+  'system.systemCheckPage.itemService': 'Background service',
+} as const
+
+register('en', messages)
+export default messages

@@ -87,23 +87,20 @@ pub(crate) fn render(r: &ReachReport) -> Vec<String> {
 }
 
 pub(crate) fn run(a: ReachArgs) -> i32 {
-    let fail = |m: String| {
-        eprintln!("error: {m}");
-        1
-    };
+    let fail = crate::ui::fail;
     let reg = match registry::Registry::load() {
         Ok(r) => r,
-        Err(e) => return fail(format!("cannot read the server registry: {e}")),
+        Err(e) => return fail(e.lead("cannot read the server registry")),
     };
     let Some(entry) = reg.find(&a.server).cloned() else {
-        return fail(format!("no registered server named '{}' (see `kora status`)", a.server));
+        return fail(format!("no registered server named '{}' (see `kora status`)", a.server).into());
     };
     let mut b = SystemBackend;
     if let Some(f) = &a.forward {
         match b.forwarding_set(&entry, f == "on") {
             Ok(v) if v.enabled => println!("Automatic port forwarding is ON for '{}'. Kora asks your router to forward port {} (TCP and UDP) while the server runs, and takes it away when it stops. (A router that programs can change is a risk worth knowing about: turn it off again with --forward off.)", entry.name, entry.ports.game),
             Ok(_) => println!("Automatic port forwarding is OFF for '{}'. Anything Kora forwarded was removed.", entry.name),
-            Err(e) => return fail(kora_core::problem::plain_text(&e)),
+            Err(e) => return fail(e),
         }
     }
     if a.open_firewall {
@@ -112,14 +109,14 @@ pub(crate) fn run(a: ReachArgs) -> i32 {
                 notes.iter().for_each(|n| println!("{n}"));
                 0
             }
-            Err(e) => fail(kora_core::problem::plain_text(&e)),
+            Err(e) => fail(e),
         };
     }
     let saved = b.reach_consent();
     let wanted = Consent { cfx_list: saved.cfx_list || a.cfx_list, ip_echo: saved.ip_echo || a.ip_echo };
     if a.remember && wanted != saved {
         if let Err(e) = b.reach_consent_set(wanted) {
-            return fail(kora_core::problem::plain_text(&e));
+            return fail(e);
         }
     }
     let once = (wanted != saved).then_some(wanted);
@@ -132,7 +129,7 @@ pub(crate) fn run(a: ReachArgs) -> i32 {
             }
             0
         }
-        Err(e) => fail(kora_core::problem::plain_text(&e)),
+        Err(e) => fail(e),
     }
 }
 

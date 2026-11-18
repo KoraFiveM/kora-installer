@@ -15,13 +15,29 @@ use std::path::Path;
 /// Error type for the step engine.
 #[derive(Debug, thiserror::Error)]
 pub enum StepError {
-    /// The text may be a packed [`crate::problem::Problem`]; `Display` shows it readably.
-    #[error("step failed: {}", crate::problem::plain_text(.0))]
-    Failed(String),
+    /// The step failed in a way the person can read (and maybe act on).
+    #[error("step failed: {0}")]
+    Failed(crate::problem::Problem),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("state error: {0}")]
     State(#[from] serde_json::Error),
+}
+
+impl From<StepError> for crate::problem::Problem {
+    fn from(e: StepError) -> Self {
+        match e {
+            StepError::Failed(p) => p,
+            StepError::Io(e) => e.into(),
+            StepError::State(e) => crate::problem::Problem::from(e).context("saving the install progress"),
+        }
+    }
+}
+
+impl From<crate::problem::Problem> for StepError {
+    fn from(p: crate::problem::Problem) -> Self {
+        StepError::Failed(p)
+    }
 }
 
 pub type StepResult<T> = Result<T, StepError>;
@@ -44,8 +60,7 @@ pub trait Step {
 /// Steps already `Done` (and still verifying) are skipped, which gives resume; so are steps the
 /// user chose to skip ([`mark_skipped`]). Running the plan again after a failure is "retry the
 /// failed step": it starts at the first step that is not done.
-/// On failure the step is marked `Failed` (with the error text, which may be a packed
-/// [`crate::problem::Problem`]) and the error is returned.
+/// On failure the step is marked `Failed` (with the error text) and the error is returned.
 pub fn run_plan(steps: &mut [Box<dyn Step>], state_path: &Path) -> StepResult<PlanState> {
     let mut state = PlanState::load_or_default(state_path)?;
     for s in steps.iter() {

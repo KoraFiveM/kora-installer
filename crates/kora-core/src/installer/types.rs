@@ -22,6 +22,9 @@ pub enum DbChoice {
     InstallIfMissing,
     /// Do not touch databases (user supplies a connection string later).
     Skip,
+    /// Container mode: a MariaDB container next to the server, on the server's private network, with its data in a
+    /// named volume (managed by Kora). Only valid together with `InstallRequest::container`.
+    Container,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,6 +192,10 @@ pub struct InstallRequest {
     /// scripts make per-user shortcuts instead). Kept so saved requests and old clients still load.
     #[serde(default, skip_serializing)]
     pub app: Option<crate::app_install::AppChoice>,
+    /// Container mode (Linux): run the server in a container instead of as a system service. `None` = as before.
+    /// With it, `service` is ignored (there is no service account, no unit) and `db` may be `DbChoice::Container`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<crate::container::ContainerRequest>,
 }
 
 impl InstallRequest {
@@ -197,6 +204,10 @@ impl InstallRequest {
     }
     pub fn versions(&self) -> Versions {
         style(self.mode, self.source, self.versions).1
+    }
+    /// The server runs in a container.
+    pub fn is_container(&self) -> bool {
+        self.container.is_some()
     }
 }
 

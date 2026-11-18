@@ -1,5 +1,7 @@
 import type * as T from './types'
 import { ROUTES, type OpName, type OpTypes } from './generated/routes'
+import { t } from '@/i18n'
+import '@/i18n/en/core/client'
 
 export interface ApiErrorBody {
   code: string
@@ -9,6 +11,8 @@ export interface ApiErrorBody {
   details?: string
   /** What the user can do (a Problem's `actions`). */
   actions?: T.ProblemAction[]
+  /** The message as a catalogue id plus parameters (a Problem's `i18n`): shown in the person's language when the panel knows the id. */
+  i18n?: T.MessageRef
 }
 
 /** An error answered by the API (or a network failure, code `network`). `message` is for end users. */
@@ -18,6 +22,7 @@ export class ApiError extends Error {
   readonly command?: string[]
   readonly details?: string
   readonly actions?: T.ProblemAction[]
+  readonly i18n?: T.MessageRef
   /** Send the request that failed again (for example once Kora's administrator service is installed). */
   replay?: () => Promise<unknown>
   constructor(status: number, body: ApiErrorBody) {
@@ -28,6 +33,7 @@ export class ApiError extends Error {
     this.command = body.command
     this.details = body.details
     this.actions = body.actions
+    this.i18n = body.i18n
   }
   get needsElevation(): boolean {
     return this.code === 'needs_elevation'
@@ -102,7 +108,7 @@ async function readError(res: Response): Promise<ApiError> {
   } catch {
     /* not JSON */
   }
-  return new ApiError(res.status, body ?? { code: res.status === 401 ? 'unauthorized' : 'internal', message: `The server answered with an unexpected error (${res.status}).` })
+  return new ApiError(res.status, body ?? { code: res.status === 401 ? 'unauthorized' : 'internal', message: t('core.client.serverAnsweredUnexpectedError', { status: res.status }) })
 }
 
 export interface RequestOptions {
@@ -145,7 +151,7 @@ export async function request<R>(path: string, opts: RequestOptions = {}): Promi
     res = await fetch(url, { method, headers, body, credentials: 'same-origin', signal: opts.signal })
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw e
-    throw new ApiError(0, { code: 'network', message: 'Could not reach Kora. Check that it is still running, then try again.' })
+    throw new ApiError(0, { code: 'network', message: t('core.client.couldReachKoraCheck') })
   }
   if (!res.ok) {
     const err = await readError(res)
@@ -389,7 +395,7 @@ export const api = {
     undo: (name: string, passphrase?: string) => call('backup_undo', { params: { s: name }, body: { passphrase } }),
     remove: (name: string, id: string) => call('backup_delete', { params: { s: name, id } }),
     /** The address of the archive (a download; it holds secrets: administrators only). Fetched with the session header, see `downloadBackup`. */
-    fileUrl: (name: string, id: string) => `${BASE}/servers/${encodeURIComponent(name)}/backups/${encodeURIComponent(id)}/file`,
+    fileUrl: (name: string, id: string) => `${BASE}/servers/${encodeURIComponent(name)}/backups/${encodeURIComponent(id)}/file`, // i18n-ignore: an API path
   },
   imports: {
     /** Upload a backup file (the file itself is the body, streamed): it waits on the computer that runs Kora. */
@@ -455,6 +461,10 @@ export const api = {
   audit: {
     list: (q: { limit?: number; before?: number; server?: string; op?: string; actor?: string; result?: string } = {}) =>
       call('audit_list', { query: { limit: q.limit, before: q.before, server: q.server || undefined, op: q.op || undefined, actor: q.actor || undefined, result: q.result || undefined } }),
+  },
+  /** What Kora's administrator service did with administrator rights (its own log; administrators only). */
+  auditService: {
+    list: (limit = 200) => call('audit_service_list', { query: { limit } }),
   },
   keys: {
     list: () => call('keys_list', {}),

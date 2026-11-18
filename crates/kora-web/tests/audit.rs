@@ -251,3 +251,32 @@ async fn acting_on_github_is_recorded_with_the_account_that_acted_and_never_the_
     // Nothing of what was written reaches the log.
     assert!(!serde_json::to_string(&all).unwrap().contains("TOPSECRETTEXT"));
 }
+
+#[tokio::test]
+async fn the_older_github_flows_say_as_which_account_they_acted_and_never_the_text() {
+    let fake = FakeBackend::sample();
+    fake.state().signed_in = true;
+    fake.state().pr_plan = Some(Ok(kora_core::feedback::PrPlan {
+        resource: "kora_hud".into(),
+        upstream: "KoraFiveM/kora_hud".into(),
+        base: "dev".into(),
+        head_owner: "sam".into(),
+        head_branch: "fix".into(),
+        ahead: 2,
+        dir: "/srv/dev/resources/[kora]/kora_hud".into(),
+    }));
+    let w = world_with(fake);
+    let (s, _) = send(&w, "POST", "/api/v1/servers/prod/issues", LAUNCH, None, Some(json!({"resource": "kora_hud", "title": "Broken", "text": "TOPSECRETTEXT"}))).await;
+    assert_eq!(s, 200);
+    let (s, plan) = send(&w, "POST", "/api/v1/servers/prod/pr/plan", LAUNCH, None, Some(json!({"resource": "kora_hud"}))).await;
+    assert_eq!(s, 200, "{plan}");
+    let (s, _) = send(&w, "POST", "/api/v1/servers/prod/pr", LAUNCH, None, Some(json!({"plan": plan, "title": "Fix", "text": "TOPSECRETTEXT"}))).await;
+    assert_eq!(s, 200);
+    let all = rows(&w);
+    for op in ["issue_report", "pr_open"] {
+        let r = all.iter().find(|r| r.op == op && r.result == "ok").unwrap_or_else(|| panic!("{op} is in the log: {all:?}"));
+        assert!(r.detail.as_deref().unwrap_or("").contains("GitHub account fake-login"), "{op}: {r:?}");
+    }
+    assert!(!all.iter().any(|r| r.op == "pr_plan"), "a plan changes nothing");
+    assert!(!serde_json::to_string(&all).unwrap().contains("TOPSECRETTEXT"));
+}

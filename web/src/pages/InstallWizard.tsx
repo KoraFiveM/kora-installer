@@ -23,8 +23,11 @@ import { formatBytes, validatePorts } from '@/lib/utils'
 import { useInstallBlock } from './install/access'
 import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
-import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, OptionsStep, PortsStep, ResourcesStep, SourceStep, VersionsStep } from './install/Steps'
+import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, OptionsStep, PortsStep, ResourcesStep, RunModeStep, SourceStep, VersionsStep } from './install/Steps'
 import { cn } from '@/lib/utils'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/install/installWizard'
 
 interface ReviewRow {
   label: string
@@ -35,29 +38,30 @@ interface ReviewRow {
   advanced?: boolean
 }
 
-function reviewRows(f: WizardForm, req: InstallRequest): ReviewRow[] {
-  const build = f.artifact === 'recommended' ? 'Recommended' : f.artifact === 'pick' ? (f.artifactBuild === null ? 'Not picked yet' : `Build ${f.artifactBuild}`) : 'Custom download'
+function reviewRows(f: WizardForm, req: InstallRequest, containersOffered = false): ReviewRow[] {
+  const build = f.artifact === 'recommended' ? t('install.installWizard.recommended') : f.artifact === 'pick' ? (f.artifactBuild === null ? t('install.installWizard.pickedYet') : t('install.installWizard.buildArtifactbuild', { artifactBuild: f.artifactBuild })) : t('install.installWizard.customDownload')
   const rows: ReviewRow[] = [
-    { label: 'Licence key', value: f.licenceChoice === 'saved' ? (f.licenceName ? `Your saved licence key "${f.licenceName}"` : 'Not picked yet') : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? `Provided (hidden). It will be saved as "${f.saveKeyName.trim()}".` : 'Provided (hidden). It will not be saved.') : 'Not given yet', step: 'licence' },
-    { label: 'Resources come from', value: f.source === 'clone' ? "Kora's resources as they are (plain copies)" : 'Your own copies on GitHub', step: 'source' },
-    { label: 'Versions', value: f.versions === 'released' ? 'Released versions (stable)' : 'Latest changes (the main branch)', step: 'versions' },
-    { label: 'Name', value: req.name || 'Not given yet', step: 'name' },
-    { label: 'Folder', value: req.dir || 'Not given yet', step: 'name' },
-    { label: 'Server name for players', value: req.hostname || '(default)', step: 'name', advanced: true },
-    { label: 'Ports', value: `Game ${f.game.trim() || '?'}, txAdmin ${f.tx.trim() || '?'}`, step: 'ports' },
-    { label: 'FiveM server build', value: f.gameBuild.trim() ? `${build}, game build ${f.gameBuild.trim()}` : build, step: 'build' },
-    { label: 'Resources', value: f.resourcesAll ? 'Everything' : `${f.resourceIds.length} picked, plus what they need`, step: 'resources' },
-    { label: 'Database', value: f.db === 'use_existing' ? 'Use the existing database' : f.db === 'install_if_missing' ? 'Set up for me' : 'Skip', step: 'database' },
-    { label: 'Database login', value: f.db === 'skip' ? 'Not needed' : f.dbCustom ? `Typed (user ${f.dbUser}, password hidden)` : 'Automatic', step: 'database' },
-    { label: 'Firewall', value: req.firewall ? (req.txadmin_public ? 'Open the game and txAdmin ports' : 'Open the game port') : 'Leave closed', step: 'options' },
-    { label: 'Background service', value: req.service ? 'Yes' : 'No', step: 'options' },
+    { label: t('install.installWizard.licenceKey'), value: f.licenceChoice === 'saved' ? (f.licenceName ? t('install.installWizard.savedLicenceKeyLicencename', { licenceName: f.licenceName }) : t('install.installWizard.pickedYet')) : f.license.trim() ? (f.saveKey && f.saveKeyName.trim() ? t('install.installWizard.providedHiddenSavedTrim', { trim: f.saveKeyName.trim() }) : t('install.installWizard.providedHiddenSaved')) : t('install.installWizard.givenYet'), step: 'licence' },
+    { label: t('install.installWizard.resourcesComeFrom'), value: f.source === 'clone' ? t('install.installWizard.korasResourcesTheyPlain') : t('install.installWizard.ownCopiesGithub'), step: 'source' },
+    { label: t('install.installWizard.versions'), value: f.versions === 'released' ? t('install.installWizard.releasedVersionsStable') : t('install.installWizard.latestChangesMainBranch'), step: 'versions' },
+    { label: t('install.installWizard.name'), value: req.name || t('install.installWizard.givenYet'), step: 'name' },
+    { label: t('install.installWizard.folder'), value: req.dir || t('install.installWizard.givenYet'), step: 'name' },
+    { label: t('install.installWizard.serverNamePlayers'), value: req.hostname || '(default)', step: 'name', advanced: true },
+    { label: t('install.installWizard.ports'), value: t('install.installWizard.gameValueTxadminValue', { game: f.game.trim() || '?', txadmin: f.tx.trim() || '?' }), step: 'ports' },
+    { label: t('install.installWizard.fivemServerBuild'), value: f.gameBuild.trim() ? t('install.installWizard.buildGameBuildTrim', { build, trim: f.gameBuild.trim() }) : build, step: 'build' },
+    { label: t('install.installWizard.resources'), value: f.resourcesAll ? t('install.installWizard.everything') : t('install.installWizard.resourcesPicked', { count: f.resourceIds.length }), step: 'resources' },
+    ...(containersOffered || f.runMode === 'container' ? [{ label: t('install.installWizard.howServerRuns'), value: f.runMode === 'container' ? t('install.installWizard.inAContainer') : t('install.installWizard.systemService'), step: 'runmode' as StepId }] : []),
+    { label: t('install.installWizard.database'), value: f.db === 'use_existing' ? t('install.installWizard.useExistingDatabase') : f.db === 'install_if_missing' ? t('install.installWizard.setUpMe') : f.db === 'container' ? t('install.installWizard.mariadbContainerNextServer') : t('install.installWizard.skip'), step: 'database' },
+    { label: t('install.installWizard.databaseLogin'), value: f.db === 'skip' ? t('install.installWizard.notNeeded') : f.dbCustom ? t('install.installWizard.typedUserDbuserPassword', { dbUser: f.dbUser }) : t('install.installWizard.automatic'), step: 'database' },
+    { label: t('install.installWizard.firewall'), value: req.firewall ? (req.txadmin_public ? t('install.installWizard.openGameTxadminPorts') : t('install.installWizard.openGamePort')) : t('install.installWizard.leaveClosed'), step: 'options' },
+    { label: t('install.installWizard.backgroundService'), value: f.runMode === 'container' ? t('install.installWizard.usedContainerRestartsItself') : req.service ? t('install.installWizard.yes') : t('install.installWizard.no'), step: 'options' },
   ]
   rows.push({
-    label: 'Sign in to txAdmin with your Cfx.re account',
-    value: f.cfxFound ? `${f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier}${f.cfxRemembered ? '. Remembered from your last install.' : ''}` : 'Not set. Kora makes a local admin with a generated password.',
+    label: t('install.installWizard.signTxadminCfxRe'),
+    value: f.cfxFound ? `${f.cfxFound.username ? `${f.cfxFound.username} (${f.cfxFound.identifier})` : f.cfxFound.identifier}${f.cfxRemembered ? t('install.installWizard.rememberedFromLastInstall') : ''}` : t('install.installWizard.setKoraMakesLocal'),
     step: 'cfx',
   })
-  if (f.source === 'fork') rows.push({ label: 'Your copies go to', value: f.githubOwner || 'Not chosen yet', step: 'github' })
+  if (f.source === 'fork') rows.push({ label: t('install.installWizard.copiesGo'), value: f.githubOwner || t('install.installWizard.chosenYet'), step: 'github' })
   return rows
 }
 
@@ -67,23 +71,23 @@ export function AdminServiceNotice({ state, needs, onWithout }: { state: 'ready'
   const list = <ul className="mt-1 list-disc pl-5">{needs.map((n) => <li key={n}>{n}</li>)}</ul>
   if (state === 'ready') {
     return (
-      <Alert tone="info" title="Kora's administrator service will do these parts">
-        <p>These parts need administrator rights, and Kora&apos;s administrator service does them for you. There is nothing to approve:</p>
+      <Alert tone="info" title={t('install.installWizard.korasAdministratorServiceDo')}>
+        <p>{t('install.installWizard.thesePartsNeedAdministrator')}</p>
         {list}
       </Alert>
     )
   }
   return (
-    <Alert tone="warning" title={state === 'missing' ? "Kora's administrator service is not installed" : "Kora's administrator service is not turned on for you"}>
-      <p>These parts need administrator rights:</p>
+    <Alert tone="warning" title={state === 'missing' ? t('install.installWizard.korasAdministratorServiceInsta') : t('install.installWizard.korasAdministratorServiceTurne')}>
+      <p>{t('install.installWizard.thesePartsNeedAdministrator2')}</p>
       {list}
       <p className="mt-2">
         {state === 'missing'
-          ? 'Install the administrator service once (it asks an administrator for approval one time) and Kora does these parts, now and later, without asking again. The install can also carry on without them.'
-          : 'An administrator can turn the service on for your account with the command shown if you go on. The install can also carry on without these parts.'}
+          ? t('install.installWizard.installAdministratorServiceOnc')
+          : t('install.installWizard.administratorTurnServiceAccoun')}
       </p>
       {onWithout && (
-        <p className="mt-2"><Button variant="link" className="h-auto p-0" onClick={onWithout}>Install without these parts</Button> (no firewall change, no background service, and an existing database only).</p>
+        <p className="mt-2">{rich('install.installWizard.buttonInstallWithoutThese', { button: (c) => <Button variant="link" className="h-auto p-0" onClick={onWithout}>{c}</Button> })}</p>
       )}
     </Alert>
   )
@@ -108,7 +112,7 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
   const said = new Set<StepId>()
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">This is what Kora will do. The suggested answers work for most people. Use Change on any line to pick something else.</p>
+      <p className="text-sm text-muted-foreground">{t('install.installWizard.whatKoraDoSuggested')}</p>
       <dl className="divide-y divide-border text-sm">
         {rows.map((r) => {
           const problem = said.has(r.step) ? undefined : problems[r.step]
@@ -122,25 +126,25 @@ function ReviewStep({ rows, req, problems, waiting, onChange, onDisk, onWithoutA
                   ? <p role="status" className="text-muted-foreground">{problem}</p>
                   : <p role="alert" className="font-medium text-danger-text">{problem}</p>)}
               </dd>
-              <dd><Button variant="link" size="sm" className="h-auto p-0 text-sm" aria-label={`Change ${r.label}`} onClick={() => onChange(r)}>Change</Button></dd>
+              <dd><Button variant="link" size="sm" className="h-auto p-0 text-sm" aria-label={t('install.installWizard.changeLabel', { label: r.label })} onClick={() => onChange(r)}>{t('install.installWizard.change')}</Button></dd>
             </div>
           )
         })}
       </dl>
-      {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title="Disk space">{disk.data.message}{!/Gi?B/.test(disk.data.message) && ` ${formatBytes(disk.data.free_bytes)} free.`}</Alert>}
+      {disk.data && <Alert tone={disk.data.ok ? 'success' : 'danger'} title={t('install.installWizard.diskSpace')}>{disk.data.message}{!/Gi?B/.test(disk.data.message) && t('install.installWizard.formatbytesFree', { formatBytes: formatBytes(disk.data.free_bytes) })}</Alert>}
       <ErrorNotice error={disk.error ?? plan.error} />
       {plan.data && plan.data.admin_service && plan.data.needs_admin.length > 0 && <AdminServiceNotice state={plan.data.admin_service} needs={plan.data.needs_admin} onWithout={onWithoutAdmin} />}
       {plan.data && !(plan.data.admin_service && plan.data.needs_admin.length > 0) && (
-        <Alert tone={plan.data.needs_admin.length ? 'warning' : 'info'} title="Administrator rights">
-          {plan.data.needs_admin.length === 0 ? 'Nothing in this install needs administrator rights.' : (
+        <Alert tone={plan.data.needs_admin.length ? 'warning' : 'info'} title={t('install.installWizard.administratorRights')}>
+          {plan.data.needs_admin.length === 0 ? t('install.installWizard.nothingInstallNeedsAdministrat') : (
             <>
-              <p>These steps need administrator rights. Kora asks for them when needed, or tells you the exact command to run:</p>
+              <p>{t('install.installWizard.theseStepsNeedAdministrator')}</p>
               <ul className="mt-1 list-disc pl-5">{plan.data.needs_admin.map((n) => <li key={n}>{n}</li>)}</ul>
             </>
           )}
         </Alert>
       )}
-      <p className="text-xs text-muted-foreground">{plan.data ? `${plan.data.steps.length} steps will run.` : ''} Your licence key and database password are sent to Kora on this computer only and are never shown again.</p>
+      <p className="text-xs text-muted-foreground">{t('install.installWizard.valueLicenceKeyDatabase', { value: plan.data ? `${plan.data.steps.length} steps will run.` : '' })}</p>
     </div>
   )
 }
@@ -150,34 +154,34 @@ export function Outcome({ o, ports, cfx }: { o: InstallOutcome; ports: { txadmin
   const link = useTxAdminLink(ports.txadmin)
   return (
     <div className="space-y-4">
-      <Alert tone={o.running ? 'success' : 'warning'} title={o.running ? 'Your server is installed and running' : 'Your server is installed'}>
-        {o.running ? 'Players can connect now.' : o.launch_problem ?? 'It was not started. Start it from the server page.'}
+      <Alert tone={o.running ? 'success' : 'warning'} title={o.running ? t('install.installWizard.serverInstalledRunning') : t('install.installWizard.serverInstalled')}>
+        {o.running ? t('install.installWizard.playersConnectNow') : o.launch_problem ?? t('install.installWizard.startedStartFromServer')}
       </Alert>
       {!o.running && o.log_tail.length > 0 && <pre className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{o.log_tail.join('\n')}</pre>}
       <div className="space-y-1.5">
-        <div className="text-sm text-muted-foreground">Connect address (players type this in the FiveM console, or use direct connect)</div>
-        <CopyField value={o.connect} label="Connect address" />
-        <p className="text-xs text-muted-foreground">{CONNECT_NOTE}</p>
+        <div className="text-sm text-muted-foreground">{t('install.installWizard.connectAddressPlayersType')}</div>
+        <CopyField value={o.connect} label={t('install.installWizard.connectAddress')} />
+        <p className="text-xs text-muted-foreground">{t(CONNECT_NOTE)}</p>
       </div>
       <div className="space-y-1.5">
         <div className="text-sm text-muted-foreground">txAdmin</div>
-        {link.url ? <CopyField value={link.url} label="txAdmin address" /> : <p className="text-sm">Open it with the button below: it goes through this panel, so no extra port has to be open on this computer.</p>}
+        {link.url ? <CopyField value={link.url} label={t('install.installWizard.txadminAddress')} /> : <p className="text-sm">{t('install.installWizard.openButtonBelowGoes')}</p>}
         {link.hint && <p className="text-xs text-muted-foreground">{link.hint}</p>}
       </div>
       <ReachCard name={o.name} compact />
       <MoreAddresses name={o.name} />
       {!o.admin_user && cfx && (
-        <p className="text-sm">Sign in to txAdmin with your Cfx.re account (<strong>{cfx}</strong>). No password was generated.</p>
+        <p className="text-sm">{rich('install.installWizard.signTxadminCfxRe2', { strong: <strong>{cfx}</strong> })}</p>
       )}
       {o.admin_user && (
-        <p className="text-sm">txAdmin administrator: <strong>{o.admin_user}</strong>. Its password was saved in <code className="font-mono text-xs">{o.admin_password_file}</code>. Open that file on this computer to read it, and change the password after you sign in.</p>
+        <p className="text-sm">{rich('install.installWizard.txadminAdministratorStrongNode', { strong: <strong>{o.admin_user}</strong>, code: <code className="font-mono text-xs">{o.admin_password_file}</code> })}</p>
       )}
       {o.notes.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">{o.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
       <div className="flex flex-wrap gap-2">
         <TxAdminButton name={o.name} port={ports.txadmin} up={o.running} size="default" />
-        <CopyButton text={o.connect} label="Copy connect address" size="default" />
+        <CopyButton text={o.connect} label={t('install.installWizard.copyConnectAddress')} size="default" />
         <OpenFolderButton name={o.name} dir={o.dir} size="default" />
-        <Button asChild><Link to={`/servers/${encodeURIComponent(o.name)}`}>Go to the server</Link></Button>
+        <Button asChild><Link to={`/servers/${encodeURIComponent(o.name)}`}>{t('install.installWizard.goServer')}</Link></Button>
       </div>
     </div>
   )
@@ -196,11 +200,11 @@ export default function InstallWizard() {
   if (block) {
     return (
       <div className="mx-auto max-w-2xl space-y-5">
-        <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
-        <Alert tone="warning" title="You cannot install a server from here">
+        <h1 className="font-heading text-2xl font-bold">{t('install.installWizard.installNewServer')}</h1>
+        <Alert tone="warning" title={t('install.installWizard.cannotInstallServerFrom')}>
           {block.reason}
         </Alert>
-        <Button asChild><Link to="/">Back to your servers</Link></Button>
+        <Button asChild><Link to="/">{t('install.installWizard.backServers')}</Link></Button>
       </div>
     )
   }
@@ -254,17 +258,21 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   /** A fix (installing a tool, signing in, starting the database) worked and the failed step was retried by itself. */
   const [autoRetried, setAutoRetried] = useState(false)
   const arts = useQuery({ queryKey: ['artifacts'], queryFn: api.artifacts })
+  // "Containers" line of the System check: a container engine that really ran a container offers "How the server runs".
+  const check = useQuery({ queryKey: ['system-check'], queryFn: api.systemCheck.get, retry: false })
+  const containerItem = check.data?.items.find((i) => i.id === 'container')
+  const containers = containerItem?.state === 'ok'
   const ports = usePortsCheck(f.game, f.tx)
   const run = useJob<InstallOutcome, InstallEvent>(job, onServersChanged)
   /** Windows: the panel can ask Windows for permission itself ("Ask again" / "Ask for administrator permission"). */
 
   const artUrl = arts.data?.items.find((a) => a.build === f.artifactBuild)?.url ?? null
   const req = buildRequest(f, { artifactUrl: artUrl })
-  const stepsOf = (source: WizardForm['source']) => (everyStep ? stepsFor(source) : quickStepsFor(source))
+  const stepsOf = (source: WizardForm['source']) => (everyStep ? stepsFor(source, containers) : quickStepsFor(source))
   const steps = stepsOf(f.source)
   const at = Math.min(step, steps.length - 1)
   const id: StepId = steps[at]
-  const ctx = { ports: ports.state, githubSignedIn }
+  const ctx = { ports: ports.state, githubSignedIn, containers }
   const problems = allProblems(f, ctx)
   const saved = defaults.saved
   const common = { f, set, advanced, defaultsDir: defaults.dir }
@@ -336,20 +344,18 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   if (job) {
     return (
       <div className="mx-auto max-w-2xl space-y-5">
-        <h1 className="font-heading text-2xl font-bold">{run.phase === 'done' ? 'All done' : run.phase === 'failed' ? 'The install stopped' : 'Installing your server'}</h1>
+        <h1 className="font-heading text-2xl font-bold">{run.phase === 'done' ? t('install.installWizard.allDone') : run.phase === 'failed' ? t('install.installWizard.installStopped') : t('install.installWizard.installingServer')}</h1>
         <Card>
           <CardContent className="space-y-5 p-6">
-            {autoRetried && run.phase === 'running' && <Alert tone="success" title="Fixed. Trying the step again">That worked, so Kora tried the step that stopped again by itself. You do not need to do anything.</Alert>}
-            {run.phase === 'running' && <p className="text-sm text-muted-foreground">This takes a few minutes. You can leave this page open; it keeps going.</p>}
+            {autoRetried && run.phase === 'running' && <Alert tone="success" title={t('install.installWizard.fixedTryingStepAgain')}>{t('install.installWizard.workedKoraTriedStep')}</Alert>}
+            {run.phase === 'running' && <p className="text-sm text-muted-foreground">{t('install.installWizard.takesFewMinutesLeave')}</p>}
             {(run.phase === 'idle' || run.phase === 'running') && run.events.length === 0 ? (
-              <p role="status" className="flex items-center gap-2 text-sm">
-                <Loader2 className="size-4 animate-spin text-info" aria-hidden /> Getting ready. The first step shows up in a moment...
-              </p>
+              <p role="status" className="flex items-center gap-2 text-sm">{rich('install.installWizard.loaderNodeGettingReady', { loader2: <Loader2 className="size-4 animate-spin text-info" aria-hidden /> })}</p>
             ) : (
               <>
                 {progressRows.length > 0 && <StepProgress events={progressRows} />}
                 {statusLines.length > 0 && (
-                  <pre aria-label="What Kora is doing" className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{statusLines.slice(-12).map((l) => l.message).join('\n')}</pre>
+                  <pre aria-label={t('install.installWizard.whatKoraDoing')} className="max-h-48 overflow-auto rounded-md border border-border bg-ink p-3 font-mono text-xs">{statusLines.slice(-12).map((l) => l.message).join('\n')}</pre>
                 )}
               </>
             )}
@@ -357,22 +363,22 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
             {run.phase === 'done' && run.result?.name && <BackupSuggestion server={run.result.name} compact />}
             {run.phase === 'failed' && (
               <div className="space-y-4">
-                <ErrorNotice error={run.error} title="The install could not finish" actions={installActions} onFixed={retryAfterFix} />
+                <ErrorNotice error={run.error} title={t('install.installWizard.installCouldFinish')} actions={installActions} onFixed={retryAfterFix} />
                 {githubAsked && (
-                  <Alert tone="info" title="Sign in to GitHub">
-                    <p className="mb-2">{retryAfterFix ? 'When you are signed in, Kora tries the step again by itself.' : 'When you are signed in, use "Try this step again" above.'} Your answers are kept.</p>
+                  <Alert tone="info" title={t('install.installWizard.signGithub')}>
+                    <p className="mb-2">{t('install.installWizard.valueAnswersKept', { value: retryAfterFix ? t('install.installWizard.whenSignedKoraTries') : t('install.installWizard.whenSignedUseTry') })}</p>
                     <GithubSignIn onSignedIn={() => { onGithubSignedIn(); void retryAfterFix?.() }} />
                   </Alert>
                 )}
                 <ErrorNotice error={resumeErr} actions={installActions} />
                 {run.error?.kept && run.error.kept.length > 0 && (
-                  <div className="text-sm"><div className="font-semibold">What was kept</div><ul className="list-disc pl-5 text-muted-foreground">{run.error.kept.map((k) => <li key={k}>{k}</li>)}</ul></div>
+                  <div className="text-sm"><div className="font-semibold">{t('install.installWizard.whatKept')}</div><ul className="list-disc pl-5 text-muted-foreground">{run.error.kept.map((k) => <li key={k}>{k}</li>)}</ul></div>
                 )}
                 {/* An answer without actions (an older panel, or contact with the job was lost): the plain choices. */}
                 {!run.error?.actions?.length && (
                   <div className="flex gap-2">
-                    <Button variant="default" onClick={() => { setJob(null); void start() }}>Try again</Button>
-                    <Button onClick={() => changeAnswers()}>Change my answers</Button>
+                    <Button variant="default" onClick={() => { setJob(null); void start() }}>{t('install.installWizard.tryAgain')}</Button>
+                    <Button onClick={() => changeAnswers()}>{t('install.installWizard.changeMyAnswers')}</Button>
                   </div>
                 )}
               </div>
@@ -391,52 +397,52 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
   const waiting: StepId[] = ports.state === 'checking' && !validatePorts(f.game, f.tx) ? ['ports'] : []
   const toFix = (Object.keys(problems) as StepId[]).filter((s) => !waiting.includes(s))
   const installBlocked = toFix.length > 0
-    ? (toFix.length === 1 ? 'The server cannot be installed yet. Fix the problem marked in red above.' : `The server cannot be installed yet. Fix the ${toFix.length} problems marked in red above.`)
-    : !diskOk ? 'The server cannot be installed yet. There is not enough free disk space in the server folder. Change the folder above, or free some space.' : null
+    ? t('install.installWizard.serverCannotInstalledYet', { count: toFix.length })
+    : !diskOk ? t('install.installWizard.serverCannotInstalledYet3') : null
   const switchFlow = (all: boolean) => { setEveryStep(all); setEditing(null); setStep(0) }
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-heading text-2xl font-bold">Install a new server</h1>
-        <Checkbox label="Show advanced options" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
+        <h1 className="font-heading text-2xl font-bold">{t('install.installWizard.installNewServer')}</h1>
+        <Checkbox label={t('install.installWizard.showAdvancedOptions')} checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
       </div>
       {at === 0 && !editing && (
-        <p className="text-sm text-muted-foreground">Already have a server on this computer? <Link to="/?add=1" className="text-info underline underline-offset-4">Add an existing server</Link> instead.</p>
+        <p className="text-sm text-muted-foreground">{rich('install.installWizard.alreadyServerComputerLink', { link: (c) => <Link to="/?add=1" className="text-info underline underline-offset-4">{c}</Link> })}</p>
       )}
       {at === 0 && !editing && (
-        <p className="text-sm text-muted-foreground">Moving a server from another computer, or restoring one? <Link to="/import" className="text-info underline underline-offset-4">Bring a server from a backup or another machine</Link>.</p>
+        <p className="text-sm text-muted-foreground">{rich('install.installWizard.movingServerFromAnother', { link: (c) => <Link to="/import" className="text-info underline underline-offset-4">{c}</Link> })}</p>
       )}
       {saved && !defaults.resumable?.some((r) => r.name === saved.name) && resumeOffered && at === 0 && !editing && (
-        <Alert tone="info" title="Continue where you left off?">
-          <p>An earlier install of &quot;{saved.name}&quot; stopped part-way. Kora kept your answers{saved.license_key_name ? <> and which saved licence key it used (&quot;{saved.license_key_name}&quot;)</> : ' (not your licence key)'}.</p>
-          {defaults.saved_key_missing && <p className="mt-1">The saved licence key &quot;{defaults.saved_key_missing}&quot; is not there any more: you will be asked to pick another.</p>}
+        <Alert tone="info" title={t('install.installWizard.continueWhereLeftOff')}>
+          <p>{rich('install.installWizard.earlierInstallNameStopped', { name: saved.name, node: saved.license_key_name ? <>{t('install.installWizard.whichSavedLicenceKey', { license_key_name: saved.license_key_name })}</> : t('install.installWizard.licenceKey2') })}</p>
+          {defaults.saved_key_missing && <p className="mt-1">{t('install.installWizard.savedLicenceKeySaved', { saved_key_missing: defaults.saved_key_missing })}</p>}
           <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>Continue where I left off</Button>
-            <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>Start fresh</Button>
+            <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>{t('install.installWizard.continueWhereILeft')}</Button>
+            <Button size="sm" onClick={async () => { await api.installs.clearSaved(); setResumeOffered(false); void qc.invalidateQueries({ queryKey: ['install-defaults'] }) }}>{t('install.installWizard.startFresh')}</Button>
           </div>
         </Alert>
       )}
       {defaults.resumable && defaults.resumable.length > 0 && at === 0 && !editing && (
-        <Alert tone="info" title="An install stopped and can carry on">
+        <Alert tone="info" title={t('install.installWizard.installStoppedCarry')}>
           {defaults.resumable.map((r) => (
             <div key={r.job} className="mt-1 flex flex-wrap items-center gap-2">
-              <span>&quot;{r.name}&quot; stopped{r.failed_step ? ` at the step ${r.failed_step}` : ''}. Its answers and licence key are kept.</span>
-              <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>Carry on</Button>
+              <span>{t('install.installWizard.nameStoppedValueIts', { name: r.name, value: r.failed_step ? ` at the step ${r.failed_step}` : '' })}</span>
+              <Button size="sm" onClick={async () => { setCarryErr(null); try { setJob((await api.installs.resume(r.job)).job) } catch (e) { setCarryErr(e) } }}>{t('install.installWizard.carryOn')}</Button>
               {saved && saved.name === r.name && (
-                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>Change my answers first</Button>
+                <Button size="sm" onClick={() => { setF(applySaved(f, saved)); setResumeOffered(false); setStep(stepsOf(applySaved(f, saved).source).indexOf('licence')) }}>{t('install.installWizard.changeMyAnswersFirst')}</Button>
               )}
             </div>
           ))}
           <ErrorNotice error={carryErr} actions={startActions} />
         </Alert>
       )}
-      <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Steps">
+      <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label={t('install.installWizard.steps')}>
         {steps.map((s, i) => (
-          <li key={s} aria-current={i === at ? 'step' : undefined} className={cn(i === at ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{i + 1}. {STEP_LABEL[s]}</li>
+          <li key={s} aria-current={i === at ? 'step' : undefined} className={cn(i === at ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{i + 1}. {t(STEP_LABEL[s])}</li>
         ))}
       </ol>
       <Card>
-        <CardHeader><CardTitle className="text-lg">{STEP_LABEL[showing]}</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-lg">{t(STEP_LABEL[showing])}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {showing === 'source' && <SourceStep {...common} />}
           {showing === 'versions' && <VersionsStep {...common} />}
@@ -444,6 +450,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           {showing === 'ports' && <PortsStep {...common} ports={ports} />}
           {showing === 'build' && <BuildStep {...common} />}
           {showing === 'resources' && <ResourcesStep {...common} />}
+          {showing === 'runmode' && <RunModeStep {...common} containers={containerItem} />}
           {showing === 'database' && <DatabaseStep {...common} />}
           {showing === 'options' && <OptionsStep {...common} />}
           {showing === 'licence' && <LicenceStep {...common} />}
@@ -451,7 +458,7 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           {showing === 'github' && <GithubStep {...common} signedIn={githubSignedIn} onSignedIn={onGithubSignedIn} />}
           {showing === 'review' && (
             <ReviewStep
-              rows={reviewRows(f, req)}
+              rows={reviewRows(f, req, containers)}
               req={req}
               problems={problems}
               waiting={waiting}
@@ -462,31 +469,29 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
           )}
           <ErrorNotice error={startErr} actions={startActions} onFixed={start} />
           {starting && (
-            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your answers (ports, GitHub, permissions) and starting the install. This can take a few seconds.
-            </p>
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{rich('install.installWizard.loaderNodeCheckingAnswers', { loader2: <Loader2 className="size-4 animate-spin" aria-hidden /> })}</p>
           )}
           {editing ? (
             <>
               {problem && <p className="text-sm">{problem}</p>}
               <div className="flex justify-end pt-2">
                 {/* Never disabled: anything still wrong is spelled out on the last screen, beside its line. */}
-                <Button variant="default" onClick={() => { setEditing(null); setStep(steps.length - 1) }}>Back to the summary</Button>
+                <Button variant="default" onClick={() => { setEditing(null); setStep(steps.length - 1) }}>{t('install.installWizard.backSummary')}</Button>
               </div>
             </>
           ) : (
             <>
               {problem && !last && <p className="text-sm">{problem}</p>}
               {last && installBlocked && <p role="alert" className="text-sm font-medium text-danger-text">{installBlocked}</p>}
-              {last && !installBlocked && waiting.length > 0 && <p role="status" className="text-sm">Checking that the ports are free. One moment.</p>}
+              {last && !installBlocked && waiting.length > 0 && <p role="status" className="text-sm">{t('install.installWizard.checkingPortsFreeOne')}</p>}
               <div className="flex justify-between pt-2">
-                <Button disabled={at === 0} onClick={() => setStep(at - 1)}>Back</Button>
+                <Button disabled={at === 0} onClick={() => setStep(at - 1)}>{t('install.installWizard.back')}</Button>
                 {last ? (
                   <Button variant="default" disabled={starting || !!installBlocked || waiting.length > 0} aria-busy={starting} onClick={() => void start()}>
-                    {starting ? <><Loader2 className="animate-spin" aria-hidden /> Starting...</> : 'Install the server'}
+                    {starting ? <>{rich('install.installWizard.loaderNodeStarting', { loader2: <Loader2 className="animate-spin" aria-hidden /> })}</> : t('install.installWizard.installServer')}
                   </Button>
                 ) : (
-                  <Button variant="default" disabled={!!problem} onClick={() => setStep(at + 1)}>Next</Button>
+                  <Button variant="default" disabled={!!problem} onClick={() => setStep(at + 1)}>{t('install.installWizard.next')}</Button>
                 )}
               </div>
             </>
@@ -494,15 +499,9 @@ function WizardSteps({ f, setF, set, defaults, githubSignedIn, onGithubSignedIn,
         </CardContent>
       </Card>
       {!editing && (everyStep ? (
-        <p className="text-sm text-muted-foreground">
-          Going through every step. Your answers are kept if you switch.{' '}
-          <Button variant="link" className="h-auto p-0" onClick={() => switchFlow(false)}>Use the short setup</Button>
-        </p>
+        <p className="text-sm text-muted-foreground">{rich('install.installWizard.goingThroughEveryStep', { button: (c) => <Button variant="link" className="h-auto p-0" onClick={() => switchFlow(false)}>{c}</Button> })}</p>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Kora picks the ports, the database and the rest for you, and shows them before anything is installed.{' '}
-          <Button variant="link" className="h-auto p-0" onClick={() => switchFlow(true)}>Choose everything myself</Button>
-        </p>
+        <p className="text-sm text-muted-foreground">{rich('install.installWizard.koraPicksPortsDatabase', { button: (c) => <Button variant="link" className="h-auto p-0" onClick={() => switchFlow(true)}>{c}</Button> })}</p>
       ))}
     </div>
   )

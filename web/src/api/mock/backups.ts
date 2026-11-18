@@ -23,7 +23,7 @@ interface Per {
   lastFailed: { at: number; why: string } | null
 }
 
-export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailCtor, servers: () => T.ServerSummary[], sleep: (ms: number) => Promise<void>): BackupsMock {
+export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailCtor, servers: () => T.ServerSummary[], sleep: (ms: number) => Promise<void>, serviceReady: () => boolean = () => false): BackupsMock {
   let per: Record<string, Per> = {}
   let dbStopped = false
   let dbLoginOk = true
@@ -51,6 +51,8 @@ export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailC
     return { last_ok_unix: newest || null, text: newest ? `Last backup ${ago}` : 'No backup yet', warning, scheduled: p.settings.schedule.enabled }
   }
   const folderOf = (name: string, s: T.BackupSettings) => `${s.folder || '/home/demo/.kora/server-backups'}/${name}`
+  // With the administrator service the schedule is a job of the operating system, and the panel's own scheduler stands down.
+  const byOs = (name: string) => serviceReady() && get(name).settings.schedule.enabled
   const view = (name: string): T.BackupsView => {
     const p = get(name)
     const u = p.undo ? p.backups.find((b) => b.id === p.undo) : undefined
@@ -63,7 +65,10 @@ export function installBackupsMock(route: Route, startJob: StartJob, Fail: FailC
       free_bytes: 120_000_000_000,
       undo: u ? { id: u.id, created_unix: u.created_unix, encrypted: u.encrypted } : null,
       database: { kind: 'dumped', note: "The server's own database is copied as one consistent snapshot.", tool_missing: false },
-      schedule_note: "Scheduled backups run while Kora's background service is running (start it with `kora panel --background`). A backup that was missed is made up when it starts again.",
+      schedule_note: byOs(name)
+        ? `Scheduled backups run as a job of your operating system (kora-backup-${name}), so they happen even when Kora's panel is closed, and one missed while the computer was off is made up when it is next on.`
+        : "Scheduled backups run while Kora's background service is running (start it with `kora panel --background`). A backup that was missed is made up when it starts again. With Kora's administrator service installed they run as a job of your operating system instead, whether or not the panel is open.",
+      schedule_by_os: byOs(name),
     }
   }
   const dbProblem = () => new Fail(422, 'backup.db_stopped', 'Kora cannot back up the database: the database server is not running.', undefined, { actions: [{ kind: 'start_database' }, { kind: 'retry' }] })

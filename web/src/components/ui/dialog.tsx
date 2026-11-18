@@ -2,6 +2,8 @@ import * as React from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { t } from '@/i18n'
+import '@/i18n/en/core/dialog'
 
 export const Dialog = DialogPrimitive.Root
 export const DialogTrigger = DialogPrimitive.Trigger
@@ -35,7 +37,7 @@ export function DialogContent({ className, children, title, description, onOpenA
         <DialogPrimitive.Title className="font-heading text-lg font-semibold">{title}</DialogPrimitive.Title>
         {description ? <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">{description}</DialogPrimitive.Description> : <DialogPrimitive.Description className="sr-only">{title}</DialogPrimitive.Description>}
         <div className="mt-4">{children}</div>
-        <DialogPrimitive.Close className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground hover:text-foreground" aria-label="Close">
+        <DialogPrimitive.Close className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground hover:text-foreground" aria-label={t('core.dialog.close')}>
           <X className="size-4" />
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>

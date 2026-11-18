@@ -3,12 +3,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ApiError, setUnauthorizedHandler } from '@/api/client'
 import { AlertsProvider } from '@/lib/app'
+import { useLocale } from '@/i18n/react'
 import { clearHash, enrolFromHash, signIn, signInByIdentity, type BootResult } from '@/lib/session'
 import { AppShell } from '@/components/AppShell'
 import { AdminActions } from '@/components/AdminActions'
 import { ToolchainActions } from '@/components/ToolchainActions'
-import { SignedOut } from '@/components/SignedOut'
-import { Enrol } from '@/components/auth/Enrol'
 import { ReauthProvider } from '@/components/auth/ReauthProvider'
 import ServersPage from '@/pages/ServersPage'
 import NotFound from '@/pages/NotFound'
@@ -16,6 +15,9 @@ import NotFound from '@/pages/NotFound'
 // Everything except the server list (the landing page) is fetched when it is first opened, so the first load only
 // carries what the first screen needs. A file that cannot be fetched (the panel was updated meanwhile) ends in the
 // ErrorBoundary of the app shell, which offers a reload: see lib/chunkError.ts. The shell shows the loading state.
+// The sign-in and enrolment screens are only needed by someone who is not signed in yet.
+const SignedOut = lazy(() => import('@/components/SignedOut').then((m) => ({ default: m.SignedOut })))
+const Enrol = lazy(() => import('@/components/auth/Enrol').then((m) => ({ default: m.Enrol })))
 const ServerDetailPage = lazy(() => import('@/pages/ServerDetailPage'))
 const ResourcePage = lazy(() => import('@/pages/ResourcePage'))
 const InstallWizard = lazy(() => import('@/pages/InstallWizard'))
@@ -28,6 +30,8 @@ const SystemCheckPage = lazy(() => import('@/pages/SystemCheckPage'))
 const Styleguide = __KORA_MOCK__ ? lazy(() => import('@/pages/Styleguide')) : null
 
 export function App({ boot }: { boot: BootResult }) {
+  // A change of language redraws everything below: nothing keeps text of the old language.
+  const locale = useLocale()
   const client = useMemo(
     () =>
       new QueryClient({
@@ -61,11 +65,12 @@ export function App({ boot }: { boot: BootResult }) {
 
   if (enrolling) {
     // The set-up signs the person in at the end; then the panel opens.
-    return <Enrol link={enrolling} onDone={() => { client.clear(); setEnrolling(null); setSignedOut(false) }} />
+    return <Suspense fallback={null}><Enrol link={enrolling} onDone={() => { client.clear(); setEnrolling(null); setSignedOut(false) }} /></Suspense>
   }
 
   if (signedOut) {
     return (
+      <Suspense fallback={null}>
       <SignedOut
         onSignedIn={() => {
           client.clear()
@@ -91,6 +96,7 @@ export function App({ boot }: { boot: BootResult }) {
           return r.status === 'failed' ? r.error : null
         }}
       />
+      </Suspense>
     )
   }
 
@@ -99,7 +105,7 @@ export function App({ boot }: { boot: BootResult }) {
       <AlertsProvider>
         <ReauthProvider>
         <AdminActions>
-        <BrowserRouter>
+        <BrowserRouter key={locale}>
           <ToolchainActions>
           <Routes>
             {Styleguide && <Route path="styleguide" element={<Suspense fallback={null}><Styleguide /></Suspense>} />}

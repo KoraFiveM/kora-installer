@@ -119,25 +119,25 @@ impl RemoteConfig {
     /// Nothing saved yet: the default (remote access off). Settings that cannot be read (or an old `panel.json`
     /// that could not be imported) are an error, never silently replaced.
     pub fn load(path: &Path) -> Result<Self, String> {
-        let Some(s) = Store::open_existing_beside(path).map_err(store::problem_to_string)? else {
+        let Some(s) = Store::open_existing_beside(path).map_err(crate::error::store_text)? else {
             let nothing = Self::default();
             nothing.loaded_rev.0.store(1, Ordering::Relaxed); // version 0 of the settings
             return Ok(nothing);
         };
         blocked(&s)?;
-        s.read(read_cfg).map_err(store::problem_to_string)
+        s.read(read_cfg).map_err(crate::error::store_text)
     }
 
     /// The version of the saved settings now (0: none saved).
     pub fn stored_rev(path: &Path) -> Result<u64, String> {
-        let Some(s) = Store::open_existing_beside(path).map_err(store::problem_to_string)? else { return Ok(0) };
-        s.read(rev_of).map_err(store::problem_to_string)
+        let Some(s) = Store::open_existing_beside(path).map_err(crate::error::store_text)? else { return Ok(0) };
+        s.read(rev_of).map_err(crate::error::store_text)
     }
 
     /// Save these settings (replacing what is saved). Refuses, saving nothing, when the settings changed since
     /// this value was loaded (see the module docs).
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        let s = Store::open_beside(path).map_err(store::problem_to_string)?;
+        let s = Store::open_beside(path).map_err(crate::error::store_text)?;
         blocked(&s)?;
         let base = self.loaded_rev.0.load(Ordering::Relaxed);
         let new_rev = s
@@ -150,7 +150,7 @@ impl RemoteConfig {
                 }
                 write_cfg(tx, self)
             })
-            .map_err(store::problem_to_string)?;
+            .map_err(crate::error::store_text)?;
         self.loaded_rev.0.store(new_rev + 1, Ordering::Relaxed);
         Ok(())
     }
@@ -163,7 +163,7 @@ impl RemoteConfig {
 
     /// [`update_at`](Self::update_at), also giving back the settings as saved.
     pub fn update_at_cfg<R>(path: &Path, f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>) -> Result<(R, RemoteConfig), String> {
-        let s = Store::open_beside(path).map_err(store::problem_to_string)?;
+        let s = Store::open_beside(path).map_err(crate::error::store_text)?;
         blocked(&s)?;
         let mut inner: Option<String> = None;
         let r = s.write(|tx| {
@@ -180,7 +180,7 @@ impl RemoteConfig {
                 }
             }
         });
-        r.map_err(|p| inner.unwrap_or_else(|| store::problem_to_string(p)))
+        r.map_err(|p| inner.unwrap_or_else(|| crate::error::store_text(p)))
     }
 
     pub fn user(&self, name: &str) -> Option<&TokenUser> {

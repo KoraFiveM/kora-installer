@@ -99,8 +99,11 @@ async fn self_update_apply_runs_a_job() {
     assert_eq!(done["result"]["version"], "v0.4.1");
     assert!(m.calls().contains(&"self_update_apply v0.4.1".to_string()));
     // No body at all is fine too.
-    let (s, _) = call(&app, "POST", "/api/v1/self-update", None).await;
+    let (s, j) = call(&app, "POST", "/api/v1/self-update", None).await;
     assert_eq!(s, 202);
+    // ...and it is waited for: a job still running when the next test installs ITS fake would call that one
+    // (the seam is process-wide), which showed up as an extra "self_update_apply -" in another test on a slow machine.
+    assert_eq!(finish(&app, j["job"].as_str().unwrap()).await["state"], "done");
 }
 
 // Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself

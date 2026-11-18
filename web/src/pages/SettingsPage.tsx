@@ -23,6 +23,12 @@ import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { ResourceProgress } from '@/components/JobProgress'
 import { restartPanel } from '@/lib/restart'
+import { t, infoOf } from '@/i18n'
+import { useLocale } from '@/i18n/react'
+import { LanguagePicker } from '@/components/LanguagePicker'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/core/language'
+import '@/i18n/en/settings/settingsPage'
 
 function RestartNow({ version }: { version?: string }) {
   const [state, setState] = useState<'idle' | 'restarting' | 'timeout'>('idle')
@@ -36,9 +42,9 @@ function RestartNow({ version }: { version?: string }) {
   }
   return (
     <div className="space-y-3">
-      <Alert tone="success">Updated{version ? ` to ${version}` : ''}.</Alert>
-      {state === 'restarting' ? <p className="text-sm">Restarting…</p> : <Button onClick={() => void go()}>Restart now</Button>}
-      {state === 'timeout' && <Alert tone="warning">The panel did not come back. Run <code>kora panel</code> on the server.</Alert>}
+      <Alert tone="success">{version ? t('settings.settingsPage.updatedTo', { version }) : t('settings.settingsPage.updatedValue')}</Alert>
+      {state === 'restarting' ? <p className="text-sm">{t('settings.settingsPage.restarting')}</p> : <Button onClick={() => void go()}>{t('settings.settingsPage.restartNow')}</Button>}
+      {state === 'timeout' && <Alert tone="warning">{rich('settings.settingsPage.panelDidComeBack', { code: (c) => <code>{c}</code> })}</Alert>}
       <ErrorNotice error={err} />
     </div>
   )
@@ -57,23 +63,23 @@ function SelfUpdate() {
   const go = async (v?: string) => { setErr(null); try { setJob((await api.selfUpdate.apply(v)).job) } catch (e) { setErr(e) } }
   return (
     <Card>
-      <CardHeader><CardTitle>Kora version</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('settings.settingsPage.koraVersion')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span>Installed: <strong>{q.data?.current ?? '...'}</strong></span>
-          {q.data && (q.data.available ? <Badge tone="info">Version {q.data.latest} is available</Badge> : <Badge tone="plain">Up to date</Badge>)}
-          <Button size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>Check again</Button>
+          <span>{rich('settings.settingsPage.installedStrongNode', { strong: <strong>{q.data?.current ?? '...'}</strong> })}</span>
+          {q.data && (q.data.available ? <Badge tone="info">{t('settings.settingsPage.versionLatestAvailable', { latest: q.data.latest ?? '' })}</Badge> : <Badge tone="plain">{t('settings.settingsPage.upDate')}</Badge>)}
+          <Button size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>{t('settings.settingsPage.checkAgain')}</Button>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <Button variant={q.data?.available ? 'default' : 'secondary'} disabled={run.phase === 'running' || !q.data?.latest || blocked !== null} onClick={() => go()}>Update to the latest</Button>
-          <div className="w-48"><Field label="Or a specific version"><Select value={version} onChange={(e) => setVersion(e.target.value)}><option value="">Choose...</option>{(q.data?.versions ?? []).map((v) => <option key={v}>{v}</option>)}</Select></Field></div>
-          <Button disabled={!version || run.phase === 'running' || blocked !== null} onClick={() => go(version)}>Install this version</Button>
+          <Button variant={q.data?.available ? 'default' : 'secondary'} disabled={run.phase === 'running' || !q.data?.latest || blocked !== null} onClick={() => go()}>{t('settings.settingsPage.updateLatest')}</Button>
+          <div className="w-48"><Field label={t('settings.settingsPage.specificVersion')}><Select value={version} onChange={(e) => setVersion(e.target.value)}><option value="">{t('settings.settingsPage.choose')}</option>{(q.data?.versions ?? []).map((v) => <option key={v}>{v}</option>)}</Select></Field></div>
+          <Button disabled={!version || run.phase === 'running' || blocked !== null} onClick={() => go(version)}>{t('settings.settingsPage.installVersion')}</Button>
         </div>
         {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
         {run.phase !== 'idle' && <ResourceProgress events={run.events} />}
         {run.phase === 'done' && (sys.data?.can_restart
           ? <RestartNow version={q.data?.current} />
-          : <Alert tone="success">Updated. This panel runs in a terminal window: stop it (Ctrl+C) and run <code>kora panel</code> again to use the new version.</Alert>)}
+          : <Alert tone="success">{rich('settings.settingsPage.updatedPanelRunsTerminal', { code: (c) => <code>{c}</code> })}</Alert>)}
         {run.phase === 'failed' && <ErrorNotice error={run.error} />}
         <ErrorNotice error={err ?? q.error} />
       </CardContent>
@@ -101,28 +107,43 @@ function Uninstall() {
   if (!role.can('admin')) return null
   return (
     <Card className="border-destructive/50">
-      <CardHeader><CardTitle>Uninstall Kora</CardTitle></CardHeader>
+      <CardHeader><CardTitle>{t('settings.settingsPage.uninstallKora')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">Removes what Kora added to this computer. By default your server folders and databases are kept.</p>
+        <p className="text-sm text-muted-foreground">{t('settings.settingsPage.removesWhatKoraAdded')}</p>
         {!role.canDestroy && <p className="text-xs text-muted-foreground">{whyNot(role, 'admin', true)}</p>}
-        {!items && <Button onClick={() => plan.mutate()} disabled={plan.isPending || !role.canDestroy}>Show what would be removed</Button>}
+        {!items && <Button onClick={() => plan.mutate()} disabled={plan.isPending || !role.canDestroy}>{t('settings.settingsPage.showWhatWouldRemoved')}</Button>}
         {items && !job && (
           <div className="space-y-4">
             <fieldset className="space-y-3">
-              <legend className="mb-1 text-sm font-semibold">Remove these</legend>
+              <legend className="mb-1 text-sm font-semibold">{t('settings.settingsPage.removeThese')}</legend>
               {items.map((i, idx) => (
-                <Checkbox key={i.item} label={i.description} hint={i.kind === 'folder' || i.kind === 'database' ? 'This deletes data and cannot be undone.' : undefined} checked={i.remove} onChange={(e) => setItems(items.map((x, k) => (k === idx ? { ...x, remove: e.target.checked } : x)))} />
+                <Checkbox key={i.item} label={i.description} hint={i.kind === 'folder' || i.kind === 'database' ? t('settings.settingsPage.deletesDataCannotUndone') : undefined} checked={i.remove} onChange={(e) => setItems(items.map((x, k) => (k === idx ? { ...x, remove: e.target.checked } : x)))} />
               ))}
             </fieldset>
-            {danger && <Alert tone="danger">You chose to delete server folders or databases. Everything in them will be lost.</Alert>}
-            <Field label='Type "uninstall" to confirm'><Input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" /></Field>
-            <Button variant="destructive" disabled={typed !== 'uninstall' || start.isPending} onClick={() => start.mutate()}>Uninstall</Button>
+            {danger && <Alert tone="danger">{t('settings.settingsPage.choseDeleteServerFolders')}</Alert>}
+            <Field label={t('settings.settingsPage.typeUninstallConfirm')}><Input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" /></Field>
+            <Button variant="destructive" disabled={typed !== 'uninstall' || start.isPending} onClick={() => start.mutate()}>{t('settings.settingsPage.uninstall')}</Button>
           </div>
         )}
         {job && <ResourceProgress events={run.events} />}
-        {run.phase === 'done' && <Alert tone="success" title="Uninstall finished">{run.result?.notes?.join(' ')}</Alert>}
+        {run.phase === 'done' && <Alert tone="success" title={t('settings.settingsPage.uninstallFinished')}>{run.result?.notes?.join(' ')}</Alert>}
         {run.phase === 'failed' && <ErrorNotice error={run.error} />}
         <ErrorNotice error={plan.error ?? start.error} />
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Settings > Language: the picker, remembered by this browser. */
+function LanguageCard() {
+  const current = useLocale()
+  const beta = infoOf(current).beta
+  return (
+    <Card>
+      <CardHeader><CardTitle>{t('core.language.label')}</CardTitle></CardHeader>
+      <CardContent className="space-y-2">
+        <LanguagePicker />
+        <p className="text-xs text-muted-foreground">{beta ? t('core.language.hint') : t('core.language.remembered')}</p>
       </CardContent>
     </Card>
   )
@@ -134,7 +155,8 @@ export default function SettingsPage() {
   const role = useRole()
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      <h1 className="font-heading text-2xl font-bold">Settings</h1>
+      <h1 className="font-heading text-2xl font-bold">{t('settings.settingsPage.settings')}</h1>
+      <LanguageCard />
       {role.remote ? <SignedInCard /> : <RemoteAccessCard />}
       {role.remote && <AccountCard />}
       {role.can('admin') && <TlsCard />}
@@ -144,23 +166,23 @@ export default function SettingsPage() {
       <RememberedCard />
       <JobHistoryCard />
       <AuditLogCard />
-      <Card><CardHeader><CardTitle>GitHub account</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>
+      <Card><CardHeader><CardTitle>{t('settings.settingsPage.githubAccount')}</CardTitle></CardHeader><CardContent><GithubSignIn /></CardContent></Card>
       <Card>
-        <CardHeader><CardTitle>Get help</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t('settings.settingsPage.getHelp')}</CardTitle></CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <p>When something goes wrong, make one file to hand to whoever is helping you. It holds your Kora version, your system, the System check, your servers' settings, recent jobs and problems, and logs, with every secret removed. You see exactly what is in it before it is saved, and Kora never uploads it.</p>
-          {role.can('admin') ? <SupportBundleLink label="Create a support bundle" /> : <p className="text-muted-foreground">Ask an administrator to make one.</p>}
+          <p>{t('settings.settingsPage.whenSomethingGoesWrong')}</p>
+          {role.can('admin') ? <SupportBundleLink label={t('settings.settingsPage.createSupportBundle')} /> : <p className="text-muted-foreground">{t('settings.settingsPage.askAdministratorMakeOne')}</p>}
         </CardContent>
       </Card>
       <Uninstall />
       <Card>
-        <CardHeader><CardTitle>About</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t('settings.settingsPage.about')}</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p>Kora Panel {meta.data?.version}. It manages FiveM servers on {meta.data?.platform === 'windows' ? 'Windows' : 'Linux'}{sys.data?.admin_service?.state === 'ready' ? ', with the administrator service turned on for you' : ''}.</p>
-          <p className="text-muted-foreground">Website: koraframe.work</p>
-          <p className="text-muted-foreground">Documentation: docs.koraframe.work/guides/installer/overview</p>
-          <p className="text-muted-foreground">Source and releases: <a className="text-info underline" href="https://github.com/KoraFiveM/kora-installer" target="_blank" rel="noopener noreferrer">github.com/KoraFiveM/kora-installer</a></p>
-          <p className="text-muted-foreground">This page makes no requests to other websites. Everything it shows comes from Kora on this computer.</p>
+          <p>{t(sys.data?.admin_service?.state === 'ready' ? 'settings.settingsPage.koraPanelVersionManagesAdmin' : 'settings.settingsPage.koraPanelVersionManages', { version: meta.data?.version ?? '', os: meta.data?.platform === 'windows' ? 'Windows' : 'Linux' })}</p>
+          <p className="text-muted-foreground">{t('settings.settingsPage.websiteKoraframeWork')}</p>
+          <p className="break-all text-muted-foreground">{t('settings.settingsPage.documentationDocsKoraframeWork')}</p>
+          <p className="break-all text-muted-foreground">{rich('settings.settingsPage.sourceReleasesLinkGithub', { link: (c) => <a className="text-info underline" href="https://github.com/KoraFiveM/kora-installer" target="_blank" rel="noopener noreferrer">{c}</a> })}</p>
+          <p className="text-muted-foreground">{t('settings.settingsPage.pageMakesNoRequests')}</p>
         </CardContent>
       </Card>
     </div>

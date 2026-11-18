@@ -7,7 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { Alert } from '@/components/ui/alert'
 import { KoraLogo } from '@/components/KoraLogo'
+import { usePageTitle } from '@/hooks/useRouteAnnouncer'
+import { LanguagePicker } from '@/components/LanguagePicker'
 import { RemoteSignIn } from '@/components/auth/RemoteSignIn'
+import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/auth/signedOut'
 
 /** Opened from another computer (not 127.0.0.1 / localhost)? Used until the panel has said (`/meta`), and if it cannot. */
 function openedRemotely(): boolean {
@@ -28,6 +33,7 @@ export function SignedOut({
   /** A passkey or one-time-code sign-in finished (the session exists). */
   onSignedIn?: (notice: string | null) => void
 }) {
+  usePageTitle(t('auth.signedOut.signIn'))
   const [token, setToken] = useState('')
   const [err, setErr] = useState<ApiError | null>(error)
   const [busy, setBusy] = useState(false)
@@ -61,52 +67,49 @@ export function SignedOut({
       }}
     >
       <Field
-        label={remote ? 'Old token link' : 'Sign-in link'}
+        label={remote ? t('auth.signedOut.oldTokenLink') : t('auth.signedOut.signinLink')}
         hint={remote
-          ? 'Only if you still have a token from before. It still works for now, and the panel will help you replace it with a passkey.'
-          : 'Paste the whole link the command printed. It starts with http://.'}
+          ? t('auth.signedOut.onlyStillTokenFrom')
+          : t('auth.signedOut.pasteWholeLinkCommand')}
       >
         <Input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
       </Field>
-      <Button type="submit" variant={remote ? 'secondary' : 'default'} disabled={busy || !token.trim()}>
-        Sign in
-      </Button>
+      <Button type="submit" variant={remote ? 'secondary' : 'default'} disabled={busy || !token.trim()}>{t('auth.signedOut.signIn2')}</Button>
     </form>
   )
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 p-6">
-      <KoraLogo className="h-9 w-auto text-foreground" />
+      <div className="flex items-center justify-between gap-4">
+        <KoraLogo className="h-9 w-auto text-foreground" />
+        <LanguagePicker compact />
+      </div>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Sign in to Kora</CardTitle>
+          <CardTitle as="h1" className="text-xl">{t('auth.signedOut.signKora')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {remote ? (
             <>
-              <p className="text-sm text-muted-foreground">
-                Sign in with the passkey you set up, or with a one-time code. New here? Open the one-time link the person who runs Kora gave you.
-              </p>
+              <p className="text-sm text-muted-foreground">{t('auth.signedOut.signPasskeySetUp')}</p>
               {err && <Alert tone="danger">{err.message}</Alert>}
               {options?.tailscale && onIdentity && (
-                <Button variant="default" disabled={busy} onClick={async () => { setBusy(true); setErr(await onIdentity()); setBusy(false) }}>Sign in with Tailscale</Button>
+                <Button variant="default" disabled={busy} onClick={async () => { setBusy(true); setErr(await onIdentity()); setBusy(false) }}>{t('auth.signedOut.signTailscale')}</Button>
               )}
               {!options && onIdentity && (
-                <Button variant="default" disabled={busy} onClick={async () => { setBusy(true); setErr(await onIdentity()); setBusy(false) }}>Sign in with Tailscale</Button>
+                <Button variant="default" disabled={busy} onClick={async () => { setBusy(true); setErr(await onIdentity()); setBusy(false) }}>{t('auth.signedOut.signTailscale')}</Button>
               )}
               {options && onSignedIn && <RemoteSignIn options={options} onSignedIn={onSignedIn} />}
-              {options?.strong_required && <p className="text-xs text-muted-foreground">An administrator requires a passkey or one-time codes here, so the old token link is not accepted.</p>}
+              {options?.strong_required && <p className="text-xs text-muted-foreground">{t('auth.signedOut.administratorRequiresPasskeyOn')}</p>}
               {(options?.token ?? true) && (
                 <div className="space-y-2 border-t border-border pt-3">
-                  {showToken ? tokenForm : <Button variant="ghost" size="sm" onClick={() => setShowToken(true)}>I have an old token link</Button>}
+                  {showToken ? tokenForm : <Button variant="ghost" size="sm" onClick={() => setShowToken(true)}>{t('auth.signedOut.iOldTokenLink')}</Button>}
                 </div>
               )}
             </>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground">
-                To keep your servers safe, this page needs a sign-in link. Run <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel --print-link</code> on this computer to get a new sign-in link. Open that link, or paste it below. If the command says the background service is not installed, run <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">kora panel</code> instead and use the link it prints.
-              </p>
+              <p className="text-sm text-muted-foreground">{rich('auth.signedOut.keepServersSafePage', { code: (c) => <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">{c}</code>, code2: (c) => <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-xs">{c}</code> })}</p>
               {err && <Alert tone="danger">{err.message}</Alert>}
               {tokenForm}
             </>

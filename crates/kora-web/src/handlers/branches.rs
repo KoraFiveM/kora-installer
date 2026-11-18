@@ -23,18 +23,12 @@ use crate::{blocking, ApiError, AppState};
 /// Resources one bulk request may name.
 const MAX_ONLY: usize = 300;
 
-/// A packed problem becomes its API error; "an update is running" is a 409 like everywhere else.
-fn fail(m: String) -> ApiError {
-    if Problem::is_encoded(&m) {
-        let p = Problem::decode(&m);
-        if p.code == codes::BUSY {
-            return ApiError::problem(StatusCode::CONFLICT, p);
-        }
-        if p.code == codes::NOT_DEV {
-            return ApiError::problem(StatusCode::CONFLICT, p);
-        }
+/// A problem becomes its API error; "an update is running" is a 409 like everywhere else.
+fn fail(p: Problem) -> ApiError {
+    if p.code == codes::BUSY || p.code == codes::NOT_DEV {
+        return ApiError::problem(StatusCode::CONFLICT, p);
     }
-    ApiError::core(m)
+    ApiError::core(p)
 }
 
 /// The server. Every server can switch a resource to a branch or a pull request now (a server on released versions is

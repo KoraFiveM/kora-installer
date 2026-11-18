@@ -8,6 +8,7 @@
 //! generated on any OS.
 
 pub mod account;
+pub mod backup_job;
 pub mod binary;
 mod schedule;
 
@@ -98,13 +99,19 @@ pub(crate) fn file_bytes(contents: &str) -> Vec<u8> {
     }
 }
 
+/// The longest any one system tool (`sc`, `netsh`, `systemctl`, `icacls`, ...) may run for [`SystemRunner`].
+pub const COMMAND_LIMIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 /// Real runner using `std::process` and `std::fs`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn run(&self, program: &str, args: &[String]) -> io::Result<CommandOutput> {
-        let out = crate::sysexe::command(program).args(args).output()?;
+        // Nobody can answer a tool or press a key here (an installer, a service, the MSI's custom actions): it gets no input and a time limit.
+        let mut cmd = crate::sysexe::command(program);
+        cmd.args(args);
+        let out = crate::sysexe::output_within(cmd, COMMAND_LIMIT)?;
         Ok(CommandOutput { code: out.status.code().unwrap_or(-1), stdout: String::from_utf8_lossy(&out.stdout).into_owned(), stderr: String::from_utf8_lossy(&out.stderr).into_owned() })
     }
 

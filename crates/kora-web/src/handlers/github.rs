@@ -38,11 +38,11 @@ const SIGN_IN_FIRST: &str = "Sign in to GitHub first.";
 const MAX_TITLE: usize = 256;
 const MAX_TEXT: usize = 60_000;
 
-fn bad_gateway(m: String) -> ApiError {
-    if Problem::is_encoded(&m) {
-        return ApiError::problem(StatusCode::BAD_GATEWAY, Problem::decode(&m));
+fn bad_gateway(p: Problem) -> ApiError {
+    if p.code == kora_core::problem::codes::FAILED && p.details.is_none() && p.actions.is_empty() {
+        return ApiError::new(StatusCode::BAD_GATEWAY, "internal", p.message);
     }
-    ApiError::new(StatusCode::BAD_GATEWAY, "internal", m)
+    ApiError::problem(StatusCode::BAD_GATEWAY, p)
 }
 
 /// 403 "sign in first", as a Problem with the sign-in action (the message stays the same).
@@ -89,7 +89,7 @@ pub async fn github_login(State(st): State<AppState>) -> Result<Response, ApiErr
         .registry
         .spawn(Op::GithubLogin, None, move |_h| {
             let _guard = guard;
-            wait().map(|user| json!({"user": user}))
+            wait().map(|user| json!({"user": user})).map_err(Into::into)
         })
         .map_err(|c| ApiError::conflict(crate::conflict_message(&c)))?;
     Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0, "code": code, "url": url}))).into_response())
@@ -130,10 +130,19 @@ fn check_resource(r: &str) -> Result<(), ApiError> {
     }
 }
 
+/// The answer, marked with the GitHub account that acted so the audit log says as whom (the answer's own shape is unchanged).
+fn acted(v: Value, login: Option<String>) -> Response {
+    let mut r = Json(v).into_response();
+    if let Some(l) = login.filter(|l| !l.is_empty() && l.len() <= 64) {
+        r.extensions_mut().insert(crate::audit::GithubActor(l));
+    }
+    r
+}
+
 /// `POST /servers/{s}/issues` `{resource, title, text}` → `{url}`.
-pub async fn issue_report(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+pub async fn issue_report(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let b: IssueBody = parse(body)?;
-    let url = blocking(move || {
+    let (url, login) = blocking(move || {
         let e = st.entry(&s)?;
         check_resource(&b.resource)?;
         let title = b.title.trim();
@@ -147,10 +156,11 @@ pub async fn issue_report(State(st): State<AppState>, Path(s): Path<String>, Jso
         if !be.github_signed_in() {
             return Err(sign_in_first());
         }
-        be.report_issue(&e, &b.resource, title, &b.text).map_err(ApiError::core)
+        let url = be.report_issue(&e, &b.resource, title, &b.text).map_err(ApiError::core)?;
+        Ok((url, be.github_acting_as()))
     })
     .await?;
-    Ok(Json(json!({"url": url})))
+    Ok(acted(json!({"url": url}), login))
 }
 
 #[derive(Deserialize)]
@@ -187,10 +197,10 @@ struct OpenBody {
 /// `POST /servers/{s}/pr` `{plan, title, text}` → `{url}`. The plan is worked out again here from
 /// the resource and must be exactly what the client sent: a plan the client changed (another
 /// folder, branch or repository) is refused, so the browser cannot make Kora push somewhere else.
-pub async fn pr_open(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+pub async fn pr_open(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let b: OpenBody = parse(body)?;
     let client: PrPlan = parse(b.plan)?;
-    let url = blocking(move || {
+    let (url, login) = blocking(move || {
         let e = st.entry(&s)?;
         check_resource(&client.resource)?;
         let title = b.title.trim();
@@ -208,8 +218,9 @@ pub async fn pr_open(State(st): State<AppState>, Path(s): Path<String>, Json(bod
         if fresh != client {
             return Err(ApiError::bad_request("The details of this pull request have changed since you looked at them. Check them again before sending."));
         }
-        be.pr_open(&fresh, title, &b.text).map_err(ApiError::core)
+        let url = be.pr_open(&fresh, title, &b.text).map_err(ApiError::core)?;
+        Ok((url, be.github_acting_as()))
     })
     .await?;
-    Ok(Json(json!({"url": url})))
+    Ok(acted(json!({"url": url}), login))
 }

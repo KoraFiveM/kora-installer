@@ -12,7 +12,9 @@ pub mod alerts;
 pub mod history;
 pub mod panel_service;
 pub mod probe;
+pub mod wintime;
 
+use crate::problem::Problem;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -117,6 +119,8 @@ pub type BackendMaker = Arc<dyn Fn() -> Box<dyn Backend + Send> + Send + Sync>;
 /// Where raised alerts go besides the panel itself.
 pub trait AlertSink: Send + Sync {
     fn deliver(&self, server: &ServerEntry, alert: &Alert, settings: &AlertSettings);
+    /// A machine-level alert (no server): sent through the notification settings of the servers that allow it.
+    fn deliver_machine(&self, _alert: &Alert) {}
 }
 
 /// Discord (the server's existing webhook) and the generic webhook, each on its own short-lived thread.
@@ -141,6 +145,32 @@ impl AlertSink for RealSink {
                 let _ = alerts::post_json(url, &alerts::webhook_payload(&alert), settings.webhook_set_remotely);
             }
         });
+    }
+
+    fn deliver_machine(&self, alert: &Alert) {
+        let alert = alert.clone();
+        std::thread::spawn(move || {
+            let servers: Vec<(AlertSettings, Option<String>, ServerEntry)> =
+                crate::installer::registry::Registry::load().unwrap_or_default().servers.into_iter().map(|e| (alerts::load_settings(&e.dir), notify::load(&e).discord_webhook, e)).collect();
+            let (discord, hooks) = alerts::machine_targets(&servers.iter().map(|(s, d, _)| (s.clone(), d.clone())).collect::<Vec<_>>());
+            for url in discord {
+                let cfg = notify::NotifyConfig { discord_webhook: Some(url) };
+                let _ = notify::send_alert(&cfg, &format!("Kora: {}", alert.title), &alert.message, RealSink::colour(alert.tone));
+            }
+            for (url, remote) in hooks {
+                let _ = alerts::post_json(&url, &alerts::webhook_payload(&alert), remote);
+            }
+        });
+    }
+}
+
+impl RealSink {
+    fn colour(tone: &str) -> u32 {
+        match tone {
+            "danger" => 0xe74c3c,
+            "success" => 0x2ecc71,
+            _ => 0xf1c40f,
+        }
     }
 }
 
@@ -177,14 +207,14 @@ pub fn now_unix() -> u64 {
 }
 
 /// Write a file only its owner can read (settings with secrets, the panel token).
-pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
-    std::fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), Problem> {
+    std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
     let tmp = path.with_extension("tmp");
     let user = crate::winuser::name();
-    crate::db::write_secret_file(&crate::db::SystemRunner, crate::db::Os::current(), &tmp, text, user.as_deref()).map_err(|e| e.to_string())?;
+    crate::db::write_secret_file(&crate::db::SystemRunner, crate::db::Os::current(), &tmp, text, user.as_deref())?;
     crate::fsutil::rename_retrying(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
-        e.to_string()
+        Problem::from(e)
     })
 }
 
@@ -253,6 +283,7 @@ impl Monitor {
         let Ok(servers) = backend.list() else { return };
         for e in &servers {
             self.sample_one(&mut *backend, e, now);
+            self.watch_os_job_backup(e, now);
         }
         // Servers taken off the list: drop their state and close their alerts.
         let mut st = self.state();
@@ -265,12 +296,27 @@ impl Monitor {
         }
     }
 
+    /// A scheduled backup made by the operating system's job runs as the person, outside this process: when it fails it records that in the
+    /// person's store, and the alert is raised here, the same as for the panel's own scheduler (one open alert, closed by the next success).
+    fn watch_os_job_backup(&self, e: &ServerEntry, now: u64) {
+        match self.inner.probe.os_job_backup_failure(e) {
+            Some(Some(why)) => self.raise_external(e, AlertKind::BackupFailed, format!("The scheduled backup did not work: {why}"), now),
+            Some(None) => self.resolve_external(&e.name, AlertKind::BackupFailed, now),
+            None => {}
+        }
+    }
+
     fn sample_one(&self, backend: &mut dyn Backend, e: &ServerEntry, now: u64) {
         let probe = &self.inner.probe;
         if !probe.dir_exists(&e.dir) {
             return;
         }
         let detail = backend.status_detail(e);
+        // A container server restarted by its engine (a crash, a reboot) has lost the process that copies its output to
+        // the console log: start it again. Does nothing for any other server, or when one runs.
+        if detail.running {
+            crate::container::logs::ensure_follower(&e.dir);
+        }
         let game = if detail.running { probe.game_info(e.ports.game) } else { None };
         let proc_ = if detail.running { probe.process(e) } else { None };
         let mem = probe.memory();
@@ -369,6 +415,34 @@ impl Monitor {
             alert
         };
         self.inner.sink.deliver(e, &alert, &alerts::load_settings(&e.dir));
+    }
+
+    /// Raise a machine-level alert (about Kora's own panel or service, no server): it shows in the panel's alert list with an empty
+    /// `server`, and goes out through the notification settings. One open alert per kind: a second one while the first is open is not announced again.
+    pub fn raise_machine(&self, kind: AlertKind, message: String, now: u64) {
+        let alert = {
+            let mut st = self.state();
+            let st = &mut *st;
+            if st.alerts.iter().any(|a| a.server.is_empty() && a.kind == kind && a.resolved.is_none()) {
+                return;
+            }
+            st.next_id += 1;
+            let alert = Alert { id: st.next_id, server: String::new(), kind, tone: kind.tone(), title: kind.title(), message, raised: now, resolved: None, acked: false };
+            st.alerts.push_back(alert.clone());
+            while st.alerts.len() > MAX_ALERTS {
+                let pos = st.alerts.iter().position(|a| a.resolved.is_some() || a.acked).unwrap_or(0);
+                st.alerts.remove(pos);
+            }
+            alert
+        };
+        self.inner.sink.deliver_machine(&alert);
+    }
+
+    /// The machine-level condition of `kind` is over.
+    pub fn resolve_machine(&self, kind: AlertKind, now: u64) {
+        for a in self.state().alerts.iter_mut().filter(|a| a.server.is_empty() && a.kind == kind && a.resolved.is_none()) {
+            a.resolved = Some(now);
+        }
     }
 
     /// Close the open alerts of `kind` for a server (the condition is over).

@@ -50,10 +50,7 @@ pub fn admin_db(a: &AdminDbArgs) -> i32 {
             println!("{m}");
             0
         }
-        Err(e) => {
-            eprintln!("error: {}", kora_core::problem::plain_text(&e.0));
-            1
-        }
+        Err(e) => crate::ui::fail(e),
     }
 }
 
@@ -67,10 +64,10 @@ pub fn admin_step(a: &AdminStepArgs) -> i32 {
     let (code, result) = match r {
         Ok(r) if r.error.is_none() => (0, r),
         Ok(r) => (1, r),
-        Err(e) => (1, system_ops::StepResult { error: Some(kora_core::problem::Problem::decode(&e.0)), ..Default::default() }),
+        Err(e) => (1, system_ops::StepResult { error: Some(e), ..Default::default() }),
     };
     if let Some(p) = &result.error {
-        eprintln!("error: {}", p.message);
+        crate::ui::print_error(p);
     }
     match result.to_line() {
         Ok(line) => println!("{line}"),

@@ -41,6 +41,15 @@ pub trait Host {
     fn load_ledger(&self) -> Result<Ledger, String>;
     fn save_ledger(&self, l: &Ledger) -> Result<(), String>;
     fn audit(&self, line: &str);
+    /// The newest part of the audit file (at most `max` bytes), for [`Op::AuditRead`].
+    fn read_audit(&self, _max: u64) -> Result<String, String> {
+        Ok(String::new())
+    }
+    /// Does this account administer the machine (Linux: a member of `sudo` / `wheel` / `admin`)? Root and an elevated
+    /// Windows token are recognised from the connection itself, not here.
+    fn is_machine_admin(&self, _id: &AccountId) -> bool {
+        false
+    }
     fn own_version(&self) -> String;
 }
 
@@ -109,6 +118,14 @@ pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller,
             return Reply::Refused(r);
         }
     };
+    // Read-only and answered here: no child, no ledger, and the read itself is not written to the log it reads.
+    if let Op::AuditRead { lines } = &operation {
+        let admin = caller.is_root || caller.integrity.is_some_and(|i| i >= policy::HIGH_INTEGRITY) || host.is_machine_admin(&me);
+        return match host.read_audit(audit::READ_MAX_BYTES) {
+            Ok(text) => Reply::Ran(Ran { code: 0, timed_out: false, data: Some(serde_json::json!({"admin": admin, "lines": audit::visible_lines(&text, me.as_str(), admin, usize::from(*lines))})) }),
+            Err(e) => Reply::CouldNotRun(format!("the service's log could not be read ({e})")),
+        };
+    }
     let argv = operation.child_args();
     match run(&RunSpec { argv: &argv, env, limit: operation.time_limit() }, progress) {
         Err(e) => {
@@ -140,7 +157,7 @@ pub fn handle(host: &dyn Host, policy: &Result<Policy, String>, caller: &Caller,
 
 fn verb_label(verb: &str) -> &str {
     // Only a verb from our own list may appear in the log; anything else is not echoed.
-    ["admin-step", "admin-db", "check", "tools", "schedule", "self-update"].into_iter().find(|v| *v == verb).unwrap_or("(unknown)")
+    super::op::VERBS.iter().copied().find(|v| *v == verb).unwrap_or("(unknown)")
 }
 
 /// What the checks found out, for the ledger update after the child ran.
@@ -159,6 +176,9 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
         Op::Step { undo, step, dir, known, .. } => (*undo, *step, Some(dir), known.as_ref()),
         Op::ScheduleSet { dir, .. } => (false, StepId::Schedule, Some(dir), None),
         Op::ScheduleOff { dir } => (true, StepId::Schedule, Some(dir), None),
+        // The backup job is a separate thing from the update task: its own ledger key, below.
+        Op::BackupJobSet { dir, .. } | Op::HandOver { dir } => (false, StepId::Schedule, Some(dir), None),
+        Op::BackupJobOff { dir } => (true, StepId::Schedule, Some(dir), None),
         _ => (false, StepId::Schedule, None, None),
     };
     if let Some(dir) = dir {
@@ -183,7 +203,11 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
             ports = rec.map(|r| (r.game_port, r.txadmin_port));
             p.slug = crate::installer::slug(&name);
             let db = host.db_name(dir);
-            p.keys = ownership::keys_for(step, &p.slug, db.as_deref());
+            p.keys = match operation {
+                Op::BackupJobSet { .. } | Op::BackupJobOff { .. } => vec![ownership::backup_key(&p.slug)],
+                Op::HandOver { .. } => vec![],
+                _ => ownership::keys_for(step, &p.slug, db.as_deref()),
+            };
             // A folder handed to the server's own account (a root-run install, or this service's earlier
             // run) is the caller's only when the ledger says the server's service is theirs.
             if by_server_account && !is_root {
@@ -198,7 +222,7 @@ fn prepare(host: &dyn Host, me: &AccountId, is_root: bool, operation: &Op) -> Re
     op::check_context(operation, &host.own_version(), ports)?;
     if !p.keys.is_empty() && !is_root {
         let ledger = host.load_ledger().map_err(|e| Rejected(format!("Kora's service cannot read its ownership records: {e}")))?;
-        let undo = matches!(operation, Op::Step { undo: true, .. } | Op::ScheduleOff { .. });
+        let undo = matches!(operation, Op::Step { undo: true, .. } | Op::ScheduleOff { .. } | Op::BackupJobOff { .. });
         ownership::allow(&ledger, &p.keys, me, undo)?;
     }
     Ok(p)
@@ -209,6 +233,8 @@ fn commit(host: &dyn Host, me: &AccountId, operation: &Op, p: &Prepared, data: O
         Op::Step { undo, step, .. } => (!undo, Some(*step)),
         Op::ScheduleSet { .. } => (true, Some(StepId::Schedule)),
         Op::ScheduleOff { .. } => (false, Some(StepId::Schedule)),
+        Op::BackupJobSet { .. } => (true, Some(StepId::Schedule)),
+        Op::BackupJobOff { .. } => (false, Some(StepId::Schedule)),
         _ => return Ok(()),
     };
     let Some(step) = step else { return Ok(()) };
@@ -467,5 +493,93 @@ mod tests {
         bad.record = Some(InstallRecord { name: "Main".into(), game_port: 3389, txadmin_port: 40120 });
         assert!(matches!(go(&bad, me()), Reply::Refused(m) if m.0.contains("3389")));
         assert!(bad.ledger.borrow().owners.is_empty());
+    }
+
+    #[test]
+    fn a_backup_job_is_the_callers_own_has_its_own_ledger_key_and_is_removed_with_it() {
+        let h = fake();
+        let set = |h: &Fake, who: AccountId| handle(h, &policy(), &caller(who), "backup-job", &s(&["set", DIR, "--daily", "03:30"]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(set(&h, me()), Reply::Ran(Ran { code: 0, .. })));
+        assert_eq!(h.ledger.borrow().owner("backup:main"), Some("uid:1000"));
+        assert_eq!(h.ledger.borrow().owner("task:main"), None, "not the update task's record");
+        assert!(h.log.borrow()[0].contains("backup job set | done") && !h.log.borrow()[0].contains("/home"));
+        // someone else's folder, or a job someone else made
+        assert!(matches!(set(&h, AccountId::uid(1001)), Reply::Refused(_)));
+        let mut h2 = fake();
+        h2.owner = Some(AccountId::uid(1001));
+        h2.ledger.borrow_mut().record("backup:main".into(), "uid:1000");
+        assert!(matches!(set(&h2, AccountId::uid(1001)), Reply::Refused(m) if m.0.contains("another account")));
+        // removing: only what is recorded as mine; the record goes
+        let off = |h: &Fake| handle(h, &policy(), &caller(me()), "backup-job", &s(&["off", DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(off(&h), Reply::Ran(_)));
+        assert!(h.ledger.borrow().owners.is_empty());
+        assert!(matches!(off(&fake()), Reply::Refused(m) if m.0.contains("do not show")), "an unrecorded job is not removed through the service");
+    }
+
+    #[test]
+    fn handing_over_files_checks_the_folder_and_records_nothing() {
+        let h = fake();
+        let go = |h: &Fake, who: AccountId| handle(h, &policy(), &caller(who), "hand-over", &s(&[DIR]), &BTreeMap::new(), &ok_run(None), &mut |_, _| {});
+        assert!(matches!(go(&h, me()), Reply::Ran(Ran { code: 0, .. })));
+        assert!(h.ledger.borrow().owners.is_empty());
+        assert!(matches!(go(&h, AccountId::uid(1001)), Reply::Refused(m) if m.0.contains("does not belong")));
+        let mut none = fake();
+        none.record = None;
+        assert!(matches!(go(&none, me()), Reply::Refused(m) if m.0.contains("no Kora install record")));
+    }
+
+    #[test]
+    fn reading_the_log_gives_a_caller_their_own_lines_an_administrator_all_and_runs_nothing() {
+        struct Log(Fake);
+        impl Host for Log {
+            fn now(&self) -> u64 {
+                self.0.now()
+            }
+            fn account_name(&self, i: &AccountId) -> String {
+                self.0.account_name(i)
+            }
+            fn folder_owner(&self, d: &str) -> Result<Option<AccountId>, String> {
+                self.0.folder_owner(d)
+            }
+            fn is_server_account(&self, i: &AccountId) -> bool {
+                self.0.is_server_account(i)
+            }
+            fn install_record(&self, d: &str) -> Option<InstallRecord> {
+                self.0.install_record(d)
+            }
+            fn db_name(&self, d: &str) -> Option<String> {
+                self.0.db_name(d)
+            }
+            fn load_ledger(&self) -> Result<Ledger, String> {
+                self.0.load_ledger()
+            }
+            fn save_ledger(&self, l: &Ledger) -> Result<(), String> {
+                self.0.save_ledger(l)
+            }
+            fn audit(&self, l: &str) {
+                self.0.audit(l)
+            }
+            fn read_audit(&self, _: u64) -> Result<String, String> {
+                Ok("2026-11-17T09:00:00Z | uid:1000 (jo) | run x | done\n2026-11-17T09:01:00Z | uid:1001 (sam) | run y | done\n".into())
+            }
+            fn is_machine_admin(&self, id: &AccountId) -> bool {
+                *id == AccountId::uid(1001)
+            }
+            fn own_version(&self) -> String {
+                "0.8.0".into()
+            }
+        }
+        let h = Log(fake());
+        let read = |c: Caller| handle(&h, &policy(), &c, "audit-read", &s(&["--lines", "10"]), &BTreeMap::new(), &never, &mut |_, _| {});
+        let lines = |r: Reply| match r {
+            Reply::Ran(Ran { data: Some(d), .. }) => (d["admin"].as_bool().unwrap(), d["lines"].as_array().unwrap().len()),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(lines(read(caller(me()))), (false, 1), "jo sees only jo's line");
+        assert_eq!(lines(read(caller(AccountId::uid(1001)))), (true, 2), "sam administers the machine");
+        let elevated = Caller { id: Some(me()), integrity: Some(policy::HIGH_INTEGRITY), is_root: false, remote: false };
+        assert_eq!(lines(read(elevated)), (true, 2), "an elevated Windows token");
+        assert!(h.0.log.borrow().is_empty(), "reading the log writes nothing to it");
+        assert!(matches!(handle(&h, &policy(), &caller(AccountId::uid(2000)), "audit-read", &[], &BTreeMap::new(), &never, &mut |_, _| {}), Reply::Refused(_)), "an unlisted account reads nothing");
     }
 }

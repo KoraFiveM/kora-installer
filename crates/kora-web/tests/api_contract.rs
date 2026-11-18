@@ -67,10 +67,10 @@ impl InstallEnv for Env {
     fn disk(&self) -> &dyn DiskInfo {
         self
     }
-    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
         Ok(())
     }
-    fn artifacts(&self) -> Result<ArtifactList, String> {
+    fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
         let b = |n: u32| ArtifactBuild { build: n, url: format!("https://example.invalid/{n}/fx.tar.xz"), broken: None };
         Ok(ArtifactList { recommended: Some(b(7000)), latest: Some(b(7100)), all: vec![b(7100), b(7000)], broken: Default::default() })
     }
@@ -87,7 +87,7 @@ impl InstallEnv for Env {
         true
     }
     fn saved_clear(&self) {}
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
         sink.event(ProgressEvent { step: "prepare".into(), title: "Getting ready".into(), status: StepStatus::Running, detail: "…".into(), percent: 10 });
         sink.event(ProgressEvent { step: "prepare".into(), title: "Getting ready".into(), status: StepStatus::Done, detail: String::new(), percent: 100 });
         Ok(InstallOutcome {
@@ -111,16 +111,16 @@ impl GithubEnv for Env {
     fn auth(&self) -> GithubUser {
         GithubUser::ready("octocat")
     }
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+    fn owners(&self) -> Result<Vec<OwnerChoice>, kora_core::problem::Problem> {
         Ok(vec![
             OwnerChoice { login: "octocat".into(), is_org: false, can_fork: true, reason: None },
             OwnerChoice { login: "acme".into(), is_org: true, can_fork: false, reason: Some("No permission".into()) },
         ])
     }
-    fn begin_login(&self) -> Result<LoginFlow, String> {
+    fn begin_login(&self) -> Result<LoginFlow, kora_core::problem::Problem> {
         Ok(LoginFlow { code: "ABCD-1234".into(), url: "https://github.com/login/device".into(), wait: Box::new(|| Ok(Some("octocat".into()))) })
     }
-    fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
+    fn resolve_owner(&self, _: Option<&str>) -> Result<String, kora_core::problem::Problem> {
         Ok("octocat".into())
     }
 }
@@ -143,7 +143,7 @@ impl kora_core::api::toolchain::ToolchainEnv for Env {
             ToolStatus { tool: Tool::Gh, name: "gh", label: "the GitHub CLI", installed: false, version: None, source: None, path: None, broken: false, can_install: true },
         ]
     }
-    fn install(&self, tool: kora_core::problem::Tool, say: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, String> {
+    fn install(&self, tool: kora_core::problem::Tool, say: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, kora_core::problem::Problem> {
         say("Downloading", 0.5);
         let mut s = self.tools().remove(0);
         s.tool = tool;
@@ -152,7 +152,7 @@ impl kora_core::api::toolchain::ToolchainEnv for Env {
     fn database(&self) -> kora_core::api::toolchain::DbState {
         kora_core::api::toolchain::DbState { installed: true, running: false, name: Some("mariadb".into()), version: Some("11".into()), unknown: false }
     }
-    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, String> {
+    fn start_database(&self, say: &mut dyn FnMut(&str)) -> Result<String, kora_core::problem::Problem> {
         say("Starting");
         Ok("The database is running.".into())
     }
@@ -688,6 +688,7 @@ fn cases() -> Vec<Case> {
         case(Op::KeysList, &[], None),
         case(Op::JobsList, &[], None),
         case(Op::AuditList, &[], None),
+        case(Op::AuditServiceList, &[], None),
         case(Op::KeyAdd, &[], Some(json!({"name": "Main", "license_key": "cfxk_0123456789abcdef0123456789abcdef_ab12cd"}))),
         case(Op::ProfileGet, &[], None),
         case(Op::ProfileSet, &[], Some(json!({"github_owner": null}))),

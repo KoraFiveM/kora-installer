@@ -33,11 +33,6 @@ impl std::fmt::Display for LockError {
 
 impl std::error::Error for LockError {}
 
-/// Is this text the busy message (e.g. an error that went through a `String`)?
-pub fn is_busy_message(s: &str) -> bool {
-    s.contains(BUSY)
-}
-
 /// Held while an update runs; dropping it releases the lock.
 #[derive(Debug)]
 pub struct UpdateLock {
@@ -115,7 +110,7 @@ mod tests {
         assert!(is_busy(t.path()));
         let e = acquire(t.path()).unwrap_err();
         assert!(matches!(e, LockError::Busy));
-        assert!(is_busy_message(&e.to_string()), "{e}");
+        assert_eq!(crate::problem::Problem::from(e).code, crate::git::branches::codes::BUSY);
         drop(held);
         assert!(!is_busy(t.path()));
         let _again = acquire(t.path()).unwrap();

@@ -1,8 +1,6 @@
 //! Where the service lives and which files it will trust. Constants and pure checks; the OS layers
 //! read the real owner / mode of a file and ask these functions.
 
-use std::path::Path;
-
 // ---- Linux ----------------------------------------------------------------------------------
 /// The unit installed by the package.
 pub const LINUX_UNIT: &str = "kora.service";
@@ -64,10 +62,15 @@ pub fn program_location_ok(exe: &str, windows: bool, program_files: Option<&str>
         let (e, base) = (norm(exe), format!("{}\\kora", norm(pf)));
         e.starts_with(&format!("{base}\\")) && !e.split('\\').any(|p| p == ".." || p == ".")
     } else {
-        let p = Path::new(exe);
-        p.is_absolute()
-            && !p.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir))
-            && LINUX_PROGRAM_DIRS.iter().any(|d| p.starts_with(d) && p != Path::new(d))
+        // Plain text, never the host's `Path` rules: this is the Linux decision and must give the same
+        // answer wherever it runs (on Windows `/usr/lib/kora/kora` is not an "absolute path").
+        let parts: Vec<&str> = exe.split('/').filter(|c| !c.is_empty()).collect();
+        exe.starts_with('/')
+            && !parts.iter().any(|c| *c == ".." || *c == ".")
+            && LINUX_PROGRAM_DIRS.iter().any(|d| {
+                let dir: Vec<&str> = d.split('/').filter(|c| !c.is_empty()).collect();
+                parts.len() > dir.len() && parts[..dir.len()] == dir[..]
+            })
     }
 }
 

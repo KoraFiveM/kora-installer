@@ -12,6 +12,8 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { ModeChip } from '@/components/Status'
+import { t } from '@/i18n'
+import '@/i18n/en/servers/addExistingDialog'
 
 export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient()
@@ -31,7 +33,7 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
     try {
       const s = await api.servers.adopt(d)
       await qc.invalidateQueries({ queryKey: ['servers'] })
-      push('success', `${s.name} was added to your list.`)
+      push('success', t('servers.addExistingDialog.addedToList', { name: s.name }))
       onOpenChange(false)
     } catch (e) {
       setError(e)
@@ -51,12 +53,12 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Add an existing server" description="Kora can manage a FiveM server you set up another way. It will not change your files.">
+      <DialogContent title={t('servers.addExistingDialog.addExistingServer')} description={t('servers.addExistingDialog.koraManageFivemServer')}>
         <div className="space-y-5">
           <section className="space-y-2">
-            <h3 className="text-sm font-semibold">Look for servers on this computer</h3>
-            <Button onClick={start} disabled={scan.phase === 'running' || !!noScan} title={noScan ?? undefined}>{scan.phase === 'running' ? 'Looking...' : 'Scan for servers'}</Button>
-            {scan.phase === 'done' && candidates.length === 0 && <p className="text-sm text-muted-foreground">No new servers were found. You can type the folder below.</p>}
+            <h3 className="text-sm font-semibold">{t('servers.addExistingDialog.lookServersComputer')}</h3>
+            <Button onClick={start} disabled={scan.phase === 'running' || !!noScan} title={noScan ?? undefined}>{scan.phase === 'running' ? t('servers.addExistingDialog.looking') : t('servers.addExistingDialog.scanServers')}</Button>
+            {scan.phase === 'done' && candidates.length === 0 && <p className="text-sm text-muted-foreground">{t('servers.addExistingDialog.noNewServersWere')}</p>}
             {scan.phase === 'failed' && <ErrorNotice error={scan.error} />}
             <ul className="space-y-2">
               {candidates.map((c) => (
@@ -65,7 +67,7 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
                     <div className="flex items-center gap-2 font-medium">{c.name} <ModeChip mode={c.mode} /></div>
                     <div className="truncate font-mono text-xs text-muted-foreground">{c.dir}</div>
                   </div>
-                  <Button size="sm" disabled={busy || !!noAdd} title={noAdd ?? undefined} onClick={() => adopt(c.dir)} aria-label={`Add ${c.name}`}>Add</Button>
+                  <Button size="sm" disabled={busy || !!noAdd} title={noAdd ?? undefined} onClick={() => adopt(c.dir)} aria-label={t('servers.addExistingDialog.addName', { name: c.name })}>{t('servers.addExistingDialog.add')}</Button>
                 </li>
               ))}
             </ul>
@@ -77,14 +79,14 @@ export function AddExistingDialog({ open, onOpenChange }: { open: boolean; onOpe
               if (dir.trim() && !noAdd) void adopt(dir.trim())
             }}
           >
-            <h3 className="text-sm font-semibold">Or type the folder</h3>
-            <Field label="Server folder" hint="The folder that contains server.cfg and resources, for example /srv/fivem/my-server.">
-              <Input value={dir} disabled={!!noAdd} onChange={(e) => setDir(e.target.value)} placeholder="/srv/fivem/my-server" />
+            <h3 className="text-sm font-semibold">{t('servers.addExistingDialog.typeFolder')}</h3>
+            <Field label={t('servers.addExistingDialog.serverFolder')} hint={t('servers.addExistingDialog.folderContainsServerCfg')}>
+              <Input value={dir} disabled={!!noAdd} onChange={(e) => setDir(e.target.value)} placeholder={t('servers.addExistingDialog.srvFivemMyserver')} />
             </Field>
             {inShell() && (
-              <Button type="button" disabled={!!noAdd} onClick={async () => { const d = await browseForFolder('Choose your server folder'); if (d) setDir(d) }}>Browse...</Button>
+              <Button type="button" disabled={!!noAdd} onClick={async () => { const d = await browseForFolder(t('servers.addExistingDialog.chooseServerFolder')); if (d) setDir(d) }}>{t('servers.addExistingDialog.browse')}</Button>
             )}
-            <Button type="submit" variant="default" disabled={busy || !dir.trim() || !!noAdd} title={noAdd ?? undefined}>Add this folder</Button>
+            <Button type="submit" variant="default" disabled={busy || !dir.trim() || !!noAdd} title={noAdd ?? undefined}>{t('servers.addExistingDialog.addFolder')}</Button>
             {noAdd && <p className="text-xs text-muted-foreground">{noAdd}</p>}
           </form>
           <ErrorNotice error={error} />

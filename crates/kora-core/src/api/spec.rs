@@ -256,6 +256,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::JobEvents => OpSpec::stream::<w::JobFailedData>("failed"),
         Op::JobsList => OpSpec::get::<w::JobsList>().with_query::<w::JobsQuery>(),
         Op::AuditList => OpSpec::get::<w::AuditPage>().with_query::<w::AuditQuery>(),
+        Op::AuditServiceList => OpSpec::get::<w::ServiceAuditPage>().with_query::<w::ServiceAuditQuery>(),
         Op::Events => OpSpec::stream::<w::ServersList>("servers"),
         Op::MetricsGet => OpSpec::get::<w::Metrics>().with_query::<w::MetricsQuery>(),
         Op::AlertsList => OpSpec::get::<w::AlertsList>(),

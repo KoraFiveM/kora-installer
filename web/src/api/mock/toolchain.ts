@@ -1,6 +1,7 @@
 // Mock data and routes for the tools, the System check and "start the database". Hooked up from
 // mock/index.ts with one `installToolchainMock(...)` call (kept apart so edits do not collide).
 import type * as T from '../types'
+import '@/i18n/en/errors/problems'
 
 type Body = Record<string, unknown>
 type Route = (method: string, pattern: string, h: (m: RegExpMatchArray, body: Body, query: URLSearchParams) => unknown | Promise<unknown>) => void
@@ -25,12 +26,19 @@ interface State {
   gh: boolean
   dbRunning: boolean
   attempts: number
+  /** The Containers line of the System check: not shown (no engine found), a working engine, or one that needs fixing. */
+  containers: 'none' | 'ready' | 'broken'
 }
-const state: State = { git: true, gh: true, dbRunning: true, attempts: 0 }
+const state: State = { git: true, gh: true, dbRunning: true, attempts: 0, containers: 'none' }
 
 /** Start a scenario from a clean world: in `trouble` the GitHub CLI is missing and the database is stopped. */
 export function resetToolchainMock(trouble: boolean): void {
-  Object.assign(state, { git: true, gh: !trouble, dbRunning: !trouble, attempts: 0 })
+  Object.assign(state, { git: true, gh: !trouble, dbRunning: !trouble, attempts: 0, containers: 'none' })
+}
+
+/** Scenario `containers` and tests: a container engine is on this computer (and works, or needs the lingering fix). */
+export function setMockContainers(c: State['containers']): void {
+  state.containers = c
 }
 
 /** Is the GitHub CLI installed in the mock world (the GitHub status route reads this)? */
@@ -78,7 +86,7 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
 
   route('GET', '/system/check', () => {
     const g = github()
-    const gitFix: T.Problem = { code: 'install.tool_missing', message: 'Git is not installed. Kora needs it to download and update resources.', actions: [{ kind: 'install_tool', tool: 'git' }, { kind: 'open_link', url: 'https://git-scm.com/downloads' }] }
+    const gitFix: T.Problem = { code: 'install.tool_missing', message: 'Git is not installed. Kora needs it to download and update resources.', i18n: { id: 'errors.problems.gitMissing' }, actions: [{ kind: 'install_tool', tool: 'git' }, { kind: 'open_link', url: 'https://git-scm.com/downloads' }] }
     const toolItem = (id: 'git' | 'gh', label: string, fix: T.Problem): T.CheckItem => {
       const t = tool(id)
       return t.installed
@@ -92,7 +100,7 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
       : { id: 'github', label: 'GitHub sign-in', state: 'ok', summary: `Signed in${g.user ? ` as ${g.user}` : ''}.`, problem: null }
     const db: T.CheckItem = state.dbRunning
       ? { id: 'database', label: 'Database', state: 'ok', summary: 'mariadb 11.4.2 is running.', problem: null }
-      : { id: 'database', label: 'Database', state: 'problem', summary: 'mariadb 11.4.2 is installed but not running.', problem: { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', actions: [{ kind: 'start_database' }] } }
+      : { id: 'database', label: 'Database', state: 'problem', summary: 'mariadb 11.4.2 is installed but not running.', problem: { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', i18n: { id: 'errors.problems.dbStopped', params: { name: 'mariadb' } }, actions: [{ kind: 'start_database' }] } }
     const items: T.CheckItem[] = [
       toolItem('git', 'Git', gitFix),
       toolItem('gh', 'GitHub CLI', ghMissing),
@@ -101,6 +109,10 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
       { id: 'admin', label: 'Administrator rights', state: 'info', summary: 'Kora runs with your normal rights. For the parts that need administrator rights it uses its administrator service when that is installed, and otherwise offers to install it or shows you the command to run.', problem: null },
       { id: 'service', label: 'Background service', state: 'info', summary: 'Not set up: the panel runs only while it is open.', problem: null },
     ]
+    if (state.containers === 'ready') items.push({ id: 'container', label: 'Containers', state: 'ok', summary: 'Podman 4.9.3, rootless: ready to run servers. Servers can run in containers.', problem: null })
+    if (state.containers === 'broken') {
+      items.push({ id: 'container', label: 'Containers', state: 'info', summary: 'Podman 4.9.3, rootless: Rootless containers need a block of extra user ids for this account.', problem: { code: 'container.no_subuid', message: 'Rootless containers need a block of extra user ids for this account (called subuid and subgid), and this account has none. An administrator can add them with the command shown, after which you sign out and in again.', actions: [{ kind: 'show_command', command: ['usermod', '--add-subuids', '100000-165535', '--add-subgids', '100000-165535', 'sam'], elevated: true }] } })
+    }
     return { items, ok: items.every((i) => i.state !== 'problem') } satisfies T.SystemCheck
   })
 
@@ -122,7 +134,7 @@ export function installToolchainMock({ route, startJob, Fail, sleep, github, tro
 
 /** For the wizard's database check: a failed login on a stopped database carries the fix. */
 export function mockDbStoppedProblem(): T.Problem | null {
-  return state.dbRunning ? null : { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', actions: [{ kind: 'start_database' }] }
+  return state.dbRunning ? null : { code: 'install.db_stopped', message: 'The database server mariadb is installed but not running.', i18n: { id: 'errors.problems.dbStopped', params: { name: 'mariadb' } }, actions: [{ kind: 'start_database' }] }
 }
 
 /** Tests: the database server is installed but stopped (and starting it needs no administrator rights outside `trouble`). */

@@ -1,0 +1,48 @@
+import { register } from '../../index'
+import type en from '../../en/resources/changesPanel'
+
+// German (beta): machine-assisted, to be checked by a native speaker before release.
+const messages = {
+  'resources.changesPanel.changesLineLine': 'Änderungen, Zeile für Zeile',
+  'resources.changesPanel.added': 'Hinzugefügt: ',
+  'resources.changesPanel.removed': 'Entfernt: ',
+  'resources.changesPanel.yourChanges': 'Deine Änderungen',
+  'resources.changesPanel.lookingFolder': 'Der Ordner wird angesehen...',
+  'resources.changesPanel.nothingChangedResourcesFolder': 'Im Ordner dieser Resource hat sich nichts geändert.',
+  'resources.changesPanel.singleCommit': 'einem einzelnen Commit',
+  'resources.changesPanel.countChangedFileValue': '{count, plural, one {# geänderte Datei} other {# geänderte Dateien}} auf {code, node}:',
+  'resources.changesPanel.changedFiles': 'Geänderte Dateien',
+  'resources.changesPanel.new': 'Neu',
+  'resources.changesPanel.added2': 'Hinzugefügt',
+  'resources.changesPanel.deleted': 'Gelöscht',
+  'resources.changesPanel.renamed': 'Umbenannt',
+  'resources.changesPanel.changed': 'Geändert',
+  'resources.changesPanel.hideChangesLineLine': 'Änderungen Zeile für Zeile ausblenden',
+  'resources.changesPanel.showChangesLineLine': 'Änderungen Zeile für Zeile anzeigen',
+  'resources.changesPanel.listChangesLongCut': 'Die Liste der Änderungen ist lang und wird hier abgeschnitten. Die Dateien oben sind vollständig.',
+  'resources.changesPanel.saveTheseChangesMessage': 'Diese Änderungen mit einer Nachricht speichern',
+  'resources.changesPanel.makesCommitSavedPoint': 'Das erstellt einen Commit: einen gespeicherten Punkt, den du beschreiben und an GitHub senden kannst.',
+  'resources.changesPanel.nodeNodeSaveChanges': '{node, node}Änderungen speichern (Commit)',
+  'resources.changesPanel.savedFilesFileValue': '{files, plural, one {# Datei} other {# Dateien}} als Commit {code, node} gespeichert.',
+  'resources.changesPanel.sendGithub': 'An GitHub senden',
+  'resources.changesPanel.plainCopyOriginalThere': 'Das ist eine einfache Kopie des Originals, es gibt also keinen eigenen Ort, an den Änderungen gesendet werden könnten. Erstelle oben zuerst deine eigene Kopie (einen Fork).',
+  'resources.changesPanel.branchGithubYet': 'Dieser Branch ist noch nicht auf GitHub.',
+  'resources.changesPanel.everythingSavedAlreadyGithub': 'Alles Gespeicherte ist schon auf GitHub.',
+  'resources.changesPanel.githubBehindDo': ' GitHub hat {behind}, die du nicht hast.',
+  'resources.changesPanel.aheadSavedChangeValue': '{ahead, plural, one {# gespeicherte Änderung} other {# gespeicherte Änderungen}} noch nicht auf GitHub.',
+  'resources.changesPanel.nodeNodePushFork': '{node, node}Nach {fork} pushen',
+  'resources.changesPanel.newBranchThere': ' (ein neuer Branch dort)',
+  'resources.changesPanel.pushedCodeNodeValue': '{code, node} nach {to} gepusht{value}.',
+  'resources.changesPanel.newBranch': 'Neuer Branch',
+  'resources.changesPanel.startNewBranch': 'Einen neuen Branch beginnen',
+  'resources.changesPanel.branchSeparateLineChanges': 'Ein Branch ist eine eigene Linie von Änderungen. Das erstellt einen von dem Stand, auf dem die Resource jetzt ist, und deine Änderungen kommen mit.',
+  'resources.changesPanel.nameNewBranch': 'Name für den neuen Branch',
+  'resources.changesPanel.exampleFixcontacts': 'zum Beispiel fix-kontakte',
+  'resources.changesPanel.makeBranch': 'Branch erstellen',
+  'resources.changesPanel.recentCommits': 'Letzte Commits',
+  'resources.changesPanel.codeNode': ' auf {code, node}',
+  'resources.changesPanel.recentCommitsNodeNode': 'Letzte Commits{node, node}',
+  'resources.changesPanel.noCommitsYet': 'Noch keine Commits.',
+} satisfies Record<keyof typeof en, string>
+
+register('de', messages)

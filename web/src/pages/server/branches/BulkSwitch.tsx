@@ -14,15 +14,18 @@ import { Field } from '@/components/Field'
 import { CountBar } from '@/components/JobProgress'
 import { ChangesDialog } from './ChangesDialog'
 import { useRefreshBranches } from './useBranches'
+import { t, msg, type Msg } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/resources/bulkSwitch'
 
 interface CountEvent { type: string; done: number; total: number; id: string }
 
-const STATUS_TEXT: Record<BulkStatus, { text: string; tone: 'success' | 'plain' | 'amber' | 'danger' }> = {
-  switched: { text: 'Switched', tone: 'success' },
-  already: { text: 'Already there', tone: 'plain' },
-  needs_choice: { text: 'Has changes of yours', tone: 'amber' },
-  skipped: { text: 'Left as it is', tone: 'plain' },
-  failed: { text: 'Could not switch', tone: 'danger' },
+const STATUS_TEXT: Record<BulkStatus, { text: Msg; tone: 'success' | 'plain' | 'amber' | 'danger' }> = {
+  switched: { text: msg('resources.bulkSwitch.switched'), tone: 'success' },
+  already: { text: msg('resources.bulkSwitch.alreadyThere'), tone: 'plain' },
+  needs_choice: { text: msg('resources.bulkSwitch.changesYours'), tone: 'amber' },
+  skipped: { text: msg('resources.bulkSwitch.leftAsItIs'), tone: 'plain' },
+  failed: { text: msg('resources.bulkSwitch.couldSwitch'), tone: 'danger' },
 }
 
 /** Every resource at once: which ones have a branch, switch them, or put them all back to the normal version. */
@@ -62,7 +65,7 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Working on several resources at once? Name a branch and Kora shows which resources have it before it changes anything. Resources without it are left alone.</p>
+      <p className="text-sm text-muted-foreground">{t('resources.bulkSwitch.workingSeveralResourcesOnce')}</p>
       <form
         className="flex flex-wrap items-end gap-2"
         onSubmit={async (e) => {
@@ -72,72 +75,70 @@ export function BulkSwitch({ server: s }: { server: ServerDetail }) {
           try { setPreviewJob((await api.branches.bulkPreview(s.name, branch.trim())).job) } catch (x) { setErr(x) }
         }}
       >
-        <div className="min-w-56 flex-1"><Field label="Branch name"><Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="For example: feature/new-ui" autoComplete="off" /></Field></div>
-        <Button type="submit" disabled={!branch.trim() || checking || applying || noOperator !== null} title={noOperator ?? undefined}>{checking && <Loader2 className="animate-spin" aria-hidden />}Check which resources have it</Button>
+        <div className="min-w-56 flex-1"><Field label={t('resources.bulkSwitch.branchName')}><Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={t('resources.bulkSwitch.exampleFeatureNewui')} autoComplete="off" /></Field></div>
+        <Button type="submit" disabled={!branch.trim() || checking || applying || noOperator !== null} title={noOperator ?? undefined}>{rich('resources.bulkSwitch.nodeNodeCheckWhich', { node: checking && <Loader2 className="animate-spin" aria-hidden /> })}</Button>
       </form>
-      {checking && <CountBar label="Checking resources" done={checked?.done ?? 0} total={checked?.total ?? 1} text={checked?.total ? `${checked.done} of ${checked.total} checked` : 'Asking GitHub...'} detail={checked?.id ? `Checked ${checked.id}` : undefined} />}
+      {checking && <CountBar label={t('resources.bulkSwitch.checkingResources')} done={checked?.done ?? 0} total={checked?.total ?? 1} text={checked?.total ? t('resources.bulkSwitch.doneTotalChecked', { done: checked.done, total: checked.total }) : t('resources.bulkSwitch.askingGithub')} detail={checked?.id ? `Checked ${checked.id}` : undefined} />}
       <ErrorNotice error={err ?? (preview.phase === 'failed' ? preview.error : null) ?? (apply.phase === 'failed' ? apply.error : null)} />
 
       {p && (
         <div className="space-y-3">
-          <Alert tone={p.have > 0 ? 'info' : 'warning'} title={`${p.have} of ${p.have + p.missing} resources have ${p.branch}`}>
-            {p.have === 0 ? 'None of them has this branch, so nothing can be switched. Check the spelling.' : `${p.missing} do not have it and would stay as they are.`}
+          <Alert tone={p.have > 0 ? 'info' : 'warning'} title={t('resources.bulkSwitch.valueResourcesBranch', { have: p.have, total: p.have + p.missing, branch: p.branch })}>
+            {p.have === 0 ? t('resources.bulkSwitch.noneThemBranchNothing') : t('resources.bulkSwitch.missingDoWouldStay', { missing: p.missing })}
             {p.notes.map((n) => <p key={n}>{n}</p>)}
           </Alert>
-          <ul className="divide-y divide-border rounded-md border border-border" aria-label="Which resources have the branch">
+          <ul className="divide-y divide-border rounded-md border border-border" aria-label={t('resources.bulkSwitch.whichResourcesBranch')}>
             {p.rows.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
                 <span className="min-w-0 flex-1 break-all font-mono text-xs">{r.id}</span>
-                {r.note ? <Badge tone="orange">Could not check</Badge> : r.already ? <Badge tone="plain">Already on it</Badge> : r.has ? <Badge tone="success">Has it</Badge> : <Badge tone="plain">Does not have it</Badge>}
-                {r.now.startsWith('the normal version') ? <span className="text-xs text-muted-foreground">now: {r.now}</span> : <Badge tone="amber" title="Not on its normal version">now: {r.now}</Badge>}
-                {r.changed_count > 0 && <Badge tone="amber">{r.changed_count} changed file{r.changed_count === 1 ? '' : 's'}</Badge>}
+                {r.note ? <Badge tone="orange">{t('resources.bulkSwitch.couldCheck')}</Badge> : r.already ? <Badge tone="plain">{t('resources.bulkSwitch.alreadyOnIt')}</Badge> : r.has ? <Badge tone="success">{t('resources.bulkSwitch.hasIt')}</Badge> : <Badge tone="plain">{t('resources.bulkSwitch.doesNotHaveIt')}</Badge>}
+                {r.now.startsWith('the normal version') /* i18n-ignore: the server's own English text, matched */ ? <span className="text-xs text-muted-foreground">{t('resources.bulkSwitch.nowNow', { now: r.now })}</span> : <Badge tone="amber" title={t('resources.bulkSwitch.itsNormalVersion')}>{t('resources.bulkSwitch.nowNow', { now: r.now })}</Badge>}
+                {r.changed_count > 0 && <Badge tone="amber">{t('resources.bulkSwitch.changedCountChangedFile', { changed_count: r.changed_count })}</Badge>}
                 {r.note && <span className="w-full text-xs text-muted-foreground">{r.note}</span>}
               </li>
             ))}
           </ul>
           {ready.length > 0 && (
             <div>
-              <Button variant="default" disabled={applying || blocked !== null} title={blocked ?? undefined} onClick={() => void start({ action: 'branch', branch: p.branch, resources: ready.map((r) => r.id) })}>
-                Switch the {ready.length} that {ready.length === 1 ? 'has' : 'have'} it
-              </Button>
+              <Button variant="default" disabled={applying || blocked !== null} title={blocked ?? undefined} onClick={() => void start({ action: 'branch', branch: p.branch, resources: ready.map((r) => r.id) })}>{t('resources.bulkSwitch.switchCountValue', { count: ready.length })}</Button>
               {blocked && <p className="mt-1 text-xs text-muted-foreground">{blocked}</p>}
-              <p className="mt-1 text-xs text-muted-foreground">If one has changes of your own, Kora asks what to do before touching it.</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t('resources.bulkSwitch.oneChangesOwnKora')}</p>
             </div>
           )}
         </div>
       )}
 
-      {applying && <CountBar label="Switching resources" done={switchedEvent?.done ?? 0} total={switchedEvent?.total ?? 1} text={switchedEvent?.total ? `${switchedEvent.done} of ${switchedEvent.total} done` : 'Starting...'} detail={switchedEvent?.id ? `Done ${switchedEvent.id}` : undefined} />}
+      {applying && <CountBar label={t('resources.bulkSwitch.switchingResources')} done={switchedEvent?.done ?? 0} total={switchedEvent?.total ?? 1} text={switchedEvent?.total ? t('resources.bulkSwitch.doneTotalDone', { done: switchedEvent.done, total: switchedEvent.total }) : t('resources.bulkSwitch.starting')} detail={switchedEvent?.id ? `Done ${switchedEvent.id}` : undefined} />}
       {apply.phase === 'done' && apply.result && (
         <div className="space-y-3">
-          <Alert tone={apply.result.failed > 0 ? 'warning' : 'success'} title={`${apply.result.switched} switched${apply.result.needs_choice ? `, ${apply.result.needs_choice} waiting for your choice` : ''}${apply.result.failed ? `, ${apply.result.failed} could not be switched` : ''}`}>
-            {apply.result.restart_note && <p>{apply.result.restart_note} A running server still has the old versions until it restarts: restart it from the Overview tab.</p>}
+          <Alert tone={apply.result.failed > 0 ? 'warning' : 'success'} title={t('resources.bulkSwitch.switchedSwitchedValueValue', { switched: apply.result.switched, value: apply.result.needs_choice ? t('resources.bulkSwitch.needsChoiceWaitingChoice', { needs_choice: apply.result.needs_choice }) : '', value2: apply.result.failed ? t('resources.bulkSwitch.failedCouldSwitched', { failed: apply.result.failed }) : '' })}>
+            {apply.result.restart_note && <p>{t('resources.bulkSwitch.restartNoteRunningServer', { restart_note: apply.result.restart_note })}</p>}
           </Alert>
-          <ul className="divide-y divide-border rounded-md border border-border" aria-label="What happened to each resource">
+          <ul className="divide-y divide-border rounded-md border border-border" aria-label={t('resources.bulkSwitch.whatHappenedEachResource')}>
             {apply.result.items.map((i) => (
               <li key={i.id} className="space-y-1 p-2.5 text-sm">
-                <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 break-all font-mono text-xs">{i.id}</span><Badge tone={STATUS_TEXT[i.status].tone}>{STATUS_TEXT[i.status].text}</Badge></div>
+                <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 break-all font-mono text-xs">{i.id}</span><Badge tone={STATUS_TEXT[i.status].tone}>{t(STATUS_TEXT[i.status].text)}</Badge></div>
                 <p className="text-xs text-muted-foreground">{i.message}</p>
-                {i.stashed && <p className="text-xs text-muted-foreground">Your changes are kept aside; bring them back from this resource's Branch window.</p>}
+                {i.stashed && <p className="text-xs text-muted-foreground">{t('resources.bulkSwitch.changesKeptAsideBring')}</p>}
               </li>
             ))}
           </ul>
-          {waiting.length > 0 && <Button disabled={blocked !== null} onClick={() => setAsking(true)}>Choose what to do with the {waiting.length} that {waiting.length === 1 ? 'has' : 'have'} changes</Button>}
+          {waiting.length > 0 && <Button disabled={blocked !== null} onClick={() => setAsking(true)}>{t('resources.bulkSwitch.chooseWhatDoCount', { count: waiting.length })}</Button>}
         </div>
       )}
 
       <div className="space-y-2 border-t border-border pt-4">
-        <h3 className="text-sm font-semibold">Put everything back to the normal version</h3>
-        <p className="text-xs text-muted-foreground">Every resource that is on another branch or a pull request goes back to its normal branch, so updates work for all of them again.</p>
-        <Button disabled={applying || blocked !== null} title={blocked ?? undefined} onClick={() => setAskDefault(true)}>Back to the normal version, for all</Button>
+        <h3 className="text-sm font-semibold">{t('resources.bulkSwitch.putEverythingBackNormal')}</h3>
+        <p className="text-xs text-muted-foreground">{t('resources.bulkSwitch.everyResourceAnotherBranch')}</p>
+        <Button disabled={applying || blocked !== null} title={blocked ?? undefined} onClick={() => setAskDefault(true)}>{t('resources.bulkSwitch.backNormalVersionAll')}</Button>
       </div>
 
       <ConfirmDialog
         open={askDefault}
         onOpenChange={setAskDefault}
-        title="Put every resource back to the normal version?"
-        description="Resources on another branch or a pull request are switched back. If any has changes of your own, Kora asks first. Nothing is thrown away without you saying so."
-        confirmLabel="Switch them all back"
+        title={t('resources.bulkSwitch.putEveryResourceBack')}
+        description={t('resources.bulkSwitch.resourcesAnotherBranchPull')}
+        confirmLabel={t('resources.bulkSwitch.switchThemAllBack')}
         onConfirm={() => { setAskDefault(false); setPreviewJob(null); void start({ action: 'default' }) }}
       />
       <ChangesDialog

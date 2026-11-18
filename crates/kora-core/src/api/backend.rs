@@ -18,11 +18,9 @@ use crate::service::ScheduleConfig;
 use crate::update::manual::{ApplyOpts, ChangeStatus, Scope, SnapshotInfo, UpdateEvent, UpdatePreview};
 use crate::update::UpdateReport;
 
-/// The error is text for a person, or a packed [`crate::problem::Problem`] (`Err(problem.into())`)
-/// when the front end should offer specific actions. The panel unpacks it (`ApiError::core`); a
-/// terminal front end shows it with [`crate::problem::plain_text`]. Plain strings stay valid and
-/// become a generic problem.
-pub type Res<T> = Result<T, String>;
+/// Every operation can fail with a [`crate::problem::Problem`]: what happened in plain words, details,
+/// and the actions a person can take. The panel turns it into its JSON error, a terminal prints it.
+pub type Res<T> = Result<T, crate::problem::Problem>;
 
 /// Live state of a server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +146,10 @@ pub trait Backend {
 
     /// Is `gh` signed in to GitHub?
     fn github_signed_in(&mut self) -> bool;
+    /// The GitHub login Kora acts as (what the audit log records for an operation that acts on GitHub). `None`: not known.
+    fn github_acting_as(&mut self) -> Option<String> {
+        None
+    }
     /// Report an issue about a resource of the server. Returns the issue address.
     fn report_issue(&mut self, e: &ServerEntry, resource: &str, title: &str, text: &str) -> Res<String>;
     /// Check that a pull request can be made from the resource's fork (development servers).

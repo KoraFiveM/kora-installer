@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/Field'
 import { getPasskey, passkeyErrorText, passkeysSupported } from '@/lib/webauthn'
+import { t } from '@/i18n'
+import '@/i18n/en/auth/remoteSignIn'
 
 type Method = 'passkey' | 'code'
 
@@ -27,14 +29,14 @@ export function RemoteSignIn({ options, onSignedIn }: { options: AuthOptions; on
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  const why = !options.passkey ? options.passkey_problem : !passkeysSupported() ? 'This browser cannot use passkeys here. Sign in with a one-time code instead.' : null
+  const why = !options.passkey ? options.passkey_problem : !passkeysSupported() ? t('auth.remoteSignIn.browserCannotUsePasskeys') : null
 
   async function withPasskey() {
     setBusy(true)
     setErr(null)
     try {
       const begin = await api.auth.login({ step: 'passkey_begin', user: user.trim() })
-      if (begin.step !== 'challenge') throw new Error('The panel did not start the sign-in.')
+      if (begin.step !== 'challenge') throw new Error(t('auth.remoteSignIn.panelDidStartSignin'))
       const credential = await getPasskey(begin.options)
       const done = await api.auth.login({ step: 'passkey_finish', handle: begin.handle, credential })
       if (done.step === 'signed_in') onSignedIn(done.notice)
@@ -72,45 +74,35 @@ export function RemoteSignIn({ options, onSignedIn }: { options: AuthOptions; on
           void (method === 'passkey' ? withPasskey() : withCode())
         }}
       >
-        <Field label="Your name" hint="The name the person who runs Kora gave you.">
+        <Field label={t('auth.remoteSignIn.yourName')} hint={t('auth.remoteSignIn.namePersonWhoRuns')}>
           <Input autoComplete="username webauthn" value={user} onChange={(e) => setUser(e.target.value)} />
         </Field>
         {method === 'code' && (
           <>
-            <Field label="Password">
+            <Field label={t('auth.remoteSignIn.password')}>
               <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
-            <Field label="One-time code" hint="The 6 digits from your authenticator app. Lost your phone? Use one of your recovery codes here.">
+            <Field label={t('auth.remoteSignIn.onetimeCode')} hint={t('auth.remoteSignIn.digitsFromAuthenticatorApp')}>
               <Input inputMode="text" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
             </Field>
           </>
         )}
         <div className="flex flex-wrap items-center gap-3">
           {method === 'passkey' ? (
-            <Button type="submit" disabled={busy || !user.trim() || !canPasskey}>
-              Sign in with a passkey
-            </Button>
+            <Button type="submit" disabled={busy || !user.trim() || !canPasskey}>{t('auth.remoteSignIn.signPasskey')}</Button>
           ) : (
-            <Button type="submit" disabled={busy || !user.trim() || !password || !code.trim()}>
-              Sign in with a code
-            </Button>
+            <Button type="submit" disabled={busy || !user.trim() || !password || !code.trim()}>{t('auth.remoteSignIn.signCode')}</Button>
           )}
           {options.code && canPasskey && method === 'passkey' && (
-            <Button type="button" variant="ghost" onClick={() => { setMethod('code'); setErr(null) }}>
-              Use a one-time code instead
-            </Button>
+            <Button type="button" variant="ghost" onClick={() => { setMethod('code'); setErr(null) }}>{t('auth.remoteSignIn.useOnetimeCodeInstead')}</Button>
           )}
           {method === 'code' && canPasskey && (
-            <Button type="button" variant="ghost" onClick={() => { setMethod('passkey'); setErr(null) }}>
-              Use a passkey instead
-            </Button>
+            <Button type="button" variant="ghost" onClick={() => { setMethod('passkey'); setErr(null) }}>{t('auth.remoteSignIn.usePasskeyInstead')}</Button>
           )}
         </div>
       </form>
       {method === 'passkey' && !canPasskey && options.code && (
-        <Button type="button" variant="secondary" onClick={() => setMethod('code')}>
-          Use a one-time code
-        </Button>
+        <Button type="button" variant="secondary" onClick={() => setMethod('code')}>{t('auth.remoteSignIn.useOnetimeCode')}</Button>
       )}
     </div>
   )

@@ -13,6 +13,15 @@ pub(crate) enum RemoteActionsCmd {
 }
 
 #[derive(Subcommand, Debug)]
+pub(crate) enum RemoteCmd {
+    /// Require a passkey or one-time codes for everybody who signs in from another computer: the old token links stop working for sign-in (the same switch as Settings, Remote access). Local to this computer.
+    RequireStrong {
+        #[command(subcommand)]
+        cmd: RemoteActionsCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub(crate) enum PanelUserCmd {
     /// Invite a person: makes the user and prints a one-time link (30 minutes, works once) where they set up a passkey or one-time codes. No token is made.
     #[command(alias = "add")]
@@ -100,6 +109,64 @@ pub(crate) fn panel_remote_actions(cmd: RemoteActionsCmd, path: &std::path::Path
         Ok(on) => {
             println!("{}", remote_actions_message(cmd, on));
             if cmd != RemoteActionsCmd::Status {
+                println!("A running panel uses the new setting right away. No restart is needed.");
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+/// What `kora panel remote require-strong on|off|status` prints. `without`: the remote users who have no passkey or one-time codes
+/// yet (they cannot sign in while it is on, until they have set one up with a new link from `kora panel user reset <name>`).
+fn require_strong_message(cmd: RemoteActionsCmd, on: bool, without: &[String]) -> String {
+    let state = if on {
+        "A passkey or one-time codes are required for everybody who signs in from another computer: the old token links no longer sign anyone in. Turn it off with `kora panel remote require-strong off`."
+    } else {
+        "A passkey or one-time codes are not required: people with an old token link can still sign in with it. Turn the requirement on with `kora panel remote require-strong on`."
+    };
+    let mut out = match (cmd, on) {
+        (RemoteActionsCmd::Status, _) => state.to_string(),
+        (_, true) => "Done. ".to_string() + state,
+        (_, false) => "Done. ".to_string() + state,
+    };
+    if on && !without.is_empty() {
+        out.push_str(&format!(
+            "\nThese people have no passkey or one-time codes yet and cannot sign in until they set one up: {}. Give each a new one-time link with `kora panel user reset <name>`.",
+            without.join(", ")
+        ));
+    }
+    out
+}
+
+/// `kora panel remote require-strong on|off|status`: the "require a passkey or one-time codes for everybody" switch of Settings > Remote
+/// access, for a server with no local browser. Saved through the same `Remote::update` the panel uses (local only: this command runs
+/// on this computer); a running panel notices the changed file by itself. The change is written to the Activity log by the command
+/// line's audit row (`kora panel remote require-strong on|off`).
+pub(crate) fn panel_remote(cmd: &RemoteCmd, path: &std::path::Path) -> i32 {
+    let RemoteCmd::RequireStrong { cmd } = cmd;
+    let run = || -> Result<(bool, Vec<String>), String> {
+        let remote = kora_web::remote::Remote::from_file(path.to_path_buf())?;
+        let on = match cmd {
+            RemoteActionsCmd::Status => remote.config().require_strong_auth,
+            RemoteActionsCmd::On | RemoteActionsCmd::Off => remote.update(|cfg| {
+                cfg.require_strong_auth = *cmd == RemoteActionsCmd::On;
+                Ok(cfg.require_strong_auth)
+            })?,
+        };
+        let without: Vec<String> = match remote.auth_store() {
+            Ok(s) => remote.config().users.iter().map(|u| u.name.clone()).filter(|n| kora_web::remote::auth::db::state(&s, n).map(|st| !st.strong()).unwrap_or(true)).collect(),
+            Err(_) => vec![],
+        };
+        Ok((on, without))
+    };
+    match run() {
+        Ok((on, without)) => {
+            println!("{}", require_strong_message(*cmd, on, &without));
+            if *cmd != RemoteActionsCmd::Status {
                 println!("A running panel uses the new setting right away. No restart is needed.");
             }
             0
@@ -270,6 +337,56 @@ mod tests {
     use crate::Cli;
     use crate::Command;
     use clap::Parser;
+
+    #[test]
+    fn require_strong_switches_the_saved_setting_names_who_would_be_locked_out_and_is_audited() {
+        use kora_web::remote::RemoteConfig;
+        let cmd = |a: &[&str]| match Cli::try_parse_from(a).map(|c| c.command) {
+            Ok(Some(Command::Panel(p))) => Ok(p.cmd),
+            Ok(_) => panic!("not the panel command"),
+            Err(e) => Err(e.to_string()),
+        };
+        assert!(matches!(cmd(&["kora", "panel", "remote", "require-strong", "on"]), Ok(Some(PanelCmd::Remote { cmd: RemoteCmd::RequireStrong { cmd: RemoteActionsCmd::On } }))));
+        assert!(matches!(cmd(&["kora", "panel", "remote", "require-strong", "status"]), Ok(Some(PanelCmd::Remote { .. }))));
+        assert!(cmd(&["kora", "panel", "remote", "require-strong"]).is_err(), "it needs on, off or status");
+        assert!(cmd(&["kora", "panel", "remote", "require-strong", "maybe"]).is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("panel.json");
+        let saved = || RemoteConfig::load(&path).unwrap().require_strong_auth;
+        // Nothing saved yet: off, and asking does not create the file.
+        assert_eq!(panel_remote(&RemoteCmd::RequireStrong { cmd: RemoteActionsCmd::Status }, &path), 0);
+        assert!(!path.exists());
+        let mut cfg = RemoteConfig { enabled: true, allow_remote_destructive: true, ..Default::default() };
+        cfg.add_user("sam", kora_web::remote::Role::Admin).unwrap();
+        cfg.save(&path).unwrap();
+        assert_eq!(panel_remote(&RemoteCmd::RequireStrong { cmd: RemoteActionsCmd::On }, &path), 0);
+        assert!(saved());
+        assert_eq!(panel_remote(&RemoteCmd::RequireStrong { cmd: RemoteActionsCmd::Status }, &path), 0);
+        assert!(saved(), "status changes nothing");
+        assert_eq!(panel_remote(&RemoteCmd::RequireStrong { cmd: RemoteActionsCmd::Off }, &path), 0);
+        assert!(!saved());
+        let after = RemoteConfig::load(&path).unwrap();
+        assert!(after.enabled && after.allow_remote_destructive && after.user("sam").is_some(), "the rest is kept");
+        // a damaged file is reported, never replaced
+        std::fs::write(&path, "{not json").unwrap();
+        assert_eq!(panel_remote(&RemoteCmd::RequireStrong { cmd: RemoteActionsCmd::On }, &path), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
+        // the words
+        let on = require_strong_message(RemoteActionsCmd::On, true, &["kim".into(), "lee".into()]);
+        assert!(on.contains("old token links no longer sign anyone in") && on.contains("kim, lee") && on.contains("kora panel user reset <name>"), "{on}");
+        assert!(!require_strong_message(RemoteActionsCmd::On, true, &[]).contains("cannot sign in until"));
+        assert!(require_strong_message(RemoteActionsCmd::Status, false, &[]).contains("not required"));
+    }
+
+    #[test]
+    fn the_cli_audit_row_for_it_is_the_remote_settings_change() {
+        use clap::CommandFactory;
+        let _ = Cli::command();
+        assert_eq!(crate::cmd::store::op_of(&["panel", "remote", "require-strong", "on"]), Some(kora_core::api::Op::RemoteSet));
+        assert_eq!(crate::cmd::store::op_of(&["panel", "remote", "require-strong", "off"]), Some(kora_core::api::Op::RemoteSet));
+        assert_eq!(crate::cmd::store::op_of(&["panel", "remote", "require-strong", "status"]), None, "looking is not a change");
+    }
 
     #[test]
     fn panel_remote_actions_switches_the_saved_setting() {

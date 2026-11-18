@@ -485,6 +485,7 @@ mod tests {
             dry_run: false,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         }
     }

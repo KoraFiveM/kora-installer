@@ -62,7 +62,7 @@ struct S {
     /// The step that fails (default `build.db`).
     fail_step: Option<&'static str>,
     runs: Vec<InstallRequest>,
-    artifacts: Option<Result<ArtifactList, String>>,
+    artifacts: Option<Result<ArtifactList, kora_core::problem::Problem>>,
 }
 
 struct Env {
@@ -87,14 +87,14 @@ impl InstallEnv for Env {
     fn disk(&self) -> &dyn DiskInfo {
         &self.disk
     }
-    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, admin: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
         if self.st().db_ok && admin.is_none_or(|a| a.password.as_deref() != Some("wrong")) {
             Ok(())
         } else {
             Err("could not log in to the database server as 'root' (access denied). Check the user, password and port.".into())
         }
     }
-    fn artifacts(&self) -> Result<ArtifactList, String> {
+    fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
         self.st().artifacts.clone().unwrap_or_else(|| Err("offline".into()))
     }
     fn is_elevated(&self) -> bool {
@@ -117,7 +117,7 @@ impl InstallEnv for Env {
     fn saved_clear(&self) {
         self.st().saved = None;
     }
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
         self.st().runs.push(req.clone());
         let ev = |step: &str, status, pct| ProgressEvent { step: step.into(), title: format!("Title of {step}"), status, detail: "detail".into(), percent: pct };
         sink.event(ev("prepare.dir", StepStatus::Running, 10));
@@ -133,7 +133,7 @@ impl InstallEnv for Env {
                 sink.event(ev(step, StepStatus::Skipped, 90));
             } else {
                 sink.event(ev(step, StepStatus::Failed, 50));
-                return Err(m);
+                return Err(m.into());
             }
         }
         sink.event(ev("finalize", StepStatus::Done, 100));
@@ -150,7 +150,7 @@ impl InstallEnv for Env {
     }
 }
 
-type Approval = Result<Option<String>, String>;
+type Approval = Result<Option<String>, kora_core::problem::Problem>;
 
 /// A machine without `gh`.
 struct MissingGh;
@@ -158,14 +158,14 @@ impl GithubEnv for MissingGh {
     fn auth(&self) -> GithubUser {
         GithubUser::gh_missing()
     }
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+    fn owners(&self) -> Result<Vec<OwnerChoice>, kora_core::problem::Problem> {
         Err("gh not found".into())
     }
-    fn begin_login(&self) -> Result<LoginFlow, String> {
-        Err(kora_core::problem::known::gh_missing().encode())
+    fn begin_login(&self) -> Result<LoginFlow, kora_core::problem::Problem> {
+        Err(kora_core::problem::known::gh_missing())
     }
-    fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
-        Err(kora_core::problem::known::gh_missing().encode())
+    fn resolve_owner(&self, _: Option<&str>) -> Result<String, kora_core::problem::Problem> {
+        Err(kora_core::problem::known::gh_missing())
     }
 }
 
@@ -180,17 +180,17 @@ impl GithubEnv for Gh {
             None => GithubUser::signed_out(),
         }
     }
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+    fn owners(&self) -> Result<Vec<OwnerChoice>, kora_core::problem::Problem> {
         Ok(vec![
             OwnerChoice { login: "sam".into(), is_org: false, can_fork: true, reason: None },
             OwnerChoice { login: "acme".into(), is_org: true, can_fork: false, reason: Some("members cannot create repositories".into()) },
         ])
     }
-    fn begin_login(&self) -> Result<LoginFlow, String> {
+    fn begin_login(&self) -> Result<LoginFlow, kora_core::problem::Problem> {
         let rx = self.release.lock().unwrap().take().ok_or("no sign-in prepared")?;
         Ok(LoginFlow { code: "ABCD-1234".into(), url: "https://github.com/login/device".into(), wait: Box::new(move || rx.recv().map_err(|_| "closed".to_string())?) })
     }
-    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, String> {
+    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, kora_core::problem::Problem> {
         match requested {
             Some(o) => Ok(o.to_string()),
             None => Ok("sam".into()),
@@ -365,13 +365,13 @@ impl kora_core::api::toolchain::ToolchainEnv for StoppedDb {
     fn tools(&self) -> Vec<kora_core::tools::ToolStatus> {
         vec![]
     }
-    fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, String> {
+    fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, kora_core::problem::Problem> {
         Err("no".into())
     }
     fn database(&self) -> kora_core::api::toolchain::DbState {
         kora_core::api::toolchain::DbState { installed: true, running: false, name: Some("mariadb".into()), version: None, unknown: false }
     }
-    fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, String> {
+    fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, kora_core::problem::Problem> {
         Err("no".into())
     }
     fn admin(&self) -> kora_core::api::toolchain::AdminState {

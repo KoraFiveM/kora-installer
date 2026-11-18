@@ -16,7 +16,7 @@ const server = { name: 'prod', dir: '/srv/prod', mode: 'production', source: 'cl
 const up = (t: number, players: number): MetricSample => ({ t, up: true, players, max_players: 48, cpu: 12.5, ram_mb: 2048, sys_ram_pct: 55, disk_free_mb: 51200, disk_free_pct: 25, game_up: true, txadmin_up: true })
 const settings: AlertSettings = {
   enabled: true,
-  rules: { stopped: true, recovered: true, disk: true, ram: true, updates: true },
+  rules: { stopped: true, recovered: true, disk: true, ram: true, updates: true, machine: true },
   disk_min_gb: 5,
   disk_min_percent: 5,
   ram_max_percent: 90,
@@ -42,11 +42,11 @@ describe('MonitoringTab', () => {
     expect(await screen.findByText('of 48')).toBeInTheDocument()
     expect(screen.getByText('9')).toBeInTheDocument()
     expect(screen.getByText('12.5%')).toBeInTheDocument()
-    expect(screen.getByText('50.0 GB')).toBeInTheDocument()
+    expect(screen.getByText('51.2 GB')).toBeInTheDocument()
     expect(screen.getAllByRole('img').map((i) => i.getAttribute('aria-label'))).toEqual([
       expect.stringContaining('Players: now 9, highest 9'),
       expect.stringContaining('Server CPU'),
-      expect.stringContaining('Server memory: now 2.0 GB'),
+      expect.stringContaining('Server memory: now 2 GB'),
     ])
   })
 

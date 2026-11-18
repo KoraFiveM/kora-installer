@@ -21,12 +21,8 @@ use crate::{blocking, ApiError, AppState};
 use kora_core::privsvc::problems::Context;
 
 /// A job error that keeps a Problem's code and choices (the declined prompt's "Ask again", ...).
-fn job_error(e: ApiError) -> String {
-    if e.actions().is_empty() {
-        e.message
-    } else {
-        e.to_problem().encode()
-    }
+fn job_error(e: ApiError) -> kora_core::api::JobFailure {
+    kora_core::api::JobFailure::new(e.to_problem())
 }
 
 fn cmd(parts: &[&str]) -> Vec<String> {
@@ -268,7 +264,7 @@ pub async fn uninstall_run(State(st): State<AppState>, bytes: axum::body::Bytes)
     st.spawn_job(Op::UninstallRun, server, move |h| {
         let out = maint::current().uninstall_run(&r, &mut |m| h.event(json!({"type": "status", "message": m})))?;
         if !out.failed.is_empty() {
-            return Err(format!("Some things could not be removed: {}", out.failed.join("; ")));
+            return Err(format!("Some things could not be removed: {}", out.failed.join("; ")).into());
         }
         let mut notes = vec!["Your server folders and databases were kept unless you chose to delete them.".to_string()];
         notes.extend(out.kept.iter().cloned());

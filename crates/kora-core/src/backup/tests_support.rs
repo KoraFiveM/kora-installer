@@ -1,5 +1,6 @@
 //! A fake server folder, a fake database and a fake git for the backup tests.
 
+use crate::problem::Problem;
 use std::path::Path;
 
 use super::dbdump::fake::FakeDb;
@@ -114,12 +115,12 @@ impl Host for FakeHost {
     fn running(&mut self) -> bool {
         self.running_now
     }
-    fn stop(&mut self) -> Result<(), String> {
+    fn stop(&mut self) -> Result<(), Problem> {
         self.running_now = false;
         self.stopped_ever = true;
         Ok(())
     }
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self) -> Result<(), Problem> {
         if self.fail_start {
             return Err("it would not start".into());
         }

@@ -6,6 +6,7 @@ mod error;
 pub mod handlers;
 mod jobs;
 pub mod launch;
+pub mod machine_alerts;
 pub mod remote;
 pub mod routes;
 pub mod security;
@@ -26,7 +27,7 @@ use axum::Extension;
 use axum::{middleware, Json, Router};
 use kora_core::api::{wire, Backend, JobRegistry, Op};
 use kora_core::installer::registry::ServerEntry;
-use serde_json::{json, Value};
+use serde_json::json;
 
 pub use error::{blocking, ApiError};
 pub use jobs::{JobMessage, Jobs, MemoryJobs, NoJobs};
@@ -210,7 +211,7 @@ impl AppState {
     /// Start a job for `op`; `202 {"job": id}`, or `409 conflict` when the server is busy.
     pub fn spawn_job<F>(&self, op: Op, server: Option<String>, f: F) -> Result<Response, ApiError>
     where
-        F: FnOnce(&kora_core::api::JobHandle) -> Result<Value, String> + Send + 'static,
+        F: FnOnce(&kora_core::api::JobHandle) -> kora_core::api::JobResult + Send + 'static,
     {
         // A job changes what the fleet shows: forget the cached list when it starts and when it ends.
         self.fleet_cache.clear();
@@ -613,6 +614,8 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
         // Make the backups the schedules ask for (only while the panel runs).
         let backup_scheduler = handlers::backups::start_scheduler(state.backend.clone(), monitor.clone());
+        // Machine-level alerts: the panel's certificate and Kora's administrator service.
+        let machine_alerts = machine_alerts::start(monitor.clone(), tls_mgr.state.clone());
         // Forward the game port on the router for servers that have it switched on (and run without a service).
         let port_keeper = kora_core::reach::forward::keeper::spawn_panel_keeper();
         // Loopback is plain HTTP by default; any other address serves HTTPS once there is a certificate.
@@ -624,6 +627,7 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         })
         .await;
         monitor.stop();
+        machine_alerts.stop();
         backup_scheduler.stop();
         port_keeper.stop();
         served?;

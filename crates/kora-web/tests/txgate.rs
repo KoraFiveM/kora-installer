@@ -600,3 +600,134 @@ async fn a_server_that_is_down_gets_a_plain_page_not_a_hang() {
     }
     let _ = s;
 }
+
+// ------------------------------------------------------------------ behind a trusted reverse proxy
+
+/// A panel with remote access, a remote administrator (token), a trusted proxy at 127.0.0.1 and the public name `panel.example.com`.
+/// Returns the world, the proxy's secret and the administrator's token.
+async fn proxied_world(template: Option<&str>) -> (World, String, String) {
+    let (prod_port, prod_tx) = fake_txadmin("prod").await;
+    let (dev_port, dev_tx) = fake_txadmin("dev").await;
+    let fake = FakeBackend::new();
+    {
+        let mut s = fake.state();
+        s.servers = vec![entry("prod", Mode::Production, 30120, prod_port), entry("dev", Mode::Development, 30130, dev_port)];
+    }
+    let (mut proxy, secret) = kora_web::remote::proxy::ProxyConfig::new(vec!["127.0.0.1".parse().unwrap()], vec![]);
+    proxy.txadmin_host = template.map(str::to_string);
+    let mut cfg = RemoteConfig { enabled: true, allow_remote_destructive: true, allowed_hosts: vec!["panel.example.com".into()], trusted_proxy: Some(proxy), ..Default::default() };
+    let token = cfg.add_user("adam", Role::Admin).unwrap();
+    let mut st = AppState::system(LAUNCH.into(), PANEL.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(Arc::new(Remote::new(None, cfg)));
+    st.txgate = Arc::new(Gate::default().with_port_fn(|_| Some(0)).with_ws_recheck(Duration::from_millis(150)));
+    (World { app: router(st.clone()), st, prod_tx, dev_tx, prod_port }, secret, token)
+}
+
+/// What a proxy adds to every request it forwards.
+fn proxy_headers(secret: &str) -> String {
+    format!("X-Kora-Proxy-Secret: {secret}\r\nX-Forwarded-For: 203.0.113.9\r\nX-Forwarded-Proto: https\r\n")
+}
+
+async fn proxied_post(w: &World, secret: &str, uri: &str, extra: &[(&str, String)], body: Option<Value>) -> (u16, Vec<String>, Value) {
+    let mut b = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::HOST, "panel.example.com")
+        .header("x-kora-proxy-secret", secret)
+        .header("x-forwarded-for", "203.0.113.9")
+        .header("x-forwarded-proto", "https")
+        .header("x-kora", "1");
+    for (k, v) in extra {
+        b = b.header(*k, v);
+    }
+    let body = match body {
+        Some(v) => {
+            b = b.header(header::CONTENT_TYPE, "application/json");
+            Body::from(v.to_string())
+        }
+        None => Body::empty(),
+    };
+    let mut r = b.body(body).unwrap();
+    r.extensions_mut().insert(ConnectInfo("127.0.0.1:50000".parse::<SocketAddr>().unwrap()));
+    let resp = w.app.clone().oneshot(r).await.unwrap();
+    let status = resp.status().as_u16();
+    let cookies: Vec<String> = resp.headers().get_all(header::SET_COOKIE).iter().filter_map(|v| v.to_str().ok()).map(str::to_string).collect();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 16).await.unwrap();
+    (status, cookies, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+/// Sign the remote administrator in through the proxy and ask for a ticket for `server`.
+async fn proxied_ticket(w: &World, secret: &str, token: &str, server: &str) -> (u16, Value) {
+    let (s, cookies, j) = proxied_post(w, secret, "/api/v1/session", &[], Some(json!({"token": token}))).await;
+    assert_eq!(s, 200, "{j}");
+    let cookie = cookies.iter().find(|c| c.contains("kora_session")).unwrap().split(';').next().unwrap().to_string();
+    let (st, _, v) = proxied_post(w, secret, &format!("/api/v1/servers/{server}/txadmin/ticket"), &[("cookie", cookie), ("x-kora-session", j["secret"].as_str().unwrap().to_string())], None).await;
+    (st, v)
+}
+
+#[tokio::test]
+async fn through_a_trusted_proxy_the_ticket_names_the_public_address_and_the_gateway_serves_the_visitor() {
+    let (w, secret, token) = proxied_world(None).await;
+    let (s, v) = proxied_ticket(&w, &secret, &token, "prod").await;
+    assert_eq!(s, 200, "{v}");
+    let url = v["url"].as_str().unwrap().to_string();
+    let port = gate_port(&url);
+    assert!(url.starts_with(&format!("https://panel.example.com:{port}/__kora/enter?t=")), "the proxy's public scheme and name, with the gateway port: {url}");
+
+    let host = format!("Host: panel.example.com:{port}\r\n");
+    let req = |path: &str, extra: &str| format!("GET {path} HTTP/1.1\r\n{host}Connection: close\r\n{extra}\r\n");
+    // without the proxy's secret, forwarded headers are refused as ever; with the wrong one too
+    let a = raw(port, &req(&enter_path(&url), "X-Forwarded-For: 203.0.113.9\r\n")).await;
+    assert_eq!(a.status, 403, "{}", a.body);
+    let a = raw(port, &req(&enter_path(&url), &proxy_headers("wrong"))).await;
+    assert_eq!(a.status, 403);
+    // a name the panel does not answer to is refused, even from the proxy
+    let evil = format!("GET {} HTTP/1.1\r\nHost: evil.example.net:{port}\r\nConnection: close\r\n{}\r\n", enter_path(&url), proxy_headers(&secret));
+    assert_eq!(raw(port, &evil).await.status, 403);
+    // the ticket works once, through the proxy, and the cookie is for https
+    let a = raw(port, &req(&enter_path(&url), &proxy_headers(&secret))).await;
+    assert_eq!(a.status, 303, "{}", a.body);
+    let c = a.header("set-cookie").unwrap().to_string();
+    assert!(c.contains("Secure") && c.contains("HttpOnly"), "{c}");
+    let cookie = c.split(';').next().unwrap().to_string();
+    let with = |path: &str| req(path, &format!("{}Cookie: {cookie}\r\n", proxy_headers(&secret)));
+    let a = raw(port, &with("/who")).await;
+    assert_eq!((a.status, a.body.as_str()), (200, "txadmin prod"));
+    // nothing of the proxy's reaches txAdmin: not the secret, not the forwarded address, not the panel's cookie
+    let head = raw(port, &with("/headers")).await.body.to_ascii_lowercase();
+    assert!(!head.contains("x-kora-proxy-secret") && !head.contains(&secret) && !head.contains("x-forwarded") && !head.contains("kora_gate"), "{head}");
+    // a visitor who cannot show the secret has no way in with the cookie either
+    let bare = raw(port, &req("/who", &format!("Cookie: {cookie}\r\n"))).await;
+    assert!(matches!(bare.status, 401 | 403), "{}", bare.status);
+    assert!(w.prod_tx.hits.load(Ordering::SeqCst) >= 2 && w.dev_tx.hits.load(Ordering::SeqCst) == 0);
+    let _ = (w.prod_port, &w.st);
+}
+
+#[tokio::test]
+async fn a_host_name_per_server_is_the_address_and_another_servers_name_is_refused() {
+    let (w, secret, token) = proxied_world(Some("tx-{server}.example.com")).await;
+    let (s, v) = proxied_ticket(&w, &secret, &token, "prod").await;
+    assert_eq!(s, 200, "{v}");
+    let url = v["url"].as_str().unwrap().to_string();
+    assert!(url.starts_with("https://tx-prod.example.com/__kora/enter?t="), "{url}");
+    // the real gateway port is behind the proxy: the visitor never sees it
+    let port = w.st.txgate.ports_for_tests().into_iter().next().expect("a gateway is open");
+    let req = |host: &str, path: &str, extra: &str| format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n{}{extra}\r\n", proxy_headers(&secret));
+    let t = url.split_once("/__kora/enter").unwrap().1.to_string();
+    // the ticket is not taken with another server's name
+    let a = raw(port, &req("tx-dev.example.com", &format!("/__kora/enter{t}"), "")).await;
+    assert_eq!(a.status, 403, "{}", a.body);
+    // (a refused try uses the ticket up: ask for another)
+    let (s2, v2) = proxied_ticket(&w, &secret, &token, "prod").await;
+    assert_eq!(s2, 200, "{v2}");
+    let t2 = v2["url"].as_str().unwrap().split_once("/__kora/enter").unwrap().1.to_string();
+    // (tests let the operating system choose the gateway port, so this ticket belongs to a second gateway)
+    let port2 = w.st.txgate.ports_for_tests().into_iter().find(|p| *p != port).expect("the second gateway");
+    let port = port2;
+    let a = raw(port, &req("tx-prod.example.com", &format!("/__kora/enter{t2}"), "")).await;
+    assert_eq!(a.status, 303, "the ticket is for this server and its own name: {}", a.body);
+    let cookie = a.header("set-cookie").unwrap().split(';').next().unwrap().to_string();
+    let wrong = raw(port, &req("tx-dev.example.com", "/who", &format!("Cookie: {cookie}\r\n"))).await;
+    assert_eq!(wrong.status, 403, "tx-dev.example.com is not this server's name: {}", wrong.body);
+    let right = raw(port, &req("tx-prod.example.com", "/who", &format!("Cookie: {cookie}\r\n"))).await;
+    assert_eq!((right.status, right.body.as_str()), (200, "txadmin prod"));
+}

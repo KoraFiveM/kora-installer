@@ -15,7 +15,7 @@ use kora_core::api::{adopt, logs, wire, Backend, Op, Status, UpdateBadge};
 use kora_core::installer::registry::{self, ServerEntry};
 use kora_core::service::ControlAction;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::{blocking, ApiError, AppState};
 
@@ -32,6 +32,7 @@ fn summary(b: &mut dyn Backend, e: &ServerEntry) -> wire::ServerSummary {
 }
 
 fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> wire::ServerSummary {
+    let rec = kora_core::container::ContainerRecord::load(&e.dir);
     wire::ServerSummary {
         name: e.name.clone(),
         dir: e.dir.clone(),
@@ -44,6 +45,8 @@ fn summary_with(e: &ServerEntry, status: Status, badge: Option<UpdateBadge>) -> 
         badge: badge.map(wire::Badge::from),
         managed: is_managed(e),
         connect: connect_address(e.ports.game),
+        run_mode: rec.is_some().then_some(kora_core::container::RunMode::Container),
+        run_label: rec.map(|r| r.describe()),
     }
 }
 
@@ -172,24 +175,9 @@ pub async fn server_delete(State(st): State<AppState>, Path(s): Path<String>, Js
     let stc = st.clone();
     st.spawn_job(Op::ServerDelete, Some(name), move |h| {
         h.event(to_value(&wire::StatusEvent::Status { message: "Deleting the server".into() }));
-        let notes = stc.backend().delete_with_admin(&e, body.keep_files, body.keep_db, body.db_admin_password.as_deref(), admin).map_err(delete_error)?;
+        let notes = stc.backend().delete_with_admin(&e, body.keep_files, body.keep_db, body.db_admin_password.as_deref(), admin)?;
         Ok(to_value(&wire::Notes { notes }))
     })
-}
-
-/// A failed database drop is reported as `{code: "needs_db_password", message}` so the panel can ask for the
-/// administrator password and try again; the message is written for the panel, not for the command line.
-fn delete_error(e: String) -> String {
-    if e.contains("could not remove database") && e.contains("KORA_DB_ADMIN_PASSWORD") {
-        let what = e.split(". Everything else").next().unwrap_or("could not remove the database");
-        let what = what.strip_prefix("could not remove ").unwrap_or(what);
-        return json!({
-            "code": "needs_db_password",
-            "message": format!("Everything else was removed, but the {what} could not be deleted: Kora needs the database administrator password. Enter it and try again, or keep the database and delete the server without it."),
-        })
-        .to_string();
-    }
-    e
 }
 
 pub async fn server_unregister(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {

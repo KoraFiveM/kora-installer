@@ -37,41 +37,57 @@ pub struct JobStarted {
 #[derive(Debug, Clone)]
 pub struct GithubActor(pub String);
 
+/// The state-changing operations that are deliberately NOT written to the log, each with the reason (like the roles table):
+/// a new operation is audited unless it is listed here, so the default is a bit too much record, never too little. The test
+/// `every_operation_is_audited_or_has_a_reason` walks `Op::ALL` against this table.
+pub const NOT_AUDITED: &[(Op, &str)] = &[
+    (Op::SessionCreate, "signing in; the sign-in steps write their own rows"),
+    (Op::SessionLogout, "signing out changes nothing that is kept"),
+    (Op::AuthLogin, "the sign-in steps write their own rows (who, how, the outcome), so the guard does not add a nameless one"),
+    (Op::AuthEnrol, "the sign-in steps write their own rows"),
+    (Op::AuthReauth, "the sign-in steps write their own rows"),
+    (Op::ServersScan, "only looks for folders (a job that changes nothing)"),
+    (Op::ServerOpenFolder, "opens a window on this computer; changes nothing"),
+    (Op::UpdatePreview, "a preview; changes nothing"),
+    (Op::ResourcesPlan, "a plan; changes nothing"),
+    (Op::WebhookTest, "sends a test message; changes nothing"),
+    (Op::PrPlan, "a plan; changes nothing"),
+    (Op::CheckPorts, "a check; changes nothing"),
+    (Op::CheckDisk, "a check; changes nothing"),
+    (Op::CheckDbLogin, "a check; changes nothing"),
+    (Op::CheckCfx, "a check; changes nothing"),
+    (Op::InstallPlan, "a plan; changes nothing"),
+    (Op::UninstallPlan, "a plan; changes nothing"),
+    (Op::AssetInspect, "looks inside a file; changes nothing"),
+    (Op::AlertsAck, "marks an alert as seen; a view preference"),
+    (Op::BranchBulkPreview, "a preview; changes nothing"),
+    (Op::BackupPreview, "a preview of a restore; changes nothing"),
+    (Op::SupportBundlePreview, "a preview; changes nothing"),
+    (Op::SupportBundleFile, "reads a file the person already made (the bundle is made by an audited operation)"),
+    (Op::SupportSummary, "reads a summary; changes nothing"),
+    (Op::BackupImportInspect, "looks inside a moving file; changes nothing"),
+];
+
+/// Reads that are written down anyway: downloading hands out the secrets inside the file.
+const READS_THAT_ARE_AUDITED: &[Op] = &[Op::BackupDownload, Op::SupportBundleDownload];
+
 /// Does a request for `op` with `method` belong in the log?
 pub fn audited(op: Op, method: &Method) -> bool {
-    // Downloading a backup hands out the secrets inside it: that is always written down.
-    if (method == Method::GET || method == Method::HEAD) && !matches!(op, Op::BackupDownload | Op::SupportBundleDownload) {
+    if (method == Method::GET || method == Method::HEAD) && !READS_THAT_ARE_AUDITED.contains(&op) {
         return false;
     }
-    !matches!(
-        op,
-        Op::SessionCreate
-            | Op::SessionLogout
-            // The sign-in steps write their own rows (who, how, the outcome), so the guard does not add a nameless one.
-            | Op::AuthLogin
-            | Op::AuthEnrol
-            | Op::AuthReauth
-            | Op::ServersScan
-            | Op::ServerOpenFolder
-            | Op::UpdatePreview
-            | Op::ResourcesPlan
-            | Op::WebhookTest
-            | Op::PrPlan
-            | Op::CheckPorts
-            | Op::CheckDisk
-            | Op::CheckDbLogin
-            | Op::CheckCfx
-            | Op::InstallPlan
-            | Op::UninstallPlan
-            | Op::AssetInspect
-            | Op::AlertsAck
-            | Op::BranchBulkPreview
-            | Op::BackupPreview
-            | Op::SupportBundlePreview
-            | Op::SupportBundleFile
-            | Op::SupportSummary
-            | Op::BackupImportInspect
-    )
+    !NOT_AUDITED.iter().any(|(o, _)| *o == op)
+}
+
+/// How an answer is written in the log: `ok`, `refused` (401/403) or `failed`.
+pub fn result_for(status: StatusCode) -> &'static str {
+    if status.is_success() {
+        result::OK
+    } else if status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED {
+        result::REFUSED
+    } else {
+        result::FAILED
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -200,13 +216,7 @@ impl Ctx {
             return;
         }
         let github = resp.extensions().get::<GithubActor>().map(|g| format!("as GitHub account {}", g.0));
-        let res = if status.is_success() {
-            result::OK
-        } else if status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED {
-            result::REFUSED
-        } else {
-            result::FAILED
-        };
+        let res = result_for(status);
         write(&self.home, self.op, self.server.as_deref(), &self.actor, res, (!status.is_success()).then(|| format!("HTTP {}", status.as_u16())).or(github));
     }
 
@@ -277,6 +287,16 @@ pub async fn audit_list(State(st): State<AppState>, Extension(caller): Extension
     .await
 }
 
+/// `GET /audit/service?limit=`: what Kora's administrator service did with administrator rights, newest first (admins only). The
+/// panel's own log ([`audit_list`]) and the service's are separate files; the Settings page shows both, merged by time.
+pub async fn service_audit_list(Extension(caller): Extension<Caller>, Query(q): Query<HashMap<String, String>>) -> Result<Json<kora_core::api::wire::ServiceAuditPage>, ApiError> {
+    if caller.remote && !caller.identity.as_ref().is_some_and(|i| i.role >= Role::Admin) {
+        return Err(ApiError::forbidden("Only an administrator can see the audit log."));
+    }
+    let lines = q.get("limit").and_then(|v| v.parse::<u32>().ok()).unwrap_or(200).clamp(1, 500) as u16;
+    crate::blocking(move || Ok(Json(crate::elevated::service_audit(lines)))).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +307,43 @@ mod tests {
         assert!(!audited(Op::ServersList, &Method::GET) && !audited(Op::CheckPorts, &Method::POST) && !audited(Op::SessionCreate, &Method::POST));
         assert!(!audited(Op::InstallPlan, &Method::POST) && !audited(Op::UpdatePreview, &Method::POST));
         assert!(audited(Op::InstallStart, &Method::POST));
+    }
+
+    #[test]
+    fn every_operation_is_audited_or_has_a_reason() {
+        use kora_core::api::Method as M;
+        // the table itself: no duplicates, a reason each, and only operations that would otherwise be written
+        for (i, (op, why)) in NOT_AUDITED.iter().enumerate() {
+            assert!(!why.trim().is_empty(), "{op:?} needs a reason");
+            assert!(NOT_AUDITED[..i].iter().all(|(o, _)| o != op), "{op:?} is listed twice");
+            assert!(op.route().0 != M::Get, "{op:?} is a read: reads are not audited anyway, so it does not belong in the table");
+        }
+        let (mut audited_n, mut skipped_n) = (0, 0);
+        for op in Op::ALL {
+            let (m, pattern) = op.route();
+            let method = Method::from_bytes(m.as_str().as_bytes()).unwrap();
+            // the request the router would send to this op reaches this op in the guard (so a row is written for it)
+            let path = format!("/api/v1{}", pattern.replace("{s}", "prod").replace("{id}", "x").replace("{file}", "f.log").replace("{job}", "j").replace("{name}", "bob"));
+            let reached = roles::op_for(m.as_str(), &path);
+            assert_eq!(reached, Some(*op), "{op:?} {path} does not resolve back to itself, so the guard could not record it");
+            let expected = (m != M::Get || READS_THAT_ARE_AUDITED.contains(op)) && !NOT_AUDITED.iter().any(|(o, _)| o == op);
+            assert_eq!(audited(*op, &method), expected, "{op:?}");
+            if expected {
+                audited_n += 1;
+            } else {
+                skipped_n += 1;
+            }
+        }
+        // sanity: most state changes are recorded
+        assert!(audited_n > 60 && skipped_n >= NOT_AUDITED.len(), "{audited_n} audited, {skipped_n} not (reads and the table)");
+        // every state change that is written down says WHO (the actor of the request) and HOW IT WENT
+        let local = actor_of(false, None);
+        assert_eq!((local.kind, local.role), ("local", Some("admin")));
+        let remote = actor_of(true, Some(&Identity { name: "o".into(), provider: Provider::Token, role: Role::Operator }));
+        assert_eq!((remote.kind, remote.role), ("remote", Some("operator")));
+        for (status, want) in [(200, "ok"), (201, "ok"), (204, "ok"), (400, "failed"), (401, "refused"), (403, "refused"), (404, "failed"), (409, "failed"), (422, "failed"), (500, "failed")] {
+            assert_eq!(result_for(StatusCode::from_u16(status).unwrap()), want, "{status}");
+        }
     }
 
     #[test]

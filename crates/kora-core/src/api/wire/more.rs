@@ -138,6 +138,13 @@ pub struct AlertRules {
     pub disk: bool,
     pub ram: bool,
     pub updates: bool,
+    /// Problems with Kora itself (the panel's certificate, the administrator service): sent to this server's addresses too.
+    #[serde(default = "default_true")]
+    pub machine: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,6 +194,9 @@ pub struct AlertRulesUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub updates: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub machine: Option<bool>,
 }
 
 /// `PUT /servers/{s}/alerts`: what is left out stays as it is.

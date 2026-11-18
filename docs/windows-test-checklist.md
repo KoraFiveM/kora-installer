@@ -226,6 +226,17 @@ S3. [ ] **Standard account.** Sign in as a standard user an administrator added 
     `kora service allow <user>` (run in an administrator terminal). Install a server from that user's panel: no
     password, no prompt; everything is theirs. A second standard account that was **not** added gets "Kora's
     administrator service is not turned on for your account" with the command `kora service allow <account>`.
+S3b. [ ] **A standard account approved with an administrator's password at install.** Sign in as a standard user who is
+    NOT yet allowed. Run `kora service install` (or "Install Kora's administrator service" in the panel, or double-click
+    the MSI) and let a *different* administrator type their password in the permission prompt. Afterwards, as the
+    standard user: `kora service status` says "serves this account: yes" without anyone having run
+    `kora service allow`; `kora service list` names both the administrator who typed the password and the standard
+    user. Then repeat as an administrator who runs the MSI from an elevated terminal: only that administrator (and
+    `ALLOWUSERS`) is listed, nobody extra. *If the standard user is not listed:* the installer log
+    (`msiexec /i ... /l*v log.txt`, look for `allow-installer`) says why ("Windows did not say which program asked...").
+    The installer never fails because of this step; the old way (`kora service allow <account>`) always works.
+    *Unverified until this is run on Windows:* that Windows Installer fills `ClientProcessId` for an installation started
+    from a standard account's prompt, and that the elevated installer's parent is the program that asked for it.
 S4. [ ] **Two accounts, one machine.** As account A install server `alpha`; as account B (also allowed) try to delete,
     change the ports or the schedule of `alpha` (a folder they cannot write is refused by Windows; for a folder B *can*
     write, the service refuses: "does not belong to you"). Settings of B never list A's servers.

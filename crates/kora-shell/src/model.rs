@@ -48,6 +48,10 @@ pub enum AlertKind {
     RamHigh,
     UpdateAttention,
     BackupFailed,
+    CertExpiring,
+    CertExpired,
+    CertRenewalFailed,
+    ServiceStopped,
     #[default]
     #[serde(other)]
     Other,
