@@ -19,6 +19,8 @@ const TOKEN: &str = "testtoken";
 fn app(fake: &FakeBackend) -> axum::Router {
     let f = fake.clone();
     kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
+                                                     // The panel without the administrator service: a machine that has the real one installed must not be asked.
+    kora_web::elevated::set_broker_override(Some(Arc::new(kora_web::elevated::AbsentService)));
     router(AppState::system(TOKEN.into(), ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone()))))
 }
 

@@ -13,6 +13,8 @@ const TOKEN: &str = "testtoken";
 const ADDR: &str = "127.0.0.1:47120";
 
 fn app(fake: &FakeBackend) -> axum::Router {
+    // These describe the panel without the administrator service: a machine that has the real one must not be asked.
+    kora_web::elevated::set_broker_override(Some(Arc::new(kora_web::elevated::AbsentService)));
     let f = fake.clone();
     router(AppState::system(TOKEN.into(), ADDR.parse().unwrap()).with_backend(Arc::new(move || Box::new(f.clone()))))
 }

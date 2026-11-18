@@ -25,4 +25,6 @@ $defines = @('-d', "Version=$numeric", '-d', "KoraExe=$exePath")
 if ($DesktopExe) { $defines += @('-d', "DesktopExe=$((Resolve-Path $DesktopExe).Path)") }
 & wix build (Join-Path $here 'kora.wxs') -arch x64 -ext WixToolset.Util.wixext @defines -o $Out
 if ($LASTEXITCODE -ne 0) { throw 'wix build failed' }
+# Look at what was built without installing it: ICE validation, the frozen component GUIDs, the service, the order of the actions.
+& (Join-Path $here 'check-msi.ps1') -Msi $Out -WithDesktop:([bool]$DesktopExe)
 Write-Host "built $Out ($([math]::Round((Get-Item $Out).Length / 1MB, 1)) MB, version $numeric)"

@@ -365,9 +365,23 @@ fn strip_license_key_arg(args: Vec<std::ffi::OsString>) -> (Vec<std::ffi::OsStri
 /// Window kept open (Windows) so an elevated or double-clicked console never flashes and vanishes.
 static NO_PAUSE_ON_SUCCESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// `kora service ...` is run by installers, the MSI's custom actions and scripts; those get a console of their own
+/// (in session 0 or in the person's session) that nobody sees, so they must never wait for Enter. Only Kora's own
+/// elevated relaunch of the command, in a window a person is looking at, keeps its output on screen.
+static AUTOMATED_COMMAND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn finish(code: i32) -> ! {
     let (si, so) = (std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
-    if !NO_PAUSE_ON_SUCCESS.load(std::sync::atomic::Ordering::Relaxed) && elevate::should_pause(cfg!(windows), elevate::owns_console(), elevate::was_relaunched(), si, so) {
+    if !NO_PAUSE_ON_SUCCESS.load(std::sync::atomic::Ordering::Relaxed)
+        && elevate::should_pause(
+            cfg!(windows),
+            elevate::owns_console(),
+            elevate::was_relaunched(),
+            si,
+            so,
+            elevate::unattended(elevate::in_session_zero(), AUTOMATED_COMMAND.load(std::sync::atomic::Ordering::Relaxed), elevate::was_relaunched()),
+        )
+    {
         println!("\nPress Enter to close this window.");
         let mut line = String::new();
         let _ = std::io::stdin().read_line(&mut line);
@@ -417,6 +431,7 @@ fn main() {
     elevate_if_needed(&cli, &cli.command);
     let audit = crate::cmd::store::audit_start::<Cli>();
     let command = cli.command;
+    AUTOMATED_COMMAND.store(matches!(command, Some(Command::Service { .. })), std::sync::atomic::Ordering::Relaxed);
     // "New version available": background check, interactive runs only (never CI, pipes, services).
     let quiet = matches!(
         command,

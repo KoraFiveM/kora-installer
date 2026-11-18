@@ -61,7 +61,11 @@ upgrading), `install` / `wininstall` / `manage` (install, enrol, allow/deny), `p
    in Program Files, so the folder cannot be squatted by a user before the installer runs.
 8. **The Windows pipe grants the listed accounts exactly read data, write data and read attributes (`0x120083`), not
    `FILE_APPEND_DATA`** (= create a pipe instance, part of `GENERIC_WRITE`), so an allowed account cannot make a look-alike
-   pipe; the panel also checks the pipe's owner is SYSTEM before sending anything.
+   pipe; the panel also checks the pipe's owner is SYSTEM before sending anything. A pipe has ONE access list (the first
+   instance's; Windows ignores the list given for later instances), so the service sets it again on every new instance and
+   makes one when `service.json` changes (it looks every two seconds): `kora service allow|deny` takes effect in a few
+   seconds without restarting the service. A client that connects and does not send its request line within ten seconds is
+   cut off (the read is cancelled; disconnecting from another thread would wait behind it).
 9. **Updates through the service** reuse `kora self-update --yes` as the child (same release feed and checksum), with a kept
    copy of the running program, an immediate "does the new one start" check, a pending-update record, a restart by the
    service manager (`Restart=always`; Windows: a failure exit code plus restart actions on non-crash failures) and a

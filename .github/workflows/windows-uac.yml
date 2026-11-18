@@ -19,6 +19,11 @@ on:
       - "crates/kora-core/src/privsvc/**"
       - "crates/kora-core/src/installer/system_ops.rs"
       - "crates/kora-cli/src/cmd/service_cmd.rs"
+      # what the installer's own commands run through (the "Press Enter" hang was in main.rs / elevate.rs)
+      - "crates/kora-cli/src/main.rs"
+      - "crates/kora-core/src/elevate.rs"
+      - "crates/kora-core/src/sysexe.rs"
+      - "crates/kora-core/src/service/**"
       - "packaging/windows/**"
       - "scripts/install.ps1"
       - "crates/kora-web/src/elevated.rs"

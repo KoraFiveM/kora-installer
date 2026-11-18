@@ -197,22 +197,24 @@ impl Executor for ChildExecutor {
         drop(tx);
         let deadline = std::time::Instant::now() + self.limit;
         loop {
+            // The limit and the cancel are checked on EVERY turn, not only after a quiet moment: a child that never
+            // stops printing must still be stopped.
+            let why = if self.cancelled.load(Ordering::SeqCst) {
+                Some("Kora Panel went away, so the step was stopped".to_string())
+            } else if std::time::Instant::now() > deadline {
+                Some(format!("the step took longer than {} minutes and was stopped", self.limit.as_secs() / 60))
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(io::ErrorKind::TimedOut, why));
+            }
             match rx.recv_timeout(Duration::from_millis(200)) {
                 Ok((name, line)) => on_line(name, &line),
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    let why = if self.cancelled.load(Ordering::SeqCst) {
-                        Some("Kora Panel went away, so the step was stopped".to_string())
-                    } else if std::time::Instant::now() > deadline {
-                        Some(format!("the step took longer than {} minutes and was stopped", self.limit.as_secs() / 60))
-                    } else {
-                        None
-                    };
-                    if let Some(why) = why {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(io::Error::new(io::ErrorKind::TimedOut, why));
-                    }
                     if let Ok(Some(st)) = child.try_wait() {
                         // Exited; give the readers a moment for the last lines, then stop waiting.
                         let grace = std::time::Instant::now() + Duration::from_secs(2);
@@ -224,6 +226,85 @@ impl Executor for ChildExecutor {
                 }
             }
         }
-        Ok(child.wait()?.code().unwrap_or(-1))
+        // Both pipes are closed, but the child may still be running (it closed its output and carried on): wait for it
+        // within the same limit and cancel, never for ever.
+        loop {
+            if let Some(st) = child.try_wait()? {
+                return Ok(st.code().unwrap_or(-1));
+            }
+            let why = if self.cancelled.load(Ordering::SeqCst) {
+                Some("Kora Panel went away, so the step was stopped".to_string())
+            } else if std::time::Instant::now() > deadline {
+                Some(format!("the step took longer than {} minutes and was stopped", self.limit.as_secs() / 60))
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(io::ErrorKind::TimedOut, why));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn run(script: &str, limit: Duration) -> (io::Result<i32>, Vec<String>, Duration) {
+        let mut ex = ChildExecutor::new("/bin/sh".into());
+        ex.limit = limit;
+        let mut lines = Vec::new();
+        let t = Instant::now();
+        let r = ex.run(&["-c".into(), script.into()], &[], &mut |_, l| lines.push(l.to_string()));
+        (r, lines, t.elapsed())
+    }
+
+    #[test]
+    fn a_child_that_never_stops_printing_is_stopped_at_the_limit() {
+        let (r, lines, took) = run("while :; do echo x; done", Duration::from_millis(600));
+        assert_eq!(r.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(!lines.is_empty());
+        assert!(took < Duration::from_secs(10), "{took:?}");
+    }
+
+    #[test]
+    fn a_child_that_closes_its_output_and_carries_on_is_stopped_at_the_limit() {
+        let (r, _, took) = run("exec >&- 2>&-; sleep 60", Duration::from_millis(600));
+        assert_eq!(r.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(took < Duration::from_secs(10), "{took:?}");
+    }
+
+    #[test]
+    fn a_grandchild_that_keeps_the_pipe_open_does_not_keep_the_service_waiting() {
+        let (r, lines, took) = run("sleep 40 & echo done; exit 4", Duration::from_secs(60));
+        assert_eq!(r.unwrap(), 4);
+        assert_eq!(lines, ["done"]);
+        assert!(took < Duration::from_secs(10), "{took:?}");
+    }
+
+    #[test]
+    fn the_child_has_no_input_and_only_the_environment_it_is_given() {
+        let (r, lines, _) = run("cat; echo \"${HOME:-unset} ${KORA_X}\"", Duration::from_secs(30));
+        assert_eq!(r.unwrap(), 0);
+        let mut ex = ChildExecutor::new("/bin/sh".into());
+        ex.limit = Duration::from_secs(30);
+        let mut out = Vec::new();
+        ex.run(&["-c".into(), "echo \"${HOME:-unset} ${KORA_X}\"".into()], &[("KORA_X".into(), "1".into())], &mut |_, l| out.push(l.to_string())).unwrap();
+        assert_eq!(out, ["unset 1"]);
+        assert_eq!(lines, ["unset"]);
+    }
+
+    #[test]
+    fn a_cancel_stops_the_child() {
+        let ex = ChildExecutor::new("/bin/sh".into());
+        let t = Instant::now();
+        // the panel goes away once the child has printed its first line
+        let r = ex.run(&["-c".into(), "while :; do echo x; done".into()], &[], &mut |_, _| ex.cancel());
+        assert_eq!(r.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(t.elapsed() < Duration::from_secs(10));
     }
 }

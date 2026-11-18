@@ -70,6 +70,7 @@ extern "system" {
     fn CreateNamedPipeW(name: *const u16, open_mode: u32, pipe_mode: u32, max: u32, out_size: u32, in_size: u32, timeout: u32, sa: *const SecurityAttributes) -> Handle;
     fn ConnectNamedPipe(pipe: Handle, overlapped: *mut c_void) -> i32;
     fn DisconnectNamedPipe(pipe: Handle) -> i32;
+    fn CancelIoEx(h: Handle, overlapped: *mut c_void) -> i32;
     fn FlushFileBuffers(h: Handle) -> i32;
     fn WaitNamedPipeW(name: *const u16, timeout: u32) -> i32;
     fn CreateFileW(name: *const u16, access: u32, share: u32, sa: *const SecurityAttributes, disposition: u32, flags: u32, template: Handle) -> Handle;
@@ -83,6 +84,7 @@ extern "system" {
 extern "system" {
     fn ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl: *const u16, revision: u32, sd: *mut *mut c_void, size: *mut u32) -> i32;
     fn ConvertSidToStringSidW(sid: *mut c_void, out: *mut *mut u16) -> i32;
+    fn SetKernelObjectSecurity(h: Handle, info: u32, sd: *mut c_void) -> i32;
     fn ImpersonateNamedPipeClient(pipe: Handle) -> i32;
     fn RevertToSelf() -> i32;
     fn OpenThreadToken(thread: Handle, access: u32, open_as_self: i32, token: *mut Handle) -> i32;
@@ -94,6 +96,9 @@ extern "system" {
 }
 
 const PIPE_ACCESS_DUPLEX: u32 = 3;
+/// Lets the server change the pipe's access list later ([`make_instance`]).
+const WRITE_DAC: u32 = 0x0004_0000;
+const DACL_SECURITY_INFORMATION: u32 = 4;
 const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x0008_0000;
 const PIPE_WAIT: u32 = 0;
 const PIPE_REJECT_REMOTE_CLIENTS: u32 = 8;
@@ -213,13 +218,25 @@ fn read_thread_token() -> (Option<String>, Option<(String, String)>, u32) {
 pub struct WinSvc {
     pub files: WinFiles,
     pub sys: crate::privsvc::winapi::SystemDirs,
+    /// The pipe's full name. Always [`paths::WINDOWS_PIPE`] in the service; tests of the pipe code use a random one.
+    pub pipe: String,
+    /// The pipe belongs to SYSTEM (the descriptor names it as owner and group; only SYSTEM may do that). Always true in
+    /// the service; a test that runs as an ordinary administrator turns it off.
+    pub owned_by_system: bool,
     names: Mutex<HashMap<AccountId, (String, String)>>,
+    /// The descriptor the listening pipe instance was made with: when the settings say something else, the waiting
+    /// instance is stale (see [`watch_policy`]).
+    listening: Mutex<String>,
 }
 
 impl WinSvc {
     pub fn new() -> WinSvc {
         let sys = crate::privsvc::winapi::system_dirs();
-        WinSvc { files: paths::windows_files(&sys.program_files), sys, names: Mutex::new(HashMap::new()) }
+        WinSvc::with(paths::windows_files(&sys.program_files), sys, paths::WINDOWS_PIPE)
+    }
+    /// Other files and another pipe name: for tests that run the pipe code without touching the real service.
+    pub fn with(files: WinFiles, sys: crate::privsvc::winapi::SystemDirs, pipe: &str) -> WinSvc {
+        WinSvc { files, sys, pipe: pipe.to_string(), owned_by_system: true, names: Mutex::new(HashMap::new()), listening: Mutex::new(String::new()) }
     }
     fn remember(&self, id: &AccountId, who: Option<(String, String)>) {
         if let Some(w) = who {
@@ -378,61 +395,102 @@ impl WinSvc {
 // ---- the pipe server --------------------------------------------------------------------------------------
 
 fn make_instance(svc: &WinSvc, first: bool) -> std::io::Result<Owned> {
-    let sddl = wide(&policy::pipe_sddl(&svc.policy()));
+    let mut sddl_text = policy::pipe_sddl(&svc.policy());
+    if !svc.owned_by_system {
+        sddl_text = sddl_text.replacen("O:SYG:SY", "", 1);
+    }
+    let sddl = wide(&sddl_text);
     let mut sd: *mut c_void = std::ptr::null_mut();
     // SAFETY: valid NUL-terminated string and out pointer.
     if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut sd, std::ptr::null_mut()) } == 0 {
         return Err(std::io::Error::last_os_error());
     }
     let sa = SecurityAttributes { n_length: std::mem::size_of::<SecurityAttributes>() as u32, descriptor: sd, inherit: 0 };
-    let w = wide(paths::WINDOWS_PIPE);
-    let mode = PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
+    let w = wide(&svc.pipe);
+    let mode = PIPE_ACCESS_DUPLEX | WRITE_DAC | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
     // SAFETY: valid arguments; byte mode, blocking, remote clients refused.
     let h = unsafe { CreateNamedPipeW(w.as_ptr(), mode, PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &sa) };
     let err = std::io::Error::last_os_error();
-    // SAFETY: allocated by the conversion above.
-    unsafe { LocalFree(sd) };
     if h == INVALID {
+        // SAFETY: allocated by the conversion above.
+        unsafe { LocalFree(sd) };
         return Err(err);
     }
+    // The access list belongs to the pipe, not to one instance: Windows keeps the list of the FIRST instance and ignores the
+    // one given for later instances. So every new instance sets it again on the pipe, and an account allowed (or taken
+    // off) while the service runs is let in (or out) by the system too, not only by the service's own check.
+    let set = if first {
+        true
+    } else {
+        // SAFETY: our new handle (opened with WRITE_DAC) and a descriptor from the conversion above.
+        unsafe { SetKernelObjectSecurity(h, DACL_SECURITY_INFORMATION, sd) != 0 }
+    };
+    let set_err = std::io::Error::last_os_error();
+    // SAFETY: allocated by the conversion above.
+    unsafe { LocalFree(sd) };
+    if !set {
+        // SAFETY: a handle we own and have not handed on.
+        unsafe { CloseHandle(h) };
+        return Err(set_err);
+    }
+    *svc.listening.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = sddl_text;
     Ok(Owned(h))
 }
 
 /// Wake the blocking `ConnectNamedPipe` with a client of our own (stop, or restart after an update).
-fn wake_listener() {
-    let w = wide(paths::WINDOWS_PIPE);
+fn wake_listener(pipe: &str) -> bool {
+    let w = wide(pipe);
     // SAFETY: valid name; the handle (if any) is closed at once.
     let h = unsafe { CreateFileW(w.as_ptr(), CLIENT_ACCESS, 0, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut()) };
-    if h != INVALID {
-        // SAFETY: a handle we just opened.
-        unsafe { CloseHandle(h) };
+    if h == INVALID {
+        return false;
     }
+    // SAFETY: a handle we just opened.
+    unsafe { CloseHandle(h) };
+    true
 }
+
+/// How long a client has to send its whole request line (and how long a thread of ours may wait for it).
+const REQUEST_WAIT: Duration = Duration::from_secs(10);
+
+/// How often the service looks whether the settings changed under the waiting pipe instance.
+const POLICY_POLL: Duration = Duration::from_secs(2);
 
 fn serve_connection(svc: Arc<WinSvc>, pipe: Owned) {
     let raw = pipe.0;
-    let got_request = Arc::new(AtomicBool::new(false));
+    // `done` (under its lock) says "the request was read, or the connection ended": the watchdog touches the handle only
+    // while it is false, and the connection thread sets it before the handle can be closed (so a handle number reused
+    // by something else is never cancelled).
+    let done = Arc::new(Mutex::new(false));
     {
-        // A client that connects and sends nothing must not hold a thread for ever.
-        let (flag, h) = (Arc::clone(&got_request), pipe.0 as usize);
+        // A client that connects and sends nothing, or half a line, must not hold a thread for ever. The read below is
+        // a blocking one on a synchronous handle: `DisconnectNamedPipe` from here would wait behind it, but cancelling
+        // the pending I/O does not.
+        let (flag, h) = (Arc::clone(&done), raw as usize);
         std::thread::spawn(move || {
-            for _ in 0..100 {
+            let until = std::time::Instant::now() + REQUEST_WAIT;
+            while std::time::Instant::now() < until {
                 std::thread::sleep(Duration::from_millis(100));
-                if flag.load(Ordering::SeqCst) {
+                if *flag.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
                     return;
                 }
             }
-            // SAFETY: only reached while the connection thread still owns the handle (it sets the flag or ends first).
-            unsafe { DisconnectNamedPipe(h as Handle) };
+            let finished = flag.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !*finished {
+                // SAFETY: the connection thread has not finished with the handle (it sets the flag, under this lock, first).
+                unsafe { CancelIoEx(h as Handle, std::ptr::null_mut()) };
+            }
         });
     }
     // SAFETY: the handle moves into the File; `pipe` is forgotten below so it is closed once.
     let file = unsafe { File::from_raw_handle(raw as RawHandle) };
     std::mem::forget(pipe);
     let mut reader = BufReader::new((&file).take(MAX_LINE as u64 + 1));
-    // Windows lets the server read the client's token only after it has read from the pipe.
-    let have = matches!(reader.fill_buf(), Ok(b) if !b.is_empty());
-    got_request.store(true, Ordering::SeqCst);
+    // The whole request line, within the time allowed. (Windows lets the server read the client's token only after it
+    // has read from the pipe.)
+    let mut line = String::new();
+    let have = matches!(reader.read_line(&mut line), Ok(n) if n > 0);
+    *done.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
     if have {
         let (sid, who, integrity) = identify(raw);
         let id = sid.as_deref().and_then(|s| AccountId::sid(s).ok());
@@ -441,21 +499,51 @@ fn serve_connection(svc: Arc<WinSvc>, pipe: Owned) {
         }
         let caller = Caller { id, integrity: Some(integrity), is_root: false, remote: false };
         let mut out = &file;
-        conn::handle_stream(&*svc, &mut reader, &mut out, caller);
+        conn::handle_stream(&*svc, &mut std::io::Cursor::new(line.into_bytes()), &mut out, caller);
         // SAFETY: our handle.
         unsafe { FlushFileBuffers(raw) };
     }
     // SAFETY: our handle; the File drop closes it.
     unsafe { DisconnectNamedPipe(raw) };
     if svc.restart_requested() {
-        wake_listener();
+        wake_listener(&svc.pipe);
+    }
+}
+
+/// The settings changed (`kora service allow|deny`) while an instance was waiting: that instance still carries the old
+/// access list (a pipe's descriptor is fixed when it is made), so an account just allowed would be refused by it, and
+/// no connection would ever come that makes a newer one. Wake the listener with a connection of our own: it takes the
+/// stale instance and makes the next one from the current settings.
+fn watch_policy(svc: &WinSvc, stop: &AtomicBool, finished: &AtomicBool) {
+    let mut waited = Duration::ZERO;
+    while !stop.load(Ordering::SeqCst) && !finished.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(100));
+        waited += Duration::from_millis(100);
+        if waited < POLICY_POLL {
+            continue;
+        }
+        waited = Duration::ZERO;
+        let now = policy::pipe_sddl(&svc.policy());
+        if *svc.listening.lock().unwrap_or_else(std::sync::PoisonError::into_inner) != now {
+            wake_listener(&svc.pipe);
+        }
     }
 }
 
 /// Serve until `stop`. Returns an error when the pipe cannot be made first (a squatter).
 pub fn serve_pipe(svc: Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| watch_policy(&svc, stop, &finished));
+        let r = serve_loop(&svc, stop);
+        finished.store(true, Ordering::SeqCst);
+        r
+    })
+}
+
+fn serve_loop(svc: &Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
     let active = Arc::new(AtomicUsize::new(0));
-    let mut inst = make_instance(&svc, true).map_err(|e| format!("cannot create {} (is another program using the name?): {e}", paths::WINDOWS_PIPE))?;
+    let mut inst = make_instance(svc, true).map_err(|e| format!("cannot create {} (is another program using the name?): {e}", svc.pipe))?;
     while !stop.load(Ordering::SeqCst) {
         // An update was installed and its answer sent: leave (the service manager starts the new program).
         if svc.restart_requested() {
@@ -468,12 +556,12 @@ pub fn serve_pipe(svc: Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
             break;
         }
         // The next instance first, so there is always one listening (and the name is never free).
-        let next = match make_instance(&svc, false) {
+        let next = match make_instance(svc, false) {
             Ok(n) => n,
             Err(e) => {
                 svc.audit(&format!("{} | service | could not make the next pipe instance: {e}", super::audit::rfc3339(svc.now())));
                 std::thread::sleep(Duration::from_millis(500));
-                match make_instance(&svc, false) {
+                match make_instance(svc, false) {
                     Ok(n) => n,
                     Err(_) => return Err(format!("cannot create the next pipe instance: {e}")),
                 }
@@ -487,7 +575,7 @@ pub fn serve_pipe(svc: Arc<WinSvc>, stop: &AtomicBool) -> Result<(), String> {
             active.fetch_sub(1, Ordering::SeqCst);
             continue; // dropped: too many at once
         }
-        let (svc, active) = (Arc::clone(&svc), Arc::clone(&active));
+        let (svc, active) = (Arc::clone(svc), Arc::clone(&active));
         std::thread::spawn(move || {
             serve_connection(svc, conn);
             active.fetch_sub(1, Ordering::SeqCst);
@@ -536,7 +624,7 @@ fn run_as_service() -> Result<(), String> {
     let handler = move |ev: ServiceControl| match ev {
         ServiceControl::Stop | ServiceControl::Shutdown => {
             stop2.store(true, Ordering::SeqCst);
-            wake_listener();
+            wake_listener(paths::WINDOWS_PIPE);
             ServiceControlHandlerResult::NoError
         }
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -599,7 +687,12 @@ pub fn run_service() -> Result<(), String> {
 // ---- the client (the panel, `kora service status`) -------------------------------------------------------------
 
 fn open_client() -> Result<File, ClientError> {
-    let w = wide(paths::WINDOWS_PIPE);
+    open_client_at(paths::WINDOWS_PIPE, true)
+}
+
+/// `check_owner`: the pipe instance reached must belong to SYSTEM (always, except in tests that run a pipe of their own).
+fn open_client_at(pipe: &str, check_owner: bool) -> Result<File, ClientError> {
+    let w = wide(pipe);
     // SAFETY: valid name.
     unsafe { WaitNamedPipeW(w.as_ptr(), 2000) };
     // Identification only (the service can see who we are, never act as us); exactly the rights the pipe grants.
@@ -623,6 +716,10 @@ fn open_client() -> Result<File, ClientError> {
     if !sd.is_null() {
         // SAFETY: allocated by GetSecurityInfo.
         unsafe { LocalFree(sd) };
+    }
+    if !check_owner {
+        // SAFETY: a handle we own, handed to `File`.
+        return Ok(unsafe { File::from_raw_handle(h as RawHandle) });
     }
     if let Err(why) = crate::privsvc::identity::check_server_owner(owner_sid.as_deref()) {
         // SAFETY: a handle we opened and have not handed on.
@@ -781,4 +878,181 @@ pub fn run_elevated_wait(file: &str, params: &str, limit: Duration) -> Result<u3
     // SAFETY: a process handle we own and a valid out pointer.
     unsafe { GetExitCodeProcess(proc.0, &mut code) };
     Ok(code)
+}
+
+/// These run the real pipe code (the same functions the service runs) on a pipe with a random name and files in a
+/// temporary folder: never the installed service's pipe, settings or program.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::privsvc::wire::PING;
+    use std::io::Write;
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(sd: *mut c_void, revision: u32, info: u32, out: *mut *mut u16, len: *mut u32) -> i32;
+    }
+
+    fn random_pipe() -> String {
+        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        format!(r"\\.\pipe\kora-test-{}-{n}", std::process::id())
+    }
+
+    struct Fixture {
+        dir: tempfile::TempDir,
+        svc: Arc<WinSvc>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<Result<(), String>>>,
+    }
+
+    impl Fixture {
+        fn start() -> Fixture {
+            let dir = tempfile::tempdir().unwrap();
+            let base = dir.path().to_string_lossy().into_owned();
+            let files = WinFiles {
+                exe: format!("{base}\\kora.exe"),
+                data_dir: format!("{base}\\data"),
+                policy: format!("{base}\\data\\service.json"),
+                audit: format!("{base}\\data\\audit.log"),
+                ledger: format!("{base}\\owners.json"),
+            };
+            let mut p = Policy::new("test");
+            if let Some(me) = current_user_sid() {
+                p.allow(AccountId::sid(&me).unwrap(), "me").unwrap();
+            }
+            super::super::manage::save(Path::new(&files.policy), &p).unwrap();
+            let pipe = random_pipe();
+            assert_ne!(pipe, paths::WINDOWS_PIPE, "a test never uses the real service's pipe");
+            let mut svc = WinSvc::with(files, crate::privsvc::winapi::system_dirs(), &pipe);
+            svc.owned_by_system = false; // only SYSTEM may name SYSTEM as the owner
+            let svc = Arc::new(svc);
+            let stop = Arc::new(AtomicBool::new(false));
+            let thread = {
+                let (svc, stop) = (Arc::clone(&svc), Arc::clone(&stop));
+                std::thread::spawn(move || serve_pipe(svc, &stop))
+            };
+            // wait for the pipe to exist
+            for _ in 0..100 {
+                let w = wide(&pipe);
+                // SAFETY: valid name.
+                if unsafe { WaitNamedPipeW(w.as_ptr(), 100) } != 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Fixture { dir, svc, stop, thread: Some(thread) }
+        }
+
+        fn pipe(&self) -> &str {
+            &self.svc.pipe
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            // When the pipe cannot be reached from here (a test that failed before it could connect) the server thread is
+            // left to end with the process: joining it would hang the test run instead of reporting the failure.
+            if wake_listener(&self.svc.pipe) {
+                if let Some(t) = self.thread.take() {
+                    let _ = t.join();
+                }
+            }
+            let _ = &self.dir;
+        }
+    }
+
+    /// Run `f` on another thread; fail the test when it has not finished in `limit`.
+    fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> (T, Duration) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let t = std::time::Instant::now();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        let v = rx.recv_timeout(limit).unwrap_or_else(|_| panic!("did not finish within {limit:?}"));
+        (v, t.elapsed())
+    }
+
+    /// The DACL of the pipe instance a client has reached, as SDDL text.
+    fn dacl_of(f: &File) -> String {
+        use std::os::windows::io::AsRawHandle;
+        let (mut sd, mut dacl): (*mut c_void, *mut c_void) = (std::ptr::null_mut(), std::ptr::null_mut());
+        // SAFETY: a handle we hold and valid out pointers; `sd` is freed below.
+        let r = unsafe { GetSecurityInfo(f.as_raw_handle() as Handle, SE_KERNEL_OBJECT, 4, std::ptr::null_mut(), std::ptr::null_mut(), &mut dacl, std::ptr::null_mut(), &mut sd) };
+        assert_eq!(r, 0, "GetSecurityInfo");
+        let mut out: *mut u16 = std::ptr::null_mut();
+        // SAFETY: a descriptor from the call above.
+        assert_ne!(unsafe { ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, 1, 4, &mut out, std::ptr::null_mut()) }, 0);
+        let text = from_wide(out);
+        // SAFETY: both allocated by the calls above.
+        unsafe {
+            LocalFree(out.cast());
+            LocalFree(sd);
+        }
+        text
+    }
+
+    #[test]
+    fn a_client_that_connects_and_sends_nothing_is_let_go() {
+        let fx = Fixture::start();
+        let pipe = fx.pipe().to_string();
+        let (r, took) = within(Duration::from_secs(40), move || {
+            let f = open_client_at(&pipe, false).map_err(|e| format!("{e:?}")).unwrap();
+            // the service ends the connection: a read then returns (end of data or an error), it does not wait for ever
+            let mut buf = [0u8; 16];
+            (&f).read(&mut buf).is_ok_and(|n| n == 0) || true
+        });
+        assert!(r);
+        assert!(took < Duration::from_secs(20), "the silent client was dropped after {took:?}");
+    }
+
+    #[test]
+    fn a_client_that_sends_half_a_line_is_let_go() {
+        let fx = Fixture::start();
+        let pipe = fx.pipe().to_string();
+        let (_, took) = within(Duration::from_secs(40), move || {
+            let f = open_client_at(&pipe, false).map_err(|e| format!("{e:?}")).unwrap();
+            (&f).write_all(b"{\"verb\":\"ping\"").unwrap();
+            let mut buf = [0u8; 16];
+            let _ = (&f).read(&mut buf);
+        });
+        assert!(took < Duration::from_secs(20), "the half-sent request was dropped after {took:?}");
+    }
+
+    #[test]
+    fn a_silent_client_does_not_stop_the_next_one_being_served() {
+        let fx = Fixture::start();
+        let silent = open_client_at(fx.pipe(), false).map_err(|e| format!("{e:?}")).unwrap();
+        let pipe = fx.pipe().to_string();
+        let (a, _) = within(Duration::from_secs(40), move || {
+            let mut w = &open_client_at(&pipe, false).map_err(|e| format!("{e:?}")).unwrap();
+            let f = open_client_at(&pipe, false).map_err(|e| format!("{e:?}")).unwrap();
+            let _ = &mut w;
+            conn::converse(&mut BufReader::new(&f), &mut &f, PING, &[], &[], &mut |_| {})
+        });
+        let a = a.expect("the service answered while another client sat silent");
+        assert!(a.ok, "{a:?}");
+        drop(silent);
+    }
+
+    #[test]
+    fn an_account_allowed_while_the_service_runs_is_on_the_waiting_pipe_without_anyone_connecting() {
+        let fx = Fixture::start();
+        let other = "S-1-5-21-1111111111-2222222222-3333333333-1234";
+        super::super::manage::allow(Path::new(&fx.svc.files.policy), other).unwrap();
+        // no connection of ours in between: the service itself must notice (it looks every couple of seconds)
+        std::thread::sleep(POLICY_POLL + Duration::from_secs(3));
+        let made_with = fx.svc.listening.lock().unwrap().clone();
+        assert!(made_with.contains(other), "the service did not notice the change: {made_with}");
+        let f = open_client_at(fx.pipe(), false).map_err(|e| format!("{e:?}")).unwrap();
+        let dacl = dacl_of(&f);
+        assert!(dacl.contains(other), "a new instance was made with the new list but the pipe still has the old one: {dacl}");
+        drop(f);
+        // and taking the account off again is noticed the same way
+        super::super::manage::deny(Path::new(&fx.svc.files.policy), other).unwrap();
+        std::thread::sleep(POLICY_POLL + Duration::from_secs(3));
+        let f = open_client_at(fx.pipe(), false).map_err(|e| format!("{e:?}")).unwrap();
+        let dacl = dacl_of(&f);
+        assert!(!dacl.contains(other), "a removed account is still on the waiting instance: {dacl}");
+    }
 }

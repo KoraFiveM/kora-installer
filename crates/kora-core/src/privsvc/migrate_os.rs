@@ -8,6 +8,27 @@ use super::migrate::{adoption, Candidate};
 use super::policy::{AccountId, Policy};
 use crate::privsvc::ownership::Ledger;
 
+/// The system tools the migration asks (`schtasks`, `sc`, `reg`): quick questions and small changes, run by the MSI's
+/// custom action where nobody can answer or wait, so each one has a short limit (and no input).
+#[cfg(windows)]
+struct Quick;
+
+#[cfg(windows)]
+impl Quick {
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    fn run(&self, program: &str, args: &[String]) -> std::io::Result<crate::service::CommandOutput> {
+        let mut cmd = crate::sysexe::command(program);
+        cmd.args(args);
+        let out = crate::sysexe::output_within(cmd, Self::LIMIT)?;
+        Ok(crate::service::CommandOutput {
+            code: out.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        })
+    }
+}
+
 struct Listed {
     name: String,
     dir: PathBuf,
@@ -192,11 +213,10 @@ pub mod unix {
 #[cfg(windows)]
 pub mod windows {
     use super::*;
-    use crate::service::{CommandRunner, SystemRunner};
 
     /// Update tasks that still run with the person's full administrator token become unelevated. Returns the names changed.
     pub fn unelevate_tasks(program_files: &str, dry_run: bool, say: &mut dyn FnMut(&str)) -> Result<Vec<String>, String> {
-        let rn = SystemRunner;
+        let rn = Quick;
         let list = rn.run("schtasks.exe", &["/Query".into(), "/FO".into(), "CSV".into(), "/NH".into()]).map_err(|e| e.to_string())?;
         let mut changed = Vec::new();
         for line in list.stdout.lines() {
@@ -242,7 +262,7 @@ pub mod windows {
             let o = crate::privsvc::winapi::path_owner_sid(d)?;
             AccountId::sid(&o).ok()
         };
-        let rn = SystemRunner;
+        let rn = Quick;
         let exists = |kind: &str, slug: &str| match kind {
             "service" => rn.run("sc.exe", &["query".into(), format!("kora-{slug}")]).is_ok_and(|o| o.success()),
             "task" => rn.run("schtasks.exe", &["/Query".into(), "/TN".into(), format!("Kora\\Update {slug}")]).is_ok_and(|o| o.success()),
@@ -364,8 +384,7 @@ pub fn finish_upgrade_user(dry_run: bool) -> Vec<String> {
     }
     #[cfg(windows)]
     if let Some(dir) = &plan.drop_path {
-        use crate::service::{CommandRunner, SystemRunner};
-        let rn = SystemRunner;
+        let rn = Quick;
         if let Ok(o) = rn.run("reg.exe", &["query".into(), r"HKCU\Environment".into(), "/v".into(), "Path".into()]) {
             if let Some((kind, value)) = parse_reg_query(&o.stdout) {
                 if let Some(fixed) = super::migrate::remove_path_entry(&value, &dir.to_string_lossy()) {

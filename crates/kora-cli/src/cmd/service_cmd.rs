@@ -167,7 +167,8 @@ pub fn service(cmd: ServiceCmd) -> i32 {
         ServiceCmd::Allow { accounts } => {
             let mut code = 0;
             // empty names are skipped: the installer passes optional properties through
-            for a in accounts.iter().filter(|a| !a.trim().is_empty()) {
+            // and as ONE argument that may hold several accounts (the MSI's ALLOWUSERS)
+            for a in accounts.iter().flat_map(|a| manage::split_accounts(a)) {
                 match manage::allow(&policy_path(), a) {
                     Ok(m) => println!("{m}"),
                     Err(e) => code = fail(e),

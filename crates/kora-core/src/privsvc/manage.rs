@@ -61,6 +61,14 @@ pub fn resolve_account(spec: &str) -> Result<(AccountId, String), Rejected> {
     Err(Rejected(format!("'{spec}' is not an account on this computer. Use the account's name (or uid:1000 / the Windows SID).")))
 }
 
+/// The accounts in one command-line argument. The MSI passes its `ALLOWUSERS` property as a single argument:
+/// accounts are separated by `;` (so a name may have spaces), or by spaces when there is no `;` (SIDs, `DOMAIN\\name`).
+/// An empty or blank argument means no accounts.
+pub fn split_accounts(arg: &str) -> Vec<&str> {
+    let parts: Vec<&str> = if arg.contains(';') { arg.split(';').collect() } else { arg.split_whitespace().collect() };
+    parts.into_iter().map(str::trim).filter(|a| !a.is_empty()).collect()
+}
+
 /// `allow`: add the account; returns the text to print.
 pub fn allow(path: &Path, spec: &str) -> Result<String, String> {
     let (id, name) = resolve_account(spec).map_err(|e| e.0)?;
@@ -98,6 +106,15 @@ fn label(id: &AccountId, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_installer_property_is_split_into_accounts() {
+        assert_eq!(split_accounts(""), Vec::<&str>::new());
+        assert_eq!(split_accounts("  "), Vec::<&str>::new());
+        assert_eq!(split_accounts("S-1-5-21-1-1003 S-1-5-21-1-1005"), ["S-1-5-21-1-1003", "S-1-5-21-1-1005"]);
+        assert_eq!(split_accounts("PC\\Jo Smith; S-1-5-21-1-1005;"), ["PC\\Jo Smith", "S-1-5-21-1-1005"]);
+        assert_eq!(split_accounts("jo"), ["jo"]);
+    }
 
     #[test]
     fn allow_list_deny_round_trip() {

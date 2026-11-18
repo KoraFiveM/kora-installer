@@ -80,6 +80,23 @@ impl Broker for ServiceBroker {
 type BrokerSlot = Mutex<Option<Arc<dyn Broker>>>;
 static BROKER: BrokerSlot = Mutex::new(None);
 
+/// A service that is not there, for tests of what the panel does WITHOUT the administrator service (`needs_elevation`
+/// and its choices). A machine that has the real service installed (a developer's, the Windows test box) answers
+/// differently, so such tests put this in with [`set_broker_override`] instead of asking whatever is installed.
+pub struct AbsentService;
+
+impl Broker for AbsentService {
+    fn availability(&self) -> Availability {
+        Availability::Missing
+    }
+    fn handles(&self, verb: &str) -> bool {
+        kora_core::privsvc::op::VERBS.contains(&verb)
+    }
+    fn call(&self, _: &str, _: &[String], _: &[(String, String)], _: &mut dyn FnMut(&str)) -> Result<StepOutcome, ClientError> {
+        Err(ClientError::Unavailable("Kora's administrator service is not running.".into()))
+    }
+}
+
 /// Test seam: use this broker instead of the real service (`None` = the real one again).
 pub fn set_broker_override(b: Option<Arc<dyn Broker>>) {
     *BROKER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = b;

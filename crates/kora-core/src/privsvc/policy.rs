@@ -127,8 +127,10 @@ impl Policy {
     }
 }
 
-/// The security descriptor of the Windows named pipe, rebuilt from the settings every time the
-/// service makes the next pipe instance, so allow / deny reach the pipe's own access list too:
+/// The security descriptor of the Windows named pipe, rebuilt from the settings and set on the pipe every time the
+/// service makes the next pipe instance (and the service makes one when it sees the settings change: `winsvc::watch_policy`).
+/// Windows keeps ONE access list per pipe name, that of the first instance, and ignores the one given for later instances,
+/// so the new instance sets it again explicitly (`SetKernelObjectSecurity`); that is how allow / deny reach the pipe's own list too:
 /// owner SYSTEM (the panel checks that before it sends anything), protected (nothing inherited),
 /// network logons denied, SYSTEM and Administrators full control, and the specific rights to talk
 /// over the pipe (`0x120083`) for exactly the accounts on the list. (The per-connection check of [`authorise`] is the real decision; this is
