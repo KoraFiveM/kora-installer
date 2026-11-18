@@ -450,6 +450,12 @@ fn wake_listener(pipe: &str) -> bool {
     true
 }
 
+/// `kora service allow|deny` calls this after it saved the settings: the waiting pipe instance is replaced at once, not at
+/// the watcher's next look (a person, or the installer's next step, may use the service the moment the command returns).
+pub fn nudge_listener() {
+    wake_listener(paths::WINDOWS_PIPE);
+}
+
 /// How long a client has to send its whole request line (and how long a thread of ours may wait for it).
 const REQUEST_WAIT: Duration = Duration::from_secs(10);
 

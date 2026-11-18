@@ -9,11 +9,12 @@
 param([Parameter(Mandatory)][string]$Verb, [string[]]$Arguments = @())
 $ErrorActionPreference = 'Stop'
 $rights = [System.IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadAttributes, ReadPermissions, Synchronize'
-$c = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'kora-service', $rights, [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::Identification, [System.IO.HandleInheritability]::None)
-try { $c.Connect(5000) } catch { Write-Output "NO-ANSWER $($_.Exception.Message)"; exit 5 }
 $reqEnv = @{}
 if ($env:CFX_LICENSE_KEY) { $reqEnv.CFX_LICENSE_KEY = $env:CFX_LICENSE_KEY }
+# built BEFORE connecting: the service drops a client that stays silent for 10 s, and the first ConvertTo-Json is slow on a busy runner
 $req = @{ verb = $Verb; args = @($Arguments); env = $reqEnv } | ConvertTo-Json -Compress -Depth 4
+$c = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'kora-service', $rights, [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::Identification, [System.IO.HandleInheritability]::None)
+try { $c.Connect(5000) } catch { Write-Output "NO-ANSWER $($_.Exception.Message)"; exit 5 }
 $w = New-Object System.IO.StreamWriter($c, (New-Object System.Text.UTF8Encoding($false)))
 $w.WriteLine($req); $w.Flush()
 $r = New-Object System.IO.StreamReader($c, [System.Text.Encoding]::UTF8)
