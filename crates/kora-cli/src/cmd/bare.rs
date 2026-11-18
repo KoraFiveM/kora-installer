@@ -276,7 +276,13 @@ fn start_as_normal_user(landing: Landing, no_open: bool, home: &std::path::Path,
     let started = match std::env::current_exe() {
         Ok(exe) => {
             let line = svc::run_command_line(&exe, port, svc::saved_tailscale(home));
-            kora_core::sysexe::command("runas.exe").args(["/trustlevel:0x20000", &line]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+            kora_core::sysexe::command("runas.exe")
+                .args(["/trustlevel:0x20000", &line])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
         }
         Err(_) => false,
     };

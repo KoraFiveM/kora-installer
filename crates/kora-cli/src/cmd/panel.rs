@@ -127,6 +127,22 @@ fn relaunch_hidden() -> i32 {
         use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
         cmd.creation_flags(0x0800_0000 | 0x0000_0200);
+        // Windows hands every inheritable handle to the child. When whoever started us reads our output
+        // through a pipe (the installer, a script), the long-lived panel would keep that pipe open and the
+        // reader would never see the end. We are about to exit, so make our own std handles non-inheritable.
+        unsafe extern "system" {
+            fn GetStdHandle(n: u32) -> isize;
+            fn SetHandleInformation(h: isize, mask: u32, flags: u32) -> i32;
+        }
+        for n in [-10i32, -11, -12] {
+            // SAFETY: plain Win32 calls on this process's own standard handles; a null or invalid handle just fails.
+            unsafe {
+                let h = GetStdHandle(n as u32);
+                if h != 0 && h != -1 {
+                    SetHandleInformation(h, 1, 0); // HANDLE_FLAG_INHERIT off
+                }
+            }
+        }
     }
     match cmd.spawn() {
         Ok(_) => 0,
