@@ -120,37 +120,109 @@ fn relaunch_hidden() -> i32 {
         }
     };
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).filter(|x| x != "--background").collect();
-    let mut cmd = std::process::Command::new(exe);
-    cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
-        cmd.creation_flags(0x0800_0000 | 0x0000_0200);
-        // Windows hands every inheritable handle to the child. When whoever started us reads our output
-        // through a pipe (the installer, a script), the long-lived panel would keep that pipe open and the
-        // reader would never see the end. We are about to exit, so make our own std handles non-inheritable.
-        unsafe extern "system" {
-            fn GetStdHandle(n: u32) -> isize;
-            fn SetHandleInformation(h: isize, mask: u32, flags: u32) -> i32;
-        }
-        for n in [-10i32, -11, -12] {
-            // SAFETY: plain Win32 calls on this process's own standard handles; a null or invalid handle just fails.
-            unsafe {
-                let h = GetStdHandle(n as u32);
-                if h != 0 && h != -1 {
-                    SetHandleInformation(h, 1, 0); // HANDLE_FLAG_INHERIT off
-                }
-            }
-        }
-    }
-    match cmd.spawn() {
-        Ok(_) => 0,
+    match spawn_hidden(&exe, &args) {
+        Ok(()) => 0,
         Err(e) => {
             eprintln!("error: could not start the panel: {e}");
             1
         }
     }
+}
+
+#[cfg(not(windows))]
+fn spawn_hidden(exe: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Result<()> {
+    std::process::Command::new(exe).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|_| ())
+}
+
+/// Windows: start the panel with no console window and NO inherited handles. `std::process::Command`
+/// always inherits every inheritable handle, so a panel started from a script that reads our output
+/// through a pipe (install.ps1, the installer) would keep that pipe open for ever and the reader would
+/// wait for an end that never comes. `CreateProcessW` with `bInheritHandles = FALSE` avoids that.
+#[cfg(windows)]
+fn spawn_hidden(exe: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Result<()> {
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
+    #[repr(C)]
+    struct StartupInfoW {
+        cb: u32,
+        lp_reserved: *mut u16,
+        lp_desktop: *mut u16,
+        lp_title: *mut u16,
+        dw_x: u32,
+        dw_y: u32,
+        dw_x_size: u32,
+        dw_y_size: u32,
+        dw_x_count_chars: u32,
+        dw_y_count_chars: u32,
+        dw_fill_attribute: u32,
+        dw_flags: u32,
+        w_show_window: u16,
+        cb_reserved2: u16,
+        lp_reserved2: *mut u8,
+        h_std_input: isize,
+        h_std_output: isize,
+        h_std_error: isize,
+    }
+    #[repr(C)]
+    struct ProcessInformation {
+        h_process: isize,
+        h_thread: isize,
+        process_id: u32,
+        thread_id: u32,
+    }
+    unsafe extern "system" {
+        fn CreateProcessW(
+            app: *const u16,
+            cmd: *mut u16,
+            pa: *const c_void,
+            ta: *const c_void,
+            inherit: i32,
+            flags: u32,
+            env: *const c_void,
+            dir: *const u16,
+            si: *const StartupInfoW,
+            pi: *mut ProcessInformation,
+        ) -> i32;
+        fn CloseHandle(h: isize) -> i32;
+    }
+    fn quote(a: &OsStr) -> Vec<u16> {
+        let w: Vec<u16> = a.encode_wide().collect();
+        let plain = !w.is_empty() && !w.iter().any(|&c| c == b' ' as u16 || c == b'\t' as u16 || c == b'"' as u16);
+        if plain {
+            return w;
+        }
+        let mut o = vec![b'"' as u16];
+        for c in w {
+            if c == b'"' as u16 {
+                o.push(b'\\' as u16);
+            }
+            o.push(c);
+        }
+        o.push(b'"' as u16);
+        o
+    }
+    let mut app: Vec<u16> = exe.as_os_str().encode_wide().collect();
+    let mut line = quote(exe.as_os_str());
+    for a in args {
+        line.push(b' ' as u16);
+        line.extend(quote(a));
+    }
+    app.push(0);
+    line.push(0);
+    // SAFETY: zeroed plain-data structs, NUL-terminated buffers that outlive the call, and the two
+    // returned handles are closed. CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP.
+    unsafe {
+        let mut si: StartupInfoW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<StartupInfoW>() as u32;
+        let mut pi: ProcessInformation = std::mem::zeroed();
+        let ok = CreateProcessW(app.as_ptr(), line.as_mut_ptr(), std::ptr::null(), std::ptr::null(), 0, 0x0800_0000 | 0x0000_0200, std::ptr::null(), std::ptr::null(), &si, &mut pi);
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        CloseHandle(pi.h_process);
+        CloseHandle(pi.h_thread);
+    }
+    Ok(())
 }
 
 pub(crate) fn panel(a: &PanelArgs) -> i32 {
