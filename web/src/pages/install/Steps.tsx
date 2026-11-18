@@ -65,14 +65,14 @@ export function NameStep({ f, set, advanced, defaultsDir, quick }: StepProps & {
         <Input value={f.name} onChange={(e) => set({ name: e.target.value, ...(f.dirTouched ? {} : { dir: folderFor(base, e.target.value) }) })} autoComplete="off" />
       </Field>
       {showFolder ? (
-        <Field label={t('install.steps.serverFolder')} hint={t('install.steps.whereServerFilesGo')}>
-          <div className="flex gap-2">
+        <div className="space-y-2">
+          <Field label={t('install.steps.serverFolder')} hint={t('install.steps.whereServerFilesGo')}>
             <Input value={f.dir} onChange={(e) => set({ dir: e.target.value, dirTouched: true })} autoComplete="off" />
-            {browse && (
-              <Button type="button" className="shrink-0" onClick={async () => { const d = await browse(t('install.steps.chooseServerFolder')); if (d) set({ dir: d, dirTouched: true }) }}>{t('install.steps.browse')}</Button>
-            )}
-          </div>
-        </Field>
+          </Field>
+          {browse && (
+            <Button type="button" onClick={async () => { const d = await browse(t('install.steps.chooseServerFolder')); if (d) set({ dir: d, dirTouched: true }) }}>{t('install.steps.browse')}</Button>
+          )}
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground">{rich('install.steps.serverFilesGoCode', { code: <code className="break-all font-mono text-xs text-foreground">{f.dir}</code>, button: (c) => <Button variant="link" className="h-auto p-0" onClick={() => setFolderOpen(true)}>{c}</Button> })}</p>
       )}
