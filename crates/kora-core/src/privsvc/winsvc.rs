@@ -216,6 +216,9 @@ pub struct WinSvc {
     pub sys: crate::privsvc::winapi::SystemDirs,
     /// The pipe's full name. Always [`paths::WINDOWS_PIPE`] in the service; tests of the pipe code use a random one.
     pub pipe: String,
+    /// The pipe belongs to SYSTEM (the descriptor names it as owner and group; only SYSTEM may do that). Always true in
+    /// the service; a test that runs as an ordinary administrator turns it off.
+    pub owned_by_system: bool,
     names: Mutex<HashMap<AccountId, (String, String)>>,
     /// The descriptor the listening pipe instance was made with: when the settings say something else, the waiting
     /// instance is stale (see [`watch_policy`]).
@@ -229,7 +232,7 @@ impl WinSvc {
     }
     /// Other files and another pipe name: for tests that run the pipe code without touching the real service.
     pub fn with(files: WinFiles, sys: crate::privsvc::winapi::SystemDirs, pipe: &str) -> WinSvc {
-        WinSvc { files, sys, pipe: pipe.to_string(), names: Mutex::new(HashMap::new()), listening: Mutex::new(String::new()) }
+        WinSvc { files, sys, pipe: pipe.to_string(), owned_by_system: true, names: Mutex::new(HashMap::new()), listening: Mutex::new(String::new()) }
     }
     fn remember(&self, id: &AccountId, who: Option<(String, String)>) {
         if let Some(w) = who {
@@ -385,7 +388,10 @@ impl WinSvc {
 // ---- the pipe server --------------------------------------------------------------------------------------
 
 fn make_instance(svc: &WinSvc, first: bool) -> std::io::Result<Owned> {
-    let sddl_text = policy::pipe_sddl(&svc.policy());
+    let mut sddl_text = policy::pipe_sddl(&svc.policy());
+    if !svc.owned_by_system {
+        sddl_text = sddl_text.replacen("O:SYG:SY", "", 1);
+    }
     let sddl = wide(&sddl_text);
     let mut sd: *mut c_void = std::ptr::null_mut();
     // SAFETY: valid NUL-terminated string and out pointer.
@@ -893,7 +899,9 @@ mod tests {
             super::super::manage::save(Path::new(&files.policy), &p).unwrap();
             let pipe = random_pipe();
             assert_ne!(pipe, paths::WINDOWS_PIPE, "a test never uses the real service's pipe");
-            let svc = Arc::new(WinSvc::with(files, crate::privsvc::winapi::system_dirs(), &pipe));
+            let mut svc = WinSvc::with(files, crate::privsvc::winapi::system_dirs(), &pipe);
+            svc.owned_by_system = false; // only SYSTEM may name SYSTEM as the owner
+            let svc = Arc::new(svc);
             let stop = Arc::new(AtomicBool::new(false));
             let thread = {
                 let (svc, stop) = (Arc::clone(&svc), Arc::clone(&stop));
