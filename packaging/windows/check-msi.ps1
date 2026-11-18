@@ -37,14 +37,14 @@ $db = $installer.OpenDatabase($Msi, 0)
 # One column per query (what the COM API returns reliably from PowerShell).
 function Get-Column([string]$sql) {
     $view = $db.OpenView($sql)
-    $view.Execute()
+    $null = $view.Execute()
     $rows = @()
     while ($true) {
         $rec = $view.Fetch()
         if ($null -eq $rec) { break }
         $rows += $rec.StringData(1)
     }
-    $view.Close()
+    $null = $view.Close()
     , $rows
 }
 function Get-Value([string]$sql) { $r = Get-Column $sql; if ($r.Count -eq 0) { $null } else { $r[0] } }
