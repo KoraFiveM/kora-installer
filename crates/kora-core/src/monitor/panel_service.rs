@@ -92,7 +92,7 @@ pub fn run_entry_command() -> Option<String> {
         if !out.status.success() {
             return None;
         }
-        return parse_run_query(&String::from_utf8_lossy(&out.stdout));
+        parse_run_query(&String::from_utf8_lossy(&out.stdout))
     }
     #[cfg(not(windows))]
     None
@@ -113,7 +113,7 @@ pub fn set_run_entry_command(command: &str) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        return std::process::Command::new("reg.exe").args(["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", command, "/f"]).creation_flags(0x0800_0000).status().is_ok_and(|s| s.success());
+        std::process::Command::new("reg.exe").args(["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", command, "/f"]).creation_flags(0x0800_0000).status().is_ok_and(|s| s.success())
     }
     #[cfg(not(windows))]
     {
