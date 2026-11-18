@@ -152,11 +152,7 @@ fn can_restart(port: u16) -> bool {
 /// Sign-in sessions live in memory, so the page signs in again afterwards. A panel that is not the background
 /// service (one in a terminal window) only restarts with `force=true`: it then starts a hidden copy of its own
 /// command line and exits.
-pub async fn panel_restart(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Query(q): Query<wire::PanelRestartQuery>,
-) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+pub async fn panel_restart(State(st): State<AppState>, Extension(caller): Extension<Caller>, Query(q): Query<wire::PanelRestartQuery>) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
     if caller.remote {
         return Err(ApiError::forbidden("The panel can only be restarted from the computer that runs Kora."));
     }
@@ -164,9 +160,7 @@ pub async fn panel_restart(
     let can = blocking(move || Ok(can_restart(port))).await?;
     let force = q.force.unwrap_or(false);
     if !can && !force {
-        return Err(ApiError::conflict(
-            "This panel is not the background service, so it cannot restart itself. Use \"Force restart\", or stop it and run `kora panel` again.",
-        ));
+        return Err(ApiError::conflict("This panel is not the background service, so it cannot restart itself. Use \"Force restart\", or stop it and run `kora panel` again."));
     }
     if seam::can_restart_override().is_some() {
         seam::count_restart();
@@ -191,10 +185,7 @@ fn relaunch_self() {
         return;
     };
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(std::env::args_os().skip(1))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    cmd.args(std::env::args_os().skip(1)).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

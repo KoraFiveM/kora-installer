@@ -299,7 +299,8 @@ impl Maintenance for SystemMaintenance {
         if only.is_none() && (self.app_status().installed || app::user::user_status().any()) {
             out.push(PlanItem {
                 item: "app".into(),
-                description: "Kora's shortcuts, its start-up entry, the Kora program and its PATH entry (and the old machine-wide Kora app, if it is still installed). Your servers are not touched".into(),
+                description: "Kora's shortcuts, its start-up entry, the Kora program and its PATH entry (and the old machine-wide Kora app, if it is still installed). Your servers are not touched"
+                    .into(),
                 kind: "app",
                 remove: false,
             });
