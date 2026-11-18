@@ -28,12 +28,20 @@ if (-not $mysqlSvc) {
     $pin = 'd62986d433eeebfde218560b276103831604a61e929e87f1a17f5aebd80257e2'
     $zip = Join-Path $env:RUNNER_TEMP 'stock-mariadb.zip'
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    try {
-        Invoke-WebRequest "https://downloads.mariadb.org/rest-api/mariadb/$ver/mariadb-$ver-winx64.zip" -OutFile $zip -TimeoutSec 600
-    } catch {
-        Write-Host "mirror download failed ($_); falling back to archive.mariadb.org"
-        Invoke-WebRequest "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip" -OutFile $zip
+    # The mirror-routed endpoint has been seen taking 20 minutes, and twice in a row nothing at all for the whole 25-minute step
+    # (Invoke-WebRequest -TimeoutSec only limits a quiet connection, not the whole download). curl.exe --max-time limits the
+    # whole transfer: a slow mirror costs a few minutes, then the archive is tried (twice).
+    $sources = @(@{ Url = "https://downloads.mariadb.org/rest-api/mariadb/$ver/mariadb-$ver-winx64.zip"; Limit = 240 },
+                 @{ Url = "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip"; Limit = 420 },
+                 @{ Url = "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip"; Limit = 420 })
+    $got = $false
+    foreach ($src in $sources) {
+        Remove-Item $zip -ErrorAction SilentlyContinue
+        & curl.exe --location --fail --silent --show-error --connect-timeout 30 --max-time $src.Limit --output $zip $src.Url
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $zip)) { $got = $true; break }
+        Write-Host "download from $($src.Url) did not finish in $($src.Limit) s (curl exit $LASTEXITCODE); trying the next source"
     }
+    if (-not $got) { throw 'the stock MariaDB zip could not be downloaded from any source' }
     Write-Host ("stock MariaDB zip downloaded in {0:n0} s" -f $sw.Elapsed.TotalSeconds)
     Assert-That ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -eq $pin) 'the stock MariaDB zip matches the pinned SHA-256'
     Expand-Archive $zip -DestinationPath 'C:\stock-extract' -Force

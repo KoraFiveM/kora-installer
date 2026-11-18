@@ -322,7 +322,7 @@ mod tests {
         r.respond("id -u", 0, "998\n");
         let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, dir_owner: Some("1000:1000".into()), ..Created::default() };
         let items = items_for(&target(), &c, Platform::Linux, &r, true, false).unwrap();
-        assert_eq!(lines(&items[0]), ["ChownTree { path: \"/srv/kora/my-server\", uid: 1000, gid: 1000 }", "userdel kora-my-server"]);
+        assert_eq!(lines(&items[0]), ["ChownTree { path: \"/srv/kora/my-server\", uid: 1000, gid: 1000 }", "pkill -KILL -u kora-my-server", "userdel kora-my-server"]);
     }
 
     #[test]
