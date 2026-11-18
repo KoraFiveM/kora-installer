@@ -5,6 +5,10 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-18
+
+Fixes for the Windows per-user install, plus a folder picker in the install wizard, a troubleshooting page, and a Force restart after updates.
+
 ### Added
 - **Force restart** after an update when the panel runs in a terminal window (it cannot restart itself the usual way): the new version starts in the background with no window, and the page reconnects. `POST /panel/restart?force=true`, local admin only.
 - Install wizard: a **Browse...** button next to the server folder opens the system folder window (in the desktop app, or, when the browser is on the same computer as Kora, a window Kora opens itself: PowerShell's folder dialog on Windows, `zenity` or `kdialog` on Linux, `osascript` on macOS). New local-only API call `pick_folder`.
